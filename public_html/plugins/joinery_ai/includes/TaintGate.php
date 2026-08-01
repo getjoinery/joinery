@@ -77,6 +77,19 @@ class TaintGate {
      * was rejected. Names the offending tool(s) and which trigger fired.
      */
     public static function explain(array $eval): string {
+        // Pipeline mode gets its own wording because the generic one overstates
+        // what the operator is agreeing to. In pipeline mode the model cannot
+        // choose what to write: it returns one verdict for one item and the job
+        // writes a fixed field on that same item. There is no tool belt to steer.
+        if (in_array('record_verdict', $eval['write_tools'], true)) {
+            return 'This recipe reads text written by whoever sent the item — an email body, '
+                 . 'say — so a sender could try to write instructions into it. What that can '
+                 . 'affect is narrow: the model returns one verdict for one item and the recipe '
+                 . 'writes a fixed field on that same item. It cannot pick a different record, '
+                 . 'a different field, or a different action. Check \'Allow tainted writes\' to '
+                 . 'confirm you accept that, then save.';
+        }
+
         $tools = implode(', ', $eval['write_tools']);
         $reasons = [];
         if (!empty($eval['untrusted_models'])) {

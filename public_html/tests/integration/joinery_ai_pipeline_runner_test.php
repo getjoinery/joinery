@@ -62,6 +62,9 @@ class FixtureJudgeJob implements PipelineJobInterface {
     /** This fixture's items are plain in-memory strings — no vault needed. */
     public function requiresVaultScope(array $config): ?string { return null; }
 
+    /** No sealed source, so nothing to protect from a cloud model. */
+    public function cloudProcessingAllowed(array $config): bool { return true; }
+
     public function hasWork(array $config, Recipe $recipe): bool {
         return $this->nextItem($config, $recipe) !== null;
     }
@@ -255,6 +258,38 @@ $result6 = PipelineRunner::run($provider6, 'fake/test-model', $recipe6, $ctx6, 5
 ok('stop_reason is token_budget', $result6['stop_reason'] === 'token_budget');
 ok('exactly one item processed before the budget halted the run', $provider6->calls === 1);
 ok('f1 recorded, f2 never reached', FixtureJudgeJob::$recorded === ['f1' => ['verdict' => 'keep']]);
+
+// -------------------------------------------------------------------------
+// Failure-email throttle. The last-sent time is a column on the recipe, not a
+// stg_settings row keyed by recipe id — a runtime-built setting name can never
+// be declared, so every failing recipe used to leave an undeclarable row behind.
+// The decision is split out from the send so it can be checked without mail.
+
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunner.php'));
+$throttled = new ReflectionMethod('RecipeRunner', 'failureEmailThrottled');
+$throttled->setAccessible(true);
+
+[$recipe7, $run7, $ctx7] = make_recipe_and_run($owner_uid, 5, 50);
+
+ok('a recipe that has never notified is not throttled',
+    $throttled->invoke(null, $recipe7, 86400) === false);
+
+$recipe7->set('rcp_last_failure_email_time', gmdate('Y-m-d H:i:s'));
+ok('one that just notified is throttled',
+    $throttled->invoke(null, $recipe7, 86400) === true);
+
+$recipe7->set('rcp_last_failure_email_time', gmdate('Y-m-d H:i:s', time() - 90000));
+ok('and is free again once the window has passed',
+    $throttled->invoke(null, $recipe7, 86400) === false);
+
+$recipe7->set('rcp_last_failure_email_time', 'not a timestamp');
+ok('an unparseable stamp notifies rather than silently suppressing',
+    $throttled->invoke(null, $recipe7, 86400) === false);
+
+$db_thr = DbConnector::get_instance()->get_db_link();
+$q_thr = $db_thr->query("SELECT count(*) FROM stg_settings
+    WHERE stg_name LIKE 'joinery_ai_last_failure_email_recipe_%'");
+ok('no per-recipe throttle rows are left in stg_settings', (int)$q_thr->fetchColumn() === 0);
 
 // Cleanup runs via the per-recipe harness_defer registered in make_recipe_and_run()
 // — crash-safe (LIFO), so a mid-suite failure still reclaims every throwaway row.

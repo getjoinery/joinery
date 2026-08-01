@@ -77,6 +77,12 @@ class EmailScheduleJob implements PipelineJobInterface {
         return EmailJobCandidates::requiredVaultScope($config);
     }
 
+    /** The domain's second consent: may its decrypted mail leave the box?
+     *  Standard domains have nothing sealed, so they always may. */
+    public function cloudProcessingAllowed(array $config): bool {
+        return MailboxAliasConfig::aiCloudAllowed((string)($config['mailbox_alias'] ?? ''));
+    }
+
     /** Cheap existence check for the same pool nextItem() draws from. */
     public function hasWork(array $config, Recipe $recipe): bool {
         $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));

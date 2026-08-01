@@ -157,6 +157,23 @@ function harness_boot(array $overrides = array()) {
 
 	harness_enforce_env();
 
+	// A test run must not send mail through a real delivery service. dev's
+	// email_service is mailgun, so every suite that created a user or triggered a
+	// notification was posting real messages to Mailgun, which delivered them —
+	// roughly twenty per run piling into the production unmatched box.
+	//
+	// SMTP rather than dry-run on purpose: the send path stays exercised end to
+	// end, it just terminates at the local relay instead of a paid service that
+	// delivers to the internet. Set in memory for this process only, so nothing
+	// about the site's real configuration changes.
+	//
+	// A test that is ABOUT a provider overrides this after boot — the two that do
+	// (inbound_forwarding_relay, setup_topology) already call
+	// harness_set_setting_mem() themselves, which is exactly the intended escape.
+	if (($h['meta']['env'] ?? '') !== 'prod-verify') {
+		harness_set_setting_mem('email_service', 'smtp');
+	}
+
 	register_shutdown_function('harness_shutdown_report');
 
 	// Graceful SIGTERM handling (CLI only): the runner wraps each test in
@@ -302,7 +319,7 @@ function make_user($suffix, $permission = 0) {
 	$user = new User(NULL);
 	$user->set('usr_first_name', 'HarnessTest');
 	$user->set('usr_last_name', 'User' . $suffix);
-	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '_' . $run_token . '@getjoinery.com');
+	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '_' . $run_token . '@dev.getjoinery.com');
 	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
 	$user->set('usr_permission', $permission);
 	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));

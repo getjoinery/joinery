@@ -79,6 +79,13 @@ class InboundEmailDomain extends SystemBase {
 		// here" and "the server reads my mail while I am here, and sends it to
 		// the configured model host" — which must never become true silently.
 		'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Second, narrower consent. ied_ai_processing_enabled says the AI may
+		// read this domain's sealed mail at all; this says the decrypted text
+		// may be sent to a model running on someone else's hardware. Separate
+		// because they are different promises: the first keeps plaintext inside
+		// the box, the second lets it out. Default off, and off is the answer
+		// for every domain that has not deliberately said otherwise.
+		'ied_ai_cloud_enabled'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key

@@ -193,6 +193,14 @@ try {
 	$res = seal_batch_logic(array('domain_id' => intval($dom->key)));
 	check($res->error !== null, 'a below-staff session is refused by the action');
 
+} catch (Throwable $harness_e) {
+	// An exception here would otherwise be silent: harness_finish() runs from the
+	// finally below and exit()s before the throw can surface, so the run reports
+	// PASS on however many checks happened to complete. A shrinking suite must not
+	// look like a passing one.
+	check(false, 'the suite ran to completion without throwing',
+		get_class($harness_e) . ': ' . $harness_e->getMessage()
+		. ' @ ' . $harness_e->getFile() . ':' . $harness_e->getLine());
 } finally {
 	harness_finish();
 }

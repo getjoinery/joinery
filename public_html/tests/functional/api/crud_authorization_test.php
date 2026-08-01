@@ -291,7 +291,7 @@ try {
 
 	// ------------------------------------------------------------------
 	section('CreateNew fast-path also honors the write floor (§4.4)');
-	$new_email = 'apitest_createnew_' . strtolower($suffix) . '@getjoinery.com';
+	$new_email = 'apitest_createnew_' . strtolower($suffix) . '@dev.getjoinery.com';
 	$r = api_request('POST', '/api/v1/User', $ha, array(
 		'usr_email'      => $new_email,
 		'usr_first_name' => 'Created',

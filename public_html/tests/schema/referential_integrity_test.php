@@ -112,7 +112,10 @@ foreach ($classes as $class) {
 check(count($behind) === 0, "no sequence behind its table's MAX ($checked checked)", implode('; ', $behind));
 
 section('No stray harness fixtures');
-$q = $dblink->prepare("SELECT count(*) FROM usr_users WHERE usr_email LIKE 'harnesstest\\_%@getjoinery.com'");
+// Domain-agnostic on purpose: a harnesstest_ user is a leak wherever it lives,
+// and fixtures have used more than one domain over time. Matching the current
+// domain only would quietly stop detecting the older strays.
+$q = $dblink->prepare("SELECT count(*) FROM usr_users WHERE usr_email LIKE 'harnesstest\\_%'");
 $q->execute();
 $stray_users = (int)$q->fetchColumn();
 check($stray_users === 0, 'no leftover harnesstest_% users', "$stray_users row(s)");

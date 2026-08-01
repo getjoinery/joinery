@@ -76,6 +76,12 @@ class EmailSecurityScanJob implements PipelineJobInterface {
         return EmailJobCandidates::requiredVaultScope($config);
     }
 
+    /** The domain's second consent: may its decrypted mail leave the box?
+     *  Standard domains have nothing sealed, so they always may. */
+    public function cloudProcessingAllowed(array $config): bool {
+        return MailboxAliasConfig::aiCloudAllowed((string)($config['mailbox_alias'] ?? ''));
+    }
+
     /** Cheap existence check for the same pool nextItem() draws from. */
     public function hasWork(array $config, Recipe $recipe): bool {
         $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
@@ -189,16 +195,21 @@ class EmailSecurityScanJob implements PipelineJobInterface {
             'recipe_id' => (int)$recipe->key,
         ];
 
-        $msg->set('iem_ai_danger_score', (int)($verdict['score'] ?? 0));
-        $msg->set('iem_ai_scan', $scan);
-        $msg->set('iem_ai_scan_time', gmdate('Y-m-d H:i:s'));
-
         $session = SessionControl::get_instance();
         $msg->authenticate_write([
             'current_user_id'         => $session->get_user_id(),
             'current_user_permission' => (int)$session->get_permission(),
         ]);
-        $msg->save();
+
+        // NOT save() — see the note in EmailTriageJob::recordVerdict(). The scan
+        // blob is a $sealed_fields member (its red_flags quote the body by
+        // prompt design), so it seals with the row; the score and timestamp are
+        // metadata and stay in the clear so the inbox can sort on them.
+        InboundEmailMessage::updateContentColumns((int)$item_key, [
+            'iem_ai_scan'          => json_encode($scan, JSON_UNESCAPED_SLASHES),
+            'iem_ai_danger_score'  => (int)($verdict['score'] ?? 0),
+            'iem_ai_scan_time'     => gmdate('Y-m-d H:i:s'),
+        ]);
     }
 
     public function defaultPrompt(): string {

@@ -3,6 +3,15 @@
    admin run-detail utilities are plain .joai-* (admin theme, not .jy-ui)
    and carry the exact values lifted from former inline styles. */
 
+/* --- Admin recipe edit: built-in prompt display ---
+   A pipeline job ships its own instructions and rcp_prompt only overrides them,
+   so the edit form shows the real text rather than an empty box. Reads as prose,
+   not as a disabled input, because it is not a field. */
+.joai-prompt-builtin { white-space: pre-wrap; word-break: break-word; font-family: inherit;
+    font-size: 0.9rem; line-height: 1.5; margin: 0; padding: 0.85rem 1rem; max-height: 22rem;
+    overflow-y: auto; background: #f7f8fa; border: 1px solid #dfe3e8; border-radius: 6px;
+    color: #33393f; }
+
 /* --- Public dashboard (/joinery_ai) --- */
 .jy-ui .joai-wrap { max-width: 900px; margin: 2rem auto; padding: 0 1rem; }
 .jy-ui .joai-wrap h1 { margin-bottom: 0.5rem; }

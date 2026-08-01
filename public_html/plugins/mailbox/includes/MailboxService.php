@@ -1056,7 +1056,9 @@ class MailboxService {
 				// AI security scan (specs/joinery_ai_email_security_scan.md):
 				// null score/scan = not yet scanned by any recipe.
 				'ai_danger_score'   => ($r['iem_ai_danger_score'] !== null) ? intval($r['iem_ai_danger_score']) : null,
-				'ai_scan'           => self::decodeScan($r['iem_ai_scan']),
+				// Sealed on a protected row, so it goes through the decrypted map
+				// like the body does — never straight off $r.
+				'ai_scan'           => self::decodeScan($decrypted['iem_ai_scan']),
 				'ai_scan_time'      => $r['iem_ai_scan_time'],
 				// AI triage (specs/implemented/joinery_ai_email_triage.md): carried for
 				// native/API consumers. The web thread view does not render it — the
@@ -1078,13 +1080,14 @@ class MailboxService {
 	 * @return array<string,string> the same column names, decrypted (or unchanged)
 	 */
 	private function decryptThreadRow(array $row): array {
-		$fields = array('iem_sender', 'iem_recipient', 'iem_bcc', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary');
+		$fields = array('iem_sender', 'iem_recipient', 'iem_bcc', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_ai_summary', 'iem_ai_scan');
 		// A Fortress pending-parse row is sealed to the owner and not yet parsed —
 		// its content columns are empty. Recipient stays cleartext metadata; the
 		// content fields render the same placeholder as a locked sealed row.
 		$pending = $this->pgBool($row['iem_pending_parse'] ?? false);
 		$content_fields = array('iem_sender' => true, 'iem_subject' => true,
-			'iem_body_plain' => true, 'iem_body_html' => true, 'iem_ai_summary' => true);
+			'iem_body_plain' => true, 'iem_body_html' => true, 'iem_ai_summary' => true,
+			'iem_ai_scan' => true);
 		$out = array();
 		foreach ($fields as $col) {
 			if ($pending && isset($content_fields[$col])) {

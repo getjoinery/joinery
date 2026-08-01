@@ -214,6 +214,7 @@ Routes outside the namespace are dropped with a logged warning.
 ├── ajax/                        # External webhooks only (page JS uses /api/v1 actions)
 ├── includes/                    # Helper classes and libraries
 ├── migrations/                  # Database migrations
+├── sync.php                     # (optional) runs on every sync — seed declared rows here
 └── uninstall.php               # (optional) external-cleanup hook — most plugins don't need one
 ```
 
@@ -892,6 +893,33 @@ To make a plugin signal notifiable, add the `notify` block inline as above — d
 
 The handler is a static method `(string $signal, array $payload): void`. Keep inline work cheap (a local insert) and push slow work to a scheduled task — see the [handler cost budget](signals.md#handler-cost-budget). The file is required lazily, only when one of its signals fires.
 
+### Seed Rows (`sync.php`)
+
+Settings, menus and scheduled tasks are declared on disk and reconciled into the database automatically. A plugin that needs the same treatment for rows of its own — curated defaults it wants present on every install — does that in a `sync.php` hook.
+
+```php
+<?php
+function myplugin_sync() {
+    require_once(PathHelper::getIncludePath('plugins/myplugin/includes/ThingSeeder.php'));
+    return ThingSeeder::seedDeclared();   // string[] messages for the sync report
+}
+```
+
+The hook is `plugins/{name}/sync.php` defining `{name}_sync()`. It runs at the end of every `PluginManager::sync()` — after tables, migrations, settings and tasks, so it can rely on all of them — and again at activation. A hook that throws is logged and skipped; the rest of the sync completes, because sync is also how an operator repairs a broken install.
+
+**The hook must be idempotent.** It runs on every deploy and on every admin sync.
+
+Four rules make declared rows safe to ship, all of them learned the hard way:
+
+- **Match on a declared key, not a name.** Put a nullable, unique `{prefix}_declared_key` column on the table. Names aren't unique, so without a key a re-sync can't tell an already-seeded row from a new declaration and duplicates everything on every upgrade.
+- **Create only.** A declaration creates a row when one with its key doesn't exist, and otherwise does nothing. Never overwrite — the operator's edits are the whole reason the row is theirs now.
+- **Count soft-deleted rows as existing.** Otherwise a row the operator deleted on purpose comes back at the next upgrade, for ever.
+- **Removing a declaration deletes nothing.** A withdrawn declaration stops arriving on new installs and leaves existing ones alone.
+
+Anything that only makes sense on the instance that authored the row — an owner id, a foreign key into another install's data, a model or provider name — must be fixed at seed time rather than declared. If a row can't arrive inert, it shouldn't ship.
+
+Joinery AI is the worked example: `plugins/joinery_ai/recipes.json` declares a few curated recipes and its seeder is documented in [the plugin's overview](../plugins/joinery_ai/docs/overview.md#shipped-recipes).
+
 ### Plugin Lifecycle
 
 **PluginManager is the single entry point for all lifecycle operations.** Plugin models (`Plugin`, `PluginHelper`) are pure CRUD — never call lifecycle methods directly on them.
@@ -916,8 +944,9 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall
 2. Runs `DatabaseUpdater::runPluginTablesOnly()` — picks up any `$field_specifications` changes since install
 3. Runs `activate.php` hook (calls `{plugin_name}_activate()` if defined)
 4. Registers deletion rules via PluginHelper
-5. Resumes any suspended scheduled tasks for this plugin
-6. Sets `plg_active = 1`
+5. Creates rows for tasks declaring `activate_on_install`, then runs the `sync.php` hook
+6. Resumes any suspended scheduled tasks for this plugin
+7. Sets `plg_active = 1`
 
 **Developer workflow for schema changes** — Modify `$field_specifications` on an already-installed plugin, then run **Sync with Filesystem** from the admin Plugins page (`/admin/admin_plugins?action=sync_filesystem`). Sync applies the full column reconciliation: new tables, new columns, type/length and nullability modifications (widening a `varchar`, adding `NOT NULL`) on existing columns, unique constraints, and indexes. Column *removal* is the one schema change sync never performs — dropping a column absent from the spec stays a deliberate migration-or-manual act. Schema changes are also applied automatically during deploys (`upgrade.php`) and when running `update_database` from admin utilities.
 
@@ -929,6 +958,7 @@ Discovery → Install → Activate ↔ Deactivate → Uninstall
 3. Applies column modifications on existing columns (type/length widening, nullability) via `DatabaseUpdater::processAdvancedColumnOperations()`, then unique constraints and indexes
 4. Runs pending migrations for all active plugins
 5. Re-registers deletion rules for all active plugins via `PluginHelper::registerAllActiveDeletionRules()`
+6. Seeds declared settings, activates declared tasks, then runs each active plugin's `sync.php` hook
 
 Sync is the recommended way to apply schema changes after code deploys. It is also available as an admin UI action on the Plugins page and the Themes page.
 

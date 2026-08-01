@@ -11,6 +11,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPromptBui
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -78,6 +79,12 @@ class RecipeRunner {
             $run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
             $run->set('rcr_workspace_before', (string)$recipe->get('rcp_workspace'));
             $run->save();
+
+            // Sink zero. Re-checked here and not only at save: a domain can
+            // withdraw its cloud consent after the recipe was saved, and that
+            // must stop the next run rather than let it keep shipping decrypted
+            // mail to a vendor. Throws before any content is read.
+            RecipeVaultScope::assertModelAllowed($recipe);
 
             // The recipe's pinned model selects the provider (claude-* →
             // Anthropic, else local). A recipe that pins no model follows the
@@ -528,21 +535,41 @@ class RecipeRunner {
     }
 
     /**
-     * Throttle failure-notification emails per recipe. The throttle is a
-     * stg_settings row keyed to the recipe ID storing the last-sent UTC
-     * timestamp. Default throttle is 24h (joinery_ai_failure_email_throttle_seconds).
-     * The first failure after a quiet window emails; subsequent failures
-     * within the window are silent.
+     * Throttle failure-notification emails per recipe. The last-sent time is a
+     * column on the recipe row (rcp_last_failure_email_time). Default throttle
+     * is 24h (joinery_ai_failure_email_throttle_seconds). The first failure
+     * after a quiet window emails; subsequent failures within the window are
+     * silent.
+     *
+     * It is a column and not a setting because the key would have to carry the
+     * recipe id, and a name built at runtime can never appear in a manifest —
+     * so every recipe that ever failed minted an undeclarable stg_settings row
+     * and reddened the declared-settings backstop. Per-recipe state belongs on
+     * the recipe.
      */
+    /**
+     * Has this recipe emailed its owner about a failure recently enough to stay
+     * quiet now?
+     *
+     * Split out so the throttle decision is testable without sending mail — the
+     * caller returns before the send, so the two are otherwise indistinguishable
+     * from outside. A recipe that has never sent one is never throttled.
+     */
+    private static function failureEmailThrottled(Recipe $recipe, int $throttle_secs): bool {
+        $last_sent = trim((string)$recipe->get('rcp_last_failure_email_time'));
+        if ($last_sent === '') return false;
+        $last = strtotime($last_sent . ' UTC');
+        if (!$last) return false;   // unparseable stamp: notify rather than swallow
+        return (time() - $last) < $throttle_secs;
+    }
+
     private static function sendFailureEmailIfNotThrottled(Recipe $recipe, RecipeRun $run, string $kind): void {
         try {
             $settings = Globalvars::get_instance();
             $throttle_secs = (int)$settings->get_setting('joinery_ai_failure_email_throttle_seconds');
             if ($throttle_secs <= 0) $throttle_secs = 86400;
 
-            $key = 'joinery_ai_last_failure_email_recipe_' . (int)$recipe->key;
-            $last = (int)$settings->get_setting($key);
-            if ($last && (time() - $last) < $throttle_secs) return;
+            if (self::failureEmailThrottled($recipe, $throttle_secs)) return;
 
             $owner_id = (int)$recipe->get('rcp_owner_user_id');
             if ($owner_id <= 0) return;
@@ -565,15 +592,14 @@ class RecipeRunner {
 
             (new EmailSender())->send(EmailMessage::create($to, $subject, $body));
 
-            // Record last-sent time. Using direct SQL to avoid the
-            // round-trip cost of a Setting model load.
+            // Record last-sent time. A targeted UPDATE rather than $recipe->save():
+            // the recipe object here came from the runner and a full-row save
+            // would write back every column it happens to be holding.
             $db = DbConnector::get_instance()->get_db_link();
             $q = $db->prepare(
-                "INSERT INTO stg_settings (stg_name, stg_value, stg_create_time)
-                 VALUES (?, ?, NOW() AT TIME ZONE 'UTC')
-                 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value"
+                'UPDATE rcp_recipes SET rcp_last_failure_email_time = ? WHERE rcp_recipe_id = ?'
             );
-            $q->execute([$key, (string)time()]);
+            $q->execute([gmdate('Y-m-d H:i:s'), (int)$recipe->key]);
         } catch (Exception $e) {
             error_log('[joinery_ai] failure email send failed: ' . $e->getMessage());
         }

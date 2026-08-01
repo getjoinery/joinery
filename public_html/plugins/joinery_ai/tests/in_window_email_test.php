@@ -251,6 +251,207 @@ try {
 		'and never queues a scheduled run for an in-window recipe');
 
 	// -----------------------------------------------------------------------
+	section('recording a verdict does not destroy the sealed row');
+
+	// This path had never once run. save() rebuilds every column from get(),
+	// which DECRYPTS, so the first sealed message ever triaged had its sender,
+	// subject and bodies written back as plaintext with iem_content_sealed still
+	// true — a leak and a corruption at once, and every later read then threw
+	// 'malformed AEAD blob'. These checks are the regression.
+	// recordVerdict() runs as the browsing owner during an in-window drain, and
+	// a recipe owner is always an admin, so the fixture session has to say so —
+	// InboundEmailMessage::authenticate_write() needs permission 5 or better.
+	$_SESSION['loggedin']    = 1;
+	$_SESSION['usr_user_id'] = $owner_id;
+	$_SESSION['permission']  = 10;
+
+	InboundEmailMessage::updateColumns($older, array('iem_is_read' => false));
+	$raw_before = $db->prepare("SELECT iem_subject, iem_sender, iem_body_plain, iem_content_sealed
+		FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
+	$raw_before->execute(array($older));
+	$before = $raw_before->fetch(PDO::FETCH_ASSOC);
+
+	$summary = 'A sealed summary long enough to have overflowed the old varchar column, '
+		. 'which is exactly why this assertion exists at all.';
+	$job->recordVerdict((string)$older, array('label' => 'none', 'summary' => $summary),
+		$recipe, 'test-model');
+
+	$raw_after = $db->prepare("SELECT iem_subject, iem_sender, iem_body_plain, iem_content_sealed,
+		iem_ai_summary FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
+	$raw_after->execute(array($older));
+	$after = $raw_after->fetch(PDO::FETCH_ASSOC);
+
+	check($after['iem_subject'] === $before['iem_subject']
+		&& $after['iem_sender'] === $before['iem_sender']
+		&& $after['iem_body_plain'] === $before['iem_body_plain'],
+		'the sealed columns are untouched — not rewritten as plaintext');
+	check(strpos((string)$after['iem_subject'], 'v1.aead.') === 0,
+		'and are still ciphertext', substr((string)$after['iem_subject'], 0, 24));
+	check(!empty($after['iem_content_sealed']) && $after['iem_content_sealed'] !== 'f',
+		'the row is still marked sealed');
+	check(strpos((string)$after['iem_ai_summary'], 'v1.aead.') === 0,
+		'the summary itself is stored sealed, not in the clear',
+		substr((string)$after['iem_ai_summary'], 0, 24));
+
+	$reread = new InboundEmailMessage($older, TRUE);
+	check((string)$reread->get('iem_ai_summary') === $summary,
+		'and reads back through the sealed reader intact');
+	check((string)$reread->get('iem_subject') === 'Older note',
+		'the message subject still opens — no malformed AEAD blob');
+
+	// The security scan blob is the same story: red_flags quote the body by
+	// prompt design, so it seals with the row while the score stays clear for
+	// sorting.
+	$scan_job = PipelineJobRegistry::get('email_security_scan');
+	$scan_recipe = iw_recipe($owner_id, 'email_security_scan', $address);
+	$scan_job->recordVerdict((string)$older, array(
+		'score' => 42, 'verdict' => 'suspicious',
+		'red_flags' => array(array('finding' => 'quotes the body verbatim here')),
+		'summary' => 'A scan summary.',
+	), $scan_recipe, 'test-model');
+
+	$raw_scan = $db->prepare("SELECT iem_ai_scan, iem_ai_danger_score
+		FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
+	$raw_scan->execute(array($older));
+	$scan_row = $raw_scan->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$scan_row['iem_ai_scan'], 'v1.aead.') === 0,
+		'the scan blob is sealed at rest', substr((string)$scan_row['iem_ai_scan'], 0, 24));
+	check((int)$scan_row['iem_ai_danger_score'] === 42,
+		'while the danger score stays clear so the inbox can sort on it');
+
+	$reread = new InboundEmailMessage($older, TRUE);
+	$decoded = json_decode((string)$reread->get('iem_ai_scan'), true);
+	check(is_array($decoded) && ($decoded['verdict'] ?? '') === 'suspicious',
+		'and decodes back to the verdict through the sealed reader');
+
+	// -----------------------------------------------------------------------
+	section('save() itself is sealed-safe (Layer 0)');
+
+	// The consumer-side fix above stops the two email jobs corrupting a sealed
+	// row. This is the platform-side one: save() must be harmless on a sealed row
+	// no matter who calls it, so the next consumer cannot repeat the mistake.
+	$before_save = $db->prepare("SELECT iem_subject, iem_sender, iem_body_plain, iem_ai_summary
+		FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?");
+	$before_save->execute(array($older));
+	$pre = $before_save->fetch(PDO::FETCH_ASSOC);
+
+	$sealed_msg = new InboundEmailMessage($older, TRUE);
+	check($sealed_msg->rowIsSealed() === true, 'the row reports itself sealed');
+	$sealed_msg->set('iem_is_read', true);           // an ordinary metadata edit
+	$sealed_msg->save();
+
+	$before_save->execute(array($older));
+	$post = $before_save->fetch(PDO::FETCH_ASSOC);
+	check($post == $pre,
+		'a plain save() leaves every sealed column byte-identical');
+	check(strpos((string)$post['iem_subject'], 'v1.aead.') === 0,
+		'they are still ciphertext, not decrypted plaintext');
+
+	$reread = new InboundEmailMessage($older, TRUE);
+	check((string)$reread->get('iem_subject') === 'Older note',
+		'and the row still opens afterwards');
+	check((bool)$reread->get('iem_is_read') === true,
+		'while the unsealed column the caller actually changed did save');
+
+	// The same call with the vault locked must not throw: get() on a sealed
+	// column would, and save() no longer reads them at all.
+	VaultUnlock::lockAll($owner_id);
+	$locked_ok = true;
+	try {
+		$locked_msg = new InboundEmailMessage($older, TRUE);
+		$locked_msg->set('iem_is_read', false);
+		$locked_msg->save();
+	} catch (Throwable $e) {
+		$locked_ok = false;
+		$cloud_message = get_class($e) . ': ' . $e->getMessage();
+	}
+	check($locked_ok, 'and saving a sealed row while the vault is LOCKED does not throw',
+		$locked_ok ? '' : $cloud_message);
+	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+		array('idle' => null, 'absolute' => null));
+
+	// -----------------------------------------------------------------------
+	section('sink zero: sealed mail does not reach a cloud model without consent');
+
+	// This precedes every storage sink — the plaintext leaves over HTTPS, not
+	// into a column, so no storage-side guard can see it.
+	require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+	check(LlmProviderFactory::isCloudModel('claude-haiku-4-5') === true,
+		'a Claude model counts as cloud');
+	check(LlmProviderFactory::isCloudModel('qwen3.6:35b-a3b-nvfp4') === false,
+		'a local model does not');
+
+	MailboxAliasConfig::clearPostureCache();
+	check(MailboxAliasConfig::aiCloudAllowed($address) === false,
+		'the sealed domain has not consented to cloud processing');
+	check(MailboxAliasConfig::aiCloudAllowed($std_address) === true,
+		'while a standard domain has nothing to withhold');
+
+	$recipe->set('rcp_model', 'claude-haiku-4-5');
+	$refused_cloud = false;
+	$cloud_message = '';
+	try {
+		RecipeVaultScope::assertModelAllowed($recipe);
+	} catch (LlmProviderException $e) {
+		$refused_cloud = true;
+		$cloud_message = $e->getMessage();
+	}
+	check($refused_cloud, 'a sealed-source recipe pinned to a cloud model is refused');
+	check(strpos($cloud_message, 'claude-haiku-4-5') !== false
+		&& stripos($cloud_message, 'cloud AI models') !== false,
+		'and the refusal names the model and the setting that would allow it', $cloud_message);
+
+	// A local model on the same sealed recipe is fine.
+	$recipe->set('rcp_model', 'qwen3.6:35b-a3b-nvfp4');
+	$local_ok = true;
+	try {
+		RecipeVaultScope::assertModelAllowed($recipe);
+	} catch (LlmProviderException $e) {
+		$local_ok = false;
+	}
+	check($local_ok, 'the same recipe on a local model is allowed');
+
+	// Granting consent lets the cloud model through...
+	$fortress->set('ied_ai_cloud_enabled', true);
+	$fortress->save();
+	MailboxAliasConfig::clearPostureCache();
+	$recipe->set('rcp_model', 'claude-haiku-4-5');
+	$allowed_now = true;
+	try {
+		RecipeVaultScope::assertModelAllowed($recipe);
+	} catch (LlmProviderException $e) {
+		$allowed_now = false;
+	}
+	check($allowed_now, 'granting the domain cloud consent allows it');
+
+	// ...and withdrawing it stops the recipe again, without the recipe changing.
+	// This is the whole point of re-checking at run start rather than only at
+	// save: the recipe row is identical either side of this.
+	$fortress->set('ied_ai_cloud_enabled', false);
+	$fortress->save();
+	MailboxAliasConfig::clearPostureCache();
+	$stopped_again = false;
+	try {
+		RecipeVaultScope::assertModelAllowed($recipe);
+	} catch (LlmProviderException $e) {
+		$stopped_again = true;
+	}
+	check($stopped_again,
+		'withdrawing consent stops an already-saved recipe, with the recipe untouched');
+
+	// A standard-mailbox recipe is never gated by this.
+	$std_recipe->set('rcp_model', 'claude-haiku-4-5');
+	$std_ok = true;
+	try {
+		RecipeVaultScope::assertModelAllowed($std_recipe);
+	} catch (LlmProviderException $e) {
+		$std_ok = false;
+	}
+	check($std_ok, 'and an ordinary mailbox recipe is untouched by the gate');
+
+	$recipe->set('rcp_model', '');
+
+	// -----------------------------------------------------------------------
 	section('consent is required to bind a recipe to a sealed mailbox');
 
 	$closed = iw_domain(InboundEmailDomain::LEVEL_FORTRESS, false);
@@ -287,6 +488,15 @@ try {
 
 	VaultUnlock::lockAll($owner_id);
 
+} catch (Throwable $e) {
+	// Without this, an exception mid-suite is silent: harness_finish() runs from
+	// the finally and exit()s before the throw can surface, so the run reports
+	// PASS on however many checks happened to complete. A shrinking suite looks
+	// identical to a passing one — which is exactly how the sealed write path
+	// stayed broken. Fail loudly instead.
+	check(false, 'the suite ran to completion without throwing',
+		get_class($e) . ': ' . $e->getMessage()
+		. ' @ ' . $e->getFile() . ':' . $e->getLine());
 } finally {
 	// harness_register_row/harness_defer reclaim every fixture row (LIFO), so a
 	// mid-suite failure still leaves no throwaway domain, alias, grant, message,

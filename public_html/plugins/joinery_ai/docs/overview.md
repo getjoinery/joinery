@@ -79,15 +79,73 @@ plugins/joinery_ai/
 
 A recipe is a row in `rcp_recipes` with:
 
-- **mode** (`rcp_mode`) — `agent` (default) or `pipeline`. Selected on the edit form; swaps which of the fields below apply — see [Item pipeline recipes](#item-pipeline-recipes).
-- **prompt** — the system + user message text the LLM sees. In pipeline mode this is optional — blank means the selected job's `defaultPrompt()` runs.
+- **mode** (`rcp_mode`) — `agent` (default) or `pipeline`. Chosen when the recipe is created and shown as static text afterwards; it swaps which of the fields below apply — see [Item pipeline recipes](#item-pipeline-recipes).
+- **prompt** — the system + user message text the LLM sees. In pipeline mode this is optional — blank means the selected job's `defaultPrompt()` runs, and the edit form displays that text rather than an empty box, with a **Customize** control that copies it into an editable field. Clearing the field back to empty returns the recipe to the job's own wording.
 - **owner** (`rcp_owner_user_id`) — the user the run executes as. `RecipeRunContext::owner_user_id` and `owner_timezone` are derived from this.
 - **allowed tools** (`rcp_allowed_tools`) — JSON array of tool names. Only listed tools are exposed to the LLM. Unknown names are silently skipped (the runner logs them to the trace). Agent mode only.
 - **allowed models** (`rcp_allowed_models`) — JSON array of class names. Drives both the schema block in the system prompt and the per-recipe gate in `query_model`. Empty array = no model reads. Agent mode only.
-- **pipeline job** (`rcp_pipeline_job`) / **source config** (`rcp_source_config`) — which registered job drives the run, and its per-recipe binding config. Pipeline mode only.
+- **pipeline job** (`rcp_pipeline_job`) / **source config** (`rcp_source_config`) — which registered job drives the run, and its per-recipe binding config. Pipeline mode only. Like mode, the job is chosen at creation and static afterwards: `aip_recipe_item_log` is unique on `(recipe, item_key)` and item keys are job-scoped, so repointing a saved recipe at another job would reinterpret everything it has already processed against a different namespace — the new job would read every past item as done and silently do nothing.
+- **runs automatically** (`rcp_enabled`) — whether the recipe runs on its own, via the dispatcher's schedule or the in-window drain. Off, it still runs from **Run Now**; turning it off also flags in-flight runs for a kill.
+- **dashboard card** (`rcp_delivery_dashboard`) — whether `/joinery_ai` shows a card with this recipe's most recent successful output. Independent of whether it runs.
+- **acts on others' content** (`rcp_allow_tainted_writes`) — the admin's acknowledgment that the recipe reads text other people wrote and writes based on it. The edit form computes whether the recipe even needs it, live, from the same inputs `TaintGate::evaluate()` reads, and says so above the checkbox.
 - **schedule** — cron expression, "manual only", or "interactive only".
 
 Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`. `rcp_max_iterations` is the max tool-loop iterations in agent mode and the max items processed per run (batch size) in pipeline mode; `rcp_allowed_actions` and `rcp_workspace` are agent-mode only, same as the tool/model allow-lists.
+
+## Shipped recipes
+
+A few recipes are worth having on every install — triage the inbox, score mail for phishing, put dated events on the calendar. Those are declared in `plugins/joinery_ai/recipes.json` and seeded onto each install by the plugin's `sync.php` hook, the same road declared settings and declared scheduled tasks take.
+
+```json
+{
+  "recipes": [
+    {
+      "key": "email_triage_default",
+      "name": "Email triage",
+      "pipeline_job": "email_triage",
+      "requires_plugin": "mailbox",
+      "prompt": "",
+      "schedule_frequency": "hourly",
+      "max_iterations": 25,
+      "max_tokens": 5000,
+      "monthly_token_cap": 200000,
+      "thinking_level": "off"
+    }
+  ]
+}
+```
+
+**What travels is the judgement and the settings.** Five fields are fixed at seed time instead of declared, because they mean nothing away from the instance the recipe was built on:
+
+| Field | Seeded as | Why it can't travel |
+|---|---|---|
+| `rcp_owner_user_id` | lowest-numbered active admin | points at a user on the publishing instance |
+| `rcp_source_config` | empty | names a mailbox that exists nowhere else |
+| `rcp_model` | null | names a model the destination may not have |
+| `rcp_enabled` | false | must never arrive switched on |
+| `rcp_allow_tainted_writes` | false | a security acknowledgment, not ours to give |
+
+`rcp_temperature` and `rcp_top_p` are also left null, so they fall back to whatever the destination tuned globally, and `rcp_workspace` is unused in pipeline mode.
+
+**Leave `prompt` empty.** An empty prompt means the job class's `defaultPrompt()` applies, which is the normal case and the one that keeps improving: an upgrade can better that wording for every install, including ones seeded years earlier. Seeding is create-only, so a prompt written into `recipes.json` is a one-time snapshot that a later, better prompt never reaches.
+
+**The schedule is advisory.** A recipe whose job reads sealed content never runs from cron — the dispatcher skips it and it runs in slices inside the owner's unlock window instead ([Sealed Vault](../../../docs/sealed_vault.md)). A declared `hourly` is honoured on an ordinary mailbox and disregarded on an encrypted one.
+
+**`requires_plugin`** holds a declaration back until the named plugin is active, so a template for a job that isn't installed doesn't arrive as clutter. It lands at the sync following that plugin's activation.
+
+Three rules govern seeding:
+
+- **Seed once, never overwrite.** A declaration creates a recipe when one with its key doesn't exist, and otherwise does nothing. An upgrade never replaces a prompt the operator tuned. (Deliberately unlike declared settings, which do get updated.)
+- **Deletion is respected.** The existence check counts soft-deleted rows, so a template the operator deleted stays deleted.
+- **Removing a declaration deletes nothing.** A withdrawn template stops arriving on new installs and leaves existing ones alone.
+
+Seeding is skipped, and retried at the next sync, when the install has no human administrator yet — `User::USER_SYSTEM` carries permission 10 and is excluded on purpose, so a shipped recipe never executes its writes as a service account.
+
+**Marking a recipe to ship.** Templates are authored like any recipe: build it in the admin, get it right, then use **Ship with new installs** on the edit page. It writes the current recipe into `recipes.json` minus the five fields above, assigns a stable `rcp_declared_key`, and stamps that key back on the recipe so marking it again updates the entry rather than adding a second one. The file is under version control, so the change is an ordinary diff to review and commit.
+
+The control appears only on an instance that publishes upgrades (`DeploymentHelper::isUpgradeServer()`). Elsewhere `recipes.json` is replaced wholesale by the next upgrade, so an edit there would be silently discarded. Seeding is the opposite and is not gated — it runs on every install, which is the point.
+
+**What the operator sees.** A seeded recipe shows as **Awaiting setup** in the recipe list, and the edit page says it shipped with the install and isn't set up yet — otherwise it looks identical to a recipe someone deliberately switched off. Enabling it is where the tainted-writes acknowledgment happens: all three email jobs declare `untrustedDigest()`, so they cannot run with the flag off, and the save-time gate explains what the flag actually covers in pipeline mode (one verdict, one item, a fixed field — the model can't pick a different record or action).
 
 ## Recipe runs
 

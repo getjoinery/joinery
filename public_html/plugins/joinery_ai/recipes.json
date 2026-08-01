@@ -1,0 +1,41 @@
+{
+    "_comment": "Recipes seeded onto every install. Create-only: a declaration makes a recipe once and never edits or restores it. Leave prompt empty so the job class keeps ownership of the wording and upgrades can improve it. See specs/implemented/joinery_ai_shipped_recipes.md.",
+    "recipes": [
+        {
+            "key": "email_triage_default",
+            "name": "Email triage",
+            "pipeline_job": "email_triage",
+            "requires_plugin": "mailbox",
+            "prompt": "",
+            "schedule_frequency": "hourly",
+            "max_iterations": 25,
+            "max_tokens": 5000,
+            "monthly_token_cap": 200000,
+            "thinking_level": "off"
+        },
+        {
+            "key": "email_security_scan_default",
+            "name": "Email security scan",
+            "pipeline_job": "email_security_scan",
+            "requires_plugin": "mailbox",
+            "prompt": "",
+            "schedule_frequency": "hourly",
+            "max_iterations": 25,
+            "max_tokens": 5000,
+            "monthly_token_cap": 200000,
+            "thinking_level": "off"
+        },
+        {
+            "key": "email_schedule_default",
+            "name": "Email calendar entries",
+            "pipeline_job": "email_schedule",
+            "requires_plugin": "mailbox",
+            "prompt": "",
+            "schedule_frequency": "hourly",
+            "max_iterations": 25,
+            "max_tokens": 5000,
+            "monthly_token_cap": 200000,
+            "thinking_level": "off"
+        }
+    ]
+}

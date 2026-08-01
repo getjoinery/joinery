@@ -412,6 +412,46 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * The boolean column recording that THIS ROW's $sealed_fields hold
+	 * ciphertext. Sealing is per-row, not per-model — the same table holds
+	 * sealed and unsealed rows side by side — so the flag lives on the row.
+	 *
+	 * Convention is {prefix}_content_sealed, which four of the five sealed
+	 * models follow; AiMessageAttachment overrides it with aia_sealed.
+	 */
+	public static function sealFlagColumn() {
+		// $prefix is declared on concrete models, not here, so derive it
+		// defensively rather than assuming — an undeclared static would fatal.
+		if (!property_exists(static::class, 'prefix')) return '';
+		return static::$prefix . '_content_sealed';
+	}
+
+	/**
+	 * Is this row's content sealed right now?
+	 *
+	 * Reads the flag straight off $this->data rather than through get(), which
+	 * would recurse into decryption. PDO hands back a Postgres boolean as 't'/'f'
+	 * for some drivers and a real bool for others, and the string 'f' is truthy
+	 * in PHP — hence the explicit comparison rather than a bare truth test.
+	 */
+	public function rowIsSealed() {
+		if (empty(static::$sealed_fields)) return false;
+		$flag = static::sealFlagColumn();
+		if (!array_key_exists($flag, static::$field_specifications)) return false;
+		$value = $this->data->$flag ?? null;
+		if ($value === null || $value === false || $value === 'f' || $value === '0' || $value === 0) {
+			return false;
+		}
+		return (bool)$value;
+	}
+
+	/** Columns save() must leave alone on a sealed row, as a lookup set. */
+	protected function sealedColumnsToSkip() {
+		if (!$this->rowIsSealed()) return array();
+		return array_flip(static::$sealed_fields);
+	}
+
+	/**
 	 * Sealed Vault generic read hook (instance path - covers get() and
 	 * anything built on it, e.g. export_as_array()). A model that declares
 	 * $sealed_fields MUST override this; the base implementation throws so a
@@ -1444,8 +1484,22 @@ abstract class SystemBase {
 			throw new DisplayableUserException($duplicate['message']);
 		}
 
+		// A sealed row's $sealed_fields are owned by the sealing path, never by
+		// save(). Without this, save() rebuilds every column from get() — which
+		// DECRYPTS — and writes the plaintext straight back into the sealed
+		// columns while the seal flag stays true. The row is then both leaked and
+		// unreadable: every later read AEAD-opens plaintext and throws. When the
+		// vault is locked it is worse still, because get() throws mid-save.
+		//
+		// This rule used to live only in a docblock on ChatSeal, which protected
+		// exactly the one subsystem whose author had read it — the AI email jobs
+		// walked into the same hazard months later. Enforcing it here is what
+		// makes the safe thing automatic instead of remembered.
+		$skip_sealed = $this->sealedColumnsToSkip();
+
 		$rowdata = array();
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
+			if (isset($skip_sealed[$field])) continue;
 			$rowdata[$field] = $this->get($field);
 		}
 
