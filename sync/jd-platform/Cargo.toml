@@ -1,0 +1,36 @@
+[package]
+name = "jd-platform"
+description = "Everything about a sync client that differs by operating system and is not the filesystem: where secrets live, where files belong, how the daemon starts at login, and how a browser gets opened."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+thiserror = "1"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+rand_core = { version = "0.6", features = ["getrandom"] }
+
+# The system credential store. macOS Keychain and the Windows Credential
+# Manager are both reachable without any system development package, so they are
+# always on. Linux is deliberately absent: the Secret Service backend needs a
+# desktop session AND libdbus-1-dev at build time, and a headless Linux server
+# running the daemon has neither. See `secret.rs` for what happens there instead.
+[dependencies.keyring]
+version = "3"
+default-features = false
+features = ["apple-native", "windows-native"]
+
+[features]
+default = []
+# Desktop Linux builds, where libsecret is present and a session bus exists.
+# Off by default so the daemon builds on a server with nothing installed.
+secret-service = ["keyring/sync-secret-service", "keyring/crypto-rust"]
+
+# Registering the daemon to start at login is a registry write on Windows.
+[target.'cfg(windows)'.dependencies]
+windows-sys = { version = "0.59", features = [
+    "Win32_Foundation",
+    "Win32_System_Registry",
+] }

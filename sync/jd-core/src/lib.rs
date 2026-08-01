@@ -16,6 +16,9 @@
 //!   able to reason about exhaustively.
 //! - [`order`] — turning a set of decided actions into a sequence that is safe
 //!   to execute, including breaking rename cycles.
+//! - [`naming`] — what each entry is called *on this computer*, which is not
+//!   always what it is called on the server: filesystems disagree about case,
+//!   about Unicode, and about which characters are allowed at all.
 //! - [`scan`] — working out what happened locally from a tree that records no
 //!   history, with the pairing precedence that keeps a move a move.
 //! - [`remote`] — what the server did, always measured from the last agreement
@@ -37,6 +40,7 @@
 
 pub mod execute;
 pub mod model;
+pub mod naming;
 pub mod order;
 pub mod pass;
 pub mod reconcile;
@@ -49,6 +53,7 @@ pub use execute::{
     journal, recover, run_one, run_queued, ExecEnv, ExecError, ExecReport, OpOutcome,
 };
 pub use model::{ContentId, Delta, EntityId, EntityType, Entry, LocalStatus, Placement};
+pub use naming::{apply_naming, NamingOutcome};
 pub use pass::{run_pass, PassOutcome};
 pub use reconcile::{is_mass_delete, reconcile, Action, Context, Issue, Resolution, Side};
 pub use remote::{local_delta, remote_delta, RemoteState};

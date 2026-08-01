@@ -37,6 +37,7 @@ use crate::clock::SimClock;
 use crate::engine::{env, Device};
 use crate::rng::SimRng;
 use crate::server::MockServer;
+use crate::vfs::MemFs;
 
 /// How many passes a device gets before a scenario calls it stuck. Generous:
 /// a pass moves one round's worth of work, and a chaotic run legitimately needs
@@ -51,15 +52,48 @@ pub struct World {
     pub rng: SimRng,
 }
 
+/// Which operating system's filesystem a device has.
+///
+/// The point of running these on Linux is that the rules are data, not
+/// `#[cfg]`: a Windows-only bug is findable on the dev box, and a scenario can
+/// put a Mac and a PC in one world and watch them disagree about whether two
+/// files exist.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum Platform {
+    Linux,
+    /// A modern Mac: case-insensitive, normalization-preserving.
+    MacOs,
+    /// A volume that decomposes — HFS+, or a network share. Kept as its own
+    /// platform rather than folded into `MacOs`, because APFS has not
+    /// decomposed since 2017 and pretending otherwise tests a filesystem
+    /// nobody has.
+    Decomposing,
+    Windows,
+}
+
 impl World {
     pub fn new(seed: u64, device_names: &[&str]) -> World {
+        let all: Vec<(&str, Platform)> =
+            device_names.iter().map(|n| (*n, Platform::Linux)).collect();
+        World::of(seed, &all)
+    }
+
+    /// A world whose devices run different operating systems.
+    pub fn of(seed: u64, devices: &[(&str, Platform)]) -> World {
         let clock = SimClock::new();
         let server = MockServer::new(clock.clone());
-        let devices = device_names
+        let devices = devices
             .iter()
             .enumerate()
-            .map(|(i, name)| {
-                Device::new(name, &server, clock.clone(), seed ^ ((i as u64 + 1) << 8))
+            .map(|(i, (name, platform))| {
+                let seed = seed ^ ((i as u64 + 1) << 8);
+                let fs = match platform {
+                    Platform::Linux => MemFs::linux(clock.clone()),
+                    Platform::MacOs => MemFs::macos(clock.clone()),
+                    Platform::Decomposing => MemFs::hfs_plus(clock.clone()),
+                    Platform::Windows => MemFs::windows(clock.clone()),
+                };
+                Device::new(name, &server, clock.clone(), seed).with_fs(fs)
             })
             .collect();
         World {
@@ -112,6 +146,11 @@ impl World {
             date: "2026-07-31".into(),
             device_name: device.name.clone(),
             conflict_suffix: 1,
+            // From the device's own disk, not a constant. A scenario that gives
+            // one device a Windows filesystem and another a Linux one is
+            // testing exactly the disagreement this field exists for, and a
+            // hardcoded personality here would quietly erase it.
+            personality: jd_vfs::Vfs::personality(&device.fs),
         };
         let now = device.now();
         let e: ExecEnv = env(device, &now);
@@ -179,7 +218,12 @@ pub fn disk_tree(device: &Device) -> BTreeMap<String, Option<String>> {
             continue;
         }
         let hash = device.fs.peek(&path).map(|b| crate::sha256_hex(&b));
-        out.insert(path, hash);
+        // Composed, because that is the spelling the `Vfs` contract promises
+        // and therefore the only one the engine ever works in. Reading the raw
+        // stored keys here would report a decomposing volume as diverging from
+        // the server over a file both of them hold correctly — the harness
+        // failing the engine for obeying its own contract.
+        out.insert(jd_vfs::nfc(&path), hash);
     }
     out
 }

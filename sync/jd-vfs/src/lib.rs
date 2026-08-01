@@ -23,6 +23,7 @@
 
 pub mod dirty;
 pub mod names;
+pub mod paths;
 pub mod personality;
 pub mod real;
 pub mod watch;
@@ -31,9 +32,10 @@ use std::path::{Path, PathBuf};
 
 pub use dirty::{DirtyPath, DirtySet, Hint};
 pub use names::{
-    comparison_key, conflict_copy_name, is_internal, nfc, resolve_siblings, EscapeReason,
-    LocalName, Resolved, UnsyncableReason,
+    comparison_key, conflict_copy_name, is_internal, nfc, path_fits, resolve_siblings,
+    to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
 };
+pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
 pub use personality::Personality;
 pub use real::OsVfs;
 pub use watch::{watch_root, Watcher};
@@ -156,6 +158,18 @@ pub trait Vfs: Send + Sync {
     /// between an inconvenience and a catastrophe.
     fn root(&self) -> Option<PathBuf>;
 
+    /// List a directory.
+    ///
+    /// **Names come back composed (NFC).** A volume that stores decomposed
+    /// names hands back a different sequence of code points than the one
+    /// written to it, and an engine comparing raw bytes reads that as a rename
+    /// of every file with an accent in its name — then pushes the "new" name to
+    /// the server, and the other device renames it back. Composing here, at the
+    /// one boundary where the operating system's spelling enters the program, is
+    /// what stops that from being a rule every caller has to remember.
+    ///
+    /// Lookups are unaffected: a volume that decomposes also accepts either
+    /// spelling when asked for a file by name.
     fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>>;
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>>;
     fn hash(&self, path: &Path) -> VfsResult<String>;

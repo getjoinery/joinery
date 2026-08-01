@@ -52,6 +52,8 @@ pub struct PassOutcome {
     /// an error and emphatically not a mass delete: an unplugged drive means
     /// wait, not "every file is gone".
     pub root_unavailable: bool,
+    /// What this filesystem could and could not be asked to hold.
+    pub naming: crate::naming::NamingOutcome,
 }
 
 impl PassOutcome {
@@ -92,6 +94,27 @@ pub fn run_pass(
         absorb_remote(env, *id, state)?;
     }
 
+    // ---- what each entry is called here -------------------------------------
+    //
+    // Before the disk is walked, not after. The scan pairs what is on disk
+    // against what the engine believes each entry is called, so that belief has
+    // to be current first — otherwise a name the server just changed is compared
+    // against the old local spelling and reads as a local rename back.
+    let root_prefix = env
+        .vfs
+        .root()
+        .map(|r| r.as_os_str().len())
+        .unwrap_or_default();
+    out.naming = crate::naming::apply_naming(env, &env.vfs.personality(), root_prefix)?;
+    for (id, reason) in &out.naming.unsyncable {
+        env.store.raise_issue(
+            Some(*id),
+            "unsyncable",
+            &format!("{reason:?}"),
+            (env.now_ms)() as i64,
+        )?;
+    }
+
     // ---- what this computer did --------------------------------------------
     let observed = observe(env)?;
     let known = known_local(env)?;
@@ -103,6 +126,14 @@ pub fn run_pass(
     // one.
     let dirs_on_disk = observed_dirs(env)?;
     let mut folder_ids = folder_paths(env)?;
+
+    // A folder the user renamed is a folder, renamed — not a new folder plus a
+    // thousand files that moved into it. Without this the old folder is left
+    // behind on the server, everything inside is re-parented one file at a
+    // time, and the folder's sharing and history stay with a shell nobody can
+    // see any more.
+    let folders = detect_folder_moves(env, &observed, &dirs_on_disk, &mut folder_ids)?;
+
     for dir in &dirs_on_disk {
         if folder_ids.contains_key(dir) {
             continue;
@@ -136,6 +167,14 @@ pub fn run_pass(
 
     for entry in all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || busy.contains(&entry.id) {
+            continue;
+        }
+        // A name this filesystem cannot hold. There is no local file, so there
+        // is nothing to compare and nothing to transfer — the entry waits,
+        // visibly, until the clash clears. The one thing still worth acting on
+        // is the server deleting it, which the ordinary path handles: no local
+        // delta, a remote delete, and the entry is forgotten.
+        if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
             continue;
         }
 
@@ -175,7 +214,9 @@ pub fn run_pass(
 
         let local = match scan.change_for(entry.id) {
             Some(change) => local_delta(change, resolve),
-            None => Delta::None,
+            // Folders are absent from the file scan, so what happened to one
+            // locally is worked out separately.
+            None => folder_delta(&entry, &folders),
         };
         // Measured from the agreement, using the freshest remote state we hold.
         // For an entity the feed did not mention this pass that is what we
@@ -543,6 +584,171 @@ fn observed_dirs(env: &ExecEnv) -> Result<Vec<String>, ExecError> {
     Ok(out)
 }
 
+/// What happened to a tracked folder on this computer since the last agreement.
+///
+/// The delete branch is guarded on the folder having been *materialized*. A
+/// folder the server told us about but which has never been created here has no
+/// local presence to have lost, and reading its absence as a deletion would
+/// propagate "this device has not caught up yet" to the server as "the user
+/// removed this".
+fn folder_delta(entry: &Entry, folders: &FolderScan) -> Delta {
+    if let Some(to) = folders.moves.get(&entry.id) {
+        return Delta::Moved { to: to.clone() };
+    }
+    if entry.id.entity_type == EntityType::Folder
+        && entry.synced_placement.is_some()
+        && !folders.present.contains(&entry.id)
+    {
+        return Delta::Deleted;
+    }
+    Delta::None
+}
+
+/// What the local scan found out about folders.
+///
+/// Folders are absent from the file scan entirely — they have no content to
+/// pair on — so the two things that can happen to one locally are worked out
+/// here instead.
+#[derive(Debug, Default)]
+struct FolderScan {
+    /// Tracked folders now sitting somewhere else, and where.
+    moves: HashMap<EntityId, Placement>,
+    /// Every tracked folder confirmed to still be on this disk — at its own
+    /// path, or under a new one. Anything materialized and *not* in here is
+    /// gone, and that is how a folder deleted locally reaches the server.
+    present: std::collections::HashSet<EntityId>,
+}
+
+/// Work out which folders on disk are tracked folders that were renamed.
+///
+/// Files can be paired by content — the same bytes somewhere else is a move.
+/// Folders have no bytes, so the evidence has to come from what is inside them:
+/// a directory nothing is tracking, holding files the engine knows by their
+/// identity on this volume, is the folder those files were already in. That is
+/// exactly how a user's rename looks from the outside, because renaming a
+/// folder does not touch a single file inside it — the inodes are untouched and
+/// only the path to them changed.
+///
+/// Matches are written into `folder_ids` so that everything below resolves
+/// children against the folder's real server id, and returned as the folder's
+/// own move so the reconciler renames it on the server in one operation.
+///
+/// **An empty folder cannot be matched**, because there is no evidence: it reads
+/// as one folder removed and another created. Nothing is lost by that — an empty
+/// folder holds nothing — and the alternative, guessing from the name, would
+/// pair two unrelated folders and drag one's sharing onto the other.
+fn detect_folder_moves(
+    env: &ExecEnv,
+    observed: &[ObservedFile],
+    dirs_on_disk: &[String],
+    folder_ids: &mut HashMap<String, i64>,
+) -> Result<FolderScan, ExecError> {
+    let mut scan = FolderScan::default();
+    // Where each tracked folder believes it is, and which of those are gone.
+    let mut tracked: HashMap<String, EntityId> = HashMap::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::Folder || entry.id.is_provisional() {
+            continue;
+        }
+        if let Some(path) = relative_path(env, &entry)? {
+            tracked.insert(path, entry.id);
+        }
+    }
+    let mut missing: Vec<(String, EntityId)> = Vec::new();
+    for (path, id) in &tracked {
+        if dirs_on_disk.contains(path) {
+            scan.present.insert(*id);
+        } else {
+            missing.push((path.clone(), *id));
+        }
+    }
+    if missing.is_empty() {
+        return Ok(scan);
+    }
+
+    // What the engine believes about the files in each of those folders.
+    let mut children: HashMap<String, Vec<(String, u64)>> = HashMap::new();
+    for entry in all_entries(env)? {
+        if entry.id.entity_type != EntityType::File {
+            continue;
+        }
+        let (Some(fingerprint), Some(path)) =
+            (entry.synced_fingerprint, relative_path(env, &entry)?)
+        else {
+            continue;
+        };
+        if let Some((dir, name)) = path.rsplit_once('/') {
+            children
+                .entry(dir.to_string())
+                .or_default()
+                .push((name.to_string(), fingerprint.file_id));
+        }
+    }
+
+    let by_path: HashMap<&str, &ObservedFile> =
+        observed.iter().map(|o| (o.path.as_str(), o)).collect();
+
+    let mut claimed: Vec<EntityId> = Vec::new();
+    // Shallowest first, so a renamed parent is resolved before the folders
+    // inside it are asked where they live.
+    let mut candidates: Vec<&String> = dirs_on_disk
+        .iter()
+        .filter(|d| !folder_ids.contains_key(*d))
+        .collect();
+    candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
+
+    for candidate in candidates {
+        let mut best: Option<(EntityId, String, usize)> = None;
+        for (old_path, id) in &missing {
+            if claimed.contains(id) {
+                continue;
+            }
+            let Some(kids) = children.get(old_path) else {
+                continue;
+            };
+            let matched = kids
+                .iter()
+                .filter(|(name, file_id)| {
+                    by_path
+                        .get(format!("{candidate}/{name}").as_str())
+                        .is_some_and(|o| o.fingerprint.file_id == *file_id)
+                })
+                .count();
+            if matched == 0 {
+                continue;
+            }
+            // The most corroborated match wins, and ties break on the folder id
+            // so two devices reach the same answer.
+            if best
+                .as_ref()
+                .is_none_or(|(bid, _, count)| matched > *count || (matched == *count && *id < *bid))
+            {
+                best = Some((*id, old_path.clone(), matched));
+            }
+        }
+
+        let Some((id, _, _)) = best else { continue };
+        claimed.push(id);
+        scan.present.insert(id);
+        folder_ids.insert(candidate.clone(), id.server_id);
+        if let Some(placement) = placement_of(candidate, folder_ids) {
+            // Only a real change is reported. A folder inside a renamed parent
+            // reaches here too, and its own placement — this parent, this name —
+            // has not moved at all; saying it did would queue a rename to where
+            // it already is.
+            let entry = env.store.get_entry(id)?;
+            let unchanged = entry
+                .as_ref()
+                .and_then(|e| e.synced_placement.clone())
+                .is_some_and(|p| p == placement);
+            if !unchanged {
+                scan.moves.insert(id, placement);
+            }
+        }
+    }
+    Ok(scan)
+}
+
 /// What the engine last recorded about each file it tracks.
 fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
     let mut out = Vec::new();
@@ -602,7 +808,7 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
 
 /// Every entry the store holds, walked from the root down so parents come
 /// before children.
-fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
+pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
     let mut out = Vec::new();
     let mut queue: Vec<Option<i64>> = vec![None];
     let mut guard = 0;
@@ -636,7 +842,7 @@ fn folder_paths(env: &ExecEnv) -> Result<HashMap<String, i64>, ExecError> {
 }
 
 /// An entry's path relative to the sync root.
-fn relative_path(env: &ExecEnv, entry: &Entry) -> Result<Option<String>, ExecError> {
+pub(crate) fn relative_path(env: &ExecEnv, entry: &Entry) -> Result<Option<String>, ExecError> {
     let mut parts = vec![entry.effective_local_name().to_string()];
     let mut parent = entry.local_placement().parent;
     let mut guard = 0;

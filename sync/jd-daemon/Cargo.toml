@@ -1,0 +1,29 @@
+[package]
+name = "jd-daemon"
+description = "The Joinery Drive client as a program: the device-link ceremony, the loop that runs the engine, the health model behind the tray, and the local control channel the shells talk to."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+jd-core = { path = "../jd-core" }
+jd-crypto = { path = "../jd-crypto" }
+jd-platform = { path = "../jd-platform" }
+jd-proto = { path = "../jd-proto" }
+jd-vfs = { path = "../jd-vfs" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "1"
+# The asking half of the control channel. Already in the dependency tree for the
+# server API, so it costs nothing here.
+ureq = { version = "2", features = ["json"] }
+
+[[bin]]
+name = "joinery-drive"
+path = "src/main.rs"
+
+[features]
+default = []
+# Passed through to jd-platform: use the Linux Secret Service where one exists.
+secret-service = ["jd-platform/secret-service"]

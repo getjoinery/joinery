@@ -26,6 +26,10 @@ use crate::{DirEntry, EntryKind, Fingerprint, Personality, SpoolFile, Vfs, VfsEr
 const HASH_CHUNK: usize = 256 * 1024;
 
 pub struct OsVfs {
+    /// The resolved spelling of the root — symlinks followed, and on Windows the
+    /// extended-length form. Every filesystem call and every watcher event is
+    /// compared against this one spelling, because two spellings of the same
+    /// folder is how a watcher ends up silently discarding every event it gets.
     root: PathBuf,
     /// Where spool files live: alongside the state store, outside the synced
     /// tree, but on the same volume as the root wherever possible so a commit
@@ -38,8 +42,18 @@ pub struct OsVfs {
 }
 
 impl OsVfs {
+    /// Open a sync root, asking the volume what kind of filesystem it is.
+    ///
+    /// The probe is not decoration. Whether this volume can tell `Report.txt`
+    /// from `report.txt`, and whether it hands names back in the form they were
+    /// written, decide which files can be materialized at all — and neither is
+    /// reliably predicted by which operating system is running. A developer's
+    /// case-sensitive APFS volume and a stock one are the same OS and different
+    /// answers.
     pub fn new(root: PathBuf, spool_dir: PathBuf) -> VfsResult<OsVfs> {
-        Self::with_personality(root, spool_dir, Personality::native())
+        let root = crate::paths::canonical_root(&root);
+        let personality = Personality::probe(&root);
+        Self::with_personality(root, spool_dir, personality)
     }
 
     pub fn with_personality(
@@ -53,7 +67,7 @@ impl OsVfs {
         })?;
         let counter = std::sync::atomic::AtomicU64::new(0);
         Ok(OsVfs {
-            root,
+            root: crate::paths::canonical_root(&root),
             spool_dir,
             personality,
             next_token: Box::new(move || {
@@ -61,6 +75,11 @@ impl OsVfs {
                 format!("{}-{}", std::process::id(), n)
             }),
         })
+    }
+
+    /// The root as everything else must spell it.
+    pub fn root_path(&self) -> &Path {
+        &self.root
     }
 
     /// Clear out spool files left behind by a previous run.
@@ -97,7 +116,7 @@ fn io_err(path: &Path, e: std::io::Error) -> VfsError {
 }
 
 #[cfg(unix)]
-fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
+fn fingerprint_of(_path: &Path, md: &fs::Metadata) -> Fingerprint {
     use std::os::unix::fs::MetadataExt;
     Fingerprint {
         size: md.len(),
@@ -111,8 +130,49 @@ fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
     }
 }
 
+/// The Windows equivalent of an inode: the volume's file index.
+///
+/// It has to come from an *opened handle* — `fs::metadata` will not report it —
+/// so this opens one with `FILE_READ_ATTRIBUTES` and full sharing. Both details
+/// matter: asking for read access would fail on a file another program holds
+/// exclusively (which on Windows is most files most of the time), and a
+/// stricter share mode would make the sync client itself the reason somebody's
+/// save fails.
+///
+/// The alternative, standing in with the creation time, is wrong in the way that
+/// costs data: Windows *preserves* creation time across a move, and worse,
+/// copies it onto a file restored from a backup — so two unrelated files
+/// routinely share one, and the pairing logic would call them the same file.
 #[cfg(windows)]
-fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
+fn file_index(path: &Path) -> Option<u64> {
+    use std::os::windows::fs::OpenOptionsExt;
+    use std::os::windows::io::AsRawHandle;
+    use windows_sys::Win32::Storage::FileSystem::{
+        GetFileInformationByHandle, BY_HANDLE_FILE_INFORMATION, FILE_FLAG_BACKUP_SEMANTICS,
+        FILE_READ_ATTRIBUTES, FILE_SHARE_DELETE, FILE_SHARE_READ, FILE_SHARE_WRITE,
+    };
+
+    let file = fs::OpenOptions::new()
+        .access_mode(FILE_READ_ATTRIBUTES)
+        .share_mode(FILE_SHARE_READ | FILE_SHARE_WRITE | FILE_SHARE_DELETE)
+        // Without this a directory cannot be opened at all.
+        .custom_flags(FILE_FLAG_BACKUP_SEMANTICS)
+        .open(path)
+        .ok()?;
+
+    // SAFETY: the handle is live for the duration of the call, and the struct is
+    // plain old data the API fills in.
+    unsafe {
+        let mut info: BY_HANDLE_FILE_INFORMATION = std::mem::zeroed();
+        if GetFileInformationByHandle(file.as_raw_handle() as _, &mut info) == 0 {
+            return None;
+        }
+        Some(((info.nFileIndexHigh as u64) << 32) | info.nFileIndexLow as u64)
+    }
+}
+
+#[cfg(windows)]
+fn fingerprint_of(path: &Path, md: &fs::Metadata) -> Fingerprint {
     use std::os::windows::fs::MetadataExt;
     Fingerprint {
         size: md.len(),
@@ -120,9 +180,10 @@ fn fingerprint_of(md: &fs::Metadata) -> Fingerprint {
         // matter because every comparison is against another value from the
         // same source.
         mtime_ns: md.last_write_time().saturating_mul(100),
-        // file_index() needs an opened handle; the creation time plus size is a
-        // usable stand-in for pairing until the daemon opens handles itself.
-        file_id: md.creation_time(),
+        // Zero when the handle could not be opened. That reads as "identity
+        // unknown", which the fingerprint comparison treats as changed — the
+        // safe direction: it costs a hash, where a wrong identity costs a file.
+        file_id: file_index(path).unwrap_or(0),
     }
 }
 
@@ -147,7 +208,22 @@ impl Vfs for OsVfs {
         let mut out = Vec::new();
         for entry in rd {
             let entry = entry.map_err(|e| io_err(path, e))?;
-            let name = entry.file_name().to_string_lossy().to_string();
+            let raw = entry.file_name().to_string_lossy().to_string();
+            // macOS hands back what it stored, which is decomposed, whatever
+            // spelling the file was created with. Left alone, every file with an
+            // accent in its name reads as a rename on the very next scan — the
+            // engine asks the server for `café.txt`, finds `café.txt` spelled
+            // the other way, and pushes the "new" name back. Two devices then
+            // rename it at each other forever.
+            //
+            // Lookups are unaffected: a volume that decomposes also accepts
+            // either spelling when asked for a file, so the composed form we
+            // hand back opens the same file.
+            let name = if self.personality.decomposes_unicode {
+                crate::names::nfc(&raw)
+            } else {
+                raw
+            };
             // The engine's own spool and swap files are not part of the tree.
             if crate::names::is_internal(&name) {
                 continue;
@@ -172,7 +248,7 @@ impl Vfs for OsVfs {
                 name,
                 kind,
                 fingerprint: if kind == EntryKind::File {
-                    Some(fingerprint_of(&md))
+                    Some(fingerprint_of(&entry.path(), &md))
                 } else {
                     None
                 },
@@ -186,7 +262,7 @@ impl Vfs for OsVfs {
 
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {
         match path.symlink_metadata() {
-            Ok(md) if md.is_file() => Ok(Some(fingerprint_of(&md))),
+            Ok(md) if md.is_file() => Ok(Some(fingerprint_of(path, &md))),
             Ok(_) => Ok(None),
             Err(e) if e.kind() == std::io::ErrorKind::NotFound => Ok(None),
             Err(e) => Err(io_err(path, e)),
@@ -228,7 +304,11 @@ impl Vfs for OsVfs {
             // retry after a crash must not fail on its own prior success.
             return Ok(());
         }
-        trash::delete(path).map_err(|e| VfsError::Io {
+        // The recycle bin is a shell API, and the shell does not understand
+        // extended-length paths — handed one it reports a path that does not
+        // exist. Everywhere else this is a no-op.
+        let shell_path = crate::paths::strip_verbatim(path);
+        trash::delete(&shell_path).map_err(|e| VfsError::Io {
             path: path.to_path_buf(),
             source: std::io::Error::other(e.to_string()),
         })
@@ -277,7 +357,7 @@ impl OsSpoolFile {
         if let Some(expected) = expect {
             if let Ok(md) = target.symlink_metadata() {
                 if md.is_file() {
-                    let actual = fingerprint_of(&md);
+                    let actual = fingerprint_of(target, &md);
                     if !actual.unchanged_from(&expected, &Personality::native()) {
                         return Err(VfsError::AlreadyExists(target.to_path_buf()));
                     }
@@ -291,7 +371,7 @@ impl OsSpoolFile {
         fs::rename(&self.path, target).map_err(|e| io_err(&self.path, e))?;
 
         let md = target.symlink_metadata().map_err(|e| io_err(target, e))?;
-        Ok(fingerprint_of(&md))
+        Ok(fingerprint_of(target, &md))
     }
 }
 

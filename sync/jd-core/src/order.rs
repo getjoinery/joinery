@@ -114,13 +114,23 @@ impl Plan {
 
 /// Stage and order a round's actions.
 ///
+/// `personality` decides what counts as the same slot. On a case-insensitive
+/// volume `Report.txt` and `report.txt` are one slot and one of the two movers
+/// has to wait; on Linux they are two and neither does. Getting that wrong does
+/// not produce an error — it produces two renames into one name, and the second
+/// quietly replaces the first.
+///
 /// `token_for` supplies the random part of a scratch name; it is a parameter so
 /// a simulated run reproduces exactly from its seed.
-pub fn plan(items: Vec<PlanItem>, token_for: &mut dyn FnMut(EntityId) -> String) -> Plan {
+pub fn plan(
+    items: Vec<PlanItem>,
+    personality: &jd_vfs::Personality,
+    token_for: &mut dyn FnMut(EntityId) -> String,
+) -> Plan {
     let mut plan = Plan::default();
 
     // Which entities need parking to break a rename cycle.
-    let waits_for = dependency_graph(&items);
+    let waits_for = dependency_graph(&items, personality);
     let parked = find_cycle_breakers(&waits_for);
     let move_rank = move_ranks(&waits_for, &parked);
 
@@ -182,11 +192,8 @@ fn stage_for(action: &Action) -> Stage {
 
 /// A key identifying a slot in the tree: a name inside a parent. Two entities
 /// cannot occupy the same slot.
-fn slot(p: &Placement) -> (Option<i64>, String) {
-    (
-        p.parent,
-        jd_vfs::comparison_key(&p.name, &jd_vfs::Personality::linux()),
-    )
+fn slot(p: &Placement, personality: &jd_vfs::Personality) -> (Option<i64>, String) {
+    (p.parent, jd_vfs::comparison_key(&p.name, personality))
 }
 
 /// Who has to get out of whose way.
@@ -194,12 +201,15 @@ fn slot(p: &Placement) -> (Option<i64>, String) {
 /// A move *into* a slot depends on whatever currently occupies that slot
 /// leaving first. That single edge per mover is the whole graph — a slot has at
 /// most one occupant, so nothing can wait on two things at once.
-fn dependency_graph(items: &[PlanItem]) -> HashMap<EntityId, EntityId> {
+fn dependency_graph(
+    items: &[PlanItem],
+    personality: &jd_vfs::Personality,
+) -> HashMap<EntityId, EntityId> {
     // Who currently sits in each slot, among the entities that are moving.
     let mut occupant: HashMap<(Option<i64>, String), EntityId> = HashMap::new();
     for item in items {
         if let Some(from) = &item.move_from {
-            occupant.insert(slot(from), item.entity);
+            occupant.insert(slot(from, personality), item.entity);
         }
     }
 
@@ -207,7 +217,7 @@ fn dependency_graph(items: &[PlanItem]) -> HashMap<EntityId, EntityId> {
     let mut waits_for: HashMap<EntityId, EntityId> = HashMap::new();
     for item in items {
         if let Some(to) = &item.move_to {
-            if let Some(blocker) = occupant.get(&slot(to)) {
+            if let Some(blocker) = occupant.get(&slot(to, personality)) {
                 if *blocker != item.entity {
                     waits_for.insert(item.entity, *blocker);
                 }
@@ -341,7 +351,7 @@ mod tests {
             ),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let order = p.ordered();
         assert_eq!(order[0].stage, Stage::CreateFolders);
         assert_eq!(order[1].stage, Stage::Transfer);
@@ -366,7 +376,7 @@ mod tests {
             ),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let order = p.ordered();
         assert_eq!(order[0].entity, EntityId::folder(1));
         assert_eq!(order[1].entity, EntityId::folder(2));
@@ -380,7 +390,7 @@ mod tests {
             PlanItem::new(EntityId::file(3), Action::TrashRemote, 2),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(
             order,
@@ -397,7 +407,7 @@ mod tests {
             PlanItem::new(EntityId::file(2), Action::TrashLocal, 1),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let order: Vec<EntityId> = p.ordered().iter().map(|o| o.entity).collect();
         assert_eq!(order, vec![EntityId::file(2), EntityId::folder(1)]);
     }
@@ -416,7 +426,7 @@ mod tests {
             ),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let stages: Vec<Stage> = p.ordered().iter().map(|o| o.stage).collect();
         assert_eq!(
             stages,
@@ -435,7 +445,7 @@ mod tests {
         )
         .moving(placement(None, "a.txt"), placement(None, "b.txt"))];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert!(p.broken_cycles.is_empty());
     }
 
@@ -462,7 +472,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "C")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert!(p.broken_cycles.is_empty(), "a chain is not a cycle");
     }
 
@@ -488,7 +498,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "A")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert_eq!(p.broken_cycles.len(), 1);
         // Deterministic victim, so two devices break the same swap identically.
         assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
@@ -524,7 +534,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "C")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert_eq!(p.broken_cycles.len(), 1);
         assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
     }
@@ -573,7 +583,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "C")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
 
@@ -600,7 +610,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "A")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert_eq!(p.broken_cycles[0].0, EntityId::file(1));
         assert_eq!(move_order(&p), vec![EntityId::file(2), EntityId::file(1)]);
     }
@@ -636,7 +646,7 @@ mod tests {
             .moving(placement(None, "B"), placement(None, "C")),
         ];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         let order = move_order(&p);
         let at = |e: EntityId| order.iter().position(|o| *o == e).unwrap();
         // 3 leaves C before 2 wants it. 3 can go first because the slot it
@@ -658,7 +668,7 @@ mod tests {
         )
         .moving(placement(None, "a.txt"), placement(Some(5), "fresh.txt"))];
         let mut t = tokens();
-        let p = plan(items, &mut t);
+        let p = plan(items, &jd_vfs::Personality::linux(), &mut t);
         assert!(p.broken_cycles.is_empty());
     }
 }

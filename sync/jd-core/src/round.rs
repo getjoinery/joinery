@@ -166,7 +166,7 @@ pub fn run_round(
         }
     }
 
-    out.plan = plan(items, token_for);
+    out.plan = plan(items, &ctx.personality, token_for);
     out
 }
 
@@ -254,6 +254,7 @@ mod tests {
             date: "2026-07-16".into(),
             device_name: "PC".into(),
             conflict_suffix: 1,
+            personality: jd_vfs::Personality::linux(),
         }
     }
 

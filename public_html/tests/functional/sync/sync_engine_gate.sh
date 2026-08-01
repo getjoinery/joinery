@@ -6,9 +6,11 @@
 # needs: [rust]
 # timeout: 300
 #
-# The sync engine's decision core ({repo root}/sync/): the filesystem
-# adaptation rules (jd-vfs) and the reconciliation matrix, conflict policy,
-# operation ordering, and mass-delete guard (jd-core).
+# The sync client's decision-making, everywhere it is a pure function
+# ({repo root}/sync/): the filesystem adaptation rules (jd-vfs), the
+# reconciliation matrix, conflict policy, operation ordering, naming, and
+# mass-delete guard (jd-core), where secrets and login items belong
+# (jd-platform), and the health model the tray draws (jd-daemon, jd-shell).
 #
 # These are the parts that decide whether somebody's file gets deleted, and
 # they are written as pure functions precisely so they can be exercised
@@ -35,6 +37,11 @@ if ! command -v cargo >/dev/null 2>&1; then
 	fi
 fi
 
-cargo test -p jd-vfs -p jd-core --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
+cargo test -p jd-vfs -p jd-core -p jd-platform -p jd-daemon \
+	--manifest-path "$SYNC_DIR/Cargo.toml" --quiet
 
-echo "sync engine gate: jd-vfs + jd-core green"
+# jd-shell has no library target, so its pure presentation logic is reached
+# through the binary's own tests rather than a lib test.
+cargo test --bin joinery-drive-tray --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
+
+echo "sync engine gate: jd-vfs + jd-core + jd-platform + jd-daemon + jd-shell green"

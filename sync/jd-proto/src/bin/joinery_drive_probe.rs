@@ -1,17 +1,24 @@
-//! joinery-drive — Phase 1 plumbing CLI (specs/drive_sync_clients.md):
-//! prove the server contract end to end before any engine code exists.
+//! joinery-drive-probe — the server surface, exercised directly.
 //!
-//!   joinery-drive login <base-url> [--email E] [--device NAME]
-//!   joinery-drive status
-//!   joinery-drive list [folder_id] [--search TERM] [--trash]
-//!   joinery-drive get <file_id> [--folder ID] [--out PATH]
-//!   joinery-drive put <path> [--folder ID] [--name NAME] [--file-id ID]
-//!   joinery-drive logout
+//!   joinery-drive-probe login <base-url> [--email E] [--device NAME]
+//!   joinery-drive-probe status
+//!   joinery-drive-probe list [folder_id] [--search TERM] [--trash]
+//!   joinery-drive-probe get <file_id> [--folder ID] [--out PATH]
+//!   joinery-drive-probe put <path> [--folder ID] [--name NAME] [--file-id ID]
+//!   joinery-drive-probe logout
+//!
+//! Not the client — `joinery-drive` in `jd-daemon` is. This is the tool for
+//! answering "is the server doing what the contract says" without an engine, a
+//! state store, or a sync folder in the way, which is a different question and
+//! worth being able to ask on its own. It is also the only way in to an
+//! instance with a password and no browser, since the device-link ceremony the
+//! real client uses needs one.
 //!
 //! Credentials live in a 0600 JSON config (default
 //! `~/.config/joinery-drive/config.json`, override with
-//! `JOINERY_DRIVE_CONFIG`). The daemon phases replace this with OS-keychain
-//! custody; the password prompt reads from the terminal (or
+//! `JOINERY_DRIVE_CONFIG`) rather than the OS keychain — this is a probe, and
+//! keeping it out of the keychain keeps it from disturbing the real client's
+//! credentials. The password prompt reads from the terminal (or
 //! `JOINERY_DRIVE_PASSWORD` for non-interactive gates) — never an argument.
 
 use std::io::Write as _;
@@ -42,7 +49,7 @@ fn load_config() -> Result<ConfigFile, String> {
     let path = config_path();
     let raw = std::fs::read_to_string(&path).map_err(|_| {
         format!(
-            "not logged in ({} missing) — run: joinery-drive login <url>",
+            "not logged in ({} missing) — run: joinery-drive-probe login <url>",
             path.display()
         )
     })?;
@@ -136,12 +143,12 @@ fn main() -> ExitCode {
         "logout" => cmd_logout(),
         _ => {
             eprintln!(
-                "usage: joinery-drive login <base-url> [--email E] [--device NAME]\n\
-                 \x20      joinery-drive status\n\
-                 \x20      joinery-drive list [folder_id] [--search TERM] [--trash]\n\
-                 \x20      joinery-drive get <file_id> [--folder ID] [--out PATH]\n\
-                 \x20      joinery-drive put <path> [--folder ID] [--name NAME] [--file-id ID]\n\
-                 \x20      joinery-drive logout"
+                "usage: joinery-drive-probe login <base-url> [--email E] [--device NAME]\n\
+                 \x20      joinery-drive-probe status\n\
+                 \x20      joinery-drive-probe list [folder_id] [--search TERM] [--trash]\n\
+                 \x20      joinery-drive-probe get <file_id> [--folder ID] [--out PATH]\n\
+                 \x20      joinery-drive-probe put <path> [--folder ID] [--name NAME] [--file-id ID]\n\
+                 \x20      joinery-drive-probe logout"
             );
             return ExitCode::from(2);
         }

@@ -321,7 +321,9 @@ The daily retention sweep trims rows past `drive_change_feed_retention_days`
 ## Sync clients
 
 A desktop client keeps a folder on a computer matching the user's Drive. Four
-server surfaces serve it, on top of the change feed above.
+server surfaces serve it, on top of the change feed above. The client itself —
+its state model, conflict policy, per-filesystem naming rules, and health model
+— is **[Drive Sync Client](drive_sync.md)**.
 
 ### Content identity on exports
 
