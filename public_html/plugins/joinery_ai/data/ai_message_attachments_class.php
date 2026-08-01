@@ -71,6 +71,11 @@ class AiMessageAttachment extends SystemBase {
     // decrypted transparently by SystemBase::get() on a sealed attachment.
     public static $sealed_fields = array('aia_extracted_text');
 
+    /** This model predates the {prefix}_content_sealed convention. */
+    public static function sealFlagColumn() {
+        return 'aia_sealed';
+    }
+
     /**
      * Decrypt the extracted text in-window. Sealed under the OWNING message's DEK
      * (resolved via aia_aim_message_id in ChatSeal), so decryption loads that

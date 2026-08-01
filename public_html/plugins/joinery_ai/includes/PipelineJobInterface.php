@@ -64,6 +64,21 @@ interface PipelineJobInterface {
     public function requiresVaultScope(array $config): ?string;
 
     /**
+     * May this binding's content be sent to a model running off the box?
+     *
+     * Asked only when requiresVaultScope() is non-null — a binding with nothing
+     * sealed has nothing to protect, so a job with no sealed source returns
+     * true. For the email jobs this is the domain's explicit cloud consent,
+     * separate from and narrower than its consent to AI reading at all
+     * (specs/sealed_content_egress.md, resolved decision 5).
+     *
+     * Checked when the recipe is saved AND again at run start, so withdrawing
+     * consent stops a cloud-pinned recipe at its next run instead of letting it
+     * continue silently — the same one-way-tightening rule as the taint gate.
+     */
+    public function cloudProcessingAllowed(array $config): bool;
+
+    /**
      * The next unhandled item for this recipe, or null when the recipe is
      * caught up. The job chooses the order; the email jobs take the newest
      * first, so fresh arrivals are judged ahead of a backlog rather than

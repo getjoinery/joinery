@@ -149,7 +149,10 @@ foreach ($recipes as $recipe) {
     }
     $row[] = htmlspecialchars($sched_label);
 
-    $row[] = htmlspecialchars($recipe->get('rcp_model'));
+    $model_label = (string)$recipe->get('rcp_model');
+    $row[] = $model_label !== ''
+        ? htmlspecialchars($model_label)
+        : '<em class="text-muted">not set</em>';
 
     $latest = $latest_runs[$recipe->key] ?? null;
     if ($latest) {
@@ -170,9 +173,18 @@ foreach ($recipes as $recipe) {
         $row[] = '<em class="text-muted">never</em>';
     }
 
-    $row[] = $recipe->get('rcp_enabled')
-        ? '<span class="badge bg-success">Yes</span>'
-        : '<span class="badge bg-secondary">No</span>';
+    // "Shipped with your install, not set up yet" and "a recipe someone turned
+    // off" both render as disabled otherwise, and they mean opposite things.
+    $awaiting_setup = (string)$recipe->get('rcp_declared_key') !== ''
+        && !$recipe->get('rcp_enabled')
+        && empty(Recipe::decodeSourceConfig($recipe));
+    if ($recipe->get('rcp_enabled')) {
+        $row[] = '<span class="badge bg-success">Yes</span>';
+    } elseif ($awaiting_setup) {
+        $row[] = '<span class="badge bg-info text-dark">Awaiting setup</span>';
+    } else {
+        $row[] = '<span class="badge bg-secondary">No</span>';
+    }
 
     $actions = '<a class="btn btn-sm btn-outline-primary" href="/admin/joinery_ai/edit?rcp_recipe_id='
              . (int)$recipe->key . '">Edit</a> '

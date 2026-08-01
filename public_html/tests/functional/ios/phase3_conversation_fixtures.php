@@ -10,9 +10,10 @@
  *   php phase3_conversation_fixtures.php ensure <user_email>
  *
  * This script:
- *   1. ensures the peer user exists (phase3.peer@getjoinery.com — off the
- *      live inbound domain on purpose; nothing ever logs in as it, so its
- *      password is random and discarded)
+ *   1. ensures the peer user exists (phase3.peer@dev.getjoinery.com — on the
+ *      dev inbound domain, where reject_unmatched refuses an address with no
+ *      alias, so nothing it is ever sent accumulates in a real mailbox;
+ *      nothing logs in as it, so its password is random and discarded)
  *   2. ensures a 1:1 conversation exists between the fixture user and the
  *      peer (Conversation::get_or_create_conversation)
  *   3. ensures the conversation has at least one message from the peer,
@@ -37,7 +38,7 @@ if ($cmd !== 'ensure' || !isset($argv[2])) {
 	exit(1);
 }
 $user_email = $argv[2];
-$peer_email = 'phase3.peer@getjoinery.com';
+$peer_email = 'phase3.peer@dev.getjoinery.com';
 
 $user = User::GetByEmail($user_email);
 if (!$user || !$user->key) {

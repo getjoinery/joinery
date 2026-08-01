@@ -167,6 +167,25 @@ The two distribution flags on the plugin's manifest govern the distribution pipe
 6. Extracts and validates all archives
 7. Performs deployment with rollback protection
 
+#### Deployment self-update (read before editing `upgrade.php`)
+
+A release can change the deployment tooling itself, so before deploying anything the upgrade compares four files between the staged archive and the live site:
+
+```
+utils/upgrade.php
+utils/update_database.php
+includes/DatabaseUpdater.php
+includes/DeploymentHelper.php
+```
+
+Any that differ are copied to live immediately and the pipeline re-executes from the start, so a release is applied by its own tooling rather than by the previous version's.
+
+**The rule this imposes:** during that window the new `upgrade.php` is running against the **old** core — every other file is still the previous release. Anything the four self-updating files call must therefore already exist on the oldest site expected to upgrade, or travel inside that same set of four.
+
+Calling a newly added core method from `upgrade.php` is the specific way this breaks, and it breaks hard: the self-update copies the new `upgrade.php`, the re-run hits an undefined method, and the upgrade aborts *before* it can deliver the file that defines it. The node is then stuck — its `upgrade.php` is the new one, and no upgrade can repair it without copying files in by hand.
+
+This is why `isUpgradeServer()` lives on `DeploymentHelper` and not on a general core helper: `upgrade.php` needs it, so it has to travel in the self-updating set.
+
 **Dashboard surfaces (Server Manager):**
 
 On any node detail page (`/admin/server_manager/node_detail?mgn_id=N`), the **Updates** tab exposes:
@@ -556,7 +575,9 @@ Every site installed by `install.sh` has the same Apache vhost shape, regardless
 | `upgrade_source` | URL of upgrade server to download from (e.g., `https://getjoinery.com`) |
 | `composerAutoLoad` | Composer vendor path |
 
-**Note:** A site acts as an upgrade server when the **Server Manager** plugin is active. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
+**Note:** A site acts as an upgrade server when the **Server Manager** plugin is active or the `upgrade_server_active` setting is on. `DeploymentHelper::isUpgradeServer()` answers that question; use it rather than re-deriving the pair, so publishing and consuming behaviour cannot drift apart. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
+
+The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Joinery AI's [Ship with new installs](../plugins/joinery_ai/docs/overview.md#shipped-recipes) action is gated this way.
 
 ### The deploy tier
 

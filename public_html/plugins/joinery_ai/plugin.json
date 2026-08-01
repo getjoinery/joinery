@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.11.3",
+    "version": "0.14.0",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
@@ -394,12 +394,6 @@
             "type": "text",
             "helptext": "Comma-separated tool names offered to a new chat when the user has not chosen their own. Empty means every tool the chat level allows.",
                 "group": "chat"
-        },
-        {
-            "name": "joinery_ai_last_failure_email_recipe_2",
-            "default": "",
-            "managed": true,
-            "helptext": "Throttle marker: when the recipe-2 failure alert was last sent. Written by the failure notifier."
         }
     ]
 }

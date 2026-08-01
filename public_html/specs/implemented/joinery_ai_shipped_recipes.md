@@ -1,6 +1,6 @@
 # Recipes that ship with new installs
 
-**Status:** Active spec, unbuilt.
+**Status:** Implemented 2026-08-01 (joinery_ai 0.12.0).
 
 ## What we want
 
@@ -78,6 +78,7 @@ diff.
       "key": "email_triage_default",
       "name": "Email triage",
       "pipeline_job": "email_triage",
+      "requires_plugin": "mailbox",
       "prompt": "",
       "schedule_frequency": "hourly",
       "max_iterations": 25,
@@ -107,14 +108,31 @@ that on an ordinary mailbox and quietly disregard it on an encrypted one. The
 edit form already explains this per recipe; the template must not be read as a
 promise the platform will not keep.
 
-**Model controls ship unset.** `temperature` and `top_p` fall back to the
-site's plugin-setting defaults when null. Shipping explicit values would
+**Model controls ship unset.** `rcp_model` is seeded as an empty string rather
+than null, because `SystemBase::save()` fills a null field from its declared
+column default on create and that default is a specific model name — exactly the
+thing that must not travel. Empty is how a recipe says it has no model of its
+own; the edit form resolves the destination's own default when it sees one.
+`temperature` and `top_p` have no column default, so null there means null and
+they fall back to the site's plugin-setting defaults. Shipping explicit values would
 override tuning the operator did globally, to no benefit — a curated recipe has
 no opinion about someone else's model settings. Same for `rcp_workspace`, which
 pipeline recipes do not use at all.
 
+**`requires_plugin` holds a declaration back** until the named plugin is active.
+All three email templates need the mailbox plugin; without it they would arrive
+as clutter naming a job that isn't registered. The declaration lands at the sync
+following that plugin's activation.
+
 Seeding runs in the plugin sync, beside the settings and task seeders it
-mirrors.
+mirrors. Core grows one hook for it: **`plugins/{name}/sync.php`** defining
+`{name}_sync()`, run at the end of every `PluginManager::sync()` and again at
+activation, returning messages for the sync report. It is the counterpart to
+`activate.php` for work that must happen on every sync rather than once, and it
+generalises — the four rules above (declared key, create-only, count
+soft-deleted, withdrawal deletes nothing) are what any plugin seeding rows needs.
+A hook that throws is logged and skipped; the rest of the sync completes, because
+sync is also how an operator repairs a broken install.
 
 **Seed once, never overwrite.** A declaration creates a recipe if one with that
 key does not exist, and otherwise does nothing. An upgrade must never replace a
@@ -199,11 +217,16 @@ upgrade. The column is null for anything an operator created themselves.
 - **`plugins/joinery_ai/docs/overview.md`** — a Shipped recipes section: the
   declaration format, seed-once semantics, what cannot travel and why, and the
   publisher-only marking action.
-- **`docs/plugin_developer_guide.md`** — note alongside declared settings and
-  tasks that a plugin can also declare seed rows, with recipes as the example.
+- **`docs/plugin_developer_guide.md`** — the `sync.php` hook alongside declared
+  settings and tasks, the four rules for declared seed rows, and recipes as the
+  worked example.
 
 ## Tests
 
+`plugins/joinery_ai/tests/shipped_recipes_test.php` (db tier, 50 checks):
+
+- the shipped manifest parses, declares unique keys, carries no non-travelling
+  field, and pastes no prompt text;
 - a declaration seeds one recipe, disabled, with no mailbox, no model, tainted
   writes off, and the declared prompt and caps;
 - a second sync creates nothing and changes nothing, including after the

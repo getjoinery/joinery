@@ -89,6 +89,54 @@ class RecipeVaultScope {
 	}
 
 	/**
+	 * Refuse a recipe that would send sealed content to a model off the box.
+	 *
+	 * The recipe analogue of LlmProviderFactory::forConversation()'s Fortress
+	 * pin. Chat pins Fortress conversations to local hardware outright; a recipe
+	 * is allowed to use a cloud model, but only where the domain it reads has
+	 * given the second, explicit consent (specs/sealed_content_egress.md,
+	 * resolved decision 5).
+	 *
+	 * This is sink zero: it precedes every storage sink, and no storage-side
+	 * guard can see it, because the plaintext leaves over HTTPS rather than into
+	 * a column.
+	 *
+	 * Called at recipe save AND at run start. Both, deliberately: the save-time
+	 * check is where the admin gets a comprehensible error, and the run-start
+	 * re-check is what makes withdrawing a domain's consent actually stop the
+	 * next run rather than leaving an already-saved recipe shipping mail to a
+	 * vendor. Same one-way-tightening rule as the taint gate.
+	 *
+	 * @throws LlmProviderException when the pairing is refused
+	 */
+	public static function assertModelAllowed(Recipe $recipe): void {
+		require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+
+		if (self::forRecipe($recipe) === null) {
+			return; // nothing sealed in play — any model may read it
+		}
+		$model = trim((string)$recipe->get('rcp_model'));
+		if (!LlmProviderFactory::isCloudModel($model)) {
+			return; // stays on the operator's hardware
+		}
+
+		$job = self::job($recipe);
+		if ($job === null) {
+			return; // unresolvable job fails its own way at run time
+		}
+		if ($job->cloudProcessingAllowed(self::config($recipe))) {
+			return;
+		}
+
+		throw new LlmProviderException(
+			'This recipe reads mail that is encrypted at rest, and “' . $model . '” runs on '
+			. 'someone else\'s hardware — so running it would send the decrypted mail off this '
+			. 'server. Either choose a local model, or turn on “Send this domain\'s decrypted '
+			. 'mail to cloud AI models” for the domain this mailbox belongs to.'
+		);
+	}
+
+	/**
 	 * Enabled, window-requiring recipes owned by this user that currently have
 	 * something to do. Used by both the work predicate and the drain, so the
 	 * heartbeat and the drain always agree about whether there is work.

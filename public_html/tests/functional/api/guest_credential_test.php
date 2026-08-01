@@ -118,7 +118,7 @@ try {
 	section('3. checkout_check_email answers as a guest');
 	$r = harness_request('POST', '/api/v1/action/store/checkout_check_email', array(
 		'jar' => $jar, 'headers' => harness_csrf_header($token),
-		'body' => array('email' => 'guesttest_' . $run_id . '_nobody@getjoinery.com')));
+		'body' => array('email' => 'guesttest_' . $run_id . '_nobody@dev.getjoinery.com')));
 	check($r['status'] === 200 && ($r['json']['data']['exists'] ?? null) === false,
 		'unknown email reports exists=false', $r['raw']);
 

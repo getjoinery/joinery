@@ -73,6 +73,12 @@ class EmailTriageJob implements PipelineJobInterface {
         return EmailJobCandidates::requiredVaultScope($config);
     }
 
+    /** The domain's second consent: may its decrypted mail leave the box?
+     *  Standard domains have nothing sealed, so they always may. */
+    public function cloudProcessingAllowed(array $config): bool {
+        return MailboxAliasConfig::aiCloudAllowed((string)($config['mailbox_alias'] ?? ''));
+    }
+
     /** Cheap existence check for the same pool nextItem() draws from. */
     public function hasWork(array $config, Recipe $recipe): bool {
         $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
@@ -176,14 +182,20 @@ class EmailTriageJob implements PipelineJobInterface {
             }
         }
 
-        $msg->set('iem_ai_summary', (string)($verdict['summary'] ?? ''));
-
         $session = SessionControl::get_instance();
         $msg->authenticate_write([
             'current_user_id'         => $session->get_user_id(),
             'current_user_permission' => (int)$session->get_permission(),
         ]);
-        $msg->save();
+
+        // NOT save(). save() rebuilds every column from get(), which decrypts —
+        // so on a sealed message it writes the plaintext sender, subject and
+        // bodies back into the sealed columns with iem_content_sealed still set,
+        // and every later read then fails to open them. updateContentColumns()
+        // seals what needs sealing and touches nothing else.
+        InboundEmailMessage::updateContentColumns((int)$item_key, [
+            'iem_ai_summary' => (string)($verdict['summary'] ?? ''),
+        ]);
     }
 
     public function defaultPrompt(): string {

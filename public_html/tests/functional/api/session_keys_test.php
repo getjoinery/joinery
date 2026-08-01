@@ -200,7 +200,7 @@ try {
 	// ------------------------------------------------------------------
 	section('Sessionless action dispatch (no key headers)');
 	$r = api_request('POST', '/api/v1/action/password_reset_1', array(), array(
-		'usr_email' => 'nonexistent_' . strtolower($suffix) . '@getjoinery.com',
+		'usr_email' => 'nonexistent_' . strtolower($suffix) . '@dev.getjoinery.com',
 	));
 	check(($r['json']['errortype'] ?? '') !== 'AuthenticationError',
 		'password_reset_1 without keys is not rejected for missing keys', $r['raw']);

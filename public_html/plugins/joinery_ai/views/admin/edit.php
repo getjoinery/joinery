@@ -5,6 +5,7 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/admin_edit_logic.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
@@ -14,6 +15,11 @@ $page_vars = process_logic(admin_joinery_ai_edit_logic(array_merge($_GET, $_POST
 extract($page_vars);
 
 $is_new = !$recipe->key;
+
+// Present on the render path; absent when the logic returned an error, so fall
+// back rather than letting the ship control disappear mid-correction.
+$is_upgrade_server = $is_upgrade_server ?? DeploymentHelper::isUpgradeServer();
+$declared_key = (string)$recipe->get('rcp_declared_key');
 
 $page = new AdminPage();
 $page->admin_header([
@@ -29,6 +35,20 @@ $page->admin_header([
 
 if (!empty($saved)) {
     echo '<div class="alert alert-success">Saved.</div>';
+}
+
+if (!empty($shipped_key)) {
+    echo '<div class="alert alert-success">Written to <code>plugins/joinery_ai/recipes.json</code> as <code>'
+       . htmlspecialchars($shipped_key) . '</code>. Commit the file to release it.</div>';
+}
+
+// A recipe that arrived with the install and hasn't been set up yet. Says so
+// plainly, because a disabled seeded recipe and a recipe someone switched off
+// look identical and mean opposite things.
+if ($declared_key !== '' && !$recipe->get('rcp_enabled')
+        && empty(Recipe::decodeSourceConfig($recipe))) {
+    echo '<div class="alert alert-info">This recipe shipped with your install and is not set up yet. '
+       . 'Choose the mailbox it should work on, pick a model, then enable it.</div>';
 }
 
 // Models with configuration issues — surfaces the registry's scan-time
@@ -92,25 +112,75 @@ $formwriter->dropinput('rcp_owner_user_id', 'Owner', [
 // --- Mode ---
 // Agent: the model drives via a tool loop, one conversation per run.
 // Pipeline: PHP drives item selection; the model judges one item per bounded
-// exchange. Switching the dropdown swaps which field group below applies —
-// see the two _group containers further down.
-$formwriter->dropinput('rcp_mode', 'Mode', [
-    'value' => (string)$recipe->get('rcp_mode') ?: Recipe::MODE_AGENT,
-    'options' => [
-        Recipe::MODE_AGENT    => 'Agent — model drives a tool loop',
-        Recipe::MODE_PIPELINE => 'Pipeline — PHP drives, one item judged per exchange',
-    ],
-    'visibility_rules' => [
-        Recipe::MODE_AGENT    => ['show' => ['rcp_agent_fields_group'], 'hide' => ['rcp_pipeline_fields_group']],
-        Recipe::MODE_PIPELINE => ['show' => ['rcp_pipeline_fields_group'], 'hide' => ['rcp_agent_fields_group']],
-    ],
-]);
+// exchange.
+//
+// Settled at creation and shown as a fact afterwards. Mode and job together
+// decide what a recipe's stored history MEANS: aip_recipe_item_log is unique on
+// (recipe, item_key) and item keys are job-scoped, so changing either on a saved
+// recipe silently reinterprets every item it has already processed against a
+// different namespace — the new job would treat them all as done and quietly do
+// nothing. Changing shape is deliberate: make a new recipe.
+$mode_value = (string)$recipe->get('rcp_mode') ?: Recipe::MODE_AGENT;
+$mode_labels = [
+    Recipe::MODE_AGENT    => 'Agent — model drives a tool loop',
+    Recipe::MODE_PIPELINE => 'Pipeline — PHP drives, one item judged per exchange',
+];
+$shape_locked = !$is_new;
+$is_pipeline  = $mode_value === Recipe::MODE_PIPELINE;
 
+if ($shape_locked) {
+    echo '<div class="form-group mb-3">';
+    echo '<label class="form-label">Mode</label>';
+    echo '<p class="mb-0">' . htmlspecialchars($mode_labels[$mode_value] ?? $mode_value) . '</p>';
+    echo '<p class="text-muted small mb-0">Fixed when the recipe was created. To run a different '
+       . 'kind of work, create a new recipe.</p>';
+    echo '<input type="hidden" name="rcp_mode" value="' . htmlspecialchars($mode_value) . '">';
+    echo '</div>';
+} else {
+    // Switching the dropdown swaps which field group below applies — see the
+    // two _group containers further down.
+    $formwriter->dropinput('rcp_mode', 'Mode', [
+        'value' => $mode_value,
+        'options' => $mode_labels,
+        'visibility_rules' => [
+            Recipe::MODE_AGENT    => ['show' => ['rcp_agent_fields_group'], 'hide' => ['rcp_pipeline_fields_group']],
+            Recipe::MODE_PIPELINE => ['show' => ['rcp_pipeline_fields_group'], 'hide' => ['rcp_agent_fields_group']],
+        ],
+    ]);
+}
+
+// --- Prompt ---
+// A pipeline job ships its own instructions and rcp_prompt only overrides them,
+// so an empty box means "use the job's", not "nothing configured". Show the real
+// text; Customize turns it into an editable copy. Both halves are rendered and
+// the script at the foot of the form decides which one applies, because mode and
+// job can both change without a round trip.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+$job_default_prompts = [];
+foreach (PipelineJobRegistry::all() as $jp_id => $jp_class) {
+    $job_default_prompts[$jp_id] = (new $jp_class())->defaultPrompt();
+}
+$prompt_is_custom = trim((string)$recipe->get('rcp_prompt')) !== '';
+
+echo '<div class="form-group mb-3" id="rcp_prompt_builtin_wrap" style="display:none">';
+echo '<label class="form-label">Prompt</label>';
+echo '<p class="text-muted small mb-2">The instructions this job runs. They ship with the platform '
+   . 'and improve with each upgrade.</p>';
+echo '<pre class="joai-prompt-builtin" id="rcp_prompt_builtin_text"></pre>';
+echo '<button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="rcp_prompt_customize">'
+   . 'Customize</button>';
+echo '</div>';
+
+echo '<div id="rcp_prompt_edit_wrap">';
 $formwriter->textarea('rcp_prompt', 'Prompt', [
     'rows' => 12,
     'placeholder' => 'Describe what the recipe should do, what tools to use, what to deliver.',
-    'helptext' => 'Pipeline mode: optional — leave blank to use the selected job\'s built-in instructions.',
+    'helptext' => 'Your wording replaces the job\'s built-in instructions entirely — and stops '
+                . 'tracking the improvements later upgrades make to them.',
 ]);
+echo '<button type="button" class="btn btn-sm btn-link ps-0" id="rcp_prompt_revert" style="display:none">'
+   . 'Use the built-in instructions instead</button>';
+echo '</div>';
 
 // --- Schedule ---
 // Show/hide day_of_week and time fields based on frequency. timeinput's
@@ -167,6 +237,11 @@ try {
     $model_options = [];
 }
 $stored_model = (string)$recipe->get('rcp_model');
+// A shipped recipe carries no model — the publishing instance's choice means
+// nothing here — so resolve the site's own default at the moment it's edited.
+if ($stored_model === '') {
+    $stored_model = joinery_ai_default_recipe_model($settings);
+}
 if ($stored_model !== '' && !isset($model_options[$stored_model])) {
     $model_options[$stored_model] = "$stored_model — unavailable (its provider isn't configured)";
 }
@@ -202,7 +277,10 @@ $formwriter->dropinput('rcp_thinking_level', 'Thinking Level', [
 // Unused in pipeline mode — a pipeline recipe's only allow-list entry is its
 // job (below); the processing log is its only carried state, so there's no
 // workspace-poisoning surface to configure.
-echo '<div id="rcp_agent_fields_group_container">';
+// With the mode locked there is no dropdown to fire the visibility rules, so the
+// group that does not apply is hidden here instead of by script.
+echo '<div id="rcp_agent_fields_group_container"'
+   . ($shape_locked && $is_pipeline ? ' style="display:none"' : '') . '>';
 
 // Allowed tools — checkboxes against the live tool registry. Drop-in tools
 // from any plugin's recipe_tools/ directory show up automatically.
@@ -406,7 +484,8 @@ echo '</div>'; // #rcp_agent_fields_group_container
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('includes/DescriptorValidator.php'));
 
-echo '<div id="rcp_pipeline_fields_group_container">';
+echo '<div id="rcp_pipeline_fields_group_container"'
+   . ($shape_locked && !$is_pipeline ? ' style="display:none"' : '') . '>';
 
 $job_registry = PipelineJobRegistry::all();
 ksort($job_registry);
@@ -437,16 +516,31 @@ if (empty($job_registry)) {
     echo '<p class="text-muted">No pipeline jobs registered. Drop a class implementing '
        . '<code>PipelineJobInterface</code> into <code>plugins/&lt;plugin&gt;/pipeline_jobs/</code>.</p>';
 } else {
-    $formwriter->dropinput('rcp_pipeline_job', 'Job', [
-        'value' => $selected_job_id,
-        'options' => $job_options,
-        'visibility_rules' => $job_visibility_rules,
-    ]);
+    if ($shape_locked && isset($job_registry[$selected_job_id])) {
+        // Settled, for the item-log reason given at the Mode field above.
+        echo '<div class="form-group mb-3">';
+        echo '<label class="form-label">Job</label>';
+        echo '<p class="mb-0">' . htmlspecialchars($job_options[$selected_job_id]) . '</p>';
+        echo '<p class="text-muted small mb-0">What this recipe does. Fixed when it was created — '
+           . 'the work already recorded against it is only meaningful for this job.</p>';
+        echo '<input type="hidden" name="rcp_pipeline_job" value="'
+           . htmlspecialchars($selected_job_id) . '">';
+        echo '</div>';
+    } else {
+        $formwriter->dropinput('rcp_pipeline_job', 'Job', [
+            'value' => $selected_job_id,
+            'options' => $job_options,
+            'visibility_rules' => $job_visibility_rules,
+        ]);
+    }
 
     // Per-job config fields, field-name-prefixed so two jobs sharing a field
     // name (e.g. "mailbox_alias") can't collide in $_POST — only the
     // selected job's prefix is read back on save (admin_edit_logic.php).
+    // A settled recipe renders only its own job's fields; nothing can switch to
+    // another job's group, so rendering them would just be dead hidden inputs.
     foreach ($job_registry as $job_id => $job_class) {
+        if ($shape_locked && isset($job_registry[$selected_job_id]) && $job_id !== $selected_job_id) continue;
         $job_instance = new $job_class();
         echo '<div id="job_config_' . htmlspecialchars($job_id) . '_group_container">';
         $descriptor = $job_instance->configDescriptor();
@@ -469,14 +563,20 @@ echo '</div>'; // #rcp_pipeline_fields_group_container
 // --- Delivery ---
 $formwriter->textinput('rcp_delivery_email', 'Delivery Email (blank = owner email)');
 
-$formwriter->checkboxinput('rcp_delivery_dashboard', 'Show on dashboard', [
+$formwriter->checkboxinput('rcp_delivery_dashboard', 'Show its latest result on the AI dashboard', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_delivery_dashboard'),
+    'help_text' => 'Adds a card for this recipe to /joinery_ai showing the output of its most '
+                 . 'recent successful run. That page is admin-only. Off means the recipe still '
+                 . 'runs; its results just are not shown there.',
 ]);
 
-$formwriter->checkboxinput('rcp_enabled', 'Enabled', [
+$formwriter->checkboxinput('rcp_enabled', 'Run automatically', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_enabled'),
+    'help_text' => 'On, the recipe runs by itself — on the schedule above, or while your vault is '
+                 . 'unlocked for a job that reads encrypted mail. Off, it only runs when you press '
+                 . 'Run Now, and turning it off also stops any run already in progress.',
 ]);
 
 // --- Limits ---
@@ -488,22 +588,38 @@ $formwriter->numberinput('rcp_max_tokens', 'Max Tokens Per Run', ['min' => 1000,
 $formwriter->numberinput('rcp_monthly_token_cap', 'Monthly Token Cap', ['min' => 0]);
 
 // --- Security ---
-$formwriter->checkboxinput('rcp_allow_tainted_writes', 'Allow tainted writes', [
+// The old label ("Allow tainted writes") named the mechanism, so it told an
+// admin nothing about what they were agreeing to. The badge above the checkbox
+// answers the first question people actually ask — does this recipe even need
+// it? — and mirrors TaintGate exactly (see the script at the foot of the form).
+echo '<div id="rcp_taint_state" class="mb-2"></div>';
+
+$formwriter->checkboxinput('rcp_allow_tainted_writes',
+    'Let this recipe act on content written by other people', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_allow_tainted_writes'),
-    'help_text' => 'Required if this recipe can perform writes AND either reads '
-                 . 'user-generated text (fields marked $ai_untrusted_fields) or '
-                 . 'carries LLM-curated state across runs (non-empty workspace). '
-                 . 'Confirms the prompt is robust to injection from those sources. '
-                 . 'Saving a tainted-capable recipe without this flag is rejected.',
-]);
-
-// --- Workspace (advanced) ---
-$formwriter->textarea('rcp_workspace', 'Workspace (LLM-curated; edit only when debugging)', [
-    'rows' => 8,
+    'help_text' => 'Some of what this recipe reads was written by someone else — the body of an '
+                 . 'email, a message a member submitted — and anyone can put text in there aimed '
+                 . 'at the AI, telling it to do something you did not ask for. Ticking this says '
+                 . 'you accept that risk for what this recipe is allowed to change. Recipes that '
+                 . 'judge one item at a time can only ever write one fixed field on the item they '
+                 . 'were shown, so the worst case is a wrong label or summary on one message. A '
+                 . 'recipe with write tools is broader: read what it can reach before agreeing.',
 ]);
 
 $formwriter->submitbutton('btn_submit', $is_new ? 'Create' : 'Save');
+
+// Ship with new installs — absent, not disabled, on an instance that consumes
+// upgrades: there recipes.json is replaced wholesale by the next upgrade, so
+// this isn't something the operator is missing out on.
+if (!$is_new && $is_upgrade_server) {
+    $formwriter->submitbutton('btn_ship_template', 'Ship with new installs', [
+        'class'          => 'btn btn-outline-secondary ms-2',
+        'onclick'        => "return confirm('Write this recipe into recipes.json so every new install gets it? "
+                          . "The owner, mailbox, model, enabled flag and tainted-writes flag are not included.');",
+        'formnovalidate' => true,
+    ]);
+}
 
 if (!$is_new) {
     $formwriter->submitbutton('btn_delete', 'Delete', [
@@ -513,7 +629,169 @@ if (!$is_new) {
     ]);
 }
 
+if (!$is_new && $is_upgrade_server) {
+    echo '<p class="text-muted small mt-2 mb-0">Shipping writes <code>plugins/joinery_ai/recipes.json</code>, '
+       . 'which is under version control — review the diff and commit it to release the change. '
+       . 'A declaration creates the recipe once on each install and never edits or restores it afterwards.</p>';
+}
+
 echo $formwriter->end_form();
+
+// Inputs for the live "is this needed?" badge. Emitted from the same sources
+// TaintGate reads, so the badge cannot drift from the rule it describes.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteExecutor.php'));
+$taint_untrusted_models = [];
+foreach (ModelRegistry::all() as $tm_class => $tm_info) {
+    if (!empty($tm_info['untrusted_fields'])) $taint_untrusted_models[] = $tm_class;
+}
+$taint_untrusted_jobs = [];
+foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
+    $taint_untrusted_jobs[$tj_id] = (new $tj_class())->untrustedDigest();
+}
+?>
+<script>
+(function () {
+    // Built-in instructions per pipeline job. The job select can change without a
+    // round trip, so the text is swapped client-side rather than rendered once.
+    var PROMPTS = <?php echo json_encode($job_default_prompts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+    var PIPELINE = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;
+
+    var modeEl    = document.querySelector('[name="rcp_mode"]');
+    var jobEl     = document.querySelector('[name="rcp_pipeline_job"]');
+    var promptEl  = document.querySelector('[name="rcp_prompt"]');
+    var readWrap  = document.getElementById('rcp_prompt_builtin_wrap');
+    var readText  = document.getElementById('rcp_prompt_builtin_text');
+    var editWrap  = document.getElementById('rcp_prompt_edit_wrap');
+    var customBtn = document.getElementById('rcp_prompt_customize');
+    var revertBtn = document.getElementById('rcp_prompt_revert');
+    if (!promptEl || !readWrap || !editWrap) return;
+
+    // A non-empty rcp_prompt IS the customization — no separate flag to persist.
+    var customized = <?php echo $prompt_is_custom ? 'true' : 'false'; ?>;
+
+    function builtinFor() {
+        var mode = modeEl ? modeEl.value : '';
+        var job  = jobEl ? jobEl.value : '';
+        if (mode !== PIPELINE || !job) return null;
+        return Object.prototype.hasOwnProperty.call(PROMPTS, job) ? PROMPTS[job] : null;
+    }
+
+    function sync() {
+        var builtin = builtinFor();
+        var showRead = (builtin !== null && !customized);
+        readWrap.style.display = showRead ? '' : 'none';
+        editWrap.style.display = showRead ? 'none' : '';
+        if (showRead) readText.textContent = builtin;
+        if (revertBtn) revertBtn.style.display = (!showRead && builtin !== null) ? '' : 'none';
+    }
+
+    if (customBtn) {
+        customBtn.addEventListener('click', function () {
+            // Start from the built-in text rather than a blank box: customizing
+            // usually means adjusting a line, not writing from scratch.
+            var builtin = builtinFor();
+            if (builtin !== null && promptEl.value.trim() === '') promptEl.value = builtin;
+            customized = true;
+            sync();
+            promptEl.focus();
+        });
+    }
+
+    if (revertBtn) {
+        revertBtn.addEventListener('click', function () {
+            var builtin = builtinFor();
+            var edited = promptEl.value.trim() !== '' && promptEl.value !== builtin;
+            var revert = function () { promptEl.value = ''; customized = false; sync(); };
+            if (!edited) { revert(); return; }
+            var msg = 'Discard your prompt and go back to the built-in instructions?';
+            if (window.JoineryModal && JoineryModal.confirm) JoineryModal.confirm(msg, revert);
+            else if (window.confirm(msg)) revert();
+        });
+    }
+
+    if (modeEl) modeEl.addEventListener('change', sync);
+    if (jobEl)  jobEl.addEventListener('change', sync);
+    sync();
+})();
+
+(function () {
+    // Live mirror of TaintGate::evaluate(). Answers "does this recipe even need
+    // that permission?" before the admin has to reason about the checkbox.
+    var WRITE_TOOLS      = <?php echo json_encode(ModelWriteExecutor::WRITE_TOOL_NAMES); ?>;
+    var UNTRUSTED_MODELS = <?php echo json_encode($taint_untrusted_models); ?>;
+    var UNTRUSTED_JOBS   = <?php echo json_encode((object)$taint_untrusted_jobs); ?>;
+    var PIPELINE         = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;
+
+    var box   = document.getElementById('rcp_taint_state');
+    var check = document.querySelector('[name="rcp_allow_tainted_writes"]');
+    var modeEl = document.querySelector('[name="rcp_mode"]');
+    var jobEl  = document.querySelector('[name="rcp_pipeline_job"]');
+    var wsEl   = document.querySelector('[name="rcp_workspace"]');
+    if (!box || !check) return;
+
+    function checkedValues(name) {
+        return Array.prototype.map.call(
+            document.querySelectorAll('input[name="' + name + '"]:checked'),
+            function (el) { return el.value; });
+    }
+
+    function evaluate() {
+        var mode = modeEl ? modeEl.value : '';
+        if (mode === PIPELINE) {
+            var job = jobEl ? jobEl.value : '';
+            if (job && UNTRUSTED_JOBS[job]) {
+                return { required: true, why: 'This job reads text written by whoever sent the item.' };
+            }
+            return { required: false, why: 'This job only reads content you control.' };
+        }
+        var tools = checkedValues('rcp_allowed_tools[]').filter(function (t) {
+            return WRITE_TOOLS.indexOf(t) !== -1; });
+        if (!tools.length) {
+            return { required: false, why: 'This recipe cannot change anything — it has no write tools.' };
+        }
+        var models = checkedValues('rcp_allowed_models[]').filter(function (m) {
+            return UNTRUSTED_MODELS.indexOf(m) !== -1; });
+        var ws = wsEl && wsEl.value.trim() !== '';
+        if (models.length) {
+            return { required: true, why: 'It can write (' + tools.join(', ') + ') and reads records '
+                + 'holding text other people wrote: ' + models.join(', ') + '.' };
+        }
+        if (ws) {
+            return { required: true, why: 'It can write (' + tools.join(', ') + ') and carries notes '
+                + 'the AI wrote to itself on earlier runs.' };
+        }
+        return { required: false, why: 'Nothing it reads was written by anyone else.' };
+    }
+
+    function render() {
+        var state = evaluate();
+        var cls, text;
+        if (!state.required) {
+            cls = 'alert alert-secondary py-2 mb-2';
+            text = '<strong>Not needed for this recipe.</strong> ' + state.why
+                 + ' Leaving the box below ticked does no harm; it just does not apply.';
+        } else if (check.checked) {
+            cls = 'alert alert-success py-2 mb-2';
+            text = '<strong>Needed, and you have allowed it.</strong> ' + state.why;
+        } else {
+            cls = 'alert alert-warning py-2 mb-2';
+            text = '<strong>Needed before this recipe can run.</strong> ' + state.why
+                 + ' Saving is refused until you tick the box below.';
+        }
+        box.className = cls;
+        box.innerHTML = text;
+    }
+
+    document.addEventListener('change', function (e) {
+        if (!e.target || !e.target.name) return;
+        if (['rcp_mode', 'rcp_pipeline_job', 'rcp_allowed_tools[]', 'rcp_allowed_models[]',
+             'rcp_workspace', 'rcp_allow_tainted_writes'].indexOf(e.target.name) !== -1) render();
+    });
+    if (wsEl) wsEl.addEventListener('input', render);
+    render();
+})();
+</script>
+<?php
 
 $page->end_box();
 $page->admin_footer();

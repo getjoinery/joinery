@@ -28,6 +28,7 @@
 		require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 	}
 	require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 	$settings = Globalvars::get_instance();
 	$baseDir = $settings->get_setting('baseDir');
@@ -176,7 +177,7 @@
 	$stage_directory = $stage_location. 'public_html';
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
-	$is_upgrade_server = $settings->get_setting('upgrade_server_active') || PluginHelper::isPluginActive('server_manager');
+	$is_upgrade_server = DeploymentHelper::isUpgradeServer();
 	if(isset($_GET['serve-upgrade']) && $_GET['serve-upgrade'] && $is_upgrade_server){
 		require_once(PathHelper::getIncludePath('/data/upgrades_class.php'));
 		$response = array();

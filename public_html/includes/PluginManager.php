@@ -776,6 +776,10 @@ class PluginManager extends AbstractExtensionManager {
             error_log("Failed to activate declared tasks for plugin '$name': " . $e->getMessage());
         }
 
+        // Same sync.php hook the full sync runs, so a plugin's declared rows
+        // land at activation rather than waiting for the next sync.
+        $this->runSyncHook($name);
+
         // Resume scheduled tasks that belong to this plugin
         require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
         $suspended = new MultiScheduledTask(array('plugin_name' => $name, 'active' => false, 'deleted' => false));
@@ -1423,7 +1427,54 @@ class PluginManager extends AbstractExtensionManager {
             $result['task_messages'] = $task_messages;
         }
 
+        // Run each active plugin's sync.php hook. Last, so a hook that seeds
+        // rows can rely on its tables, settings and tasks all being current.
+        $sync_hook_messages = [];
+        foreach ($active_plugins as $plugin) {
+            $plugin_name = $plugin->get('plg_name');
+            foreach ($this->runSyncHook($plugin_name) as $message) {
+                $sync_hook_messages[] = "$plugin_name: $message";
+            }
+        }
+        if (!empty($sync_hook_messages)) {
+            $result['sync_hook_messages'] = $sync_hook_messages;
+        }
+
         return $result;
+    }
+
+    /**
+     * Run a plugin's optional sync.php hook.
+     *
+     * The counterpart to activate.php for work that must happen on every sync,
+     * not just at activation: seeding rows a plugin declares on disk (the way
+     * plugin.json declares settings and a task's .json declares its schedule),
+     * reconciling on-disk assets against database records, and similar.
+     *
+     * The hook is `plugins/{name}/sync.php` defining `{name}_sync()`. It returns
+     * an array of human-readable messages, surfaced in the sync result. It must
+     * be idempotent — sync runs on every deploy and on demand from the admin.
+     *
+     * Failure is never fatal: a broken hook logs and the rest of the sync
+     * completes, because sync is also how an operator repairs a broken install.
+     *
+     * @param string $plugin_name
+     * @return string[] messages from the hook
+     */
+    public function runSyncHook($plugin_name) {
+        $sync_file = PathHelper::getAbsolutePath("plugins/{$plugin_name}/sync.php");
+        if (!file_exists($sync_file)) return array();
+
+        try {
+            require_once($sync_file);
+            $sync_fn = $plugin_name . '_sync';
+            if (!function_exists($sync_fn)) return array();
+            $messages = $sync_fn();
+            return is_array($messages) ? $messages : array();
+        } catch (Throwable $e) {
+            error_log("sync.php hook failed for plugin '$plugin_name': " . $e->getMessage());
+            return array('sync hook failed — ' . $e->getMessage());
+        }
     }
 
     /**

@@ -45,6 +45,17 @@ class Recipe extends SystemBase {
         'rcp_max_tokens'          => array('type'=>'int4', 'default'=>5000),
         'rcp_monthly_token_cap'   => array('type'=>'int8', 'default'=>200000),
         'rcp_workspace'           => array('type'=>'text'),
+        // Set only on a recipe seeded from plugins/joinery_ai/recipes.json; null
+        // on anything an operator created. It is what lets a later sync tell an
+        // already-seeded recipe from a new declaration, since rcp_name isn't
+        // unique. See specs/implemented/joinery_ai_shipped_recipes.md.
+        'rcp_declared_key'        => array('type'=>'varchar(100)', 'unique'=>true),
+        // When this recipe last emailed its owner about a failed run, for the
+        // per-recipe throttle. Lives here rather than in stg_settings: it is
+        // per-recipe state, and a setting keyed by recipe id can never be
+        // declared, so every failing recipe used to mint an undeclarable
+        // settings row. See specs/sealed_content_egress.md work log.
+        'rcp_last_failure_email_time' => array('type'=>'timestamp(6)'),
         'rcp_owner_user_id'       => array('type'=>'int4'),
         'rcp_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'rcp_update_time'         => array('type'=>'timestamp(6)'),
@@ -132,7 +143,16 @@ class MultiRecipe extends SystemMultiBase {
             $filters['rcp_name'] = [$this->options['name'], PDO::PARAM_STR];
         }
 
-        if (isset($this->options['deleted'])) {
+        if (isset($this->options['declared_key'])) {
+            $filters['rcp_declared_key'] = [$this->options['declared_key'], PDO::PARAM_STR];
+        }
+
+        // include_deleted drops the delete filter entirely, so soft-deleted rows
+        // count as existing. The seeder needs exactly that: a template the
+        // operator deleted on purpose must never be re-created by the next sync.
+        if (!empty($this->options['include_deleted'])) {
+            // no rcp_delete_time filter
+        } elseif (isset($this->options['deleted'])) {
             $filters['rcp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
         } else {
             $filters['rcp_delete_time'] = "IS NULL";

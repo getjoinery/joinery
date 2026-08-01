@@ -248,6 +248,17 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 		$domain->set('ied_ai_processing_enabled', $new_ai);
 
+		// The narrower consent: may that reading leave the box? It can only be
+		// on where the first is on — consenting to cloud processing for mail the
+		// AI may not read at all is a stale yes waiting to surprise someone. It
+		// rides the same step-up as the first, which the operator has just
+		// passed if they are turning both on together.
+		$new_cloud = isset($input['ied_ai_cloud_enabled']);
+		if ($new_cloud && !$new_ai) {
+			$new_cloud = false;
+		}
+		$domain->set('ied_ai_cloud_enabled', $new_cloud);
+
 		try {
 			$domain->prepare();
 			$domain->save();

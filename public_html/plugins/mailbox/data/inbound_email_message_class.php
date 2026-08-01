@@ -138,7 +138,21 @@ class InboundEmailMessage extends SystemBase {
 	// inbound row — the direction guard in decryptSealedField*() seals them only when
 	// iem_direction is 'outbound' or 'draft'. iem_draft_state (compose scratch JSON)
 	// is likewise sealed and only ever set on a draft row.
-	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary');
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan');
+
+	/**
+	 * Sealed columns that are legitimately absent on a given row: a message may
+	 * never have been AI-triaged, and only a composed row carries bcc or draft
+	 * state. An empty value in one of these is nothing rather than ciphertext,
+	 * so the unseal pass skips it instead of trying to AEAD-open ''.
+	 *
+	 * Declared beside $sealed_fields on purpose. It used to be an array literal
+	 * buried in unsealAndPersistContent(), which meant adding a sealed optional
+	 * column silently broke unsealing until someone ran the lowering test — the
+	 * same "the safe thing is the thing you have to remember" shape this file's
+	 * updateContentColumns() note describes.
+	 */
+	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
 	// query_model tool. On a protected domain a locked row is EXCLUDED from
@@ -270,14 +284,23 @@ class InboundEmailMessage extends SystemBase {
 		// EmailSecurityScanJob::recordVerdict() (not $ai_writable_fields); NULL
 		// score/scan/time = not yet scanned by any recipe.
 		'iem_ai_danger_score'     => array('type'=>'int2'),
-		'iem_ai_scan'             => array('type'=>'jsonb'), // {verdict, red_flags, summary, model, recipe_id}
+		// {verdict, red_flags, summary, model, recipe_id}, stored as JSON text.
+		// text rather than jsonb because it is a $sealed_fields member: on a
+		// sealed row the column holds an AEAD blob, which is not JSON. Readers
+		// json_decode it after decryption, exactly as before.
+		'iem_ai_scan'             => array('type'=>'text'),
 		'iem_ai_scan_time'        => array('type'=>'timestamp(6)'),
 		// AI triage (specs/implemented/joinery_ai_email_triage.md). One-line gist for the
 		// inbox, written ONLY by EmailTriageJob::recordVerdict() (not
 		// $ai_writable_fields). Content in miniature, so it is a sealed field
 		// like the message body on a protected domain (see $sealed_fields) —
 		// labels stay cleartext (operational metadata).
-		'iem_ai_summary'          => array('type'=>'varchar(280)'),
+		// The prompt caps the summary at 280 characters, but this column is a
+		// $sealed_fields member and must hold the SEALED form: 'v1.aead.' plus a
+		// base64 nonce and ciphertext, which is roughly 1.4x the plaintext plus
+		// 42 characters. varchar(280) overflowed for any summary past ~170
+		// characters, so a sealed row's first summary was a Postgres error.
+		'iem_ai_summary'          => array('type'=>'text'),
 		'iem_size_bytes'          => array('type'=>'int4'),
 		// IMAP locator (populated only for reference-backed, IMAP-sourced rows;
 		// a non-null iem_iia_inbound_imap_account_id marks the row reference-backed
@@ -685,7 +708,7 @@ class InboundEmailMessage extends SystemBase {
 					continue;
 				}
 				$stored = (string)($row[$field] ?? '');
-				if ($stored === '' && in_array($field, array('iem_bcc', 'iem_draft_state', 'iem_ai_summary'), true)) {
+				if ($stored === '' && in_array($field, static::$optional_sealed_fields, true)) {
 					continue; // optional column, never sealed when empty
 				}
 				$columns[$field] = $crypto->openField($stored, $dek, self::sealAd($message_id, $field));
@@ -941,6 +964,73 @@ class InboundEmailMessage extends SystemBase {
 		}
 		$msg->save();
 		return $msg;
+	}
+
+	/**
+	 * Write content columns onto an existing message, sealing whichever of them
+	 * are $sealed_fields when the row itself is sealed.
+	 *
+	 * This is the ONLY correct way for a later consumer — the AI triage and
+	 * security-scan jobs, anything that annotates a message after ingest — to
+	 * store derived content on a message it has read.
+	 *
+	 * The two wrong ways it exists to replace:
+	 *
+	 *  - `save()`, which rebuilds every column from get() and therefore writes
+	 *    DECRYPTED sender/subject/bodies back into the sealed columns while
+	 *    iem_content_sealed stays true. That is a leak and a corruption at once:
+	 *    every later read AEAD-opens plaintext and throws 'malformed AEAD blob'.
+	 *  - `updateColumns()` with a raw value for a sealed field, which stores
+	 *    plaintext in a column every reader will try to decrypt.
+	 *
+	 * A row that is not sealed takes the values as-is, so a standard mailbox is
+	 * unaffected. Sealing reuses the row's existing DEK, so the values sit under
+	 * the same key as the body they describe, and the caller must hold the
+	 * owner's unlock window — which any consumer that just READ the message
+	 * necessarily does.
+	 *
+	 * @param array $columns column name => plaintext value
+	 * @throws VaultLockedException when the row is sealed and no window is open
+	 */
+	public static function updateContentColumns(int $message_id, array $columns): void {
+		if ($message_id <= 0 || empty($columns)) {
+			return;
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			'SELECT iem_content_sealed, iem_sealed_key, iem_sealed_owner_user_id,
+			        iem_iea_inbound_email_alias_id
+			 FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?'
+		);
+		$q->execute(array($message_id));
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		if ($row === false) {
+			return;
+		}
+
+		$sealed = !empty($row['iem_content_sealed']) && $row['iem_content_sealed'] !== 'f'
+			&& !empty($row['iem_sealed_key']);
+
+		if ($sealed) {
+			$owner_id = self::sealedOwnerUserId(
+				$row['iem_sealed_owner_user_id'] ?? null,
+				$row['iem_iea_inbound_email_alias_id'] ?? null
+			);
+			if ($owner_id === null) {
+				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+				throw new VaultLockedException();
+			}
+			$crypto = self::openMessageDekCrypto($owner_id, (string)$row['iem_sealed_key']);
+			foreach ($columns as $col => $value) {
+				if (!in_array($col, static::$sealed_fields, true)) continue;
+				$columns[$col] = $crypto['crypto']->sealField(
+					(string)$value, $crypto['dek'], self::sealAd($message_id, $col)
+				);
+			}
+		}
+
+		self::updateColumns($message_id, $columns);
 	}
 
 	/**

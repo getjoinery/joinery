@@ -267,7 +267,7 @@ try {
 		$victim = new User(NULL);
 		$victim->set('usr_first_name', 'DelTest');
 		$victim->set('usr_last_name', 'Victim');
-		$victim->set('usr_email', 'deltest_victim_' . substr(md5(uniqid('', true)), 0, 8) . '@getjoinery.com');
+		$victim->set('usr_email', 'deltest_victim_' . substr(md5(uniqid('', true)), 0, 8) . '@dev.getjoinery.com');
 		$victim->set('usr_password', User::GeneratePassword('x' . uniqid()));
 		$victim->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
 		$victim->save();

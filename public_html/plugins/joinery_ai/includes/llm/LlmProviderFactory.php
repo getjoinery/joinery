@@ -45,8 +45,7 @@ class LlmProviderFactory {
     public static function forConversation(AiConversation $conversation): LlmProviderInterface {
         $model = trim((string)$conversation->get('aic_model'));
         if ((string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS) {
-            $is_cloud = $model !== '' && (preg_match('/^claude/i', $model) || FireworksProvider::owns($model));
-            if ($is_cloud) {
+            if (self::isCloudModel($model)) {
                 throw new LlmProviderException(
                     'This is a Fortress chat — its content never leaves your hardware, so it can only run '
                     . 'on a local model. The selected model “' . $model . '” is a cloud model. Switch to a '
@@ -56,6 +55,22 @@ class LlmProviderFactory {
             return self::local();   // pins to the local host (uses joinery_ai_local_model)
         }
         return self::forModel($model);
+    }
+
+    /**
+     * Does this model run somewhere other than the operator's own hardware?
+     *
+     * The one definition of "cloud" — the Fortress chat pin and the sealed-mail
+     * recipe gate both ask here, so they cannot disagree about a model. Note
+     * this is NOT LlmProviderInterface::isPrivate(), which is about a provider's
+     * training policy and is true for Fireworks: a vendor promising not to train
+     * on your data is still a vendor holding your plaintext. For sealing, the
+     * only question is whether the bytes leave the box.
+     */
+    public static function isCloudModel(string $model): bool {
+        $model = trim($model);
+        if ($model === '') return false;
+        return (bool)preg_match('/^claude/i', $model) || FireworksProvider::owns($model);
     }
 
     /**

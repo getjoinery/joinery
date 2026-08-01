@@ -183,9 +183,9 @@ if ($show_form) {
 		// rest. On Standard the server already reads it, so there is nothing to
 		// consent to (specs/in_window_deferred_work.md).
 		'visibility_rules' => [
-			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled']],
-			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled'], 'hide' => []],
-			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled'], 'hide' => []],
+			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled']],
+			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled'], 'hide' => []],
+			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled'], 'hide' => []],
 		],
 	]);
 
@@ -203,6 +203,19 @@ if ($show_form) {
 				. 'security scan, calendar) read this domain\'s mail during an unlock window '
 				. 'and send it to the configured model host. They cannot run at all while it '
 				. 'is off, because encrypted mail is unreadable without you.',
+		]);
+
+	// The narrower second consent. Reading sealed mail on your own hardware and
+	// sending that plaintext to a vendor are different promises, so they are
+	// different switches — this one stays off when the first is turned on.
+	$formwriter->checkboxinput('ied_ai_cloud_enabled',
+		"Send this domain's decrypted mail to cloud AI models", [
+			'value' => (bool)$form_domain->get('ied_ai_cloud_enabled'),
+			'help' => 'Off by default, and separate from the setting above on purpose. With it '
+				. 'off, this domain\'s mail is only ever read by a model running on hardware you '
+				. 'control, and a recipe pinned to a cloud model is refused. Turning it on lets '
+				. 'the decrypted mail be sent to that provider, who then holds it in the clear. '
+				. 'Turning it back off stops those recipes at their next run.',
 		]);
 
 	$formwriter->dropinput('ied_catch_all_mode', 'Catch-All Mode', [

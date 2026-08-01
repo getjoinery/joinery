@@ -9,6 +9,39 @@
 class DeploymentHelper {
 
     // ============================================
+    // DEPLOYMENT TOPOLOGY
+    // ============================================
+
+    /**
+     * True on an instance that PUBLISHES upgrades, false on one that consumes them.
+     *
+     * The distinction matters wherever a control edits a file the upgrade replaces
+     * wholesale: on a consuming install the edit is discarded at the next upgrade,
+     * so the control has no business being there. Publishing instances are the dev
+     * checkout and anything running Server Manager.
+     *
+     * It lives HERE, and not in a general core helper, because upgrade.php is one
+     * of its callers. The four deployment files self-update as a unit ahead of the
+     * rest of a release, so during that window the new upgrade.php is running
+     * against the OLD core — and a predicate defined anywhere else would be an
+     * undefined method that aborts the upgrade before it can deliver its own fix.
+     * Anything upgrade.php calls must travel in that same set.
+     */
+    public static function isUpgradeServer() {
+        try {
+            $settings = Globalvars::get_instance();
+            if ($settings->get_setting('upgrade_server_active')) return true;
+        } catch (Throwable $e) {
+            // Settings unavailable (very early boot) — fall through to the plugin check.
+        }
+
+        if (!class_exists('PluginHelper')) {
+            require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
+        }
+        return PluginHelper::isPluginActive('server_manager');
+    }
+
+    // ============================================
     // VALIDATION METHODS
     // ============================================
 

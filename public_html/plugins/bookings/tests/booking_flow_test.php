@@ -149,7 +149,7 @@ function bk_submit($slug, $slot_start, array $extra = array()) {
 		'book_submit'      => '1',
 		'slot_start'       => $slot_start,
 		'invitee_name'     => 'Harness Invitee' . $n,
-		'invitee_email'    => 'bkflow_' . $RUN . '_' . $n . '@getjoinery.com',
+		'invitee_email'    => 'bkflow_' . $RUN . '_' . $n . '@dev.getjoinery.com',
 		'invitee_notes'    => '',
 		'invitee_timezone' => 'UTC',
 	), $extra);
@@ -362,7 +362,7 @@ check(count($slots_d) === 2, 'The contested day starts with two open hours', jso
 $first = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00');
 check(!bk_errors($first), 'The first booker gets the slot', json_encode(bk_errors($first)));
 
-$loser_email = 'bkflow_loser_' . $RUN . '@getjoinery.com';
+$loser_email = 'bkflow_loser_' . $RUN . '@dev.getjoinery.com';
 $second = bk_submit($type_d->get('bkt_slug'), $day_d . ' 09:00:00', array('invitee_email' => $loser_email));
 check(bk_errors($second), 'The second booker for the same hour is refused');
 check(strpos(implode(' ', bk_errors($second)), 'just taken') !== false,

@@ -68,12 +68,18 @@ class MailboxAliasConfig {
 	 *  returns, with the caller's own label/help text. */
 	public static function descriptorField(string $label, string $help): array {
 		$options = self::aliasOptions();
+		// The placeholder is what keeps an unbound recipe unbound. A plain select
+		// pre-selects its first option, so a recipe that has never chosen a
+		// mailbox — a shipped template, or a half-filled new recipe — would post
+		// whichever address happened to sort first and silently bind to it. The
+		// placeholder is deliberately absent from `enum`, so submitting it fails
+		// the required check by name instead of validating as a real choice.
 		return [
 			'type'     => 'select',
 			'required' => true,
 			'label'    => $label,
 			'help'     => $help,
-			'options'  => $options,
+			'options'  => ['' => '— select a mailbox —'] + $options,
 			'enum'     => array_keys($options),
 		];
 	}
@@ -120,6 +126,31 @@ class MailboxAliasConfig {
 	}
 
 	/**
+	 * May this address's decrypted mail be sent to a model running off the box?
+	 *
+	 * Only meaningful where there is something to protect: on a standard domain
+	 * the mail is not sealed at rest, so no promise is broken by a cloud model
+	 * reading it, and this returns true. On a sealed domain it is the domain's
+	 * explicit second consent, default off.
+	 *
+	 * Deliberately separate from aiProcessingAllowed(): letting the AI read
+	 * sealed mail on hardware you control and letting that plaintext leave the
+	 * box are different decisions, and an operator may reasonably want the first
+	 * without the second.
+	 */
+	public static function aiCloudAllowed(string $address): bool {
+		$row = self::domainPostureForAddress($address);
+		if ($row === null) {
+			return false;
+		}
+		$level = (string)$row['ied_security_level'];
+		if ($level !== 'private' && $level !== 'fortress') {
+			return true;
+		}
+		return (bool)$row['ied_ai_cloud_enabled'];
+	}
+
+	/**
 	 * @var array<string, ?array> Per-request memo. The vault heartbeat asks this
 	 * for every one of a user's recipes on every beat, and most of them point at
 	 * the same handful of mailboxes — without the memo that is one query per
@@ -137,7 +168,7 @@ class MailboxAliasConfig {
 
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT d.ied_security_level, d.ied_ai_processing_enabled
+			"SELECT d.ied_security_level, d.ied_ai_processing_enabled, d.ied_ai_cloud_enabled
 			   FROM iea_inbound_email_aliases a
 			   JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
 			  WHERE a.iea_delete_time IS NULL

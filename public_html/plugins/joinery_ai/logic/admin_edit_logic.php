@@ -3,6 +3,7 @@
 function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
@@ -53,6 +54,28 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         if (isset($input['btn_delete']) && $recipe->key) {
             $recipe->soft_delete();
             return LogicResult::redirect('/admin/joinery_ai');
+        }
+
+        // "Ship with new installs" — writes this recipe into recipes.json as a
+        // declaration, minus the fields that can't travel. The predicate is
+        // re-checked here and not only in the view: the control being hidden is
+        // presentation, this is the rule.
+        if (isset($input['btn_ship_template']) && $recipe->key) {
+            require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSeeder.php'));
+            if (!DeploymentHelper::isUpgradeServer()) {
+                return LogicResult::error(
+                    'This instance receives upgrades rather than publishing them, so an edit to '
+                    . 'recipes.json would be replaced by the next upgrade.',
+                    ['recipe' => $recipe, 'session' => $session]
+                );
+            }
+            try {
+                $shipped_key = RecipeSeeder::ship($recipe);
+            } catch (Throwable $e) {
+                return LogicResult::error($e->getMessage(), ['recipe' => $recipe, 'session' => $session]);
+            }
+            return LogicResult::redirect('/admin/joinery_ai/edit?rcp_recipe_id=' . $recipe->key
+                . '&shipped=' . urlencode($shipped_key));
         }
 
         $simple_fields = [
@@ -185,6 +208,17 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             );
         }
 
+        // Sink zero: a sealed-source recipe pinned to a cloud model would POST
+        // the decrypted mail to that vendor. Refused here so the admin sees why
+        // while they are choosing the model, and again at run start so
+        // withdrawing the domain's consent stops an already-saved recipe.
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+        try {
+            RecipeVaultScope::assertModelAllowed($recipe);
+        } catch (LlmProviderException $e) {
+            return LogicResult::error($e->getMessage(), ['recipe' => $recipe, 'session' => $session]);
+        }
+
         $recipe->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
 
         try {
@@ -215,6 +249,8 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         'recipe' => $recipe,
         'session' => $session,
         'saved' => !empty($input['saved']),
+        'shipped_key' => (string)($input['shipped'] ?? ''),
+        'is_upgrade_server' => DeploymentHelper::isUpgradeServer(),
     ];
 
     return LogicResult::render($page_vars);
