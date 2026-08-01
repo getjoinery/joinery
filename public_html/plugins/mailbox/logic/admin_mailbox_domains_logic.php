@@ -66,6 +66,23 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id);
 	}
+	// Claim ownership of the domain — the inline fix for the domain_owner row
+	// (specs/mailbox_unmatched_sealing.md). Mail arriving for an address with no
+	// mailbox seals to whoever owns the domain, so a sealing level needs one.
+	// Only ever assigns the ACTING admin: this is a deliberate claim, never a
+	// picker that could hand someone else's key duty to them without their
+	// knowledge. Refused when the domain already has an owner, so it can never
+	// be used to take a domain from someone.
+	if ($input && ($input['action'] ?? '') === 'ceremony_set_domain_owner') {
+		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
+		$claim = new InboundEmailDomain($domain_id, TRUE);
+		$acting = intval($session->get_user_id());
+		if ($claim->key && $acting > 0 && intval($claim->get('ied_owner_usr_user_id')) <= 0) {
+			$claim->set('ied_owner_usr_user_id', $acting);
+			$claim->save();
+		}
+		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id);
+	}
 	if ($input && ($input['action'] ?? '') === 'ceremony_seal_batch') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$domain = new InboundEmailDomain($domain_id, TRUE);
@@ -196,6 +213,40 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 
 		$domain->set('ied_security_level', $new_level);
+
+		// --- AI consent (specs/in_window_deferred_work.md § Turning it on has to
+		// be a deliberate choice) ---
+		// On a sealed level this decides whether the AI email features may read
+		// this domain's mail during an unlock window. It changes what the
+		// security level means in practice, so switching it ON needs the same
+		// fresh identity check other vault-consequential changes require.
+		// Turning it OFF is always allowed: withdrawing consent must never be
+		// harder than giving it.
+		$old_ai = $domain->key ? (bool)$domain->get('ied_ai_processing_enabled') : false;
+		$new_ai = isset($input['ied_ai_processing_enabled']);
+		if ($new_ai && !$new_seals) {
+			$new_ai = false;   // meaningless at Standard; never store a stale yes
+		}
+		if ($new_ai && !$old_ai) {
+			// Same ceremony the level change above uses: redirect to the step-up,
+			// return to this editor, and let the operator re-submit now confirmed.
+			// target_ai rides the return URL so the checkbox is still ticked when
+			// they land back here — the lost POST must not discard their intent.
+			//
+			// SessionControl rather than PasskeyService: both read the same
+			// session-bound `stepup` marker in pks_passkey_ceremonies, but this
+			// needs no WebAuthn library. PasskeyService implements a library
+			// interface at class-definition time, so merely requiring it pulls in
+			// composer's autoloader, which this route has no other reason to load.
+			// It also counts a TOTP step-up, which "recent step-up" always meant.
+			$ai_return = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
+				. (int)$domain->key . '&target_level=' . rawurlencode($new_level) . '&target_ai=1';
+			$ai_stepup = $session->require_recent_second_factor($ai_return);
+			if ($ai_stepup !== null) {
+				return $ai_stepup;
+			}
+		}
+		$domain->set('ied_ai_processing_enabled', $new_ai);
 
 		try {
 			$domain->prepare();

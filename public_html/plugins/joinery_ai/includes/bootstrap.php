@@ -11,7 +11,11 @@
  * AiConversationMessage / AiMessageAttachment) need no registration here — they
  * are declared on the classes, which are required wherever a row is read.
  *
- * @version 1.0
+ * It also registers the AI pipeline as a deferred-work consumer
+ * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
+ * in the owner's unlock window rather than on a schedule.
+ *
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -23,6 +27,24 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_message_attachments_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
+
+// --- Deferred work consumer (specs/in_window_deferred_work.md) ---
+// A pipeline job that reads sealed content cannot run from cron, because a
+// command-line worker never holds an unlock window. Those recipes run here
+// instead: in slices, inside the owner's own request, while their vault is open.
+// Registered AFTER mailbox (VaultUnlock::CONSUMER_PLUGINS order) because the
+// email jobs skip unparsed mail — parsing has to lead.
+require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+VaultDeferredWork::register(
+    'ai_pipeline',
+    function (int $user_id): bool {
+        return RecipeVaultScope::hasWork($user_id);
+    },
+    function (int $user_id, string $secret_key, float $deadline): int {
+        return RecipeVaultScope::drain($user_id, $secret_key, $deadline);
+    }
+);
 
 // --- Sealed-File decrypt hook (docs/sealed_vault.md § The two generic consumer hooks) ---
 // A chat upload on a protected conversation stores ciphertext bytes on disk; the

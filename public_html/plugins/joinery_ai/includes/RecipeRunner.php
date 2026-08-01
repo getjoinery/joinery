@@ -31,7 +31,7 @@ class RecipeRunner {
      *  single-run-at-a-time, so a static member is sufficient. */
     private static $active_provider = null;
 
-    public static function run(RecipeRun $run): void {
+    public static function run(RecipeRun $run, ?float $deadline = null): void {
         try {
             $recipe = self::loadRecipe($run);
             $ctx = new RecipeRunContext($recipe, $run);
@@ -104,7 +104,7 @@ class RecipeRunner {
                 // exchange. No tools, no workspace, no conversation carry-over
                 // — see specs/joinery_ai_item_pipeline.md.
                 $result = PipelineRunner::run($provider, $model, $recipe, $ctx,
-                    $max_iterations, $token_budget, $temperature, $top_p, $thinking);
+                    $max_iterations, $token_budget, $temperature, $top_p, $thinking, $deadline);
             } else {
                 $allowed_tools = self::resolveAllowedTools($recipe);
                 $system = self::buildSystemPrompt($recipe, $ctx);
@@ -145,6 +145,7 @@ class RecipeRunner {
         switch ($result['stop_reason']) {
             case 'end_turn':
             case 'max_iterations':
+            case 'deadline':
                 if ($result['assistant_text'] !== '') {
                     self::finishSuccess($run, $recipe, $result['assistant_text'], $in, $out, $cw, $cr);
                 } else {
@@ -290,6 +291,11 @@ class RecipeRunner {
         $owner_id = (int)$recipe->get('rcp_owner_user_id');
         if ($owner_id <= 0) return;
         $session = SessionControl::get_instance();
+        // An in-window slice runs inside the owner's own browser request
+        // (specs/in_window_deferred_work.md § How they run). Installing the
+        // synthetic actor there would overwrite the live session of the person
+        // browsing. They are already the owner — there is nothing to set up.
+        if ((int)$session->get_user_id() === $owner_id) return;
         $session->set_api_user($owner_id);
     }
 

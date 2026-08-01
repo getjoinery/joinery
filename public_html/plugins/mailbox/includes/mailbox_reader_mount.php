@@ -248,6 +248,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 <script src="<?php echo htmlspecialchars($asset_ver('mailbox_reader.js')); ?>"></script>
 	<?php
 	mailbox_reader_emit_unseal_convergence();
+	mailbox_reader_emit_ai_catchup();
 }
 
 /**
@@ -299,6 +300,106 @@ function mailbox_reader_emit_unseal_convergence(): void {
 		}).catch(function () { /* silent — the next visit resumes */ });
 	}
 	batch();
+})();
+</script>
+	<?php
+}
+
+/**
+ * Catch-up prompt for AI email processing
+ * (specs/in_window_deferred_work.md § Catching up).
+ *
+ * On a sealed domain the AI email features can only run while the owner is
+ * signed in with their vault open, so a spell away leaves mail unsummarized.
+ * Ordinary background batches clear a small backlog on their own within a
+ * session or two — this prompt exists for the case where someone comes back to
+ * a pile, and appears only then.
+ *
+ * The button runs the same deferred-work drain the background batches run,
+ * under the same advisory lock, just repeatedly and with the count visible.
+ *
+ * joinery_ai is looked up defensively: mail works perfectly well with the AI
+ * plugin absent or inactive, and the dependency only ever points
+ * mailbox <- joinery_ai.
+ */
+function mailbox_reader_emit_ai_catchup(): void {
+	$user_id = (int)SessionControl::get_instance()->get_user_id();
+	if (!$user_id) {
+		return;
+	}
+	// Below this, background batches will have it done shortly and a prompt
+	// would be noise.
+	$threshold = 20;
+	$outstanding = 0;
+	try {
+		$scope_class = PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php');
+		if (!is_file($scope_class)) {
+			return;
+		}
+		require_once($scope_class);
+		if (!class_exists('RecipeVaultScope')) {
+			return;
+		}
+		$outstanding = RecipeVaultScope::outstandingItemCount($user_id);
+	} catch (\Throwable $e) {
+		return; // a probe failure must never break the reader
+	}
+	if ($outstanding < $threshold) {
+		return;
+	}
+	$label = $outstanding . ' message' . ($outstanding === 1 ? '' : 's');
+	?>
+<div class="mbx-catchup-banner" data-outstanding="<?php echo (int)$outstanding; ?>">
+	<span class="mbx-catchup-text"><?php echo htmlspecialchars($label); ?> waiting to be summarized.</span>
+	<span class="mbx-catchup-progress" role="status" aria-live="polite"></span>
+	<button type="button" class="mbx-catchup-btn">Catch up</button>
+</div>
+<script>
+(function () {
+	var box = document.querySelector('.mbx-catchup-banner');
+	if (!box) { return; }
+	var btn = box.querySelector('.mbx-catchup-btn');
+	var out = box.querySelector('.mbx-catchup-progress');
+	var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
+	var done = 0, running = false;
+
+	function pass() {
+		fetch('/api/v1/action/vault_deferred_work', {
+			method: 'POST',
+			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
+			body: JSON.stringify({})
+		}).then(function (r) { return r.json(); }).then(function (j) {
+			var d = (j && j.data) || {};
+			if (d.locked) {
+				out.textContent = 'Unlock your vault to continue.';
+				stop();
+				return;
+			}
+			Object.keys(d.done || {}).forEach(function (k) { done += d.done[k]; });
+			out.textContent = done ? ('Processed ' + done + '\u2026') : 'Working\u2026';
+			if (d.more) { pass(); return; }
+			out.textContent = 'All caught up.';
+			stop();
+		}).catch(function () {
+			out.textContent = 'Stopped \u2014 try again.';
+			stop();
+		});
+	}
+
+	function stop() {
+		running = false;
+		btn.disabled = false;
+		btn.textContent = 'Catch up';
+	}
+
+	btn.addEventListener('click', function () {
+		if (running) { return; }
+		running = true;
+		btn.disabled = true;
+		btn.textContent = 'Working';
+		out.textContent = 'Working\u2026';
+		pass();
+	});
 })();
 </script>
 	<?php

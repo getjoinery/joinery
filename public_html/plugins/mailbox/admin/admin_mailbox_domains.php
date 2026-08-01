@@ -12,7 +12,7 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
- * @version 3.4
+ * @version 3.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -179,7 +179,31 @@ if ($show_form) {
 				'This domain can only send mail while you are signed in.',
 			],
 		],
+		// The AI consent control only means something once mail is encrypted at
+		// rest. On Standard the server already reads it, so there is nothing to
+		// consent to (specs/in_window_deferred_work.md).
+		'visibility_rules' => [
+			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled']],
+			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled'], 'hide' => []],
+			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled'], 'hide' => []],
+		],
 	]);
+
+	// After a step-up round-trip the intent rides back as target_ai — keep the
+	// box ticked so the operator does not have to remember what they were doing.
+	$ai_value = (bool)$form_domain->get('ied_ai_processing_enabled');
+	if (!empty($_GET['target_ai'])) {
+		$ai_value = true;
+	}
+
+	$formwriter->checkboxinput('ied_ai_processing_enabled',
+		"Let Joinery AI read this domain's mail while your vault is unlocked", [
+			'value' => $ai_value,
+			'help' => 'Off by default. Turning this on lets the AI email features (triage, '
+				. 'security scan, calendar) read this domain\'s mail during an unlock window '
+				. 'and send it to the configured model host. They cannot run at all while it '
+				. 'is off, because encrypted mail is unreadable without you.',
+		]);
 
 	$formwriter->dropinput('ied_catch_all_mode', 'Catch-All Mode', [
 		'options' => [

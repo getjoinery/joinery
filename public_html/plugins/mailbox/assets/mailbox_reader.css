@@ -691,6 +691,36 @@
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
 
+/* Catch-up prompt (specs/in_window_deferred_work.md § Catching up): shown only
+   when enough unsummarized mail has piled up that background batches will not
+   clear it promptly. Deliberately quieter than the unlock banner — nothing is
+   wrong, there is just a backlog. */
+.mbx-catchup-banner {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.5rem 0.875rem;
+	margin: 0.5rem 0;
+	background: #f8fafc;
+	border: 1px solid #e2e8f0;
+	border-radius: 8px;
+	font-size: var(--mbx-text-sm);
+}
+.mbx-catchup-text { color: #475569; }
+.mbx-catchup-progress { color: #64748b; }
+.mbx-catchup-btn {
+	margin-left: auto;
+	padding: 0.3rem 0.8rem;
+	border: 1px solid #cbd5e1;
+	border-radius: 6px;
+	background: #fff;
+	color: #334155;
+	font-size: var(--mbx-text-sm);
+	cursor: pointer;
+}
+.mbx-catchup-btn:hover { background: #f1f5f9; }
+.mbx-catchup-btn:disabled { opacity: 0.6; cursor: default; }
+
 /* Setup banner (specs/mailbox_setup_verdicts.md): shown in place of the first
    conversation when the open mailbox looks unfinished, and absent entirely
    otherwise. It reads as a card, not a row, so it never scans as mail. */

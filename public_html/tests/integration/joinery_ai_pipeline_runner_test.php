@@ -59,6 +59,17 @@ class FixtureJudgeJob implements PipelineJobInterface {
     public function validateConfig(array $config, Recipe $recipe): void {}
     public function untrustedDigest(): bool { return false; }
 
+    /** This fixture's items are plain in-memory strings — no vault needed. */
+    public function requiresVaultScope(array $config): ?string { return null; }
+
+    public function hasWork(array $config, Recipe $recipe): bool {
+        return $this->nextItem($config, $recipe) !== null;
+    }
+
+    public function countWork(array $config, Recipe $recipe): int {
+        return $this->hasWork($config, $recipe) ? 1 : 0;
+    }
+
     public function nextItem(array $config, Recipe $recipe): ?array {
         $db = DbConnector::get_instance()->get_db_link();
         foreach (self::$items as $item) {

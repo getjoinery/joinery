@@ -14,10 +14,13 @@
  * clear the pending state. For a single-reader mailbox this is invisible — the
  * rules have always run by the time any mailbox view renders.
  *
- * This mirrors how MailboxIndex::fold() runs: lazily, whenever the mailbox is
- * viewed with an open window, rather than needing a dedicated unlock callback.
+ * Two things drive it. The mailbox view calls drainForUser() directly, which is
+ * lower-latency than waiting for a tick — the rules have always run by the time
+ * any mailbox view renders. And the plugin registers it with VaultDeferredWork
+ * (specs/in_window_deferred_work.md), so the backlog also drains while the
+ * owner is anywhere else on the site with their vault open.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
@@ -28,13 +31,37 @@ class DeferredIngest {
 	/** Safety cap per drain pass so a huge logged-out backlog never blocks a page render. */
 	const DEFAULT_MAX = 200;
 
+	/** Is there anything to parse for this owner? Cheap, indexed, no decrypt —
+	 *  it runs on every vault heartbeat via VaultDeferredWork. */
+	public static function hasWork(int $user_id): bool {
+		if ($user_id <= 0) {
+			return false;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT 1 FROM iem_inbound_email_messages
+			  WHERE iem_pending_parse = true
+			    AND iem_sealed_owner_user_id = ?
+			    AND iem_delete_time IS NULL
+			  LIMIT 1"
+		);
+		$stmt->execute(array($user_id));
+		return (bool)$stmt->fetchColumn();
+	}
+
 	/**
-	 * Parse every pending-parse message owned by $user_id, using their in-window
+	 * Parse pending-parse messages owned by $user_id, using their in-window
 	 * vault secret. Returns the number of messages parsed. Per-message failures are
 	 * logged and the row is left pending (retried at the next drain) — one bad blob
 	 * never stalls the rest of the backlog.
+	 *
+	 * $deadline is a microtime(true) value: parsing stops before starting a new
+	 * message once it passes. It bounds how many messages START, so a slow one
+	 * may overrun it — the same contract every VaultDeferredWork consumer has.
+	 * Null means no deadline (the mailbox-view call sites, bounded by $max).
 	 */
-	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX): int {
+	public static function drainForUser(int $user_id, string $secret_key, int $max = self::DEFAULT_MAX,
+			?float $deadline = null): int {
 		if ($user_id <= 0 || $secret_key === '') {
 			return 0;
 		}
@@ -47,6 +74,9 @@ class DeferredIngest {
 		$router = new InboundEmailRouter();
 		$parsed = 0;
 		foreach ($ids as $id) {
+			if ($deadline !== null && microtime(true) >= $deadline) {
+				break;
+			}
 			try {
 				$msg = new InboundEmailMessage(intval($id), TRUE);
 				if ($router->parsePendingMessage($msg, $secret_key)) {
@@ -60,8 +90,14 @@ class DeferredIngest {
 	}
 
 	/**
-	 * The pending-parse message ids for an owner, oldest first (so the backlog
-	 * drains in arrival order and the newest mail is the last to appear parsed).
+	 * The pending-parse message ids for an owner, NEWEST first.
+	 *
+	 * Two reasons for that order. Your most recent mail should be the first to
+	 * become readable after an unlock, not the last. And the AI email jobs skip
+	 * unparsed messages while themselves taking the newest candidate first
+	 * (specs/in_window_deferred_work.md § New mail goes first) — parsing
+	 * oldest-first would leave them stalled on exactly the mail they want while
+	 * this worked forward through the backlog. The two orders have to agree.
 	 */
 	private static function pendingIds(int $user_id, int $max): array {
 		$db = DbConnector::get_instance()->get_db_link();
@@ -71,7 +107,7 @@ class DeferredIngest {
 			  WHERE iem_pending_parse = true
 			    AND iem_sealed_owner_user_id = ?
 			    AND iem_delete_time IS NULL
-			  ORDER BY iem_received_time ASC
+			  ORDER BY iem_received_time DESC
 			  LIMIT ?"
 		);
 		$stmt->bindValue(1, $user_id, PDO::PARAM_INT);

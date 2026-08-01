@@ -1221,6 +1221,62 @@ the extension and FTS5 support. The unlock window's own host-hardening facts (AP
 `apc.mmap_file_mask`, swap, coredumps) are the vault's own `VaultHealth` check
 (`includes/VaultHealth.php`), not repeated here.
 
+### Mail that belongs to no mailbox
+
+The catch-all accepts mail for addresses nobody created — `postmaster@`, a typo,
+an address a spammer guessed. That mail is stored with no alias, so it has no
+mailbox and therefore no mailbox owner.
+
+On a sealing domain it seals to the **domain's owner**
+(`ied_owner_usr_user_id`, the same person whose vault seals the domain's DKIM
+key). It arrived for the domain, so the domain's owner is whose it is. One key
+covers every such address, and no mailbox has to be created per address.
+
+`InboundEmailMessage::sealOwnerUserId()` is the single answer to "whose key does
+this message seal to", used by both delivery and the backlog pass so the two can
+never disagree. The fallback applies **only** to mail with no mailbox: a mailbox
+with no owner, or with several, still has no single key and stays unsealed until
+an operator fixes the mailbox. Sealing one of those to the domain owner would
+hand someone else's mail to a third party.
+
+Two consequences worth knowing. Only the domain owner can read unmatched mail —
+other all-access admins still see the rows but cannot decrypt them. And a domain
+cannot sit at Private or Fortress without an owner who holds a vault: the
+protection ceremony makes it a required prerequisite, with an inline control for
+the acting admin to claim ownership.
+
+### Letting AI read a sealed domain's mail
+
+The AI email features (triage, security scan, calendar extraction) cannot read
+mail that is encrypted at rest unless the owner is signed in with their vault
+open — and even then, only if the domain has been set to allow it.
+
+`ied_ai_processing_enabled` is that switch. It is off by default, appears on the
+domain form only for Private and Fortress domains (at Standard the server
+already reads the mail, so there is nothing to consent to), and turning it on
+requires a recent identity confirmation. Turning it off never does — withdrawing
+consent must not be harder than giving it.
+
+With it off, saving a recipe pointed at a mailbox on that domain is refused, and
+the message names the domain and the setting. The refusal happens at save time
+rather than at run time, so the failure mode is an explanation rather than a
+recipe that silently does nothing.
+
+What it buys, stated plainly: with it on, the server reads that domain's mail
+during an unlock window and sends it to the configured model host. Overnight
+processing remains impossible on a sealed domain — summaries appear shortly
+after the owner opens their mail, never before they arrive.
+
+### Parsing the backlog
+
+Fortress mail that arrived while the owner was logged out is stored unparsed.
+`DeferredIngest` turns it into readable fields, and is registered as a
+[deferred-work consumer](../../../docs/sealed_vault.md#deferred-work-in-the-window),
+so the backlog drains wherever the owner is on the site with their vault open —
+not only when they open the mailbox. It parses newest first, so the most recent
+mail becomes readable first, and because the AI jobs skip unparsed mail and also
+take the newest first, the two never work against each other.
+
 ## Outbound send protection
 
 Encryption at rest protects *reading* stored mail while locked; outbound send

@@ -43,7 +43,8 @@ class PipelineRunner {
         int $token_budget,
         ?float $temperature,
         ?float $top_p,
-        string $thinking_level
+        string $thinking_level,
+        ?float $deadline = null
     ): array {
         $job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
         $config = DescriptorValidator::coerce($job->configDescriptor(), Recipe::decodeSourceConfig($recipe));
@@ -63,6 +64,13 @@ class PipelineRunner {
             if ($out >= $token_budget) {
                 return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
                     'token_budget', 'output token budget exhausted');
+            }
+            // In-window slice bound (specs/in_window_deferred_work.md). Checked
+            // BEFORE starting an item, never inside one: an in-flight model call
+            // cannot be cut off cleanly, so a slice may overrun by one item.
+            if ($deadline !== null && microtime(true) >= $deadline) {
+                return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
+                    'deadline', 'slice ended at ' . $items_done . ' items; more remain');
             }
 
             $item = $job->nextItem($config, $recipe);

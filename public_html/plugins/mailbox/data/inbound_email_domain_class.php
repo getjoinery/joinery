@@ -70,6 +70,15 @@ class InboundEmailDomain extends SystemBase {
 		'ied_setup_status'       => array('type'=>'varchar(16)'),   // ok | attention | unknown; empty = never checked
 		'ied_setup_checked_time' => array('type'=>'timestamp(6)'),
 		'ied_security_level'    => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'standard'), // 'standard' | 'private' | 'fortress'
+		// Consent for AI features to read this domain's mail
+		// (specs/in_window_deferred_work.md § Turning it on has to be a
+		// deliberate choice). Only consequential on a sealed level: at
+		// 'standard' the server already reads the mail, so there is nothing to
+		// consent to and the control is not shown. On 'private'/'fortress' this
+		// is the difference between "the server cannot read my mail unless I am
+		// here" and "the server reads my mail while I am here, and sends it to
+		// the configured model host" — which must never become true silently.
+		'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key

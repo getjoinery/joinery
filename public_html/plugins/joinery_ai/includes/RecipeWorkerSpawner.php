@@ -1,5 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 
 /**
  * Spawns CLI workers for queued RecipeRun rows, subject to a concurrency cap.
@@ -85,7 +86,27 @@ class RecipeWorkerSpawner {
 
     private static function isSpawnable(RecipeRun $run): bool {
         $status = $run->get('rcr_status');
-        return in_array($status, [RecipeRun::STATUS_PENDING, ''], true);
+        if (!in_array($status, [RecipeRun::STATUS_PENDING, ''], true)) {
+            return false;
+        }
+        // A worker is a command-line process, and a command-line process can
+        // never hold a vault unlock window — the secret lives in APCu keyed to
+        // the browser session. A recipe whose job reads sealed content is
+        // therefore unspawnable by construction; it runs in slices inside its
+        // owner's own request instead (specs/in_window_deferred_work.md).
+        // Refusing here as well as in the dispatcher covers Run Now and the
+        // worker self-chain, not just the scheduled path.
+        return !self::requiresWindow($run);
+    }
+
+    /** Does this run's recipe need an unlock window a worker cannot hold? */
+    private static function requiresWindow(RecipeRun $run): bool {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+        $recipe = new Recipe((int)$run->get('rcr_rcp_recipe_id'), true);
+        if (!$recipe->key) {
+            return false;   // a dangling run fails its own way in the runner
+        }
+        return RecipeVaultScope::requiresWindow($recipe);
     }
 
     /**

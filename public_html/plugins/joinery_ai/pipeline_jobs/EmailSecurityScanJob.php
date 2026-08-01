@@ -4,6 +4,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
 
 /**
  * Pipeline job (specs/joinery_ai_email_security_scan.md): scores every
@@ -51,14 +52,44 @@ class EmailSecurityScanJob implements PipelineJobInterface {
      * couldn't already see in their inbox.
      */
     public function validateConfig(array $config, Recipe $recipe): void {
-        MailboxAliasConfig::validateOwnerGrant(
-            (string)($config['mailbox_alias'] ?? ''), (int)$recipe->get('rcp_owner_user_id'));
+        $address = (string)($config['mailbox_alias'] ?? '');
+        MailboxAliasConfig::validateOwnerGrant($address, (int)$recipe->get('rcp_owner_user_id'));
+        // A sealed domain must have consented to AI reading its mail. Refusing
+        // at save time names the domain and the setting; refusing at run time
+        // would just look like a recipe that does nothing.
+        EmailJobCandidates::assertAiProcessingAllowed($address);
     }
 
     /** Email is attacker-controlled text — the recipe carries
      *  rcp_allow_tainted_writes per the pipeline's taint posture. */
     public function untrustedDigest(): bool {
         return true;
+    }
+
+    /**
+     * Mail on a sealed domain can only be read inside the owner's unlock
+     * window, so such a recipe never runs from cron
+     * (specs/in_window_deferred_work.md). A standard-domain mailbox needs no
+     * window and keeps running on its schedule, unattended, as before.
+     */
+    public function requiresVaultScope(array $config): ?string {
+        return EmailJobCandidates::requiredVaultScope($config);
+    }
+
+    /** Cheap existence check for the same pool nextItem() draws from. */
+    public function hasWork(array $config, Recipe $recipe): bool {
+        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
+        if ($alias_id === null) return false;
+        return EmailJobCandidates::hasCandidate(
+            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
+    }
+
+    /** How far behind this recipe is, for the mailbox catch-up prompt. */
+    public function countWork(array $config, Recipe $recipe): int {
+        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
+        if ($alias_id === null) return 0;
+        return EmailJobCandidates::countCandidates(
+            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
     }
 
     public function nextItem(array $config, Recipe $recipe): ?array {
@@ -69,26 +100,11 @@ class EmailSecurityScanJob implements PipelineJobInterface {
         // re-saving the recipe re-validates and would catch it at edit time.
         if ($alias_id === null) return null;
 
-        // Sealed mail (specs/mailbox_encryption_at_rest.md § No Sideways Copies)
-        // is excluded outright: this job runs as an unattended pipeline job with
-        // no unlock window, so a sealed message's content columns are structurally
-        // unreadable here — never a candidate to retry, never a blocker for the
-        // unsealed mail behind it in the queue.
-        $db = DbConnector::get_instance()->get_db_link();
-        $sql = "SELECT iem_inbound_email_message_id
-                FROM iem_inbound_email_messages
-                WHERE iem_iea_inbound_email_alias_id = :alias_id
-                  AND iem_delete_time IS NULL
-                  AND iem_spam_verdict IS DISTINCT FROM 'spam'
-                  AND iem_direction IS DISTINCT FROM 'draft'
-                  AND iem_content_sealed IS NOT TRUE
-                  AND " . MultiAipRecipeItemLog::notExistsClause('iem_inbound_email_message_id::text') . "
-                ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC
-                LIMIT 1";
-        $q = $db->prepare($sql);
-        $q->execute(['alias_id' => $alias_id, 'aip_recipe_id' => (int)$recipe->key]);
-        $id = (int)$q->fetchColumn();
-        if ($id <= 0) return null;
+        // Selection is shared across all three email jobs so they cannot
+        // drift apart — see EmailJobCandidates for the rules.
+        $id = EmailJobCandidates::nextId(
+            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
+        if ($id === null) return null;
 
         $msg = new InboundEmailMessage($id, TRUE);
         if (!$msg->key) return null;

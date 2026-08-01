@@ -6,7 +6,11 @@
  * read once heartbeats stop for longer than the grace interval. Returns
  * `alive:false` when there is no open window so the client stops beating.
  *
- * @version 1.0
+ * Also reports `work_pending` — whether any feature has deferred work waiting on
+ * this window (specs/in_window_deferred_work.md). Reporting only: the drain runs
+ * in its own request so a slow model can never stall the beat.
+ *
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -23,7 +27,19 @@ function vault_heartbeat_logic(array $input): LogicResult {
 	}
 
 	$alive = VaultUnlock::heartbeat($user_id, UserEncryptionVault::SCOPE_USER);
-	return LogicResult::render(['alive' => $alive]);
+
+	// Whether any feature has work waiting on this window (see
+	// specs/in_window_deferred_work.md). The beat only ANSWERS this — it never
+	// does the work, because the work can involve a language model and the beat
+	// must stay fast enough to keep the window open reliably. The client fires
+	// vault_deferred_work as a separate request when this is true.
+	$work_pending = false;
+	if ($alive) {
+		require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
+		$work_pending = VaultDeferredWork::hasWork($user_id);
+	}
+
+	return LogicResult::render(['alive' => $alive, 'work_pending' => $work_pending]);
 }
 
 function vault_heartbeat_logic_api() {

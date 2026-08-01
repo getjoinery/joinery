@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.28
+ * @version 1.31
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -50,6 +50,11 @@ class InboundEmailSetupCheck {
 	// severity values
 	const REQUIRED = 'required';
 	const RECOMMENDED = 'recommended';
+
+	/** How long mail may sit waiting to seal before it stops being routine.
+	 *  Nothing drains the backlog on a timer, so past this someone has simply
+	 *  not run the pass and the domain is holding plaintext it should not. */
+	const SEALING_BACKLOG_STALE_SECONDS = 86400;   // 24 hours
 
 	private $settings;
 	private $publicIp = '';
@@ -1173,6 +1178,10 @@ class InboundEmailSetupCheck {
 			$converging = 0;
 			$blocked    = 0;
 			$blocked_addresses = array();
+			$blocked_causes    = array();   // one human phrase per distinct cause
+			$blocked_catchall  = false;     // at least one ownerless catch-all message
+			$blocked_novault   = false;     // at least one owner without a vault
+			$converging_oldest = null;      // earliest arrival still waiting to seal
 			$counted    = false;
 			try {
 				$db = DbConnector::get_instance()->get_db_link();
@@ -1184,7 +1193,9 @@ class InboundEmailSetupCheck {
 				$stmt = $db->prepare(
 					"SELECT iem_iea_inbound_email_alias_id AS alias_id,
 					        COUNT(*) FILTER (WHERE iem_content_sealed = false AND iem_pending_parse = false) AS unsealed,
-					        COUNT(*) FILTER (WHERE iem_pending_parse = true) AS pending
+					        COUNT(*) FILTER (WHERE iem_pending_parse = true) AS pending,
+					        MIN(iem_received_time) FILTER (WHERE iem_content_sealed = false
+					            AND iem_pending_parse = false) AS oldest_unsealed
 					   FROM iem_inbound_email_messages
 					  WHERE iem_ied_inbound_email_domain_id = ? AND iem_delete_time IS NULL
 					  GROUP BY iem_iea_inbound_email_alias_id");
@@ -1193,6 +1204,7 @@ class InboundEmailSetupCheck {
 				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+				require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 				foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $group) {
 					$pending += intval($group['pending']);
 					$n = intval($group['unsealed']);
@@ -1201,18 +1213,67 @@ class InboundEmailSetupCheck {
 					}
 					// Sealing needs only the holder's PUBLIC key, so a mailbox
 					// with one holder who has a vault is always sealable.
+					// Same resolution the sealing pass uses, so this row can never
+					// claim a message is stuck that the pass would actually seal:
+					// a mailbox's single owner, or the DOMAIN owner for mail that
+					// belongs to no mailbox (specs/mailbox_unmatched_sealing.md).
 					$alias_id = intval($group['alias_id']);
-					$owner_id = InboundEmailMessage::singleOwnerUserId($alias_id ?: null);
+					$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id ?: null, intval($model->key));
 					if ($owner_id !== null && UserEncryptionVault::loadForUser($owner_id) !== null) {
 						$converging += $n;
+						$oldest = (string)($group['oldest_unsealed'] ?? '');
+						if ($oldest !== '' && ($converging_oldest === null || $oldest < $converging_oldest)) {
+							$converging_oldest = $oldest;
+						}
 						continue;
 					}
 					$blocked += $n;
+
+					// Name the cause, not just the count. The three ways a message
+					// ends up unsealable need three different fixes, and the row is
+					// useless if it cannot say which one applies.
+					if ($alias_id === 0) {
+						// No mailbox: the catch-all accepted mail for an address
+						// nobody created. That mail seals to the DOMAIN owner, so
+						// reaching here means the domain has no owner, or theirs
+						// has no vault. "Create a mailbox for that address" was
+						// never the fix — you cannot create one per stranger.
+						$to = $this->unaliasedRecipients(intval($model->key));
+						$domain_owner = InboundEmailMessage::domainOwnerUserId(intval($model->key));
+						$why = ($domain_owner === null)
+							? 'belongs to no mailbox, and this domain has no owner to seal it to'
+							: 'belongs to no mailbox, and this domain\'s owner has no vault';
+						$blocked_causes[] = array('n' => $n,
+							'text' => 'addressed to ' . ($to !== '' ? $to : 'an address with no mailbox')
+								. ' (' . $why . ')');
+						$blocked_catchall = true;
+						continue;
+					}
+
+					$address = '';
 					try {
 						$alias = new InboundEmailAlias($alias_id, TRUE);
-						if ($alias->key) { $blocked_addresses[] = (string)$alias->get_full_address(); }
+						if ($alias->key) {
+							$address = (string)$alias->get_full_address();
+							$blocked_addresses[] = $address;
+						}
 					} catch (\Throwable $e) {
-						// Name unavailable — the count still tells the story.
+						// Name unavailable — the count and cause still tell the story.
+					}
+					// Every cause phrase starts the same way so they read alike
+					// whether shown alone or in a list.
+					$where = $address !== '' ? 'addressed to ' . $address : 'addressed to mailbox #' . $alias_id;
+
+					$holders = InboundEmailMailboxGrant::user_ids_for_alias($alias_id);
+					if (count($holders) === 0) {
+						$blocked_causes[] = array('n' => $n, 'text' => $where . ' (that mailbox has no owner)');
+					} elseif (count($holders) > 1) {
+						$blocked_causes[] = array('n' => $n, 'text' => $where . ' (that mailbox has '
+							. count($holders) . ' owners, so there is no single key to seal to)');
+					} else {
+						$blocked_causes[] = array('n' => $n,
+							'text' => $where . ' (its owner has not set up a vault)');
+						$blocked_novault = true;
 					}
 				}
 				$counted = true;
@@ -1221,27 +1282,78 @@ class InboundEmailSetupCheck {
 			}
 
 			if ($blocked > 0) {
-				$where = $blocked_addresses
-					? ' (' . implode(', ', array_unique($blocked_addresses)) . ')'
-					: '';
+				$noun = $blocked === 1 ? 'message is' : 'messages are';
+				// One cause covering everything already has its count in the lead
+				// sentence, so repeating it reads like two different numbers.
+				if (count($blocked_causes) === 1) {
+					$detail = ': ' . ($blocked === 1 ? '' : 'all ') . $blocked_causes[0]['text'] . '.';
+				} elseif ($blocked_causes) {
+					$parts = array();
+					foreach ($blocked_causes as $cause) {
+						$parts[] = $cause['n'] . ' ' . $cause['text'];
+					}
+					$detail = ': ' . implode('; ', $parts) . '.';
+				} else {
+					$detail = '.';
+				}
+
+				// The fix depends on the cause, so name the one that applies
+				// rather than offering all three every time.
+				if ($blocked_catchall && !$blocked_novault && count($blocked_causes) === 1) {
+					$action = 'Give this domain an owner who has a vault. Mail that arrives for an '
+						. 'address you have not created belongs to no mailbox, so it seals to the '
+						. 'domain\'s owner instead — one key covers every such address, and you never '
+						. 'have to create a mailbox per address. Set the owner in the domain editor, '
+						. 'then run the sealing pass to converge what is already stored.';
+				} elseif ($blocked_catchall) {
+					$action = 'Each line above needs its own fix: give this domain an owner with a '
+						. 'vault (that is who mail with no mailbox seals to), give a mailbox exactly '
+						. 'one owner, or have that owner set up a vault on their security page. The '
+						. 'sealing pass converges what it can from the domain editor afterwards.';
+				} else {
+					$action = 'Give the mailbox exactly one owner and have them set up a vault '
+						. 'on their security page. The sealing pass converges the backlog from the '
+						. 'domain editor once it can.';
+				}
+
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
 					self::REQUIRED, self::FAIL,
-					$blocked . ' message(s) cannot be sealed' . $where
-					. ' — the mailbox has no single owner with a vault.',
-					'Sealing needs the mailbox owner\'s vault public key. A mailbox with no owner, '
-					. 'more than one owner, or an owner whose vault was deleted after the level was '
-					. 'raised has no key to seal to, so those messages stay plaintext at rest.',
-					array('text' => 'Give the mailbox exactly one owner and have them set up a vault '
-						. 'on their security page. The sealing pass converges the backlog from the '
-						. 'domain editor once it can.'));
+					$blocked . ' ' . $noun . ' stored unencrypted on this domain and cannot be sealed'
+					. $detail,
+					'Sealing needs one owner\'s vault public key. Mail in a mailbox seals to that '
+					. 'mailbox\'s single owner; mail that belongs to no mailbox seals to the domain\'s '
+					. 'owner. A message has no key to seal to when its mailbox has no owner or more '
+					. 'than one, when that owner has no vault, or when the domain itself has no owner. '
+					. 'Those messages stay readable on the server, which is the one thing this '
+					. 'security level exists to prevent.',
+					array('text' => $action));
 			} elseif ($converging > 0) {
+				// Waiting to seal is the NORMAL in-between state, not a problem:
+				// mail seals as it arrives, and a backlog appears only after a
+				// raise or a change that made previously-unsealable mail sealable.
+				// Reporting it as a warning puts a "needs attention" banner in
+				// front of someone whose mailbox is working exactly as designed.
+				//
+				// It does become a real issue if nobody ever drains it: there is
+				// no scheduled sealing task, so a backlog only moves when an
+				// operator opens the domain editor. Mail still sitting in plaintext
+				// a day later means that has not happened, and on a sealing domain
+				// that is worth interrupting someone for.
+				$stale = ($converging_oldest !== null
+					&& strtotime($converging_oldest . ' UTC') < time() - self::SEALING_BACKLOG_STALE_SECONDS);
+				$noun = $converging === 1 ? 'message is' : 'messages are';
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
-					self::RECOMMENDED, self::WARN,
-					$converging . ' message(s) are waiting for the sealing pass.',
+					$stale ? self::RECOMMENDED : self::OPTIONAL,
+					$stale ? self::WARN : self::INFO,
+					$stale
+						? $converging . ' ' . $noun . ' still stored unencrypted, waiting for the '
+							. 'sealing pass since ' . substr((string)$converging_oldest, 0, 16) . ' UTC.'
+						: $converging . ' ' . $noun . ' waiting for the sealing pass.',
 					'Every message is briefly unsealed between arriving and being sealed. The owner '
-					. 'has a vault, so these will seal — they are stored as plaintext until they do.',
-					array('text' => 'Open the domain editor to run the pass now; it also resumes on '
-						. 'its own.'));
+					. 'has a vault, so these will seal — they are stored as plaintext until they do. '
+					. 'Nothing seals them on a timer, so the pass runs when the domain editor is '
+					. 'opened.',
+					array('text' => 'Open the domain editor to run the pass.'));
 			} elseif ($counted) {
 				$out[] = $this->r('domain.sealed_backlog', $domain, 'domain', 'Mail sealed at rest',
 					self::REQUIRED, self::PASS,
@@ -1582,6 +1694,44 @@ class InboundEmailSetupCheck {
 	// ===================================================================
 	// Helpers
 	// ===================================================================
+
+	/**
+	 * The addresses that ownerless catch-all mail on this domain was sent to,
+	 * as a short human list.
+	 *
+	 * A message stored by the catch-all carries no alias, so the row cannot name
+	 * a mailbox — the recipient header is the only thing that tells the operator
+	 * WHICH address is unowned, which is exactly what they need to fix it.
+	 * Capped: naming three is enough to act on, and a domain under a dictionary
+	 * attack would otherwise render a wall of text.
+	 */
+	private function unaliasedRecipients(int $domain_id, int $limit = 3): string {
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"SELECT DISTINCT iem_recipient
+				   FROM iem_inbound_email_messages
+				  WHERE iem_ied_inbound_email_domain_id = ?
+				    AND iem_iea_inbound_email_alias_id IS NULL
+				    AND iem_delete_time IS NULL
+				    AND iem_content_sealed = false
+				    AND iem_pending_parse = false
+				  ORDER BY iem_recipient
+				  LIMIT " . (max(1, $limit) + 1));
+			$stmt->execute(array($domain_id));
+			$rows = $stmt->fetchAll(PDO::FETCH_COLUMN, 0) ?: array();
+		} catch (\Throwable $e) {
+			return '';   // a naming failure must never cost the verdict itself
+		}
+		if (!$rows) {
+			return '';
+		}
+		$more = count($rows) > $limit;
+		if ($more) {
+			array_pop($rows);
+		}
+		return implode(', ', $rows) . ($more ? ' and others' : '');
+	}
 
 	private function r($id, $scope, $layer, $label, $severity, $status, $summary, $detail = '', $fix = null, $recheckable = true) {
 		return array(
