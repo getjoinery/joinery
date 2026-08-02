@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.5 - Pin config/backup_site_key alongside the relay SSH key (the dev-mode 777
+#              sweep would otherwise expose the key that opens this site's backups)
 #VERSION 2.4 - Re-pin config/admin_credentials.txt to 600 root:root after the sweep, alongside the SSH key
 #VERSION 2.3 - Re-pin SSH private keys to 600 after the blanket sweep (ssh refuses group-accessible keys; the relay mail pull broke on every deploy)
 #
@@ -96,9 +98,13 @@ fi
 # SSH private keys demand 0600 and caller-only ownership — the blanket sweep
 # above would make ssh refuse them, silently breaking the relay mail pull on
 # every deploy. Re-pin them last, in both modes.
-for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
+#
+# config/backup_site_key rides along for a different reason: it opens this
+# site's own backups, so the dev-mode 777 sweep above would hand every backup
+# this site ever made to anyone with a shell on the box.
+for keyfile in "$SITE_ROOT/config/relay_pull_key" "$SITE_ROOT/config/backup_site_key"; do
     if [ -f "$keyfile" ]; then
-        echo "  Pinning SSH key $keyfile to 600 www-data:www-data..."
+        echo "  Pinning key $keyfile to 600 www-data:www-data..."
         chown www-data:www-data "$keyfile"
         chmod 600 "$keyfile"
     fi

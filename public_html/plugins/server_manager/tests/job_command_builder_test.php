@@ -862,7 +862,7 @@ check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archiv
 // it deletes exactly the file it just uploaded and can never run on an upload
 // failure or delete a backup that landed between two steps (P-23). There must be
 // no separate cleanup step, and the rm must sit after the upload in the command.
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 $bkt = new BackupTarget(NULL);
 $bkt->set('bkt_name', 'HarnessTest Target ' . bin2hex(random_bytes(3)));
 $bkt->set('bkt_provider', 'b2');
@@ -980,50 +980,106 @@ preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_b, $mb);
 check(!empty($ma[0]) && !empty($mb[0]) && $ma[0] !== $mb[0],
 	'two installs never share an installer directory', ($ma[0] ?? '?') . ' vs ' . ($mb[0] ?? '?'));
 
-section('Backup key: verify-or-fail, never node-side generation');
+section('Backup key: one envelope per run, nothing precious left behind');
 
-// Encrypted backups must VERIFY the escrowed key is present and fail loudly if
-// not — the control plane mints and pushes keys, so a node must never generate
-// (and forget) its own key. A cloud target forces encryption.
+// Every encrypted backup mints its own key on the node, seals it to the
+// operator's recovery key and to the node's own site key, and destroys the
+// plaintext copy. A cloud target forces encryption.
 $enc_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/encnode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key));
 foreach (['build_backup_database', 'build_backup_project'] as $builder) {
 	$steps = JobCommandBuilder::$builder($enc_node);
 	$all_cmd = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $steps));
-	$verify_step = '';
-	foreach ($steps as $s) {
-		if (($s['label'] ?? '') === 'Verify encryption key present') { $verify_step = $s['cmd']; }
-	}
-	check($verify_step !== '', $builder . ': emits a verify-key step');
-	check(strpos($verify_step, 'BACKUP_KEY_MISSING') !== false && strpos($verify_step, 'exit 1') !== false,
-		$builder . ': the verify step fails loudly when the key is absent', $verify_step);
-	check(strpos($all_cmd, 'openssl rand') === false,
-		$builder . ': no node-side key generation remains anywhere in the job', $all_cmd);
-	check(strpos($all_cmd, 'BACKUP_KEY_FPR') !== false,
-		$builder . ': reports the on-disk key fingerprint for mismatch detection');
 
-	// Sealing comes first, and on the control plane: the node's SSH key is only
-	// readable by the agent, and verifying a key that was never escrowed would
-	// pass while leaving the archives unrecoverable.
-	$escrow_at = $verify_at = -1;
+	$mint_at = $engine_at = $final_at = -1;
+	$mint_step = $final_step = '';
 	foreach ($steps as $i => $s) {
-		if (($s['label'] ?? '') === 'Seal backup key to the recovery key') { $escrow_at = $i; }
-		if (($s['label'] ?? '') === 'Verify encryption key present') { $verify_at = $i; }
+		$label = $s['label'] ?? '';
+		if ($label === 'Mint backup encryption key')     { $mint_at = $i; $mint_step = $s['cmd']; }
+		if (strpos($label, 'Run ') === 0)                { $engine_at = $i; }
+		if ($label === 'Seal the backup key to the archive') { $final_at = $i; $final_step = $s['cmd']; }
 	}
-	check($escrow_at !== -1 && $escrow_at < $verify_at,
-		$builder . ': seals the node key to the recovery key before verifying it is present');
-	check(($steps[$escrow_at]['type'] ?? '') === 'local',
-		$builder . ': the sealing step runs on the control plane, where node SSH keys are readable');
+
+	check($mint_at !== -1, $builder . ': mints an envelope for the run');
+	check($mint_at < $engine_at, $builder . ': mints the key before the engine that encrypts with it',
+		"mint@{$mint_at} engine@{$engine_at}");
+	check($final_at > $engine_at, $builder . ': seals the envelope to the archive after it exists',
+		"final@{$final_at} engine@{$engine_at}");
+
+	check(strpos($mint_step, 'backup_envelope.php') !== false && strpos($mint_step, ' mint') !== false,
+		$builder . ': minting runs the envelope tool', $mint_step);
+	check(($steps[$mint_at]['type'] ?? '') === 'ssh',
+		$builder . ': minting happens ON THE NODE, so no plaintext key crosses the wire');
+	check(strpos($mint_step, '--recovery-pub') !== false && strpos($mint_step, '--site-key') !== false,
+		$builder . ': seals to both the recovery key and the node site key', $mint_step);
+	check(strpos($mint_step, '/config/backup_site_key') !== false,
+		$builder . ': the site key is read from the node project config', $mint_step);
+
+	// The engine has to be told which key to use, or it would silently fall
+	// back to whatever happens to be in $HOME and the envelope would describe
+	// a key the archive was not encrypted with.
+	check(strpos($all_cmd, '--key-file') !== false && strpos($all_cmd, JobCommandBuilder::ENVELOPE_KEY_PATH) !== false,
+		$builder . ': the engine is pointed at the minted key');
+
+	// The plaintext key must not outlive the run: leaving it on disk puts a
+	// working decryption key next to the thing it decrypts.
+	check(strpos($final_step, 'shred') !== false || strpos($final_step, 'rm -f') !== false,
+		$builder . ': destroys the plaintext key when the run ends', $final_step);
+	check(strpos($final_step, 'RC=$?') !== false,
+		$builder . ': shreds the key even when the relabel fails, and still reports the failure', $final_step);
+
+	check(strpos($all_cmd, 'openssl rand') === false,
+		$builder . ': no ad-hoc node-side key generation remains anywhere in the job', $all_cmd);
+	check(strpos($all_cmd, 'escrow') === false,
+		$builder . ': no escrow step survives', $all_cmd);
 }
 
-// A plaintext backup on a node with no cloud target neither seals nor verifies —
-// there is no key in play at all.
+// The envelope has to reach the bucket too — an encrypted archive alone is
+// indistinguishable from noise.
+$upload_labels = array();
+foreach (JobCommandBuilder::build_backup_project($enc_node) as $s) {
+	if (strpos($s['label'] ?? '', 'Upload backup') === 0) { $upload_labels[] = $s['cmd']; }
+}
+check(count($upload_labels) === 2, 'an encrypted backup uploads the archive AND its envelope',
+	'uploads: ' . count($upload_labels));
+check(strpos(implode("\n", $upload_labels), '.keys.json') !== false,
+	'one of the uploads is the envelope sidecar');
+
+// A plaintext backup on a node with no cloud target mints nothing — there is no
+// key in play at all, and no envelope to upload.
 $plain_node = jcb_node(array('mgn_web_root' => '/var/www/html/plainnode/public_html'));
 $plain_labels = array_map(function ($s) { return $s['label'] ?? ''; },
 	JobCommandBuilder::build_backup_database($plain_node));
-check(!in_array('Seal backup key to the recovery key', $plain_labels, true),
-	'an unencrypted backup does not seal a key', implode(' | ', $plain_labels));
+check(!in_array('Mint backup encryption key', $plain_labels, true),
+	'an unencrypted backup mints no key', implode(' | ', $plain_labels));
+check(!in_array('Seal the backup key to the archive', $plain_labels, true),
+	'and seals no envelope', implode(' | ', $plain_labels));
+
+// Restores prefer the envelope beside the archive, so a node can restore itself
+// with no operator present, and fall back to the old node key for archives made
+// before envelopes existed.
+$restore_cmd = '';
+foreach (JobCommandBuilder::build_restore_database($enc_node,
+		array('local_path' => '/backups/site-20260802.sql.gz.enc')) as $s) {
+	if (($s['label'] ?? '') === 'Restore database from backup') { $restore_cmd = $s['cmd']; }
+}
+check($restore_cmd !== '', 'the restore builder emits a restore step');
+// Assert the WHOLE path, not just the suffix: an empty archive path would
+// still produce a string containing ".keys.json" and read as passing.
+check(strpos($restore_cmd, "/backups/site-20260802.sql.gz.enc'.keys.json") !== false,
+	'a database restore looks for the envelope belonging to THAT archive', $restore_cmd);
+check(strpos($restore_cmd, '.joinery_backup_key') !== false,
+	'and still falls back to the node key for pre-envelope archives', $restore_cmd);
+check(strpos($restore_cmd, 'backup_envelope.php') !== false && strpos($restore_cmd, ' open ') !== false,
+	'the envelope is opened with the site key, so no operator is needed', $restore_cmd);
+
+// A restore with nothing to restore from must fail at build time, not after
+// the pre-restore snapshot has already run.
+$threw = false;
+try { JobCommandBuilder::build_restore_database($enc_node, array('filename' => 'orphan.sql.gz.enc')); }
+catch (Exception $e) { $threw = true; }
+check($threw, 'a restore with no resolvable archive path is refused up front');
 
 section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
 

@@ -1,0 +1,7 @@
+{
+    "name": "Backup",
+    "description": "Backs this site up on a schedule: builds an encrypted archive, seals its key to the recovery key and to this site, uploads it to the configured target, then enforces retention — keeping the newest N restore points offsite and sweeping old local files including the auto_pre_* snapshots restores leave behind. Inactive until a backup target and a recovery key are configured on the Backups page.",
+    "default_frequency": "daily",
+    "default_time": "02:00:00",
+    "activate_on_install": false
+}

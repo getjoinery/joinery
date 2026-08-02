@@ -119,7 +119,7 @@
 	// host SSH probe, so it is safe to run on render — only for a removed node.
 	$purge_block = null; // null = allowed; string = reason it is blocked
 	if ($is_removed) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+		require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 		try {
 			$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
 			if ($bk['count'] > 0) {
@@ -567,7 +567,7 @@
 
 	$target_id = $node->get('mgn_bkt_backup_target_id');
 	if ($target_id) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 		try {
 			$target = new BackupTarget($target_id, TRUE);
 			$conn_row('Backup target',
@@ -747,7 +747,7 @@
 	echo '<h6 class="text-muted mt-4 mb-3">Backup Settings</h6>';
 
 	// Target dropdown (manual since FormWriter doesn't have a model-aware FK dropdown)
-	require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+	require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 	$all_targets = new MultiBackupTarget(['deleted' => false, 'enabled' => true], ['bkt_name' => 'ASC']);
 	$all_targets->load();
 	$current_target_id = $node->get('mgn_bkt_backup_target_id');

@@ -19,7 +19,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAssets.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/node_detail_actions_logic.php'));

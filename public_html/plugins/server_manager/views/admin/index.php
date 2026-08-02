@@ -4,6 +4,7 @@
  * URL: /admin/server_manager
  *
  * @version 1.16 - recovery-readiness attention line (never-verified/stale must-save secrets) linking to the readiness page
+ * @version 1.16 - the backup alert is recovery-key setup only; per-node escrow rows are gone
  * @version 1.15 - escrow alert covers recovery-not-set-up as its own row and links to the guided
  *                 walkthrough; heading no longer assumes every row is a node
  * @version 1.14 - Show-all-sites toggle (?show_all=1) surfaces removed (soft-deleted) nodes with a Removed badge
@@ -91,7 +92,7 @@ $inflight_provisions->load();
 // Nodes whose uptime monitoring cannot currently conclude up or down.
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 $monitor_problems = NodeMonitorHealth::problems();
-$escrow_problems  = NodeMonitorHealth::backup_escrow_problems();
+$recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 
 // Recovery readiness: must-save secrets never verified or verified too long
 // ago. One line; the details live on the readiness page.
@@ -212,14 +213,14 @@ if ($agent_online) {
 </div>
 <?php endif; ?>
 
-<?php // Nodes whose backup key is not escrowed (or was regenerated out of band).
+<?php // Backup recovery is not set up, so encrypted backups cannot run.
       // A backup you cannot restore is as silent as monitoring that cannot alert,
       // so it is surfaced the same way. ?>
-<?php if (!empty($escrow_problems)): ?>
+<?php if (!empty($recovery_problems)): ?>
 <div class="alert alert-warning" role="alert">
 	<strong>Backups cannot be recovered yet.</strong>
 	<ul class="mb-0 mt-2">
-		<?php foreach ($escrow_problems as $p): ?>
+		<?php foreach ($recovery_problems as $p): ?>
 			<li>
 				<?php if ((int)$p['id'] > 0): ?>
 					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>

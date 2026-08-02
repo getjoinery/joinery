@@ -14,9 +14,10 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetTester.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('includes/TargetTester.php'));
+require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackups.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 $session = SessionControl::get_instance();
@@ -84,9 +85,9 @@ $escrow_finish = function ($message, $ok) use ($session, $page_regex, $escrow_re
 // possession proof is cleared so the new value must be proven before use.
 if ($post_action === 'save_escrow_public_key') {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 	try {
-		BackupKeyCustody::set_escrow_public_key($_POST['escrow_public_key'] ?? '');
+		BackupRecoveryKey::set_public_key($_POST['escrow_public_key'] ?? '');
 		$escrow_finish('Recovery public key saved. Now prove you hold the matching private key.', true);
 	} catch (Exception $e) {
 		$escrow_finish($e->getMessage(), false);
@@ -97,9 +98,9 @@ if ($post_action === 'save_escrow_public_key') {
 // possible while nothing has been sealed to it.
 if ($post_action === 'clear_escrow_public_key') {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 	try {
-		BackupKeyCustody::clear_escrow_public_key();
+		BackupRecoveryKey::clear_public_key();
 		$escrow_finish('Recovery public key cleared. Paste a different one to start again.', true);
 	} catch (Exception $e) {
 		$escrow_finish($e->getMessage(), false);
@@ -111,9 +112,9 @@ if ($post_action === 'clear_escrow_public_key') {
 // honored (a mistyped key would otherwise seal every backup key unopenably).
 if ($post_action === 'verify_escrow_key') {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+	require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 	try {
-		BackupKeyCustody::record_possession_proof($_POST['escrow_proof'] ?? '');
+		BackupRecoveryKey::record_possession_proof($_POST['escrow_proof'] ?? '');
 		$escrow_finish('Recovery key verified — backup-key escrow is now active.', true);
 	} catch (Exception $e) {
 		$escrow_finish($e->getMessage(), false);
@@ -323,8 +324,17 @@ if ($error) {
 // The guided walkthrough: it detects how far setup has got and renders the one
 // outstanding step. Once every targeted node is escrowed it collapses to a
 // standing summary of what recovery would look like.
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyWalkthrough.php'));
-BackupKeyWalkthrough::render($page, BackupKeyCustody::setup_state(), '/admin/server_manager/targets');
+// Recovery key setup is core, not fleet: a standalone site needs it just as
+// much. This page links there rather than carrying a second copy of the panel.
+$rk_state = BackupRecoveryKey::setup_state();
+echo '<div class="alert ' . ($rk_state['is_ready'] ? 'alert-success' : 'alert-warning') . ' border" id="backup-key-setup">';
+echo '<strong>Backup key recovery.</strong> '
+   . htmlspecialchars(BackupRecoveryKey::outstanding_summary($rk_state));
+if ($rk_state['is_ready']) {
+	echo ' Key ' . htmlspecialchars($rk_state['fingerprint']) . '&hellip;';
+}
+echo ' <a href="' . BackupRecoveryKey::SETUP_URL . '" class="alert-link">Open backup settings</a>.';
+echo '</div>';
 
 // ── Target List ──
 $provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
@@ -480,7 +490,7 @@ if ($target !== null) {
 
 		$page->begin_box(['title' => 'Stored Backups']);
 		try {
-			$listing = TargetBackups::list_grouped($target);
+			$listing = FleetBackups::list_grouped($target);
 			if ($listing['total_objects'] === 0) {
 				echo '<p class="text-muted">No backup objects found under '
 					. htmlspecialchars(TargetBackups::base_prefix($target)) . '</p>';

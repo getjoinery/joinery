@@ -23,10 +23,10 @@
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
 
-require_once(__DIR__ . '/../../../tests/lib/harness.php');
+require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 
 $db = DbConnector::get_instance()->get_db_link();

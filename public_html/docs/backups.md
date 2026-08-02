@@ -1,0 +1,268 @@
+# Backups
+
+Every Joinery site can back itself up: on a schedule, encrypted, uploaded to an
+S3-compatible bucket, with retention enforced. No agent, no SSH, no control
+plane. server_manager is a fleet layer on top of this, not a prerequisite for
+it — a site running server_manager backs *itself* up through exactly the same
+path as a standalone install, because no site's recovery may depend on another
+machine being alive.
+
+Configured at **Admin → System → Backups** (`/admin/admin_backups`).
+
+## What a backup is
+
+Two shapes, chosen by **How backups are taken**.
+
+**Incremental (default).** A chain: one full, then runs that carry only what
+changed. Measured on a real site, the first run's file archive was 193 MB and
+the next was 37 kB.
+
+```
+{path_prefix}/{slug}/chain-{YYYYMMDD_HHMMSS}/
+    manifest.json           the restore contract — order, hashes, sealed keys
+    files-0000.tar.gz.enc   the full
+    db-0000.sql.gz.enc
+    meta-0000.tar.gz.enc    virtualhost + a note of the run
+    files-0001.tar.gz.enc   an incremental
+    db-0001.sql.gz.enc
+    ...
+```
+
+**Full every time.** One self-contained archive per run:
+
+```
+{path_prefix}/{slug}/{project}-{timestamp}.tar.gz.enc            the archive
+{path_prefix}/{slug}/{project}-{timestamp}.tar.gz.enc.keys.json  its envelope
+```
+
+Everything is AES-256-CBC (PBKDF2, random salt). `slug` defaults to the project
+directory name — the same value a control plane would use for this site — so a
+standalone site that later joins a fleet keeps one location instead of starting
+a second pile beside the first.
+
+## How chains work
+
+The files archive uses GNU tar's `--listed-incremental` against a snapshot file
+at `{working dir}/.{slug}.snar`. tar records each directory's full contents, so
+restoring replays **deletions** as well as additions — a file removed last
+Tuesday is absent when you restore to Wednesday, rather than rising from the
+dead.
+
+The archive is taken from the **live tree**, not from a staging copy. This is
+not a preference: an rsync copy gives every file a new ctime, so tar sees the
+whole site as changed and every "incremental" silently becomes a full. Measured,
+and pinned by a test.
+
+Archiving a live tree means a file can change while tar is reading it. That is
+tolerated — GNU tar reports it with exit status 1, the run notes it and carries
+on, and the file's settled version ships with the next run. It also means the
+file set has no single point-in-time: the database dump is taken minutes after
+the file archive, so a deploy landing mid-backup can leave the two slightly
+skewed. For a web tree this is the normal trade; restore the newest run if it
+matters.
+
+**The database is dumped in full on every run.** A dump is the small part, and a
+half-applied database is not something anyone wants to restore.
+
+A run starts a **new chain** when there is nothing to extend, when the snapshot
+file is missing or empty, when the chain is older than the configured interval,
+when one full is carrying more than 30 incrementals, or when the chain's
+envelope no longer opens with the site key (the site key is disposable; a chain
+sealed to a lost one cannot be extended, only restored). Losing the snapshot —
+or the local manifest — is therefore safe: the next run costs one extra full,
+and never produces a broken backup.
+
+A run that **fails** partway clears the snapshot for the same reason: the
+snapshot advances while tar runs, before the run is committed to the manifest
+and confirmed in the bucket, so carrying it past a failure would quietly leave
+the failed run's changes out of the chain. The next run starts a fresh chain
+instead — one extra full, never a silently broken backup.
+
+Runs are serialized with a lock in the working directory; a run that finds
+another in progress reports itself skipped rather than racing it for the
+snapshot and the manifest.
+
+Retention over chains is **atomic**: a chain is kept or deleted whole. Deleting
+the oldest runs of a chain would leave incrementals whose full is gone, which is
+not a smaller backup — it is no backup, and it would look like a restore point
+right up until someone needed it.
+
+### Restoring a chain
+
+```
+php maintenance_scripts/sysadmin_tools/backup_envelope.php open \
+    --sidecar manifest.json --private ~/recovery.key --key-out /tmp/k
+bash maintenance_scripts/sysadmin_tools/restore_chain.sh {project} \
+    --artifacts {downloaded chain dir} --key-file /tmp/k [--seq N]
+```
+
+Every artifact is checked against its recorded size and hash **before anything
+is written**, so a truncated download fails while the live site is still intact.
+`--seq N` restores as at run N; the default is the newest. `--dry-run` reports
+the plan and needs no key.
+
+## Key model: one envelope per backup
+
+Every run mints its own random data key, encrypts the archive with it, and seals
+that key to two recipients:
+
+- **recovery** — the operator's recovery public key. The private half lives in a
+  password manager and never touches a server. A site holds only the public
+  half, so the same key can be configured on any number of sites and one private
+  key opens every backup from all of them.
+- **site** — a keypair the site itself holds at `config/backup_site_key`. This is
+  what lets a site restore itself unattended: pre-restore rollback snapshots and
+  routine restores need no operator. It is disposable — lose it and the recovery
+  key still opens everything, and the next run mints a new one.
+
+Nothing on the machine is precious as a result. Losing a site, or its whole
+disk, costs no ability to read any backup it ever made.
+
+The plaintext data key exists only as a `0600` file for the length of the run
+and is destroyed before the run ends. It is never passed in argv, and on the
+fleet path it never enters a management job row.
+
+`config/backup_site_key` is pinned to `600 www-data:www-data` by
+`fix_permissions.sh`. A key that exists but cannot be read is an error, never
+treated as absent — minting over a live key would orphan the site recipient for
+every backup already sealed to the first one.
+
+## Recovery key setup
+
+Generate the keypair, keep the private half, give the site the public half:
+
+```
+php maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key
+```
+
+Paste the printed public key into the Backups page, then **prove possession**.
+This step is load-bearing, not paperwork: sealing to a public key always appears
+to succeed, so a mistyped key would produce backups that all report themselves
+encrypted and recoverable while every one of them is permanently unopenable —
+discovered only during a real recovery. Until the proof is recorded, encrypted
+backups refuse to run.
+
+Two ways to prove it, both demonstrating the same X25519 secret:
+
+- **In the page** — paste the key from your password manager. It is used in the
+  browser (X25519 → HKDF-SHA256 → AES-256-GCM via WebCrypto) and never sent
+  anywhere; only the recovered sentence is posted, and the server re-checks it.
+- **At the command line** — `escrow_keypair.php unseal --private ~/recovery.key`.
+
+Replacing a proven key is a rotation, not an edit: backups already made carry
+keys sealed to the old public key. Pasting over a proven value is refused.
+
+Standing re-verification lives on **Recovery Readiness**, so "did I really save
+it?" has an answer on demand rather than only at setup time.
+
+## Retention
+
+- **Cloud** — keep the newest N restore points (default 4). Older ones are
+  deleted oldest-first, driven by this site's own run history rather than by a
+  bucket listing, so it can only ever delete objects this site recorded writing.
+  Retention runs last in a backup, and only after an upload is confirmed: a run
+  that failed must never be the run that decides an older backup is surplus.
+
+  Chains and standalone full backups are retained as **separate families**, and
+  every run prunes both: standalone archives are counted and deleted per restore
+  point, chains only ever whole. A site switched between modes keeps aging its
+  old backups out, and no pass can delete a chain's full out from under its
+  incrementals.
+- **Local** — keep M days in `/backups` (default 7). This also sweeps the
+  `auto_pre_*` snapshots a restore leaves behind, which are the size of a full
+  backup. An archive and its envelope are always swept together. `0` means never.
+  With **Delete the local copy once uploaded** on, a chain run removes its
+  artifacts as soon as they are confirmed offsite — the chain stays extendable
+  from just the manifest and the snapshot.
+
+## Restoring
+
+On the machine itself, nothing extra is needed — the envelope sits beside the
+archive and opens with the site's own key:
+
+```
+bash maintenance_scripts/sysadmin_tools/restore_project.sh {project} /backups/{archive}
+```
+
+From the bucket, with only the recovery key:
+
+```
+php maintenance_scripts/sysadmin_tools/backup_envelope.php open \
+    --sidecar {archive}.keys.json --private ~/recovery.key --key-out /tmp/k
+bash maintenance_scripts/sysadmin_tools/restore_project.sh {project} {archive} --key-file /tmp/k
+```
+
+`restore_project.sh` decides whether an archive is encrypted by reading the
+openssl magic bytes, not the filename, so a renamed archive still restores.
+
+Bucket credentials plus the password-manager private key are sufficient to
+recover from total loss of the machine.
+
+## The node tool
+
+`maintenance_scripts/sysadmin_tools/backup_envelope.php` is deliberately
+standalone — no platform bootstrap — so it works during disaster recovery when
+the site will not boot.
+
+| Command | What it does |
+|---|---|
+| `mint` | Mints a data key, seals it, writes the key file and the envelope |
+| `open` | Recovers the data key from an envelope or manifest, given a recovery or site key |
+| `relabel` | Points an envelope at the archive it belongs to |
+| `site-key` | Prints this site's public key, minting the keypair if absent |
+
+`backup_files.sh` archives the file tree, incrementally when given a snapshot
+path. `restore_chain.sh` applies a chain in order. Both take an explicit
+directory override so the incremental and deletion-replay behaviour is tested
+against a throwaway tree rather than a live site.
+
+`includes/BackupEnvelope.php` reads and writes the same format;
+`tests/backups/backup_envelope_cli_test.php` holds both to that contract in
+both directions, because drift there is silent and only surfaces at disaster
+time.
+
+## Scheduling
+
+The **Backup** scheduled task (`tasks/BackupRun.php`) runs it. It is not active
+on install: a site with no target configured runs nothing and warns about
+nothing. Activate it on **Scheduled Tasks**, where its frequency and time are
+also set. It supports a dry run, which reports exactly what a real run would do
+without producing or deleting anything.
+
+A run is recorded in `bkh_backup_history` before it starts and updated when it
+finishes — including when it fails. A site whose backups have been failing for a
+month looks identical to a healthy one if only successes are written down.
+
+## Artifact naming
+
+`includes/BackupNaming.php` owns which files are backups, what each one is, and
+what restoring it would do. Every surface consults it — the management API's
+local listing, the node Backups tab, the job builder's globs.
+
+Recognized suffixes are matched longest-first: `.sql.gz` is a suffix of
+`.sql.gz.enc`, so a shortest-first match would classify every encrypted dump as
+plaintext and hand the restore engine a file it will not decrypt.
+
+## Settings
+
+| Setting | Default | What it controls |
+|---|---|---|
+| `backup_recovery_public_key` | — | The key every backup seals to |
+| `backup_target_id` | none | Which target scheduled backups upload to |
+| `backup_type` | `project` | Whole site, or database only |
+| `backup_mode` | `chain` | Incremental chains, or a full every time |
+| `backup_full_interval_days` | `7` | Days before a chain rolls to a fresh full |
+| `backup_retention_count` | `4` | Restore points (or chains) kept offsite |
+| `backup_output_dir` | `/backups` | Working directory backups are built in |
+| `backup_exclude` | — | Extra directory names to skip (build output, caches). A name matches a directory of that name at **any depth** — this is tar's exclude semantics, and it applies to the built-in skips (`vendor`, `cache`, `tmp`, `logs`, …) too |
+| `backup_local_retention_days` | `7` | Days kept locally; 0 never sweeps |
+| `backup_delete_local_after_upload` | off | Remove the local copy once uploaded |
+| `backup_path_slug` | project dir | Folder in the bucket this site files under |
+
+## The account backups run as
+
+The scheduled task runs as the web user, which is what `fix_permissions.sh`
+makes the owner of the site tree. A backup that cannot read part of the tree
+**fails** rather than shipping a partial archive, and says which file it could
+not read — so a permissions problem surfaces as a failed run with a specific
+cause, not as a backup that turns out to be incomplete on the day it is needed.

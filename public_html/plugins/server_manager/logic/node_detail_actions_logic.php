@@ -8,7 +8,7 @@
  *
  *   - CSRF once, for every action. The token is validated a single time before
  *     any handler runs, so all 18 actions are covered (the inline version only
- *     guarded delete_node and escrow_backup_key).
+ *     guarded delete_node).
  *   - Uniform error handling (R-3). A builder that throws produces a user-facing
  *     message and a redirect back to the right tab — never an unhandled 500.
  *     Only check_status lacked a try/catch before; now none can.
@@ -36,7 +36,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_nod
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
+require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
 
 class NodeDetailActions {
@@ -46,7 +46,6 @@ class NodeDetailActions {
 		'check_status'             => 'overview',
 		'backup_database'          => 'backups',
 		'backup_project'           => 'backups',
-		'escrow_backup_key'        => 'backups',
 		'copy_database'            => 'database',
 		'copy_database_local'      => 'database',
 		'restore_database'         => 'database',
@@ -123,17 +122,6 @@ class NodeDetailActions {
 				self::ensure_backup_key_if_encrypting($node, $params);
 				$steps = JobCommandBuilder::build_backup_project($node, $params);
 				$job = ManagementJob::createJob($node->key, 'backup_project', $steps, $params, $uid);
-				return self::jobUrl($job);
-			}
-
-			// Seal this node's backup key to the recovery key. The reading and
-			// sealing happen in a control-plane step (the node's SSH key is not
-			// readable by the web user), and the key itself never reaches a job
-			// row — the step prints only its fingerprint.
-			case 'escrow_backup_key': {
-				BackupKeyCustody::escrow_public_key(); // refuse now if recovery is not set up
-				$steps = JobCommandBuilder::build_escrow_backup_key($node);
-				$job = ManagementJob::createJob($node->key, 'escrow_backup_key', $steps, null, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -421,7 +409,7 @@ class NodeDetailActions {
 				// record would orphan them from the node they belong to. Delete them from the
 				// target's Stored Backups panel first. Fail safe — if a target can't be
 				// listed we cannot confirm zero, so we also refuse.
-				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
+				require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 				$bk = TargetBackups::slug_backup_count($node->get('mgn_slug'));
 				if ($bk['count'] > 0) {
 					$session->save_message(new DisplayMessage(
@@ -499,14 +487,14 @@ class NodeDetailActions {
 	 * encrypting too. Throws (message shown on the tab) when recovery is not set
 	 * up and verified.
 	 *
-	 * Only the settings are checked here. Sealing this node's key rides along as
-	 * the job's first step, where the agent — which can read the node's SSH key —
-	 * does the work.
+	 * Checked here so an unconfigured or unproven recovery key is refused while
+	 * the operator is looking at the button, rather than part-way through a
+	 * backup that then has nothing it can seal its key to.
 	 */
 	private static function ensure_backup_key_if_encrypting($node, $params): void {
 		$will_encrypt = !empty($params['encryption']) || JobCommandBuilder::get_target($node);
 		if ($will_encrypt) {
-			BackupKeyCustody::escrow_public_key();
+			BackupRecoveryKey::public_key();
 		}
 	}
 

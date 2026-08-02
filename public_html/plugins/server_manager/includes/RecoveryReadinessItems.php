@@ -6,22 +6,21 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * Readiness page (declared under `recoveryReadiness` in plugin.json).
  *
  * Two item families:
- *   - The backup recovery private key: the one secret that opens every escrowed
- *     node backup key. Verified by the same in-browser possession ceremony the
- *     setup walkthrough uses — now standing, so "did I really save it?" has an
- *     answer on demand, not only at setup time.
+ *   - The backup recovery private key: the one secret that opens every backup
+ *     from every node. Verified by the in-browser possession ceremony, standing
+ *     rather than one-off, so "did I really save it?" has an answer on demand.
  *   - One attestation item per enabled backup target: after total server loss,
  *     the provider console login is the only non-circular way back to the
  *     backups, and the platform cannot check it for you.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 class RecoveryReadinessItems {
 
 	/** Provider for RecoveryReadiness::items() — returns a list of item arrays. */
 	public static function items() {
-		require_once(__DIR__ . '/BackupKeyCustody.php');
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 
 		$items = array();
 		$items[] = self::recoveryKeyItem();
@@ -32,53 +31,41 @@ class RecoveryReadinessItems {
 	}
 
 	private static function recoveryKeyItem() {
-		$state = BackupKeyCustody::setup_state();
+		$state = BackupRecoveryKey::setup_state();
 
 		$item = array(
 			'key'      => 'backup_recovery_key',
 			'title'    => 'Backup recovery private key',
-			'protects' => 'Every encrypted database backup from every managed node. If the nodes are lost and this key is too, those backups can never be opened.',
+			'protects' => 'Every encrypted backup from every node. Each backup carries its own key sealed to this one, so if the nodes are lost and this key is too, none of them can ever be opened.',
 			'verify'   => 'ceremony',
 		);
 
 		if (!$state['is_ready']) {
 			$item['state'] = 'not_configured';
 			$item['state_text'] = ($state['state'] === 'unconfigured')
-				? 'No backup recovery key is set up — encrypted backups have no recovery story until one is. Set it up on the Backup Targets page.'
-				: 'A recovery key is configured but not usable (' . ($state['error'] !== '' ? $state['error'] : 'not yet verified') . '). Finish the setup on the Backup Targets page.';
+				? 'No backup recovery key is set up — encrypted backups refuse to run until one is.'
+				: 'A recovery key is configured but not usable (' . ($state['error'] !== '' ? $state['error'] : 'not yet verified') . '). Finish the setup to enable encrypted backups.';
 			return $item;
 		}
 
-		$sealed = self::sealedNodeSummary();
-
 		$item['label'] = '{site} — backup recovery key (' . $state['fingerprint'] . ')';
 		$item['facts'] = array(
-			'Key fingerprint'      => $state['fingerprint'] . '…',
-			'Node keys sealed to it' => $sealed['count'] > 0 ? $sealed['count'] . ' (' . $sealed['names'] . ')' : 'none yet',
+			'Key fingerprint' => $state['fingerprint'] . '…',
+			'Opens'           => 'every backup made by any site holding this public key',
 		);
 		$item['verify_call'] = 'RecoveryReadinessItems::verify_recovery_key';
 		$item['ceremony'] = array(
-			'challenge'   => BackupKeyCustody::browser_challenge(),
-			'public_key'  => base64_encode(BackupKeyCustody::parse_public_key()),
-			'cli_command' => "echo '" . BackupKeyCustody::possession_challenge() . "' | php "
+			'challenge'   => BackupRecoveryKey::browser_challenge(),
+			'public_key'  => base64_encode(BackupRecoveryKey::parse_public_key()),
+			// Sent rather than assumed: the browser derives the same HKDF context
+			// the server used, so a rename on either side would otherwise break
+			// the ceremony silently and only for people trying to verify a key.
+			'info_prefix' => BackupRecoveryKey::BROWSER_INFO,
+			'cli_command' => "echo '" . BackupRecoveryKey::possession_challenge() . "' | php "
 				. PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php'
 				. ' unseal --private /path/to/recovery.key',
 		);
 		return $item;
-	}
-
-	/** Distinct live nodes whose backup keys are escrowed, for the facts line. */
-	private static function sealedNodeSummary() {
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare(
-			"SELECT DISTINCT m.mgn_slug
-			   FROM bke_backup_key_escrow b
-			   JOIN mgn_managed_nodes m ON m.mgn_id = b.bke_mgn_node_id
-			  WHERE b.bke_kind = 'backup' AND m.mgn_delete_time IS NULL
-			  ORDER BY m.mgn_slug");
-		$q->execute();
-		$slugs = $q->fetchAll(PDO::FETCH_COLUMN);
-		return array('count' => count($slugs), 'names' => implode(', ', $slugs));
 	}
 
 	/** Where each provider's console sign-in lives (for the guided attestation). */
@@ -125,11 +112,11 @@ class RecoveryReadinessItems {
 	 * marker (idempotent — it rewrites the same fingerprint).
 	 */
 	public static function verify_recovery_key(array $input) {
-		require_once(__DIR__ . '/BackupKeyCustody.php');
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 		try {
-			BackupKeyCustody::record_possession_proof((string)($input['escrow_proof'] ?? ''));
+			BackupRecoveryKey::record_possession_proof((string)($input['escrow_proof'] ?? ''));
 			return array('ok' => true, 'message' => 'Your saved key opened the challenge — it is the right key.');
-		} catch (BackupKeyCustodyException $e) {
+		} catch (BackupRecoveryKeyException $e) {
 			return array('ok' => false, 'message' => $e->getMessage());
 		}
 	}

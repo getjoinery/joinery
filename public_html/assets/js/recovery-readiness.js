@@ -3,7 +3,7 @@
  *
  * Ceremony: the operator pastes a recovery private key; the challenge the
  * server sealed to the configured public key is opened right here with
- * WebCrypto (X25519 + HKDF-SHA256 + AES-256-GCM, the BackupKeyCustody
+ * WebCrypto (X25519 + HKDF-SHA256 + AES-256-GCM, the BackupRecoveryKey
  * browser-challenge layout). The key never leaves the page: no fetch, no form
  * field, cleared the moment it is used. Only the recovered proof string —
  * public by construction — goes into the form.
@@ -91,7 +91,7 @@ window.recoveryReadiness = (function () {
 		var hkdfKey = await subtle.importKey('raw', shared, 'HKDF', false, ['deriveBits']);
 		zero(new Uint8Array(shared));
 
-		var info = concat(utf8(infoPrefix || 'sm-escrow-possession:'), ephPub, recipientPub);
+		var info = concat(utf8(infoPrefix || 'joinery-backup-recovery-possession:'), ephPub, recipientPub);
 		var bits = await subtle.deriveBits(
 			{ name: 'HKDF', hash: 'SHA-256', salt: new Uint8Array(), info: info }, hkdfKey, 256);
 

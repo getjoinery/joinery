@@ -1138,3 +1138,27 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "SELECT 1;";
 	$migrations[] = $migration;
+
+	// The recovery keypair became core infrastructure: a standalone site with no
+	// server_manager still needs one before it can encrypt its own backups. Carry
+	// the configured public key and its possession proof onto the core setting
+	// names, so an operator who already ran the ceremony is not asked again.
+	$migration = array();
+	$migration['database_version'] = '161';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'adopt_core_backup_recovery_key.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+	// Per-node backup key escrow is retired — each backup seals its own key to
+	// the recovery key as it is made. The recovery key moved to core setting
+	// names in 161; this removes the two rows it left behind, so every stored
+	// setting stays declared.
+	$migration = array();
+	$migration['database_version'] = '162';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'purge_escrow_setting_rows.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;
+
+

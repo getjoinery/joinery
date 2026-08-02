@@ -30,6 +30,7 @@
     "api": "API",
     "api_rate_limits": "API rate limiting",
     "logging": "Data retention",
+    "backups": "Backups",
     "upgrade": "Upgrade settings",
     "cloud_storage": "Cloud storage",
     "oauth": "OAuth providers",
@@ -54,6 +55,115 @@
     "inbound_provider": "Inbound provider settings"
   },
   "settings": [
+    {
+      "name": "backup_recovery_public_key",
+      "default": "",
+      "group": "backups",
+      "label": "Backup recovery public key",
+      "type": "textarea",
+      "rows": 3,
+      "helptext": "The public half of the recovery keypair whose private half you keep in your password manager. Every backup this site makes seals a copy of its encryption key to this value, so that one private key opens every backup forever. Set it through the Backup recovery panel, which generates the keypair, takes the public half, and then has you open a challenge to prove the private half works. That proof is the whole point: a mistyped key would seal happily while producing archives nobody can ever open. Encrypted backups refuse to run until it is proven."
+    },
+    {
+      "name": "backup_recovery_public_key_proven_fpr",
+      "default": "",
+      "managed": true,
+      "helptext": "Fingerprint of the recovery public key whose private half has been demonstrated. Written by BackupRecoveryKey after the possession ceremony; its presence is what makes the recovery key honored."
+    },
+    {
+      "name": "backup_target_id",
+      "default": "0",
+      "group": "backups",
+      "label": "Backup target",
+      "type": "select",
+      "helptext": "Scheduled backups are uploaded here. With none chosen the backup task skips, since there would be nowhere to put the result.",
+      "options_from": "CoreSettingOptions::backupTargets",
+      "options_include": "includes/CoreSettingOptions.php"
+    },
+    {
+      "name": "backup_type",
+      "default": "project",
+      "group": "backups",
+      "label": "What to back up",
+      "type": "select",
+      "options": {
+        "project": "Whole site (files, database, web server config)",
+        "database": "Database only"
+      },
+      "helptext": "The whole site is the restorable unit: files without their database, or the reverse, will not bring a site back on their own. Database only is for a site whose files come from somewhere else, such as a rebuild-from-source deployment."
+    },
+    {
+      "name": "backup_mode",
+      "default": "chain",
+      "group": "backups",
+      "label": "How backups are taken",
+      "type": "select",
+      "options": {
+        "chain": "Incremental — a periodic full, then only what changed",
+        "full": "Full every time"
+      },
+      "helptext": "Incremental uploads only the files that changed since the last run, and a restore replays deletions as well as changes, so any day restores to exactly how the site looked. The database is dumped in full every run either way — it is the small part, and a partly-applied database is not something anyone wants to restore."
+    },
+    {
+      "name": "backup_full_interval_days",
+      "default": "7",
+      "group": "backups",
+      "label": "Days before a fresh full backup",
+      "type": "text",
+      "helptext": "How long one chain runs before the next backup starts a new one with a full. Shorter chains cost more storage and restore faster; longer chains cost less and mean more archives to apply. Only applies to incremental backups."
+    },
+    {
+      "name": "backup_retention_count",
+      "default": "4",
+      "group": "backups",
+      "label": "Restore points to keep offsite",
+      "type": "text",
+      "helptext": "How many backups to keep in the bucket. Older ones are deleted oldest-first, and only ever after a newer backup has been confirmed uploaded — a run that failed never causes an older backup to be removed."
+    },
+    {
+      "name": "backup_output_dir",
+      "default": "/backups",
+      "group": "backups",
+      "label": "Where backups are written on this machine",
+      "type": "text",
+      "helptext": "The working directory backups are built in before upload, and the one the local sweep prunes. /backups suits a machine you control; a shared host that will not let you write outside your home directory needs a path here that you can."
+    },
+    {
+      "name": "backup_exclude",
+      "default": "",
+      "group": "backups",
+      "label": "Also leave out of backups",
+      "type": "text",
+      "helptext": "Comma-separated directory names, on top of the ones always skipped (backups, vendor, node_modules, .git, logs, cache, tmp, sessions). For build output and regenerable caches — anything large that a restore would rebuild anyway. Names only, not paths — and a name matches a directory of that name at any depth in the tree."
+    },
+    {
+      "name": "backup_local_retention_days",
+      "default": "7",
+      "group": "backups",
+      "label": "Days to keep backups on this machine",
+      "type": "text",
+      "helptext": "Local copies are a convenience, not the archive. This also sweeps the auto_pre_* snapshots a restore leaves behind, which are the same size as a full backup and were never cleaned up by anything. 0 means never delete local files."
+    },
+    {
+      "name": "backup_delete_local_after_upload",
+      "default": "0",
+      "group": "backups",
+      "label": "Delete the local copy once uploaded",
+      "type": "select",
+      "options": {
+        "0": "No — keep it until it ages out",
+        "1": "Yes — upload and remove"
+      },
+      "helptext": "For machines with little disk. Leaving it off means a restore can use the local copy without a download."
+    },
+    {
+      "name": "backup_path_slug",
+      "default": "",
+      "group": "backups",
+      "label": "Name this site files backups under",
+      "type": "text",
+      "helptext": "The folder inside the bucket that holds this site's backups. Blank uses the project directory name, which is also what a fleet control plane would call this site — so leaving it blank keeps one pile rather than starting a second beside the first. Letters, numbers, hyphens and underscores only."
+    },
     {
       "name": "activation_required_login",
       "default": "1",
@@ -463,7 +573,7 @@
     {
       "name": "vault_deferred_work_slice_seconds",
       "default": "10",
-      "helptext": "How long one batch of deferred work may run. Deferred work is work that can only happen while a user has their vault unlocked \u2014 parsing encrypted mail, and the AI email features on an encrypted domain. It runs in its own request, not on the keep-alive ping, so a slow model can never stall the ping that holds the window open.",
+      "helptext": "How long one batch of deferred work may run. Deferred work is work that can only happen while a user has their vault unlocked — parsing encrypted mail, and the AI email features on an encrypted domain. It runs in its own request, not on the keep-alive ping, so a slow model can never stall the ping that holds the window open.",
       "group": "vault_unlock",
       "label": "Deferred work batch length (seconds)",
       "type": "number",

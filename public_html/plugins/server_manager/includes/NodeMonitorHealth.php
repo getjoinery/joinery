@@ -10,14 +10,15 @@
  * Every surface that reports monitoring state uses this class, so the
  * dashboard, the node detail page and the uptime task cannot disagree.
  *
- * It also surfaces backup-key escrow problems (backup_escrow_problems), in the
+ * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
- * @version 1.4 - escrow problems are derived from BackupKeyCustody::setup_state() (one survey
- *                shared with the walkthrough and the node Backups tab), and "recovery not set up
- *                at all" is surfaced as its own control-plane row linking to the walkthrough
- * @version 1.3 - escrow check matches ANY escrow row (a restored older key is still recoverable);
- *                un-escrowed agent signing key surfaced as a control-plane problem row
+ * @version 1.6 - surfaces a fleet trust root whose only offsite copy (this site's own whole-site
+ *                backup) does not exist yet — the implicit guarantee that replaced the signing-key
+ *                escrow record is made checkable
+ * @version 1.5 - backup_recovery_problems reports the one thing that can still be wrong: recovery
+ *                itself is not set up. Per-node key rows are gone — a backup seals its own key as
+ *                it is made, so a node holds nothing that can go missing
  * @version 1.2
  */
 
@@ -179,75 +180,76 @@ class NodeMonitorHealth {
 	}
 
 	/**
-	 * Backup-key escrow problems across all nodes, in the same shape as
-	 * problems() so the dashboard renders them identically. A backup you cannot
-	 * restore is as silent as monitoring that cannot alert, so it is surfaced the
-	 * same way. Two problem types:
-	 *   - a node has a backup target (encryption forced) but NO escrow row →
-	 *     "Backup key not escrowed — offsite backups unrecoverable if lost"
-	 *   - the last on-disk key fingerprint matches NO escrow row (any row — a
-	 *     node legitimately runs an older escrowed key after a restore) → the
-	 *     node key was regenerated out of band and is not escrowed.
-	 *   - the agent signing key exists but has no escrow row while escrow is
-	 *     configured → the fleet trust root dies with the control plane.
-	 *   - recovery itself was never set up → no node can take an encrypted backup
-	 *     at all, which otherwise surfaces nowhere until a backup is refused.
+	 * Backup recovery problems, in the same shape as problems() so the dashboard
+	 * renders them identically. A backup you cannot restore is as silent as
+	 * monitoring that cannot alert, so it is surfaced the same way.
 	 *
-	 * The survey comes from BackupKeyCustody::setup_state(), so the dashboard,
+	 * Two things can be wrong:
+	 *   - recovery was never set up, in which case no node can take an encrypted
+	 *     backup at all. Per-node key problems no longer exist — each backup
+	 *     seals its own key to the recovery key as it is made, so a node holds
+	 *     nothing that can go missing.
+	 *   - the agent signing key (the fleet trust root) exists but this site has
+	 *     never completed a whole-site backup. The key's only offsite copy is
+	 *     inside this site's own encrypted project archive — that is the design,
+	 *     replacing the old standalone recovery record — so until one such
+	 *     backup is confirmed offsite, losing this machine loses the trust root
+	 *     and every fleet agent must be re-keyed by hand.
+	 *
+	 * The state comes from BackupRecoveryKey::setup_state(), so the dashboard,
 	 * the walkthrough, and the node Backups tab cannot disagree about what is
 	 * outstanding.
 	 */
-	public static function backup_escrow_problems(): array {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyWalkthrough.php'));
+	public static function backup_recovery_problems(): array {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
-		$setup    = BackupKeyCustody::setup_state();
-		$survey   = BackupKeyCustody::survey_nodes();
+		$setup = BackupRecoveryKey::setup_state();
+		if (!$setup['is_ready']) {
+			return [[
+				'node'   => null,
+				'slug'   => 'control-plane',
+				'name'   => 'Control plane',
+				'id'     => 0,
+				'link'   => BackupRecoveryKey::SETUP_URL,
+				'health' => self::result('recovery', 'Backup key recovery not set up',
+					BackupRecoveryKey::outstanding_summary($setup)
+					. ' Encrypted backups do not run until it is set up.', true),
+			]];
+		}
+
 		$problems = [];
-
-		if ($setup['state'] !== 'ready') {
+		if (is_file(PathHelper::getSiteRoot() . '/config/agent_signing_key')
+			&& !self::has_offsite_project_backup()) {
 			$problems[] = [
 				'node'   => null,
 				'slug'   => 'control-plane',
 				'name'   => 'Control plane',
 				'id'     => 0,
-				'link'   => BackupKeyWalkthrough::URL,
-				'health' => self::result('escrow', 'Backup key recovery not set up',
-					BackupKeyWalkthrough::outstanding_summary($setup)
-					. ' Encrypted backups do not run until it is set up.', true),
+				'link'   => '/admin/admin_backups',
+				'health' => self::result('recovery', 'Fleet trust root not yet backed up',
+					'The agent signing key lives only in config/ on this machine, and its offsite copy '
+					. 'is this site\'s own whole-site backup — which has never completed. Until one is '
+					. 'confirmed offsite, losing this machine loses the fleet trust root.', true),
 			];
-		}
-
-		foreach ($survey['pending'] as $pending) {
-			$problems[] = [
-				'node'   => null,
-				'slug'   => $pending['slug'],
-				'name'   => $pending['name'],
-				'id'     => (int)$pending['id'],
-				'health' => self::result('escrow', 'Backup key not escrowed',
-					$pending['reason'] === 'regenerated'
-						? 'Node backup key was regenerated out of band and is not escrowed — new backups cannot be recovered.'
-						: 'Backup key not escrowed — offsite backups are unrecoverable if this node is lost.',
-					true),
-			];
-		}
-
-		try {
-			if ($setup['agent_signing'] === 'pending') {
-				$problems[] = [
-					'node'   => null,
-					'slug'   => 'control-plane',
-					'name'   => 'Control plane',
-					'id'     => 0,
-					'health' => self::result('escrow', 'Agent signing key not escrowed',
-						'The agent signing key (fleet trust root) has no escrow row — it is lost with the control plane. Publishing a release escrows it automatically.', true),
-				];
-			}
-		} catch (\Throwable $e) {
-			error_log('NodeMonitorHealth: signing-key escrow check failed: ' . $e->getMessage());
 		}
 		return $problems;
+	}
+
+	/** Has this site ever confirmed a whole-site backup in the bucket? */
+	private static function has_offsite_project_backup(): bool {
+		try {
+			require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+			$rows = new MultiBackupHistory(
+				array('type' => 'project', 'outcome' => 'success', 'offsite' => true, 'deleted' => false),
+				array('bkh_start_time' => 'DESC'), 1, 0);
+			$rows->load();
+			foreach ($rows as $r) { return true; }
+		} catch (\Throwable $e) {
+			// An unreadable history must not paint a false problem row.
+			error_log('NodeMonitorHealth: backup history check failed: ' . $e->getMessage());
+			return true;
+		}
+		return false;
 	}
 
 	private static function result($state, $label, $detail, $is_problem): array {

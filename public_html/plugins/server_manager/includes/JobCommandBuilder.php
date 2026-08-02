@@ -543,29 +543,30 @@ class JobCommandBuilder {
 
 		$steps = [];
 
-		// Seal the node's key to the recovery key first (minting it if the node has
-		// none), then verify-or-fail that it is there. Sealing first is what makes
-		// the verify meaningful: a node-only key that was never escrowed is exactly
-		// the unrecoverable-after-loss footgun.
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_escrow_backup_key($node);
-			$steps[] = self::step_verify_backup_key();
-			$steps[] = self::step_report_key_fingerprint();
-		}
-
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
 			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
+
+		// The key is minted before the engine runs, because the engine encrypts
+		// with it. Directory first, since that is where the key lands.
+		if (!empty($params['encryption'])) {
+			$steps[] = self::step_mint_envelope($node);
+			$flags .= ' --key-file ' . escapeshellarg(self::ENVELOPE_KEY_PATH);
+		}
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
 			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
 			'timeout' => 3600];
 
+		if (!empty($params['encryption'])) {
+			$steps[] = self::step_finalize_envelope($node);
+		}
+
 		// Append upload step if node has a cloud target
-		self::append_upload_steps($steps, $node);
+		self::append_upload_steps($steps, $node, !empty($params['encryption']));
 
 		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
-			'cmd' => "ls -lht /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -5",
+			'cmd' => 'ls -lht ' . self::backup_glob() . ' 2>/dev/null | head -5',
 			'continue_on_error' => true];
 
 		return $steps;
@@ -596,15 +597,16 @@ class JobCommandBuilder {
 
 		$steps = [];
 
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_escrow_backup_key($node);
-			$steps[] = self::step_verify_backup_key();
-			$steps[] = self::step_report_key_fingerprint();
-		}
-
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
 			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
+
+		// The key is minted before the engine runs, because the engine encrypts
+		// the archive with it as tar streams out.
+		if (!empty($params['encryption'])) {
+			$steps[] = self::step_mint_envelope($node);
+			$flags .= ' --key-file ' . escapeshellarg(self::ENVELOPE_KEY_PATH);
+		}
 
 		// Emit the credentials preamble so the script inherits DB_NAME/DB_USER/
 		// PGPASSWORD from the environment instead of self-harvesting the config,
@@ -614,7 +616,11 @@ class JobCommandBuilder {
 			'cmd' => "{$creds} && bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
 			'timeout' => 3600];
 
-		self::append_upload_steps($steps, $node);
+		if (!empty($params['encryption'])) {
+			$steps[] = self::step_finalize_envelope($node);
+		}
+
+		self::append_upload_steps($steps, $node, !empty($params['encryption']));
 
 		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
 			'cmd' => "ls -lht /backups/ 2>/dev/null | head -5",
@@ -808,16 +814,31 @@ class JobCommandBuilder {
 			}
 		}
 
+		// Neither a local path nor a downloadable cloud path leaves nothing to
+		// restore FROM. Left unchecked this becomes an empty argument, and the
+		// engine is asked to restore a file called "" after the pre-restore
+		// snapshot has already run — a confusing failure in the one operation
+		// where clarity matters most.
+		if (!$local_path) {
+			throw new Exception(
+				'No backup file given to restore. Pass local_path, or cloud_path on a node with a configured target.');
+		}
+
 		$restore_path = escapeshellarg($local_path);
 		$engine       = escapeshellarg("{$scripts}/sysadmin_tools/restore_database.sh");
 
 		// One restore engine for every path: it verifies the archive (decrypting
-		// an .enc with the node key) BEFORE dropping anything, replaces the schema,
-		// and loads under ON_ERROR_STOP — a bad key or corrupt file leaves the
-		// database intact. The key path is resolved in this non-sudo shell and
-		// passed absolute so it survives any sudo context (B-2).
+		// an .enc with the resolved key) BEFORE dropping anything, replaces the
+		// schema, and loads under ON_ERROR_STOP — a bad key or corrupt file
+		// leaves the database intact.
+		// The trailing cleanup removes the key step_resolve_restore_key unsealed
+		// into a temp file — whatever the engine's outcome, and without eating
+		// its exit code. A usable decryption key must not outlive the restore
+		// that needed it. The node's standing legacy key is not ours to remove.
+		$key_resolve = self::step_resolve_restore_key($node, $restore_path);
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
+			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
+				. '; RC=$?; if [ -n "$KEY_PATH" ] && [ "$KEY_PATH" != "$HOME/.joinery_backup_key" ]; then rm -f "$KEY_PATH"; fi; exit $RC',
 			'timeout' => 3600];
 
 		// Verify
@@ -1057,58 +1078,111 @@ class JobCommandBuilder {
 
 	// ── Backup target helpers ──
 
-	/**
-	 * Verify-or-fail step: the escrowed backup key must already be present on the
-	 * node. Node-side generation is deleted — the control plane mints and pushes
-	 * keys (BackupKeyCustody) so nothing exists on a node without an escrow row.
-	 */
-	/**
-	 * Seal this node's backup key to the recovery key — mints it first if the node
-	 * has none. Runs on the control plane, not on the node.
-	 *
-	 * Escrow has to read the key off the node over SSH, and a node's SSH key is
-	 * owned by the operator account at mode 600 — the web-server user cannot read
-	 * it, so doing this inside the web request that asks for it fails on every
-	 * node whose key is not web-readable. The agent owns those keys (it runs every
-	 * other node step), so the work belongs on its side of the fence.
-	 *
-	 * Key material still never reaches a job row: escrow_node_key.php reads, seals
-	 * and drops the key inside its own process, printing only the fingerprint.
-	 */
-	public static function step_escrow_backup_key($node) {
-		$script = PathHelper::getIncludePath('plugins/server_manager/includes/escrow_node_key.php');
-		return ['type' => 'local', 'label' => 'Seal backup key to the recovery key',
-			'cmd' => 'php ' . escapeshellarg($script) . ' --node=' . intval($node->key),
-			'timeout' => 120];
-	}
-
-	/** Escrow a node's backup key on its own (the node Backups tab action). */
-	public static function build_escrow_backup_key($node, $params = []) {
-		return [self::step_escrow_backup_key($node)];
-	}
-
-	private static function step_verify_backup_key() {
-		return ['type' => 'ssh', 'label' => 'Verify encryption key present',
-			'cmd' => '[ -s ~/.joinery_backup_key ] || { echo BACKUP_KEY_MISSING; exit 1; }'];
-	}
+	/** Working paths for the envelope, before the archive's real name is known. */
+	const ENVELOPE_KEY_PATH     = '/backups/.jy_envelope.key';
+	const ENVELOPE_SIDECAR_PATH = '/backups/.jy_envelope.keys.json';
 
 	/**
-	 * Report the on-disk key fingerprint so JobResultProcessor can detect a key
-	 * that was manually regenerated on the node (fingerprint no longer matches the
-	 * newest escrow row) on the next backup rather than at restore time.
+	 * Mint the encryption key for this backup, on the node.
 	 *
-	 * The fingerprint must equal BackupKeyCustody::fingerprint() = sha256 of the
-	 * key VALUE, so JobResultProcessor can compare it to bke_key_fingerprint. Hence
-	 * `tr -d` strips the trailing newline the key file carries before hashing —
-	 * hashing the file directly (sha256sum ~/.joinery_backup_key) would fold in the
-	 * newline and never match. And no double quotes inside the command: the agent
-	 * sends the step verbatim to the remote shell, and a backslash-escaped inner
-	 * quote (the old `cut -d" "`) mangles on the JSON round-trip and yields empty.
+	 * Every run gets its own random key, sealed to the operator's recovery key
+	 * and to the node's own site key, and written beside the archive as a JSON
+	 * envelope. Nothing precious is left on the node: the plaintext key exists
+	 * only as a 0600 file for the length of the run, and losing the node loses
+	 * no ability to read any backup it made.
+	 *
+	 * The recovery PUBLIC key travels in the step command, which is safe and is
+	 * the point — a public key seals but cannot open, so a job row that persists
+	 * forever holds nothing worth stealing. The sealing itself happens on the
+	 * node, so the plaintext key never crosses the wire in either direction.
+	 *
+	 * Reading the recovery key here means an unconfigured or unproven one fails
+	 * when the job is BUILT, with a message the operator sees immediately,
+	 * rather than part-way through a backup that then cannot be encrypted.
 	 */
-	private static function step_report_key_fingerprint() {
-		return ['type' => 'ssh', 'label' => 'Report backup key fingerprint',
-			'cmd' => "echo \"BACKUP_KEY_FPR=\$(tr -d '\\n\\r' < ~/.joinery_backup_key | sha256sum | cut -c1-64)\"",
-			'continue_on_error' => true];
+	private static function step_mint_envelope($node) {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+
+		$recovery_pub = base64_encode(BackupRecoveryKey::public_key());
+		$scripts      = self::get_scripts_path($node);
+		$project_root = dirname(rtrim($node->get('mgn_web_root'), '/'));
+		$site_key     = $project_root . '/config/backup_site_key';
+
+		$cmd = 'php ' . escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php') . ' mint'
+			. ' --recovery-pub ' . escapeshellarg($recovery_pub)
+			. ' --artifact pending'
+			. ' --key-out ' . escapeshellarg(self::ENVELOPE_KEY_PATH)
+			. ' --sidecar-out ' . escapeshellarg(self::ENVELOPE_SIDECAR_PATH)
+			. ' --site-key ' . escapeshellarg($site_key);
+
+		return ['type' => 'ssh', 'label' => 'Mint backup encryption key', 'cmd' => $cmd, 'timeout' => 120];
+	}
+
+	/**
+	 * Point the envelope at the archive that was just written, and destroy the
+	 * plaintext key.
+	 *
+	 * The key is shredded whether or not the relabel worked: leaving it behind
+	 * would put a usable decryption key next to the thing it decrypts, which is
+	 * the one arrangement the whole design exists to avoid. A failed relabel
+	 * still fails the step, so the operator sees an archive whose envelope needs
+	 * attention rather than one silently missing its key.
+	 */
+	private static function step_finalize_envelope($node) {
+		$scripts = self::get_scripts_path($node);
+		$tool    = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
+		$key     = escapeshellarg(self::ENVELOPE_KEY_PATH);
+		$sidecar = escapeshellarg(self::ENVELOPE_SIDECAR_PATH);
+
+		$resolve = 'ARCHIVE=$(ls -t ' . self::backup_glob() . ' 2>/dev/null | head -1)';
+		$shred   = '{ shred -u ' . $key . ' 2>/dev/null || rm -f ' . $key . '; }';
+
+		$cmd = $resolve
+			. ' && test -n "$ARCHIVE"'
+			. ' && php ' . $tool . ' relabel --sidecar ' . $sidecar . ' --artifact "$ARCHIVE" --out "$ARCHIVE.keys.json"'
+			. '; RC=$?; ' . $shred . '; exit $RC';
+
+		return ['type' => 'ssh', 'label' => 'Seal the backup key to the archive', 'cmd' => $cmd, 'timeout' => 120];
+	}
+
+	/**
+	 * The archive shapes a node may hold. One list, because "which files are
+	 * backups" was previously spelled out separately at every place that had to
+	 * decide, and they drifted.
+	 */
+	public static function backup_glob() {
+		require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
+		return BackupNaming::shell_glob();
+	}
+
+	/**
+	 * Shell that leaves the decryption key for an archive in KEY_PATH.
+	 *
+	 * The envelope beside the archive is tried first — that is the key that
+	 * provably belongs to this file, and it is what lets a node restore itself
+	 * with no operator present. Archives made before envelope keys existed have
+	 * no envelope, so the node's old key remains the fallback and those restores
+	 * keep working untouched.
+	 *
+	 * KEY_PATH is resolved here, in the non-sudo shell, and passed absolute:
+	 * a $HOME-relative lookup breaks once sudo changes $HOME (B-2).
+	 *
+	 * @param string $archive_expr shell expression for the archive path, already quoted
+	 */
+	private static function step_resolve_restore_key($node, $archive_expr) {
+		$scripts      = self::get_scripts_path($node);
+		$tool         = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
+		$project_root = dirname(rtrim($node->get('mgn_web_root'), '/'));
+		$site_key     = escapeshellarg($project_root . '/config/backup_site_key');
+
+		return 'KEY_PATH="$HOME/.joinery_backup_key"'
+			. " && SIDECAR={$archive_expr}.keys.json"
+			. " && { if [ -f \"\$SIDECAR\" ] && [ -f {$site_key} ] && [ -f {$tool} ]; then"
+			. "   UNSEALED=$(mktemp /tmp/jy_restore_key_XXXXXX);"
+			. "   if php {$tool} open --sidecar \"\$SIDECAR\" --private {$site_key} --key-out \"\$UNSEALED\" >/dev/null 2>&1; then"
+			. '     KEY_PATH="$UNSEALED";'
+			. '   else rm -f "$UNSEALED"; fi;'
+			. ' fi; }';
 	}
 
 	/**
@@ -1118,7 +1192,7 @@ class JobCommandBuilder {
 	public static function get_target($node) {
 		$target_id = $node->get('mgn_bkt_backup_target_id');
 		if (!$target_id) return null;
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 		try {
 			$target = new BackupTarget($target_id, TRUE);
 			if ($target->get('bkt_enabled')) {
@@ -1133,12 +1207,25 @@ class JobCommandBuilder {
 	 * node has a cloud backup target configured. Picks the newest backup file,
 	 * which is the one the preceding backup step just wrote.
 	 */
-	private static function append_upload_steps(&$steps, $node) {
+	private static function append_upload_steps(&$steps, $node, $encrypted = false) {
 		$target = self::get_target($node);
 		if (!$target) return;
 
-		$resolve = 'UPLOAD_FILE=$(ls -t /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz 2>/dev/null | head -1)';
-		$steps[] = self::upload_step($node, $target, $resolve, (bool) $node->get('mgn_delete_local_after_upload'));
+		$delete_local = (bool) $node->get('mgn_delete_local_after_upload');
+
+		$resolve = 'UPLOAD_FILE=$(ls -t ' . self::backup_glob() . ' 2>/dev/null | head -1)';
+		$steps[] = self::upload_step($node, $target, $resolve, $delete_local);
+
+		// The envelope is what makes the archive readable again, so it has to
+		// reach the bucket too — an encrypted archive sitting there alone is
+		// indistinguishable from noise. It is resolved separately rather than
+		// carried over from the previous step because each step is its own SSH
+		// session; the archive upload may also have just deleted its own file,
+		// which is why this globs the sidecar rather than deriving it.
+		if ($encrypted) {
+			$sidecar_resolve = 'UPLOAD_FILE=$(ls -t /backups/*.keys.json 2>/dev/null | head -1)';
+			$steps[] = self::upload_step($node, $target, $sidecar_resolve, $delete_local);
+		}
 	}
 
 	/**
@@ -1172,7 +1259,7 @@ class JobCommandBuilder {
 	 * absolute path of the file to upload in UPLOAD_FILE.
 	 */
 	private static function upload_step($node, $target, $resolve_cmd, $delete_local) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php'));
+		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
 		$slug = $node->get('mgn_slug');
 		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
@@ -1224,7 +1311,7 @@ class JobCommandBuilder {
 	 * visibly, whereas inlined credentials would persist in the job row forever.
 	 */
 	private static function build_node_uploader_script($bucket, $target_id) {
-		$signer_path = PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php');
+		$signer_path = PathHelper::getIncludePath('includes/S3Signer.php');
 		$dispatcher_path = PathHelper::getIncludePath('plugins/server_manager/includes/node_uploader.php');
 
 		$signer = self::strip_php_tags(file_get_contents($signer_path));
@@ -1274,7 +1361,7 @@ class JobCommandBuilder {
 	public static function build_list_backups_ssh($node) {
 		return [
 			['type' => 'ssh', 'label' => 'List local backups',
-			 'cmd' => "for f in /backups/*.sql.gz /backups/*.sql.gz.enc /backups/*.tar.gz; do "
+			 'cmd' => "for f in " . self::backup_glob() . "; do "
 			        . "[ -f \"\$f\" ] && stat --format='LOCAL|%s|%Y|%n' \"\$f\"; "
 			        . "done 2>/dev/null; echo 'LOCAL_LIST_DONE'",
 			 'continue_on_error' => true],
@@ -1380,7 +1467,7 @@ class JobCommandBuilder {
 		$checks = [];
 		if ($is_docker) {
 			$checks[] = "if command -v docker >/dev/null 2>&1 && docker ps -a --format '{{.Names}}' | grep -qx {$site_esc}; then GONE=0; echo 'still present: container'; fi";
-			$checks[] = "if command -v docker >/dev/null 2>&1 && docker volume ls --format '{{.Name}}' | grep -q \"^${site}_\"; then GONE=0; echo 'still present: volumes'; fi";
+			$checks[] = "if command -v docker >/dev/null 2>&1 && docker volume ls --format '{{.Name}}' | grep -q \"^{$site}_\"; then GONE=0; echo 'still present: volumes'; fi";
 		}
 		// The reverse-proxy vhost and project dir live on the host for both topologies.
 		$checks[] = "if [ -f /etc/apache2/sites-available/{$site}.conf ]; then GONE=0; echo 'still present: vhost'; fi";

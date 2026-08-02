@@ -40,6 +40,35 @@ class CoreSettingOptions {
 		return $options;
 	}
 
+	/**
+	 * Configured backup targets, for choosing where scheduled backups go.
+	 *
+	 * Keyed by target id as a STRING, because that is what comes back in the
+	 * POST and what is compared against the stored setting — an int key here
+	 * would match neither, and the select would quietly show the wrong target
+	 * as selected.
+	 *
+	 * Disabled targets are listed and marked rather than hidden: a schedule
+	 * already pointing at one must show what it points at, not appear unset.
+	 */
+	public static function backupTargets(): array {
+		$options = array('0' => '— none —');
+		try {
+			require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+			$targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
+			$targets->load();
+			foreach ($targets as $t) {
+				$label = (string)$t->get('bkt_name');
+				if (!$t->get('bkt_enabled')) { $label .= ' (disabled)'; }
+				$options[(string)(int)$t->key] = $label;
+			}
+		} catch (\Throwable $e) {
+			// A settings page has to render on a half-configured install.
+			error_log('CoreSettingOptions::backupTargets failed: ' . $e->getMessage());
+		}
+		return $options;
+	}
+
 	/** Themes present on disk, by directory name. */
 	public static function themes(): array {
 		$options = array();

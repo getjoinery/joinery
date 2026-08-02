@@ -12,7 +12,7 @@
  * @version 2.0
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php'));
+require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
 class TargetLister {
 

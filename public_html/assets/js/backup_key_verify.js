@@ -15,7 +15,7 @@
  * nothing here is trusted.
  *
  * Crypto is WebCrypto only (X25519 + HKDF-SHA256 + AES-256-GCM), matching
- * BackupKeyCustody::browser_challenge(). Browsers without X25519 fall back to
+ * BackupRecoveryKey::browser_challenge(). Browsers without X25519 fall back to
  * the command-line instructions shown alongside.
  *
  * @version 1.0
@@ -32,7 +32,7 @@ window.smBackupKeyVerify = (function () {
 		0x03, 0x2b, 0x65, 0x6e, 0x04, 0x22, 0x04, 0x20
 	]);
 
-	var INFO_PREFIX = 'sm-escrow-possession:';
+	var INFO_PREFIX = 'joinery-backup-recovery-possession:';
 
 	function b64decode(s) {
 		var bin = atob(String(s).replace(/\s+/g, ''));

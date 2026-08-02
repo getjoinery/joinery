@@ -8,8 +8,8 @@
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetLister.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);

@@ -66,8 +66,8 @@ function backup_actions_logic(array $input): LogicResult {
 		// credentials on agent >= 0.4.0 and otherwise no-ops while the job still
 		// reports "completed" (the step is continue_on_error).
 		if ($want_cloud) {
-			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetBackups.php'));
-			require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+			require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
+			require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 			$target_id = (int) $node->get('mgn_bkt_backup_target_id');
 			if (!$target_id) {
 				return LogicResult::render(['success' => false, 'message' => 'This node has no cloud backup target configured.']);

@@ -315,34 +315,6 @@ class JobResultProcessor {
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
 
-		// Record the on-disk backup-key fingerprint and reconcile escrow. A
-		// fingerprint with NO matching escrow row (any row — a node legitimately
-		// runs an older escrowed key after a restore) means the node key was
-		// regenerated out of band (unrecoverable) — the dashboard surfaces it.
-		// Also re-upload the matching sealed blob offsite so a lost control
-		// plane still leaves the blob beside the archives in the bucket.
-		if (preg_match('/BACKUP_KEY_FPR=([0-9a-f]{64})/', $output, $fm)) {
-			$fpr = $fm[1];
-			$node_id = $job->get('mjb_mgn_node_id');
-			if ($node_id) {
-				try {
-					require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
-					require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_key_escrow_class.php'));
-					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
-					$node = new ManagedNode(intval($node_id), true);
-					if ($node->get('mgn_backup_key_fingerprint') !== $fpr) {
-						$node->set('mgn_backup_key_fingerprint', $fpr);
-						$node->save();
-					}
-					$match = MultiBackupKeyEscrow::matching_for_node($node->key, $fpr);
-					if ($match) {
-						BackupKeyCustody::replicateBlob($node, $match);
-					}
-				} catch (\Throwable $e) {
-					error_log('JobResultProcessor: backup-key reconcile failed: ' . $e->getMessage());
-				}
-			}
-		}
 	}
 
 	/**

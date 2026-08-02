@@ -28,7 +28,7 @@ function scrub_job_row_inline_credentials() {
 	$secrets = [];
 
 	if ($has_targets) {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 		foreach ($db->query("SELECT bkt_id FROM bkt_backup_targets")->fetchAll(PDO::FETCH_COLUMN) as $tid) {
 			try {
 				$target = new BackupTarget(intval($tid), TRUE);
