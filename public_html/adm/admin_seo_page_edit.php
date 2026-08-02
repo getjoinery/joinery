@@ -47,7 +47,7 @@ echo $formwriter->begin_form();
 if (!$spm->key) {
 	$formwriter->textinput('spm_path', 'Path', array(
 		'maxlength' => 255,
-		'help'      => 'Canonical request path (e.g. "/pricing"). Leading slash required.',
+		'helptext'  => 'Canonical request path (e.g. "/pricing"). Leading slash required.',
 	));
 } else {
 	echo '<div style="margin-bottom: 16px;"><strong>Path:</strong> <code>' . htmlspecialchars($spm->get('spm_path')) . '</code>';

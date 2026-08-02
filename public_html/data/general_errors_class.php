@@ -120,18 +120,51 @@ function display_time($session) {
 		
 		$error_context = '<pre>'.htmlentities($error_context).'</pre>';
 		
+		$message = $exception->getMessage();
+
+		// An exception thrown while this process holds sealed plaintext can quote
+		// it — a validation failure naming the offending value, a driver error
+		// echoing a bound parameter, a stack frame carrying a truncated argument.
+		// This table is readable by anyone with database access and has no unlock
+		// window, so on a hot process the row keeps the reference and drops the
+		// prose: exception type, file and line are what make an error findable in
+		// the file log, and none of them came out of the vault. The full message
+		// and trace still reach logs/error.log, which is where a developer reads
+		// them anyway. See specs/implemented/sealed_content_egress.md § Layer 3.
+		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+		$file = $exception->getFile();
+		if (SealedEgressGuard::isHot()) {
+			$message = self::withheldReference($exception);
+			$error_context = '(withheld — thrown while holding sealed content)';
+			// Even a path can exceed the threshold. The tail is the part that
+			// identifies the file, so that is what survives the cap.
+			$file = substr($file, -SealedEgressGuard::THRESHOLD);
+		}
+
 		$this->set('err_code', $exception->getCode());
-		$this->set('err_file', $exception->getFile());
+		$this->set('err_file', $file);
 		$this->set('err_line', $exception->getLine());
 		$this->set('err_context', $error_context);
-		$this->set('err_message', $exception->getMessage());
-		
+		$this->set('err_message', $message);
+
 		if($session_obj->get_user_id()){
 			$this->set('err_usr_user_id', $session_obj->get_user_id());
 		}
 		
 		// Use standard save method
 		$this->save();
+	}
+
+	/**
+	 * A findable pointer to an error whose text cannot be stored: type, file and
+	 * line, kept short enough that the hot-turn rule reads it as a reference
+	 * rather than a copy. Bounded by the guard's own threshold so the two can
+	 * never drift apart.
+	 */
+	private static function withheldReference(\Throwable $exception): string {
+		$reference = get_class($exception) . '@' . basename($exception->getFile())
+		           . ':' . $exception->getLine();
+		return substr($reference, 0, SealedEgressGuard::THRESHOLD);
 	}
 
 	private static function sanitizeSessionData($data) {

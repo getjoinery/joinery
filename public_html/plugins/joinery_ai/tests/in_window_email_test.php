@@ -479,10 +479,17 @@ try {
 	$ai_summary = 'A summary written while the domain was still Standard.';
 	$ai_scan = json_encode(array('verdict' => 'suspicious',
 		'red_flags' => array(array('finding' => 'quotes the body: Standard-era body.'))));
-	InboundEmailMessage::updateColumns($late_msg, array(
-		'iem_ai_summary' => $ai_summary,
-		'iem_ai_scan'    => $ai_scan,
-	));
+	// Both values are literals a few lines up, not anything this process
+	// decrypted, so building the fixture is its own unit of work. Without the
+	// boundary the hot-turn rule would refuse them purely because an earlier
+	// section of this file read sealed mail — which is the rule working, and
+	// exactly why RecipeRunner brackets each run the same way.
+	SealedEgressGuard::isolate(function () use ($late_msg, $ai_summary, $ai_scan) {
+		InboundEmailMessage::updateColumns($late_msg, array(
+			'iem_ai_summary' => $ai_summary,
+			'iem_ai_scan'    => $ai_scan,
+		));
+	});
 
 	$late->set('ied_security_level', InboundEmailDomain::LEVEL_FORTRESS);
 	$late->save();
@@ -553,6 +560,25 @@ try {
 		'rcr_error'      => '',
 	));
 
+	// Regression: the runner saves STATUS changes on the same instance that
+	// sealed the row (seal at run start, then status → running). sealColumns()
+	// wrote the key wrapping straight to the database, so this instance's
+	// $data still holds NULL/0 for the seal metadata — save() must skip those
+	// columns on a sealed row, or the wrapped DEK is destroyed while the seal
+	// flag stays true and everything sealed above becomes permanently
+	// unreadable. Every check below this line also re-proves decryptability
+	// AFTER a save, because they read from fresh instances.
+	$sealed_run->set('rcr_status', RecipeRun::STATUS_RUNNING);
+	$sealed_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$sealed_run->saveContent();
+	$wrap_check = $db->prepare(
+		'SELECT rcr_sealed_key, rcr_sealed_owner_user_id FROM rcr_recipe_runs WHERE rcr_run_id = ?');
+	$wrap_check->execute(array($sealed_run->key));
+	$wrap_row = $wrap_check->fetch(PDO::FETCH_ASSOC);
+	check(!empty($wrap_row['rcr_sealed_key'])
+		&& intval($wrap_row['rcr_sealed_owner_user_id']) === $owner_id,
+		'a status save on the sealing instance leaves the DEK wrapping intact');
+
 	// The estate assertion: EVERY column of the row, not a list someone has to
 	// remember to update. A content column added later is covered by this
 	// without anyone touching the test.
@@ -600,7 +626,7 @@ try {
 	check($rendered, 'run history renders with the vault locked', $render_error);
 	check($rendered && $out === null && $calls === array(),
 		'showing no content rather than ciphertext or a placeholder string');
-	check((string)$locked_run->get('rcr_status') === RecipeRun::STATUS_PENDING,
+	check((string)$locked_run->get('rcr_status') === RecipeRun::STATUS_RUNNING,
 		'while the status is still readable, because it is not content');
 	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
 		array('idle' => null, 'absolute' => null));
@@ -608,7 +634,10 @@ try {
 	// The suppression is conditional. A standard mailbox has nothing to protect
 	// and real value in the detail, so its runs stay plaintext and searchable.
 	$plain_run = iw_run($std_recipe);
-	$plain_run->writeContent(array('rcr_output' => "1 item\n- $leaky_subject: none"));
+	// Its own unit of work — see the fixture note in the raise section above.
+	SealedEgressGuard::isolate(function () use ($plain_run, $leaky_subject) {
+		$plain_run->writeContent(array('rcr_output' => "1 item\n- $leaky_subject: none"));
+	});
 	$run_row->execute(array($plain_run->key));
 	$plain_stored = $run_row->fetch(PDO::FETCH_ASSOC);
 	check(strpos((string)$plain_stored['rcr_output'], $leaky_subject) !== false,
@@ -626,11 +655,16 @@ try {
 	require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RunContentPurge.php'));
 
 	$legacy = iw_run($recipe);              // $recipe reads the Fortress mailbox
-	RecipeRun::updateColumns(intval($legacy->key), array(
-		'rcr_output'     => "1 item\n- $leaky_subject: none",
-		'rcr_tool_calls' => $trace,
-		'rcr_input_tokens' => 4321,
-	));
+	// Reconstructing a pre-sealing row is a fixture, not a derivation, so it
+	// gets its own unit of work — the rule would otherwise refuse the very
+	// state this section exists to purge.
+	SealedEgressGuard::isolate(function () use ($legacy, $leaky_subject, $trace) {
+		RecipeRun::updateColumns(intval($legacy->key), array(
+			'rcr_output'     => "1 item\n- $leaky_subject: none",
+			'rcr_tool_calls' => $trace,
+			'rcr_input_tokens' => 4321,
+		));
+	});
 	$run_row->execute(array($legacy->key));
 	$before_purge = $run_row->fetch(PDO::FETCH_ASSOC);
 	check(strpos((string)$before_purge['rcr_output'], $leaky_subject) !== false,

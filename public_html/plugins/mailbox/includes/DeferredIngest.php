@@ -20,11 +20,12 @@
  * (specs/in_window_deferred_work.md), so the backlog also drains while the
  * owner is anywhere else on the site with their vault open.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 
 class DeferredIngest {
 
@@ -78,8 +79,18 @@ class DeferredIngest {
 				break;
 			}
 			try {
+				// One message is one unit of work for the hot-turn rule, by the
+				// same argument RecipeRunner::run() makes: a forward action can
+				// open this message's stored raw, and without the boundary that
+				// one open would leave every LATER message in the pass hot —
+				// refusing attachment rows and log lines whose content came from
+				// their own plaintext, not from anything sealed. Nothing one
+				// message decrypts is in play when the next one starts.
 				$msg = new InboundEmailMessage(intval($id), TRUE);
-				if ($router->parsePendingMessage($msg, $secret_key)) {
+				$done = SealedEgressGuard::isolate(function () use ($router, $msg, $secret_key) {
+					return $router->parsePendingMessage($msg, $secret_key);
+				});
+				if ($done) {
 					$parsed++;
 				}
 			} catch (\Throwable $e) {

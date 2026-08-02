@@ -193,8 +193,25 @@ column, and `saveContent()` is the `set()`-then-save form of it. A plain `save()
 skips sealed columns on a sealed row by design, so a value set and saved that way
 is silently dropped.
 
-Runs recorded before this existed are cleared by migration 160 — content only;
-counts and timings survive.
+The plugin sync hook runs `RunContentPurge` on every sync: any **unsealed** run
+row belonging to a recipe whose source is sealed has its content columns
+cleared — content only; counts and timings survive.
+
+**Each run is its own unit of work for the hot-turn rule.** A drain slice works
+through everything one user has pending, so several recipes share a process.
+`RecipeRunner::run()` brackets each one with `SealedEgressGuard::isolate()`
+(see [Sealed Vault](../../../docs/sealed_vault.md#the-hot-turn-rule)), so a
+protected run cannot make the standard runs after it fail. Inside a run the rule
+is fully in force: a protected run that tries to copy what it read into any
+table that cannot seal it throws, and its notification email goes out only
+because the tally was replaced by a pointer first.
+
+That rule is also what keeps memory and notes clean without either being sealed.
+`mem_memories` and `rcn_notes` store plaintext, and a turn holding protected
+content is refused when it writes anything substantial into them — so a
+protected source cannot launder its content out through a remembered fact. The
+chat-side gate below (`ChatMemory::activeFor()`) is the first line; the hot-turn
+rule is the backstop that does not depend on anyone remembering it.
 
 ## Item pipeline recipes
 
@@ -525,7 +542,7 @@ Durable facts the assistant recalls across separate chats and recipe runs — "t
 
 Every stored text in both layers is wrapped `<<UNTRUSTED_$nonce>>…<</UNTRUSTED_$nonce>>`, the contract gains a "Stored memories" source line, and the whole block rides **after** the prompt-cache breakpoint (appended to the untrusted block — the rotating nonce must never sit in the cached prefix). Recipes get no auto-injection — Layer 1 keys off an incoming user message, which a recipe run doesn't have; recipes pull via the tools.
 
-**Security-level gate.** One predicate — `ChatMemory::activeFor()` — governs the whole feature for a turn, applied identically in `resolveAllowedTools` (tool availability) and the injection step. A Standard chat is fully active on any model. A protected (Private/Fortress) chat is active **only on a local-model turn**: on a remote model neither layer is injected and none of the three tools is offered, so a sealed chat never ships plaintext memories to a cloud provider and never mints a new unsealed memory from sealed-context content. Fortress is pinned local, so it always qualifies. Memory rows themselves are stored plaintext (a documented limitation; memory is a natural future Sealed Vault consumer).
+**Security-level gate.** One predicate — `ChatMemory::activeFor()` — governs the whole feature for a turn, applied identically in `resolveAllowedTools` (tool availability) and the injection step. A Standard chat is fully active on any model. A protected (Private/Fortress) chat is active **only on a local-model turn**: on a remote model neither layer is injected and none of the three tools is offered, so a sealed chat never ships plaintext memories to a cloud provider and never mints a new unsealed memory from sealed-context content. Fortress is pinned local, so it always qualifies. Memory rows themselves are stored plaintext. That is safe rather than merely tolerated: a turn holding protected content cannot write a memory of any substance, because the [hot-turn rule](../../../docs/sealed_vault.md#the-hot-turn-rule) refuses the write. `mem_memories` gains sealing columns the day a product flow genuinely needs a protected memory and that refusal is what asks for it.
 
 **Human curation.**
 

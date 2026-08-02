@@ -368,7 +368,74 @@ summary of a sealed body, a run log quoting a sealed subject, a note written
 from a sealed thread — all of it seals, on the same per-row terms, to the same
 owner. Where a pointer will do, store the pointer: an id resolved through the
 sealed reader at display time cannot leak and cannot go stale. See
-`specs/sealed_content_egress.md`.
+`specs/implemented/sealed_content_egress.md`.
+
+## The hot-turn rule
+
+Reading protected content correctly still breaks the promise the moment the
+reader writes what it read somewhere else. The rule that stops that is one rule
+at one place, in `includes/SealedEgressGuard.php`:
+
+> Once a process has actually opened sealed content, any long string it writes
+> to the database must land somewhere that protects it.
+
+A process is **cold** until `VaultCrypto::openField()` hands out a plaintext,
+and **hot** from then on. Cold is virtually every request, and costs one boolean
+check per statement. Hot, an INSERT or UPDATE carrying a string longer than
+`SealedEgressGuard::THRESHOLD` (64 characters) must satisfy one of:
+
+- every long value is already a sealed blob (`v1.aead.` or `v1.seal.`) — this is
+  how `sealColumns()` writes through the rule it sits behind;
+- the statement updates a single row already sealed to the owner whose scope
+  this process opened.
+
+Anything else throws `SealedContentEgressException` naming the destination table
+and what was read. The exception is the fix instruction, in preference order:
+store a reference instead of a copy, give the destination the Layer 0 sealing
+columns and seal the value, or do not write the content. There is deliberately
+no way to declare a table exempt.
+
+The rule anchors at the PDO statement layer (`includes/GuardedPdo.php`), under
+models, Multi collections, hand-written SQL and plugins alike, because there is
+no single write path above it. Owner attribution comes from
+`VaultUnlock::secretKey()`, which every read must pass through first; a process
+that opened two people's content can name neither, so only ciphertext writes
+pass.
+
+**Mail is refused outright.** `EmailSender::send()` will not send from a hot
+process unless the call site passes one of the `EmailSender::EGRESS_*`
+assertions — `CONTENT_FREE` (built from counts, ids, links and fixed prose),
+`USER_COMPOSE` (the user is sending their own message from their own mailbox),
+or `ACKNOWLEDGED_FORWARD` (a filter whose owner acknowledged the egress in
+writing). Refusing the send is also what keeps protected content out of
+`equ_queued_emails`: a message that is never sent is never queued for retry.
+An asserted send is attempted **once** — the retry queue stores bodies in the
+clear, so a hot process never queues one, whatever the message contains. A
+transport failure on a hot send is logged and final.
+
+**Units of work.** `SealedEgressGuard::isolate()` runs one independent unit with
+its own hot state and restores the caller's afterwards, so a process that does
+several unrelated things in a row — a drain slice working through one user's
+pending AI runs — does not let the first protected run poison every later one.
+The caller is asserting that nothing the unit decrypted is still in play when it
+returns; an outer hot state survives, so nesting cannot launder a process cold.
+It is a boundary between units, never a wrapper around a write site.
+
+**One sanctioned non-arming open.** Mail held in transit for a protected
+domain — relay-fronted Fortress mail waiting, sealed to the owner's key, for
+the owner to appear — is opened with `VaultCrypto::openHeldDeliveryBlob()`,
+which does not arm the rule. Opening it is first-time delivery arriving late:
+the plaintext is exactly what receive-time ingest holds, cold, for the same
+message on any server, so it is not a read of stored sealed content. It is
+the only such exception, and `tests/vault/sealed_read_paths_test.php` pins
+the entire caller set of the low-level decrypt primitives — a new direct
+caller fails the suite and has to argue its case against that criterion in
+review. Everything stored sealed is read through `openField()`, which arms.
+
+**The accepted gap.** Any copy shorter than the threshold passes. That is a
+deliberate trade: the surfaces that actually carry short protected content —
+subjects in run rows, summaries on message rows — are sealed structurally by the
+record-level rule above, and every new write site prefers a reference anyway.
 
 ## Key rotation
 

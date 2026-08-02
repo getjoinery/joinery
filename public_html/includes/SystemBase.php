@@ -442,9 +442,24 @@ abstract class SystemBase {
 		if (empty(static::$sealed_fields)) return false;
 		$flag = static::sealFlagColumn();
 		if (!array_key_exists($flag, static::$field_specifications)) return false;
-		$value = $this->data->$flag ?? null;
-		if ($value === null || $value === false || $value === 'f' || $value === '0' || $value === 0) {
-			return false;
+		return self::sealFlagIsSet($this->data->$flag ?? null);
+	}
+
+	/**
+	 * Read a seal flag out of whatever form it arrives in.
+	 *
+	 * A boolean reaches this code as a real bool, as 't'/'f' from some PDO
+	 * drivers, as '0'/'1', or as the literal string a field spec declared for its
+	 * default. Every one of those false spellings except a bare `false` is
+	 * TRUTHY in PHP, so a naive test reads an unsealed row as sealed — and a row
+	 * wrongly believed sealed has its content columns skipped by save() and
+	 * silently never written. Match the false spellings explicitly and treat
+	 * everything else as sealed, which is the fail-safe direction for a read.
+	 */
+	protected static function sealFlagIsSet($value): bool {
+		if ($value === null || $value === false || $value === 0) return false;
+		if (is_string($value)) {
+			return !in_array(strtolower($value), array('f', 'false', '0', 'no', ''), true);
 		}
 		return (bool)$value;
 	}
@@ -452,7 +467,22 @@ abstract class SystemBase {
 	/** Columns save() must leave alone on a sealed row, as a lookup set. */
 	protected function sealedColumnsToSkip() {
 		if (!$this->rowIsSealed()) return array();
-		return array_flip(static::$sealed_fields);
+		$skip = array_flip(static::$sealed_fields);
+		// The seal METADATA travels with the content, not with save(). sealColumns()
+		// writes the key wrapping with a targeted UPDATE that never touches
+		// $this->data — so an instance that was in memory when its row sealed
+		// (a RecipeRun sealed at run start, then saved for a status change) still
+		// holds NULL/0 for these columns, and letting save() write them back
+		// destroys the wrapped DEK while the seal flag stays true: every byte the
+		// row sealed becomes permanently unreadable, silently. Unseal paths use
+		// their own targeted UPDATEs, so save() never legitimately writes these.
+		foreach (array(static::sealedKeyColumn(), static::sealedOwnerColumn(),
+				static::sealedGenerationColumn()) as $meta_col) {
+			if ($meta_col !== '' && array_key_exists($meta_col, static::$field_specifications)) {
+				$skip[$meta_col] = true;
+			}
+		}
+		return $skip;
 	}
 
 	/** The column holding this row's DEK, wrapped to the owner's vault public key. */
@@ -520,8 +550,7 @@ abstract class SystemBase {
 		$flag = static::sealFlagColumn();
 		$key  = static::sealedKeyColumn();
 		if ($flag === '' || $key === '') return false;
-		$value = $row[$flag] ?? null;
-		if ($value === null || $value === false || $value === 'f' || $value === '0' || $value === 0) {
+		if (!self::sealFlagIsSet($row[$flag] ?? null)) {
 			return false;
 		}
 		return !empty($row[$key]);
@@ -611,7 +640,7 @@ abstract class SystemBase {
 	/**
 	 * Seal content onto an existing row and persist it — the ONLY supported
 	 * writer for a $sealed_fields column, and the write-side half of the Layer 0
-	 * contract (specs/sealed_content_egress.md): save() skips sealed columns on a
+	 * contract (specs/implemented/sealed_content_egress.md): save() skips sealed columns on a
 	 * sealed row, sealColumns() owns them.
 	 *
 	 * Sealing needs only the owner's vault PUBLIC key, so any process can seal to

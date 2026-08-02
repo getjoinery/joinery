@@ -321,6 +321,18 @@ function harness_defer(callable $fn) {
  * with the next run's same-suffix fixture ("email already been used").
  */
 function make_user($suffix, $permission = 0) {
+	// Building a fixture is its own unit of work: every value below is generated
+	// right here, so none of it can be sealed content this suite decrypted
+	// earlier. Without the boundary, any suite that reads protected data before
+	// creating its next user would be refused by the hot-turn rule
+	// (includes/SealedEgressGuard.php) for a write that leaks nothing.
+	require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+	return SealedEgressGuard::isolate(function () use ($suffix, $permission) {
+		return make_user_row($suffix, $permission);
+	});
+}
+
+function make_user_row($suffix, $permission = 0) {
 	static $run_token = null;
 	if ($run_token === null) $run_token = bin2hex(random_bytes(4));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));

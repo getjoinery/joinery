@@ -5,7 +5,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVault
 
 /**
  * Clear the content columns on runs that read protected mail before run rows
- * could seal (specs/sealed_content_egress.md § resolved decision 2).
+ * could seal (specs/implemented/sealed_content_egress.md § resolved decision 2).
  *
  * A run against a protected mailbox copied what it read into columns with no
  * encryption of any kind: the tally in rcr_output, the per-item trace in
@@ -60,7 +60,11 @@ class RunContentPurge {
             try {
                 $recipe = new Recipe((int)$id, TRUE);
                 if (!$recipe->key) continue;
-                if (RecipeVaultScope::forRecipe($recipe) !== null) {
+                // scopeOrThrow, not forRecipe: forRecipe swallows a failed scope
+                // check into "no scope", which here would mean KEEPING plaintext
+                // for a recipe nobody could prove clean. The catch below turns a
+                // throw into the clearing direction instead.
+                if (RecipeVaultScope::scopeOrThrow($recipe) !== null) {
                     $sealed_sources[] = (int)$id;
                 }
             } catch (Throwable $e) {

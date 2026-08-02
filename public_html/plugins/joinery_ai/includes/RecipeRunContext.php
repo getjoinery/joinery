@@ -226,7 +226,7 @@ class RecipeRunContext implements ToolContext {
      * Persist the in-memory trace to the run row. Best-effort.
      *
      * This is the write that produced the leak the sealing work exists to fix
-     * (specs/sealed_content_egress.md): on a pipeline run the trace holds one
+     * (specs/implemented/sealed_content_egress.md): on a pipeline run the trace holds one
      * record per item — the item's label, which is the mail subject, and the
      * model's verdict, which describes the body. writeContent() seals it on a
      * sealed run and leaves it plain on any other.

@@ -32,12 +32,28 @@ class RecipeRunner {
      *  single-run-at-a-time, so a static member is sufficient. */
     private static $active_provider = null;
 
+    /**
+     * One run is one unit of work: it reads one recipe's source and writes that
+     * recipe's trace, tally, verdicts and notification. Several runs share a
+     * process — an in-window drain slice works through everything one user has
+     * pending — and they are independent of each other, so each gets its own
+     * hot-turn state. Without that boundary the first protected run in a slice
+     * would make every later run in it fail, including runs against mailboxes
+     * with nothing to protect. See includes/SealedEgressGuard.php.
+     */
     public static function run(RecipeRun $run, ?float $deadline = null): void {
+        require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+        SealedEgressGuard::isolate(function () use ($run, $deadline) {
+            self::runIsolated($run, $deadline);
+        });
+    }
+
+    private static function runIsolated(RecipeRun $run, ?float $deadline = null): void {
         try {
             $recipe = self::loadRecipe($run);
 
             // A run that reads protected material IS protected material
-            // (specs/sealed_content_egress.md § Layer 1). Decided here, before
+            // (specs/implemented/sealed_content_egress.md § Layer 1). Decided here, before
             // the first content write of any kind — including the startup
             // failures below, whose messages can name what they looked at.
             self::sealRunIfSourceIsSealed($run, $recipe);
@@ -525,7 +541,11 @@ class RecipeRunner {
 
             $message = EmailMessage::create($to, "[Joinery AI] $name", $text)
                                    ->html($html_body);
-            (new EmailSender())->send($message);
+            // Content-free exactly when the tally was replaced by the pointer
+            // above. A standard run's tally IS content, so if this process also
+            // read protected mail the send is refused rather than quietly sent.
+            (new EmailSender())->send($message, true, null,
+                $run->rowIsSealed() ? EmailSender::EGRESS_CONTENT_FREE : '');
         } catch (Exception $e) {
             error_log('[joinery_ai] success email send failed: ' . $e->getMessage());
         }
@@ -643,7 +663,10 @@ class RecipeRunner {
                   . "Further failure emails for this recipe will be suppressed for the next "
                   . round($throttle_secs / 3600, 1) . " hours.";
 
-            (new EmailSender())->send(EmailMessage::create($to, $subject, $body));
+            // Same rule as the success email: content-free only because the
+            // error detail was withheld a few lines above.
+            (new EmailSender())->send(EmailMessage::create($to, $subject, $body), true, null,
+                $run->rowIsSealed() ? EmailSender::EGRESS_CONTENT_FREE : '');
 
             // Record last-sent time. A targeted UPDATE rather than $recipe->save():
             // the recipe object here came from the runner and a full-row save

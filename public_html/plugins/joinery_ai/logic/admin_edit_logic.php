@@ -97,7 +97,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
                 if (!array_key_exists($field, $input)) continue;
                 $posted = trim((string)$input[$field]);
                 $stored = trim((string)$recipe->get($field));
-                if ($posted !== '' && $posted !== $stored) {
+                if ($posted !== $stored) {
                     return LogicResult::error(
                         'A saved recipe cannot change its ' . $label . '. Create a new recipe instead.',
                         ['recipe' => $recipe, 'session' => $session]
@@ -106,11 +106,15 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             }
         }
 
-        $simple_fields = [
+        // Shape fields are writable at CREATE only. On a saved recipe the guard
+        // above gives feedback, but the stored value must not depend on it — a
+        // posted value never reaches set() here, so neither a differing nor an
+        // empty rcp_mode/rcp_pipeline_job can alter a saved recipe's shape.
+        $shape_fields = $recipe->key ? [] : ['rcp_mode', 'rcp_pipeline_job'];
+
+        $simple_fields = array_merge($shape_fields, [
             'rcp_name',
             'rcp_prompt',
-            'rcp_mode',
-            'rcp_pipeline_job',
             'rcp_schedule_frequency',
             'rcp_schedule_day_of_week',
             'rcp_model',
@@ -122,7 +126,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             'rcp_max_tokens',
             'rcp_monthly_token_cap',
             'rcp_workspace',
-        ];
+        ]);
         // Numeric controls store NULL when blank (→ fall back to the setting default).
         $null_when_blank = ['rcp_schedule_day_of_week', 'rcp_temperature', 'rcp_top_p'];
         foreach ($simple_fields as $f) {

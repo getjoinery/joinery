@@ -214,7 +214,11 @@ class CostGuard {
         $to = $recipe->get('rcp_delivery_email') ?: $user->get('usr_email');
         if (!$to) return;
 
-        (new EmailSender())->send(EmailMessage::create($to, $subject, $body));
+        // Content-free: every caller builds the body from token counts, caps and
+        // fixed prose. Nothing here is derived from what a run read, so a cost
+        // alert still goes out from a run that touched protected mail.
+        (new EmailSender())->send(EmailMessage::create($to, $subject, $body), true, null,
+            EmailSender::EGRESS_CONTENT_FREE);
     }
 
     private static function pct(int $used, int $cap): int {

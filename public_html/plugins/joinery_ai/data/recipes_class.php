@@ -54,7 +54,7 @@ class Recipe extends SystemBase {
         // per-recipe throttle. Lives here rather than in stg_settings: it is
         // per-recipe state, and a setting keyed by recipe id can never be
         // declared, so every failing recipe used to mint an undeclarable
-        // settings row. See specs/sealed_content_egress.md work log.
+        // settings row. See specs/implemented/sealed_content_egress.md work log.
         'rcp_last_failure_email_time' => array('type'=>'timestamp(6)'),
         'rcp_owner_user_id'       => array('type'=>'int4'),
         'rcp_create_time'         => array('type'=>'timestamp(6)', 'default'=>'now()'),

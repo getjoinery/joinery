@@ -19,7 +19,18 @@
  * Never exposed over CRUD or AI surfaces (defaults stay closed) — the API
  * dispatch layer (ApiLogicEndpoint) is the only reader and writer.
  *
- * @version 1.0
+ * The cached body is sealed per row (specs/implemented/sealed_content_egress.md § resolved
+ * decision 6). Any /api/v1 response can carry protected content — a message read
+ * over the API, a protected chat's reply — and caching it verbatim would put a
+ * plaintext copy in a table nobody thinks of as mail storage. So when the
+ * request that produced it had opened sealed content, the body is encrypted to
+ * that owner. Replay inside their unlock window returns it normally; replay
+ * outside one is told the response was not retained, while the row goes on
+ * suppressing duplicates, which is the part that actually protects the client.
+ * Nothing here is idempotency-specific: the hot-turn rule refuses the plaintext
+ * write, and sealing is that refusal's ordinary resolution.
+ *
+ * @version 1.1
  */
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
@@ -58,7 +69,17 @@ class ApiIdempotencyKey extends SystemBase {
 		'aik_response_status' => array('type'=>'int4'),
 		'aik_response_body' => array('type'=>'text'),
 		'aik_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()', 'index'=>true),
+		// Layer 0 sealing columns. Per row, not per table: only a response
+		// produced from protected content is sealed, and an ordinary API replay
+		// stays plaintext and free to read.
+		'aik_content_sealed' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'aik_sealed_key' => array('type'=>'text'),
+		'aik_sealed_owner_user_id' => array('type'=>'int8'),
+		'aik_key_generation' => array('type'=>'int4'),
 	);
+
+	/** The cached response body seals when the request that produced it was hot. */
+	public static $sealed_fields = array('aik_response_body');
 
 	/**
 	 * The credential-scope string for an authenticated principal: the API key

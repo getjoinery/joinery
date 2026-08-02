@@ -213,6 +213,12 @@ class VaultUnlock {
 			self::touchWindowMarker($user_id, $scope);
 			self::stampMeta($sid, $user_id, $scope, 'content'); // this fetch IS a content decrypt
 		}
+		// Every open of sealed content needs this key first, so this is where the
+		// hot-turn rule learns whose content the process could be holding. It does
+		// not arm the rule — enrolment and rotation fetch keys without reading
+		// anything — VaultCrypto::openField() does that.
+		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+		SealedEgressGuard::noteScopeOpened($user_id, $scope);
 		return $value;
 	}
 

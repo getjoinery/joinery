@@ -88,6 +88,32 @@ ok('radio trigger wires a listener on every radio in the group',
       strpos($radioHtml, "document.querySelectorAll(\"input[name='ends']\")") !== false
       && strpos($radioHtml, 'radios.forEach(') !== false);
 
+// A card radio is the same trigger wearing different markup. The mailbox
+// domain editor picks a security level this way and hides the AI consent
+// checkboxes on Standard, so if 'card' ever stopped emitting the script the
+// consents would sit visible on a level where they mean nothing.
+$cardHtml = render_field('radioinput', ['level', 'Security level', [
+    'card' => true,
+    'options' => ['standard' => 'Standard', 'private' => 'Private'],
+    'value' => 'standard',
+    'visibility_rules' => [
+        'standard' => ['hide' => ['ai_on']],
+        'private'  => ['show' => ['ai_on']],
+    ],
+]]);
+ok('a card radio emits the same trigger script as a plain one',
+      strpos($cardHtml, "document.querySelector(\"input[name='level']:checked\")") !== false
+      && strpos($cardHtml, 'radios.forEach(') !== false);
+
+// The other half of the contract, and the half nothing else pins: the script
+// hides `{id}_container`, so a target that renders no container element is
+// addressed by a selector that matches nothing and never hides.
+$targetHtml = render_field('checkboxinput', ['ai_on', 'Let AI read it', ['value' => false]]);
+ok('a checkbox target renders the {id}_container the script looks for',
+      strpos($targetHtml, 'id="ai_on_container"') !== false);
+ok('and the show/hide lookup asks for that container first',
+      strpos($radioHtml, 'document.getElementById(id + "_container") || document.getElementById(id)') !== false);
+
 // ── checkboxList radio: addresses the name="{name}[]" group ─────────────────
 
 $listRadioHtml = render_field('checkboxList', ['picker', 'Picker', [

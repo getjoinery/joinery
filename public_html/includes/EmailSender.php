@@ -8,6 +8,33 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declare
 require_once(PathHelper::getIncludePath('data/debug_email_logs_class.php'));
 
 class EmailSender {
+
+    /**
+     * Assertions a call site can make when sending from a process that has
+     * opened sealed content (specs/implemented/sealed_content_egress.md, Layer 2). Without
+     * one of these, such a send is refused — mail is an unencrypted channel and
+     * the vault's whole promise is that its content does not travel on one.
+     *
+     * Each is a different claim, and they are not interchangeable:
+     *
+     *   CONTENT_FREE         the message body was built from counts, ids, links
+     *                        and fixed prose — nothing that came out of the
+     *                        vault. The sealed-run notification emails are the
+     *                        pattern: they say a run finished and where to read
+     *                        it, never what it read.
+     *   USER_COMPOSE         the message IS the user's own content and they are
+     *                        sending it themselves, in their own session, from
+     *                        their own mailbox. Pressing send is the consent.
+     *   ACKNOWLEDGED_FORWARD a filter forwards this mailbox's mail off-platform
+     *                        and the owner acknowledged that egress in writing
+     *                        (resolved decision 7). The acknowledgment row is
+     *                        the consent, and raising the domain's security
+     *                        level revokes it.
+     */
+    const EGRESS_CONTENT_FREE = 'content-free';
+    const EGRESS_USER_COMPOSE = 'user-compose';
+    const EGRESS_ACKNOWLEDGED_FORWARD = 'acknowledged-forward';
+
     private $settings;
     private $defaultFrom;
     private $defaultFromName;
@@ -159,9 +186,23 @@ class EmailSender {
      *        email_service selection AND its fallback are skipped (you cannot fall back a
      *        send-as-this-identity to a different identity), but validation, the retry-queue, and
      *        debug logging are kept. This is the single pipeline — no send path bypasses it.
+     * @param string $egress_assertion One of the EGRESS_* constants, required to send at all from
+     *        a process that has opened sealed content (the hot-turn rule — see
+     *        includes/SealedEgressGuard.php). Not a convenience flag: each value is a claim a
+     *        reviewer can check against the code that builds the message. Empty means no claim,
+     *        which is right for the overwhelming majority of sends.
      * @return bool True if sent successfully
      */
-    public function send(EmailMessage $message, $queue_on_failure = true, ?EmailServiceProvider $transport = null) {
+    public function send(EmailMessage $message, $queue_on_failure = true, ?EmailServiceProvider $transport = null,
+            $egress_assertion = '') {
+        // Mail is an unencrypted channel, so a process holding sealed plaintext
+        // may only send a message whose call site makes one of the assertions
+        // above. Refusing here rather than at the transport is also what keeps
+        // sealed content out of equ_queued_emails: a message that is never sent
+        // is never queued for retry.
+        require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+        SealedEgressGuard::assertSendAllowed((string)$egress_assertion, (string)$message->getSubject());
+
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
@@ -343,6 +384,11 @@ class EmailSender {
      * @return array ['success' => bool, 'failed_recipients' => string[]]
      */
     public function sendBatch(EmailMessage $message, array $recipients) {
+        // No content-free escape here: a batch is one body to many people, which
+        // is never the shape a sealed-content pointer takes. See send().
+        require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+        SealedEgressGuard::assertSendAllowed('', (string)$message->getSubject());
+
         // Set defaults if not specified
         if (!$message->getFrom()) {
             $message->from($this->defaultFrom, $this->defaultFromName);
@@ -541,6 +587,23 @@ class EmailSender {
      * Saves one row per recipient into equ_queued_emails with ERROR_SENDING status.
      */
     private function queueForRetry(EmailMessage $message) {
+        // The retry queue stores the full message body in the clear
+        // (equ_queued_emails), and a process holding sealed plaintext may not
+        // write long strings anywhere that cannot protect them — the hot-turn
+        // rule would refuse the row below regardless of what the message
+        // contains, because no assertion travels down to the database layer.
+        // Skip deliberately and say so, rather than letting the guard's refusal
+        // surface as a generic queue failure: a hot send is attempted once, and
+        // a transport failure is final. The call sites that send while hot are
+        // the asserted notification mails, whose loss is an inconvenience, not
+        // lost content.
+        require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+        if (SealedEgressGuard::isHot()) {
+            error_log('[EmailSender] Not queueing "' . $message->getSubject() . '" for retry: this '
+                . 'process has opened sealed content, and the retry queue stores bodies in the clear. '
+                . 'The send was attempted once and will not retry.');
+            return;
+        }
         try {
             require_once(PathHelper::getIncludePath('data/queued_email_class.php'));
 

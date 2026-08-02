@@ -67,7 +67,7 @@ class RecipeRun extends SystemBase {
 
     /**
      * Every column that can carry what the run READ, as opposed to what it did
-     * (specs/sealed_content_egress.md § Layer 1).
+     * (specs/implemented/sealed_content_egress.md § Layer 1).
      *
      * A run against a standard mailbox holds nothing protected here and stays
      * plaintext and fully searchable. A run against a sealed one holds subjects

@@ -285,6 +285,21 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// session cache so the Fortress mandatory-2FA gate (§ 5.3) re-evaluates.
 			unset($_SESSION['max_security_level']);
 
+			// Raising the level revokes every forwarding acknowledgment on this
+			// domain (specs/implemented/sealed_content_egress.md § resolved decision 7).
+			// Agreeing to send this domain's mail out in clear text was agreed at
+			// the old level; it is not consent for what the domain now promises.
+			// The filters keep matching, labelling and filing — only forwarding
+			// stops, until someone re-acknowledges it knowing the new level.
+			if ($raising) {
+				$revoked = InboundEmailFilter::clearForwardAcknowledgments((int)$domain->key);
+				if ($revoked > 0) {
+					error_log('Mailbox: raising ' . $domain_name . ' to ' . $new_level
+						. ' revoked ' . $revoked . ' forwarding acknowledgment(s); those filters '
+						. 'no longer forward until re-acknowledged.');
+				}
+			}
+
 			// A raise into a sealing level converges the backlog: earlier mail was
 			// stored plaintext (sealing is per-row) and "my mail is now private"
 			// must not be quietly untrue for history. Every raise lands on the
