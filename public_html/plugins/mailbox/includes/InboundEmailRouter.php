@@ -629,8 +629,13 @@ class InboundEmailRouter {
 			return false;
 		}
 
-		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
-		$raw = (new SealedBox())->openDek($sealed_raw, $secret_key);
+		// The named non-arming open, deliberately: this blob is mail held in
+		// transit, and opening it is delivery arriving late — the same plaintext
+		// receive-time ingest holds cold for the same message on any server. It
+		// is NOT a read of stored sealed content, which is why the hot-turn rule
+		// stays off here and only here. See the method's contract.
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$raw = (new VaultCrypto())->openHeldDeliveryBlob($sealed_raw, $secret_key);
 
 		$parsed = $this->parseEmail($raw);
 		$bodies = $this->extractBodies($raw, $parsed);
@@ -1612,6 +1617,17 @@ class InboundEmailRouter {
 		if (!$domain->key) {
 			return array();
 		}
+		// Reading the raw message above opens it, so this process is now hot.
+		// Relaying is the one send that is allowed to carry the content itself,
+		// and only because someone acknowledged in writing that it would — the
+		// caller has already checked that acknowledgment (see
+		// InboundEmailFilter::forwardConsentSatisfied). Naming it here means the
+		// relay path is covered by the same rule as EmailSender, rather than
+		// slipping past it by using a different transport.
+		require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		SealedEgressGuard::assertSendAllowed(EmailSender::EGRESS_ACKNOWLEDGED_FORWARD);
+
 		$parsed = $this->parseEmail($raw);
 		list($raw_mime, $envelope_sender) = $this->buildForwardMessage(
 			$raw, $parsed, $domain, (string)$msg->get('iem_recipient'));

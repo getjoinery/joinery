@@ -47,8 +47,11 @@ class RecipeVaultScope {
 	 * indefinitely. A CONSENT gate needs the opposite: an unanswerable question
 	 * must not read as permission. Same computation, opposite failure
 	 * direction, so the caller picks rather than the callee guessing.
+	 * Public because RunContentPurge needs the strict direction too: a recipe
+	 * whose scope cannot be answered cannot be proven clean, so its old run
+	 * content is cleared rather than kept.
 	 */
-	private static function scopeOrThrow(Recipe $recipe): ?string {
+	public static function scopeOrThrow(Recipe $recipe): ?string {
 		// AGENT MODE IS OUT OF SCOPE HERE, AND THAT RESTS ON AN INVARIANT.
 		//
 		// An agent recipe reaches mail through the generic query_model tool, and
@@ -122,7 +125,7 @@ class RecipeVaultScope {
 	 * The recipe analogue of LlmProviderFactory::forConversation()'s Fortress
 	 * pin. Chat pins Fortress conversations to local hardware outright; a recipe
 	 * is allowed to use a cloud model, but only where the domain it reads has
-	 * given the second, explicit consent (specs/sealed_content_egress.md,
+	 * given the second, explicit consent (specs/implemented/sealed_content_egress.md,
 	 * resolved decision 5).
 	 *
 	 * This is sink zero: it precedes every storage sink, and no storage-side

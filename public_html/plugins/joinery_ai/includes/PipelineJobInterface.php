@@ -70,7 +70,7 @@ interface PipelineJobInterface {
      * sealed has nothing to protect, so a job with no sealed source returns
      * true. For the email jobs this is the domain's explicit cloud consent,
      * separate from and narrower than its consent to AI reading at all
-     * (specs/sealed_content_egress.md, resolved decision 5).
+     * (specs/implemented/sealed_content_egress.md, resolved decision 5).
      *
      * Checked when the recipe is saved AND again at run start, so withdrawing
      * consent stops a cloud-pinned recipe at its next run instead of letting it

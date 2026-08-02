@@ -93,6 +93,12 @@ Keys are scoped per credential (API key, or user for browser sessions), so key s
 
 Stored outcomes live in `aik_api_idempotency_keys` (the raw key is never stored, only its SHA-256) and are purged past the 24-hour window by the **Purge Idempotency Keys** scheduled task.
 
+**Responses built from protected content are stored encrypted.** When the request that produced the response opened Sealed Vault content — reading mail on a protected domain, a protected chat turn — the cached body is sealed to that owner (`docs/sealed_vault.md` § The hot-turn rule) rather than cached in the clear. Three consequences for a client:
+
+- A retry made while the owner's vault is unlocked replays the body exactly as always. Nothing changes.
+- A retry made while it is locked, or after a request that involved more than one owner's protected content, gets **409** `ActionError` with *the original response for this Idempotency-Key is not retained*. The action was **not** repeated — duplicate suppression is intact. Retry while the owner's vault is unlocked, re-issue the operation under a fresh key, or query the resource for the outcome.
+- Retention is unchanged: sealed rows expire on the same `idempotency_key_retention_hours` window as any other.
+
 ### Locked state (sealed mailboxes)
 
 Mailbox actions over a protected (Private/Fortress) domain follow the

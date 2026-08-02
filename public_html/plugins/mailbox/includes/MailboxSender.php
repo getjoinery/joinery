@@ -245,7 +245,11 @@ class MailboxSender {
 		// One pipeline, synchronous (no retry-queue): success/failure is shown now.
 		try {
 			$sender = new EmailSender();
-			$ok = $sender->send($email, false, $transport->transport);
+			// Building the body opens the quoted source and the sealed DKIM key,
+			// so this process is hot by the time it gets here. The egress is the
+			// whole point and the user authorised it by pressing send in their own
+			// session, on their own mailbox — see EmailSender::EGRESS_USER_COMPOSE.
+			$ok = $sender->send($email, false, $transport->transport, EmailSender::EGRESS_USER_COMPOSE);
 		} catch (VaultLockedException $e) {
 			// Signing a protected identity domain unwraps its sealed DKIM key, so it
 			// is a content action under the locked-state contract: a closed window

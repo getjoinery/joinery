@@ -157,6 +157,7 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 				'form_values'   => $values,
 				'scope_options' => $scope['options'],
 				'label_options' => _filter_label_options($values['scope']),
+				'forward_ack_domain' => _filter_forward_ack_domain($values['scope'], $scope['alias_domain']),
 				'error'         => $e->getMessage(),
 				'session'       => $session,
 				'settings'      => $settings,
@@ -187,6 +188,7 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 			'form_values'   => $values,
 			'scope_options' => $scope['options'],
 			'label_options' => _filter_label_options($values['scope']),
+			'forward_ack_domain' => _filter_forward_ack_domain($values['scope'], $scope['alias_domain']),
 			'session'       => $session,
 			'settings'      => $settings,
 		));
@@ -376,7 +378,7 @@ function _filter_blank_values(): array {
 		'fil_action_star' => false, 'fil_action_mark_read' => false,
 		'fil_action_archive' => false, 'fil_action_mark_spam' => false,
 		'fil_action_never_spam' => false, 'fil_action_delete' => false,
-		'fil_action_forward_to' => '', 'apply_existing' => false,
+		'fil_action_forward_to' => '', 'fil_forward_ack' => false, 'apply_existing' => false,
 	);
 }
 
@@ -410,8 +412,34 @@ function _filter_collect_input(array $input): array {
 		'fil_action_never_spam'=> !empty($input['fil_action_never_spam']),
 		'fil_action_delete'    => !empty($input['fil_action_delete']),
 		'fil_action_forward_to'=> trim((string)($input['fil_action_forward_to'] ?? '')),
+		'fil_forward_ack'      => !empty($input['fil_forward_ack']),
 		'apply_existing'       => !empty($input['apply_existing']),
 	);
+}
+
+/**
+ * The domain name a filter's scope belongs to, but only when that domain seals
+ * its content — the form uses it to decide whether forwarding needs an
+ * acknowledgment, and to name the domain in the sentence being agreed to.
+ * Empty string when nothing needs acknowledging.
+ */
+function _filter_forward_ack_domain(string $scope, array $alias_domain): string {
+	$domain_id = null;
+	if (strncmp($scope, 'alias:', 6) === 0) {
+		$alias_id = intval(substr($scope, 6));
+		$domain_id = $alias_domain[$alias_id] ?? null;
+		if ($domain_id === null) {
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			$domain_id = $alias->key ? intval($alias->get('iea_ied_inbound_email_domain_id')) : null;
+		}
+	} elseif (strncmp($scope, 'domain:', 7) === 0) {
+		$domain_id = intval(substr($scope, 7));
+	}
+	if (!$domain_id) {
+		return '';
+	}
+	$domain = new InboundEmailDomain(intval($domain_id), TRUE);
+	return ($domain->key && $domain->seals_content()) ? (string)$domain->get('ied_domain') : '';
 }
 
 /** Reconstruct the editable value set from a stored filter (edit prefill). */
@@ -433,6 +461,10 @@ function _filter_values_from_model(InboundEmailFilter $f): array {
 			'fil_action_delete') as $col) {
 		$v[$col] = (bool)$f->get($col);
 	}
+	// Prefill the acknowledgment as ticked only when the standing one still covers
+	// the address in the box. A revoked or superseded consent shows unticked, so
+	// re-saving is a deliberate re-consent rather than a rubber stamp.
+	$v['fil_forward_ack'] = $f->forwardConsentSatisfied() && $f->forwardNeedsAcknowledgment();
 	$lid = intval($f->get('fil_action_ilb_inbound_email_label_id'));
 	$v['fil_action_ilb_inbound_email_label_id'] = $lid > 0 ? (string)$lid : '0';
 	$v['fil_match_size_op'] = (string)$f->get('fil_match_size_op');
@@ -516,6 +548,25 @@ function _filter_save(array $v, array $alias_domain): InboundEmailFilter {
 	$filter->set('fil_action_never_spam', $v['fil_action_never_spam']);
 	$filter->set('fil_action_delete', $v['fil_action_delete']);
 	$filter->set('fil_action_forward_to', $v['fil_action_forward_to'] !== '' ? $v['fil_action_forward_to'] : null);
+
+	// Forwarding off a protected domain is an egress and needs the operator to
+	// say so in writing (specs/implemented/sealed_content_egress.md § resolved decision 7).
+	// The acknowledgment is refreshed on every save that ticks the box, which is
+	// what makes changing the destination re-consent rather than inherit.
+	if ($filter->forwardNeedsAcknowledgment()) {
+		if (empty($v['fil_forward_ack'])) {
+			throw new InboundEmailFilterException(
+				'This domain protects its mail, so forwarding it off the server needs your '
+				. 'acknowledgment. Tick the confirmation under the forwarding address, or clear '
+				. 'the address to save the rest of the filter.');
+		}
+		$filter->recordForwardAcknowledgment(intval(SessionControl::get_instance()->get_user_id()));
+	} else {
+		// No address, or a domain with nothing to protect: hold no stale consent.
+		$filter->set('fil_forward_ack_time', null);
+		$filter->set('fil_forward_ack_usr_user_id', null);
+		$filter->set('fil_forward_ack_destination', null);
+	}
 
 	// "Also apply to existing": flag for the backfill task and reset its cursor.
 	if ($v['apply_existing']) {

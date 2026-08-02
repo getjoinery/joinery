@@ -630,8 +630,10 @@ class InboundEmailMessage extends SystemBase {
 	 * on this row's direction, and a sealed column added later is covered here
 	 * without anyone remembering to add it.
 	 *
-	 * Already-sealed values are skipped, so a re-run is a no-op rather than a
-	 * double-seal. Returns the row DEK for sealing this message's attachments.
+	 * Takes UNSEALED rows only — an already-sealed row throws, because sealing
+	 * mints a fresh DEK and replacing the row's key wrapping would strand the
+	 * existing ciphertext. Returns the row DEK for sealing this message's
+	 * attachments.
 	 */
 	public static function sealExistingRow(InboundEmailMessage $msg, UserEncryptionVault $vault): string {
 		$message_id = intval($msg->key);
@@ -647,6 +649,16 @@ class InboundEmailMessage extends SystemBase {
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		if (!$row) {
 			throw new InboundEmailMessageException('sealExistingRow(): row ' . $message_id . ' not found.');
+		}
+		// Refuse an already-sealed row rather than silently re-wrapping it:
+		// sealColumns() below MINTS a fresh DEK, and writing that wrapping over
+		// iem_sealed_key would strand every column and attachment sealed under
+		// the old one. Both callers select iem_content_sealed = false; this
+		// guard is for the caller that one day doesn't.
+		if (static::rowArrayIsSealed($row)) {
+			throw new InboundEmailMessageException(
+				'sealExistingRow(): row ' . $message_id . ' is already sealed — '
+				. 're-sealing would replace its key wrapping and strand the existing ciphertext.');
 		}
 
 		$columns = array();

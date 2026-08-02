@@ -31,7 +31,12 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.3.0
+ * @version 1.4.0
+ * @changelog 1.4.0 - Sealed idempotency cache (specs/implemented/sealed_content_egress.md
+ *   § resolved decision 6): a response produced while the process held sealed
+ *   content is stored encrypted to that owner — or not at all when more than
+ *   one owner was involved. Replay outside the owner's unlock window answers
+ *   409 "response not retained" while the key row still suppresses duplicates.
  * @changelog 1.3.0 - Idempotency resolves before boundary validation: a key
  *   reused with a different body is a 409 even when the new body would not
  *   validate (the retry mismatch outranks the validation detail). Claiming
@@ -436,8 +441,28 @@ class ApiLogicEndpoint {
 			return $row; // abandoned original: take over and execute
 		}
 
-		// Replay the stored outcome verbatim.
+		// Replay the stored outcome verbatim — unless the body was sealed to a
+		// vault that is not open right now, or was never retained because the
+		// original request read more than one person's protected content. Either
+		// way the key has still done its real job: the action does not run twice.
+		// The client is told to re-issue with a new key rather than handed an
+		// empty success it might read as the original response.
 		$stored_status = (int) $stored_status;
+		$stored_body = self::idempotencyReplayBody($row);
+		if ($stored_body === null) {
+			RequestLogger::log('api', 'action ' . $action_label, false, [
+				'user_id' => $user_id,
+				'status_code' => 409,
+				'error_type' => 'ActionError',
+				'note' => 'idempotent replay: response not retained'
+			]);
+			api_error('The original response for this Idempotency-Key is not retained: it was '
+				. 'sealed to a vault that is not open right now, or was never stored. '
+				. 'The action was NOT repeated. Query the resource for the outcome, retry while '
+				. 'the protecting vault is unlocked, or re-issue the request with a new '
+				. 'Idempotency-Key to run it again.', 'ActionError', 409);
+		}
+
 		RequestLogger::log('api', 'action ' . $action_label, $stored_status < 400, [
 			'user_id' => $user_id,
 			'status_code' => $stored_status,
@@ -445,8 +470,25 @@ class ApiLogicEndpoint {
 		]);
 		header("Content-Type: application/json");
 		http_response_code($stored_status);
-		echo $row->get('aik_response_body') . PHP_EOL;
+		echo $stored_body . PHP_EOL;
 		exit;
+	}
+
+	/**
+	 * The stored response body a replay may return, or null when there is
+	 * nothing to hand back: the body was sealed to a vault that is not open
+	 * right now, or was never stored (a hot original that involved more than
+	 * one owner). Null means the replay answers "not retained" — the key row
+	 * itself still suppresses the duplicate either way.
+	 */
+	protected static function idempotencyReplayBody($row): ?string {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+		try {
+			$body = $row->get('aik_response_body');
+		} catch (VaultLockedException $e) {
+			return null;
+		}
+		return ($body === null || $body === '') ? null : (string) $body;
 	}
 
 	/**
@@ -456,9 +498,41 @@ class ApiLogicEndpoint {
 	 */
 	protected static function idempotencyFinalize($idem_record, $status_code, $response_json) {
 		try {
+			require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
+			$owner_id = SealedEgressGuard::isHot() ? SealedEgressGuard::ownerUserId() : 0;
+
+			// Cold request: the body holds nothing the vault protects, so cache it
+			// as it always was.
+			if ($owner_id === 0) {
+				$idem_record->set('aik_response_status', (int) $status_code);
+				$idem_record->set('aik_response_body', $response_json);
+				$idem_record->save();
+				return;
+			}
+
+			// Hot request: the status is stored either way, because that is what
+			// makes a retry safe. The body is stored only if it can be sealed —
+			// and it cannot when the request read more than one owner's content,
+			// since there is then no single person it belongs to.
 			$idem_record->set('aik_response_status', (int) $status_code);
-			$idem_record->set('aik_response_body', $response_json);
 			$idem_record->save();
+			$vault = null;
+			if ($owner_id !== null) {
+				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+				$vault = UserEncryptionVault::loadForUser((int) $owner_id);
+			}
+			if ($vault === null || !$vault->key) {
+				// The outcome is recorded, the body is not. Say so: a retry that
+				// gets "not retained" is otherwise hard to account for.
+				error_log('ApiLogicEndpoint: idempotency body not retained for key '
+					. (int) $idem_record->key . ' — request opened sealed content ('
+					. implode(', ', SealedEgressGuard::sources()) . ') and '
+					. ($owner_id === null ? 'more than one owner was involved'
+					                      : 'user ' . (int) $owner_id . ' has no vault to seal it to') . '.');
+				return;
+			}
+			ApiIdempotencyKey::sealColumns((int) $idem_record->key, $vault,
+				array('aik_response_body' => (string) $response_json));
 		} catch (Exception $e) {
 			error_log('ApiLogicEndpoint: failed to store idempotency outcome: ' . $e->getMessage());
 		}

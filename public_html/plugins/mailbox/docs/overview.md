@@ -604,6 +604,29 @@ All forward paths — alias forward, `forward_and_store`, and the domain
 catch-all forward — go through this resolver, so the catch-all forward
 preserves attachments and MIME structure exactly like the alias forward.
 
+### Forwarding off a protected domain
+
+A domain at Private or Fortress promises its mail cannot be read without the
+owner's key. A forwarding filter breaks that promise by design: the copy leaves
+over SMTP in clear text, permanently out of the vault's reach. That is allowed,
+but only as an informed choice.
+
+Saving a filter with a forwarding address on a protected domain requires ticking
+an acknowledgment that names the destination. The acknowledgment is stored with
+the address it was given for (`fil_forward_ack_time`, `fil_forward_ack_destination`,
+`fil_forward_ack_usr_user_id`), so repointing the filter somewhere else needs
+fresh consent rather than inheriting the old one.
+
+**Raising the domain's security level revokes every acknowledgment on it.**
+Agreeing to send a Standard domain's mail out in clear text is not agreement for
+what Fortress promises. Affected filters keep matching, labelling, starring and
+filing — only the forward stops, and the address stays in the box so
+re-acknowledging is one tick. Each suppressed forward is logged, naming the
+filter and the address.
+
+A filter with no forwarding address needs no acknowledgment, and forwarding off
+a Standard domain is unaffected.
+
 The **SRS bounce notification** (`handleSRSBounce`) is not a relay — it is a
 freshly generated delivery-failure message, sent through the normal provider
 send path (`EmailSender`), which also reuses the provider credential.

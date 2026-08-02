@@ -1,9 +1,53 @@
 # Sealed content must not escape into unsealed storage
 
-**Status:** Active. The three live defects, **Layer 0** and **Layer 1 for
-`rcr_recipe_runs`** are built; Layer 2, Layer 3, and Layer 1 for the remaining
-tables (`rcp_recipes.rcp_workspace`, `mem_memories`, `rcn_notes`,
-`aik_api_idempotency_keys`, `cal_entries`) are not.
+**Status:** Implemented. The three live defects, **Layer 0**, **Layer 1 for
+`rcr_recipe_runs`**, **Layer 2 (the hot-turn rule)** and resolved decisions 6
+and 7 are all in the tree (commits 090ad98a, bb71449c, the review fix pass
+extending `save()`'s sealed-skip to the seal metadata columns, and the Layer 2
+checkin). Layer 3 stays a standing preference rather than a build: the agent
+trace cap and the reference-over-copy rule apply at every new write site, and
+the hot-turn rule is what raises them when someone forgets. Layer 1's remaining
+tables are demand-driven by resolved decision 10 and are deliberately not built
+— the next refusal the rule raises is what asks for the next one.
+
+Layer 2 landed as: `SealedEgressGuard` holds one boolean per process, armed by
+`VaultCrypto::openField()` and attributed by `VaultUnlock::secretKey()`;
+`GuardedPdo` / `GuardedPdoStatement` run the rule under every INSERT and UPDATE
+in the platform (`DbConnector` builds the guarded connection, so nothing else
+changes); `EmailSender::send()` and `sendBatch()` refuse a hot send that carries
+no `EGRESS_*` assertion, and `InboundEmailRouter::forwardStoredMessage()` names
+the same assertion so the SMTP relay cannot slip past by using a different
+transport. `SealedEgressGuard::isolate()` scopes the rule to one unit of work —
+`RecipeRunner::run()` and the harness fixture builders are the callers — and an
+outer hot state survives it, so nesting cannot launder a process cold.
+
+Dev triage, per the build note below: three writers tripped and all three
+resolved at the write site, none by exempting a table. The error log stores a
+type/file/line reference instead of the message and trace while hot
+(`GeneralError::logError()`). `RecipeRunner` brackets each run, because a drain
+slice runs several independent recipes for one user and the first protected one
+would otherwise fail every later one. Test fixtures that deliberately construct
+pre-sealing state bracket those writes.
+
+One Layer 0 defect surfaced building this and is fixed in the same checkin:
+`rowIsSealed()` read a seal flag with a naive truth test, and every false
+spelling a boolean arrives in except a bare `false` — `'f'`, `'0'`, and the
+string `'false'` a field spec may declare as its default — is truthy in PHP. A
+row wrongly believed sealed has its content columns skipped by `save()` and
+silently never written. `SystemBase::sealFlagIsSet()` now matches the false
+spellings explicitly, and both the instance and raw-row paths go through it.
+
+**Descope, owner-decided 2026-08-02:** the verbatim-copy matcher (the original
+"Layer 2b" — plaintext registration at `VaultCrypto::openField()`, normalized
+rolling-hash shingles at the PDO layer) is **removed from scope**, and Layer 1
+stops enumerating future tables pre-emptively — `mem_memories`, `rcn_notes`,
+`rcp_recipes.rcp_workspace` and `cal_entries` seal **on demand**, when the
+hot-turn rule refuses a write a product flow actually needs (see Layer 1).
+Rationale recorded under resolved decision 9 and Rejected alternatives. The
+first two checkins grew well past the feature's size because every sink was
+being closed by hand; the hot-turn rule is the single choke point that caps
+that curve, so it is built next and everything else queues behind refusals it
+actually raises.
 
 Layer 1 landed for the run table as: the run row seals to the recipe owner at run
 start when `RecipeVaultScope::forRecipe()` answers non-null; `rcr_output`,
@@ -222,37 +266,64 @@ public static $sealed_fields = array(
 
 (The original draft listed three of these five. The fix spec itself
 under-enumerated the one table it audited — which is why the estate test below
-asserts across *every* column, and why Layer 2a exists.)
+asserts across *every* column, and why Layer 2 exists.)
 
 The same row-flag treatment extends to the other per-row-sensitive tables the
-audit surfaced: `rcp_recipes` (`rcp_workspace`), `mem_memories`
+audit surfaced — `rcp_recipes` (`rcp_workspace`), `mem_memories`
 (`mem_title`, `mem_content`, `mem_tags`), `rcn_notes` (`rcn_title`,
-`rcn_content`). For each, a row written from protected material seals; a row
-written from ordinary material stays plaintext and fully searchable. Under
-Layer 0 each of these is a declaration plus a flag column, not a crypto project.
+`rcn_content`) — but **on demand, not pre-emptively**. Each of those tables
+seals when the hot-turn rule (Layer 2) refuses a write that a product flow
+actually needs: the refusal names the destination, and the fix is either a
+Layer 0 declaration on that model (a flag column plus `$sealed_fields`, not a
+crypto project) or — preferred — storing a reference instead (Layer 3).
+Until then they carry no sealing columns and no code. What protects them in
+the meantime is the same thing that protects them today: the flows that would
+write sealed-derived content into them are refused by the hot-turn rule the
+moment it exists, and before it exists they are unreachable from sealed
+content by runner topology (a CLI worker holds no window; the in-window drain
+runs pipeline recipes, which use none of these sinks — the invariant pinned in
+`RecipeVaultScope::scopeOrThrow()` and the `sealed_egress` test).
+
+Enumerating and sealing all of them up front was the original plan and is
+deliberately abandoned: it is O(sinks) forever, each sink is a checkin the
+size of the run-log one, and the enumeration is exactly the thing the audit
+proved nobody keeps complete.
 
 This is the only layer that covers *derived* content — an AI summary is new prose
 that shares no substring with the body it describes, so no mechanical check can
 recognise it. Structure is the only thing that catches it.
 
-### Layer 2 — The egress guard: two rules at one anchor
+### Layer 2 — The hot-turn rule: one rule at one anchor
 
-Both rules live at the PDO statement layer in `DbConnector` (see corrected
-premise 2 — the only true write choke point), plus one hook in
-`EmailSender::send()`. Both are armed only when the request has actually opened
-sealed content, which is rare, so the production cost rounds to zero on every
-other request.
+**This is the single choke point the rest of the design leans on.** It lives at
+the PDO statement layer in `DbConnector` (see corrected premise 2 — the only
+true write choke point), plus one hook in `EmailSender::send()`. It is armed
+only when the process has actually opened sealed content, which is rare, so the
+production cost rounds to zero everywhere else.
 
-**2a — The hot-turn rule (structural; catches paraphrase).** When
-`VaultCrypto::openField()` first hands out a sealed plaintext, the request is
-marked *hot*, recording the owner and scope. While hot, any string value above a
-trivial length written to a content column must land in a row that seals:
+When `VaultCrypto::openField()` first hands out a sealed plaintext, the process
+is marked *hot*, recording the owner and scope (the model hooks add source
+model+field attribution when they are the caller). While hot, any string value
+above the threshold (resolved decision 8: 64 characters) written by an INSERT
+or UPDATE must land in a row that seals:
 
 - destination model declares sealing support → the write proceeds with the row
   flag set and the columns sealed to the recorded owner (Layer 0 makes this one
   call);
+- the value is already ciphertext (`v1.aead.` prefix) or the destination row is
+  sealed to the recorded owner → the write proceeds; this is how `sealColumns()`
+  and `writeContent()` pass through the guard they sit behind;
 - destination cannot seal → `SealedContentEgressException`, naming the
-  destination and the source scope that made the request hot.
+  destination table and the source scope that made the process hot. The fix is
+  at the write site, in preference order: store a reference (Layer 3), make the
+  destination sealable (a Layer 0 declaration), or don't write the content.
+
+At `EmailSender::send()`, the same state applies: while hot, a send is refused
+unless the call site passes an explicit content-free flag — the reviewed
+assertion that the message was built only from unsealed data (the sealed-run
+pointer emails `RecipeRunner` already sends are the pattern). This closes both
+the SMTP sink and the `equ_queued_emails` retry spill, because a message that
+is never sent is never queued for retry.
 
 This is the confidentiality twin of `TaintGate` (which tracks *injection*
 provenance and already proves the predicate-enforced-at-the-choke-point
@@ -260,38 +331,30 @@ pattern). It is deliberately coarse: no string matching, so it cannot be
 defeated by paraphrase — and the audit shows the majority of real leaks
 (`remember`, `save_note`, calendar titles, workspaces, AI summaries) are
 paraphrase-shaped, invisible to any matcher. Strictness is resolved
-decision 8: always refuse, no opt-out mechanism.
+decision 8: always refuse, no table exemptions.
 
 Note the distinction from the rejected *tainted-value wrapper*: nothing wraps
 values, so there is no `__toString` escape hatch and no read-site breakage. The
-taint is one boolean on the request, not a type threaded through the codebase.
+taint is one flag on the process, not a type threaded through the codebase.
 
-**2b — The verbatim-copy rule (precise; provides attribution).** Registration at
-`VaultCrypto::openField()` (text plaintexts within length bounds; the model
-hooks add source model+field attribution). At the PDO anchor, every outgoing
-string parameter is checked for containment of registered plaintext — and at
-`EmailSender::send()`, the subject and bodies are checked the same way, which
-closes both the SMTP sink and the `equ_queued_emails` retry spill without asking
-the producer to remember anything.
+Two deliberate exemptions, both consent-shaped rather than table-shaped:
 
-Matching must survive the transformations already present in tree:
+- **The AI provider client.** Sending the digest to the model *is the feature*;
+  which providers may receive sealed digests is governed by resolved decision 5
+  (per-domain cloud consent), enforced in `LlmProviderFactory`, not here.
+- **The acknowledged `forward_to` filter** (resolved decision 7): the recorded
+  acknowledgment *is* the consent, so the forward path passes the
+  `EmailSender` hook the same content-free-style flag, backed by the
+  acknowledgment row rather than a code-review claim.
 
-- **JSON escaping** — `flushToolCalls()` json-encodes; a subject containing a
-  quote or non-ASCII no longer matches raw containment;
-- **truncation** — `GetRecentOutputsTool` cuts at 4000 chars; tally gists
-  truncate;
-- case and markdown wrapping.
-
-So: normalize both sides (lowercase, strip non-alphanumerics) and test whether
-any ~32-character window of a registered plaintext occurs in the candidate —
-rolling-hash shingles, linear in the candidate length. Minimum registered length
-stays (proposed 24 chars pre-normalization) to keep addresses and single words
-from false-positiving.
-
-One deliberate exemption: the AI provider client. Sending the digest to the
-model *is the feature*; which providers may receive sealed digests is governed
-by resolved decision 5 (per-domain cloud consent), enforced in
-`LlmProviderFactory`, not the guard.
+**Build note — first triage list.** Arming is per PHP process (one web request,
+one CLI run). Known writers that will trip the rule in dev and must be triaged
+at their write sites during the build, not by exempting tables: session
+persistence if DB-backed, `vew_visitor_events` URLs, error/audit log rows that
+quote values, and `aip_recipe_item_log` notes if any grow past the threshold.
+Each is expected to resolve as "reference or cap, not content" — if one cannot,
+that is evidence worth bringing back to this spec, not a reason to weaken the
+rule.
 
 ### Layer 3 — Prefer a reference to a copy
 
@@ -318,8 +381,8 @@ resolves item keys and shows subjects; outside one it shows ids.
 The delivery email for a sealed recipe carries the tally with content suppressed —
 counts and outcomes, no subjects, no summaries — and says why, with a link to the
 run. Mail is an unencrypted channel; sealed content must not go through it at all.
-(Layer 2b at `EmailSender::send()` enforces this even if a future producer
-forgets.)
+(The hot-turn hook at `EmailSender::send()` enforces this even if a future
+producer forgets.)
 
 ## Resolved decisions
 
@@ -333,7 +396,7 @@ forgets.)
    sealed mail has ever been AI-processed (see Blast radius).
 3. **No opt-out declaration mechanism** (`$unsealed_fields`). See Rejected
    alternatives. The gap it would have covered — a future content column nobody
-   thought about — is instead covered by the hot-turn rule (2a) and the
+   thought about — is instead covered by the hot-turn rule (Layer 2) and the
    every-column estate test.
 4. **The agent workspace seals.** Survey confirmed no out-of-window consumer:
    the dispatcher reaper reads only status/error columns
@@ -361,7 +424,7 @@ forgets.)
    scope, in which case no body is stored at all — gets a "response not
    retained, re-issue the request" error while the key row still suppresses
    duplicates. This is not special-cased code: the `aik` INSERT during a hot
-   request trips the hot-turn rule (2a), and auto-sealing is that rule's
+   request trips the hot-turn rule (Layer 2), and auto-sealing is that rule's
    normal resolution — the cache is simply the first consumer of the general
    mechanism. Retention sweep behavior is unchanged (sealed rows purge on the
    same `idempotency_key_retention_hours` window, default 24, `0` = keep).
@@ -374,7 +437,7 @@ forgets.)
    still matches, stores and labels normally) until re-acknowledged. Same
    one-way-tightening rule as `TaintGate`'s opt-in and the same shape as
    resolved decision 5: sealed content leaves the box only behind explicit,
-   informed, revocable consent. The forward path itself carries a Layer 2b
+   informed, revocable consent. The forward path itself carries a hot-turn
    exemption analogous to the provider client — the acknowledged filter *is*
    the consent — so the `EmailSender` hook does not fight it.
 
@@ -387,13 +450,35 @@ forgets.)
    exist only to be misused. Accepted trade, stated plainly: on a code path
    never exercised in dev, this turns a would-be silent leak into a loud
    production exception. For a confidentiality promise that is the correct
-   failure direction. Parameters: the 2a threshold is 64 characters (below
-   that, 2b still catches verbatim copies down to 24 normalized characters;
-   the residual gap is a sub-64-character paraphrase); the standing exemption
-   list starts empty, and a false positive found in dev is fixed at the write
-   site — cap the log note, store the reference — never by exempting the
-   table. Thresholds are constants, recalibrated only from dev estate-run
-   evidence.
+   failure direction. Parameters: the threshold is 64 characters; the
+   residual gap is any copy — verbatim or paraphrase — below it, accepted
+   because the surfaces where short strings carry sealed content (subjects in
+   run rows, summaries on message rows) are already sealed structurally by
+   Layer 1, and Layer 3 prefers references over copies at every new write
+   site. The standing exemption list starts empty, and a false positive found
+   in dev is fixed at the write site — cap the log note, store the reference
+   — never by exempting the table. The threshold is a constant, recalibrated
+   only from dev estate-run evidence; if that evidence ever shows short
+   verbatim copies escaping, lowering it is the dial, not resurrecting the
+   matcher.
+
+9. **The verbatim-copy matcher is descoped** (owner decision 2026-08-02). The
+   original design paired the hot-turn rule with a plaintext-registration +
+   normalized-shingle containment check at the same anchors. Dropped because:
+   the leak classes it uniquely covered (sub-64-character verbatim copies)
+   are handled by Layer 1 at the surfaces that actually carry them; the
+   majority leak class (paraphrase) was never coverable by matching at all;
+   and the matcher was the single most complex remaining component — its own
+   normalization pipeline, defeated in-tree by JSON escaping and truncation
+   before it was ever built. One rule at one choke point is the design; two
+   rules at the same choke point was the old design paying twice for the
+   weaker guarantee. Revisit only on dev estate evidence per decision 8.
+
+10. **Layer 1 stops at demand-driven** (owner decision 2026-08-02, same
+    conversation). No new table gains sealing columns until the hot-turn rule
+    refuses a write a product flow needs. The refusal is the requirements
+    document: it names the destination, the source scope, and the value size,
+    and the preferred resolution is a reference, not a seal.
 
 ## Blast radius today, and the shipped templates
 
@@ -431,14 +516,17 @@ them to, and nothing should until the run log stops copying what it reads.
   (regression for live defect 1), and `sealColumns()` round-trips;
 - a sealed run's content columns are unreadable with the vault locked and
   readable with it open;
-- the hot-turn rule: a request that opened sealed content and writes a long
-  string into a non-sealing model throws `SealedContentEgressException` naming
-  the destination; the same write in a cold request passes;
-- the verbatim rule catches a JSON-escaped copy and a truncated (>32-char
-  overlap) copy, does not fire on strings below the minimum length, and names
-  source model+field and destination;
+- the hot-turn rule: a process that opened sealed content and writes a long
+  string into a non-sealing table throws `SealedContentEgressException` naming
+  the destination; the same write in a cold process passes; a write of
+  already-sealed ciphertext, and a write into a row sealed to the recorded
+  owner, both pass while hot;
+- values at and below the threshold pass while hot (the accepted residual gap
+  of resolved decision 8, pinned so a threshold change is a deliberate act);
 - the delivery email for a sealed recipe contains no subject or summary, and
-  `EmailSender::send()` refuses a message containing registered plaintext;
+  `EmailSender::send()` refuses a hot send that does not carry the
+  content-free flag — and therefore nothing hot ever reaches
+  `equ_queued_emails` via the retry queue;
 - run history renders outside an unlock window without throwing;
 - a sealed-source recipe naming a cloud model is refused at save and at run
   start without the domain's cloud consent, and runs with it; withdrawing the
@@ -457,8 +545,8 @@ them to, and nothing should until the run log stops copying what it reads.
 - **`docs/sealed_vault.md`** — a "Derived content" section: the record-level
   sealing rule and why sensitivity lives on the row rather than the column; the
   Layer 0 write-side contract (`save()` skips sealed columns; `sealColumns()`
-  is the only writer); the hot-turn rule and the verbatim guard with its
-  paraphrase limit; the reference-over-copy rule for anything reading sealed
+  is the only writer); the hot-turn rule, its threshold, and the accepted
+  residual gap; the reference-over-copy rule for anything reading sealed
   material.
 - **`plugins/joinery_ai/docs/overview.md`** — what a sealed recipe's run history
   and delivery email contain, and why they differ from a standard recipe's;
@@ -487,15 +575,24 @@ count, a duration, a status — and under opt-out every one of those is encrypte
 unless its author remembers to exempt it, which breaks any query that sorts or
 filters on it. The mechanism would fire constantly for the common case to protect
 against the rare one. The gap it uniquely covered — a future *paraphrase* column
-nobody declared — is now covered structurally by the hot-turn rule (2a), which
+nobody declared — is now covered structurally by the hot-turn rule (Layer 2), which
 fires on the write regardless of what the column is called.
 
 **Tainted-value wrapper.** Decryption returns a `SealedString` object that sinks
 must explicitly unwrap. The strongest per-value guarantee available, and rejected
 on cost: without `__toString` every existing read site breaks, and with it the
 protection silently evaporates at the first `(string)` cast. The *per-turn* taint
-adopted as Layer 2a keeps the provenance idea and discards the wrapper: one
+adopted as Layer 2 keeps the provenance idea and discards the wrapper: one
 boolean on the request, no type threading, no cast escape hatch.
+
+**The verbatim-copy matcher (the original Layer 2b).** Plaintext registration
+at decrypt time plus normalized rolling-hash shingle containment at the PDO
+anchor and `EmailSender`. Carried in this spec through two checkins and then
+descoped (resolved decision 9): its unique coverage — short verbatim copies —
+is carried by Layer 1 at the surfaces that hold them, its normalization
+pipeline was already defeated in-tree by JSON escaping and truncation before
+it existed, and it could never see the paraphrase class that motivated the
+guard in the first place. The hot-turn rule alone is the guard.
 
 **Just do not log content.** Sounds clean, is not: the run trace is the debugging
 surface, and for a standard mailbox there is nothing to protect and real value in

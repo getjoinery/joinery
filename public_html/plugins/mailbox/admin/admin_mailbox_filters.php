@@ -144,6 +144,21 @@ if (($mode ?? 'list') === 'form') {
 			'value' => $v['fil_action_forward_to'],
 			'helptext' => 'A single email address. Historical mail is never re-forwarded.',
 		));
+		// On a domain that seals its mail, forwarding sends it back out in clear
+		// text. That is allowed, but only once the operator has said so — and the
+		// consent lapses whenever the domain's security level is raised.
+		if (!empty($forward_ack_domain)) {
+			$formwriter->checkboxinput('fil_forward_ack',
+				InboundEmailFilter::forwardAcknowledgmentText(
+					$v['fil_action_forward_to'] !== '' ? $v['fil_action_forward_to'] : 'the address above',
+					$forward_ack_domain),
+				array(
+					'checked'  => $v['fil_forward_ack'],
+					'helptext' => 'Required only while a forwarding address is set — leave the '
+						. 'address blank and this is ignored. Raising this domain security level '
+						. 'clears it, and forwarding stops until you confirm again.',
+				));
+		}
 		$formwriter->checkboxinput('fil_action_delete', 'Delete it', array('checked' => $v['fil_action_delete']));
 
 		$formwriter->checkboxinput('apply_existing', 'Also apply this filter to matching existing mail', array(

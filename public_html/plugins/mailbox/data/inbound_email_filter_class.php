@@ -101,6 +101,16 @@ class InboundEmailFilter extends SystemBase {
 		'fil_action_forward_to'  => array('type'=>'varchar(500)'),
 		'fil_action_delete'      => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
+		// Forwarding off a protected domain is an egress: the message leaves in
+		// clear text over SMTP, out of reach of the vault that was protecting it.
+		// It happens only behind a written acknowledgment naming the destination
+		// (specs/implemented/sealed_content_egress.md § resolved decision 7). The destination
+		// is recorded WITH the acknowledgment so changing where mail goes needs a
+		// fresh one — the old consent was for a different address.
+		'fil_forward_ack_time'        => array('type'=>'timestamp(6)'),
+		'fil_forward_ack_usr_user_id' => array('type'=>'int8'),
+		'fil_forward_ack_destination' => array('type'=>'varchar(500)'),
+
 		// backfill bookkeeping ("Also apply to existing")
 		'fil_apply_existing_pending' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'fil_apply_existing_cursor'  => array('type'=>'int8', 'default'=>'0', 'is_nullable'=>false),
@@ -115,6 +125,81 @@ class InboundEmailFilter extends SystemBase {
 			throw new SystemAuthenticationError(
 				'Current user does not have permission to edit this entry in ' . static::$tablename);
 		}
+	}
+
+	// --------------------------------------------------- forwarding consent
+
+	/**
+	 * Does this filter need a written acknowledgment before it may forward?
+	 *
+	 * Only when it forwards at all AND its domain seals content. Forwarding off
+	 * a standard domain is ordinary mail routing and needs nothing.
+	 */
+	function forwardNeedsAcknowledgment(): bool {
+		if (trim((string)$this->get('fil_action_forward_to')) === '') {
+			return false;
+		}
+		$domain = new InboundEmailDomain(intval($this->get('fil_ied_inbound_email_domain_id')), TRUE);
+		return $domain->key ? $domain->seals_content() : false;
+	}
+
+	/**
+	 * May this filter forward right now?
+	 *
+	 * Yes when no acknowledgment is needed, or when one exists and names the
+	 * address mail would actually go to. Pointing an acknowledged filter at a
+	 * different address is a new egress and needs its own consent, so the
+	 * comparison is against the recorded destination, not merely its presence.
+	 */
+	function forwardConsentSatisfied(): bool {
+		if (!$this->forwardNeedsAcknowledgment()) {
+			return true;
+		}
+		if (!$this->get('fil_forward_ack_time')) {
+			return false;
+		}
+		return strcasecmp(
+			trim((string)$this->get('fil_forward_ack_destination')),
+			trim((string)$this->get('fil_action_forward_to'))
+		) === 0;
+	}
+
+	/** Record the acknowledgment against the destination it was given for. */
+	function recordForwardAcknowledgment(int $user_id): void {
+		$this->set('fil_forward_ack_time', gmdate('Y-m-d H:i:s'));
+		$this->set('fil_forward_ack_usr_user_id', $user_id > 0 ? $user_id : null);
+		$this->set('fil_forward_ack_destination', trim((string)$this->get('fil_action_forward_to')));
+	}
+
+	/** The sentence an operator has to agree to before a protected domain forwards. */
+	static function forwardAcknowledgmentText(string $destination, string $domain_name): string {
+		return 'I understand that this sends mail from ' . $domain_name . ' in clear text to '
+			. $destination . '. Forwarded copies leave this server unencrypted and are no longer '
+			. 'protected by the security level set on this domain.';
+	}
+
+	/**
+	 * Revoke every forwarding acknowledgment on a domain — called when its
+	 * security level is raised.
+	 *
+	 * Tightening is one-way and never silent: consent given at one level was not
+	 * given at a higher one, so it lapses and has to be given again knowing what
+	 * the domain now promises. Affected filters keep matching, labelling and
+	 * filing; only the forward stops.
+	 *
+	 * @return int filters whose acknowledgment was cleared
+	 */
+	static function clearForwardAcknowledgments(int $domain_id): int {
+		if ($domain_id <= 0) { return 0; }
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE ' . static::$tablename . '
+			    SET fil_forward_ack_time = NULL, fil_forward_ack_usr_user_id = NULL,
+			        fil_forward_ack_destination = NULL
+			  WHERE fil_ied_inbound_email_domain_id = ?
+			    AND fil_forward_ack_time IS NOT NULL');
+		$stmt->execute(array($domain_id));
+		return $stmt->rowCount();
 	}
 
 	function prepare() {
@@ -299,6 +384,19 @@ class InboundEmailFilter extends SystemBase {
 	function buildActionSet(): array {
 		$label = intval($this->get('fil_action_ilb_inbound_email_label_id'));
 		$fwd   = trim((string)$this->get('fil_action_forward_to'));
+
+		// A protected domain forwards only while its acknowledgment stands.
+		// Dropping the action here rather than at the relay keeps the rest of the
+		// filter working exactly as configured: the message still matches, gets
+		// its labels, and is filed. Only the copy that would have left the server
+		// in clear text does not happen.
+		if ($fwd !== '' && !$this->forwardConsentSatisfied()) {
+			error_log('InboundEmailFilter: filter ' . intval($this->key) . ' did not forward to ' . $fwd
+				. ' — this domain seals content and the forwarding acknowledgment is missing or was '
+				. 'revoked by a security-level raise. Re-acknowledge it on the filter to resume.');
+			$fwd = '';
+		}
+
 		return array(
 			'never_spam' => (bool)$this->get('fil_action_never_spam'),
 			'mark_spam'  => (bool)$this->get('fil_action_mark_spam'),

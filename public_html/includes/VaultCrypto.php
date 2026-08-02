@@ -18,9 +18,10 @@
  * different row and decrypt successfully — VaultCrypto enforces nothing about
  * the AD's shape, it just always requires one.
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
+require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 
 class VaultCrypto {
 
@@ -54,9 +55,36 @@ class VaultCrypto {
 		return $this->box->aeadEncrypt($plaintext, $dek, $ad);
 	}
 
+	/**
+	 * Open a held-delivery blob: mail sealed IN TRANSIT to the owner's vault
+	 * public key so the server could not read it before the owner appeared —
+	 * never content that was ingested and stored under the sealed-at-rest
+	 * promise. Opening one is first-time delivery arriving late, so it does
+	 * NOT arm the hot-turn rule: the plaintext it yields is exactly what
+	 * receive-time ingest holds, cold, for the same message on any server
+	 * (docs/sealed_vault.md § The hot-turn rule).
+	 *
+	 * This is the ONLY sanctioned non-arming open of owner-keyed content, and
+	 * tests/vault/sealed_read_paths_test.php pins that: a new direct SealedBox
+	 * decrypt call anywhere in the tree fails the suite, so a second candidate
+	 * has to argue its case against the criterion above in review rather than
+	 * quietly joining. Reading anything STORED sealed goes through openField(),
+	 * which arms.
+	 */
+	public function openHeldDeliveryBlob(string $sealed, string $secret_key): string {
+		return $this->box->openDek($sealed, $secret_key);
+	}
+
 	/** Open content sealed by sealField(). Throws on tamper or an AD mismatch. */
 	public function openField(string $blob, string $dek, string $ad): string {
-		return $this->box->aeadDecrypt($blob, $dek, $ad);
+		$plaintext = $this->box->aeadDecrypt($blob, $dek, $ad);
+		// This is the one line every server-side read of sealed content passes
+		// through — model columns, attachment bytes, raw messages, the search
+		// index — so it is where the process becomes hot. From here on the
+		// hot-turn rule governs what may be written and sent
+		// (specs/implemented/sealed_content_egress.md, Layer 2).
+		SealedEgressGuard::markHot($ad);
+		return $plaintext;
 	}
 }
 ?>
