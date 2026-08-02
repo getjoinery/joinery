@@ -1161,4 +1161,17 @@
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
 
+	// backup_output_dir shipped defaulting to /backups, which nothing the site
+	// runs as can create — every backup failed with "does not exist and could
+	// not be created" until someone made it as root. Blank now means the site's
+	// own backups/ directory, which exists on every deployment shape. Only the
+	// old default is cleared: an operator who chose their own path keeps it.
+	$migration = array();
+	$migration['database_version'] = '163';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "UPDATE stg_settings SET stg_value = ''
+		WHERE stg_name = 'backup_output_dir' AND stg_value = '/backups';";
+	$migrations[] = $migration;
+
 

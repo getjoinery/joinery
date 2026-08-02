@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.35
+ * No framework. @version 2.36
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -125,8 +125,13 @@
 
 	// The reader's endpoints are /api/v1 actions, called through the shared
 	// joineryApi transport. apiGet keeps its query-string call convention: it
-	// parses the query off the configured action URL into a JSON body. Errors
-	// resolve as {} so list/render callers degrade to an empty state.
+	// parses the query off the configured action URL into a JSON body.
+	//
+	// It REJECTS on failure rather than resolving {}. A request that did not
+	// answer is not the same fact as a mailbox holding nothing, and a caller
+	// that cannot tell them apart states the wrong one confidently — a failed
+	// list read rendered as "No conversations.", which reads as data loss on a
+	// mailbox full of mail. Every caller handles its own failure below.
 	function apiGet(url) {
 		var qpos = url.indexOf('?');
 		var base = qpos === -1 ? url : url.slice(0, qpos);
@@ -134,7 +139,7 @@
 		if (qpos !== -1) {
 			new URLSearchParams(url.slice(qpos + 1)).forEach(function (v, k) { payload[k] = v; });
 		}
-		return joineryApi.post(base, payload).catch(function () { return {}; });
+		return joineryApi.post(base, payload);
 	}
 	function apiAction(payload) {
 		var body = { action: payload.action };
@@ -519,7 +524,9 @@
 	}
 
 	function refreshMailboxes() {
-		return apiGet(CFG.mailboxesUrl).then(renderMailboxes);
+		// A failed switcher read leaves the rail exactly as it was — repainting it
+		// from nothing would empty the mailbox list the reader navigates by.
+		return apiGet(CFG.mailboxesUrl).then(renderMailboxes).catch(function () {});
 	}
 
 	// ---- list multi-select (Gmail-style) ----
@@ -882,6 +889,15 @@
 			state.hasMore = !!data.has_more;
 			$('#mbx-more').hidden = !state.hasMore;
 			syncSelectionUI();
+		}).catch(function (err) {
+			// The read failed. Say that — an unanswered request must never render
+			// as an empty mailbox. "Load more" leaves the rows it already has.
+			if (reset) { listEl.innerHTML = ''; }
+			listEl.appendChild(errorRow(
+				'Could not load this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
+				function () { loadThreads(reset); }));
+			$('#mbx-more').hidden = true;
+			syncSelectionUI();
 		});
 	}
 
@@ -910,6 +926,20 @@
 
 	function loadingRow() { var li = el('li', 'mbx-loading', 'Loading…'); return li; }
 	function emptyRow(text) { var li = el('li', 'mbx-loading', text); return li; }
+
+	// A list that could not be read says so, and offers the retry — never the
+	// empty-state wording, which would claim the mail is gone.
+	function errorRow(text, retry) {
+		var li = el('li', 'mbx-loading mbx-load-error');
+		li.appendChild(el('span', 'mbx-load-error-text', text));
+		if (retry) {
+			var btn = el('button', 'mbx-unlock-btn', 'Retry');
+			btn.type = 'button';
+			btn.addEventListener('click', function () { btn.disabled = true; retry(); });
+			li.appendChild(btn);
+		}
+		return li;
+	}
 
 	// Mail providers where the person is the identity and the domain says nothing:
 	// a bare address here falls back to the local part, not to 'Gmail'.
@@ -1179,6 +1209,14 @@
 						refreshMailboxes();
 					});
 			}
+		}).catch(function (err) {
+			// A conversation that would not open says so in the reading pane; the
+			// list beside it keeps its rows.
+			var pane = $('#mbx-thread');
+			pane.innerHTML = '';
+			pane.appendChild(errorRow(
+				'Could not open this conversation' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
+				function () { openThread(t, rowEl); }));
 		});
 	}
 
@@ -2810,6 +2848,9 @@
 			+ (state.aliasId != null ? '&alias_id=' + encodeURIComponent(state.aliasId) : '');
 		apiGet(url).then(function (data) {
 			renderThread(state.openThread || { thread_key: state.threadKey, subject: '' }, data.messages || []);
+		}).catch(function () {
+			// The send already succeeded — a failed repaint must not blank the
+			// thread, so leave what is on screen and let the next open refresh it.
 		});
 	}
 

@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.18
+ * Vanilla CSS, no framework. @version 2.19
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -335,6 +335,10 @@
 .mbx-thread-ai { font-style: italic; }
 .mbx-thread-item.unread .mbx-thread-from,
 .mbx-thread-item.unread .mbx-thread-subject { font-weight: 700; }
+/* On an unread row the AI summary is the line worth reading — it says what the
+   mail wants — so it carries the subject's colour rather than the muted snippet
+   grey, a step darker still. A read row keeps the quiet grey either way. */
+.mbx-thread-item.unread .mbx-thread-ai { color: #111827; }
 .mbx-thread-time { flex: 0 0 auto; color: #9097a1; font-size: var(--mbx-text-xs); white-space: nowrap; }
 /* In Trash the right-hand date is when the conversation is permanently deleted,
    not when it arrived — a deadline, so it does not read as quiet metadata. */
@@ -690,6 +694,21 @@
 	cursor: pointer;
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
+
+/* A read that failed. Distinct from the empty state beside it: an empty
+   mailbox is a fact about the mail, this is a fact about the request. */
+.mbx-load-error {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.625rem 0.875rem;
+	margin: 0.5rem 0;
+	background: #fef2f2;
+	border: 1px solid #fecaca;
+	border-radius: 8px;
+	font-size: var(--mbx-text-base);
+}
+.mbx-load-error-text { color: #991b1b; }
 
 /* Catch-up prompt (specs/in_window_deferred_work.md § Catching up): shown only
    when enough unsummarized mail has piled up that background batches will not

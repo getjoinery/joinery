@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.17
+ * @version 1.18
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -289,11 +289,24 @@ class MailboxService {
 		$agg = array();
 		if (count($alias_ids)) {
 			$in = implode(',', array_map('intval', $alias_ids));
-			// Badges reflect the inbox view, so judged-spam rows are excluded (they
-			// live in the Spam view) — specs/inbound_email_spam_filtering.md.
+			// The badge counts the INBOX's unread, because the Inbox is where
+			// clicking the badge lands: judged spam is excluded (it lives in the
+			// Spam view — specs/inbound_email_spam_filtering.md) and so is archived
+			// mail, matching listThreads' inbox filter exactly. A count that spans
+			// a view the click cannot reach sends the reader looking for unread
+			// mail the Inbox does not hold. IS NOT TRUE, not "= false", so a NULL
+			// from before the column existed counts as not-archived — the same
+			// idiom listThreads uses, or the two would disagree on legacy rows.
+			//
+			// `total` deliberately stays mailbox-wide: it answers "does this box
+			// hold anything at all", which decides whether the box is offered in
+			// the rail. Narrowing it to the Inbox would hide a fully-archived
+			// mailbox and its Trash with it.
 			$sql = "SELECT iem_iea_inbound_email_alias_id AS alias_id,
 						COUNT(*) AS total,
-						COUNT(*) FILTER (WHERE iem_is_read = false) AS unread
+						COUNT(*) FILTER (
+							WHERE iem_is_read = false AND iem_is_archived IS NOT TRUE
+						) AS unread
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
 					AND iem_spam_verdict IS DISTINCT FROM 'spam'" . self::NO_DRAFTS . "
@@ -403,9 +416,15 @@ class MailboxService {
 			// route to its own trash, leaving discarded mail recoverable in the
 			// database and unreachable in the interface until retention purges it
 			// (specs/mailbox_unmatched_sealing.md § unmatched mail you cannot reach).
+			// `unread` excludes archived for the same reason the per-mailbox badge
+			// does: selecting Unmatched opens the Inbox view, so the count has to
+			// describe what that view shows.
 			$row = $db->query("SELECT
 					COUNT(*) FILTER (WHERE iem_delete_time IS NULL) AS total,
-					COUNT(*) FILTER (WHERE iem_delete_time IS NULL AND iem_is_read = false) AS unread,
+					COUNT(*) FILTER (
+						WHERE iem_delete_time IS NULL AND iem_is_read = false
+						AND iem_is_archived IS NOT TRUE
+					) AS unread,
 					COUNT(*) FILTER (WHERE iem_delete_time IS NOT NULL) AS trashed
 				FROM iem_inbound_email_messages
 				WHERE iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "")
@@ -1110,6 +1129,18 @@ class MailboxService {
 				try {
 					$value = InboundEmailMessage::decryptSealedFieldStatic($col, $value, $row);
 				} catch (VaultLockedException $e) {
+					$value = self::SEALED_PLACEHOLDER;
+					$this->content_locked = true;
+				} catch (Throwable $e) {
+					// A column that will not open — a damaged blob, or one left
+					// plaintext under a sealed flag by an older write path. The
+					// thread list already survives this per column
+					// (fetchAndDecryptContent); opening the conversation has to as
+					// well, or one bad column makes the whole thread unreadable
+					// while the row beside it renders fine. Renders as unreadable
+					// and says so in the log, naming the message and column.
+					error_log('MailboxService: could not read ' . $col . ' on message '
+						. intval($row['iem_inbound_email_message_id'] ?? 0) . ': ' . $e->getMessage());
 					$value = self::SEALED_PLACEHOLDER;
 					$this->content_locked = true;
 				}
