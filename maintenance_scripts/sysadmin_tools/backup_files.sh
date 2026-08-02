@@ -126,9 +126,15 @@ TAR_ARGS=(--warning=no-file-changed --warning=no-file-removed)
 
 # backups/ is excluded before anything else: it is where this archive is being
 # written, and a backup that contains previous backups grows without limit.
+#
+# target/ is Cargo's build output, the same category as vendor/ and
+# node_modules/: regenerable from source, large (gigabytes for a workspace with
+# a few targets), and full of 0600 lock files the backup user cannot read —
+# which fails the whole run, since an unreadable file is treated as a backup
+# that would silently lie about what it holds.
 TAR_ARGS+=(--exclude='backups' --exclude='vendor' --exclude='node_modules'
-           --exclude='.git' --exclude='logs' --exclude='cache' --exclude='tmp'
-           --exclude='sessions')
+           --exclude='target' --exclude='.git' --exclude='logs'
+           --exclude='cache' --exclude='tmp' --exclude='sessions')
 
 for x in ${EXTRA_EXCLUDES[@]+"${EXTRA_EXCLUDES[@]}"}; do
     TAR_ARGS+=(--exclude="$x")

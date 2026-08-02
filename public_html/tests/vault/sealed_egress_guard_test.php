@@ -291,6 +291,63 @@ try {
 	check(SealedEgressGuard::ownerUserId() === null,
 		'a process that read two people content can name neither, so nothing can be sealed on its behalf');
 
+	// =====================================================================
+	section('a refused log write cannot take down the request it describes');
+
+	// Observability sits in the path of every API request, including the ones
+	// that open sealed mail. A refusal there once escaped through the endpoint's
+	// own error handler and killed the response instead of the log row: the
+	// reader spun on "Loading…" forever and the original error was never
+	// recorded. The rule still holds — the note does not get written — but the
+	// caller has to survive it.
+	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
+
+	SealedEgressGuard::reset();
+	SealedEgressGuard::markHot('mail:1:iem_body_plain');
+	$escaped = null;
+	try {
+		RequestLogger::log('test_seg', 'hot note', false,
+			array('error_type' => 'ActionError', 'note' => seg_long('n')));
+	} catch (Throwable $e) {
+		$escaped = $e;
+	}
+	check($escaped === null, 'logging a long note while hot returns instead of throwing at the caller');
+
+	$db = DbConnector::get_instance()->get_db_link();
+	$row = $db->query("SELECT rql_request_log_id, rql_error_type, rql_note
+			FROM rql_request_logs WHERE rql_feature = 'test_seg'
+			ORDER BY rql_request_log_id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+	check(!empty($row), 'the row is still written — the request is observable');
+	if (!empty($row)) {
+		harness_register_row('rql_request_logs', 'rql_request_log_id', (int)$row['rql_request_log_id']);
+		check($row['rql_error_type'] === 'ActionError',
+			'facts about the request survive: what failed is still recorded');
+		check(strpos((string)$row['rql_note'], seg_long('n')) === false,
+			'but the note itself never lands — the content is what the rule protects');
+	}
+
+	// Belt and braces: a refusal that is not about the note (a long action) is
+	// contained the same way. Logging must never be the thing that fails a request.
+	$escaped = null;
+	try {
+		RequestLogger::log('test_seg', seg_long('a'), false, array('error_type' => 'ActionError'));
+	} catch (Throwable $e) {
+		$escaped = $e;
+	}
+	check($escaped === null, 'any refused log write is contained, whichever column triggered it');
+
+	SealedEgressGuard::reset();
+	RequestLogger::log('test_seg', 'cold note', false,
+		array('error_type' => 'ActionError', 'note' => seg_long('c')));
+	$row = $db->query("SELECT rql_request_log_id, rql_note FROM rql_request_logs
+			WHERE rql_feature = 'test_seg' ORDER BY rql_request_log_id DESC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+	check(!empty($row), 'a cold request still logs');
+	if (!empty($row)) {
+		harness_register_row('rql_request_logs', 'rql_request_log_id', (int)$row['rql_request_log_id']);
+		check(strpos((string)$row['rql_note'], seg_long('c')) === 0,
+			'and keeps its full note — the cost is paid only where sealed content was opened');
+	}
+
 } finally {
 	// Cleanup only — never harness_finish() here. harness_finish() exit()s, so
 	// calling it inside the try would swallow an in-flight exception and report a

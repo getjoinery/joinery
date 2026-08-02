@@ -74,6 +74,16 @@ echo '<tr><th>Recovery key</th><td>'
        : htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery)))
    . '</td></tr>';
 echo '</tbody></table>';
+
+// A backup on demand — before a risky change, or to prove the setup works
+// without waiting for tonight. Only offered when a run could actually work.
+if ($plan) {
+	$fr = $page->getFormWriter('run_now_form');
+	$fr->begin_form();
+	$fr->hiddeninput('action', '', array('value' => 'run_backup'));
+	$fr->submitbutton('btn_run_backup', 'Run a backup now', array('class' => 'btn btn-sm btn-primary mt-2'));
+	$fr->end_form();
+}
 $page->end_box();
 
 // ── Recovery key ────────────────────────────────────────────────────────────
@@ -146,7 +156,11 @@ if ($recovery['state'] === 'unconfigured' || $recovery['state'] === 'invalid') {
 $page->end_box();
 
 // ── Targets ─────────────────────────────────────────────────────────────────
-$page->begin_box(array('title' => 'Where backups go'));
+$adding = !empty($_GET['add']);
+
+echo '<a id="targets"></a>';
+$page->begin_box(array('title' => 'Where backups go',
+	'altlinks' => array('Add a target' => '/admin/admin_backups?add=1#targets')));
 
 $rows = array();
 foreach ($targets as $t) { $rows[] = $t; }
@@ -163,7 +177,7 @@ if ($rows) {
 		echo '<td>' . htmlspecialchars((string)$t->get('bkt_path_prefix')) . '</td>';
 		echo '<td>' . ($t->get('bkt_enabled') ? 'Yes' : 'No') . '</td>';
 		echo '<td>';
-		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups?edit=' . (int)$t->key . '">Edit</a>';
+		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups?edit=' . (int)$t->key . '#targets">Edit</a>';
 		$ft = $page->getFormWriter('test_' . (int)$t->key);
 		$ft->begin_form();
 		$ft->hiddeninput('action', '', array('value' => 'test_target'));
@@ -186,54 +200,112 @@ if ($edit_id) {
 	foreach ($rows as $t) { if ((int)$t->key === $edit_id) { $editing = $t; } }
 }
 
-echo '<h6 class="mt-3">' . ($editing ? 'Edit target' : 'Add a target') . '</h6>';
-$fw = $page->getFormWriter('target_form');
-$fw->begin_form();
-$fw->hiddeninput('action', '', array('value' => 'save_target'));
-$fw->hiddeninput('bkt_id', '', array('value' => $editing ? (int)$editing->key : ''));
-$fw->textinput('bkt_name', 'Name', array('required' => true, 'value' => $editing ? $editing->get('bkt_name') : ''));
-$fw->dropinput('bkt_provider', 'Provider', array(
-	'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
-	'value'   => $editing ? $editing->get('bkt_provider') : 'b2',
-));
-$fw->textinput('bkt_bucket', 'Bucket', array('value' => $editing ? (string)$editing->get('bkt_bucket') : ''));
-$fw->textinput('bkt_path_prefix', 'Folder inside the bucket',
-	array('value' => $editing ? (string)$editing->get('bkt_path_prefix') : 'joinery-backups'));
-$fw->textinput('access_key', 'Access key ID',
-	array('autocomplete' => 'off', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
-$fw->passwordinput('secret_key', 'Secret key',
-	array('autocomplete' => 'new-password', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
-$fw->textinput('region', 'Region', array('value' => ''));
-$fw->textinput('endpoint', 'Endpoint hostname',
-	array('value' => '', 'helptext' => 'Leave blank for Backblaze B2 — it is detected when the target is saved.'));
-$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $editing ? (bool)$editing->get('bkt_enabled') : true));
-$fw->submitbutton('btn_save_target', $editing ? 'Save target' : 'Add target');
-$fw->end_form();
+if (!$rows && !$adding) {
+	echo '<p class="text-muted mb-0">No target is set up yet, so backups have nowhere to go.</p>';
+}
+
+// The form only appears when asked for — the Add a target action on this box,
+// or a row's Edit button. A page whose default state is a blank credential
+// form reads as unfinished setup even on a fully configured site.
+if ($editing || $adding) {
+	echo '<h6 class="mt-3">' . ($editing ? 'Edit target' : 'Add a target') . '</h6>';
+	$fw = $page->getFormWriter('target_form');
+	$fw->begin_form();
+	$fw->hiddeninput('action', '', array('value' => 'save_target'));
+	$fw->hiddeninput('bkt_id', '', array('value' => $editing ? (int)$editing->key : ''));
+	$fw->textinput('bkt_name', 'Name', array('required' => true, 'value' => $editing ? $editing->get('bkt_name') : ''));
+	$fw->dropinput('bkt_provider', 'Provider', array(
+		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
+		'value'   => $editing ? $editing->get('bkt_provider') : 'b2',
+	));
+	$fw->textinput('bkt_bucket', 'Bucket', array('value' => $editing ? (string)$editing->get('bkt_bucket') : ''));
+	$fw->textinput('bkt_path_prefix', 'Folder inside the bucket',
+		array('value' => $editing ? (string)$editing->get('bkt_path_prefix') : 'joinery-backups'));
+	$fw->textinput('access_key', 'Access key ID',
+		array('autocomplete' => 'off', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
+	$fw->passwordinput('secret_key', 'Secret key',
+		array('autocomplete' => 'new-password', 'helptext' => $editing ? 'Leave blank to keep the stored key.' : ''));
+	$fw->textinput('region', 'Region', array('value' => ''));
+	$fw->textinput('endpoint', 'Endpoint hostname',
+		array('value' => '', 'helptext' => 'Leave blank for Backblaze B2 — it is detected when the target is saved.'));
+	$fw->checkboxinput('bkt_enabled', 'Enabled', array('checked' => $editing ? (bool)$editing->get('bkt_enabled') : true));
+	$fw->submitbutton('btn_save_target', $editing ? 'Save target' : 'Add target');
+	$fw->end_form();
+	echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups">Cancel</a>';
+}
 $page->end_box();
 
 // ── Schedule and retention ──────────────────────────────────────────────────
-$page->begin_box(array('title' => 'What to keep'));
+// A summary once configured, the form only on first setup or behind Edit. The
+// configured marker is a chosen target: it is the one setting with no default,
+// and the thing that makes every other value here mean something.
+$schedule_configured = (int)$settings->get_setting('backup_target_id') > 0;
+$editing_schedule = !empty($_GET['edit_schedule']) || !$schedule_configured;
 
-$target_options = array('0' => '— none —');
-foreach ($rows as $t) {
-	if ($t->get('bkt_enabled')) { $target_options[(string)(int)$t->key] = $t->get('bkt_name'); }
+echo '<a id="keep"></a>';
+$keep_box = array('title' => 'What to keep');
+if (!$editing_schedule) {
+	$keep_box['altlinks'] = array('Edit' => '/admin/admin_backups?edit_schedule=1#keep');
 }
+$page->begin_box($keep_box);
 
-// These are declared settings, so the page must not draw its own fields for
-// them — the declarations in settings.json are the single source of the label,
-// type and help, and a hand-drawn duplicate is exactly how those drift apart.
-// The recovery key lives in its own box above, so it is skipped here.
-require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+if ($editing_schedule) {
+	// These are declared settings, so the page must not draw its own fields for
+	// them — the declarations in settings.json are the single source of the label,
+	// type and help, and a hand-drawn duplicate is exactly how those drift apart.
+	// The recovery key lives in its own box above, so it is skipped here.
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
-$fw = $page->getFormWriter('schedule_form');
-$fw->begin_form();
-$fw->hiddeninput('action', '', array('value' => 'save_schedule'));
-SettingsFieldRenderer::renderGroup($fw, 'backups', array(
-	'source' => 'core',
-	'skip'   => array('backup_recovery_public_key', 'backup_recovery_public_key_proven_fpr'),
-));
-$fw->submitbutton('btn_save_schedule', 'Save');
-$fw->end_form();
+	$fw = $page->getFormWriter('schedule_form');
+	$fw->begin_form();
+	$fw->hiddeninput('action', '', array('value' => 'save_schedule'));
+	SettingsFieldRenderer::renderGroup($fw, 'backups', array(
+		'source' => 'core',
+		'skip'   => array('backup_recovery_public_key', 'backup_recovery_public_key_proven_fpr'),
+		// Blank means "follow the project directory name" — show what that
+		// resolves to on THIS machine, since the declaration cannot know it.
+		'field_options' => array(
+			'backup_path_slug' => array('placeholder' => $default_slug),
+		),
+	));
+	$fw->submitbutton('btn_save_schedule', 'Save');
+	$fw->end_form();
+	if ($schedule_configured) {
+		echo '<a class="btn btn-sm btn-outline-secondary" href="/admin/admin_backups">Cancel</a>';
+	}
+} else {
+	$target_name = '';
+	$target_id = (int)$settings->get_setting('backup_target_id');
+	foreach ($rows as $t) {
+		if ((int)$t->key === $target_id) { $target_name = (string)$t->get('bkt_name'); }
+	}
+
+	$is_db_only = $settings->get_setting('backup_type') === 'database';
+	$is_full    = $is_db_only || $settings->get_setting('backup_mode') === 'full';
+	$keep       = max(1, (int)$settings->get_setting('backup_retention_count'));
+	$local_days = (int)$settings->get_setting('backup_local_retention_days');
+	$slug       = trim((string)$settings->get_setting('backup_path_slug')) ?: $default_slug;
+	$excludes   = trim((string)$settings->get_setting('backup_exclude'));
+
+	echo '<table class="table mb-2"><tbody>';
+	echo '<tr><th>Backing up</th><td>'
+	   . ($is_db_only ? 'Database only' : 'Whole site (files, database, web server config)') . '</td></tr>';
+	echo '<tr><th>How</th><td>'
+	   . ($is_full ? 'Full every time'
+	               : 'Incremental — a fresh full every ' . (int)$settings->get_setting('backup_full_interval_days') . ' days')
+	   . '</td></tr>';
+	echo '<tr><th>Uploads to</th><td>'
+	   . ($target_name !== '' ? htmlspecialchars($target_name) : '<span class="text-muted">missing target</span>')
+	   . ', filed under ' . htmlspecialchars($slug) . '</td></tr>';
+	echo '<tr><th>Keeping</th><td>Newest ' . $keep . ' offsite; local copies '
+	   . ($local_days > 0 ? $local_days . ' days' : 'forever')
+	   . ($settings->get_setting('backup_delete_local_after_upload') === '1' ? '; local copy removed once uploaded' : '')
+	   . '</td></tr>';
+	if ($excludes !== '') {
+		echo '<tr><th>Leaving out</th><td>' . htmlspecialchars($excludes) . '</td></tr>';
+	}
+	echo '</tbody></table>';
+}
 
 echo '<p class="text-muted small mb-0">When backups run is set on '
    . '<a href="/admin/admin_scheduled_tasks">Scheduled Tasks</a>'

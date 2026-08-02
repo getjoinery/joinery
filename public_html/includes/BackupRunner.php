@@ -47,7 +47,10 @@ class BackupRunnerException extends Exception {}
 
 class BackupRunner {
 
-	/** Default working directory. Overridable — see output_dir(). */
+	/**
+	 * Last-resort working directory, used only if the site root cannot be
+	 * resolved. The real default is computed — see output_dir().
+	 */
 	const OUTPUT_DIR = '/backups';
 
 	/** Engine wall-clock ceiling. A large site's first full run is not quick. */
@@ -194,19 +197,41 @@ class BackupRunner {
 	/**
 	 * Where backups are built and swept.
 	 *
-	 * Configurable because /backups assumes a machine whose root you own. A
-	 * shared host will not let you create it, and a site that cannot write its
-	 * working directory cannot back up at all — which is a bad reason to have no
-	 * backups. Must be absolute: a relative path would resolve against whatever
-	 * directory the scheduler happened to start in.
+	 * Left blank it resolves to `backups/` beside public_html — the site's own
+	 * directory, next to logs/, uploads/ and cache/, writable by whoever runs
+	 * the site and already excluded from published archives. That is the one
+	 * location every deployment shape has: a VPS, a container, and a shared host
+	 * that will not let you write outside your home directory all have it.
+	 *
+	 * A filesystem-root path like /backups cannot be the default, however much
+	 * it suits a machine you own: nothing the site runs as can create a
+	 * directory at /, so it fails on a fresh install until someone intervenes as
+	 * root — and a site that cannot write its working directory cannot back up
+	 * at all, which is a bad reason to have no backups.
+	 *
+	 * Still configurable, and still absolute: a relative path would resolve
+	 * against whatever directory the scheduler happened to start in.
 	 */
 	public static function output_dir() {
 		$dir = trim((string)self::setting('backup_output_dir'));
-		if ($dir === '') { $dir = self::OUTPUT_DIR; }
+		if ($dir === '') { $dir = self::default_output_dir(); }
 		if (substr($dir, 0, 1) !== '/') {
 			throw new BackupRunnerException('The backup working directory must be an absolute path.');
 		}
 		return rtrim($dir, '/');
+	}
+
+	/**
+	 * The computed default: `backups/` in the site root. Falls back to the
+	 * constant only if the site root cannot be resolved to an absolute path,
+	 * which would mean the install is not laid out the way every deploy path
+	 * builds it.
+	 */
+	public static function default_output_dir() {
+		$root = rtrim((string)PathHelper::getSiteRoot(), '/');
+		return ($root !== '' && substr($root, 0, 1) === '/')
+			? $root . '/backups'
+			: self::OUTPUT_DIR;
 	}
 
 	/**

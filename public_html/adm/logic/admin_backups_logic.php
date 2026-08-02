@@ -182,6 +182,21 @@ function _admin_backups_handle($action, array $input, $session) {
 				return $url;
 			}
 
+			case 'run_backup': {
+				// Refuse the obvious no-op loudly: with no viable plan, a run
+				// would only record a skip nobody asked for. plan() throws with
+				// the exact reason, which the catch below shows the operator.
+				BackupRunner::plan();
+
+				// The run outlives any sensible web request — a first full can
+				// take hours — so it happens in its own process. Progress and
+				// outcome land in Recent backups, where scheduled runs report.
+				$runner = PathHelper::getIncludePath('utils/run_backup.php');
+				exec('nohup php ' . escapeshellarg($runner) . ' > /dev/null 2>&1 &');
+				$say('Backup started in the background. Watch it under Recent backups.', true);
+				return $url;
+			}
+
 			case 'delete_history': {
 				$row = new BackupHistory((int)($input['bkh_id'] ?? 0), TRUE);
 				$row->set('bkh_delete_time', gmdate('Y-m-d H:i:s'));
