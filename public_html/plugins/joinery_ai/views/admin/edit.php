@@ -566,7 +566,7 @@ $formwriter->textinput('rcp_delivery_email', 'Delivery Email (blank = owner emai
 $formwriter->checkboxinput('rcp_delivery_dashboard', 'Show its latest result on the AI dashboard', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_delivery_dashboard'),
-    'help_text' => 'Adds a card for this recipe to /joinery_ai showing the output of its most '
+    'helptext' => 'Adds a card for this recipe to /joinery_ai showing the output of its most '
                  . 'recent successful run. That page is admin-only. Off means the recipe still '
                  . 'runs; its results just are not shown there.',
 ]);
@@ -574,7 +574,7 @@ $formwriter->checkboxinput('rcp_delivery_dashboard', 'Show its latest result on 
 $formwriter->checkboxinput('rcp_enabled', 'Run automatically', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_enabled'),
-    'help_text' => 'On, the recipe runs by itself — on the schedule above, or while your vault is '
+    'helptext' => 'On, the recipe runs by itself — on the schedule above, or while your vault is '
                  . 'unlocked for a job that reads encrypted mail. Off, it only runs when you press '
                  . 'Run Now, and turning it off also stops any run already in progress.',
 ]);
@@ -598,7 +598,7 @@ $formwriter->checkboxinput('rcp_allow_tainted_writes',
     'Let this recipe act on content written by other people', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_allow_tainted_writes'),
-    'help_text' => 'Some of what this recipe reads was written by someone else — the body of an '
+    'helptext' => 'Some of what this recipe reads was written by someone else — the body of an '
                  . 'email, a message a member submitted — and anyone can put text in there aimed '
                  . 'at the AI, telling it to do something you did not ask for. Ticking this says '
                  . 'you accept that risk for what this recipe is allowed to change. Recipes that '
@@ -653,7 +653,10 @@ foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
 (function () {
     // Built-in instructions per pipeline job. The job select can change without a
     // round trip, so the text is swapped client-side rather than rendered once.
-    var PROMPTS = <?php echo json_encode($job_default_prompts, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE); ?>;
+    // JSON_HEX_TAG: this lands inside a <script> block, so a prompt containing
+    // </script> would otherwise close it and spill the rest as markup.
+    var PROMPTS = <?php echo json_encode($job_default_prompts,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     var PIPELINE = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;
 
     var modeEl    = document.querySelector('[name="rcp_mode"]');

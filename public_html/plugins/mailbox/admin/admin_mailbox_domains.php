@@ -189,17 +189,23 @@ if ($show_form) {
 		],
 	]);
 
-	// After a step-up round-trip the intent rides back as target_ai — keep the
-	// box ticked so the operator does not have to remember what they were doing.
+	// After a step-up round-trip the intent rides back as target_ai/target_cloud
+	// — keep whichever boxes they ticked ticked, so the operator does not have
+	// to remember what they were doing, and the graver of the two consents is
+	// not silently dropped by the lost POST.
 	$ai_value = (bool)$form_domain->get('ied_ai_processing_enabled');
 	if (!empty($_GET['target_ai'])) {
 		$ai_value = true;
+	}
+	$cloud_value = (bool)$form_domain->get('ied_ai_cloud_enabled');
+	if (!empty($_GET['target_cloud'])) {
+		$cloud_value = true;
 	}
 
 	$formwriter->checkboxinput('ied_ai_processing_enabled',
 		"Let Joinery AI read this domain's mail while your vault is unlocked", [
 			'value' => $ai_value,
-			'help' => 'Off by default. Turning this on lets the AI email features (triage, '
+			'helptext' => 'Off by default. Turning this on lets the AI email features (triage, '
 				. 'security scan, calendar) read this domain\'s mail during an unlock window '
 				. 'and send it to the configured model host. They cannot run at all while it '
 				. 'is off, because encrypted mail is unreadable without you.',
@@ -210,8 +216,8 @@ if ($show_form) {
 	// different switches — this one stays off when the first is turned on.
 	$formwriter->checkboxinput('ied_ai_cloud_enabled',
 		"Send this domain's decrypted mail to cloud AI models", [
-			'value' => (bool)$form_domain->get('ied_ai_cloud_enabled'),
-			'help' => 'Off by default, and separate from the setting above on purpose. With it '
+			'value' => $cloud_value,
+			'helptext' => 'Off by default, and separate from the setting above on purpose. With it '
 				. 'off, this domain\'s mail is only ever read by a model running on hardware you '
 				. 'control, and a recipe pinned to a cloud model is refused. Turning it on lets '
 				. 'the decrypted mail be sent to that provider, who then holds it in the clear. '

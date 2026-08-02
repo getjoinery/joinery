@@ -40,9 +40,9 @@ $q = $db->prepare(
              WHEN rcr_status = ? THEN NOW() AT TIME ZONE 'UTC'
              ELSE rcr_completed_time
          END,
-         rcr_error = CASE
+         rcr_status_note = CASE
              WHEN rcr_status = ? THEN 'cancelled by admin (before dispatch)'
-             ELSE rcr_error
+             ELSE rcr_status_note
          END
      WHERE rcr_run_id = ?
        AND rcr_status IN (?, ?)

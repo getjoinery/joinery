@@ -33,7 +33,8 @@ function joinery_ai_dashboard_logic(array $input): LogicResult {
             $placeholders = implode(',', array_fill(0, count($ids), '?'));
             // DISTINCT ON to grab the most recent successful run per recipe in one query.
             $sql = "SELECT DISTINCT ON (rcr_rcp_recipe_id)
-                       rcr_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_output
+                       rcr_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_output,
+                       rcr_content_sealed, rcr_sealed_key, rcr_sealed_owner_user_id
                     FROM rcr_recipe_runs
                     WHERE rcr_rcp_recipe_id IN ($placeholders)
                       AND rcr_status = ?
@@ -43,6 +44,17 @@ function joinery_ai_dashboard_logic(array $input): LogicResult {
             $q = $db->prepare($sql);
             $q->execute($params);
             foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                // A protected run's card shows that it ran, not what it found,
+                // unless the viewer's own vault is open right now. Locked is a
+                // normal state here, not an error — the card falls back to the
+                // waiting message.
+                try {
+                    $row['rcr_output'] = RecipeRun::decryptSealedFieldStatic(
+                        'rcr_output', $row['rcr_output'], $row);
+                } catch (Throwable $e) {
+                    $row['rcr_output'] = '';
+                    $row['rcr_locked'] = true;
+                }
                 $latest_by_recipe[(int)$row['rcr_rcp_recipe_id']] = $row;
             }
         }

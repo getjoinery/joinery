@@ -170,8 +170,16 @@ function harness_boot(array $overrides = array()) {
 	// A test that is ABOUT a provider overrides this after boot — the two that do
 	// (inbound_forwarding_relay, setup_topology) already call
 	// harness_set_setting_mem() themselves, which is exactly the intended escape.
+	//
+	// SCOPE, stated plainly: this is THIS PROCESS ONLY. A suite that drives the
+	// web server (needs=dev-web — the functional API tests) makes its requests
+	// in Apache, which reads the site's real email_service and will happily send
+	// through the paid provider. Fixture addresses live on the dev inbound
+	// domain so nothing escapes to a stranger, but the send is real. Closing
+	// that needs a cross-process signal, which does not exist yet.
 	if (($h['meta']['env'] ?? '') !== 'prod-verify') {
 		harness_set_setting_mem('email_service', 'smtp');
+		harness_set_setting_mem('email_fallback_service', 'smtp');
 	}
 
 	register_shutdown_function('harness_shutdown_report');

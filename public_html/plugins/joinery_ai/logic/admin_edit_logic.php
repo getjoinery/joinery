@@ -78,6 +78,34 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
                 . '&shipped=' . urlencode($shipped_key));
         }
 
+        // A saved recipe's SHAPE is fixed: its mode, and for a pipeline recipe
+        // its job. The editor renders both as static text once saved, but that
+        // is presentation — the guarantee has to hold against the posted value,
+        // because an edited hidden input is all it takes otherwise.
+        //
+        // What flipping the job would do is not cosmetic. Both mail jobs take
+        // the same `mailbox_alias` config, so validation passes, and
+        // aip_recipe_item_log is keyed per job — repoint a triage recipe at the
+        // security scan and every already-triaged message reads as already
+        // scanned, so the scan silently processes nothing. Flipping pipeline to
+        // agent additionally leaves the sealed-source cloud gate, which only
+        // examines pipeline recipes.
+        //
+        // Make a different recipe instead; that is what the shape describes.
+        if ($recipe->key) {
+            foreach (['rcp_mode' => 'mode', 'rcp_pipeline_job' => 'job'] as $field => $label) {
+                if (!array_key_exists($field, $input)) continue;
+                $posted = trim((string)$input[$field]);
+                $stored = trim((string)$recipe->get($field));
+                if ($posted !== '' && $posted !== $stored) {
+                    return LogicResult::error(
+                        'A saved recipe cannot change its ' . $label . '. Create a new recipe instead.',
+                        ['recipe' => $recipe, 'session' => $session]
+                    );
+                }
+            }
+        }
+
         $simple_fields = [
             'rcp_name',
             'rcp_prompt',

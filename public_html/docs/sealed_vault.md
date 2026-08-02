@@ -267,41 +267,108 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 stored bytes and writing the response; a `VaultLockedException` becomes a
 generic `423 Locked` response, never a raw error or ciphertext.
 
-**Sealed-field model hook** — a model declares which columns are sealed and
-overrides the two decrypt methods `SystemBase` provides as an extension
-point:
+**Sealed-field model hook** — a model declares which columns hold protected
+content and adds four columns. That is the whole integration: no crypto code,
+no key handling, no AD string of its own.
 
 ```php
-class InboundEmailMessage extends SystemBase {
-    public static $sealed_fields = ['iem_body_plain', 'iem_body_html'];
+class MailboxContact extends SystemBase {
+    public static $sealed_fields = ['imc_address', 'imc_display_name'];
 
-    protected function decryptSealedField($field, $ciphertext) {
-        // read $this->get('iem_sealed_key') / the owning user id from $this,
-        // VaultUnlock::secretKey(), VaultCrypto::openItemDek()+openField()
-    }
-
-    public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
-        // same, but working from a raw associative row (no $this available) -
-        // this is the path plugins/joinery_ai/includes/ModelQueryExecutor.php
-        // uses, since it reads rows by SQL without instantiating models
-    }
+    public static $field_specifications = [
+        // ... the content columns above, declared 'text' (base64 + AEAD
+        // overhead outgrows any varchar cap), plus:
+        'imc_content_sealed'       => ['type'=>'bool', 'is_nullable'=>false, 'default'=>false],
+        'imc_sealed_key'           => ['type'=>'text', 'is_nullable'=>true],
+        'imc_sealed_owner_user_id' => ['type'=>'int8', 'is_nullable'=>true],
+        'imc_key_generation'       => ['type'=>'int4', 'is_nullable'=>false, 'default'=>0],
+    ];
 }
 ```
 
-`SystemBase::get()` calls `decryptSealedField()` automatically whenever the
-requested key is listed in `$sealed_fields` — covering ordinary field access
-and anything built on it (`export_as_array()`, `export_for_api()`) for free.
-`ModelQueryExecutor` (the AI `query_model` tool's raw-row reader) calls
-`decryptSealedFieldStatic()` directly, since it never instantiates the model.
-Both default to throwing — a model that lists a sealed field but doesn't
-override the corresponding method is a programming error, not a silent
-ciphertext leak. A locked vault becomes `VaultLockedException` (File hook) or
-a `[locked - unlock your vault to view]` placeholder (the raw-row path, so an
-LLM sees a legible state rather than a stack trace).
+### Sealing is per row, not per model
 
-Every field-name pair `$sealed_fields` names, and every `$ad` convention a
-consumer builds around them, is entirely the consumer's concern — the vault
-provides only the hook.
+The flag lives on the row because sensitivity does. The same table holds sealed
+and plaintext rows side by side — a Fortress domain's mail and a Standard
+domain's mail are the same model — and only the row knows which it is. A row
+with `{prefix}_content_sealed` false reads and writes as ordinary plaintext and
+costs nothing.
+
+### Reading
+
+`SystemBase::get()` decrypts automatically whenever the requested key is in
+`$sealed_fields`, which covers ordinary field access and everything built on it
+(`export_as_array()`, `export_for_api()`). `ModelQueryExecutor` (the AI
+`query_model` tool's raw-row reader) calls `decryptSealedFieldStatic()` on a raw
+associative row instead, since it never instantiates the model. Both paths run
+the same implementation, so they cannot drift apart.
+
+A locked vault raises `VaultLockedException` — never a return of ciphertext,
+which would look like data. At the edges that becomes a `423 Locked` response
+(File hook) or a `[locked - unlock your vault to view]` placeholder (the raw-row
+path, so an LLM sees a legible state rather than a stack trace).
+
+### Writing
+
+`sealColumns()` is the only supported writer for a `$sealed_fields` column:
+
+```php
+MailboxContact::sealColumns($contact_id, $owner_vault, [
+    'imc_address'      => $address,
+    'imc_display_name' => $name,
+]);
+```
+
+It mints the row's DEK, wraps it to the owner's vault public key, seals each
+value, sets the flag and writes one UPDATE — returning the raw DEK so the caller
+can seal related blobs (attachments, raw messages) under the same key. Pass a
+DEK as the fourth argument to re-seal under an existing one, which leaves the
+key wrapping untouched and keeps anything already sealed beside it readable.
+
+The row must exist first: the AD binds every value to the primary key. Insert
+with the sealed columns empty, then seal.
+
+**Sealing needs only the owner's public key.** Any process can seal content to a
+user at any time, with no unlock window — only reading needs the in-window
+secret. So there is never a reason to store protected content in the clear
+because "the window might close".
+
+**`save()` is sealed-safe.** On a row whose flag is set it skips the
+`$sealed_fields` columns entirely, so an ordinary metadata edit cannot write
+decrypted content back into them, and it works with the vault locked. Those
+columns belong to `sealColumns()`.
+
+### The override surface
+
+Two hooks, for the cases the defaults cannot answer:
+
+- `sealedOwnerUserIdFor($row)` — whose vault this row opens against. The default
+  is the owner recorded at seal time, which is immune to later membership
+  changes. Override for an indirect owner (chat resolves through the
+  conversation) or a fallback for rows sealed before the column existed.
+- `sealedFieldIsActive($field, $row)` — whether a column holds content on this
+  particular row. Override where a column is content on some rows and metadata
+  on others: an inbound message's recipient is the routing alias, written in the
+  clear, while an outbound message's recipient is a real address list.
+
+`sealAd($row_id, $field)` builds the AD binding a value to its row and column —
+the splice defense, so a ciphertext moved elsewhere fails to open rather than
+decrypting into the wrong place. The default is `{prefix}:{id}:{field}`; models
+that predate it override it and keep their own literal (`mail:`, `contact:`),
+because changing an AD strands every row already sealed under it.
+
+A model that declares `$sealed_fields` without the flag and key columns, and
+without overriding the hooks, throws on first read. Failing loudly beats
+returning ciphertext that looks like a value.
+
+### Derived content
+
+A record derived from protected material is itself protected material. An AI
+summary of a sealed body, a run log quoting a sealed subject, a note written
+from a sealed thread — all of it seals, on the same per-row terms, to the same
+owner. Where a pointer will do, store the pointer: an id resolved through the
+sealed reader at display time cannot leak and cannot go stale. See
+`specs/sealed_content_egress.md`.
 
 ## Key rotation
 

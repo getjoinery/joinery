@@ -227,11 +227,29 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		if ($new_ai && !$new_seals) {
 			$new_ai = false;   // meaningless at Standard; never store a stale yes
 		}
-		if ($new_ai && !$old_ai) {
+
+		// The narrower consent: may that reading leave the box? It can only be
+		// on where the first is on — consenting to cloud processing for mail the
+		// AI may not read at all is a stale yes waiting to surprise someone.
+		$old_cloud = $domain->key ? (bool)$domain->get('ied_ai_cloud_enabled') : false;
+		$new_cloud = isset($input['ied_ai_cloud_enabled']);
+		if ($new_cloud && !$new_ai) {
+			$new_cloud = false;
+		}
+
+		// ONE gate over BOTH grants. Either one newly on needs a fresh identity
+		// check: granting cloud consent on a domain that already allowed AI
+		// reading is the graver of the two — it is what lets decrypted mail
+		// leave the server — so it cannot be the one that slips through
+		// unchecked. Turning either OFF is always allowed: withdrawing consent
+		// must never be harder than giving it.
+		if (($new_ai && !$old_ai) || ($new_cloud && !$old_cloud)) {
 			// Same ceremony the level change above uses: redirect to the step-up,
 			// return to this editor, and let the operator re-submit now confirmed.
-			// target_ai rides the return URL so the checkbox is still ticked when
-			// they land back here — the lost POST must not discard their intent.
+			// BOTH flags ride the return URL, so whichever boxes they ticked are
+			// still ticked when they land back here — the lost POST must not
+			// discard their intent, and a silently-dropped cloud tick would be
+			// the worst version of that.
 			//
 			// SessionControl rather than PasskeyService: both read the same
 			// session-bound `stepup` marker in pks_passkey_ceremonies, but this
@@ -240,23 +258,15 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// composer's autoloader, which this route has no other reason to load.
 			// It also counts a TOTP step-up, which "recent step-up" always meant.
 			$ai_return = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
-				. (int)$domain->key . '&target_level=' . rawurlencode($new_level) . '&target_ai=1';
+				. (int)$domain->key . '&target_level=' . rawurlencode($new_level)
+				. ($new_ai ? '&target_ai=1' : '')
+				. ($new_cloud ? '&target_cloud=1' : '');
 			$ai_stepup = $session->require_recent_second_factor($ai_return);
 			if ($ai_stepup !== null) {
 				return $ai_stepup;
 			}
 		}
 		$domain->set('ied_ai_processing_enabled', $new_ai);
-
-		// The narrower consent: may that reading leave the box? It can only be
-		// on where the first is on — consenting to cloud processing for mail the
-		// AI may not read at all is a stale yes waiting to surprise someone. It
-		// rides the same step-up as the first, which the operator has just
-		// passed if they are turning both on together.
-		$new_cloud = isset($input['ied_ai_cloud_enabled']);
-		if ($new_cloud && !$new_ai) {
-			$new_cloud = false;
-		}
 		$domain->set('ied_ai_cloud_enabled', $new_cloud);
 
 		try {

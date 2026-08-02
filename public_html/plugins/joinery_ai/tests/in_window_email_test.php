@@ -26,7 +26,7 @@
  *
  * Run: php tests/run.php db --filter=in_window_email
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -41,6 +41,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_doma
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
@@ -139,7 +140,7 @@ try {
 	$owner_id = intval($owner->key);
 	$kp = sodium_crypto_box_keypair();
 	$secret = SealedBox::b64url(sodium_crypto_box_secretkey($kp));
-	iw_vault($owner_id, SealedBox::b64url(sodium_crypto_box_publickey($kp)));
+	$owner_vault = iw_vault($owner_id, SealedBox::b64url(sodium_crypto_box_publickey($kp)));
 
 	$fortress = iw_domain(InboundEmailDomain::LEVEL_FORTRESS, true);
 	$alias = iw_alias(intval($fortress->key), 'me', $owner_id);
@@ -371,6 +372,306 @@ try {
 		array('idle' => null, 'absolute' => null));
 
 	// -----------------------------------------------------------------------
+	section('sealing is a SystemBase primitive, not per-model crypto (Layer 0)');
+
+	// Exercised through MailboxContact, which carries the four convention
+	// columns and no crypto code of its own — so what passes here is the base
+	// implementation every future sealed model inherits, not a mailbox routine.
+	function iw_contact(int $user_id): MailboxContact {
+		$c = new MailboxContact(NULL);
+		$c->set('imc_usr_user_id', $user_id);
+		$c->set('imc_address_hash', hash('sha256', 'iw-' . bin2hex(random_bytes(8))));
+		$c->set('imc_address', '');
+		$c->set('imc_display_name', '');
+		$c->save();
+		$c->load();
+		harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', intval($c->key));
+		return $c;
+	}
+
+	$contact = iw_contact($owner_id);
+	MailboxContact::sealColumns(intval($contact->key), $owner_vault, array(
+		'imc_address'      => 'sealed.person@example.test',
+		'imc_display_name' => 'Sealed Person',
+	));
+
+	$raw_contact = $db->prepare('SELECT * FROM imc_mailbox_contacts WHERE imc_mailbox_contact_id = ?');
+	$raw_contact->execute(array($contact->key));
+	$crow = $raw_contact->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$crow['imc_address'], 'v1.aead.') === 0
+		&& strpos((string)$crow['imc_display_name'], 'v1.aead.') === 0,
+		'sealColumns() wrote ciphertext to both content columns');
+	check(!empty($crow['imc_sealed_key']) && intval($crow['imc_sealed_owner_user_id']) === $owner_id,
+		'and recorded the wrapped DEK plus the owner it was wrapped to');
+
+	$reload = new MailboxContact(intval($contact->key), TRUE);
+	check((string)$reload->get('imc_address') === 'sealed.person@example.test',
+		'the generic get() hook opens it again in-window');
+	check((string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $crow['imc_display_name'], $crow)
+		=== 'Sealed Person',
+		'and the raw-row hook agrees, so the two read paths cannot drift');
+
+	// Same save() guarantee as mail, reached with zero mailbox-specific code.
+	$reload->set('imc_use_count', 7);
+	$reload->save();
+	$raw_contact->execute(array($contact->key));
+	$after = $raw_contact->fetch(PDO::FETCH_ASSOC);
+	check($after['imc_address'] === $crow['imc_address'],
+		'save() leaves the sealed columns byte-identical here too');
+	check(intval($after['imc_use_count']) === 7, 'while the unsealed column it changed persists');
+
+	// The AD binds a value to its row AND its column, so a ciphertext lifted
+	// from another row is not merely wrong — it will not open at all.
+	$other = iw_contact($owner_id);
+	MailboxContact::sealColumns(intval($other->key), $owner_vault,
+		array('imc_address' => 'someone.else@example.test'));
+	$splice = $db->prepare('UPDATE imc_mailbox_contacts SET imc_address = ?
+		WHERE imc_mailbox_contact_id = ?');
+	$splice->execute(array($crow['imc_address'], intval($other->key)));
+	$spliced = false;
+	try {
+		(new MailboxContact(intval($other->key), TRUE))->get('imc_address');
+	} catch (Throwable $e) {
+		$spliced = true;
+	}
+	check($spliced, 'a ciphertext moved to another row refuses to open');
+
+	// Sealing a column nothing decrypts would write data no reader can recover,
+	// so the writer refuses rather than accepting it.
+	$refused_col = false;
+	$refused_msg = '';
+	try {
+		MailboxContact::sealColumns(intval($contact->key), $owner_vault,
+			array('imc_source' => MailboxContact::SOURCE_MANUAL));
+	} catch (Throwable $e) {
+		$refused_col = true;
+		$refused_msg = $e->getMessage();
+	}
+	check($refused_col && strpos($refused_msg, 'imc_source') !== false,
+		'sealColumns() refuses a column that is not in $sealed_fields', $refused_msg);
+
+	VaultUnlock::lockAll($owner_id);
+	$locked_read = false;
+	try {
+		(new MailboxContact(intval($contact->key), TRUE))->get('imc_address');
+	} catch (VaultLockedException $e) {
+		$locked_read = true;
+	}
+	check($locked_read, 'and with the vault locked the value is unreadable, not returned as ciphertext');
+	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+		array('idle' => null, 'absolute' => null));
+
+	// -----------------------------------------------------------------------
+	section('raising a domain seals what earlier AI runs already wrote');
+
+	// The gap this closes: a message triaged while its domain was Standard
+	// carries derived content — an AI summary of the body, a scan whose red
+	// flags quote it — in plaintext. Raising the domain sets the sealed flag on
+	// that row. Seal an enumerated list of columns and those two are left
+	// behind: readable in the clear on a domain whose whole point is that it is
+	// not, AND unreadable to the reader, which now tries to AEAD-open plaintext.
+	$late = iw_domain(InboundEmailDomain::LEVEL_STANDARD, true);
+	$late_alias = iw_alias(intval($late->key), 'late', $owner_id);
+	$late_address = 'late@' . $late->get('ied_domain');
+	$late_msg = iw_message(intval($late->key), intval($late_alias->key),
+		'Standard-era subject', 'Standard-era body.', $late_address, '-10');
+
+	$ai_summary = 'A summary written while the domain was still Standard.';
+	$ai_scan = json_encode(array('verdict' => 'suspicious',
+		'red_flags' => array(array('finding' => 'quotes the body: Standard-era body.'))));
+	InboundEmailMessage::updateColumns($late_msg, array(
+		'iem_ai_summary' => $ai_summary,
+		'iem_ai_scan'    => $ai_scan,
+	));
+
+	$late->set('ied_security_level', InboundEmailDomain::LEVEL_FORTRESS);
+	$late->save();
+	$late_sealed = mailbox_protection_seal_batch($late, 200);
+	check($late_sealed['sealed'] === 1 && $late_sealed['remaining'] === 0,
+		'the raise seals the pre-existing message', json_encode($late_sealed));
+
+	$late_row = $db->prepare('SELECT * FROM iem_inbound_email_messages
+		WHERE iem_inbound_email_message_id = ?');
+	$late_row->execute(array($late_msg));
+	$late_stored = $late_row->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$late_stored['iem_ai_summary'], 'v1.aead.') === 0,
+		'the AI summary written before the raise is sealed, not left in the clear');
+	check(strpos((string)$late_stored['iem_ai_scan'], 'v1.aead.') === 0,
+		'and so is the scan, whose red flags quote the body');
+	check(strpos((string)$late_stored['iem_ai_summary'], 'Standard') === false
+		&& strpos((string)$late_stored['iem_ai_scan'], 'Standard-era body') === false,
+		'no plaintext of either survives on the row');
+
+	// And the reader still works — an enumerated seal list leaves these two
+	// opening plaintext as if it were an AEAD blob, which throws.
+	$late_read = new InboundEmailMessage($late_msg, TRUE);
+	$read_ok = true;
+	$read_error = '';
+	try {
+		$got_summary = (string)$late_read->get('iem_ai_summary');
+		$got_scan    = (string)$late_read->get('iem_ai_scan');
+	} catch (Throwable $e) {
+		$read_ok = false;
+		$read_error = get_class($e) . ': ' . $e->getMessage();
+	}
+	check($read_ok, 'the raised row still reads without throwing', $read_error);
+	check($read_ok && $got_summary === $ai_summary && $got_scan === $ai_scan,
+		'and both columns round-trip byte-for-byte');
+
+	// -----------------------------------------------------------------------
+	section('a run that reads protected mail is itself protected (Layer 1)');
+
+	function iw_run(Recipe $recipe): RecipeRun {
+		$run = new RecipeRun(NULL);
+		$run->set('rcr_rcp_recipe_id', intval($recipe->key));
+		$run->set('rcr_status', RecipeRun::STATUS_PENDING);
+		$run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
+		$run->save();
+		$run->load();
+		harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($run->key));
+		return $run;
+	}
+
+	// What the runner writes for one item of a Fortress mailbox: the subject as
+	// the label, and a model summary of the body. Both came out of the vault.
+	$leaky_subject = 'Older note';
+	$leaky_summary = 'A description of the encrypted body, written by the model.';
+	$trace = json_encode(array(array(
+		'item_key' => (string)$older, 'status' => 'done', 'label' => $leaky_subject,
+		'verdict'  => array('label' => 'none', 'summary' => $leaky_summary),
+	)));
+
+	$sealed_run = iw_run($recipe);
+	check($sealed_run->rowIsSealed() === false, 'a fresh run row starts unsealed');
+	$sealed_run->sealToOwner($owner_vault);
+	check($sealed_run->rowIsSealed() === true,
+		'and seals once the runner sees the recipe reads a protected source');
+
+	$sealed_run->writeContent(array(
+		'rcr_output'     => "1 item\n- $leaky_subject: none",
+		'rcr_tool_calls' => $trace,
+		'rcr_error'      => '',
+	));
+
+	// The estate assertion: EVERY column of the row, not a list someone has to
+	// remember to update. A content column added later is covered by this
+	// without anyone touching the test.
+	$run_row = $db->prepare('SELECT * FROM rcr_recipe_runs WHERE rcr_run_id = ?');
+	$run_row->execute(array($sealed_run->key));
+	$stored = $run_row->fetch(PDO::FETCH_ASSOC);
+	$leaked = array();
+	foreach ($stored as $col => $value) {
+		if (!is_string($value) || $value === '') continue;
+		if (strpos($value, $leaky_subject) !== false || strpos($value, $leaky_summary) !== false) {
+			$leaked[] = $col;
+		}
+	}
+	check(count($leaked) === 0,
+		'no column of the run row holds the subject or the summary in the clear',
+		implode(', ', $leaked));
+	check(strpos((string)$stored['rcr_output'], 'v1.aead.') === 0
+		&& strpos((string)$stored['rcr_tool_calls'], 'v1.aead.') === 0,
+		'both are stored as ciphertext instead');
+	check(intval($stored['rcr_input_tokens']) === 0 && $stored['rcr_status'] !== null,
+		'while the columns history renders from stay readable');
+
+	// In-window the operator sees everything, from a freshly loaded row — not
+	// from the writer's in-memory copy.
+	$reloaded = new RecipeRun(intval($sealed_run->key), TRUE);
+	check(strpos((string)$reloaded->contentOrNull('rcr_output'), $leaky_subject) !== false,
+		'in-window the run reads back with its detail intact');
+	$items = $reloaded->toolCalls();
+	check(count($items) === 1 && ($items[0]['label'] ?? '') === $leaky_subject,
+		'and the per-item trace decodes to an array, not a blob');
+
+	// Out of window, history must still render: what the run DID is visible,
+	// what it READ is not, and nothing throws.
+	VaultUnlock::lockAll($owner_id);
+	$locked_run = new RecipeRun(intval($sealed_run->key), TRUE);
+	$rendered = true;
+	$render_error = '';
+	try {
+		$out   = $locked_run->contentOrNull('rcr_output');
+		$calls = $locked_run->toolCalls();
+	} catch (Throwable $e) {
+		$rendered = false;
+		$render_error = get_class($e) . ': ' . $e->getMessage();
+	}
+	check($rendered, 'run history renders with the vault locked', $render_error);
+	check($rendered && $out === null && $calls === array(),
+		'showing no content rather than ciphertext or a placeholder string');
+	check((string)$locked_run->get('rcr_status') === RecipeRun::STATUS_PENDING,
+		'while the status is still readable, because it is not content');
+	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+		array('idle' => null, 'absolute' => null));
+
+	// The suppression is conditional. A standard mailbox has nothing to protect
+	// and real value in the detail, so its runs stay plaintext and searchable.
+	$plain_run = iw_run($std_recipe);
+	$plain_run->writeContent(array('rcr_output' => "1 item\n- $leaky_subject: none"));
+	$run_row->execute(array($plain_run->key));
+	$plain_stored = $run_row->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$plain_stored['rcr_output'], $leaky_subject) !== false,
+		'a standard binding still records subjects, so this is not a blanket loss of detail');
+	check(empty($plain_stored['rcr_content_sealed']), 'and its run row is not sealed');
+
+	// -----------------------------------------------------------------------
+	section('the catch-up purge clears runs recorded before sealing existed');
+
+	// Runs recorded before run rows could seal hold subjects and summaries in
+	// the clear. RunContentPurge is the catch-up, and it runs from the plugin
+	// SYNC HOOK, not a core migration: migrations execute hundreds of lines
+	// before PluginManager::sync() adds the sealing columns, so a migration
+	// touching rcr_content_sealed runs against a table that has not got it yet.
+	require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RunContentPurge.php'));
+
+	$legacy = iw_run($recipe);              // $recipe reads the Fortress mailbox
+	RecipeRun::updateColumns(intval($legacy->key), array(
+		'rcr_output'     => "1 item\n- $leaky_subject: none",
+		'rcr_tool_calls' => $trace,
+		'rcr_input_tokens' => 4321,
+	));
+	$run_row->execute(array($legacy->key));
+	$before_purge = $run_row->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$before_purge['rcr_output'], $leaky_subject) !== false,
+		'the pre-sealing run holds the subject in the clear, as those rows do');
+
+	$purge_messages = RunContentPurge::run();
+	$run_row->execute(array($legacy->key));
+	$after_purge = $run_row->fetch(PDO::FETCH_ASSOC);
+	check($after_purge['rcr_output'] === null && $after_purge['rcr_tool_calls'] === null,
+		'the purge clears the content columns');
+	check(intval($after_purge['rcr_input_tokens']) === 4321
+		&& (string)$after_purge['rcr_status'] === RecipeRun::STATUS_PENDING,
+		'and leaves the counts and status history renders from');
+	check(count($purge_messages) === 1 && strpos($purge_messages[0], 'cleared plaintext') !== false,
+		'and says how many rows it touched', json_encode($purge_messages));
+
+	// Idempotent, because it runs on EVERY sync — not just once.
+	check(RunContentPurge::run() === array(),
+		'a second pass finds nothing and reports nothing');
+
+	// A standard-binding run is not its business.
+	$plain_keep = iw_run($std_recipe);
+	RecipeRun::updateColumns(intval($plain_keep->key),
+		array('rcr_output' => "1 item\n- $leaky_subject: none"));
+	RunContentPurge::run();
+	$run_row->execute(array($plain_keep->key));
+	$kept = $run_row->fetch(PDO::FETCH_ASSOC);
+	check(strpos((string)$kept['rcr_output'], $leaky_subject) !== false,
+		'a standard-binding run keeps its detail');
+
+	// The platform's own message about a run is not content, and is written by
+	// actors who hold no key at all — cron's reaper, another admin's session.
+	check(in_array('rcr_status_note', RecipeRun::$sealed_fields, true) === false,
+		'the platform status note is deliberately not a sealed column');
+	RecipeRun::updateColumns(intval($sealed_run->key),
+		array('rcr_status_note' => 'reaper: worker process did not complete'));
+	$note_row = new RecipeRun(intval($sealed_run->key), TRUE);
+	check((string)$note_row->get('rcr_status_note') === 'reaper: worker process did not complete',
+		'so cron can still say why a protected run died');
+
+	// -----------------------------------------------------------------------
 	section('sink zero: sealed mail does not reach a cloud model without consent');
 
 	// This precedes every storage sink — the plaintext leaves over HTTPS, not
@@ -380,6 +681,38 @@ try {
 		'a Claude model counts as cloud');
 	check(LlmProviderFactory::isCloudModel('qwen3.6:35b-a3b-nvfp4') === false,
 		'a local model does not');
+
+	// An UNPINNED recipe is the important case, and the easy one to get wrong:
+	// its model id says nothing, so the classification has to come from the
+	// global default provider the run will actually follow. Shipped templates
+	// seed unpinned, so they are the rows on this path.
+	$saved_provider = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider');
+	harness_set_setting_mem('joinery_ai_llm_provider', 'anthropic');
+	check(LlmProviderFactory::isCloudModel('') === true,
+		'no pinned model + a cloud site default counts as cloud, not as harmless');
+	harness_set_setting_mem('joinery_ai_llm_provider', 'local');
+	check(LlmProviderFactory::isCloudModel('') === false,
+		'and as local when the site default is local');
+	harness_set_setting_mem('joinery_ai_llm_provider', $saved_provider);
+
+	// The gate has to refuse that recipe too, and say something an admin can act
+	// on rather than quoting an empty model name back at them.
+	$unpinned = iw_recipe($owner_id, 'email_triage', $address);
+	$unpinned->set('rcp_model', '');
+	harness_set_setting_mem('joinery_ai_llm_provider', 'anthropic');
+	$refused_unpinned = false;
+	$unpinned_message = '';
+	try {
+		RecipeVaultScope::assertModelAllowed($unpinned);
+	} catch (LlmProviderException $e) {
+		$refused_unpinned = true;
+		$unpinned_message = $e->getMessage();
+	}
+	check($refused_unpinned,
+		'a sealed-source recipe with NO model pinned is refused against a cloud default');
+	check(stripos($unpinned_message, 'no model pinned') !== false,
+		'and the refusal explains that rather than quoting an empty name', $unpinned_message);
+	harness_set_setting_mem('joinery_ai_llm_provider', $saved_provider);
 
 	MailboxAliasConfig::clearPostureCache();
 	check(MailboxAliasConfig::aiCloudAllowed($address) === false,
@@ -488,19 +821,17 @@ try {
 
 	VaultUnlock::lockAll($owner_id);
 
-} catch (Throwable $e) {
-	// Without this, an exception mid-suite is silent: harness_finish() runs from
-	// the finally and exit()s before the throw can surface, so the run reports
-	// PASS on however many checks happened to complete. A shrinking suite looks
-	// identical to a passing one — which is exactly how the sealed write path
-	// stayed broken. Fail loudly instead.
-	check(false, 'the suite ran to completion without throwing',
-		get_class($e) . ': ' . $e->getMessage()
-		. ' @ ' . $e->getFile() . ':' . $e->getLine());
 } finally {
-	// harness_register_row/harness_defer reclaim every fixture row (LIFO), so a
-	// mid-suite failure still leaves no throwaway domain, alias, grant, message,
-	// recipe, run, or vault behind.
-	harness_finish();
+	// Cleanup only — never harness_finish(). harness_finish() exit()s, so calling
+	// it here would swallow an in-flight exception and report PASS on however
+	// many checks happened to complete. Left outside, an exception propagates
+	// uncaught and the harness shutdown reporter records the failure.
+	// tests/estate/harness_contract_test.php enforces this shape.
+	VaultUnlock::lockAll($owner_id ?? 0);
 }
+
+// harness_register_row/harness_defer reclaim every fixture row (LIFO), so a
+// mid-suite failure still leaves no throwaway domain, alias, grant, message,
+// recipe, run, or vault behind — harness_finish() and the crash net both run it.
+harness_finish();
 ?>

@@ -201,8 +201,16 @@ check($owner_id !== User::USER_SYSTEM,
 $q = $db->prepare("SELECT usr_permission, usr_delete_time FROM usr_users WHERE usr_user_id = ?");
 $q->execute(array(User::USER_SYSTEM));
 $system_row = $q->fetch(PDO::FETCH_ASSOC);
-check($system_row && (int)$system_row['usr_permission'] >= 10 && $system_row['usr_delete_time'] === null,
-	'the system account WOULD qualify without the exclusion (so the exclusion is doing work)');
+$system_qualifies = $system_row && (int)$system_row['usr_permission'] >= 10
+	&& $system_row['usr_delete_time'] === null;
+if ($system_qualifies) {
+	check(true, 'the system account WOULD qualify without the exclusion (so the exclusion is doing work)');
+} else {
+	// An install whose system row is absent, demoted or deleted is a different
+	// shape, not a broken one — the exclusion simply has nothing to exclude.
+	harness_skip('the system account WOULD qualify without the exclusion',
+		'this install has no active permission-10 system row');
+}
 
 $q = $db->prepare(
 	"SELECT MIN(usr_user_id) FROM usr_users
@@ -272,14 +280,68 @@ check($r->error && stripos((string)$r->error, 'one verdict for one item') !== fa
 	var_export($r->error, true));
 
 // -----------------------------------------------------------------------------
+section('A saved recipe cannot change its shape');
+
+// The editor renders mode and job as static text once a recipe is saved, but
+// that is presentation. Editing the hidden input must be refused server-side,
+// because flipping the job is not cosmetic: both mail jobs take the same
+// mailbox_alias config so validation passes, and aip_recipe_item_log is keyed
+// per job — repoint triage at the security scan and every already-triaged
+// message reads as already scanned, so the scan silently does nothing.
+$shape_input = array(
+	'rcp_recipe_id'            => (int)$seeded_b['rcp_recipe_id'],
+	'rcp_name'                 => $seeded_b['rcp_name'],
+	'rcp_mode'                 => Recipe::MODE_PIPELINE,
+	'rcp_pipeline_job'         => 'email_security_scan',   // was email_triage
+	'rcp_allow_tainted_writes' => '1',
+);
+$r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $shape_input);
+check($r->error && stripos((string)$r->error, 'cannot change its job') !== false,
+	'posting a different pipeline job is refused', var_export($r->error, true));
+
+$after_job = $fetch($key_prefix . 'b');
+check((string)$after_job['rcp_pipeline_job'] === 'email_triage',
+	'and the stored job is untouched', (string)$after_job['rcp_pipeline_job']);
+
+$mode_input = $shape_input;
+$mode_input['rcp_pipeline_job'] = 'email_triage';
+$mode_input['rcp_mode'] = Recipe::MODE_AGENT;
+$r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $mode_input);
+check($r->error && stripos((string)$r->error, 'cannot change its mode') !== false,
+	'and so is flipping pipeline to agent, which would also exit the sealed-source cloud gate',
+	var_export($r->error, true));
+
+// Re-posting the SAME shape is not a change, so the lock must not fire — the
+// editor posts mode and job on every ordinary save. It gets past the shape
+// check and lands on the next real gate (this template is still unbound), which
+// is exactly how far it should get.
+$same_input = $shape_input;
+$same_input['rcp_pipeline_job'] = 'email_triage';
+$r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $same_input);
+check($r->error === null || stripos((string)$r->error, 'cannot change its') === false,
+	're-posting the unchanged shape is not treated as a change',
+	var_export($r->error, true));
+check($r->error && stripos((string)$r->error, 'mailbox_alias') !== false,
+	'it proceeds to the binding requirement instead', var_export($r->error, true));
+
+// -----------------------------------------------------------------------------
 section('Marking a recipe to ship');
 
-check(DeploymentHelper::isUpgradeServer() === true,
-	'the dev checkout is a publishing instance, so the control is available here');
-check(DeploymentHelper::isUpgradeServer()
+// Assert the PREDICATE, not the host. Whether a given machine publishes
+// upgrades is a property of that machine — hard-asserting true here passes on
+// the dev checkout and fails on every node that merely consumes releases,
+// turning an environment difference into a red test.
+$publishes = DeploymentHelper::isUpgradeServer();
+check($publishes
 		=== (bool)(Globalvars::get_instance()->get_setting('upgrade_server_active')
 			|| PluginHelper::isPluginActive('server_manager')),
 	'the predicate is the same one utils/upgrade.php gates the upgrade endpoint on');
+if (!$publishes) {
+	harness_skip('ship control checks', 'this host does not publish upgrades');
+}
 
 // A fully-configured recipe, exactly what an author would mark.
 $author = new Recipe(NULL);

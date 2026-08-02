@@ -194,14 +194,17 @@ try {
 	check($res->error !== null, 'a below-staff session is refused by the action');
 
 } catch (Throwable $harness_e) {
-	// An exception here would otherwise be silent: harness_finish() runs from the
-	// finally below and exit()s before the throw can surface, so the run reports
-	// PASS on however many checks happened to complete. A shrinking suite must not
-	// look like a passing one.
+	// Names the throw and where it happened, which beats the fatal-handler
+	// detail the crash net has to fall back on.
 	check(false, 'the suite ran to completion without throwing',
 		get_class($harness_e) . ': ' . $harness_e->getMessage()
 		. ' @ ' . $harness_e->getFile() . ':' . $harness_e->getLine());
-} finally {
-	harness_finish();
 }
+
+// Outside the try, and NEVER in a finally: harness_finish() exit()s, so calling
+// it while an exception is unwinding swallows the throw and reports PASS on
+// however many checks completed. Fixture teardown runs from here and from the
+// crash net, so nothing leaks on either path.
+// tests/estate/harness_contract_test.php enforces this shape estate-wide.
+harness_finish();
 ?>

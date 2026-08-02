@@ -778,7 +778,34 @@ class PluginManager extends AbstractExtensionManager {
 
         // Same sync.php hook the full sync runs, so a plugin's declared rows
         // land at activation rather than waiting for the next sync.
-        $this->runSyncHook($name);
+        //
+        // EVERY active plugin's hook, not just this one's. A declaration can be
+        // held back waiting on a plugin that is not installed yet — joinery_ai's
+        // email recipes need mailbox — and the plugin that has been waiting is
+        // the one just activated, so running only its own hook is the one case
+        // guaranteed to miss. Hooks are required to be idempotent, so re-running
+        // the others costs a no-op each.
+        // $name is included explicitly rather than relied upon to appear in the
+        // active list — this runs alongside the status flip, and which side of
+        // it we are on is not a detail this should depend on.
+        $hook_targets = array($name);
+        try {
+            $active_now = new MultiPlugin(['plg_active' => 1]);
+            $active_now->load();
+            foreach ($active_now as $active_plugin) {
+                $active_name = (string)$active_plugin->get('plg_name');
+                if ($active_name !== '' && !in_array($active_name, $hook_targets, true)) {
+                    $hook_targets[] = $active_name;
+                }
+            }
+        } catch (Throwable $e) {
+            error_log("Could not enumerate active plugins while activating '$name': " . $e->getMessage());
+        }
+        foreach ($hook_targets as $hook_target) {
+            foreach ($this->runSyncHook($hook_target) as $message) {
+                error_log("Plugin sync hook (activating '$name'): " . $message);
+            }
+        }
 
         // Resume scheduled tasks that belong to this plugin
         require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));

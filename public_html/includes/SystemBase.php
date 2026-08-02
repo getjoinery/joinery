@@ -109,12 +109,16 @@ abstract class SystemBase {
 
 	/**
 	 * Sealed Vault (docs/sealed_vault.md) generic read hook. A consumer with
-	 * fields sealed under the vault lists their column names here and
-	 * overrides decryptSealedField()/decryptSealedFieldStatic() to actually
-	 * decrypt (using its own VaultUnlock::secretKey() call, its own AD
-	 * convention, its own owning-user lookup - the vault names no consumer).
-	 * Every other model leaves this empty and pays nothing: get() only takes
-	 * the decrypt path when the field name is listed here.
+	 * fields sealed under the vault lists their column names here; add the
+	 * four convention columns ({prefix}_content_sealed, {prefix}_sealed_key,
+	 * {prefix}_sealed_owner_user_id, {prefix}_key_generation) and reading and
+	 * writing both work with no crypto code of your own — sealColumns() writes,
+	 * get() decrypts, save() leaves the sealed columns alone.
+	 *
+	 * Models whose owner is indirect, or whose columns are content only on some
+	 * rows, override sealedOwnerUserIdFor() / sealedFieldIsActive() rather than
+	 * the decrypt hooks themselves. Every other model leaves this empty and pays
+	 * nothing: get() only takes the decrypt path for a listed field name.
 	 */
 	public static $sealed_fields = array();
 
@@ -451,31 +455,229 @@ abstract class SystemBase {
 		return array_flip(static::$sealed_fields);
 	}
 
+	/** The column holding this row's DEK, wrapped to the owner's vault public key. */
+	public static function sealedKeyColumn() {
+		if (!property_exists(static::class, 'prefix')) return '';
+		return static::$prefix . '_sealed_key';
+	}
+
+	/** The column recording WHOSE vault the DEK was wrapped to, at seal time. */
+	public static function sealedOwnerColumn() {
+		if (!property_exists(static::class, 'prefix')) return '';
+		return static::$prefix . '_sealed_owner_user_id';
+	}
+
+	/** The column recording the owner's key generation at seal time (rotation). */
+	public static function sealedGenerationColumn() {
+		if (!property_exists(static::class, 'prefix')) return '';
+		return static::$prefix . '_key_generation';
+	}
+
+	/**
+	 * The AD (additional data) string binding one sealed value to its row and
+	 * column — the splice defense: a ciphertext moved to another row or another
+	 * column fails to open. Sealer and opener must build the identical string.
+	 *
+	 * The default is "{prefix}:{id}:{field}". Models that predate this
+	 * convention override it and keep their own literal (mail:, contact:) —
+	 * changing one would strand every row already sealed under it.
+	 */
+	public static function sealAd(int $row_id, string $field): string {
+		$prefix = property_exists(static::class, 'prefix') ? static::$prefix : 'row';
+		return $prefix . ':' . $row_id . ':' . $field;
+	}
+
+	/**
+	 * Does $field actually hold sealed content on THIS row? Default yes for
+	 * every declared column. Overridden where a column is content on some rows
+	 * and metadata on others — an inbound mail row's recipient is the routing
+	 * alias (never sealed) while an outbound row's recipient is a real address
+	 * list (sealed).
+	 */
+	protected static function sealedFieldIsActive(string $field, array $row): bool {
+		return true;
+	}
+
+	/**
+	 * Whose vault this row decrypts against. Default is the owner recorded on
+	 * the row at seal time, which is immune to later membership changes.
+	 * Overridden by models needing a fallback (a row sealed before the column
+	 * existed) or an indirect owner (chat resolves through the conversation).
+	 * Returns null when nothing resolves — the caller treats that as locked.
+	 */
+	protected static function sealedOwnerUserIdFor(array $row): ?int {
+		$col = static::sealedOwnerColumn();
+		$owner = ($col !== '') ? intval($row[$col] ?? 0) : 0;
+		return $owner > 0 ? $owner : null;
+	}
+
+	/**
+	 * True when a raw row's sealed columns hold ciphertext — the raw-row twin of
+	 * rowIsSealed(). Both the flag and the wrapped key must be present: a row
+	 * mid-ingest, between its INSERT and its sealColumns() UPDATE, has neither.
+	 */
+	protected static function rowArrayIsSealed(array $row): bool {
+		$flag = static::sealFlagColumn();
+		$key  = static::sealedKeyColumn();
+		if ($flag === '' || $key === '') return false;
+		$value = $row[$flag] ?? null;
+		if ($value === null || $value === false || $value === 'f' || $value === '0' || $value === 0) {
+			return false;
+		}
+		return !empty($row[$key]);
+	}
+
+	/**
+	 * Fail loudly when a model declares $sealed_fields but has none of the
+	 * plumbing the generic path needs. Without this a misdeclared model would
+	 * silently hand back ciphertext, which is the one outcome worse than an
+	 * exception: it looks like data.
+	 */
+	protected static function assertSealingDeclared(string $field): void {
+		foreach (array(static::sealFlagColumn(), static::sealedKeyColumn()) as $col) {
+			if ($col === '' || !array_key_exists($col, static::$field_specifications)) {
+				throw new RuntimeException(
+					get_called_class() . ' declares "' . $field . '" in $sealed_fields but has no '
+					. 'sealing columns — add {prefix}_content_sealed and {prefix}_sealed_key, or '
+					. 'override the seal column accessors / the decrypt hooks.'
+				);
+			}
+		}
+	}
+
 	/**
 	 * Sealed Vault generic read hook (instance path - covers get() and
-	 * anything built on it, e.g. export_as_array()). A model that declares
-	 * $sealed_fields MUST override this; the base implementation throws so a
-	 * declared-but-undecrypted field is never returned as ciphertext.
+	 * anything built on it, e.g. export_as_array()).
+	 *
+	 * Delegates to the raw-row implementation over this row's stored values, so
+	 * the two paths can never drift apart. $this->data holds ciphertext for the
+	 * sealed columns (load() does no decryption), which is exactly what the
+	 * static path expects.
 	 */
 	protected function decryptSealedField($field, $ciphertext) {
-		throw new RuntimeException(
-			get_called_class() . ' declares "' . $field . '" in $sealed_fields '
-			. 'but does not override decryptSealedField().'
-		);
+		$row = get_object_vars($this->data);
+		$row[static::$pkey_column] = $this->key;
+		return static::decryptSealedFieldStatic($field, $ciphertext, $row);
 	}
 
 	/**
 	 * Sealed Vault generic read hook (raw-row path - for readers that fetch
 	 * rows directly via SQL without instantiating a model, e.g.
-	 * joinery_ai's ModelQueryExecutor). A model that declares $sealed_fields
-	 * MUST override this too; the base implementation throws for the same
-	 * reason decryptSealedField() does.
+	 * joinery_ai's ModelQueryExecutor).
+	 *
+	 * Returns the value untouched on a row that was never sealed, so a table
+	 * holding sealed and plaintext rows side by side reads correctly either way.
+	 * Throws VaultLockedException when the row IS sealed but the owner's unlock
+	 * window is closed or no owner resolves — locked, not an error.
 	 */
 	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
-		throw new RuntimeException(
-			get_called_class() . ' declares "' . $field . '" in $sealed_fields '
-			. 'but does not override decryptSealedFieldStatic().'
-		);
+		static::assertSealingDeclared($field);
+		if (!static::rowArrayIsSealed($row)) {
+			return $ciphertext;
+		}
+		if (!static::sealedFieldIsActive($field, $row)) {
+			return $ciphertext;
+		}
+		// A sealed row seals its columns as they are written, so one that holds
+		// nothing yet is normal and reads back as-is. Anything else in a sealed
+		// column MUST be a sealed blob: a populated plaintext value there is
+		// corruption, and saying so beats handing it back as though it were data.
+		if ($ciphertext === null || $ciphertext === '') {
+			return $ciphertext;
+		}
+		if (!is_string($ciphertext) || strpos($ciphertext, 'v1.aead.') !== 0) {
+			throw new RuntimeException(
+				get_called_class() . '.' . $field . ' holds plaintext on a sealed row — '
+				. 'something wrote it without sealColumns().'
+			);
+		}
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+
+		$owner_id = static::sealedOwnerUserIdFor($row);
+		if ($owner_id === null) {
+			throw new VaultLockedException();
+		}
+		$secret = VaultUnlock::secretKey($owner_id);
+		if ($secret === null) {
+			throw new VaultLockedException();
+		}
+		$crypto = new VaultCrypto();
+		$dek = $crypto->openItemDek((string)$row[static::sealedKeyColumn()], $secret);
+		return $crypto->openField($ciphertext, $dek,
+			static::sealAd(intval($row[static::$pkey_column] ?? 0), $field));
+	}
+
+	/**
+	 * Seal content onto an existing row and persist it — the ONLY supported
+	 * writer for a $sealed_fields column, and the write-side half of the Layer 0
+	 * contract (specs/sealed_content_egress.md): save() skips sealed columns on a
+	 * sealed row, sealColumns() owns them.
+	 *
+	 * Sealing needs only the owner's vault PUBLIC key, so any process can seal to
+	 * a user at any time — no unlock window, no liveness problem. Only reading
+	 * needs the in-window secret.
+	 *
+	 * The row must already exist: the AD binds each value to the primary key, so
+	 * the id has to be real before anything is sealed. INSERT the row with its
+	 * sealed columns empty, then call this.
+	 *
+	 * $reuse_dek re-seals under an existing row DEK (a draft saved repeatedly,
+	 * whose already-sealed attachments hang off that key) and leaves the key
+	 * wrapping columns untouched. Returns the DEK raw bytes so the caller can
+	 * seal related blobs — attachments, raw messages — under the same key.
+	 */
+	public static function sealColumns($row_id, $vault, array $values, $reuse_dek = null) {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$row_id = intval($row_id);
+		if ($row_id <= 0) {
+			throw new RuntimeException(get_called_class() . '::sealColumns() needs a persisted row id.');
+		}
+		foreach (array_keys($values) as $col) {
+			if (!in_array($col, static::$sealed_fields, true)) {
+				throw new RuntimeException(
+					get_called_class() . '::sealColumns() refused "' . $col . '": not in $sealed_fields. '
+					. 'Sealing a column nothing decrypts would write unreadable data.'
+				);
+			}
+		}
+		static::assertSealingDeclared(static::$sealed_fields[0] ?? '');
+
+		$crypto = new VaultCrypto();
+		$mint = ($reuse_dek === null);
+		$dek  = $mint ? $crypto->newItemDek() : $reuse_dek;
+
+		$sets = array();
+		$params = array();
+		foreach ($values as $col => $plaintext) {
+			$sets[] = $col . ' = ?';
+			$params[] = $crypto->sealField((string)$plaintext, $dek, static::sealAd($row_id, $col));
+		}
+		// Only a freshly-minted DEK writes the wrapping; a reused one leaves the
+		// existing key/generation/owner in place so the old ciphertext still opens.
+		if ($mint) {
+			$sets[] = static::sealedKeyColumn() . ' = ?';
+			$params[] = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+
+			$generation = static::sealedGenerationColumn();
+			if ($generation !== '' && array_key_exists($generation, static::$field_specifications)) {
+				$sets[] = $generation . ' = ?';
+				$params[] = intval($vault->get('uev_key_generation'));
+			}
+			$owner = static::sealedOwnerColumn();
+			if ($owner !== '' && array_key_exists($owner, static::$field_specifications)) {
+				$sets[] = $owner . ' = ?';
+				$params[] = intval($vault->get('uev_usr_user_id'));
+			}
+		}
+		$sets[] = static::sealFlagColumn() . ' = true';
+		$params[] = $row_id;
+
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute($params);
+		return $dek;
 	}
 
 	/**

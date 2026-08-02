@@ -180,11 +180,18 @@ includes/DeploymentHelper.php
 
 Any that differ are copied to live immediately and the pipeline re-executes from the start, so a release is applied by its own tooling rather than by the previous version's.
 
-**The rule this imposes:** during that window the new `upgrade.php` is running against the **old** core — every other file is still the previous release. Anything the four self-updating files call must therefore already exist on the oldest site expected to upgrade, or travel inside that same set of four.
+The comparison happens twice, and both passes take all four together:
 
-Calling a newly added core method from `upgrade.php` is the specific way this breaks, and it breaks hard: the self-update copies the new `upgrade.php`, the re-run hits an undefined method, and the upgrade aborts *before* it can deliver the file that defines it. The node is then stuck — its `upgrade.php` is the new one, and no upgrade can repair it without copying files in by hand.
+1. **Early** — straight out of the downloaded tarball, before staging is cleared or anything is extracted. A bug anywhere in the pipeline is then one upgrade attempt away from fixing itself.
+2. **Post-extract** — again from the fully staged tree, so a file the tarball listing missed is still caught.
 
-This is why `isUpgradeServer()` lives on `DeploymentHelper` and not on a general core helper: `upgrade.php` needs it, so it has to travel in the self-updating set.
+**All four move as one set, never individually.** They call each other, so refreshing a subset produces a new file running against an old API — which is the same breakage the self-update exists to prevent, arrived at from the other direction.
+
+**The rule this imposes:** during that window the new `upgrade.php` is running against the **old** core — every file outside the set of four is still the previous release. Anything those four call must therefore already exist on the oldest site expected to upgrade, or travel inside that same set.
+
+Calling a newly added core method from `upgrade.php` is the specific way this breaks, and it breaks hard: the re-run hits an undefined method and aborts *before* it can deliver the file that defines it. Every retry aborts identically, and the node needs files copied in by hand.
+
+Two things guard against it. `isUpgradeServer()` lives on `DeploymentHelper` rather than a general core helper, so `upgrade.php`'s dependency travels with it. And `upgrade.php` calls it behind `method_exists()`, so a site that somehow reaches the re-run with an older helper degrades to "not an upgrade server" for one pass instead of fataling. Write new call sites the same way: **guard any deployment-set call whose target was added in the same release.**
 
 **Dashboard surfaces (Server Manager):**
 

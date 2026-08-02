@@ -124,24 +124,40 @@ $page->begin_box(['title' => 'Run summary']);
 <?php
 $page->end_box();
 
-if ($run->get('rcr_error')) {
+// A protected run shows what it DID from the columns above — status, timings,
+// tokens, cost — and what it READ only while the owner's vault is open. Every
+// content read below goes through contentOrNull()/toolCalls(), which return
+// empty rather than throwing, so this page always renders.
+$run_error  = $run->contentOrNull('rcr_error');
+$run_output = $run->contentOrNull('rcr_output');
+$tool_calls = $run->toolCalls();
+$content_locked = $run->rowIsSealed() && $run_output === null && $run_error === null && !count($tool_calls);
+
+if ((string)$run->get('rcr_status_note') !== '') {
+    $page->begin_box(['title' => 'Status']);
+    echo '<p class="mb-0">' . htmlspecialchars((string)$run->get('rcr_status_note')) . '</p>';
+    $page->end_box();
+}
+
+if ($content_locked) {
+    $page->begin_box(['title' => 'Results']);
+    echo '<p class="mb-0">This recipe reads protected content, so its results are '
+       . 'encrypted to you. Unlock your vault to read them.</p>';
+    $page->end_box();
+}
+
+if ($run_error) {
     $page->begin_box(['title' => 'Error']);
     echo '<pre class="mb-0 joai-pre-wrap">'
-       . htmlspecialchars($run->get('rcr_error')) . '</pre>';
+       . htmlspecialchars((string)$run_error) . '</pre>';
     $page->end_box();
 }
 
-if ($run->get('rcr_output')) {
+if ($run_output) {
     $page->begin_box(['title' => 'Output']);
     echo '<div class="joai-pre-wrap">'
-       . htmlspecialchars($run->get('rcr_output')) . '</div>';
+       . htmlspecialchars((string)$run_output) . '</div>';
     $page->end_box();
-}
-
-$tool_calls = $run->get('rcr_tool_calls');
-if (is_string($tool_calls)) {
-    $decoded = json_decode($tool_calls, true);
-    $tool_calls = is_array($decoded) ? $decoded : null;
 }
 
 $is_pipeline = (string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE;

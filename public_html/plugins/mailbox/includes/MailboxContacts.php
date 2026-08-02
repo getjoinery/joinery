@@ -12,7 +12,7 @@
  * SEEN when it warmed up through use (source sent or received) — lookup() reports which,
  * and manualAdd() stamps a seen row as saved.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -142,22 +142,9 @@ class MailboxContacts {
 
 	/** Seal a just-inserted contact's address + display name under a per-row DEK. */
 	private function sealContact(int $contact_id, UserEncryptionVault $vault, string $addr, string $name): void {
-		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-		$crypto = new VaultCrypto();
-		$dek = $crypto->newItemDek();
-		$sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
-		$db = $this->db();
-		$stmt = $db->prepare('UPDATE imc_mailbox_contacts SET
-			imc_address = ?, imc_display_name = ?, imc_sealed_key = ?, imc_key_generation = ?,
-			imc_sealed_owner_user_id = ?, imc_content_sealed = true
-			WHERE imc_mailbox_contact_id = ?');
-		$stmt->execute(array(
-			$crypto->sealField($addr, $dek, MailboxContact::sealAd($contact_id, 'imc_address')),
-			$crypto->sealField($name, $dek, MailboxContact::sealAd($contact_id, 'imc_display_name')),
-			$sealed_key,
-			intval($vault->get('uev_key_generation')),
-			intval($vault->get('uev_usr_user_id')),
-			$contact_id,
+		MailboxContact::sealColumns($contact_id, $vault, array(
+			'imc_address'      => $addr,
+			'imc_display_name' => $name,
 		));
 	}
 
@@ -361,7 +348,6 @@ class MailboxContacts {
 	/** Write a display name onto an existing row, re-sealing under that row's own DEK. */
 	private function setDisplayName(array $row, string $name, ?string $secret): void {
 		$id = intval($row['imc_mailbox_contact_id']);
-		$value = $name;
 		if (!empty($row['imc_content_sealed']) && !empty($row['imc_sealed_key'])) {
 			// $secret is the row owner's only when the row was sealed to their own vault
 			// (always so in practice) — otherwise leave the stored name alone.
@@ -371,12 +357,15 @@ class MailboxContacts {
 			}
 			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 			$crypto = new VaultCrypto();
+			// Re-seal under the row's OWN DEK, so the address sealed beside it stays
+			// readable; a reused DEK needs no vault (the wrapping is already written).
 			$dek = $crypto->openItemDek((string)$row['imc_sealed_key'], $secret);
-			$value = $crypto->sealField($name, $dek, MailboxContact::sealAd($id, 'imc_display_name'));
+			MailboxContact::sealColumns($id, null, array('imc_display_name' => $name), $dek);
+			return;
 		}
 		$stmt = $this->db()->prepare('UPDATE imc_mailbox_contacts SET imc_display_name = ?
 			WHERE imc_mailbox_contact_id = ?');
-		$stmt->execute(array($value, $id));
+		$stmt->execute(array($name, $id));
 	}
 
 	/**

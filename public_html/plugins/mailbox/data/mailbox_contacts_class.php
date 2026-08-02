@@ -24,7 +24,7 @@
  * because the contacts payload also de-duplicates by decrypted address on read (this store is
  * a cache).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -72,44 +72,18 @@ class MailboxContact extends SystemBase {
 		// (every mutation is bound to the acting user's id), so no admin gate here.
 	}
 
-	/** The AD row-binding string for a sealed contact field (docs/sealed_vault.md § AD). */
+	/**
+	 * The AD row-binding string for a sealed contact field (docs/sealed_vault.md § AD).
+	 * Overrides the SystemBase default ("imc:{id}:{field}") — every contact already
+	 * sealed uses this literal, and changing it would strand them.
+	 *
+	 * Everything else about sealing here is the SystemBase Layer 0 default: the four
+	 * convention columns are declared above, so reads decrypt through
+	 * decryptSealedField()/decryptSealedFieldStatic() and writes go through
+	 * sealColumns() with no crypto code in this class.
+	 */
 	public static function sealAd(int $contact_id, string $field): string {
 		return 'contact:' . $contact_id . ':' . $field;
-	}
-
-	/** Sealed Vault read hook (loaded-model path). */
-	protected function decryptSealedField($field, $ciphertext) {
-		if (!$this->get('imc_content_sealed') || !$this->get('imc_sealed_key')) {
-			return $ciphertext;
-		}
-		$owner_id = intval($this->get('imc_sealed_owner_user_id'));
-		return self::openField(intval($this->key), $owner_id, (string)$this->get('imc_sealed_key'), $field, $ciphertext);
-	}
-
-	/** Sealed Vault read hook (raw-row path — MailboxContacts list reads). */
-	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
-		if (empty($row['imc_content_sealed']) || empty($row['imc_sealed_key'])) {
-			return $ciphertext;
-		}
-		$owner_id = intval($row['imc_sealed_owner_user_id'] ?? 0);
-		$contact_id = intval($row['imc_mailbox_contact_id'] ?? 0);
-		return self::openField($contact_id, $owner_id, (string)$row['imc_sealed_key'], $field, $ciphertext);
-	}
-
-	/** Unwrap the per-row DEK in-window, then open the AEAD field. */
-	private static function openField(int $contact_id, int $owner_id, string $sealed_key, string $field, string $ciphertext): string {
-		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-		if ($owner_id <= 0) {
-			throw new VaultLockedException();
-		}
-		$secret = VaultUnlock::secretKey($owner_id);
-		if ($secret === null) {
-			throw new VaultLockedException();
-		}
-		$crypto = new VaultCrypto();
-		$dek = $crypto->openItemDek($sealed_key, $secret);
-		return $crypto->openField($ciphertext, $dek, self::sealAd($contact_id, $field));
 	}
 }
 

@@ -1,6 +1,35 @@
 # Sealed content must not escape into unsealed storage
 
-**Status:** Active spec, unbuilt.
+**Status:** Active. The three live defects, **Layer 0** and **Layer 1 for
+`rcr_recipe_runs`** are built; Layer 2, Layer 3, and Layer 1 for the remaining
+tables (`rcp_recipes.rcp_workspace`, `mem_memories`, `rcn_notes`,
+`aik_api_idempotency_keys`, `cal_entries`) are not.
+
+Layer 1 landed for the run table as: the run row seals to the recipe owner at run
+start when `RecipeVaultScope::forRecipe()` answers non-null; `rcr_output`,
+`rcr_tool_calls`, `rcr_error` and the workspace pair are `$sealed_fields`;
+`rcr_tool_calls` moved from `jsonb` to `text`; `RecipeRun::writeContent()` /
+`saveContent()` are the writers and `contentOrNull()` / `toolCalls()` the
+locked-safe readers; a new unsealed `rcr_status_note` carries the reaper's and
+the admin-cancel verdicts, which are written by actors holding no key; the
+delivery and failure emails withhold content on a sealed run; `RunContentPurge`
+clears pre-existing plaintext (resolved decision 2).
+
+That purge runs from joinery_ai's `sync.php` hook and NOT from a core migration.
+Core migrations execute several hundred lines before `PluginManager::sync()` adds
+or alters plugin columns, so a migration touching `rcr_content_sealed` queries a
+table that has not got it yet. The sync hook is the only place those columns are
+guaranteed to exist. Migration slot 160 is retained as a no-op so version
+numbering stays unbroken.
+
+Layer 0 landed as: `save()` skips a sealed row's sealed columns,
+generic `decryptSealedField()` / `decryptSealedFieldStatic()` / `sealColumns()` on
+`SystemBase` behind the `{prefix}_content_sealed` / `_sealed_key` /
+`_sealed_owner_user_id` / `_key_generation` convention, with
+`sealedOwnerUserIdFor()` / `sealedFieldIsActive()` / `sealAd()` as the override
+surface. `InboundEmailMessage` and `MailboxContact` are migrated onto it; the chat
+models still carry their own hooks (their DEK resolves through the conversation).
+Documented in `docs/sealed_vault.md` § The two generic consumer hooks.
 
 ## The problem
 
