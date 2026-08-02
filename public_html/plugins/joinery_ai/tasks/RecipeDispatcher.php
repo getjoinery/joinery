@@ -45,9 +45,13 @@ class RecipeDispatcher implements ScheduledTaskInterface {
      */
     private function reapStuckRuns(): int {
         $db = DbConnector::get_instance()->get_db_link();
+        // The verdict goes in rcr_status_note, not rcr_error: the reaper runs
+        // from cron, holds nobody's vault key, and rcr_error is a sealed column
+        // on a protected run. This is the platform's own message anyway, not
+        // anything the run read.
         $sql = "UPDATE rcr_recipe_runs
                 SET rcr_status = ?,
-                    rcr_error = COALESCE(NULLIF(rcr_error,''), 'reaper: worker process did not complete'),
+                    rcr_status_note = COALESCE(NULLIF(rcr_status_note,''), 'reaper: worker process did not complete'),
                     rcr_completed_time = NOW() AT TIME ZONE 'UTC'
                 WHERE rcr_status = ?
                   AND rcr_started_time < (NOW() AT TIME ZONE 'UTC' - INTERVAL '" . self::STUCK_RUN_SECONDS . " seconds')

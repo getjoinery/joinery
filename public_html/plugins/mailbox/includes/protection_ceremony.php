@@ -454,15 +454,9 @@ function mailbox_protection_seal_batch(InboundEmailDomain $domain, int $limit = 
 			continue;
 		}
 		try {
-			// Same per-row shape as backfill_seal_logic: an outbound row's
-			// iem_recipient is real content and must seal; an inbound row's is
-			// routing metadata and stays plaintext.
-			$seal_recipient = ((string)$msg->get('iem_direction') === 'outbound');
-			$dek = InboundEmailMessage::sealAndPersistContent(
-				intval($msg->key), $vault,
-				(string)$msg->get('iem_sender'), (string)$msg->get('iem_recipient'), (string)$msg->get('iem_subject'),
-				(string)$msg->get('iem_body_plain'), (string)$msg->get('iem_body_html'), $seal_recipient
-			);
+			// Same path as backfill_seal_logic: seal every content column this
+			// row holds, chosen by the predicate the read path uses.
+			$dek = InboundEmailMessage::sealExistingRow($msg, $vault);
 			$raw = $msg->getRawMessage();
 			if ($raw !== null && $raw !== '') {
 				$router->resealBackfillAttachments(intval($msg->key), $raw, $dek);

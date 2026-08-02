@@ -911,6 +911,16 @@ class MailboxService {
 					} catch (VaultLockedException $e) {
 						$value = self::SEALED_PLACEHOLDER;
 						$this->content_locked = true;
+					} catch (Throwable $e) {
+						// A column that will not open — a damaged blob, or one
+						// left plaintext under a sealed flag by an older write
+						// path. One bad row must not take down the whole thread
+						// list, so it renders as unreadable and says so in the
+						// log, naming the message and column.
+						error_log('MailboxService: could not read ' . $col . ' on message '
+							. $mid . ': ' . $e->getMessage());
+						$value = self::SEALED_PLACEHOLDER;
+						$this->content_locked = true;
 					}
 				}
 				$entry[$key] = (string)$value;

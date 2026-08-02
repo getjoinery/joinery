@@ -93,7 +93,7 @@ $formwriter->textinput('spm_og_type', 'OG type', array(
 ));
 
 $formwriter->checkboxinput('spm_noindex', 'Noindex this path', array(
-	'help' => 'Emits <meta name="robots" content="noindex"> and excludes from sitemap.',
+	'helptext' => 'Emits <meta name="robots" content="noindex"> and excludes from sitemap.',
 ));
 
 $formwriter->submitbutton('btn_submit', 'Save');

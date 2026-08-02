@@ -85,16 +85,11 @@ function backfill_seal_logic(array $input): LogicResult {
 			continue;
 		}
 		try {
-			// Seal what the read path will expect for this row's direction: an
-			// outbound row's iem_recipient is real content and the decrypt hooks
-			// open it on every sealed outbound read, so it MUST be sealed here;
-			// an inbound row's is routing metadata and stays plaintext.
-			$seal_recipient = ((string)$msg->get('iem_direction') === 'outbound');
-			$dek = InboundEmailMessage::sealAndPersistContent(
-				(int)$msg->key, $vault,
-				(string)$msg->get('iem_sender'), (string)$msg->get('iem_recipient'), (string)$msg->get('iem_subject'),
-				(string)$msg->get('iem_body_plain'), (string)$msg->get('iem_body_html'), $seal_recipient
-			);
+			// Seals every content column this row actually holds — including the
+			// AI summary and scan a Standard-era triage may have left behind,
+			// and a draft's recipient/bcc/draft-state — using the same
+			// per-direction predicate the read path uses.
+			$dek = InboundEmailMessage::sealExistingRow($msg, $vault);
 
 			$raw = $msg->getRawMessage();
 			if ($raw !== null && $raw !== '') {

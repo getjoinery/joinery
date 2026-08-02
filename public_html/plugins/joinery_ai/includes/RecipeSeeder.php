@@ -62,11 +62,13 @@ class RecipeSeeder {
     /**
      * Read and validate the declarations.
      *
-     * @param string|null $path  manifest to read; defaults to the shipped one
-     * @return array[] validated declarations, in file order
-     * @throws RecipeSeederException on a malformed file or a bad entry
+     * @param string|null $path    manifest to read; defaults to the shipped one
+     * @param array|null  $errors  out: one message per skipped entry
+     * @return array[] usable declarations, in file order
+     * @throws RecipeSeederException only when the FILE itself is unusable
      */
-    public static function declarations(?string $path = null): array {
+    public static function declarations(?string $path = null, ?array &$errors = null): array {
+        $errors = [];
         $path = $path ?? self::manifestPath();
         if (!file_exists($path)) return [];
 
@@ -84,34 +86,41 @@ class RecipeSeeder {
             throw new RecipeSeederException('recipes.json: "recipes" must be a list.');
         }
 
+        // A problem with the FILE throws — nothing can be salvaged from JSON
+        // that will not parse. A problem with one ENTRY skips that entry and
+        // reports it: one typo must not stop every other template seeding, on
+        // every install, for ever. Same treatment the per-recipe create loop
+        // gives a failure in seedDeclared().
         $seen = [];
         $out = [];
         foreach ($entries as $i => $entry) {
+            $problem = null;
+            $key = is_array($entry) ? (string)($entry['key'] ?? '') : '';
+
             if (!is_array($entry)) {
-                throw new RecipeSeederException("recipes.json entry #$i is not an object.");
-            }
-            $key = (string)($entry['key'] ?? '');
-            if (!preg_match('/^[a-z0-9_]+$/', $key)) {
-                throw new RecipeSeederException(
-                    "recipes.json entry #$i has no usable 'key' — lowercase letters, digits and underscores only.");
-            }
-            if (isset($seen[$key])) {
-                throw new RecipeSeederException("recipes.json declares '$key' twice.");
-            }
-            $seen[$key] = true;
-
-            if (trim((string)($entry['name'] ?? '')) === '') {
-                throw new RecipeSeederException("recipes.json entry '$key' has no 'name'.");
-            }
-
-            foreach (array_keys($entry) as $field) {
-                if (strpos((string)$field, '_') === 0) continue; // _comment and friends
-                if (!in_array($field, self::DECLARED_KEYS, true)) {
-                    throw new RecipeSeederException(
-                        "recipes.json entry '$key' declares unknown field '$field'.");
+                $problem = "entry #$i is not an object";
+            } elseif (!preg_match('/^[a-z0-9_]+$/', $key)) {
+                $problem = "entry #$i has no usable 'key' — lowercase letters, digits and underscores only";
+            } elseif (isset($seen[$key])) {
+                $problem = "'$key' is declared twice; the later one is ignored";
+            } elseif (trim((string)($entry['name'] ?? '')) === '') {
+                $problem = "entry '$key' has no 'name'";
+            } else {
+                foreach (array_keys($entry) as $field) {
+                    if (strpos((string)$field, '_') === 0) continue; // _comment and friends
+                    if (!in_array($field, self::DECLARED_KEYS, true)) {
+                        $problem = "entry '$key' declares unknown field '$field'";
+                        break;
+                    }
                 }
             }
 
+            if ($problem !== null) {
+                $errors[] = 'recipes.json: ' . $problem . ' — skipped.';
+                continue;
+            }
+
+            $seen[$key] = true;
             $out[] = $entry;
         }
 
@@ -135,12 +144,17 @@ class RecipeSeeder {
 
         if ($declarations === null) {
             try {
-                $declarations = self::declarations();
+                $declarations = self::declarations(null, $manifest_errors);
+                // A malformed entry is reported and skipped, so the rest still
+                // seed; only an unusable FILE stops everything.
+                foreach ($manifest_errors as $manifest_error) {
+                    $messages[] = $manifest_error;
+                }
             } catch (RecipeSeederException $e) {
                 return [$e->getMessage()];
             }
         }
-        if (empty($declarations)) return [];
+        if (empty($declarations)) return $messages;
 
         // Nothing to do if every declaration is already accounted for — checked
         // before resolving an owner so a mid-setup install stays quiet once it
@@ -151,11 +165,12 @@ class RecipeSeeder {
                 $pending[] = $declaration;
             }
         }
-        if (empty($pending)) return [];
+        if (empty($pending)) return $messages;
 
         $owner_id = $owner_resolver ? $owner_resolver() : self::resolveOwnerUserId();
         if ($owner_id === null) {
-            return ['shipped recipes not seeded yet — no administrator to own them.'];
+            $messages[] = 'shipped recipes not seeded yet — no administrator to own them.';
+            return $messages;
         }
 
         foreach ($pending as $declaration) {

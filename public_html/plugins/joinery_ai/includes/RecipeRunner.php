@@ -35,6 +35,13 @@ class RecipeRunner {
     public static function run(RecipeRun $run, ?float $deadline = null): void {
         try {
             $recipe = self::loadRecipe($run);
+
+            // A run that reads protected material IS protected material
+            // (specs/sealed_content_egress.md § Layer 1). Decided here, before
+            // the first content write of any kind — including the startup
+            // failures below, whose messages can name what they looked at.
+            self::sealRunIfSourceIsSealed($run, $recipe);
+
             $ctx = new RecipeRunContext($recipe, $run);
 
             // Pre-LLM checks (in order). All four fail fast before the first
@@ -71,14 +78,14 @@ class RecipeRunner {
                 $run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
                 $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
                 $run->set('rcr_error', $e->getMessage());
-                $run->save();
+                $run->saveContent();
                 return;
             }
 
             $run->set('rcr_status', RecipeRun::STATUS_RUNNING);
             $run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
             $run->set('rcr_workspace_before', (string)$recipe->get('rcp_workspace'));
-            $run->save();
+            $run->saveContent();
 
             // Sink zero. Re-checked here and not only at save: a domain can
             // withdraw its cloud consent after the recipe was saved, and that
@@ -129,12 +136,12 @@ class RecipeRunner {
             $run->set('rcr_status', RecipeRun::STATUS_FAILED);
             $run->set('rcr_error', "[$code] " . $e->getMessage());
             $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-            $run->save();
+            $run->saveContent();
         } catch (Exception $e) {
             $run->set('rcr_status', RecipeRun::STATUS_FAILED);
             $run->set('rcr_error', $e->getMessage());
             $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-            $run->save();
+            $run->saveContent();
         }
     }
 
@@ -307,6 +314,37 @@ class RecipeRunner {
     }
 
     /**
+     * Seal the run row when the recipe reads from a sealed source, so every
+     * content column it later writes is encrypted to the recipe's owner.
+     *
+     * Only the owner's vault PUBLIC key is needed, so this works whether or not
+     * a window is open, and a run whose window lapses mid-way keeps writing
+     * sealed rather than falling back to plaintext.
+     *
+     * A recipe whose owner has no vault cannot have a sealed source in the first
+     * place — the protection ceremony refuses to seal a domain with no owning
+     * key — so the null return here is a no-op on ordinary recipes, not a
+     * silent downgrade.
+     */
+    private static function sealRunIfSourceIsSealed(RecipeRun $run, Recipe $recipe): void {
+        try {
+            if (RecipeVaultScope::forRecipe($recipe) === null) {
+                return; // ordinary recipe: nothing it reads is protected
+            }
+            require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+            $vault = UserEncryptionVault::loadForUser((int)$recipe->get('rcp_owner_user_id'));
+            if ($vault === null) {
+                return;
+            }
+            $run->sealToOwner($vault);
+        } catch (Throwable $e) {
+            // Never let this abort a run silently — but do say so, because an
+            // unsealed run against a sealed source is exactly the leak.
+            error_log('[joinery_ai] could not seal run ' . (int)$run->key . ': ' . $e->getMessage());
+        }
+    }
+
+    /**
      * Common terminal path for run-start lifecycle / drift failures. Marks
      * the run as failed with a specific error before any LLM call has
      * happened — costs zero tokens.
@@ -316,7 +354,7 @@ class RecipeRunner {
         $run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
         $run->set('rcr_error', $reason);
-        $run->save();
+        $run->saveContent();
         self::sendFailureEmailIfNotThrottled($recipe, $run, 'failed');
     }
 
@@ -442,12 +480,12 @@ class RecipeRunner {
         $workspace_after = (string)$recipe->get('rcp_workspace');
         $run->set('rcr_workspace_after', $workspace_after);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-        $run->save();
+        $run->saveContent();
 
         // Persist any set_workspace mutation back to the recipe row. Only on
         // success — failed/timeout runs leave the prior workspace untouched per
         // spec, so the LLM doesn't poison its own state on a half-run.
-        if ($workspace_after !== (string)$run->get('rcr_workspace_before')) {
+        if ($workspace_after !== (string)$run->contentOrNull('rcr_workspace_before')) {
             $recipe->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
             $recipe->save();
         }
@@ -463,6 +501,14 @@ class RecipeRunner {
     private static function sendSuccessEmailIfConfigured(Recipe $recipe, RecipeRun $run, string $text): void {
         $to = trim((string)$recipe->get('rcp_delivery_email'));
         if ($to === '') return;
+
+        // Mail is an unencrypted channel. A sealed run's tally is exactly the
+        // subjects and summaries the vault exists to keep off it, so the email
+        // says the run finished and where to read it, and nothing more.
+        if ($run->rowIsSealed()) {
+            $text = "This recipe reads protected content, so its results are not sent by email.\n\n"
+                  . "Open the run to read them while your vault is unlocked.";
+        }
 
         try {
             require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -491,7 +537,7 @@ class RecipeRunner {
         $run->set('rcr_error', $why);
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-        $run->save();
+        $run->saveContent();
         self::sendFailureEmailIfNotThrottled($recipe, $run, 'timeout');
     }
 
@@ -501,7 +547,7 @@ class RecipeRunner {
         $run->set('rcr_error', $why);
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-        $run->save();
+        $run->saveContent();
         self::sendFailureEmailIfNotThrottled($recipe, $run, 'failed');
     }
 
@@ -517,7 +563,7 @@ class RecipeRunner {
         $run->set('rcr_error', $why);
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-        $run->save();
+        $run->saveContent();
         self::sendFailureEmailIfNotThrottled($recipe, $run, 'incomplete');
     }
 
@@ -531,7 +577,7 @@ class RecipeRunner {
         $run->set('rcr_error', 'cancelled by admin');
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
-        $run->save();
+        $run->saveContent();
     }
 
     /**
@@ -582,10 +628,17 @@ class RecipeRunner {
             $to = $recipe->get('rcp_delivery_email') ?: $user->get('usr_email');
             if (!$to) return;
 
+            // A provider or job error can echo the content that caused it, so on
+            // a sealed run the detail stays behind the vault and the mail is a
+            // pointer. Same rule as the success tally.
+            $detail = $run->rowIsSealed()
+                ? '(withheld — this recipe reads protected content; open the run to read the error)'
+                : (string)$run->contentOrNull('rcr_error');
+
             $name = $recipe->get('rcp_name');
             $subject = "Joinery AI: recipe '$name' $kind";
             $body = "Recipe '$name' $kind on its most recent run.\n\n"
-                  . "Error: " . $run->get('rcr_error') . "\n\n"
+                  . "Error: " . $detail . "\n\n"
                   . "Run details: /admin/joinery_ai/run?rcr_run_id=" . (int)$run->key . "\n\n"
                   . "Further failure emails for this recipe will be suppressed for the next "
                   . round($throttle_secs / 3600, 1) . " hours.";

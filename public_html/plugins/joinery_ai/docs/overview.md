@@ -152,13 +152,49 @@ The control appears only on an instance that publishes upgrades (`DeploymentHelp
 Each invocation creates an `rcr_recipe_runs` row with:
 
 - **status** — `running`, `completed`, `error`
-- **tool calls** (`rcr_tool_calls`) — JSON array, one entry per `tool_use` block; written by `RecipeRunContext::appendToolCall()` and persisted at run end
+- **tool calls** (`rcr_tool_calls`) — JSON, one entry per `tool_use` block (or per judged item in pipeline mode); written by `RecipeRunContext::appendToolCall()` and flushed as the run proceeds. Stored as `text`, not `jsonb`, so a protected run can hold ciphertext — read it with `RecipeRun::toolCalls()`, which returns an array either way
 - **token / cost totals** — for the cost guard and admin reporting
 - **output** — the final assistant message
 
 `RecipeRunner::run($recipe)` drives the tool-use loop: send the conversation to the active LLM provider, dispatch any `tool_use` blocks back through `RecipeToolRegistry::get($name)->execute($input, $ctx)`, append the `tool_result`, repeat until the model emits a final text response or the cost guard trips.
 
 The `CostGuard` enforces per-run input/output token and dollar ceilings configured in plugin settings; trips raise an exception that the runner logs as `error`.
+
+### Runs that read protected content
+
+A run against a protected mailbox is itself protected. The run row seals to the
+recipe's owner at run start — before a single byte of what it reads is written —
+and `rcr_output`, `rcr_tool_calls`, `rcr_error` and the workspace pair are
+encrypted at rest under the Sealed Vault (`docs/sealed_vault.md`). The columns
+history is built from — status, timings, tokens, cost, item counts — are not
+sealed, because they describe the run rather than its source.
+
+Sealing needs only the owner's public key, so a run keeps writing encrypted even
+if the unlock window lapses halfway through.
+
+What this changes in practice:
+
+- **Run history renders either way.** Inside the owner's unlock window it shows
+  every subject and verdict. Outside one it shows the run — when, how long, how
+  many items, what status — and says the results are encrypted.
+- **The delivery email carries no results.** Mail is an unencrypted channel, so
+  a protected recipe's email says the run finished and links to it. The failure
+  email withholds the error text for the same reason: a provider or job error
+  can quote what caused it.
+- **`get_recent_outputs` reports an absence.** A protected run the caller cannot
+  open is described as protected rather than shown as an empty run.
+- **`rcr_status_note` carries the platform's own verdict** — a reaper timeout, an
+  admin cancellation. It is never sealed: those writers run from cron or from
+  another person's session and hold no key, and what they write is about the run,
+  not about what it read.
+
+Writing: `RecipeRun::writeContent()` is the only correct way to store a content
+column, and `saveContent()` is the `set()`-then-save form of it. A plain `save()`
+skips sealed columns on a sealed row by design, so a value set and saved that way
+is silently dropped.
+
+Runs recorded before this existed are cleared by migration 160 — content only;
+counts and timings survive.
 
 ## Item pipeline recipes
 

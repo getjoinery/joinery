@@ -68,6 +68,8 @@ $page->public_header([]);
             <div class="joai-card-body">
                 <?php if ($latest && trim((string)$latest['rcr_output']) !== ''): ?>
                     <?php echo MarkdownRenderer::render($latest['rcr_output']); ?>
+                <?php elseif ($latest && !empty($latest['rcr_locked'])): ?>
+                    <div class="joai-empty">Results are encrypted. Unlock your vault to read them.</div>
                 <?php else: ?>
                     <div class="joai-empty">Waiting for the first run.</div>
                 <?php endif; ?>

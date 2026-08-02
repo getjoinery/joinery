@@ -1125,3 +1125,16 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "SELECT 1;";
 	$migrations[] = $migration;
+
+	// Retained as version history only. Clearing plaintext from runs that read
+	// protected mail reads and writes rcr_recipe_runs, a PLUGIN table — and
+	// migrations run several hundred lines before PluginManager::sync() adds or
+	// alters plugin columns, so a migration here cannot see rcr_content_sealed.
+	// The purge lives in joinery_ai's sync.php hook, which runs after that step.
+	// specs/sealed_content_egress.md § resolved decision 2.
+	$migration = array();
+	$migration['database_version'] = '160';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "SELECT 1;";
+	$migrations[] = $migration;

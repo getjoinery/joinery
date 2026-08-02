@@ -23,13 +23,38 @@ class LlmProviderFactory {
      * @throws LlmProviderException if the resolved provider's required setting is empty.
      */
     public static function forModel(string $model): LlmProviderInterface {
+        switch (self::routeFor($model)) {
+            case 'local':     return self::local();
+            case 'fireworks': return self::fireworks();
+            default:          return self::anthropic();
+        }
+    }
+
+    /**
+     * Which provider a model id resolves to: 'anthropic' | 'fireworks' | 'local'.
+     *
+     * The single routing decision. forModel() builds from it and isCloudModel()
+     * classifies from it, so what actually receives the request and what the
+     * consent gates believe receives it cannot disagree — including for the
+     * empty model id, where the answer is not a property of the id at all but of
+     * the global default provider setting.
+     */
+    private static function routeFor(string $model): string {
         $model = trim($model);
         if ($model === '') {
-            return self::build();
+            // No pinned model: the run follows the global default, so THAT is
+            // what has to be classified. Anything other than 'local' leaves the
+            // box, and the setting's own fallback is Anthropic.
+            $default = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider') ?: 'anthropic';
+            if ($default === 'local')     return 'local';
+            if ($default === 'fireworks') return 'fireworks';
+            return 'anthropic';
         }
-        if (preg_match('/^claude/i', $model)) return self::anthropic();
-        if (FireworksProvider::owns($model)) return self::fireworks();
-        return self::local();
+        if (preg_match('/^claude/i', $model)) return 'anthropic';
+        if (FireworksProvider::owns($model))  return 'fireworks';
+        // Any other id is served by the operator's own OpenAI-compatible host,
+        // which is where forModel() sends it — classification and routing agree.
+        return 'local';
     }
 
     /**
@@ -45,7 +70,10 @@ class LlmProviderFactory {
     public static function forConversation(AiConversation $conversation): LlmProviderInterface {
         $model = trim((string)$conversation->get('aic_model'));
         if ((string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS) {
-            if (self::isCloudModel($model)) {
+            // A Fortress turn is pinned local below whatever the id says, so the
+            // only thing to report is an explicit cloud CHOICE. An unpinned chat
+            // has made no choice to refuse — it simply runs local.
+            if ($model !== '' && self::isCloudModel($model)) {
                 throw new LlmProviderException(
                     'This is a Fortress chat — its content never leaves your hardware, so it can only run '
                     . 'on a local model. The selected model “' . $model . '” is a cloud model. Switch to a '
@@ -66,11 +94,14 @@ class LlmProviderFactory {
      * training policy and is true for Fireworks: a vendor promising not to train
      * on your data is still a vendor holding your plaintext. For sealing, the
      * only question is whether the bytes leave the box.
+     *
+     * Answered from routeFor(), the same decision forModel() builds from — so an
+     * UNPINNED recipe is classified by the global default provider it will
+     * actually follow, not treated as harmless because its model id is empty.
+     * Shipped templates ship unpinned, so that case is the common one.
      */
     public static function isCloudModel(string $model): bool {
-        $model = trim($model);
-        if ($model === '') return false;
-        return (bool)preg_match('/^claude/i', $model) || FireworksProvider::owns($model);
+        return self::routeFor($model) !== 'local';
     }
 
     /**

@@ -177,7 +177,18 @@
 	$stage_directory = $stage_location. 'public_html';
 
 	//IF WE ARE ACTING AS A SERVER, AND SOMEONE REQUESTS THE INFO FOR UPGRADING
-	$is_upgrade_server = DeploymentHelper::isUpgradeServer();
+	//
+	// method_exists, not a bare call: this file self-updates AHEAD of the rest
+	// of the release (see EARLY SELF-UPDATE below), so on the re-run it is a new
+	// upgrade.php executing against the site's OLD includes/. Any helper method
+	// added in the same release as a call to it is therefore absent on that pass.
+	// An unguarded call fatals here — before the block that would deliver the new
+	// helper — and every retry fatals the same way, leaving hand-copying the file
+	// as the only recovery. Defaulting to "not a server" is the safe read: the
+	// worst case is one pass declining to serve upgrade metadata.
+	$is_upgrade_server = method_exists('DeploymentHelper', 'isUpgradeServer')
+		? DeploymentHelper::isUpgradeServer()
+		: false;
 	if(isset($_GET['serve-upgrade']) && $_GET['serve-upgrade'] && $is_upgrade_server){
 		require_once(PathHelper::getIncludePath('/data/upgrades_class.php'));
 		$response = array();
@@ -546,54 +557,97 @@
 		upgrade_echo("✓ Core archive downloaded ({$core_size_mb} MB)<br>");
 
 		// =====================================================
-		// EARLY SELF-UPDATE — refresh upgrade.php first
+		// EARLY SELF-UPDATE — refresh the deployment files first
 		// =====================================================
-		// Extract just utils/upgrade.php from the tarball and self-update
-		// BEFORE any failure-prone step (staging-clear, extract, sync, etc).
-		// This guarantees that any bug in upgrade.php is one upgrade attempt
+		// Extract the deployment files from the tarball and self-update BEFORE
+		// any failure-prone step (staging-clear, extract, sync, etc). This
+		// guarantees that a bug in the upgrade pipeline is one upgrade attempt
 		// away from being fixed automatically — no manual intervention needed.
+		//
+		// ALL FOUR travel together, not upgrade.php alone. They call each other:
+		// a new upgrade.php landing beside an old DeploymentHelper is a new file
+		// running against an old API, and any method the release added is missing
+		// on the re-run. Refreshing one and re-execing was exactly that bug.
 		//
 		// Cost: one extra tarball download per upgrade-with-self-update (the
 		// re-run will download again, since staging is still empty). Worth it
 		// to keep the pipeline self-healing.
 		//
-		// The post-extract self-update block below still handles the other
-		// deployment files (DatabaseUpdater, DeploymentHelper, update_database).
+		// The post-extract self-update block below re-checks the same set from
+		// the fully extracted staging tree, so a file missing from this tarball
+		// listing is still caught there.
+		$early_su_files = [
+			'utils/upgrade.php',
+			'utils/update_database.php',
+			'includes/DatabaseUpdater.php',
+			'includes/DeploymentHelper.php',
+		];
 		$early_su_tmp = sys_get_temp_dir() . '/joinery_su_' . getmypid();
 		@mkdir($early_su_tmp, 0770, true);
 		exec(sprintf(
-			'tar -xzf %s -C %s utils/upgrade.php 2>&1',
+			'tar -xzf %s -C %s %s 2>&1',
 			escapeshellarg($file_download_location),
-			escapeshellarg($early_su_tmp)
+			escapeshellarg($early_su_tmp),
+			implode(' ', array_map('escapeshellarg', $early_su_files))
 		), $early_su_out, $early_su_exit);
 
-		$early_su_staged = $early_su_tmp . '/utils/upgrade.php';
-		$live_upgrade_php = $live_directory . '/utils/upgrade.php';
-
-		if ($early_su_exit === 0
-			&& file_exists($early_su_staged)
-			&& file_exists($live_upgrade_php)
-			&& md5_file($early_su_staged) !== md5_file($live_upgrade_php)
-		) {
-			if (@copy($early_su_staged, $live_upgrade_php)) {
-				if (function_exists('opcache_invalidate')) {
-					opcache_invalidate($live_upgrade_php, true);
+		// Which of them actually differ from live. An absent staged file means
+		// this tarball does not carry it — leave live alone rather than delete.
+		$early_su_changed = [];
+		if ($early_su_exit === 0) {
+			foreach ($early_su_files as $rel_path) {
+				$staged = $early_su_tmp . '/' . $rel_path;
+				$live   = $live_directory . '/' . $rel_path;
+				if (file_exists($staged) && file_exists($live)
+						&& md5_file($staged) !== md5_file($live)) {
+					$early_su_changed[] = $rel_path;
 				}
-				@unlink($early_su_staged);
-				@rmdir($early_su_tmp . '/utils');
-				@rmdir($early_su_tmp);
+			}
+		}
 
+		$early_su_cleanup = function () use ($early_su_tmp, $early_su_files) {
+			foreach ($early_su_files as $rel_path) {
+				@unlink($early_su_tmp . '/' . $rel_path);
+			}
+			@rmdir($early_su_tmp . '/utils');
+			@rmdir($early_su_tmp . '/includes');
+			@rmdir($early_su_tmp);
+		};
+
+		if (!empty($early_su_changed)) {
+			// All-or-nothing: a partial copy is the split-version state this
+			// block exists to prevent, so any failure abandons the early
+			// refresh and lets the post-extract block do it properly.
+			$early_su_copied = true;
+			foreach ($early_su_changed as $rel_path) {
+				$live = $live_directory . '/' . $rel_path;
+				if (@copy($early_su_tmp . '/' . $rel_path, $live)) {
+					if (function_exists('opcache_invalidate')) {
+						opcache_invalidate($live, true);
+					}
+				} else {
+					$early_su_copied = false;
+					error_log('Early self-update: copy of ' . $rel_path
+						. ' failed — proceeding with live versions');
+					break;
+				}
+			}
+
+			if ($early_su_copied) {
+				$early_su_cleanup();
+
+				$refreshed = implode(', ', $early_su_changed);
 				if ($is_cli) {
 					echo "\n════════════════════════════════════════════════════════════\n";
 					echo "  UPGRADE PIPELINE REFRESHED\n";
 					echo "════════════════════════════════════════════════════════════\n\n";
-					echo "  utils/upgrade.php has been refreshed from the source.\n";
+					echo "  Refreshed from the source: {$refreshed}\n";
 					self_update_cli_rerun();
 				} else {
 					out_step('Upgrade Pipeline Refreshed');
 					echo '<div style="border: 3px solid #0066cc; padding: 20px; margin: 20px 0; background-color: #e7f3ff; color: #004085;">';
 					echo '<h2 style="margin-top: 0; color: #0066cc;">Upgrade Pipeline Refreshed</h2>';
-					echo '<p>utils/upgrade.php has been refreshed from the source.</p>';
+					echo '<p>Refreshed from the source: ' . htmlspecialchars($refreshed) . '</p>';
 					echo '<p><strong>Please click the button below to continue with the new orchestrator.</strong></p>';
 					echo '<form method="POST" action="/utils/upgrade">';
 					echo '<input type="hidden" name="confirm" value="1">';
@@ -604,14 +658,10 @@
 					echo '</div>';
 				}
 				exit(0);
-			} else {
-				error_log('Early self-update: copy of upgrade.php failed — proceeding with live version');
 			}
 		}
 		// Cleanup tmp regardless
-		@unlink($early_su_staged);
-		@rmdir($early_su_tmp . '/utils');
-		@rmdir($early_su_tmp);
+		$early_su_cleanup();
 
 		//CLEAR OLD STAGED FILES — bulletproof: nuke the directory entirely
 		//and recreate empty. Robust against dotfiles, restrictive perms,

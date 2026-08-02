@@ -86,7 +86,15 @@ class GetRecentOutputsTool implements RecipeToolInterface {
             $when = LibraryFunctions::convert_time(
                 $run->get('rcr_started_time'), 'UTC', $tz, 'M j, Y g:i A T'
             );
-            $output = (string)$run->get('rcr_output');
+            // A protected run's output is readable only in the owner's window.
+            // Locked reads back as a stated absence, so the model is told the
+            // run happened and that it cannot see inside it — not handed a
+            // stack trace, and not silently shown an empty run.
+            $output = $run->contentOrNull('rcr_output');
+            if ($output === null && $run->rowIsSealed()) {
+                $output = '(protected — this run\'s output is encrypted and cannot be read here)';
+            }
+            $output = (string)$output;
             if (mb_strlen($output) > self::MAX_OUTPUT_CHARS_PER_RUN) {
                 $output = mb_substr($output, 0, self::MAX_OUTPUT_CHARS_PER_RUN) . "\n…(truncated)";
             }

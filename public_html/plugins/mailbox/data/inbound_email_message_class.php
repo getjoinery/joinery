@@ -478,52 +478,37 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
-	 * Sealed Vault generic read hook (docs/sealed_vault.md), the SystemBase::get()
-	 * path for a loaded model. Returns the ciphertext unchanged for a row that was
-	 * never sealed (iem_content_sealed = false / no iem_sealed_key — Standard-tier,
-	 * or a row mid-ingest before Phase 4's UPDATE completes). Throws
-	 * VaultLockedException when the owner's vault window is closed.
+	 * Sealed Vault read hooks (docs/sealed_vault.md). Both the loaded-model path
+	 * (SystemBase::get()) and the raw-row path (MailboxService's direct SQL reads,
+	 * joinery_ai's ModelQueryExecutor) are the SystemBase Layer 0 generics; the
+	 * four convention columns are declared above, so this class supplies only the
+	 * two things that are genuinely its own.
+	 *
+	 * A row that was never sealed (iem_content_sealed = false / no iem_sealed_key —
+	 * Standard tier, or a row mid-ingest before Phase 4's UPDATE lands) reads back
+	 * unchanged; a sealed row with the owner's window closed throws
+	 * VaultLockedException.
+	 *
+	 * First: iem_recipient/iem_bcc/iem_draft_state hold real content only on a
+	 * composed row. On an inbound row the recipient IS the routing alias, written
+	 * in the clear at insert, so a broad read must not try to open it.
 	 */
-	protected function decryptSealedField($field, $ciphertext) {
-		if (!$this->get('iem_content_sealed') || !$this->get('iem_sealed_key')) {
-			return $ciphertext;
+	protected static function sealedFieldIsActive(string $field, array $row): bool {
+		if (!self::isComposeOnlyField($field)) {
+			return true;
 		}
-		if (self::isComposeOnlyField($field) && !self::isComposedDirection($this->get('iem_direction'))) {
-			return $ciphertext; // inbound row: recipient is the routing alias; bcc/draft absent
-		}
-		$owner_id = self::sealedOwnerUserId($this->get('iem_sealed_owner_user_id'), $this->get('iem_iea_inbound_email_alias_id'));
-		if ($owner_id === null) {
-			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-			throw new VaultLockedException();
-		}
-		return self::openSealedField(intval($this->key), $owner_id, (string)$this->get('iem_sealed_key'), $field, $ciphertext);
+		return self::isComposedDirection($row['iem_direction'] ?? 'inbound');
 	}
 
 	/**
-	 * Same as decryptSealedField(), for the raw-row path (MailboxService's direct
-	 * SQL reads; plugins/joinery_ai/includes/ModelQueryExecutor.php) that never
-	 * instantiates a model.
+	 * Second: the owner recorded at seal time wins, with a live grantee lookup as
+	 * the fallback for a row sealed before that column existed.
 	 */
-	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
-		if (empty($row['iem_content_sealed']) || empty($row['iem_sealed_key'])) {
-			return $ciphertext;
-		}
-		if (self::isComposeOnlyField($field) && !self::isComposedDirection($row['iem_direction'] ?? 'inbound')) {
-			return $ciphertext; // inbound row: recipient is the routing alias; bcc/draft absent
-		}
-		$owner_id = self::sealedOwnerUserId($row['iem_sealed_owner_user_id'] ?? null, $row['iem_iea_inbound_email_alias_id'] ?? null);
-		if ($owner_id === null) {
-			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-			throw new VaultLockedException();
-		}
-		$message_id = intval($row['iem_inbound_email_message_id'] ?? 0);
-		return self::openSealedField($message_id, $owner_id, (string)$row['iem_sealed_key'], $field, $ciphertext);
-	}
-
-	/** Shared opener: unwrap the per-message DEK (in-window), then the AEAD field. */
-	private static function openSealedField(int $message_id, int $owner_id, string $sealed_key, string $field, string $ciphertext): string {
-		$crypto = self::openMessageDekCrypto($owner_id, $sealed_key);
-		return $crypto['crypto']->openField($ciphertext, $crypto['dek'], self::sealAd($message_id, $field));
+	protected static function sealedOwnerUserIdFor(array $row): ?int {
+		return self::sealedOwnerUserId(
+			$row['iem_sealed_owner_user_id'] ?? null,
+			$row['iem_iea_inbound_email_alias_id'] ?? null
+		);
 	}
 
 	/**
@@ -597,62 +582,89 @@ class InboundEmailMessage extends SystemBase {
 			string $recipient, string $subject, string $body_plain, string $body_html,
 			bool $seal_recipient = false, string $bcc = '', ?string $draft_state = null,
 			?string $reuse_dek = null): string {
-		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-
-		$crypto = new VaultCrypto();
-		// A saved draft re-seals its content under the SAME DEK on every save
-		// ($reuse_dek), so its already-persisted attachments (sealed under that DEK)
-		// stay readable; the DEK wrapping (iem_sealed_key/generation/owner) is left
-		// untouched in that case. A fresh row mints a new DEK and records its wrapping.
-		$reuse = ($reuse_dek !== null);
-		$dek = $reuse ? $reuse_dek : $crypto->newItemDek();
-		$sealed_key = $reuse ? null : $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
 
 		// The always-sealed content columns. iem_recipient/iem_bcc are added only
 		// for a composed row ($seal_recipient) — an inbound row's iem_recipient is
 		// the routing alias, already written at insert and left alone here; iem_bcc
 		// and iem_draft_state exist only on composed/draft rows.
 		$columns = array(
-			'iem_sender'     => $crypto->sealField($sender, $dek, self::sealAd($message_id, 'iem_sender')),
-			'iem_subject'    => $crypto->sealField($subject, $dek, self::sealAd($message_id, 'iem_subject')),
-			'iem_body_plain' => $crypto->sealField($body_plain, $dek, self::sealAd($message_id, 'iem_body_plain')),
-			'iem_body_html'  => $crypto->sealField($body_html, $dek, self::sealAd($message_id, 'iem_body_html')),
+			'iem_sender'     => $sender,
+			'iem_subject'    => $subject,
+			'iem_body_plain' => $body_plain,
+			'iem_body_html'  => $body_html,
 		);
 		if ($seal_recipient) {
-			$columns['iem_recipient'] = $crypto->sealField($recipient, $dek, self::sealAd($message_id, 'iem_recipient'));
+			$columns['iem_recipient'] = $recipient;
 			if ($bcc !== '') {
-				$columns['iem_bcc'] = $crypto->sealField($bcc, $dek, self::sealAd($message_id, 'iem_bcc'));
+				$columns['iem_bcc'] = $bcc;
 			}
 		}
 		if ($draft_state !== null) {
-			$columns['iem_draft_state'] = $crypto->sealField($draft_state, $dek, self::sealAd($message_id, 'iem_draft_state'));
+			$columns['iem_draft_state'] = $draft_state;
 		}
 
-		// The owner is recorded ON the row at seal time (iem_sealed_owner_user_id)
-		// so decryption never depends on the grant list as it happens to look
-		// later — a grant addition or alias deletion must not strand sealed mail.
-		$sets = array();
-		$params = array();
-		foreach ($columns as $col => $val) {
-			$sets[] = $col . ' = ?';
-			$params[] = $val;
-		}
-		// Only a freshly-minted DEK writes the wrapping columns; a reused DEK leaves
-		// the existing iem_sealed_key/generation/owner in place.
-		if (!$reuse) {
-			$sets[] = 'iem_sealed_key = ?';           $params[] = $sealed_key;
-			$sets[] = 'iem_key_generation = ?';       $params[] = intval($vault->get('uev_key_generation'));
-			$sets[] = 'iem_sealed_owner_user_id = ?'; $params[] = intval($vault->get('uev_usr_user_id'));
-		}
-		$sets[] = 'iem_content_sealed = true';
-		$params[] = $message_id;
+		// SystemBase::sealColumns() mints or reuses the DEK, seals each value under
+		// this class's sealAd(), records the wrapping (iem_sealed_key/generation/
+		// owner) on a fresh DEK only, sets the row flag, and UPDATEs — one statement.
+		// Recording the owner ON the row is what keeps decryption independent of how
+		// the grant list looks later: a grant addition or alias deletion must never
+		// strand sealed mail.
+		return static::sealColumns($message_id, $vault, $columns, $reuse_dek);
+	}
 
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare('UPDATE iem_inbound_email_messages SET ' . implode(', ', $sets)
-			. ' WHERE iem_inbound_email_message_id = ?');
-		$stmt->execute($params);
-		return $dek;
+	/**
+	 * Seal an EXISTING plaintext row — the level-raise path (a Standard domain
+	 * promoted to Private/Fortress, whose stored mail must catch up).
+	 *
+	 * Unlike sealAndPersistContent(), which is handed the values at ingest, this
+	 * reads the row and seals every $sealed_fields column that currently holds
+	 * plaintext. That difference matters: a message triaged while the domain was
+	 * Standard carries derived content — iem_ai_summary, iem_ai_scan — that an
+	 * enumerated column list silently leaves in the clear under a sealed flag.
+	 * Which is both the leak this whole area exists to close, and a broken read:
+	 * every later read of that column would try to AEAD-open plaintext.
+	 *
+	 * Column selection uses sealedFieldIsActive() — the same predicate the READ
+	 * path uses — so the two can never disagree about which columns hold content
+	 * on this row's direction, and a sealed column added later is covered here
+	 * without anyone remembering to add it.
+	 *
+	 * Already-sealed values are skipped, so a re-run is a no-op rather than a
+	 * double-seal. Returns the row DEK for sealing this message's attachments.
+	 */
+	public static function sealExistingRow(InboundEmailMessage $msg, UserEncryptionVault $vault): string {
+		$message_id = intval($msg->key);
+		if ($message_id <= 0) {
+			throw new InboundEmailMessageException('sealExistingRow() needs a persisted row.');
+		}
+
+		// Straight from the row: the model's get() would decrypt, and this pass
+		// needs the stored bytes to tell plaintext from an existing seal.
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ?');
+		$stmt->execute(array($message_id));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		if (!$row) {
+			throw new InboundEmailMessageException('sealExistingRow(): row ' . $message_id . ' not found.');
+		}
+
+		$columns = array();
+		foreach (static::$sealed_fields as $field) {
+			if (!static::sealedFieldIsActive($field, $row)) {
+				continue; // metadata on this direction, not content
+			}
+			$value = $row[$field] ?? null;
+			if (!is_string($value) || $value === '') {
+				continue; // nothing stored yet
+			}
+			if (strpos($value, 'v1.aead.') === 0) {
+				continue; // already sealed
+			}
+			$columns[$field] = $value;
+		}
+
+		return static::sealColumns($message_id, $vault, $columns);
 	}
 
 	/**
@@ -708,8 +720,12 @@ class InboundEmailMessage extends SystemBase {
 					continue;
 				}
 				$stored = (string)($row[$field] ?? '');
-				if ($stored === '' && in_array($field, static::$optional_sealed_fields, true)) {
-					continue; // optional column, never sealed when empty
+				// Only what is actually sealed comes back. A column can hold
+				// nothing (an empty body, an optional column never written) —
+				// the seal path skips those, so the unseal path must too, or a
+				// row with one empty content column can never be lowered.
+				if ($stored === '' || strpos($stored, 'v1.aead.') !== 0) {
+					continue;
 				}
 				$columns[$field] = $crypto->openField($stored, $dek, self::sealAd($message_id, $field));
 			}

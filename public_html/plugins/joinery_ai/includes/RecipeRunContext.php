@@ -173,7 +173,7 @@ class RecipeRunContext implements ToolContext {
             $entries[$i] = $entry;
             break;
         }
-        $this->run->set('rcr_tool_calls', $entries);
+        $this->tool_calls = $entries;
         $this->flushToolCalls();
     }
 
@@ -186,7 +186,7 @@ class RecipeRunContext implements ToolContext {
     public function appendToolCall(array $entry): void {
         $existing = $this->currentToolCalls();
         $existing[] = $entry;
-        $this->run->set('rcr_tool_calls', $existing);
+        $this->tool_calls = $existing;
     }
 
     /**
@@ -208,26 +208,34 @@ class RecipeRunContext implements ToolContext {
      *  (The tool-call audit already records what ran, for the report.) */
     public function noteActivity(string $label): void {}
 
-    /** Decode the run's rcr_tool_calls column to an array (handles the
-     *  JSON-string or already-array cases). */
+    /**
+     * The trace as it stands, held here rather than on the run row: on a sealed
+     * run the row's column is ciphertext, and round-tripping the working copy
+     * through it would mean decrypting on every append.
+     */
+    private $tool_calls = null;
+
     private function currentToolCalls(): array {
-        $existing = $this->run->get('rcr_tool_calls');
-        if (is_string($existing)) {
-            $decoded = json_decode($existing, true);
-            return is_array($decoded) ? $decoded : [];
+        if ($this->tool_calls === null) {
+            $this->tool_calls = $this->run->toolCalls();
         }
-        return is_array($existing) ? $existing : [];
+        return $this->tool_calls;
     }
 
-    /** Persist the in-memory trace to the run row. Best-effort. */
+    /**
+     * Persist the in-memory trace to the run row. Best-effort.
+     *
+     * This is the write that produced the leak the sealing work exists to fix
+     * (specs/sealed_content_egress.md): on a pipeline run the trace holds one
+     * record per item — the item's label, which is the mail subject, and the
+     * model's verdict, which describes the body. writeContent() seals it on a
+     * sealed run and leaves it plain on any other.
+     */
     private function flushToolCalls(): void {
         try {
-            $db = DbConnector::get_instance()->get_db_link();
-            $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_tool_calls = ? WHERE rcr_run_id = ?");
-            $q->execute([
-                json_encode($this->run->get('rcr_tool_calls'), JSON_UNESCAPED_SLASHES),
-                (int)$this->run->key,
-            ]);
+            $this->run->writeContent(array(
+                'rcr_tool_calls' => json_encode($this->currentToolCalls(), JSON_UNESCAPED_SLASHES),
+            ));
         } catch (Throwable $e) {
             error_log('[joinery_ai] flushToolCalls failed: ' . $e->getMessage());
         }

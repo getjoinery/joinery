@@ -30,6 +30,40 @@ class RecipeVaultScope {
 	 * "needs the vault" here would silently strand a schedule.
 	 */
 	public static function forRecipe(Recipe $recipe): ?string {
+		try {
+			return self::scopeOrThrow($recipe);
+		} catch (\Throwable $e) {
+			error_log('RecipeVaultScope: scope check failed for recipe '
+				. (int)$recipe->key . ': ' . $e->getMessage());
+			return null;
+		}
+	}
+
+	/**
+	 * The same question, without the swallow.
+	 *
+	 * forRecipe() answers for SCHEDULING, where an unanswerable question has to
+	 * resolve to "no window needed" or a transient fault strands a schedule
+	 * indefinitely. A CONSENT gate needs the opposite: an unanswerable question
+	 * must not read as permission. Same computation, opposite failure
+	 * direction, so the caller picks rather than the callee guessing.
+	 */
+	private static function scopeOrThrow(Recipe $recipe): ?string {
+		// AGENT MODE IS OUT OF SCOPE HERE, AND THAT RESTS ON AN INVARIANT.
+		//
+		// An agent recipe reaches mail through the generic query_model tool, and
+		// InboundEmailMessage is $ai_readable with sealed fields — so
+		// ModelQueryExecutor WILL decrypt for it whenever an unlock window
+		// happens to be open. Nothing in this file stops that; what stops it is
+		// where agent runs execute. A CLI worker holds no window (APCu is
+		// session-keyed), and the only in-window execution path — the deferred
+		// work drain — runs pipeline recipes exclusively.
+		//
+		// The day any agent run executes inside a web request with the owner's
+		// window open, a cloud-model agent recipe ships decrypted sealed mail
+		// off-box with no consent check at all. Whoever changes that must gate
+		// it here first. `sealed_egress` in the in_window_email suite pins the
+		// invariant so the change cannot land quietly.
 		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
 			return null;
 		}
@@ -37,13 +71,7 @@ class RecipeVaultScope {
 		if ($job === null) {
 			return null;
 		}
-		try {
-			return $job->requiresVaultScope(self::config($recipe));
-		} catch (\Throwable $e) {
-			error_log('RecipeVaultScope: scope check failed for recipe '
-				. (int)$recipe->key . ': ' . $e->getMessage());
-			return null;
-		}
+		return $job->requiresVaultScope(self::config($recipe));
 	}
 
 	/**
@@ -112,27 +140,51 @@ class RecipeVaultScope {
 	public static function assertModelAllowed(Recipe $recipe): void {
 		require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
-		if (self::forRecipe($recipe) === null) {
-			return; // nothing sealed in play — any model may read it
+		// Fail CLOSED: an unanswerable scope check is treated as "reads
+		// protected content", so a job that throws cannot be the way a cloud
+		// model gets handed sealed mail. The scheduling path makes the opposite
+		// choice for its own good reasons — see scopeOrThrow().
+		try {
+			if (self::scopeOrThrow($recipe) === null) {
+				return; // nothing sealed in play — any model may read it
+			}
+		} catch (\Throwable $e) {
+			error_log('RecipeVaultScope: assuming protected content for recipe '
+				. (int)$recipe->key . ' — scope check failed: ' . $e->getMessage());
 		}
 		$model = trim((string)$recipe->get('rcp_model'));
 		if (!LlmProviderFactory::isCloudModel($model)) {
 			return; // stays on the operator's hardware
 		}
 
-		$job = self::job($recipe);
-		if ($job === null) {
-			return; // unresolvable job fails its own way at run time
+		// Past this point the recipe reads protected content on a cloud model, so
+		// the ONLY thing that permits it is a domain that has said yes. A job
+		// that cannot be resolved, or that throws while answering, cannot say
+		// yes on that domain's behalf — so it does not.
+		$consented = false;
+		try {
+			$job = self::job($recipe);
+			$consented = ($job !== null) && $job->cloudProcessingAllowed(self::config($recipe));
+		} catch (\Throwable $e) {
+			error_log('RecipeVaultScope: cloud-consent check failed for recipe '
+				. (int)$recipe->key . ': ' . $e->getMessage());
 		}
-		if ($job->cloudProcessingAllowed(self::config($recipe))) {
+		if ($consented) {
 			return;
 		}
 
+		// An unpinned recipe follows the site's default provider, so name that
+		// rather than an empty quotation mark pair the admin cannot act on.
+		$what = $model !== ''
+			? '“' . $model . '” runs on someone else\'s hardware'
+			: 'this recipe has no model pinned, so it follows the site default provider, '
+			  . 'which runs on someone else\'s hardware';
+
 		throw new LlmProviderException(
-			'This recipe reads mail that is encrypted at rest, and “' . $model . '” runs on '
-			. 'someone else\'s hardware — so running it would send the decrypted mail off this '
-			. 'server. Either choose a local model, or turn on “Send this domain\'s decrypted '
-			. 'mail to cloud AI models” for the domain this mailbox belongs to.'
+			'This recipe reads mail that is encrypted at rest, and ' . $what . ' — so running '
+			. 'it would send the decrypted mail off this server. Either pin a local model, or '
+			. 'turn on “Send this domain\'s decrypted mail to cloud AI models” for the domain '
+			. 'this mailbox belongs to.'
 		);
 	}
 
