@@ -354,6 +354,14 @@
             "order": 9,
             "permission": 10,
             "parent": "system"
+        },
+        {
+            "slug": "backups",
+            "title": "Backups",
+            "url": "admin_backups",
+            "order": 10,
+            "permission": 10,
+            "parent": "system"
         }
     ],
     "profileMenu": [

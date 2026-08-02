@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.3.0 - Encrypted archives (.tar.gz.enc) are opened by reading the openssl
+#                  magic, not the filename; the key comes from --key-file, the envelope
+#                  sidecar beside the archive, or ~/.joinery_backup_key, and whatever
+#                  opened the archive is forwarded to the database engine
 # Version: 1.2.1 - mkdir/fix_permissions failures inside perform_restore are checked
 #                  (set -e is suppressed there by the if-condition call) — a failed
 #                  permission fix no longer ends in "RESTORE COMPLETE"
@@ -21,7 +25,7 @@
 #   - tar and gzip for archive extraction
 #
 # Usage:
-#   ./restore_project.sh PROJECT_NAME BACKUP_FILE.tar.gz [--dry-run]
+#   ./restore_project.sh PROJECT_NAME BACKUP_FILE.tar.gz.enc [--dry-run]
 #
 # Options:
 #   PROJECT_NAME    Name of the project to restore (required)
@@ -45,7 +49,7 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.3.0"
 
 # Colors for output
 RED='\033[0;31m'
@@ -224,6 +228,58 @@ cleanup() {
 # Set trap to cleanup on exit
 trap cleanup EXIT
 
+# The archive key, once resolved. Encrypted archives and the database dump
+# inside them share one key, so whatever opens the outer archive is also what
+# the database engine is handed.
+ARCHIVE_KEY_FILE=""
+
+# An openssl -salt stream begins with the literal bytes "Salted__". Reading the
+# format rather than trusting the filename means a renamed archive still
+# restores, and a plaintext one is never fed through a decrypt that would only
+# fail confusingly.
+archive_is_encrypted() {
+    [ "$(head -c 8 "$1" 2>/dev/null)" = "Salted__" ]
+}
+
+# Key sources, in order: the envelope sidecar beside the archive, opened with
+# this site's own key (how an unattended restore works — no operator, no
+# password manager); then the caller's --key-file; then ~/.joinery_backup_key
+# for archives made before envelope keys existed.
+#
+# The sidecar comes first because it is the key that provably belongs to THIS
+# archive, while --key-file is usually a standing default a caller passes for
+# every restore. A sidecar that does not open falls through, so an explicit key
+# is never shut out — it just stops being tried first.
+resolve_archive_key() {
+    local archive_path="$1"
+
+    local sidecar="${archive_path}.keys.json"
+    local envelope_tool="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/backup_envelope.php"
+    local site_key="/var/www/html/${PROJECT_NAME}/config/backup_site_key"
+    if [ -f "$sidecar" ] && [ -f "$site_key" ] && [ -f "$envelope_tool" ] && command -v php >/dev/null 2>&1; then
+        local unsealed="${TEMP_DIR}/archive.key"
+        if php "$envelope_tool" open --sidecar "$sidecar" --private "$site_key" \
+                --key-out "$unsealed" >/dev/null 2>&1; then
+            print_success "Archive key recovered from $(basename "$sidecar") using this site's key"
+            ARCHIVE_KEY_FILE="$unsealed"
+            return 0
+        fi
+        print_warning "The envelope beside this archive did not open with this site's key"
+    fi
+
+    if [ -n "$KEY_FILE" ] && [ -f "$KEY_FILE" ]; then
+        ARCHIVE_KEY_FILE="$KEY_FILE"
+        return 0
+    fi
+
+    if [ -f "$HOME/.joinery_backup_key" ]; then
+        ARCHIVE_KEY_FILE="$HOME/.joinery_backup_key"
+        return 0
+    fi
+
+    return 1
+}
+
 # Function to verify archive contents
 verify_archive() {
     local archive_path="$1"
@@ -231,8 +287,22 @@ verify_archive() {
 
     print_info "Extracting archive for verification..."
 
-    # Extract archive
-    if ! tar -xzf "$archive_path" -C "$temp_extract" 2>/dev/null; then
+    if archive_is_encrypted "$archive_path"; then
+        if ! resolve_archive_key "$archive_path"; then
+            print_error "This archive is encrypted and no key is available."
+            print_error "Pass --key-file PATH, or recover the key from the envelope beside it:"
+            print_error "  php backup_envelope.php open --sidecar ${archive_path}.keys.json --private RECOVERY_KEY --key-out /tmp/k"
+            return 1
+        fi
+        # Decrypt straight into tar: the plaintext archive never lands on disk,
+        # and the key crosses on fd 3 rather than argv.
+        if ! ( set -o pipefail
+               openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$archive_path" 2>/dev/null \
+                 | tar -xz -C "$temp_extract" 2>/dev/null ) 3< "$ARCHIVE_KEY_FILE"; then
+            print_error "Failed to open the archive. The key may be wrong, or the file may be corrupted."
+            return 1
+        fi
+    elif ! tar -xzf "$archive_path" -C "$temp_extract" 2>/dev/null; then
         print_error "Failed to extract archive. File may be corrupted."
         return 1
     fi
@@ -373,7 +443,12 @@ perform_restore() {
                 if [ -n "$DB_USER" ]; then
                     db_flags+=(--db-user "$DB_USER")
                 fi
-                if [ -n "$KEY_FILE" ]; then
+                # The dump was encrypted with the same key as the archive around
+                # it, so hand over whatever opened the archive — which may have
+                # come from the envelope rather than from --key-file.
+                if [ -n "$ARCHIVE_KEY_FILE" ]; then
+                    db_flags+=(--key-file "$ARCHIVE_KEY_FILE")
+                elif [ -n "$KEY_FILE" ]; then
                     db_flags+=(--key-file "$KEY_FILE")
                 fi
                 if bash "$RESTORE_DB_SCRIPT" "$PROJECT_NAME" "$db_file" ${db_flags[@]+"${db_flags[@]}"}; then

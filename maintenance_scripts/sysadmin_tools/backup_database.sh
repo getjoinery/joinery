@@ -1,4 +1,5 @@
 #!/usr/bin/env bash
+#Version 3.4 - --key-file names the key to use; envelope runs mint one per backup
 #Version 3.3 - Stale-staging sweep at startup; jy_backup_ temp prefix
 #Version 3.2 - Encryption key passed via fd (never in argv/ps); pipefail on the encrypted pipeline
 #Version 3.1 - Full-timestamp filenames; plaintext path writes .sql.gz
@@ -7,6 +8,7 @@
 ENCRYPT_BACKUPS=true
 NON_INTERACTIVE=false
 ENCRYPTION_KEY=""
+KEY_FILE=""
 
 # Authentication order: 1) .pgpass, 2) config file, 3) interactive prompt
 
@@ -251,6 +253,23 @@ backup_all_databases() {
 
 # Function to get encryption key for non-interactive mode
 get_encryption_key() {
+    # Priority 0: an explicitly named key file. This is how envelope backups
+    # run: the caller mints a key for this backup alone, points here at it, and
+    # shreds it afterwards, so no key on this machine outlives the run.
+    if [ -n "$KEY_FILE" ]; then
+        if [ ! -f "$KEY_FILE" ]; then
+            echo "✗ Error: --key-file '$KEY_FILE' does not exist"
+            return 1
+        fi
+        ENCRYPTION_KEY=$(head -1 "$KEY_FILE" | tr -d '\n\r')
+        if [ -z "$ENCRYPTION_KEY" ]; then
+            echo "✗ Error: --key-file '$KEY_FILE' is empty"
+            return 1
+        fi
+        echo "✓ Using encryption key from $KEY_FILE"
+        return 0
+    fi
+
     # Priority 1: Environment variable
     if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
         ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
@@ -289,13 +308,15 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  --non-interactive, -n     Use encryption key from env var or file (no prompts)"
+    echo "  --key-file PATH           Read the encryption key from PATH"
     echo "  --plaintext, -p           Create unencrypted backups"
     echo "  --help, -h                Show this help message"
     echo ""
     echo "Non-Interactive Mode:"
     echo "  Encryption key sources (in order of precedence):"
-    echo "  1. \$BACKUP_ENCRYPTION_KEY environment variable"
-    echo "  2. ~/.joinery_backup_key file (must have 600 permissions)"
+    echo "  1. --key-file PATH"
+    echo "  2. \$BACKUP_ENCRYPTION_KEY environment variable"
+    echo "  3. ~/.joinery_backup_key file (must have 600 permissions)"
     echo ""
     echo "Examples:"
     echo "  $0                              # Backup all databases (encrypted, prompts for password)"
@@ -326,6 +347,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --non-interactive|-n)
             NON_INTERACTIVE=true
+            shift
+            ;;
+        --key-file)
+            KEY_FILE="$2"
+            shift 2
+            ;;
+        --key-file=*)
+            KEY_FILE="${1#*=}"
             shift
             ;;
         --help|-h)

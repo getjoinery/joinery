@@ -11,8 +11,8 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/TargetLister.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
 
 class BackupListHelper {
 

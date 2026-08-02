@@ -149,6 +149,10 @@ foreach ($items as $i => $item) {
 				'proofId'    => $ids['proof'],
 				'challenge'  => (string)$item['ceremony']['challenge'],
 				'publicKey'  => (string)$item['ceremony']['public_key'],
+				// The HKDF context the server sealed with. Carried through rather
+				// than assumed on the browser side, so the two cannot drift apart
+				// and break verification for whoever tries it next.
+				'infoPrefix' => (string)($item['ceremony']['info_prefix'] ?? ''),
 			);
 			break;
 

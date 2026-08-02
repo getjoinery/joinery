@@ -27,6 +27,8 @@
  *
  * @version 1.4 - publish() returns a status result (built/skipped/carried/failed) so the
  *                pipeline can refuse a release whose agent rebuild failed
+ * @version 1.4 - the signing key needs no recovery record of its own: it sits in config/, which the
+ *                site's own encrypted project backup carries
  * @version 1.3 - only the site's own config/agent_signing_key is escrowed; a key minted into any
  *                other directory is not the fleet trust root, so it files no recovery record
  * @version 1.2 - signing key escrowed on every load (idempotent), not only at first mint,
@@ -281,27 +283,11 @@ class AgentDistPublisher {
 			throw new Exception("cannot read {$secret_path} (created by another user? fix ownership)");
 		}
 
-		// Escrow the signing key on EVERY load, not just at mint: idempotent by
-		// fingerprint, and this is what escrows a key that predates escrow being
-		// configured (or a mint that happened before the recovery key was set).
-		// Best-effort — never blocks a publish; the dashboard surfaces a key
-		// that remains unescrowed.
-		//
-		// Only for the key that IS the fleet trust root, though: the one at this
-		// site's own config/agent_signing_key, which is what the health check
-		// inspects. A key minted into any other directory is not that key, so
-		// filing a recovery record for it would be recording recovery for
-		// something nothing will ever need recovering.
-		$real_secret = realpath($secret_path);
-		$trust_root  = realpath(PathHelper::getSiteRoot() . '/config/agent_signing_key');
-		if ($real_secret !== false && $real_secret === $trust_root) {
-			try {
-				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupKeyCustody.php'));
-				BackupKeyCustody::escrowAgentSigningKey(trim($secret_b64), $minted ? 'generated' : 'migrated');
-			} catch (\Throwable $e) {
-				error_log('AgentDistPublisher: agent signing key escrow failed: ' . $e->getMessage());
-			}
-		}
+		// The signing key is the fleet trust root, and it lives inside this
+		// site's own project tree at config/agent_signing_key — so the site's
+		// encrypted project backup already carries it, openable with the
+		// recovery key. That is the same guarantee a separate recovery record
+		// gave, without a second thing to keep in step.
 
 		$secret = base64_decode(trim($secret_b64), true);
 		if ($secret === false || strlen($secret) !== SODIUM_CRYPTO_SIGN_SECRETKEYBYTES) {

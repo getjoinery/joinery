@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
-# Version: 2.3.0
+# Version: 2.4.0
 #
 # Description:
 #   Creates a comprehensive backup of a web project including:
@@ -23,13 +23,15 @@
 # Options:
 #   PROJECT_NAME      Name of the project to backup (required)
 #                     Must match the directory name in /var/www/html/
-#   --plaintext       Create unencrypted database backup (default: encrypted)
+#   --plaintext       Create an unencrypted backup (default: encrypted)
 #   --non-interactive Use encryption key from env var or file (no prompts)
+#   --key-file PATH   Read the encryption key from PATH
 #   --output-dir DIR  Directory to create backup in (default: current directory)
 #   --help            Show help message
 #
 # Output:
-#   Creates PROJECT-YYYY-MM-DD-HHMMSS.tar.gz in output directory
+#   Creates PROJECT-YYYY-MM-DD-HHMMSS.tar.gz.enc in output directory
+#   (.tar.gz when --plaintext is passed)
 #
 # Examples:
 #   ./backup_project.sh myproject                          # Encrypted, interactive
@@ -44,7 +46,7 @@
 set -euo pipefail
 
 # Version information
-SCRIPT_VERSION="2.3.0"
+SCRIPT_VERSION="2.4.0"
 
 # Deployment environment (Docker or bare metal) — read from the project's
 # Globalvars_site.php once PROJECT_DIR is known (spec deployment_environment_flag).
@@ -84,15 +86,17 @@ show_help() {
     echo ""
     echo "Options:"
     echo "  PROJECT_NAME              Name of the project to backup (required)"
-    echo "  --plaintext, -p           Create unencrypted database backup (default: encrypted)"
+    echo "  --plaintext, -p           Create an unencrypted backup (default: encrypted)"
     echo "  --non-interactive, -n     Use encryption key from env var or file (no prompts)"
+    echo "  --key-file PATH           Read the encryption key from PATH"
     echo "  --output-dir DIR, -o DIR  Directory to create backup in (default: current directory)"
     echo "  --help, -h                Show this help message"
     echo ""
     echo "Non-Interactive Mode:"
     echo "  Encryption key sources (in order of precedence):"
-    echo "  1. \$BACKUP_ENCRYPTION_KEY environment variable"
-    echo "  2. ~/.joinery_backup_key file (must have 600 permissions)"
+    echo "  1. --key-file PATH"
+    echo "  2. \$BACKUP_ENCRYPTION_KEY environment variable"
+    echo "  3. ~/.joinery_backup_key file (must have 600 permissions)"
     echo ""
     echo "Examples:"
     echo "  $0 joinerytest                         # Backup with encrypted database (interactive)"
@@ -102,7 +106,7 @@ show_help() {
     echo "  $0 joinerytest -n -o /tmp              # Automated backup to /tmp"
     echo ""
     echo "The script will create:"
-    echo "  - A tar.gz archive named: PROJECT-YYYY-MM-DD-HHMMSS.tar.gz"
+    echo "  - An encrypted archive named: PROJECT-YYYY-MM-DD-HHMMSS.tar.gz.enc"
     echo "  - Contents: database backup, /var/www/html/PROJECT/, Apache virtualhost config"
 }
 
@@ -111,6 +115,7 @@ PROJECT_NAME=""
 ENCRYPT_DB=true
 NON_INTERACTIVE=false
 OUTPUT_DIR=""
+KEY_FILE=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -120,6 +125,19 @@ while [[ $# -gt 0 ]]; do
             ;;
         --non-interactive|-n)
             NON_INTERACTIVE=true
+            shift
+            ;;
+        --key-file)
+            if [[ -n "${2:-}" && ! "$2" =~ ^- ]]; then
+                KEY_FILE="$2"
+                shift 2
+            else
+                print_error "--key-file requires a path argument"
+                exit 1
+            fi
+            ;;
+        --key-file=*)
+            KEY_FILE="${1#*=}"
             shift
             ;;
         --output-dir|-o)
@@ -164,7 +182,39 @@ fi
 TIMESTAMP=$(date +"%Y-%m-%d-%H%M%S")
 BACKUP_DIR="${OUTPUT_DIR:-$(pwd)}"
 BACKUP_NAME="${PROJECT_NAME}-${TIMESTAMP}"
-FINAL_ARCHIVE="${BACKUP_NAME}.tar.gz"
+
+# The archive carries the whole site tree, config/ included — the database
+# password, the secret box key, the agent signing key, the relay pull key. It is
+# encrypted unless --plaintext is passed explicitly.
+#
+# Key sources, in order: --key-file (how envelope backups run — a key minted for
+# this backup alone), $BACKUP_ENCRYPTION_KEY, then ~/.joinery_backup_key.
+ARCHIVE_KEY_SOURCE=""
+if [ "$ENCRYPT_DB" = true ]; then
+    if [ -n "$KEY_FILE" ]; then
+        if [ ! -f "$KEY_FILE" ]; then
+            print_error "--key-file '$KEY_FILE' does not exist"
+            exit 1
+        fi
+        ARCHIVE_KEY_SOURCE="$KEY_FILE"
+    elif [ -n "${BACKUP_ENCRYPTION_KEY:-}" ]; then
+        ARCHIVE_KEY_SOURCE="env"
+    elif [ -f "$HOME/.joinery_backup_key" ]; then
+        ARCHIVE_KEY_SOURCE="$HOME/.joinery_backup_key"
+    elif [ "$NON_INTERACTIVE" = true ]; then
+        # Never silently downgrade to a plaintext archive: an automated run that
+        # cannot encrypt must fail, not quietly ship config/ in the clear.
+        print_error "Encryption is on but no key is available"
+        echo "Pass --key-file PATH, set \$BACKUP_ENCRYPTION_KEY, or use --plaintext deliberately."
+        exit 1
+    fi
+fi
+
+if [ "$ENCRYPT_DB" = true ]; then
+    FINAL_ARCHIVE="${BACKUP_NAME}.tar.gz.enc"
+else
+    FINAL_ARCHIVE="${BACKUP_NAME}.tar.gz"
+fi
 
 # Validate output directory exists
 if [ -n "$OUTPUT_DIR" ]; then
@@ -284,19 +334,25 @@ if [ "$DB_EXISTS" = "yes" ]; then
     # Run backup_database.sh in the temp directory
     cd "${TEMP_DIR}/${BACKUP_NAME}"
 
-    # Build backup command arguments
-    BACKUP_ARGS=""
+    # Build backup command arguments. An array, not a word-split string: the key
+    # path is caller-supplied and may contain spaces.
+    BACKUP_ARGS=()
     if [ "$ENCRYPT_DB" = false ]; then
-        BACKUP_ARGS="--plaintext"
+        BACKUP_ARGS+=(--plaintext)
         print_info "Creating plaintext database backup..."
     else
         print_info "Creating encrypted database backup..."
         if [ "$NON_INTERACTIVE" = true ]; then
-            BACKUP_ARGS="--non-interactive"
+            BACKUP_ARGS+=(--non-interactive)
+        fi
+        # The dump is encrypted with the same key as the archive around it, so a
+        # restore needs exactly one key however far in it has to reach.
+        if [ -n "$KEY_FILE" ]; then
+            BACKUP_ARGS+=(--key-file "$KEY_FILE")
         fi
     fi
 
-    if bash "$BACKUP_DB_SCRIPT" $BACKUP_ARGS "$PROJECT_NAME"; then
+    if bash "$BACKUP_DB_SCRIPT" "${BACKUP_ARGS[@]}" "$PROJECT_NAME"; then
         print_success "Database backup completed"
     else
         print_error "Database backup failed"
@@ -432,7 +488,9 @@ Excluded from project files:
 
 Restoration Instructions:
 ========================
-1. Extract archive: tar -xzf $FINAL_ARCHIVE
+1. $(if [ "$ENCRYPT_DB" = true ]; then echo "Recover the archive key, then extract:
+   php backup_envelope.php open --sidecar $FINAL_ARCHIVE.keys.json --private RECOVERY_KEY --key-out /tmp/k
+   openssl enc -aes-256-cbc -d -pbkdf2 -pass file:/tmp/k -in $FINAL_ARCHIVE | tar -xz"; else echo "Extract archive: tar -xzf $FINAL_ARCHIVE"; fi)
 2. Restore database (if included):
    - Encrypted: openssl enc -aes-256-cbc -d -pbkdf2 -in [database_file].sql.gz.enc | gunzip | psql -U postgres -d $PROJECT_NAME
    - Plaintext: psql -U postgres -d $PROJECT_NAME < [database_file].sql
@@ -449,7 +507,27 @@ print_info "Creating final archive: $FINAL_ARCHIVE"
 
 cd "$TEMP_DIR"
 TAR_STATUS=0
-tar -czf "${BACKUP_DIR}/${FINAL_ARCHIVE}" "$BACKUP_NAME" || TAR_STATUS=$?
+if [ "$ENCRYPT_DB" = true ]; then
+    # tar streams straight into openssl, so the plaintext archive never lands on
+    # disk. The key crosses on fd 3 — never argv, which is world-visible in ps
+    # for the whole encrypt. pipefail is set at the top of the script, so a tar
+    # failure cannot yield a valid-looking .enc of a truncated stream.
+    if [ "$ARCHIVE_KEY_SOURCE" = "env" ]; then
+        ( tar -czf - "$BACKUP_NAME" \
+            | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "${BACKUP_DIR}/${FINAL_ARCHIVE}" \
+        ) 3< <(printf '%s\n' "$BACKUP_ENCRYPTION_KEY") || TAR_STATUS=$?
+    elif [ -n "$ARCHIVE_KEY_SOURCE" ]; then
+        ( tar -czf - "$BACKUP_NAME" \
+            | openssl enc -aes-256-cbc -salt -pbkdf2 -pass fd:3 -out "${BACKUP_DIR}/${FINAL_ARCHIVE}" \
+        ) 3< "$ARCHIVE_KEY_SOURCE" || TAR_STATUS=$?
+    else
+        print_info "Enter the encryption password for the archive:"
+        tar -czf - "$BACKUP_NAME" \
+            | openssl enc -aes-256-cbc -salt -pbkdf2 -out "${BACKUP_DIR}/${FINAL_ARCHIVE}" || TAR_STATUS=$?
+    fi
+else
+    tar -czf "${BACKUP_DIR}/${FINAL_ARCHIVE}" "$BACKUP_NAME" || TAR_STATUS=$?
+fi
 
 if [ "$TAR_STATUS" -ne 0 ]; then
     print_error "Failed to create archive (tar exit ${TAR_STATUS})"
@@ -457,6 +535,11 @@ if [ "$TAR_STATUS" -ne 0 ]; then
 fi
 
 cd "$BACKUP_DIR"
+
+# The archive holds the whole site tree; nobody but its owner should read it
+# off this disk while it waits to be uploaded.
+chmod 600 "$FINAL_ARCHIVE" 2>/dev/null || true
+
 ARCHIVE_SIZE=$(ls -lh "$FINAL_ARCHIVE" | awk '{print $5}')
 print_success "Backup archive created successfully!"
 echo ""
@@ -466,9 +549,17 @@ echo "========================================="
 echo "Archive: $FINAL_ARCHIVE"
 echo "Size: $ARCHIVE_SIZE"
 echo "Location: $(pwd)/$FINAL_ARCHIVE"
+echo "Encrypted: $(if [ "$ENCRYPT_DB" = true ]; then echo "yes"; else echo "NO"; fi)"
 echo ""
-echo "To extract: tar -xzf $FINAL_ARCHIVE"
+if [ "$ENCRYPT_DB" = true ]; then
+    echo "To extract: openssl enc -aes-256-cbc -d -pbkdf2 -pass file:KEY -in $FINAL_ARCHIVE | tar -xz"
+else
+    echo "To extract: tar -xzf $FINAL_ARCHIVE"
+fi
 echo "========================================="
+# Machine-readable, so a caller does not have to re-derive the name by globbing
+# the directory and hoping the newest file is the one it just made.
+echo "BACKUP_ARCHIVE=${BACKUP_DIR}/${FINAL_ARCHIVE}"
 
 # Cleanup is handled by trap
 exit 0

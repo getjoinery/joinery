@@ -653,8 +653,8 @@ foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
 (function () {
     // Built-in instructions per pipeline job. The job select can change without a
     // round trip, so the text is swapped client-side rather than rendered once.
-    // JSON_HEX_TAG: this lands inside a <script> block, so a prompt containing
-    // </script> would otherwise close it and spill the rest as markup.
+    // JSON_HEX_TAG: this lands inside a script block, so a prompt containing a
+    // closing script tag would otherwise end the block and spill the rest as markup.
     var PROMPTS = <?php echo json_encode($job_default_prompts,
         JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
     var PIPELINE = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;

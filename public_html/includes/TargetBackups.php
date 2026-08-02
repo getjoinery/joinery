@@ -1,22 +1,28 @@
 <?php
 /**
- * TargetBackups — a control-plane view of what is actually stored on a backup target.
+ * TargetBackups — what is actually stored on a backup target.
  *
- * Offsite backups live under {bkt_path_prefix}/{mgn_slug}/{filename}. This lists them
- * straight from the bucket via S3Signer, so no live node is required — a decommissioned
- * site's backups stay reachable and deletable. Objects are grouped by their slug segment
- * and each group is tagged against the node table:
+ * Backups live under {bkt_path_prefix}/{slug}/{filename}. This lists them straight
+ * from the bucket via S3Signer, so nothing has to be running for them to be
+ * reachable — which is the point, since the case that matters is the one where
+ * the machine that made them is gone.
  *
- *   live          — a non-deleted node owns this slug
- *   decommissioned — a soft-deleted node owned this slug (the site is gone; its backups remain)
- *   orphaned      — no node, deleted or otherwise, matches this slug
+ * Objects are grouped by their slug segment. Classifying those slugs needs to
+ * know who owns them, and only the caller knows that: a standalone site owns
+ * exactly one slug, while a control plane owns a whole fleet. So the ownership
+ * map is passed IN (see group_objects), and server_manager's FleetBackups supplies
+ * the fleet-wide one. Nothing here reads the node table.
  *
- * @version 1.1 - slug_backup_count(): blocks hard-deleting a node record while its backups exist
- * @version 1.0
+ *   live           — a current owner has this slug
+ *   decommissioned — a former owner had this slug (the site is gone; its backups remain)
+ *   orphaned       — nothing in the map matches this slug
+ *
+ * @version 2.0 - moved to core; slug ownership is supplied by the caller rather than
+ *                read from the fleet node table
  */
 
-require_once(PathHelper::getIncludePath('plugins/server_manager/includes/S3Signer.php'));
-require_once(PathHelper::getIncludePath('plugins/server_manager/data/backup_target_class.php'));
+require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 
 class TargetBackupsException extends Exception {}
 
@@ -35,7 +41,7 @@ class TargetBackups {
 	 *    'total_objects' => int, 'total_bytes' => int]
 	 * Throws TargetBackupsException on a credential or listing failure.
 	 */
-	public static function list_grouped($target) {
+	public static function list_grouped($target, array $node_map = []) {
 		$creds  = self::creds_or_throw($target);
 		$bucket = self::bucket_or_throw($target);
 		$base   = self::base_prefix($target);
@@ -46,7 +52,7 @@ class TargetBackups {
 			throw new TargetBackupsException($e->getMessage());
 		}
 
-		return self::group_objects($objects, $base, self::slug_status_map());
+		return self::group_objects($objects, $base, $node_map);
 	}
 
 	/**
@@ -191,17 +197,4 @@ class TargetBackups {
 		return $bucket;
 	}
 
-	/** Map mgn_slug => ['node_id','deleted'] across ALL nodes (soft-deleted included). */
-	private static function slug_status_map() {
-		$map = [];
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->query('SELECT mgn_id, mgn_slug, mgn_delete_time FROM mgn_managed_nodes');
-		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
-			$map[$row['mgn_slug']] = [
-				'node_id' => (int)$row['mgn_id'],
-				'deleted' => $row['mgn_delete_time'] !== null,
-			];
-		}
-		return $map;
-	}
 }

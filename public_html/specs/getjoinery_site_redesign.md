@@ -1,13 +1,13 @@
 # getjoinery.com Redesign — Private Google Workspace Replacement
 
-**Status:** Draft for review
+**Status:** Draft — awaiting owner decisions before build. Pricing/licensing is fully decided (§5.4). **Open decisions, all in §9: 9.1 demo instance, 9.3 mail-provider/relay claims, 9.5 developers-subdomain mechanics, 9.6 automatic-install scope, 9.7 audience set, 9.8 calendar maturity.** (§9.2 and §9.4 are resolved.) Companion spec `specs/automatic_install_mail_topology.md` has its own short open list.
 **Scope:** Structure and copy only. The visual design (getjoinery theme, warm stone/amber palette) stays. This spec defines the new information architecture, page-by-page content, copy direction, and what moves to developers.getjoinery.com.
 
 ---
 
 ## 1. The repositioning in one paragraph
 
-getjoinery.com stops selling "membership software" and starts selling **a self-hosted replacement for Google Workspace / Nextcloud: email, calendar, and drive on a server you own**. The single primary goal of every page is to get the visitor to **install** — free self-install, free Linode one-click, or $39.99 automatic install. The current developer/framework/membership story moves to **developers.getjoinery.com**. Paid plugins (Store, Server Manager) are promoted prominently but always as a secondary lane that never blocks the install funnel. The Vault/password manager stays out of the marketing story for now.
+getjoinery.com stops selling "membership software" and starts selling **a self-hosted replacement for Google Workspace / Nextcloud: email, calendar, and drive on a server you own**. The single primary goal of every page is to get the visitor to **install** — free self-install, free Linode one-click, or $39.99 automatic install. The current developer/framework/membership story moves to **developers.getjoinery.com**. Paid plugins (Store, Server Manager) are promoted prominently but always as a secondary lane that never blocks the install funnel. Business use is monetized by pay-once lifetime licenses — a 200-seat Founder cohort at $499 with every first-party paid plugin free for life, then a standard $399 lifetime license — presented in the pricing page's business lane, never in the install funnel's way. The Vault/password manager stays out of the marketing story for now.
 
 ---
 
@@ -143,12 +143,20 @@ Replaces `/features`. Three deep sections + a grid:
 
 ### 5.4 `/pricing`
 
-Rewritten around "free software, paid convenience" (Cloudron model — the cap is never on privacy or ownership). **The model is simple and the page should feel simple: everything is free except two paid plugins and the $39.99 automatic install.**
+Rewritten around "free software, paid convenience" (Cloudron model — the cap is never on privacy or ownership). **The page is two lanes and should feel that simple: personal use is free except the $39.99 automatic install and two optional paid plugins; business use is a pay-once lifetime license.**
 
-1. **The software: free.** Email, calendar, drive, contacts, events — the whole suite, free to self-host, plainly stated. License terms in one honest sentence (noncommercial free; commercial licensing → developers site).
+**Personal lane:**
+
+1. **The software: free.** Email, calendar, drive, contacts, events — the whole suite, free to self-host for personal use, plainly stated. License terms in one honest sentence (noncommercial free; businesses → the business lane below).
 2. **Install options:** Free / Free / $39.99 (mirrors `/install`).
-3. **The two paid plugins** (`#plugins` anchor): **Store** — sell products, subscriptions, memberships from your own server, 0% platform transaction fees. **Server Manager** — backups to your own cloud bucket, one-click upgrades, fleet management. Each with price and a one-line "who it's for." (Prices: open question §9.4.)
-4. **The business-model sentence** (privacy audiences require it): "Joinery is funded by the paid install, two paid plugins, and hosting referral fees. You pay us; that's the whole model. No ads, no data, no investors to satisfy."
+3. **The two paid plugins** (`#plugins` anchor): **Store, $99 one-time** — sell products, subscriptions, memberships from your own server, 0% platform transaction fees. **Server Manager, $149 one-time** — backups to your own cloud bucket, one-click upgrades, fleet management. Each with a one-line "who it's for." Pay-once, matching this audience's documented preference for one-time pricing on self-run software.
+
+**Business lane** (`#business` anchor):
+
+4. **Founder license — $499, limited to 200.** Lifetime business license: one production install, lifetime updates, and **every first-party paid plugin free forever** — the current two ($248 of plugins today) and everything published later. The pitch is stated honestly: founders are betting the plugin catalog grows, and the $100 premium over the standard license buys the whole catalog for life — already rational on day one against today's two plugins alone. Show a **real live counter** ("N of 200 remaining") — genuine scarcity displayed plainly, never a countdown timer or invented deadline.
+5. **Standard business license — $399 lifetime.** Opens when the founder cohort sells out. One production install, lifetime updates, plugins sold separately, occasional sales. Dev/staging copies free (standard convention, stated).
+6. **The no-guarantee line**, one calm sentence, not a banner: "Lifetime licensing is how we price today; we don't guarantee it will always be offered." (Precedent: Roon carried exactly this caveat for years, then honored it — buyers on the warning felt vindicated, not tricked.)
+7. **The business-model sentence** (privacy audiences require it): "Joinery is funded by business licenses, the paid install, two paid plugins, and hosting referral fees. You pay us; that's the whole model. No ads, no data, no investors to satisfy."
 
 The old hosted tiers ($29/$59/$99) and the White Glove $249 card are **gone** — they do not appear anywhere on the marketing site.
 
@@ -207,9 +215,9 @@ The self-hosted audience's #1 skepticism is license rug-pulls, and they read "so
 ## 9. Open questions (owner decisions)
 
 1. **Live demo instance.** Every install-oriented competitor uses a public demo as the #1 de-risking device, and the research says a demo is the strongest proof a small project has. Recommendation: stand one up (auto-resetting) and put "See it live" in the hero and nav. Decide: build it now, or ship the redesign with screenshots first?
-2. ~~Do hosted tiers survive?~~ **Resolved:** everything is free except the two paid plugins and the $39.99 install. Hosted tiers are removed from the marketing site entirely.
+2. ~~Do hosted tiers survive?~~ **Resolved:** hosted tiers are removed from the marketing site entirely. Personal use is free except the two paid plugins and the $39.99 install; business use is the lifetime-license lane (§5.4).
 3. **Exact relay and mail-provider claims.** Deliverability copy = outbound via established mail providers; relay copy = security/privacy (unexposed server, offline hold). Before copy ships, pin down: which outbound providers get named/supported on the page, whether the relay is included free for every install, and precisely what the relay does and doesn't see (this audience will dissect the privacy claim, so it must match the architecture exactly).
-4. **Paid plugin prices.** Store and Server Manager need public prices for `/pricing` (hidden pricing is a documented BS-trigger). One-time vs subscription also matters: this audience distrusts "lifetime" from hosted services but *prefers* pay-once for self-run software.
+4. ~~Paid plugin prices.~~ **Resolved:** Store $99, Server Manager $149, both one-time. Business licensing: Founder $499 (200 seats, all first-party plugins for life) → standard $399 lifetime with occasional sales, plus the no-guarantee-forever line (§5.4).
 5. **developers subdomain mechanics.** Confirm same-codebase/host-header approach (§6) vs a separate static docs site.
 6. **"Automatic install" scope.** Confirm the $39.99 product is the existing server_manager customer-cloud flow (buyer's own Linode account, one-time fee) and whether it includes any post-install support window (e.g. "we make sure your first import works") — a cheap, high-trust differentiator no competitor prices.
 7. **Audience set.** This spec keeps the owner's three audiences and treats families/households as Audience C's landing page rather than a fourth audience. Confirm.
@@ -223,5 +231,6 @@ The self-hosted audience's #1 skepticism is license rug-pulls, and they read "so
 - **Nav is hardcoded** in `theme/getjoinery/includes/PublicPage.php` (header ~lines 126–235, footer below) — the nav changes in §4 land there.
 - **Reusable components already exist** (`marketing_hero`, `gj_feature_grid`, `comparison_cards`, `audience_grid`, `pricing_teaser`, `feature_showcase`, `trust_badges`, `cta_section`) — the new pages should compose these, adding new components only where a genuinely new shape is needed (the install ladder, the app-grid-vs-incumbent map).
 - **`/pricing` route** is currently an explicit serve.php route into the store plugin, shadowed by the theme view — the rewrite keeps the shadow but must not break store checkout routes (`/checkout`, `/cart`), which the $39.99 flow depends on.
+- **Business licenses ride the existing open-core machinery** (license products + the key-minting purchase hook, already built): Founder and Standard are license-product SKUs, and the founder plugin bundle is an entitlement attached to the founder license key. The plugin entitlement gate is deferred (`specs/plugin_entitlement_gate.md`), so enforcement is honor-system at launch — acceptable, since the buyers are self-selecting believers. The "N of 200 remaining" counter must be driven by real sold-count inventory on the founder product (the store's stock mechanism), never a hand-edited number.
 - **Screenshot debt:** the current site ships "Screenshot coming soon" ×9. The new site's proof strategy (real screenshots + demo) makes this a launch blocker for the pages that promise proof.
 - Developer docs updates (routing/theme docs if the host-header theme selection changes) go into the relevant existing `/docs/` files at implementation time.

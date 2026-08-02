@@ -1,7 +1,113 @@
 # Backups: Core Engine, Retention, and Incremental Chains
 
-**Status:** Draft — awaiting owner decisions (see Open Decisions)
+**Status:** Phases 1-3 BUILT and live-verified 2026-08-02 (uncommitted). Phase 4 (later) untouched.
 **Date:** 2026-08-01
+
+## Phase 3 as built
+
+Cadence default taken: a fresh full every 7 days, plus a hard ceiling of 30
+incrementals on one full.
+
+New: `maintenance_scripts/sysadmin_tools/backup_files.sh` (tar
+`--listed-incremental`), `restore_chain.sh` (ordered apply + pre-flight
+verification), `includes/BackupChain.php` (manifest, chain decisions, restore
+plan), chain mode in `BackupRunner`, and settings `backup_mode`,
+`backup_full_interval_days`, `backup_output_dir`, `backup_exclude`.
+
+**Deviation from the spec, deliberate.** The spec put `--incremental` on
+`backup_project.sh`. That cannot work: `backup_project.sh` tars an rsync staging
+copy, and a copy resets every file's ctime, so tar sees the whole site as
+changed and every incremental is silently a full. Measured before building —
+3 of 3 files re-shipped over a staging copy, 0 of 3 over the live tree. Chains
+therefore use a separate engine that archives the live tree, and
+`backup_project.sh` is untouched and still serves the full-archive path.
+
+Live-verified on dev against the real B2 bucket: a full (193 MB files) followed
+by an incremental (**37 kB files**) in one chain, correct object layout,
+manifest rewritten per run, history rows carrying chain id and sequence.
+`backup_chain_gate.sh` proves deletion replay, snapshot loss, and refusal of
+truncated/hash-mismatched/headless chains with real tar and openssl.
+
+Open:
+
+- **Retention has not been exercised against a live bucket** — it needs five
+  chains to exist. The selection logic is unit-tested (including that it never
+  empties the shelf whatever it is asked for) and deletion reuses the same
+  `S3Signer::delete` path proven by the Phase 2 cleanup.
+- `restore_chain.sh` has not been run against a bucket-downloaded chain, only
+  against locally produced artifacts.
+- The dev box has `config/*` files owned by `user1` that `fix_permissions.sh`
+  would make `www-data:user1`, so a full-tree run there fails (loudly, naming
+  the file). The verification run excluded `config` and `specs` to prove the
+  orchestration; that chain was deleted from the bucket afterwards.
+
+## Phase 2 as built
+
+Defaults taken: keep 4 restore points cloud / 7 days local, history table
+`bkh_backup_history`, fleet tab observe-only.
+
+Moved to core: `S3Signer`, `BackupTarget` (same table), `TargetTester`,
+`TargetLister`, `TargetUploader`, `TargetBackups`. `TargetBackups::list_grouped()`
+now takes the slug-ownership map as an argument rather than reading the node
+table — a standalone site owns one slug, a control plane owns dozens — and
+server_manager's new `FleetBackups` supplies the fleet answer.
+
+New in core: `includes/BackupRunner.php`, `includes/BackupNaming.php`,
+`data/backup_history_class.php`, `tasks/BackupRun.php` (+ dry run),
+`adm/admin_backups.php`, `CoreSettingOptions::backupTargets`, and six declared
+settings under a new `backups` group.
+
+Verified live on dev: the page renders, saving settings works through
+`SettingsWriter`, the B2 connection test passes from core, and the dry run
+resolves a full plan. `db` tier 218/218 (6616 checks), `safe` 78/78.
+
+Deferred with reasons:
+
+- **A remote node's core backup history is not shown on its Backups tab.** That
+  history lives in the node's own database, so the control plane needs a new
+  management API endpoint to read it. Worth doing, but it is a new endpoint plus
+  a client plus UI, and the v1 decision was observe-only.
+- **`/backups` does not exist on dev**, so no real end-to-end run has executed
+  here. The dry run reports this as its one problem, which is the intended
+  behaviour.
+- The core Backups page has target CRUD and history; the fleet **bucket browser**
+  (cross-node grouping, orphaned-prefix cleanup) stays on the server_manager
+  Backup Targets page, which now links to core for recovery-key setup rather
+  than rendering a second copy of the panel.
+
+## Phase 1 as built
+
+Envelope encryption is live. New core: `includes/BackupEnvelope.php` (per-run data
+keys, sealed to recovery + site recipients), `includes/BackupRecoveryKey.php` (the
+recovery key and its possession ceremony), and the standalone node tool
+`maintenance_scripts/sysadmin_tools/backup_envelope.php`
+(`mint` / `open` / `relabel` / `site-key`). Migrations 161-162 carry the proven
+recovery key onto core setting names and drop the retired rows.
+
+Retired: `bke_backup_key_escrow` + `BackupKeyEscrow`, `BackupKeyCustody`,
+`escrow_node_key.php`, `mgn_backup_key_fingerprint`, the three escrow job steps,
+the per-node "seal backup key" action, the dashboard's per-node escrow rows, and
+the agent-signing-key escrow record.
+
+Known gaps carried forward, none blocking:
+
+- **Install-from-backup cannot open an envelope from another site.** The archive's
+  envelope is sealed to the *source* site's key and the recovery key; a freshly
+  provisioned node holds neither. Cross-node encrypted restores already required
+  a manually placed key, so this is not a regression — but the clean fix is for
+  the source node to re-seal the data key to the destination's site public key at
+  provisioning time, which belongs with Phase 2's provisioning work.
+- **The `bke_backup_key_escrow` table and `mgn_backup_key_fingerprint` column are
+  left in place.** Nothing reads them. They still hold the sealed node keys for
+  pre-envelope archives sitting in buckets, so they are the recovery path for
+  those until the standing "purge and recreate all backups" task clears them.
+- **No full `backup_project.sh` run has been executed end to end.** The script
+  hardcodes `/var/www/html/PROJECT` plus an Apache vhost, so it cannot run on a
+  scratch fixture. Every piece is covered (`--key-file`, the streaming encrypt,
+  the restore side, the whole node lifecycle), but one real run on a node is
+  outstanding.
+- `escrow_keypair.php` keeps its name — it still generates and unseals recovery
+  keypairs, and renaming it would break a documented DR command.
 
 ## Problem
 
@@ -55,12 +161,27 @@ The sealed data keys travel **inside the backup artifact set** (in the chain man
 - `BackupKeyCustody` node-key minting, no-clobber writes, fingerprint reconciliation, and `replicateBlob()` bucket replication.
 - `escrow_node_key.php` and the `escrow_backup_key` / key-verify job steps prepended to every encrypted backup.
 - `mgn_backup_key_fingerprint` on managed nodes.
+- **Agent signing key escrow** (`escrowAgentSigningKey`, the `kind='agent_signing'` rows, the escrow-on-every-publish step). `config/agent_signing_key` sits inside the project tree, so once the project archive is encrypted (below) the control plane's own backup already protects it under the recovery key — the same guarantee escrow gave, with none of the machinery. The readiness surface changes from "is the signing key escrowed" to "is this site's project backup current", which is Phase 2's history table.
 - `~/.joinery_backup_key` as a load-bearing secret (existing keys remain readable for restoring pre-migration backups; see Migration).
 
 ### What survives
 
 - The recovery keypair and its prove-possession ceremony (moved to core, still gating encrypted backups: no proven recovery public key → encrypted backups refuse to run).
 - `restore_database.sh --key-file` decryption path, extended to accept a data key unsealed from the envelope.
+
+### The project archive was never encrypted
+
+`backup_project.sh` ended in a plain `tar -czf`. Only the database dump *inside*
+the tarball was encrypted, so every full project backup in a bucket is a
+readable archive containing `config/` — `Globalvars_site.php` with the database
+password, `secret_box_key`, `agent_signing_key`, `relay_pull_key`. Phase 1 fixes
+this: the archive streams through `openssl` on the way out (plaintext never
+lands on disk), the artifact becomes `.tar.gz.enc`, and an automated run that
+cannot encrypt fails rather than silently writing the old plaintext shape.
+
+Existing plaintext archives in buckets stay readable to anyone holding them.
+They age out under Phase 2 retention; the standing "purge and recreate all
+backups" task is what clears them sooner.
 
 ### Standalone-first key UX
 
@@ -181,7 +302,7 @@ Restore of a chain point = download full + incrementals 1..k + the k-th db dump,
 
 ## Open Decisions
 
-1. **Key model approval (gates Phase 1):** adopt envelope encryption with two recipients (operator recovery key + disposable site key), retiring per-node key escrow. The password-manager key becomes the single root secret; automated restores keep working via the site recipient.
+1. ~~**Key model approval (gates Phase 1)**~~ **RESOLVED 2026-08-02 — adopt envelope encryption.** Two recipients (operator recovery key + disposable site key); per-node key escrow retired. The password-manager key is the single root secret; automated restores keep working via the site recipient.
 2. **Retention defaults:** proposed keep-4-chains cloud / 7-days local — confirm numbers.
 3. **Chain cadence defaults:** weekly full + daily incremental — confirm.
 4. **Backup history table naming/prefix** and whether server_manager's Backups tab should write core settings on remote nodes in v1 or observe-only.

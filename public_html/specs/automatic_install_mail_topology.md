@@ -1,6 +1,6 @@
 # Checkout-Time Mail Topology for Automatic Install
 
-**Status:** Draft for review
+**Status:** Draft — awaiting owner confirmation on three defaults, all in §8: **8.2 sitewide default topology (`single` recommended), 8.4 no smarthost option at checkout (recommended), 8.5 relay region/instance type (site's region + smallest plan via setting, recommended).** Pricing is resolved (§8.1, §8.3: one $39.99 price either way, no upgrade order flow). Build order is in §9.
 **Companion to:** `specs/getjoinery_site_redesign.md` (the $39.99 automatic install this configures)
 
 ## 1. Summary

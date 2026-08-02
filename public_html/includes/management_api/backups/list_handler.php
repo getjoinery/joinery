@@ -28,11 +28,8 @@ function backups_list_handler($request) {
 	}
 	$result['readable'] = true;
 
-	$patterns = [
-		$dir . '/*.sql.gz',
-		$dir . '/*.sql.gz.enc',
-		$dir . '/*.tar.gz',
-	];
+	require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
+	$patterns = BackupNaming::glob_patterns($dir);
 
 	$files = [];
 	foreach ($patterns as $pattern) {
