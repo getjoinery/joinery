@@ -8,8 +8,10 @@
  * the caller can already see). Auth: the message must be in the caller's mailbox scope.
  *
  * Every mailbox user gets the contact half: the counterparty's address, the display name
- * from the message, and what the CALLER'S OWN contact store knows about that address
- * ({contact:null} when nothing, {contact:{locked:true}} when their vault is closed).
+ * from the message, and what the CALLER'S OWN contact store for THAT MAILBOX knows about the
+ * address ({contact:null} when nothing, {contact:{locked:true}} when their vault is closed).
+ * Contacts are per-mailbox, so the answer is about this mailbox alone — the same address may
+ * be a saved contact in another one.
  *
  * The site-account half is admin-only (permission 5+) — member records, orders and
  * registrations are operator data, so a non-admin mailbox grantee never gets another
@@ -19,7 +21,7 @@
  * registrations / orders / conversation count — each section present only when its
  * plugin/feature is active. No match → {is_member:false}.
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -88,15 +90,21 @@ function sender_context_logic(array $input): LogicResult {
 	}
 	$address = $parsed[0];
 
-	// What the caller's own contact store holds for this address — saved, merely seen, or
-	// nothing. Independent of whether they also have an account here.
-	$contact = (new MailboxContacts())->lookup(intval($session->get_user_id()), $address);
+	// What the caller's own contact store holds for this address ON THIS MAILBOX — saved,
+	// merely seen, or nothing. Independent of whether they also have an account here.
+	// Unmatched mail (alias_id 0) belongs to no mailbox, so it has no contact store to
+	// consult and none to add to; `alias_id` in the payload is what tells the client to
+	// leave the Add control off rather than offer a save that cannot land.
+	$contact = ($alias_id > 0)
+		? (new MailboxContacts())->lookup(intval($session->get_user_id()), $address, $alias_id)
+		: null;
 
 	$base = array(
 		'message_id'      => $message_id,
 		'address'         => $address,
 		'display_name'    => (string)$parsed[1],
 		'contact'         => $contact,
+		'alias_id'        => $alias_id,
 		'account_visible' => $can_see_account,
 	);
 

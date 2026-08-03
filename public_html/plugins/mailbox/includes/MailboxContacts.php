@@ -1,18 +1,26 @@
 <?php
 /**
- * MailboxContacts — the per-user contact store service (specs/mailbox_compose_maturity.md
- * § Phase 4): harvest, list (for autocomplete + management), import, delete.
+ * MailboxContacts — the contact store service (specs/mailbox_compose_maturity.md § Phase 4):
+ * harvest, list (for autocomplete + management), import, delete.
  *
- * Every method is scoped to one user id. A row is sealed when that user holds a Sealed
- * Vault; harvest always runs in-window (on send, or on opening a thread), so the plaintext
- * address is available to hash and seal. The address hash is a keyed blind index for vault
- * holders (never leaks the sealed address) and a plain SHA-256 otherwise — see addressHash().
+ * Every method is scoped to one user id AND one mailbox (alias id). A contact belongs to the
+ * mailbox it was seen on, so composing from a work mailbox never suggests an address harvested
+ * in a personal one; the same person on two mailboxes is two rows, which is fine because this
+ * store is a cache. The mailbox scope rides in the address hash rather than in a separate key
+ * column — see addressHash() — so the existing (hash, user) unique constraint already means one
+ * row per (user, mailbox, address).
+ *
+ * A row is sealed when the harvesting user holds a Sealed Vault; harvest always runs in-window
+ * (on send, or on opening a thread), so the plaintext address is available to hash and seal.
+ * Sealing follows the USER, not the mailbox: two grantees sharing one mailbox each build their
+ * own contacts, each readable only by them. The address hash is a keyed blind index for vault
+ * holders (never leaks the sealed address) and a plain SHA-256 otherwise.
  *
  * A row is SAVED when the user added it deliberately (source manual or import) and merely
  * SEEN when it warmed up through use (source sent or received) — lookup() reports which,
  * and manualAdd() stamps a seen row as saved.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -29,18 +37,25 @@ class MailboxContacts {
 	}
 
 	/**
-	 * The dedup digest for a normalized address. For a vault holder it is a keyed
-	 * HMAC (blind index) under a subkey derived from the in-window vault secret, so
-	 * DB access alone can't recover the sealed address; for a user with no vault it
-	 * is a plain SHA-256 (the address column is plaintext anyway). Returns '' when a
-	 * vault holder is locked (no secret) — the caller then skips harvest.
+	 * The dedup digest for a normalized address ON ONE MAILBOX. For a vault holder it is
+	 * a keyed HMAC (blind index) under a subkey derived from the in-window vault secret,
+	 * so DB access alone can't recover the sealed address; for a user with no vault it is
+	 * a plain SHA-256 (the address column is plaintext anyway).
+	 *
+	 * The mailbox is hashed alongside the address so that the same address on two
+	 * mailboxes digests differently — which is what lets the (hash, user) unique
+	 * constraint enforce one row per (user, mailbox, address) without a composite key
+	 * over an encrypted column. Rows written before contacts were mailbox-scoped hashed
+	 * the address alone, so they no longer match and are inert; they re-warm on the next
+	 * send or thread open.
 	 */
-	public function addressHash(string $normalized, ?string $secret): string {
+	public function addressHash(string $normalized, ?string $secret, int $alias_id): string {
+		$material = $alias_id . ':' . $normalized;
 		if ($secret !== null) {
 			$subkey = hash_hmac('sha256', 'joinery:contact-index:v1', $secret, true);
-			return hash_hmac('sha256', $normalized, $subkey); // 64 hex chars
+			return hash_hmac('sha256', $material, $subkey); // 64 hex chars
 		}
-		return hash('sha256', 'joinery:contact:' . $normalized);
+		return hash('sha256', 'joinery:contact:' . $material);
 	}
 
 	/**
@@ -71,15 +86,19 @@ class MailboxContacts {
 	// ── harvest ──────────────────────────────────────────────────────────────
 
 	/**
-	 * Upsert a batch of addresses for a user (best-effort; never throws into the
-	 * caller). Each existing contact has its use_count and last_used bumped; a new
-	 * one is inserted (sealed when the user holds a vault). $tokens are raw
+	 * Upsert a batch of addresses for a user ON ONE MAILBOX (best-effort; never throws
+	 * into the caller). Each existing contact has its use_count and last_used bumped; a
+	 * new one is inserted (sealed when the user holds a vault). $tokens are raw
 	 * "Name <email>" / bare-address strings.
+	 *
+	 * A harvest with no mailbox to attribute to is dropped rather than stored unscoped:
+	 * an unscoped row would be invisible to every mailbox-scoped read, so writing one
+	 * only grows the table.
 	 *
 	 * @param string[] $tokens
 	 */
-	public function harvest(int $user_id, array $tokens, string $source): void {
-		if ($user_id <= 0 || !count($tokens)) {
+	public function harvest(int $user_id, array $tokens, string $source, int $alias_id): void {
+		if ($user_id <= 0 || $alias_id <= 0 || !count($tokens)) {
 			return;
 		}
 		try {
@@ -102,18 +121,18 @@ class MailboxContacts {
 					continue; // one bump per address per batch
 				}
 				$seen[$addr] = true;
-				$this->upsertOne($user_id, $addr, $name, $source, $vault, $secret);
+				$this->upsertOne($user_id, $addr, $name, $source, $vault, $secret, $alias_id);
 			}
 		} catch (\Throwable $e) {
 			error_log('MailboxContacts::harvest failed for user ' . $user_id . ': ' . $e->getMessage());
 		}
 	}
 
-	private function upsertOne(int $user_id, string $addr, string $name, string $source, ?UserEncryptionVault $vault, ?string $secret): void {
-		$hash = $this->addressHash($addr, $secret);
+	private function upsertOne(int $user_id, string $addr, string $name, string $source, ?UserEncryptionVault $vault, ?string $secret, int $alias_id): void {
+		$hash = $this->addressHash($addr, $secret, $alias_id);
 		$db = $this->db();
 
-		$existing = $this->findRow($user_id, $addr, $secret);
+		$existing = $this->findRow($user_id, $addr, $secret, $alias_id);
 		if ($existing !== null) {
 			$bump = $db->prepare('UPDATE imc_mailbox_contacts
 				SET imc_use_count = imc_use_count + 1, imc_last_used_time = now()
@@ -124,6 +143,7 @@ class MailboxContacts {
 
 		$row = new MailboxContact(NULL);
 		$row->set('imc_usr_user_id', $user_id);
+		$row->set('imc_iea_inbound_email_alias_id', $alias_id);
 		$row->set('imc_address_hash', $hash);
 		$row->set('imc_source', $source);
 		$row->set('imc_use_count', 1);
@@ -148,11 +168,11 @@ class MailboxContacts {
 		));
 	}
 
-	/** The row for one normalized address, or null when the user has none. */
-	private function findRow(int $user_id, string $normalized, ?string $secret): ?array {
+	/** The row for one normalized address on one mailbox, or null when there is none. */
+	private function findRow(int $user_id, string $normalized, ?string $secret, int $alias_id): ?array {
 		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
 			WHERE imc_usr_user_id = ? AND imc_address_hash = ? LIMIT 1');
-		$stmt->execute(array($user_id, $this->addressHash($normalized, $secret)));
+		$stmt->execute(array($user_id, $this->addressHash($normalized, $secret, $alias_id)));
 		$row = $stmt->fetch(PDO::FETCH_ASSOC);
 		return $row ? $row : null;
 	}
@@ -170,9 +190,9 @@ class MailboxContacts {
 	 * merely warmed up on: every address in an opened thread is harvested, so presence
 	 * alone says nothing about intent.
 	 */
-	public function lookup(int $user_id, string $address): ?array {
+	public function lookup(int $user_id, string $address, int $alias_id): ?array {
 		$parsed = self::parseAddress($address);
-		if ($user_id <= 0 || $parsed === null) {
+		if ($user_id <= 0 || $alias_id <= 0 || $parsed === null) {
 			return null;
 		}
 		try {
@@ -181,7 +201,7 @@ class MailboxContacts {
 			if ($vault !== null && $secret === null) {
 				return array('locked' => true);
 			}
-			$row = $this->findRow($user_id, $parsed[0], $secret);
+			$row = $this->findRow($user_id, $parsed[0], $secret, $alias_id);
 			if ($row === null) {
 				return null;
 			}
@@ -204,13 +224,13 @@ class MailboxContacts {
 	// ── list ─────────────────────────────────────────────────────────────────
 
 	/**
-	 * The user's contacts, decrypted, de-duplicated by address (a rotation can leave
-	 * two rows for one address — keep the most-used), ranked use_count desc then
+	 * The user's contacts ON ONE MAILBOX, decrypted, de-duplicated by address (a rotation
+	 * can leave two rows for one address — keep the most-used), ranked use_count desc then
 	 * recency. Returns ['contacts'=>[{id,address,name,use_count,source}], 'locked'=>bool].
 	 * A vault holder with a closed window returns ['locked'=>true] and no contacts.
 	 */
-	public function listForUser(int $user_id): array {
-		if ($user_id <= 0) {
+	public function listForMailbox(int $user_id, int $alias_id): array {
+		if ($user_id <= 0 || $alias_id <= 0) {
 			return array('contacts' => array());
 		}
 		$vault = UserEncryptionVault::loadForUser($user_id);
@@ -219,9 +239,10 @@ class MailboxContacts {
 		}
 
 		$db = $this->db();
-		$stmt = $db->prepare('SELECT * FROM imc_mailbox_contacts WHERE imc_usr_user_id = ?
+		$stmt = $db->prepare('SELECT * FROM imc_mailbox_contacts
+			WHERE imc_usr_user_id = ? AND imc_iea_inbound_email_alias_id = ?
 			ORDER BY imc_use_count DESC, imc_last_used_time DESC LIMIT ' . self::MAX_LIST);
-		$stmt->execute(array($user_id));
+		$stmt->execute(array($user_id, $alias_id));
 		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
 		$by_address = array();
@@ -276,7 +297,7 @@ class MailboxContacts {
 	 * (source='import'). Returns ['imported'=>int, 'skipped'=>int]. A minimal, forgiving
 	 * parser; a row/card with no valid email is skipped.
 	 */
-	public function import(int $user_id, string $content, string $filename): array {
+	public function import(int $user_id, string $content, string $filename, int $alias_id): array {
 		$content = (string)$content;
 		$is_vcard = (stripos($filename, '.vcf') !== false) || (stripos($content, 'BEGIN:VCARD') !== false);
 		// Each parser returns ['tokens'=>[...], 'empty'=>int] — 'empty' counts cards/rows
@@ -295,22 +316,22 @@ class MailboxContacts {
 			$imported++;
 		}
 		if (count($batch)) {
-			$this->harvest($user_id, $batch, MailboxContact::SOURCE_IMPORT);
+			$this->harvest($user_id, $batch, MailboxContact::SOURCE_IMPORT, $alias_id);
 		}
 		return array('imported' => $imported, 'skipped' => $skipped);
 	}
 
-	/** Manual single add (the contacts management "add" form, the reader's Add button). */
-	public function manualAdd(int $user_id, string $raw): bool {
+	/** Manual single add (the contacts panel's "add" form, the reader's Add button). */
+	public function manualAdd(int $user_id, string $raw, int $alias_id): bool {
 		$parsed = self::parseAddress($raw);
-		if ($parsed === null) {
+		if ($parsed === null || $alias_id <= 0) {
 			return false;
 		}
-		$this->harvest($user_id, array($raw), MailboxContact::SOURCE_MANUAL);
+		$this->harvest($user_id, array($raw), MailboxContact::SOURCE_MANUAL, $alias_id);
 		// harvest() only bumps a row that already exists, and every address in an opened
 		// thread is already harvested — so a deliberate add stamps the source itself,
 		// which is what turns a merely-seen address into a saved contact.
-		$this->markSaved($user_id, $parsed[0], $parsed[1]);
+		$this->markSaved($user_id, $parsed[0], $parsed[1], $alias_id);
 		return true;
 	}
 
@@ -319,14 +340,14 @@ class MailboxContacts {
 	 * add supplied one and the row has none. Best-effort: a locked vault holder or a
 	 * missing row leaves the harvest result as it stands.
 	 */
-	private function markSaved(int $user_id, string $normalized, string $name): void {
+	private function markSaved(int $user_id, string $normalized, string $name, int $alias_id): void {
 		try {
 			$vault = UserEncryptionVault::loadForUser($user_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			if ($vault !== null && $secret === null) {
 				return;
 			}
-			$row = $this->findRow($user_id, $normalized, $secret);
+			$row = $this->findRow($user_id, $normalized, $secret, $alias_id);
 			if ($row === null) {
 				return;
 			}

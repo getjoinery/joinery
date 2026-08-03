@@ -290,8 +290,28 @@ class MailboxReaderTest {
 		$keys = $this->threadKeys($super->listThreads(null, array(), 1, 50));
 		$this->ok(in_array('<u1@x>', $keys, true), 'superadmin All mail includes unmatched');
 
+		// Unmatched is reported as one box PER DOMAIN, so the assertion names this
+		// test's own domain rather than trusting a site-wide total that another
+		// fixture's stray rows could satisfy on its own.
 		$mb = $super->listMailboxes();
-		$this->ok(isset($mb['unmatched']) && $mb['unmatched']['total'] >= 1, 'listMailboxes reports unmatched count');
+		$mine = null;
+		foreach (($mb['unmatched'] ?? array()) as $u) {
+			if (intval($u['domain_id']) === intval($this->domain_id)) { $mine = $u; }
+		}
+		$this->ok($mine !== null && intval($mine['total']) >= 1,
+			'listMailboxes reports this domain\'s unmatched box', json_encode($mine));
+		$this->ok($mine !== null && $mine['domain'] !== '' && isset($mine['security_level']),
+			'the unmatched box names its domain and states a protection level');
+
+		// Scoping the read to that box returns the unmatched row and nothing else —
+		// the per-domain sentinel has to actually filter, not just label.
+		$scoped = MailboxService::parseAliasParam('unmatched:' . $this->domain_id);
+		$scoped_keys = $this->threadKeys($super->listThreads($scoped, array(), 1, 50));
+		$this->ok(in_array('<u1@x>', $scoped_keys, true),
+			'the domain\'s unmatched box lists its unrouted mail');
+		$this->ok(!in_array('<t1@x>', $scoped_keys, true) && !in_array('<o1@x>', $scoped_keys, true),
+			'the unmatched box excludes mail that DID route to a mailbox');
+
 		$this->ok($mb['all_access'] === true && isset($mb['all_mail']), 'all_access flag + all_mail present');
 	}
 

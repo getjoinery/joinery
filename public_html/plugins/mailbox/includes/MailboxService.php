@@ -79,9 +79,24 @@ class MailboxService {
 	const UNMATCHED = -1;
 
 	/**
+	 * Unmatched mail is offered PER DOMAIN, because that is the unit it actually
+	 * belongs to: a catch-all message seals to the domain's owner, so one lumped box
+	 * can hold mail sealed to several different people and can show no honest
+	 * protection level. "Unmatched for domain D" encodes as UNMATCHED_DOMAIN_BASE - D.
+	 *
+	 * The encoding rides in the same int the alias scope already travels as, rather
+	 * than a second parameter, because that scope is decoded in exactly two places
+	 * (readScopeSql / trashScopeSql) and passed through everywhere else — widening the
+	 * signature would touch every caller to serve two of them. Real alias ids are
+	 * positive serials and the base is well below UNMATCHED, so nothing can collide.
+	 */
+	const UNMATCHED_DOMAIN_BASE = -1000;
+
+	/**
 	 * Parse an alias_id request parameter into a scope value for the read/mutation
-	 * methods: '' / absent → null (all accessible); 'unmatched' → UNMATCHED; else
-	 * the integer alias id. One parser shared by every reader endpoint.
+	 * methods: '' / absent → null (all accessible); 'unmatched' → UNMATCHED;
+	 * 'unmatched:{domain_id}' → that domain's unmatched box; else the integer alias
+	 * id. One parser shared by every reader endpoint.
 	 *
 	 * @param mixed $raw
 	 * @return int|null
@@ -93,7 +108,25 @@ class MailboxService {
 		if ($raw === 'unmatched') {
 			return self::UNMATCHED;
 		}
+		if (is_string($raw) && strpos($raw, 'unmatched:') === 0) {
+			$domain_id = intval(substr($raw, strlen('unmatched:')));
+			// A malformed domain id degrades to the aggregate unmatched scope rather
+			// than to alias 0, which would read as a real (non-existent) mailbox.
+			return $domain_id > 0 ? (self::UNMATCHED_DOMAIN_BASE - $domain_id) : self::UNMATCHED;
+		}
 		return intval($raw);
+	}
+
+	/**
+	 * The domain id inside a domain-scoped unmatched sentinel, or null when $aliasId
+	 * is anything else (a real mailbox, aggregate unmatched, or all-mail).
+	 */
+	private static function unmatchedDomainId(?int $aliasId): ?int {
+		if ($aliasId === null || $aliasId > self::UNMATCHED_DOMAIN_BASE) {
+			return null;
+		}
+		$domain_id = self::UNMATCHED_DOMAIN_BASE - $aliasId;
+		return $domain_id > 0 ? $domain_id : null;
 	}
 
 	/** SQL expression for a row's grouping key (real thread key, or m:<id>). */
@@ -164,6 +197,16 @@ class MailboxService {
 	const NO_DRAFTS = " AND iem_direction IS DISTINCT FROM 'draft'";
 
 	private function readScopeSql(?int $aliasId): string {
+		// "Unmatched, domain D" — the per-domain catch-all box. Superadmin-only, same
+		// as the aggregate below; the domain id is an int by construction (decoded from
+		// the sentinel), never interpolated user text.
+		$unmatched_domain = self::unmatchedDomainId($aliasId);
+		if ($unmatched_domain !== null) {
+			return $this->viewer->isAllAccess()
+				? 'iem_delete_time IS NULL AND iem_iea_inbound_email_alias_id IS NULL'
+					. ' AND iem_ied_inbound_email_domain_id = ' . intval($unmatched_domain) . self::NO_DRAFTS
+				: '1=0';
+		}
 		// "Unmatched" — NULL-alias mail that belongs to no mailbox. Superadmin-only;
 		// everyone else gets a no-match scope even if they craft the parameter.
 		if ($aliasId === self::UNMATCHED) {
@@ -190,6 +233,13 @@ class MailboxService {
 	 * another mailbox's discarded mail.
 	 */
 	private function trashScopeSql(?int $aliasId): string {
+		$unmatched_domain = self::unmatchedDomainId($aliasId);
+		if ($unmatched_domain !== null) {
+			return $this->viewer->isAllAccess()
+				? 'iem_delete_time IS NOT NULL AND iem_iea_inbound_email_alias_id IS NULL'
+					. ' AND iem_ied_inbound_email_domain_id = ' . intval($unmatched_domain) . self::NO_DRAFTS
+				: '1=0';
+		}
 		if ($aliasId === self::UNMATCHED) {
 			return $this->viewer->isAllAccess()
 				? 'iem_delete_time IS NOT NULL AND iem_iea_inbound_email_alias_id IS NULL' . self::NO_DRAFTS
@@ -204,12 +254,23 @@ class MailboxService {
 	}
 
 	/**
-	 * READ scope for the Drafts view: the viewer's own draft rows across the
-	 * mailboxes they can access. Never all-access-broad — drafts are personal
-	 * compose state, keyed by their From alias (a grant the viewer holds).
+	 * READ scope for a Drafts view: the viewer's own draft rows. Drafts live in each
+	 * mailbox's own Drafts folder, so $aliasId normally names one mailbox; null keeps
+	 * the cross-mailbox form (every accessible mailbox at once), which is what an
+	 * "All mail" Drafts read would want.
+	 *
+	 * Never all-access-broad — drafts are personal compose state, keyed by their From
+	 * alias (a grant the viewer holds). An unmatched sentinel resolves to no mailbox at
+	 * all: unmatched mail has no From identity, so it can hold no drafts.
 	 */
-	private function draftScopeSql(): string {
-		$ids = array_map('intval', $this->viewer->accessibleAliasIds());
+	private function draftScopeSql(?int $aliasId = null): string {
+		if ($aliasId !== null && ($aliasId === self::UNMATCHED || self::unmatchedDomainId($aliasId) !== null)) {
+			return '1=0';
+		}
+		$accessible = array_map('intval', $this->viewer->accessibleAliasIds());
+		$ids = ($aliasId !== null)
+			? array_values(array_intersect($accessible, array(intval($aliasId))))
+			: $accessible;
 		$in = count($ids) ? implode(',', $ids) : 'NULL';
 		// A draft belongs to its author alone (fix pack Fix 1) — never a co-grantee
 		// of a shared mailbox, never an all-access superadmin.
@@ -266,9 +327,10 @@ class MailboxService {
 	// ------------------------------------------------------------ switcher
 
 	/**
-	 * Switcher data: one entry per accessible mailbox (address, domain, unread,
-	 * total, any-starred). For an all-access superadmin, prepends an "All mail"
-	 * pseudo-mailbox and reports an "Unmatched" (NULL-alias) count.
+	 * Switcher data: one entry per accessible mailbox (address, domain, unread, total,
+	 * any-starred, plus that mailbox's own draft count). For an all-access superadmin,
+	 * adds an "All mail" pseudo-mailbox and one "Unmatched" entry PER DOMAIN that holds
+	 * NULL-alias mail.
 	 *
 	 * @return array
 	 */
@@ -382,19 +444,28 @@ class MailboxService {
 			'mailboxes'  => $mailboxes,
 		);
 
-		// Drafts bucket (specs/mailbox_compose_maturity.md § Phase 2): the count of the
-		// viewer's saved drafts across the mailboxes they can access, for the Drafts
-		// rail entry. Personal compose state, so scoped by grants even for a superadmin.
+		// Drafts (specs/mailbox_compose_maturity.md § Phase 2), counted PER MAILBOX for
+		// each mailbox's own Drafts folder. Every draft is bound to the From mailbox it
+		// was saved against (MailboxDrafts::save rejects a draft with no alias), so a
+		// draft always has exactly one mailbox to sit under and none can be stranded.
+		// Personal compose state, so scoped by author even for a superadmin.
+		$drafts_by_alias = array();
 		if (count($alias_ids)) {
 			$in = implode(',', array_map('intval', $alias_ids));
-			$row = $db->query("SELECT COUNT(*) AS total FROM iem_inbound_email_messages
+			$stmt = $db->query("SELECT iem_iea_inbound_email_alias_id AS alias_id, COUNT(*) AS total
+				FROM iem_inbound_email_messages
 				WHERE iem_delete_time IS NULL AND iem_direction = 'draft'
 				AND iem_iea_inbound_email_alias_id IN ($in)
-				AND iem_draft_author_user_id = " . intval($this->viewer->getUserId()))->fetch(PDO::FETCH_ASSOC);
-			$result['drafts'] = array('total' => intval($row['total']));
-		} else {
-			$result['drafts'] = array('total' => 0);
+				AND iem_draft_author_user_id = " . intval($this->viewer->getUserId()) . "
+				GROUP BY iem_iea_inbound_email_alias_id");
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$drafts_by_alias[intval($r['alias_id'])] = intval($r['total']);
+			}
 		}
+		foreach ($mailboxes as $i => $mb) {
+			$mailboxes[$i]['drafts'] = $drafts_by_alias[intval($mb['alias_id'])] ?? 0;
+		}
+		$result['mailboxes'] = $mailboxes;
 
 		if ($this->viewer->isAllAccess()) {
 			// "All mail" — every non-deleted, non-spam row, including NULL-alias.
@@ -408,18 +479,22 @@ class MailboxService {
 				'total'  => intval($row['total']),
 			);
 
-			// "Unmatched" — rows that belong to no mailbox.
+			// "Unmatched" — rows that belong to no mailbox, one box PER DOMAIN.
 			//
-			// `trashed` is counted because the box is only offered when it has
-			// something in it, and Trash is scoped to the selected mailbox. Count
-			// live rows alone and emptying the box hides it — along with the only
-			// route to its own trash, leaving discarded mail recoverable in the
-			// database and unreachable in the interface until retention purges it
-			// (specs/mailbox_unmatched_sealing.md § unmatched mail you cannot reach).
-			// `unread` excludes archived for the same reason the per-mailbox badge
-			// does: selecting Unmatched opens the Inbox view, so the count has to
-			// describe what that view shows.
-			$row = $db->query("SELECT
+			// Per domain because that is the unit the mail actually belongs to: a
+			// catch-all message seals to its DOMAIN's owner, so a single lumped box can
+			// hold mail sealed to several different people and can state no honest
+			// protection level for what it contains.
+			//
+			// `trashed` is counted because a box is only offered when it has something
+			// in it, and Trash is scoped to the selected box. Count live rows alone and
+			// emptying it hides it — along with the only route to its own trash, leaving
+			// discarded mail recoverable in the database and unreachable in the interface
+			// until retention purges it (specs/mailbox_unmatched_sealing.md § unmatched
+			// mail you cannot reach). `unread` excludes archived for the same reason the
+			// per-mailbox badge does: selecting a box opens its Inbox view, so the count
+			// has to describe what that view shows.
+			$stmt = $db->query("SELECT iem_ied_inbound_email_domain_id AS domain_id,
 					COUNT(*) FILTER (WHERE iem_delete_time IS NULL) AS total,
 					COUNT(*) FILTER (
 						WHERE iem_delete_time IS NULL AND iem_is_read = false
@@ -427,13 +502,36 @@ class MailboxService {
 					) AS unread,
 					COUNT(*) FILTER (WHERE iem_delete_time IS NOT NULL) AS trashed
 				FROM iem_inbound_email_messages
-				WHERE iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "")
-				->fetch(PDO::FETCH_ASSOC);
-			$result['unmatched'] = array(
-				'unread'  => intval($row['unread']),
-				'total'   => intval($row['total']),
-				'trashed' => intval($row['trashed']),
-			);
+				WHERE iem_iea_inbound_email_alias_id IS NULL" . self::NO_DRAFTS . "
+				GROUP BY iem_ied_inbound_email_domain_id");
+
+			// Domain names + their protection level, so each box can carry an honest
+			// chip. A row whose domain record has gone is still listed, under its id —
+			// unreachable mail is the failure this box exists to prevent.
+			$unmatched_domains = new MultiInboundEmailDomain(array());
+			$unmatched_domains->load();
+			$name_map = array();
+			$umlevel_map = array();
+			foreach ($unmatched_domains as $d) {
+				$name_map[intval($d->key)] = $d->get('ied_domain');
+				$umlevel_map[intval($d->key)] = $d->security_level();
+			}
+
+			$unmatched = array();
+			foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $r) {
+				$did = intval($r['domain_id']);
+				$unmatched[] = array(
+					'domain_id'      => $did,
+					'domain'         => $name_map[$did] ?? ('#' . $did),
+					'security_level' => $umlevel_map[$did] ?? InboundEmailDomain::LEVEL_STANDARD,
+					'unread'         => intval($r['unread']),
+					'total'          => intval($r['total']),
+					'trashed'        => intval($r['trashed']),
+				);
+			}
+			// Stable, name-ordered so the rail does not reshuffle as counts move.
+			usort($unmatched, function ($a, $b) { return strcmp($a['domain'], $b['domain']); });
+			$result['unmatched'] = $unmatched;
 		}
 
 		return $result;
@@ -654,7 +752,7 @@ class MailboxService {
 		// Mutually exclusive with every other view — a discarded message is in Trash
 		// and nowhere else, whatever its read/archive/spam/label state says.
 		$trash = !$drafts && !empty($filters['trash']);
-		$where = array($drafts ? $this->draftScopeSql()
+		$where = array($drafts ? $this->draftScopeSql($aliasId)
 			: ($trash ? $this->trashScopeSql($aliasId) : $this->readScopeSql($aliasId)));
 		$params = array();
 

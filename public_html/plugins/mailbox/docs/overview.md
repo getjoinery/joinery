@@ -1048,8 +1048,9 @@ as a badge linking to the domain editor (the badge IS the path to raising
 protection); mailboxes on protected domains carry the badge on their Accounts
 rows, and in the reader (both the staff reader and `/profile/mailbox/mailbox`) as
 a chip beside the name of the open mailbox in the conversation-list header. The
-chip states the level of the one mailbox being read, so the aggregate views
-(Drafts, Contacts, all-mail) show none.
+chip states the level of the one mailbox being read, so the all-mail view — which
+spans mailboxes that may differ — shows none. Each unmatched box states its own
+domain's level, which it can do honestly because it holds one domain's mail.
 
 **Rows are sealed per-row** (`iem_content_sealed`): mail sealed under one posture stays
 readable after the domain's level changes — the read hooks key off the row, not the
@@ -1911,6 +1912,16 @@ The reader's **left rail** is a switcher over the addresses the viewer has been
 granted, each independently badged with its unread count, each with its folders
 beneath it. Selecting one scopes the whole reader to that mailbox.
 
+The rail lists **where mail lives, and nothing else**. Everything that belongs to a
+mailbox sits inside it rather than beside it: the selected mailbox's folders (Inbox,
+its own Drafts, All Mail, any tracked IMAP folders, Spam, Trash) are indented under it,
+and its contacts are the right-hand panel. An all-access viewer additionally sees one
+**Unmatched** box per domain that holds unrouted mail — per domain because catch-all mail
+seals to the domain's owner, so a single lumped box could hold mail sealed to several
+different people and could state no honest protection level. A box is offered whenever it
+holds anything live **or discarded**, since hiding an emptied box would also hide the only
+route to its own Trash.
+
 Selecting rows in the list and acting on them sends the whole selection to
 `thread_action` as `thread_keys[]`, which expands each key **under the caller's
 own scope** and unions the resulting message ids. A key the caller cannot see
@@ -2043,7 +2054,7 @@ independent of the session.
 The endpoints (`ajax/mailbox_*.php`) require a **signed-in session** — any
 member — and `MailboxViewer` is the sole authority on which mailboxes a viewer
 touches: grants partition mailboxes per user, and permission-10 superadmins are
-all-access (every mailbox plus "All mail"/"Unmatched"). The admin page itself
+all-access (every mailbox plus "All mail" and the per-domain "Unmatched" boxes). The admin page itself
 stays permission-5, and grant management (the alias editor) is admin-only.
 Reply/Reply-All/Forward are gated by `MailboxViewer::canCompose()` — a grant
 means full access to the mailbox, reading it and sending as it, so any viewer
@@ -2202,8 +2213,13 @@ prompting a one-tap unlock), never delivering a message shorn of its sealed atta
 A From change from a sealed to a standard mailbox clears `iem_content_sealed` but retains
 `iem_sealed_key`, so the draft's already-sealed attachments stay decryptable.
 
-A **Drafts** rail entry lists them (via `thread_list` `drafts=1`); every other view/query,
-the FTS index, IMAP dirtiness, and AI triage/scan/schedule exclude `direction='draft'`.
+Each mailbox has its own **Drafts folder** in the folder rail, beneath its Inbox, carrying
+that mailbox's draft count. Every draft is bound to a From mailbox at save time
+(`MailboxDrafts::save()` rejects one with no alias), so a draft always has exactly one place
+to live and none can be stranded. The folder lists via `thread_list` `drafts=1` with the
+mailbox's `alias_id`; passing no alias keeps the cross-mailbox form. An unmatched box has no
+From identity and so gets no Drafts folder. Every other view/query, the FTS index, IMAP
+dirtiness, and AI triage/scan/schedule exclude `direction='draft'`.
 Because a morphed draft keeps its message id (now below the FTS high-water mark), each
 mailbox owner's search bookkeeping carries a **refold queue** (`imi_refold_ids`) — the
 sent message is explicitly re-indexed on the next fold so it becomes searchable.
@@ -2219,15 +2235,31 @@ quote, where the user sees and can edit it before sending — the server does no
 
 ### Contacts + recipient autocomplete
 
-A per-user contact store (`imc_mailbox_contacts`, `MailboxContact` /
-`MailboxContacts`) warms up through use: every send harvests To/Cc/Bcc, and opening a
-thread harvests the counterparty sender. Rows are sealed when the owner holds a vault
-(`imc_address` / `imc_display_name` under a per-row DEK); dedup is a per-user
-`imc_address_hash` — a keyed blind index for vault holders (never leaks the sealed
-address), plain SHA-256 otherwise. The composer fetches the whole (small) decrypted list
-once and filters it client-side for To/Cc/Bcc autocomplete (no server prefix-search over
-ciphertext); a locked vault makes autocomplete silently absent. A **Contacts** rail entry
-manages the list (add, delete, and import a vCard / Google CSV via `mailbox/contacts_import`).
+A contact store (`imc_mailbox_contacts`, `MailboxContact` / `MailboxContacts`) warms up
+through use: every send harvests To/Cc/Bcc, and opening a thread harvests the counterparty
+sender.
+
+Contacts belong to **one mailbox** (`imc_iea_inbound_email_alias_id`), not to the account:
+composing from a work address never suggests what was harvested in a personal one. The
+same person seen on two mailboxes is two rows, which the store treats as normal — it is a
+cache, not a person record. Harvest attributes to the mailbox the mail actually moved
+through: the From mailbox on a send, and each message's own mailbox on a thread open (so a
+thread read from "All mail" still lands in the right store, and mail belonging to no
+mailbox is skipped). Scope is a property of the row, not of the sealing: a row still seals
+to the **harvesting user's** vault, so two grantees sharing one mailbox each keep their own
+contacts, readable only by them.
+
+Rows are sealed when that user holds a vault (`imc_address` / `imc_display_name` under a
+per-row DEK); dedup is `imc_address_hash` — a keyed blind index for vault holders (never
+leaks the sealed address), plain SHA-256 otherwise. The hash covers the **mailbox and the
+address together**, which is what makes the existing `(hash, user)` unique constraint mean
+one row per (user, mailbox, address) without a composite key over an encrypted column.
+
+The composer fetches the whole (small) decrypted list for one mailbox and filters it
+client-side for To/Cc/Bcc autocomplete (no server prefix-search over ciphertext); a locked
+vault makes autocomplete silently absent. Changing the **From** selector re-fetches the
+list for the newly chosen mailbox, so suggestions always follow the address being written
+from. Addresses already typed are left alone — only the suggestion list changes.
 
 A row is **saved** when the user added it deliberately (`imc_source` `manual` or `import`)
 and merely **seen** when it warmed up through use (`sent` or `received`). Presence alone
@@ -2237,19 +2269,31 @@ saved (filling a display name the harvest never captured) instead of inserting a
 
 ### Contact panel
 
-When a thread opens, every mailbox user sees a right-hand **Contact** panel for the
-correspondent (`mailbox/sender_context`). The client sends the **message id, never an
-address**, so the endpoint can't be a membership oracle — the server re-derives the
-counterparty from a message already in the caller's scope, and that scope binds admin and
-non-admin alike.
+The right-hand aside is where contacts live — the left rail lists **where mail lives**, and
+a contact store belongs to a mailbox rather than sitting beside one. The panel has two
+states over the same element:
 
-The panel's card names the correspondent, shows their address, and states whether they are
-**In Contacts** or **Not in Contacts** — the latter with a one-click **+ Add** that posts
-the address (with the display name from the message) to `mailbox/contacts_import` and
-re-renders from the server. For a known contact it also shows how often the address has
-been seen, when it was last and first seen, and a link that searches the mailbox for all
-mail with that address. A sealed contact store with no open window can answer neither way,
-so the card says **Contacts locked** and offers Unlock rather than asserting "not a contact".
+- **On the list view** — the selected mailbox's contact manager (add, delete, and import a
+  vCard / Google CSV via `mailbox/contacts_import`, all landing in that mailbox).
+  **Collapsed to a labelled spine by default**, since it is reference material rather than
+  the task at hand; the open/closed choice is remembered across visits. A view with no one
+  mailbox behind it (All mail, or an unmatched box) has no single store to show, so the
+  panel steps aside entirely.
+- **On an open conversation** — the correspondent's card, expanded
+  (`mailbox/sender_context`). The client sends the **message id, never an address**, so the
+  endpoint can't be a membership oracle: the server re-derives the counterparty from a
+  message already in the caller's scope, and that scope binds admin and non-admin alike.
+
+The card names the correspondent, shows their address, and states whether they are **In
+Contacts** or **Not in Contacts** — the latter with a one-click **+ Add** that posts the
+address (with the display name from the message) to `mailbox/contacts_import` and re-renders
+from the server. Because contacts are per-mailbox, the answer is about **this mailbox
+alone**; the same address may be saved in another. Mail belonging to no mailbox has no store
+to add to, so the Add control is absent rather than offering a save that cannot land. For a
+known contact the card also shows how often the address has been seen, when it was last and
+first seen, and a link that searches the mailbox for all mail with that address. A sealed
+contact store with no open window can answer neither way, so the card says **Contacts
+locked** and offers Unlock rather than asserting "not a contact".
 
 Below the card, a **Site account** section is **admin-only** (permission 5+), because member
 records, orders and registrations are operator data: it resolves the address with
@@ -2268,15 +2312,15 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 
 | Action | Purpose |
 |---|---|
-| `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag, plus `can_compose` and a `drafts` count |
-| `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint |
+| `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag and `drafts` count, plus `can_compose`; for an all-access viewer also `all_mail` and `unmatched` — an array of one entry per domain holding unrouted mail (`domain_id`, `domain`, `security_level`, `unread`, `total`, `trashed`) |
+| `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint. `alias_id` takes a mailbox id, `unmatched:{domain_id}` for a domain's catch-all box, or nothing for all accessible mail |
 | `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids; harvests inbound senders into contacts |
 | `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]`, a `thread_key`, or `thread_keys[]` (the list's multi-select) |
 | `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` or `alias_id`, plus optional `bcc`, `body_html`, `inline_manifest`, `draft_id` (morph a draft); plain JSON or multipart `attachments[]`; forwards re-attach the original's parts server-side |
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |
 | `draft_attachment_delete` | Remove one saved attachment from a draft — `draft_id`, `attachment_id` (author-scoped, non-inline) |
 | `signature_save` | Save the caller's compose signature for one of their mailboxes |
-| `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts |
+| `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox |
 | `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, plus (admins only) their member record, orders and registrations |
 
 Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
@@ -2519,7 +2563,7 @@ restore has nothing to reassemble.
 
 **Exactly one view sees a trashed row.** Every read scope pins `iem_delete_time IS
 NULL`; `MailboxService::trashScopeSql()` inverts that pin, branch for branch (a single
-mailbox, an all-access "All mail", the superadmin "Unmatched" pseudo-mailbox). The Trash
+mailbox, an all-access "All mail", a superadmin per-domain "Unmatched" box). The Trash
 view is also the one view that ignores the spam verdict, so mail a filter trashed on
 arrival is not invisible in both places. `listThreads()` takes a `trash` filter,
 `getThread()` / `messageIdsInThread()` a `$trashed` flag; the reader passes them from
