@@ -14,6 +14,7 @@
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+harness_test_mode();
 
 require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
