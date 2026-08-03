@@ -700,6 +700,21 @@
 			// Non-fatal — individual settings will still get added via admin settings save
 		}
 
+		// Step: Provision the file-URL signing key while the process is cold.
+		// The seed above leaves file_signed_url_key present but empty, and the
+		// first request that needs a signed URL may well be one that has already
+		// opened sealed content — where the write is refused. Minting it here
+		// means that request finds a key waiting. Runs after the seed so it
+		// fills that row rather than racing it.
+		try {
+			require_once(PathHelper::getIncludePath('data/files_class.php'));
+			echo File::provisionSigningKey()
+				? "✓ File signing key present<br>\n"
+				: "⚠️  File signing key could not be provisioned<br>\n";
+		} catch (Throwable $e) {
+			echo "⚠️  File signing key provisioning failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Seed core menus from public_html/admin_menus.json
 		// Runs after settings seed so settingActivate references resolve. Uses
 		// overwrite=false, prune=false so admin customizations to existing rows survive.
