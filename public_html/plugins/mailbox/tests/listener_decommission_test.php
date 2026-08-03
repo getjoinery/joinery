@@ -124,7 +124,7 @@ if ($relay_active && $listening) {
 } elseif ($relay_active) {
 	check(!$threw, 'relay active + decommissioned + port silent => healthy');
 } else {
-	check(true, 'no active relay on this deployment — inversion path not exercisable here');
+	harness_skip('decommissioned health-check inversion', 'no active relay on this deployment');
 }
 harness_set_setting_mem('mailbox_local_listener', 'active');
 
@@ -204,7 +204,7 @@ if (!is_file(mailbox_listener_helper_path())) {
 	check($run['ok'] === false && strpos($run['message'], 'provision_relay_main.sh') !== false,
 		'missing helper refuses and prescribes the bootstrap', $run['message']);
 } else {
-	check(true, 'helper installed on this box — runner refusal path not exercisable here');
+	harness_skip('missing helper refuses and prescribes the bootstrap', 'helper installed on this box');
 }
 
 harness_finish();

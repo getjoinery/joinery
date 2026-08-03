@@ -147,18 +147,32 @@ check(strpos($strip, 'href="/admin/admin_settings_plugins"') === false,
 check(PluginHelper::isPluginActive('store') === (strpos($strip, 'Payment Settings') !== false),
 	'Payment Settings appears exactly when the store plugin is active');
 
-// Drift guard: every settings tab page must go through the shared helper. A page
-// that rebuilds its own list is how the sets diverge.
-$tab_pages = array(
-	'adm/admin_settings.php',
-	'adm/admin_settings_email.php',
-	'adm/admin_settings_plugins.php',
-	'plugins/store/admin/admin_settings_payments.php',
-);
-foreach ($tab_pages as $rel) {
-	$src = file_get_contents(PathHelper::getIncludePath($rel));
-	check(strpos($src, 'settings_tab_menu(') !== false, "$rel calls the shared tab helper");
-	check(strpos($src, '$tab_menus') === false, "$rel does not build its own tab list");
+// Drift guard: every settings tab page must render the SAME strip. Proven on
+// the pages' real output — fetch each one as a signed-in admin and compare the
+// rendered tab set against the helper's own — so a page that rebuilds its own
+// list is caught the moment its set diverges, however it was built.
+$canonical = AdminPage::settings_tab_menu(NULL);
+preg_match_all('/href="([^"#]+)"/', $canonical, $m);
+$tab_urls = $m[1];
+check(count($tab_urls) >= 3, 'the helper names the tab pages to sweep', implode(', ', $tab_urls));
+
+require_once(__DIR__ . '/../lib/http.php');
+$tab_admin = make_user('TabStrip', 10);
+$tab_jar = harness_jar_new('pst');
+$tab_csrf = harness_web_login($tab_jar, $tab_admin->get('usr_email'), 'TestPassword_TabStrip');
+check($tab_csrf !== null, 'admin web login for the tab sweep succeeded');
+
+foreach (($tab_csrf !== null) ? $tab_urls : array() as $url) {
+	$page = harness_request('GET', $url, array('jar' => $tab_jar, 'accept' => null));
+	$found = preg_match('/<ul class="nav-tabs">.*?<\/ul>/s', $page['body'], $mm);
+	check($found === 1, "$url renders the shared tab strip", 'status ' . $page['status']);
+	if ($found !== 1) { continue; }
+	preg_match_all('/href="([^"#]+)"/', $mm[0], $hh);
+	$got = $hh[1];
+	sort($got);
+	$expect = array_values(array_diff($tab_urls, array($url)));
+	sort($expect);
+	check($got === $expect, "$url links every other tab and not itself", implode(', ', $hh[1]));
 }
 
 
@@ -185,25 +199,56 @@ foreach ($sources as $plugin) {
 }
 
 // The plugin sections are siblings, not nested forms: the page owns begin_form,
-// end_form and the submit button, and the renderer emits fields only.
-$renderer_src = file_get_contents(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
-check(strpos($renderer_src, 'begin_form') === false && strpos($renderer_src, '<form') === false,
-	'the renderer never opens a form');
-check(strpos($renderer_src, 'end_form') === false && strpos($renderer_src, 'submitbutton') === false,
-	'the renderer never closes one or adds a submit button');
+// end_form and the submit button, and the renderer emits fields only. Proven on
+// the renderer's real output — draw one plugin's section into a bare form and
+// inspect what it actually wrote.
+if (empty($sources)) {
+	harness_skip('the renderer never opens a form', 'no plugin declares a renderable setting here');
+} else {
+	require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+	$probe_form = new FormWriterV2HTML5('pst_probe_form');
+	ob_start();
+	SettingsFieldRenderer::renderSource($probe_form, $sources[0]);
+	$emitted = ob_get_clean();
+	check(stripos($emitted, '<input') !== false || stripos($emitted, '<select') !== false
+		|| stripos($emitted, '<textarea') !== false,
+		'the renderer emits real field markup to inspect', strlen($emitted) . ' bytes');
+	check(stripos($emitted, '<form') === false, 'the renderer never opens a form');
+	check(stripos($emitted, '</form') === false && stripos($emitted, '<button') === false
+		&& stripos($emitted, 'type="submit"') === false,
+		'the renderer never closes one or adds a submit button');
+}
 
 
 // =========================================================================
 section('D. General Settings no longer carries plugin fields');
 // =========================================================================
 
-$general_src = file_get_contents(PathHelper::getIncludePath('adm/admin_settings.php'));
-check(strpos($general_src, 'settings_form.php') === false,
-	'the General page includes no plugin settings form');
+// Proven on the rendered page: fetch General Settings as the signed-in admin
+// and assert no plugin-declared field is offered for input there.
+if ($tab_csrf === null) {
+	harness_skip('the General page renders no plugin-declared field', 'admin web login unavailable');
+} else {
+	$general = harness_request('GET', '/admin/admin_settings', array('jar' => $tab_jar, 'accept' => null));
+	check($general['status'] == 200, 'the General page renders for the sweep', 'status ' . $general['status']);
+	$plugin_fields_on_general = array();
+	foreach ($sources as $plugin) {
+		foreach (SettingsFieldRenderer::renderSourceNames($plugin) as $field) {
+			// A plugin page may MIRROR a core group (settingsMirrorGroups), so a
+			// core-owned field showing up in its render list is by design. Only
+			// a field the plugin itself declares is out of place on General.
+			$decl = SettingsDeclarations::get($field);
+			if (($decl['_source'] ?? '') !== $plugin) { continue; }
+			if (strpos($general['body'], 'name="' . $field . '"') !== false) {
+				$plugin_fields_on_general[] = $field;
+			}
+		}
+	}
+	check(empty($plugin_fields_on_general), 'the General page renders no plugin-declared field',
+		implode(', ', $plugin_fields_on_general));
+}
 check(!file_exists(PathHelper::getIncludePath('plugins/mailbox/settings_form.php')),
 	'settings_form.php files are gone — a plugin declares fields, it does not draw them');
-check(strpos($general_src, 'plugin-settings') === false,
-	'the General page carries no plugin-settings heading');
 
 
 // =========================================================================

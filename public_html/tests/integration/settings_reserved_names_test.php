@@ -59,10 +59,11 @@ foreach ($real as $name) {
 	check(!Setting::isReservedName($name), "$name is still a writable setting");
 }
 
-// Every name actually stored must be judged the same way by the live table.
+// The reservation only means something if the live table honors it: a stored
+// row with a reserved name is a file-config key being shadowed from the DB.
 $stored = $db->query("SELECT stg_name FROM stg_settings")->fetchAll(PDO::FETCH_COLUMN);
 $reserved_rows = array_values(array_filter($stored, function ($n) { return Setting::isReservedName($n); }));
-check(true, 'reserved rows currently stored: ' . (count($reserved_rows) ?: 'none'),
+check(count($reserved_rows) === 0, 'no stored settings row carries a reserved name',
 	implode(', ', $reserved_rows));
 
 

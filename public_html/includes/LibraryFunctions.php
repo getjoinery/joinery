@@ -1294,6 +1294,8 @@ class LibraryFunctions {
 			'require_field_specifications' => false,
 			'base_class' => 'SystemBase',
 			'include_plugins' => false,
+			// A plugin name here narrows discovery to THAT plugin's classes
+			// only — core classes are excluded (see below).
 			'plugin_filter' => null,
 			// 'all'    → every plugin dir on disk (maintenance/schema/deletion callers
 			//            that must see inactive-plugin tables too — the default).
@@ -1303,15 +1305,21 @@ class LibraryFunctions {
 			'verbose' => false
 		);
 		$options = array_merge($defaults, $options);
-		
+
 		$classes = array();
-		
-		// Load from main data directory (always load core classes)
-		$data_path = PathHelper::getBasePath() . '/data';
-		if ($options['verbose']) {
-			echo "Discovering models in: $data_path<br>\n";
+
+		// Core classes are part of the answer except when the caller filtered
+		// to one plugin: every plugin_filter caller means "this plugin's own
+		// classes" (per-plugin constraint/FK sync, deletion-rule registration),
+		// and including core there makes each per-plugin pass redo the whole
+		// platform's schema work.
+		if (!$options['plugin_filter']) {
+			$data_path = PathHelper::getBasePath() . '/data';
+			if ($options['verbose']) {
+				echo "Discovering models in: $data_path<br>\n";
+			}
+			LibraryFunctions::load_models_from_directory($data_path, $classes, $options);
 		}
-		LibraryFunctions::load_models_from_directory($data_path, $classes, $options);
 		
 		// Load from plugin directories if requested
 		if ($options['include_plugins']) {

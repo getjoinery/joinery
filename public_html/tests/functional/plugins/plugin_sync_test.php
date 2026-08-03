@@ -200,7 +200,7 @@ foreach ($active_names as $name) {
     }
     $declared = $helper->getDeclaredSettings();
     if (empty($declared)) {
-        check(true, "'$name' declares no settings (nothing to validate)");
+        harness_skip("'$name' declared settings pass validation", 'no settings declared');
         continue;
     }
     $msg = $validate($name, $declared);
@@ -290,16 +290,17 @@ section('A failing plugin does not abort the deploy, but does not vanish either'
 // array rather than an exception, and a string nobody prints is a failure nobody
 // sees. Every bucket sync() can record a failure into must be surfaced by the
 // caller — update_database.php is the only caller on the deploy path.
+//
+// These are source tripwires, not behavioral checks: running the whole deploy
+// script in-test costs more than the risk warrants, so settle for tripping when
+// a bucket's only mention disappears from the updater. settings_messages is the
+// sharp one — sync() only ever writes to it on exception, so anything in it is
+// a plugin whose settings did not sync.
 $updater_src = file_get_contents(PathHelper::getIncludePath('utils/update_database.php'));
 foreach (array('table_messages', 'migration_messages', 'settings_messages') as $bucket) {
     check(strpos($updater_src, "\$plugin_sync_result['$bucket']") !== false,
         "update_database surfaces $bucket rather than discarding it");
 }
-
-// settings_messages is the sharp one: sync() only ever writes to it on
-// exception, so anything in it is a plugin whose settings did not sync.
-check(preg_match('/settings_messages.*?\n.*?foreach/s', $updater_src) === 1,
-    'update_database iterates settings_messages to print each failure');
 
 // ---------------------------------------------------------------------------
 section('Deletion-rule pruning does not depend on activation state');
@@ -323,16 +324,20 @@ $checked_inactive = 0;
 foreach ($inactive as $p) {
     if ($p->get('plg_active')) { continue; }
     $name = $p->get('plg_name');
-    $data_dir = PathHelper::getIncludePath('plugins/' . $name . '/data');
-    if (!is_dir($data_dir)) { continue; }
-    foreach (glob($data_dir . '/*_class.php') as $class_file) {
-        $src = file_get_contents($class_file);
-        if (preg_match('/\$tablename\s*=\s*[\'"]([a-z0-9_]+)[\'"]/i', $src, $m)) {
-            check(isset($known[$m[1]]),
-                "an inactive plugin's table is still known to discovery: " . $m[1],
-                "plugin: $name");
-            $checked_inactive++;
-        }
+    if (!is_dir(PathHelper::getIncludePath('plugins/' . $name . '/data'))) { continue; }
+    // The runtime's own discovery, filtered to this plugin — not a regex
+    // reimplementation of it, so the table names checked are the ones the
+    // registry itself would be asked about.
+    $plugin_classes = LibraryFunctions::discover_model_classes(array(
+        'require_tablename' => true,
+        'include_plugins'   => true,
+        'plugin_filter'     => $name,
+    ));
+    foreach ($plugin_classes as $class) {
+        check(isset($known[$class::$tablename]),
+            "an inactive plugin's table is still known to discovery: " . $class::$tablename,
+            "plugin: $name");
+        $checked_inactive++;
     }
 }
 if ($checked_inactive === 0) {

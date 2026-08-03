@@ -33,7 +33,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.p
 if (!is_dir(MailboxIndex::SHM_DIR)) {
 	// No tmpfs (unusual CI shape) — the index is /dev/shm-only, so skip cleanly.
 	section('refold queue');
-	check(true, 'skipped: ' . MailboxIndex::SHM_DIR . ' unavailable', 'no shm');
+	harness_skip('refold queue', MailboxIndex::SHM_DIR . ' unavailable (no shm)');
 	harness_finish();
 	return;
 }

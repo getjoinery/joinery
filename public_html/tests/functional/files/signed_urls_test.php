@@ -19,7 +19,7 @@
  * Defaults target the site this code serves, pinned to its origin IP (bypasses
  * Cloudflare so headers/status are the app's own).
  *
- * @version 1.1.0
+ * @version 1.1.1
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -80,8 +80,17 @@ try {
 	ok('extended expiry is denied', $r['status'] == 404, 'status ' . $r['status']);
 
 	// ---- Expired signature falls back to the gate -------------------------
-	$short = $file->mintSignedUrl('original', 1);
-	sleep(2);
+	// Sign a past expiry directly rather than sleeping out a freshly minted
+	// one: the expiry branch runs before the signature compare, so what it
+	// needs is a *correctly signed* URL whose timestamp is already gone.
+	$past = time() - 10;
+	$sign_key = new ReflectionMethod('File', '_get_signing_key');
+	$sign_key->setAccessible(true);
+	$sign_payload = new ReflectionMethod('File', '_signed_url_payload');
+	$sign_payload->setAccessible(true);
+	$past_sig = hash_hmac('sha256',
+		$sign_payload->invoke($file, 'original', $past), $sign_key->invoke(null, true));
+	$short = parse_url($signed, PHP_URL_PATH) . '?expires=' . $past . '&sig=' . $past_sig;
 	$r = http_get($short);
 	ok('expired signature is denied', $r['status'] == 404, 'status ' . $r['status']);
 

@@ -85,8 +85,8 @@ try {
 		check(is_array($decoded) && isset($decoded['enc']), 'raw value is the sealed {enc:...} shape');
 		check(SecretBox::looksEncrypted($decoded['enc'] ?? ''), 'sealed blob is a SecretBox ciphertext');
 	} else {
-		check(true, 'no secret_box_key — plaintext fallback path (round-trip already verified)');
-		check(true, '(skipped sealed-shape assertion without a key)');
+		harness_skip('raw value is the sealed {enc:...} shape',
+			'no secret_box_key on this install — plaintext fallback (round-trip verified above)');
 	}
 
 	// -----------------------------------------------------------------------
@@ -102,7 +102,8 @@ try {
 		check(isset($decoded['enc']) && !isset($decoded['secret_key']),
 			'still a single seal layer (no nested enc, no exposed plaintext)');
 	} else {
-		check(true, '(skipped seal-layer assertion without a key)');
+		harness_skip('still a single seal layer (no nested enc, no exposed plaintext)',
+			'no secret_box_key on this install');
 	}
 
 	// -----------------------------------------------------------------------
@@ -123,7 +124,8 @@ try {
 	if ($has_secretbox) {
 		check(strpos($raw_after, 'legacy_secret_42') === false, 'legacy secret sealed at rest after migration save');
 	} else {
-		check(true, '(no secret_box_key — legacy value stays plaintext by design)');
+		check(strpos($raw_after, 'legacy_secret_42') !== false,
+			'without a secret_box_key the legacy value stays plaintext by design');
 	}
 	$migrated = new BackupTarget($created_id, TRUE);
 	check($migrated->get_credentials()['secret_key'] === 'legacy_secret_42',
