@@ -77,10 +77,14 @@ constraints, never drops the stale one, so a changed `unique_with` would have le
 vault. Two grantees sharing one mailbox each build their own contacts, readable only by them.
 The alias is a scope tag, which keeps the change additive with no re-seal.
 
-**Legacy rows are inert, not migrated.** Rows written before scoping hashed the address alone,
-so they no longer match and no mailbox-scoped read returns them. They re-warm on the next send
-or thread open. No migration — the store is a cache, and there are no production users
-(`project_no_production_users`).
+**Legacy rows are deleted (migration 164).** Rows written before scoping carry no mailbox and
+hashed the address alone, so no mailbox-scoped read can ever return them. Nothing re-creates
+them either — contacts are entered deliberately now rather than harvested from mail traffic —
+so left in place they would be permanently invisible dead weight. A backfill was not an
+option: the rows are sealed, and the blind index is keyed to the owner's in-window vault
+secret, which a CLI migration can never hold; and a row records no hint of which mailbox it
+came from, so on an account with several there is nothing to adopt it into. The migration is a
+plain idempotent DELETE.
 
 **The unmatched sentinel.** `MailboxService::parseAliasParam()` accepts `unmatched:{domain_id}`
 and encodes it as `UNMATCHED_DOMAIN_BASE - domain_id`. The scope value travels as an `?int`

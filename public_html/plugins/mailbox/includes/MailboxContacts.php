@@ -46,8 +46,7 @@ class MailboxContacts {
 	 * The mailbox is hashed alongside the address so that the same address on two
 	 * mailboxes digests differently — which is what lets the (hash, user) unique
 	 * constraint enforce one row per (user, mailbox, address) without a composite key
-	 * over an encrypted column. Rows written before contacts were mailbox-scoped hashed
-	 * the address alone, so they no longer match and are inert.
+	 * over an encrypted column.
 	 */
 	public function addressHash(string $normalized, ?string $secret, int $alias_id): string {
 		$material = $alias_id . ':' . $normalized;
