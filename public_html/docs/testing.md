@@ -70,6 +70,7 @@ php tests/run.php test-db      # only the test-database suites
 php tests/run.php live         # only live tests (never implied)
 php tests/run.php deploy       # does the deployed code run here — what upgrade.php runs
 php tests/run.php db --filter=api   # narrow by name or path substring
+php tests/run.php db --serial       # disable the test-db lane overlap (fully serial)
 php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by repo-relative path
 php tests/run.php db --timeout=30   # override every test's declared wall-clock cap (seconds)
 php tests/run.php --list       # list discovered tests, run nothing
@@ -82,6 +83,17 @@ never pulls in the others — it has real external effects, so it is always an
 explicit choice. Each test runs in its own subprocess, so a fatal in one file
 cannot take down the run. The runner exits non-zero if any test failed — it is
 the CI entry point.
+
+When a run selects both `test-db` suites and anything else, the `test-db`
+suites run as one serial lane alongside the main batch, hiding their wall clock
+inside it. The overlap is safe because those suites write only to the copied
+test database — every write goes through `DbConnector::set_test_mode()`, and
+`harness_finish()` fails any `test-db`-tier suite whose process never entered
+test mode, so the isolation is enforced rather than assumed. The suites stay
+serial *within* the lane (they share the copy), lane results carry a
+`[test-db]` tag in the output, and a lane failure — including a crash of the
+lane worker — fails the gate. `--serial` forces the fully serial order, for
+debugging or as a fallback.
 
 ### `deploy` is not a development tier
 
@@ -114,7 +126,8 @@ currently checks.
 
 `safe` is the tier to run while working: 79 tests in about 20 seconds. `db`
 is the gate to run before a checkin or a publish: 221 tests (cumulative with
-safe and test-db) in about four and a half minutes.
+safe and test-db) in about four minutes — the test-db lane runs alongside the
+db batch, so the gate's wall clock is the db batch's alone.
 
 That gap is not a matter of test count. Of those 221 tests, 159 finish in
 under a second each and account for 27 seconds between them; twelve tests carry
@@ -132,9 +145,9 @@ they drive a real subsystem end to end rather than a unit of one:
 Adding a small test costs the gate almost nothing. Adding a suite that boots a
 subsystem costs it seconds, so give one of those a `tier:` it has earned.
 
-The runner executes tests one at a time. Most of the `db` gate's wall clock is
-spent waiting on the database rather than on CPU, so its duration is closer to
-the sum of its parts than to the work it does.
+Within each lane the runner executes tests one at a time. Most of the `db`
+gate's wall clock is spent waiting on the database rather than on CPU, so its
+duration is closer to the sum of its parts than to the work it does.
 
 The `test-db` suites declare `needs: [test-db]`, and the runner probes the
 connection itself rather than trusting the setting. An install without the
