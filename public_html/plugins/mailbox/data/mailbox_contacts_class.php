@@ -4,14 +4,18 @@
  *
  * A disposable autocomplete cache, NOT an identity/relationship record (that is a separate
  * future core system — specs/FUTURE_verified_connections.md; this table must stay a cache).
- * One row per (user, mailbox, normalized address); the store warms up through use (harvested
- * on every send and on opening a thread) and can be imported from a vCard / Google CSV.
+ * One row per (user, mailbox, normalized address).
  *
- * MAILBOX SCOPE. A contact belongs to the mailbox it was seen on (imc_iea_inbound_email_alias_id),
- * so composing from a work mailbox never suggests addresses harvested in a personal one. The
- * same person seen on two mailboxes is two rows, which this store treats as normal: it is a
+ * DELIBERATE ENTRY ONLY. A row exists because the user added it (imc_source 'manual') or
+ * imported a vCard / Google CSV ('import'). Mail traffic never writes here in either
+ * direction: reading a message would let anyone who can send you mail put themselves in
+ * your address book, and a store that fills itself with spam senders is worse than empty.
+ *
+ * MAILBOX SCOPE. A contact belongs to the mailbox it was added to (imc_iea_inbound_email_alias_id),
+ * so composing from a work mailbox never suggests addresses kept in a personal one. The
+ * same person added on two mailboxes is two rows, which this store treats as normal: it is a
  * cache, not a person record. Scope is a property of the ROW, not of the sealing — a row still
- * seals to the harvesting USER's vault, so grantees sharing one mailbox each keep their own
+ * seals to the ADDING user's vault, so grantees sharing one mailbox each keep their own
  * contacts, readable only by them.
  *
  * ENCRYPTION AT REST. A row is sealed iff the owning user holds a Sealed Vault
@@ -29,11 +33,11 @@
  * under a subkey derived from the in-window vault secret) so it never leaks the sealed address
  * to an attacker with only DB access; for a user with no vault it is a plain SHA-256 (the
  * address column is plaintext anyway). See MailboxContacts::addressHash(). A vault rotation
- * changes the derived key, so a re-harvested address may land a second row post-rotation —
+ * changes the derived key, so a re-added address may land a second row post-rotation —
  * harmless, because the contacts payload also de-duplicates by decrypted address on read (this
  * store is a cache).
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -45,8 +49,8 @@ class MailboxContact extends SystemBase {
 	public static $tablename = 'imc_mailbox_contacts';
 	public static $pkey_column = 'imc_mailbox_contact_id';
 
-	const SOURCE_SENT     = 'sent';
-	const SOURCE_RECEIVED = 'received';
+	// How the row got here. Both are deliberate acts by the user — there is no
+	// traffic-derived source, and adding one would re-open the spam-harvest hole.
 	const SOURCE_IMPORT   = 'import';
 	const SOURCE_MANUAL   = 'manual';
 
@@ -54,18 +58,18 @@ class MailboxContact extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		'imc_usr_user_id' => array('action' => 'cascade'),
-		// A mailbox going away takes its harvested contacts with it — they are that
-		// mailbox's cache and mean nothing without it.
+		// A mailbox going away takes its contacts with it — they are that mailbox's
+		// cache and mean nothing without it.
 		'imc_iea_inbound_email_alias_id' => array('action' => 'cascade'),
 	);
 
 	public static $field_specifications = array(
 		'imc_mailbox_contact_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'imc_usr_user_id'        => array('type'=>'int8', 'is_nullable'=>false),
-		// The mailbox this contact was seen on. Nullable only because rows harvested
+		// The mailbox this contact belongs to. Nullable only because rows written
 		// before contacts were mailbox-scoped carry no alias; every write sets it, and
-		// every read filters on it, so a legacy NULL row is simply invisible and
-		// re-warms on the next send or thread open. Nothing is lost — this is a cache.
+		// every read filters on it, so a legacy NULL row is simply invisible. Nothing
+		// of the user's own choosing is lost — this is a cache.
 		'imc_iea_inbound_email_alias_id' => array('type'=>'int4', 'is_nullable'=>true,
 			'foreign_key'=>array('table'=>'iea_inbound_email_aliases',
 				'column'=>'iea_inbound_email_alias_id', 'on_delete'=>'CASCADE')),
@@ -78,8 +82,10 @@ class MailboxContact extends SystemBase {
 		// (user, MAILBOX, address) — see MailboxContacts::addressHash().
 		'imc_address_hash'       => array('type'=>'varchar(64)', 'unique_with'=>array('imc_usr_user_id')),
 		'imc_last_used_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
+		// Times this address has been added (a re-add bumps rather than duplicating).
+		// It orders the autocomplete list; it is not a count of messages exchanged.
 		'imc_use_count'          => array('type'=>'int4', 'is_nullable'=>false, 'default'=>1),
-		'imc_source'             => array('type'=>'varchar(10)', 'default'=>'sent'), // sent|received|import|manual
+		'imc_source'             => array('type'=>'varchar(10)', 'default'=>'manual'), // import|manual
 		// Sealed Vault columns (mirror InboundEmailMessage).
 		'imc_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'imc_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),

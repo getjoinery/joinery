@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.37
+ * No framework. @version 2.38
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -2102,7 +2102,9 @@
 			});
 			lockRow.appendChild(unlock);
 			card.appendChild(lockRow);
-		} else if (contact && contact.saved) {
+		} else if (contact) {
+			// A row exists at all only because the user added or imported it — nothing
+			// files itself here — so its presence is the whole answer.
 			card.appendChild(el('div', 'mbx-context-badge', 'In Contacts'));
 		} else if (isRealMailbox(data.alias_id)) {
 			// Saving needs a mailbox to save INTO, and contacts are per-mailbox. Mail
@@ -2129,15 +2131,11 @@
 			card.appendChild(row);
 		}
 
-		if (contact && !contact.locked) {
-			// use_count counts harvests (a send, or opening a thread), not messages —
-			// so the wording is "seen", which is what the store actually knows.
-			var seen = 'Seen ' + contact.use_count + (contact.use_count === 1 ? ' time' : ' times');
-			if (contact.last_time) seen += ' · last ' + fmtDate(contact.last_time);
-			card.appendChild(el('div', 'mbx-context-since', seen));
-			if (contact.first_time) {
-				card.appendChild(el('div', 'mbx-context-since', 'First seen ' + fmtDate(contact.first_time)));
-			}
+		if (contact && !contact.locked && contact.added_time) {
+			// When they were put here, and by which route. The store knows nothing about
+			// how much mail was exchanged — it never watched the traffic.
+			var how = (contact.source === 'import') ? 'Imported ' : 'Added ';
+			card.appendChild(el('div', 'mbx-context-since', how + fmtDate(contact.added_time)));
 		}
 
 		var all = el('a', 'mbx-context-link', 'All mail with this address →');
@@ -2190,7 +2188,7 @@
 	// Fetch the (small) contact list for ONE mailbox. Called on compose open and again
 	// whenever the From identity changes, because contacts are per-mailbox: suggestions
 	// must follow the address you are writing from, or a work compose would offer the
-	// addresses harvested in a personal mailbox. A locked vault returns no contacts →
+	// addresses kept in a personal mailbox. A locked vault returns no contacts →
 	// autocomplete is silently absent (typing by hand still works).
 	function loadContacts(aliasId) {
 		var target = (aliasId != null) ? aliasId : state.draftAlias;
@@ -3099,9 +3097,9 @@
 			// hasn't started writing (never clobber real content).
 			if (isComposerEmptyExceptSignature()) { insertSignature(aliasSel.value); }
 			// Re-scope recipient suggestions to the new From. Contacts belong to the
-			// mailbox they were seen on, so changing who you are writing AS changes
+			// mailbox they were added to, so changing who you are writing AS changes
 			// which addresses may be suggested — the work mailbox must never offer
-			// what was harvested in a personal one. Addresses already typed stay put;
+			// what was kept in a personal one. Addresses already typed stay put;
 			// only the suggestion list changes.
 			loadContacts(aliasSel.value);
 			markDraftDirty();
