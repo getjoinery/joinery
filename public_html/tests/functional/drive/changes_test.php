@@ -119,12 +119,19 @@ $session->set_api_user($owner->key);
 // ---------------------------------------------------------------------------
 section('reset on a cursor before the retained window');
 
-// Simulate a purge: raise the minimum id by deleting the earliest rows, then ask
-// with a cursor that now points before the earliest retained change.
+// The reset branch fires when cursor + 1 < MIN(retained id). On a table with
+// any history, a cursor below the window can simply be chosen — never delete
+// rows this test does not own from a shared table.
 $min_id = (int)$dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
-$stale_cursor = max(1, $min_id - 5);
-// Delete any rows at/below stale_cursor so min rises above it (a real purge).
-$dblink->prepare("DELETE FROM fch_file_changes WHERE fch_file_change_id <= ?")->execute(array($min_id + 2));
+if ($min_id >= 3) {
+	$stale_cursor = $min_id - 2;
+} else {
+	// Fresh install: the table's only rows are this run's own, so a real purge
+	// of the earliest few is safe here and raises MIN above the cursor.
+	$stale_cursor = max(1, $min_id);
+	$dblink->prepare("DELETE FROM fch_file_changes WHERE fch_file_change_id <= ?")
+	       ->execute(array($stale_cursor + 1));
+}
 $new_min = $dblink->query("SELECT MIN(fch_file_change_id) FROM fch_file_changes")->fetchColumn();
 
 $reset_feed = drive_changes_logic(array('cursor' => $stale_cursor));

@@ -33,7 +33,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.p
 
 if (!is_dir(MailboxIndex::SHM_DIR)) {
 	section('index content');
-	check(true, 'skipped: ' . MailboxIndex::SHM_DIR . ' unavailable', 'no shm');
+	harness_skip('index content', MailboxIndex::SHM_DIR . ' unavailable (no shm)');
 	harness_finish();
 	return;
 }

@@ -112,22 +112,22 @@ currently checks.
 
 ### What each tier costs
 
-`safe` is the tier to run while working: 57 tests in about 15 seconds. `db`
-is the gate to run before a checkin or a publish: 165 tests in about five and a
-half minutes.
+`safe` is the tier to run while working: 79 tests in about 20 seconds. `db`
+is the gate to run before a checkin or a publish: 221 tests (cumulative with
+safe and test-db) in about four and a half minutes.
 
-That gap is not a matter of test count. Of the 165 tests in `db`, 111 finish in
-under a second each and account for 16 seconds between them; twelve tests carry
-two thirds of the total. The expensive ones are expensive for a legible reason —
+That gap is not a matter of test count. Of those 221 tests, 159 finish in
+under a second each and account for 27 seconds between them; twelve tests carry
+half of the total. The expensive ones are expensive for a legible reason —
 they drive a real subsystem end to end rather than a unit of one:
 
 | test | tier | ~time | what it drives |
 |---|---|---|---|
-| `plugin_sync` | db | 62s | a full `PluginManager::sync()` over every active plugin, twice (the idempotence check) |
-| `models_crud` | test-db | 39s | CRUD against every data class in the platform |
-| `multi_models_crud` | test-db | 23s | every Multi collection's filter surface |
-| `api_ajax_migration` | db | 15s | every migrated `/ajax/` action through the API |
-| `account_login` | db | 13s | the sign-in matrix, including deliberate lockout waits |
+| `models_crud` | test-db | 34s | CRUD against every data class in the platform |
+| `multi_models_crud` | test-db | 21s | every Multi collection's filter surface |
+| `account_login` | db | 12s | the sign-in matrix, including deliberate lockout waits |
+| `plugin_sync` | db | 9s | a full `PluginManager::sync()` over every active plugin, twice (the idempotence check) |
+| `booking_flow` | db | 8s | the whole booking subsystem, availability through checkout |
 
 Adding a small test costs the gate almost nothing. Adding a suite that boots a
 subsystem costs it seconds, so give one of those a `tier:` it has earned.

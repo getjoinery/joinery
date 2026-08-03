@@ -127,7 +127,7 @@ try {
 section("Cold-start forces uniform random (threshold=100, both variants at 0 trials)");
 
 $counts = [(int)$variantA->key => 0, (int)$variantB->key => 0];
-for ($i = 0; $i < 400; $i++) {
+for ($i = 0; $i < 120; $i++) {
 	reset_cookies();
 	reset_stash();
 	$p = new Page($page->key, true);
@@ -135,9 +135,12 @@ for ($i = 0; $i < 400; $i++) {
 	$stash = read_stash();
 	if (!empty($stash)) $counts[$stash[0][1]]++;
 }
-// With uniform random over 400 trials, expect ~200 each; loose bounds
-assert_between(130, 270, $counts[(int)$variantA->key], 'Variant A cold-start count ~50%');
-assert_between(130, 270, $counts[(int)$variantB->key], 'Variant B cold-start count ~50%');
+// The failure this guards is gross — cold start collapsing to argmax gives
+// one variant ~everything — so the bounds only need to rule that out. With
+// uniform random over 120 trials, expect ~60 each; 30–90 is ±5.5 sd, so a
+// correct implementation essentially never trips it.
+assert_between(30, 90, $counts[(int)$variantA->key], 'Variant A cold-start count ~50%');
+assert_between(30, 90, $counts[(int)$variantB->key], 'Variant B cold-start count ~50%');
 
 // ---------------------------------------------------------------------------
 // Test 2: Warm bandit picks argmax with epsilon=0

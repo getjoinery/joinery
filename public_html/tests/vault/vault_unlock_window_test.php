@@ -75,7 +75,9 @@ if (!function_exists('apcu_key_info')) {
 	VaultUnlock::open($uid, $secret, $scope, ['idle' => null, 'absolute' => null]);
 	$vault_key = 'vault:' . $sid . ':' . $uid . ':' . $scope;
 	$before = apcu_key_info($vault_key);
-	sleep(2);
+	// creation_time has whole-second granularity; a 1s sleep always lands
+	// time() in a later second, which is all the comparison needs.
+	sleep(1);
 	VaultUnlock::heartbeat($uid);
 	$after_hb = apcu_key_info($vault_key);
 	check($after_hb['creation_time'] === $before['creation_time'], 'a heartbeat does not re-store the key');

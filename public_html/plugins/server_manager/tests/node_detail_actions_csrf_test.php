@@ -85,9 +85,7 @@ try {
 			check(false, "action '{$action}' rejected without a token (got: " . var_export($r, true) . ')');
 		}
 	}
-	if ($all_rejected) {
-		check(true, 'all ' . count($ALL_ACTIONS) . ' actions returned the reject redirect without a token');
-	}
+	check($all_rejected, 'all ' . count($ALL_ACTIONS) . ' actions returned the reject redirect without a token');
 	check(job_count($db, $node_id) === $before, 'no job was created by any tokenless action');
 
 	// -----------------------------------------------------------------------

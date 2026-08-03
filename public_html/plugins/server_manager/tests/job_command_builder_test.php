@@ -79,8 +79,12 @@ function jcb_cmds($steps) {
 function jcb_payload_fired($cmd, $dir) {
 	@unlink($dir . '/CANARY_FIRED');
 	// Neutralise anything that would touch the real system: the fragment is run
-	// with a stub PATH entry set so only the canary is observable.
-	$wrapped = 'cd ' . escapeshellarg($dir) . ' && { ' . $cmd . ' ; } >/dev/null 2>&1';
+	// with a stub PATH entry set so only the canary is observable. The stubs
+	// matter for speed as well as safety — a real ssh against the fixture's
+	// TEST-NET host would block for its full ConnectTimeout per fragment.
+	$wrapped = 'cd ' . escapeshellarg($dir)
+		. ' && export PATH=' . escapeshellarg($dir . '/stub-bin') . ':"$PATH"'
+		. ' && { ' . $cmd . ' ; } >/dev/null 2>&1';
 	@shell_exec($wrapped);
 	$fired = file_exists($dir . '/CANARY_FIRED');
 	@unlink($dir . '/CANARY_FIRED');
@@ -89,6 +93,13 @@ function jcb_payload_fired($cmd, $dir) {
 
 $tmpdir = sys_get_temp_dir() . '/jcb_test_' . bin2hex(random_bytes(4));
 @mkdir($tmpdir, 0777, true);
+// Inert shims for the network binaries a fragment may invoke (see
+// jcb_payload_fired). Exit 255 mirrors ssh's own connection-failure code.
+@mkdir($tmpdir . '/stub-bin', 0777, true);
+foreach (array('ssh', 'scp') as $stub) {
+	file_put_contents($tmpdir . '/stub-bin/' . $stub, "#!/bin/sh\nexit 255\n");
+	@chmod($tmpdir . '/stub-bin/' . $stub, 0755);
+}
 harness_defer(function () use ($tmpdir) {
 	// Recurse: the path-construction section creates a sites-enabled/ subtree,
 	// and a flat unlink+rmdir leaves the whole directory behind.

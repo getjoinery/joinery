@@ -313,7 +313,8 @@ if (!$grp_id) {
 		$variant = $blob->read_bytes($thumb_key);
 		check($variant !== null && base64_encode($variant) === $thumb_b64, 'encrypted thumbnail stored in the thumb variant slot');
 	} else {
-		check(true, 'no image size configured — encrypted thumbnail slot skipped by design');
+		harness_skip('encrypted thumbnail stored in the thumb variant slot',
+			'no image size configured on this install');
 	}
 
 	// -----------------------------------------------------------------------
@@ -329,7 +330,8 @@ if (!$grp_id) {
 		foreach ((array)$profile->itemsForRow((int)$blob->key) as $item) { $listed[] = $item['remote_key']; }
 		check(in_array($blob->remote_key_for($thumb_key), $listed, true), 'offload enumerator lists the encrypted thumb variant');
 	} else {
-		check(true, 'no image size configured — variant inventory leg skipped');
+		harness_skip('blob variant inventory (encrypted thumbnail lifecycle)',
+			'no image size configured on this install');
 	}
 
 	// -----------------------------------------------------------------------
@@ -482,7 +484,8 @@ if (!$grp_id) {
 		));
 		check(!empty($si3['json']['error']), 'vault destination refuses past the ciphertext ceiling');
 	} else {
-		check(true, 'size-cap API leg skipped (tier cap exceeds remaining quota)');
+		harness_skip('vault destination size-cap API leg',
+			'tier cap exceeds remaining quota on this install');
 	}
 
 	// Clear the share grant so teardown leaves no orphan rows.

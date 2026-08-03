@@ -91,20 +91,24 @@ check($order->count() >= 2 && $order[0] === 't_first' && $order[1] === 't_second
 	'consumers run in the order they registered');
 
 section('One consumer cannot starve another');
+// The budget must clear MIN_TURN_SECONDS (1.0): below it the first
+// consumer's turn floor legally spans the whole slice and nothing about
+// starvation is observable. 1.2s gives the slow consumer its 1.0s floor
+// (100 of its 200 items) and still leaves the fast one a turn.
 VaultDeferredWork::resetForTests();
-list($slow) = fake_consumer('t_slow', 100, 0.05);
+list($slow) = fake_consumer('t_slow', 200, 0.01);
 list($fast) = fake_consumer('t_fast', 3);
-VaultDeferredWork::drain($uid, $scope, 1.5);
+VaultDeferredWork::drain($uid, $scope, 1.2);
 check($slow['done'] > 0, 'the slow consumer made progress');
 check($fast['done'] === 3, 'and the fast one still finished its work');
 
 section('The deadline bounds the slice');
 VaultDeferredWork::resetForTests();
-list($greedy) = fake_consumer('t_greedy', 10000, 0.02);
+list($greedy) = fake_consumer('t_greedy', 10000, 0.005);
 $started = microtime(true);
-VaultDeferredWork::drain($uid, $scope, 1.0);
+VaultDeferredWork::drain($uid, $scope, 0.4);
 $elapsed = microtime(true) - $started;
-check($elapsed < 3.0, 'a slice with unlimited work still returns near its budget (' . round($elapsed, 2) . 's)');
+check($elapsed < 1.2, 'a slice with unlimited work still returns near its budget (' . round($elapsed, 2) . 's)');
 check($greedy['remaining'] > 0, 'and it stopped with work left over');
 
 section('A broken consumer is skipped, not fatal');

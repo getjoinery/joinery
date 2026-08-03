@@ -234,15 +234,7 @@ if (!$admin_uid) {
 			$now = $read->fetch(PDO::FETCH_ASSOC);
 			check(in_array('system_version', $result['refused'], true),
 				'a managed setting is refused', json_encode($result['refused']));
-			if (SettingsWriter::ENFORCE_SCOPE) {
-				check($now['stg_value'] === $sysver['stg_value'], 'and is not written');
-			} else {
-				// Shadow mode writes what today's loops write and only logs the
-				// refusal — restore whatever it did.
-				$db->prepare("UPDATE stg_settings SET stg_value = ?, stg_update_time = ? WHERE stg_name = ?")
-				   ->execute(array($sysver['stg_value'], $sysver['stg_update_time'], 'system_version'));
-				check(true, 'shadow mode logs the refusal without changing behaviour yet');
-			}
+			check($now['stg_value'] === $sysver['stg_value'], 'and is not written');
 		}
 	}
 
@@ -263,15 +255,9 @@ if (!$admin_uid) {
 	check(in_array('totp_issuer_name', $result['refused'], true),
 		'a core setting is out of scope for a plugin-scoped save', json_encode($result['refused']));
 
-	if (SettingsWriter::ENFORCE_SCOPE) {
-		$read->execute(array('totp_issuer_name'));
-		check($read->fetch(PDO::FETCH_ASSOC)['stg_value'] === $before['stg_value'],
-			'and its value is untouched');
-	} else {
-		$db->prepare("UPDATE stg_settings SET stg_value = ?, stg_update_time = ? WHERE stg_name = ?")
-		   ->execute(array($before['stg_value'], $before['stg_update_time'], 'totp_issuer_name'));
-		check(true, 'shadow mode records the out-of-scope name without refusing it yet');
-	}
+	$read->execute(array('totp_issuer_name'));
+	check($read->fetch(PDO::FETCH_ASSOC)['stg_value'] === $before['stg_value'],
+		'and its value is untouched');
 
 	// An undeclared name is refused whatever the scope.
 	$result = SettingsWriter::write(
@@ -280,14 +266,9 @@ if (!$admin_uid) {
 	);
 	check(in_array('a_setting_nobody_declared', $result['refused'], true),
 		'an undeclared name is refused');
-	if (SettingsWriter::ENFORCE_SCOPE) {
-		$count = $db->prepare("SELECT COUNT(*) FROM stg_settings WHERE stg_name = ?");
-		$count->execute(array('a_setting_nobody_declared'));
-		check((int)$count->fetchColumn() === 0, 'and no row is created for it');
-	} else {
-		$db->prepare("DELETE FROM stg_settings WHERE stg_name = ?")->execute(array('a_setting_nobody_declared'));
-		check(true, 'shadow mode still creates it — that is the behaviour being measured, not yet changed');
-	}
+	$count = $db->prepare("SELECT COUNT(*) FROM stg_settings WHERE stg_name = ?");
+	$count->execute(array('a_setting_nobody_declared'));
+	check((int)$count->fetchColumn() === 0, 'and no row is created for it');
 
 	// Form and request plumbing is never a candidate, in any mode.
 	$result = SettingsWriter::write(array('_csrf_token' => 'abc'), array('page' => 'test'));
