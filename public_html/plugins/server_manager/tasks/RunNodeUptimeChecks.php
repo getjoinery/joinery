@@ -274,7 +274,6 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$errno  = curl_errno($ch);
 		$errmsg = curl_error($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 

@@ -370,7 +370,6 @@ class JobResultProcessor {
 		]);
 		curl_exec($ch);
 		$curl_error = curl_error($ch);
-		curl_close($ch);
 
 		if ($version) {
 			$node->set('mgn_joinery_version', $version);

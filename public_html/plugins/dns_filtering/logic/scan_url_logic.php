@@ -142,7 +142,6 @@ function scan_url_logic(array $input): LogicResult{
 		$body        = curl_exec($ch);
 		$http_code   = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$redirect_to = curl_getinfo($ch, CURLINFO_REDIRECT_URL);
-		curl_close($ch);
 
 		if ($body === false) {
 			return LogicResult::error('Could not fetch the page. The server may be unavailable or blocking automated requests.');
@@ -326,7 +325,6 @@ function scan_url_logic(array $input): LogicResult{
 			$response  = curl_multi_getcontent($item['handle']);
 			$http_code = curl_getinfo($item['handle'], CURLINFO_HTTP_CODE);
 			curl_multi_remove_handle($multi, $item['handle']);
-			curl_close($item['handle']);
 
 			$entry = array('domain' => $item['domain']);
 

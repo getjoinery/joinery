@@ -219,7 +219,6 @@ class DownloadBlocklists implements ScheduledTaskInterface {
 
 		$success = curl_exec($ch);
 		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		fclose($fp);
 
 		if (!$success || $http_code < 200 || $http_code >= 300) {

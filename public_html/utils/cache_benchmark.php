@@ -37,7 +37,6 @@ function measure_load_time($url, $use_cache = true) {
     $end = microtime(true);
 
     $info = curl_getinfo($ch);
-    curl_close($ch);
 
     return [
         'time' => ($end - $start) * 1000, // Convert to milliseconds

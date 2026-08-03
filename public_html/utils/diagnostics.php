@@ -16,7 +16,7 @@
 # See PasswordHash.php for more information.
 #
 
-error_reporting(E_ALL | E_STRICT);
+error_reporting(E_ALL);
 
 require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 

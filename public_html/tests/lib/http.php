@@ -270,7 +270,6 @@ function harness_request($method, $url, array $opts = array()) {
 	$status = (int)curl_getinfo($ch, CURLINFO_RESPONSE_CODE);
 	$content_type = (string)curl_getinfo($ch, CURLINFO_CONTENT_TYPE);
 	$redirect_url = (string)curl_getinfo($ch, CURLINFO_REDIRECT_URL);
-	curl_close($ch);
 
 	$raw = ($raw === false) ? '' : (string)$raw;
 

@@ -961,7 +961,6 @@ class PluginManager extends AbstractExtensionManager {
         $ok = curl_exec($ch);
         $curl_error = curl_error($ch);
         $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-        curl_close($ch);
         fclose($fp);
 
         if ($http_code === 404) {

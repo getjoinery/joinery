@@ -540,12 +540,6 @@ private static function UcAddress($string) {
 		return $this->get('usa_usr_user_id') === $session->get_user_id();
 	}
 
-	function get_distance_between($other_address, $force_private=FALSE) {
-		return Address::GetDistanceBetweenLocations(
-			$this->get_location($force_private),
-		 	$other_address->get_location($force_private));
-	}
-
 	function get_location($force_private=FALSE) {
 		if (!$this->get('x')) {
 			return NULL;
@@ -690,7 +684,6 @@ private static function UcAddress($string) {
 		curl_setopt($ch, CURLOPT_URL, $url);
 		curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 		$address_data = unserialize(curl_exec($ch));
-		curl_close($ch);
 
 		if(strlen($address_data['ResultSet']['Result']['precision'])>0){
 			$numreturned=1;
@@ -736,7 +729,6 @@ private static function UcAddress($string) {
 		curl_setopt($ch, CURLOPT_TIMEOUT, 3000);
 
 		$data = curl_exec($ch);
-		curl_close($ch);
 
 		if (substr($data,0,3) == "200"){
 			$data = explode(",",$data);

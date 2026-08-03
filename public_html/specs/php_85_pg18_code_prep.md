@@ -1,6 +1,9 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
-**Status:** Draft — Phase 1 ready to build, Phase 2 gated on the OS campaign
+**Status:** Phase 1 partially BUILT 2026-08-03 (uncommitted) — the no-op deletions
+in 1.2 and all of 1.7 are done and `safe` is green (79/79, 1904 checks). The rest
+of Phase 1 (1.1, the `trigger_error` and `$http_response_header` items in 1.2, and
+1.3–1.6, 1.8) is ready to build. Phase 2 remains gated on the OS campaign.
 **Date:** 2026-08-01
 **Companion:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (the fleet migration itself)
 
@@ -74,6 +77,12 @@ A full static sweep of the tree (2026-08-01) against the PHP 8.4 and 8.5 UPGRADI
 notes and the PostgreSQL 17 and 18 migration lists found the application code
 substantially clean. Recorded here so it is not re-derived:
 
+**Scope correction (2026-08-03).** The original sweep's `curl_close()` count was
+core-only and missed every plugin — 12 recorded against 53 actual. Counts for
+`imagedestroy()` (8), `finfo_close()` (2), and implicitly nullable parameters (2)
+were re-verified across the whole tree at build time and were correct as written.
+Any future audit item must be counted across `plugins/` as well as core.
+
 **Clean — no occurrences anywhere in app code:** `(boolean)`/`(integer)`/`(double)`/
 `(binary)` casts, `MHASH_*`, mysqli, `xml_set_*`, `xml_parser_free`,
 `SplObjectStorage`, `setAccessible()`, `socket_set_timeout`, `lcg_value`,
@@ -142,28 +151,33 @@ All of the following are valid on 8.3 and behave identically there.
   `:3969`, `:3979`, all inside `validateVisibilityRules()`. These are
   developer-error assertions intended to halt; replace with a thrown
   `InvalidArgumentException`, which preserves the intent and the message.
-- Implicitly nullable parameters — `includes/VaultDeferredWork.php:118`:
-  `string $scope = null` and `float $budget_seconds = null` become `?string` and
-  `?float`.
-- `E_STRICT` — `utils/diagnostics.php:19`, `error_reporting(E_ALL | E_STRICT)`
-  becomes `error_reporting(E_ALL)`.
+- ~~Implicitly nullable parameters~~ **BUILT 2026-08-03** —
+  `includes/VaultDeferredWork.php:118`: `string $scope = null` and
+  `float $budget_seconds = null` became `?string` and `?float`. A whole-tree
+  rescan confirmed these were the only two; the other `= null` typed params in
+  the tree (`?\Throwable $previous` in `includes/ErrorClasses.php` and
+  `MailingListProviderException.php`) were already explicit.
+- ~~`E_STRICT`~~ **BUILT 2026-08-03** — `utils/diagnostics.php:19` is now
+  `error_reporting(E_ALL)`.
 
 **Deprecated in 8.5:**
 
-- `curl_close()` — twelve call sites: `adm/admin_static_cache.php:182`,
-  `includes/PluginManager.php:933`, `data/address_class.php:693` and `:739`,
-  `includes/StaticPageCache.php:954`, `includes/FormWriterV2Base.php:5009` and
-  `:5029`, `utils/cache_benchmark.php:40`, `utils/upgrade.php:258`, `:536` and
-  `:1878`, `tests/lib/http.php:273`. The function has been a no-op since PHP 8.0
-  (a `CurlHandle` is released by garbage collection), so these are deletions.
-- `imagedestroy()` — eight call sites: `data/file_blobs_class.php:1091` and
-  `:1092`, `includes/UploadHandler.php:618`, `:697` and `:708`,
-  `includes/Photo.php:308` and `:309`,
+- ~~`curl_close()`~~ **BUILT 2026-08-03** — **53 call sites across 30 files**, not
+  the twelve originally recorded; the original count omitted `plugins/` entirely
+  (`plugins/store/includes/PaypalHelper.php` alone held 14, plus sites in
+  `server_manager`, `dns_filtering`, `mailbox`, and `store`). The function has
+  been a no-op since PHP 8.0 (a `CurlHandle` is released by garbage collection),
+  so all 53 were deletions. Every site was verified to be a standalone statement
+  and none was the sole body of an unbraced `if`/`else` before deleting — that
+  was the only way a bulk line-delete could have silently changed control flow.
+- ~~`imagedestroy()`~~ **BUILT 2026-08-03** — eight call sites:
+  `data/file_blobs_class.php:1091` and `:1092`, `includes/UploadHandler.php:618`,
+  `:697` and `:708`, `includes/Photo.php:308` and `:309`,
   `tests/functional/files/blob_layer_test.php:49`. Also a no-op since 8.0.
-  `UploadHandler.php:618` is the exception to "just delete the line": it reads
-  `return $image && imagedestroy($image);`, so the call is part of the return
-  expression and removing it must preserve the `(bool)$image` result.
-- `finfo_close()` — `data/files_class.php:717` and `:747`.
+  `UploadHandler.php:618` was the exception to "just delete the line": it read
+  `return $image && imagedestroy($image);`, so the call was part of the return
+  expression and became `return (bool)$image;`, preserving the result.
+- ~~`finfo_close()`~~ **BUILT 2026-08-03** — `data/files_class.php:717` and `:747`.
 - `$http_response_header` — `plugins/mailbox/tasks/LearnSpamFeedback.php:177`,
   reading the rspamd controller's status line. The replacement,
   `http_get_last_response_headers()`, is 8.4-and-later only, so this needs a
@@ -274,14 +288,15 @@ containing a newline — common in the Google Contacts "Notes" column — breaks
 row alignment regardless of the escape setting. Worth its own fix; out of scope
 for an upgrade-prep pass.
 
-### 1.7 Remove dead bulk-user page
+### 1.7 Remove dead bulk-user page — BUILT 2026-08-03
 
-`adm/admin_user_add_bulk.php` calls `fopen("test.csv", "r")` against a hardcoded
-relative filename that does not exist, with no upload and no form, and echoes
-raw fields to the page. It is absent from `admin_menus.json` and from
-`amu_admin_menus`, and nothing in the tree links to it; reaching
-`/admin/admin_user_add_bulk` with permission 5 renders a blank page. Delete it.
-This also removes one site from 1.6.
+`adm/admin_user_add_bulk.php` called `fopen("test.csv", "r")` against a hardcoded
+relative filename that does not exist, with no upload and no form, and echoed
+raw fields to the page. It was absent from `admin_menus.json` and from
+`amu_admin_menus`, and nothing in the tree linked to it; reaching
+`/admin/admin_user_add_bulk` with permission 5 rendered a blank page. Deleted,
+after confirming zero code references and zero `amu_admin_menus` rows. This also
+removed one site from 1.6.
 
 ### 1.8 Composer floor, platform pin, and dependency constraints
 
@@ -315,6 +330,68 @@ constraint from `^2.0` to `^5.0`. Three majors, but the blast radius is one file
 `Model\SendSmtpEmail`, and `ApiException`. Verify those symbols survived the
 v2→v5 move; `tests/integration/email_inline_attachments_test.php` already
 exercises `BrevoProvider::buildBaseEmail()` and is the regression check.
+
+### 1.9 Latent fatals surfaced by the validator sweep — BUILT 2026-08-03
+
+Not upgrade work. Both were found by running `validate_php_file.php` over files
+already being touched for 1.2, and both were pre-existing calls to methods that
+do not exist anywhere in the tree — guaranteed fatals, latent only because
+neither caller currently has callers of its own.
+
+- `includes/StaticPageCache.php:1037` — `getRecentUrls()` called
+  `self::getIndex()`. The class defines `loadIndex()` and `saveIndex()`; there is
+  no `getIndex()`. Repointed to `loadIndex()`, which returns the index array the
+  surrounding code goes on to use.
+- `data/address_class.php:543` — `get_distance_between()` called
+  `Address::GetDistanceBetweenLocations()`, which exists in neither the tree nor
+  vendor. Deleted the method rather than implementing it: there is no haversine,
+  PostGIS, or other distance helper anywhere to point it at, it had zero callers,
+  it is not exposed through a descriptor or the AI surface, and the one adjacent
+  hook (`get_address_dropdown_options`'s `$distance_from_addr`) is never passed by
+  its only caller. Address-to-address distance is a feature request, not a fix —
+  it belongs to `specs/geolocation_postgis_spec.md`.
+
+A third flag, `$message->partIterator()` in
+`plugins/mailbox/includes/InboundEmailRouter.php`, is a validator false positive:
+the method is genuine `Horde_Mime_Part` API (`vendor/bytestream/horde-mime/lib/Horde/Mime/Part.php:1682`)
+and the validator mis-attributes `$message` to the app's own `EmailMessage`.
+
+**Tree-wide sweep (2026-08-03).** The validator was then run deliberately across
+the tree. Because it `include()`s its target, a tokenizer pre-screen excluded any
+file with top-level executable code: 857 declaration-shaped candidates under
+`data/`, `includes/`, `logic/`, and the plugin equivalents, of which 806 cleared
+and were validated. That yielded 14 findings, 11 of them false positives (traits
+where `parent::`/`self::` cannot resolve standalone, and vendor classes such as
+Guzzle's `Promise\Utils` and Brevo's aliased `Configuration`). The three real
+ones, none of them PHP 8.5 issues:
+
+- **`includes/PluginHelper.php:43` — `registerRoutes()` removed.** Orphaned
+  residue: commit `7afd6337` (2026-04-06, "Remove unused public API surface from
+  theme/plugin system") deleted both the `$this->registerRoutes();` call and the
+  sibling `registerAdminMenu()` method, but left `registerRoutes()` itself.
+  It was `private` with zero callers, and the `RouteRegistry` class it guarded on
+  has never existed in any commit in the repository's history — plugin routing is
+  auto-discovery. `getAdminMenuItems()` is unrelated and still live (3 callers).
+- **`data/location_info_data.php` — left in place, deliberately.**
+  `LocationInfo::find_location()` calls `LibraryFunctions::GetLocationInfoFromCache()`,
+  which does not exist and has no `__callStatic` fallback. Nothing requires the
+  file and nothing references the class, so it cannot execute. Not deleted: it is
+  126 lines of zip/city-state parsing, and `includes/SessionControl.php:1034`
+  carries a commented-out companion call to `StoreLocationInfoInCache()`, which
+  reads as a paused feature rather than abandoned code. Needs an owner decision.
+- **Blocking is documented but does not exist** — see below; a docs defect, not a
+  code one.
+
+`docs/social_features.md` claimed `get_or_create_conversation()` and
+`add_message()` enforce user blocks and that "plugins don't need to check blocks
+separately". No `UserBlock` class and no user-block table exist, so the
+`class_exists('UserBlock')` branch at `data/conversations_class.php:52` and `:147`
+is permanently false and no block check ever runs. The doc was corrected to state
+that the platform has no blocking system and that callers must enforce their own
+restrictions; the guards were left as the integration point if blocking is built.
+The same file's "reporting" claim was also dropped — no report class or table
+exists either. The `agf_agent_files` "Internal CLAUDE.md" record still repeats
+both claims and needs the same correction through `/admin/admin_agent_files`.
 
 ## Phase 2 — Requires the New Stack
 
@@ -371,8 +448,13 @@ These are behaviour changes with no code fix — they need a run, not an edit.
 
 ## Verification
 
-- `php tests/run.php safe` after each Phase 1 item.
+- `php tests/run.php safe` after each Phase 1 item. **Green as of 2026-08-03 for
+  the built subset (1.2 deletions, 1.7, 1.9): 79/79 tests, 1904 checks, 0 failed.**
 - `php tests/run.php db` before committing Phase 1, and again before publishing.
+  **Not yet run against the built subset.**
+- `validate_php_file.php` reports `Missing: 0` on every file touched so far. Note
+  that it *executes* its target, so it is run only on class/definition files —
+  `utils/` scripts and other run-on-include bodies get `php -l` and review by eye.
 - `tests/deploy/syntax_sweep_test.php` covers the parse level for every file the
   deployed site can load; it is the existing deploy gate and needs no change.
 - Phase 1.1 specifically: confirm on a current 24.04 node that an upgrade

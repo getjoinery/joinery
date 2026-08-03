@@ -347,7 +347,6 @@ class S3Signer {
 			// never be prepended to the next one's.
 			$sink = fopen($sink_file, 'wb');
 			if (!$sink) {
-				curl_close($ch);
 				throw new S3SignerException('Cannot open sink file: ' . $sink_file);
 			}
 			curl_setopt($ch, CURLOPT_FILE, $sink);
@@ -366,7 +365,6 @@ class S3Signer {
 		$header_size = (int)curl_getinfo($ch, CURLINFO_HEADER_SIZE);
 		$curl_errno = curl_errno($ch);
 		$curl_err = curl_error($ch);
-		curl_close($ch);
 		if ($sink !== null) {
 			fclose($sink);
 		}

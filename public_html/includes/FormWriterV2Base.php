@@ -5006,7 +5006,6 @@ JS;
             ]));
             curl_setopt($verify, CURLOPT_RETURNTRANSFER, true);
             $response = curl_exec($verify);
-            curl_close($verify);
             $responseData = json_decode($response);
             return !empty($responseData->success);
         } elseif ($settings->get_setting('captcha_public') && $settings->get_setting('captcha_private')) {
@@ -5026,7 +5025,6 @@ JS;
                 'remoteip' => $_SERVER['REMOTE_ADDR'],
             ]);
             $resp = json_decode(curl_exec($ch));
-            curl_close($ch);
             return !empty($resp->success);
         }
 

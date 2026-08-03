@@ -1088,8 +1088,6 @@ class FileBlob extends SystemBase {
 
 			self::gd_write($dst, $new_path, $type, $quality);
 
-			imagedestroy($src);
-			imagedestroy($dst);
 		} catch (\Throwable $e) {
 			error_log('FileBlob resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());
 		}

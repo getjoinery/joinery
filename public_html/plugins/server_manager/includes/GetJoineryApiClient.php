@@ -62,7 +62,6 @@ class GetJoineryApiClient {
 		$body   = curl_exec($ch);
 		$errno  = curl_errno($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		if ($errno || $status < 200 || $status >= 300) return null;
 		$decoded = json_decode($body, true);

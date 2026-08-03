@@ -305,8 +305,6 @@ class Photo {
 		}
 
 		// clean up
-		imagedestroy($this->src);
-		imagedestroy($this->tmp);
 		return $success;
 	}
 

@@ -714,7 +714,6 @@ public static function get_by_name($name, $search_deleted = false) {
 			return null;
 		}
 		$mime = finfo_file($finfo, $path);
-		finfo_close($finfo);
 		if ($mime === false || $mime === '') {
 			return null;   // finfo failed on readable bytes — treat as unavailable
 		}
@@ -744,7 +743,6 @@ public static function get_by_name($name, $search_deleted = false) {
 			return null;
 		}
 		$mime = finfo_buffer($finfo, (string)$bytes);
-		finfo_close($finfo);
 		if ($mime === false || $mime === '') {
 			return null;
 		}
