@@ -16,7 +16,7 @@ class FileException extends SystemBaseException {}
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.7.0
+ * @version 1.8.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -1129,6 +1129,25 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * Mint the signing key now if the deployment has none, so that no later
+	 * request has to.
+	 *
+	 * Called from update_database, which runs on every install and upgrade.
+	 * The point is the moment, not the act: minting writes a long encrypted
+	 * blob to stg_settings, and stg_settings cannot seal anything to a user,
+	 * so the write is refused outright (SealedEgressGuard) if it happens in a
+	 * request that has already opened sealed content. Opening a protected mail
+	 * thread with an attachment is exactly such a request — it decrypts the
+	 * bodies, then mints signed URLs for the attachments. Provisioning here,
+	 * cold, keeps that first mint out of a hot request.
+	 *
+	 * @return bool True once a key exists.
+	 */
+	public static function provisionSigningKey() {
+		return self::_get_signing_key(true) !== null;
+	}
+
+	/**
 	 * The dedicated file-URL signing key: 32 random bytes, generated on
 	 * first mint, stored SecretBox-encrypted in stg_settings. Deliberately
 	 * separate from secret_box_key (key separation): deleting the row
@@ -1162,15 +1181,27 @@ public static function get_by_name($name, $search_deleted = false) {
 				self::$signing_key = false;
 				return null;
 			}
-			// Race-safe first-mint provisioning: ON CONFLICT no-op, then
-			// re-read so a concurrent winner's key is the one we use.
+			// Race-safe first-mint provisioning, then re-read so a concurrent
+			// winner's key is the one we use.
+			//
+			// The row usually already exists and is empty: file_signed_url_key is
+			// declared in settings.json, so every install seeds it with its ''
+			// default long before anything mints. First-mint therefore has to fill
+			// an existing row, not merely insert one — a plain DO NOTHING leaves
+			// the row empty forever and every signed URL on the deployment fails.
+			// Filling only when empty is still race-safe: ON CONFLICT locks the
+			// conflicting row and evaluates this WHERE against its latest version,
+			// so a concurrent loser sees the winner's key and leaves it alone, and
+			// a key already in use is never overwritten.
 			$box = new SecretBox();
 			$new_blob = $box->encrypt(base64_encode(random_bytes(32)));
 			$ins = $dblink->prepare(
 				"INSERT INTO stg_settings
 					(stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
 				 VALUES (?, ?, 1, NOW(), NOW(), 'files')
-				 ON CONFLICT (stg_name) DO NOTHING"
+				 ON CONFLICT (stg_name) DO UPDATE
+					SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()
+					WHERE stg_settings.stg_value IS NULL OR stg_settings.stg_value = ''"
 			);
 			$ins->execute(array(self::SIGNING_KEY_SETTING, $new_blob));
 			$blob = $read();

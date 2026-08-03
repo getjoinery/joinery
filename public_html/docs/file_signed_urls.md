@@ -85,11 +85,24 @@ no `Accept-Ranges` and ignore a `Range` header rather than half-honoring it.
 
 ## The signing key
 
-A dedicated 32-byte key, generated on first mint and stored
-SecretBox-encrypted in `stg_settings` under `file_signed_url_key`. It is
-deliberately separate from `secret_box_key` (key separation): deleting the
-row rotates the key, which invalidates every outstanding signed URL and
-nothing else — a non-event given short TTLs.
+A dedicated 32-byte key, stored SecretBox-encrypted in `stg_settings` under
+`file_signed_url_key`. It is deliberately separate from `secret_box_key` (key
+separation): deleting the row rotates the key, which invalidates every
+outstanding signed URL and nothing else — a non-event given short TTLs.
+
+`update_database` provisions the key on every install and upgrade
+(`File::provisionSigningKey()`), so a deployment has one before anything needs
+to mint. That timing is the point. The setting is declared in `settings.json`,
+so the row is seeded empty and first-mint fills it; but minting writes a long
+encrypted blob to `stg_settings`, which cannot seal to a user, so
+[SealedEgressGuard](sealed_vault.md) refuses the write in any request that has
+already opened sealed content. Opening a protected mail thread with an
+attachment is exactly that: it decrypts the bodies, then mints signed URLs for
+the attachments. Provisioning at deploy time, cold, keeps first-mint out of
+that request.
+
+A request may still mint the key itself if none exists — filling the seeded row
+when it is empty, and never overwriting a key already in use.
 
 ## Composition: Drive share links
 
@@ -105,3 +118,7 @@ visitor may fetch, the signed URL controls *this one fetch*.
 
 `tests/functional/files/signed_urls_test.php` (see [Testing](testing.md)) — covers no-session
 serving, expiry, tamper, size-key binding, and the ownership-gate fallback.
+
+`tests/functional/files/signing_key_provision_test.php` — covers first-mint:
+filling the seeded-empty row, leaving a key already in use alone, and minting
+end to end.
