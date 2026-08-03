@@ -99,10 +99,20 @@ if ($recovery['state'] === 'unconfigured' || $recovery['state'] === 'invalid') {
 	echo '<pre class="border rounded p-2 small">php '
 	   . htmlspecialchars(PathHelper::getSiteRoot())
 	   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key</pre>';
+	// The key is a declared setting, so the field comes from the renderer even
+	// though this box owns it — the schedule form below skips it for the same
+	// reason. Only the requirement to fill it in is page context.
+	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 	$fw = $page->getFormWriter('recovery_key_form');
 	$fw->begin_form();
 	$fw->hiddeninput('action', '', array('value' => 'save_recovery_key'));
-	$fw->textinput('backup_recovery_public_key', 'Recovery public key', array('required' => true));
+	SettingsFieldRenderer::renderGroup($fw, 'backups', array(
+		'source' => 'core',
+		'only'   => array('backup_recovery_public_key'),
+		'field_options' => array(
+			'backup_recovery_public_key' => array('required' => true),
+		),
+	));
 	$fw->submitbutton('btn_save_recovery', 'Save public key');
 	$fw->end_form();
 

@@ -1,6 +1,6 @@
 # Social Features
 
-Core platform features for user-to-user interaction: reactions (likes, favorites, bookmarks), blocking, reporting, and messaging. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
+Core platform features for user-to-user interaction: reactions (likes, favorites, bookmarks) and messaging. These are generic systems used by any interactive site -- the dating plugin and others add domain-specific behavior on top.
 
 ---
 
@@ -223,9 +223,18 @@ $participant->save();
 $_SESSION['message_unread_count'] = null;
 ```
 
-### Block System Integration
+### Blocking
 
-`Conversation::get_or_create_conversation()` and `add_message()` check for blocks before proceeding. If either user has blocked the other, a `ConversationException` is thrown. Plugins don't need to check blocks separately -- the messaging API handles it.
+**The platform has no user-blocking system.** There is no block model, no block
+table, and no way for one user to block another.
+
+`Conversation::get_or_create_conversation()` and `add_message()` each contain a
+`class_exists('UserBlock')` branch that would reject a blocked pair. No such
+class exists, so the branch never runs and the messaging API performs no block
+checks at all. The branch is the integration point if blocking is ever built.
+
+**A caller that needs to restrict who may message whom must enforce it itself,
+before calling the messaging API.** The messaging system will not do it.
 
 ### Plugin Usage
 

@@ -38,17 +38,6 @@ class PluginHelper extends ComponentBase {
     }
     
     /**
-     * Register plugin routes with the system
-     */
-    private function registerRoutes() {
-        // This would integrate with serve.php routing system
-        // Store plugin routes for processing in main routing logic
-        if (class_exists('RouteRegistry')) {
-            RouteRegistry::registerPlugin($this->name, $this->getIncludePath('serve.php'));
-        }
-    }
-    
-    /**
      * Check if plugin is currently active
      */
     protected function isActive() {

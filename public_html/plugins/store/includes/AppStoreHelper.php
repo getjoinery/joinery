@@ -188,7 +188,6 @@ class AppStoreHelper {
 		$body = curl_exec($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$curl_error = curl_error($ch);
-		curl_close($ch);
 
 		if ($body === false) {
 			throw new AppStoreHelperException('App Store Server API request failed: ' . $curl_error);

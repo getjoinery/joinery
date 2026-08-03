@@ -97,7 +97,6 @@ function refresh_node_status_logic(array $input): LogicResult {
 	$errmsg     = curl_error($ch);
 	$status     = (int) curl_getinfo($ch, CURLINFO_HTTP_CODE);
 	$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
-	curl_close($ch);
 
 	$is_up = !$errno && $status >= 200 && $status < 400;
 	if ($is_up) {

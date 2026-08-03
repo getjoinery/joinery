@@ -951,7 +951,6 @@ class StaticPageCache {
             $response = curl_exec($ch);
             $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
             $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-            curl_close($ch);
 
             if ($response === false) {
                 $result['reasons'][] = '❌ Failed to fetch URL';
@@ -1035,7 +1034,7 @@ class StaticPageCache {
         }
 
         $urls = [];
-        $index = self::getIndex();
+        $index = self::loadIndex();
 
         // Get all cached files with their URLs
         $files = glob(self::$cache_dir . '*.html');

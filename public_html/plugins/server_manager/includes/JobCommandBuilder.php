@@ -157,7 +157,6 @@ class JobCommandBuilder {
 		$errno = curl_errno($ch);
 		$errmsg = curl_error($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
 
@@ -248,7 +247,6 @@ class JobCommandBuilder {
 		$errno = curl_errno($ch);
 		$errmsg = curl_error($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
 
@@ -319,7 +317,6 @@ class JobCommandBuilder {
 		curl_exec($ch);
 		$errno  = curl_errno($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		return ['ok' => ($errno === 0 && $status > 0)];
 	}
 

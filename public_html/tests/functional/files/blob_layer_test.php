@@ -46,7 +46,6 @@ function make_png($seed = 0) {
 	ob_start();
 	imagepng($im);
 	$data = ob_get_clean();
-	imagedestroy($im);
 	return $data;
 }
 

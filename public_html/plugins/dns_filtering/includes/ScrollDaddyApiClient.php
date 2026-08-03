@@ -95,7 +95,6 @@ class ScrollDaddyApiClient {
 
 		$response = curl_exec($ch);
 		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 
 		if ($response === false || $http_code < 200 || $http_code >= 300) {
 			return null;

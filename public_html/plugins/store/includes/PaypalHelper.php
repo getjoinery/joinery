@@ -187,7 +187,6 @@ class PaypalHelper{
 
 		$response = curl_exec($curl);
 
-		curl_close($curl);
 		return json_decode($response,true);
 
 	}
@@ -214,7 +213,6 @@ class PaypalHelper{
 
 		$response = curl_exec($curl);
 
-		curl_close($curl);
 		return json_decode($response,true);
 	}
 	
@@ -239,7 +237,6 @@ class PaypalHelper{
 
 		$response = curl_exec($curl);
 
-		curl_close($curl);
 		return json_decode($response,true);
 
 	}
@@ -279,7 +276,6 @@ class PaypalHelper{
 		));
 
 		$response = curl_exec($curl);
-		curl_close($curl);
 		return json_decode($response, true);
 	}
 	
@@ -331,7 +327,6 @@ class PaypalHelper{
 		));
 
 		$response = curl_exec($curl);
-		curl_close($curl);
 
 		$response = json_decode($response, true);
 		return $response;
@@ -371,7 +366,6 @@ class PaypalHelper{
 		));
 
 		$response = curl_exec($curl);
-		curl_close($curl);
 		return json_decode($response, true);
 	}
 
@@ -468,7 +462,6 @@ class PaypalHelper{
 		));
 
 		$response = curl_exec($curl);
-		curl_close($curl);
 		return json_decode($response,true);
     }
 	
@@ -503,7 +496,6 @@ class PaypalHelper{
 		));
 
 		$result = curl_exec($ch);
-		curl_close($ch);			
 		return json_decode($result, true);
 	}
 	
@@ -528,7 +520,6 @@ class PaypalHelper{
 
 		$response = curl_exec($curl);
 
-		curl_close($curl);
 		return json_decode($response, true);
 	}
 
@@ -553,7 +544,6 @@ class PaypalHelper{
 		));
 		$response = curl_exec($curl);
 		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-		curl_close($curl);
 		return $http_code === 204;
 	}
 
@@ -575,7 +565,6 @@ class PaypalHelper{
 		));
 		$response = curl_exec($curl);
 		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-		curl_close($curl);
 		return $http_code === 204;
 	}
 
@@ -597,7 +586,6 @@ class PaypalHelper{
 		));
 		$response = curl_exec($curl);
 		$http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
-		curl_close($curl);
 		return $http_code === 204;
 	}
 
@@ -614,7 +602,6 @@ class PaypalHelper{
 			CURLOPT_HTTPHEADER => array("Authorization: Basic $access_token"),
 		));
 		$response = curl_exec($curl);
-		curl_close($curl);
 		return json_decode($response, true);
 	}
 
@@ -655,7 +642,6 @@ class PaypalHelper{
 			),
 		));
 		$response = curl_exec($curl);
-		curl_close($curl);
 
 		$result = json_decode($response, true);
 		return isset($result['verification_status']) && $result['verification_status'] === 'SUCCESS';

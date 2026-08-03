@@ -65,7 +65,6 @@ function fetch_marketplace_catalog($upgrade_source, $type) {
 	$response = curl_exec($ch);
 	$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 	$curl_error = curl_error($ch);
-	curl_close($ch);
 
 	if ($http_code !== 200 || !$response) {
 		error_log("Marketplace: failed to fetch $type catalog from $url — HTTP $http_code, $curl_error");
@@ -156,7 +155,6 @@ function handle_marketplace_install($input, $upgrade_source, $session) {
 	curl_exec($ch);
 	$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 	$curl_error = curl_error($ch);
-	curl_close($ch);
 	fclose($fp);
 
 	if ($http_code !== 200) {

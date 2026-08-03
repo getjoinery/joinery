@@ -115,7 +115,7 @@ class VaultDeferredWork {
 	 *
 	 * @return array{locked: bool, done: array<string,int>, more: bool}
 	 */
-	public static function drain(int $user_id, string $scope = null, float $budget_seconds = null): array {
+	public static function drain(int $user_id, ?string $scope = null, ?float $budget_seconds = null): array {
 		$scope = $scope ?? UserEncryptionVault::SCOPE_USER;
 		$empty = array('locked' => true, 'done' => array(), 'more' => false);
 		if ($user_id <= 0) {

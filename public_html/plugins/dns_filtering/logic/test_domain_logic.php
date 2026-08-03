@@ -82,7 +82,6 @@ function test_domain_logic(array $input): LogicResult{
 	));
 	$response = curl_exec($ch);
 	$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-	curl_close($ch);
 
 	if ($response === false || $http_code < 200 || $http_code >= 300) {
 		return LogicResult::error('DNS server is not responding. The test could not be completed.');

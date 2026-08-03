@@ -239,7 +239,6 @@ class FleetClient {
 		$body = curl_exec($ch);
 		$err = curl_error($ch);
 		$http = intval(curl_getinfo($ch, CURLINFO_RESPONSE_CODE));
-		curl_close($ch);
 
 		if ($body === false) {
 			throw new FleetClientException('Could not reach the fleet service: ' . $err);

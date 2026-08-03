@@ -215,7 +215,6 @@ if ($_POST && isset($_POST['bkt_name'])) {
 				curl_setopt($ch, CURLOPT_TIMEOUT, 10);
 				$body = curl_exec($ch);
 				$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-				curl_close($ch);
 				if ($status === 200 && ($data = json_decode($body, true))) {
 					$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
 					if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {

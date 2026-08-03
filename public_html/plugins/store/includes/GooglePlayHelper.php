@@ -363,7 +363,6 @@ class GooglePlayHelper {
 		$response = curl_exec($ch);
 		$status = curl_getinfo($ch, CURLINFO_HTTP_CODE);
 		$curl_error = curl_error($ch);
-		curl_close($ch);
 
 		if ($response === false) {
 			throw new GooglePlayHelperException('Google API request failed: ' . $curl_error);

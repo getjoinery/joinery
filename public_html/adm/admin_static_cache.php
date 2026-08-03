@@ -179,7 +179,6 @@ if ($action) {
                     $response = curl_exec($ch);
                     $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
                     $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-                    curl_close($ch);
 
                     if ($response !== false) {
                         $response_headers = substr($response, 0, $header_size);

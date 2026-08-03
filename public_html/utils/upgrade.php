@@ -267,7 +267,6 @@
 	$response = curl_exec($curl);
 	$curl_error = curl_error($curl);
 	$curl_errno = curl_errno($curl);
-	curl_close($curl);
 
 	// Validate cURL request succeeded
 	$upgrade_server_error = null;
@@ -545,7 +544,6 @@
 		$curl_error = curl_error($cd);
 		$curl_errno = curl_errno($cd);
 		$status = curl_getinfo($cd);
-		curl_close($cd);
 		fclose($new_file);
 
 		if ($curl_errno !== 0 || $status["http_code"] != 200) {
@@ -1926,7 +1924,6 @@
 		$success = curl_exec($ch);
 		$error = curl_error($ch);
 		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		curl_close($ch);
 		fclose($fp);
 
 		if (!$success || $http_code !== 200) {

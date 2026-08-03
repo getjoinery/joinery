@@ -407,7 +407,6 @@
 				$token_response = curl_exec($curl);
 				$token_http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 				$curl_error = curl_error($curl);
-				curl_close($curl);
 				
 				// If we got an access token, that means credentials are valid
 				if ($token_http_code === 200) {
@@ -551,7 +550,6 @@
 				$token_response = curl_exec($curl);
 				$token_http_code = curl_getinfo($curl, CURLINFO_HTTP_CODE);
 				$curl_error = curl_error($curl);
-				curl_close($curl);
 
 				// If we got an access token, that means credentials are valid
 				if ($token_http_code === 200) {
