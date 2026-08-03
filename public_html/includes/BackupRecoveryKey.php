@@ -15,6 +15,8 @@
  * operator must open a challenge once before this site will seal anything to
  * the value, and encrypted backups refuse to run until they have.
  *
+ * @version 1.1 - key_report() and accept_proven_fingerprint(), so a control plane can see what a
+ *                site holds and hand it a key it has already proven
  * @version 1.0 - extracted to core from the server_manager custody class; covers the recovery
  *                key only, because per-node key escrow no longer exists
  */
@@ -289,6 +291,95 @@ class BackupRecoveryKey {
 		}
 		self::write_setting(self::PUBLIC_KEY_SETTING, '');
 		self::write_proof_setting('');
+	}
+
+	/**
+	 * What this site is holding, in the form something outside it can compare.
+	 *
+	 * A control plane deciding whether a site needs a recovery key must be able
+	 * to ask without ever handling a private key, and must be able to tell "this
+	 * is the key I manage" from "this is somebody else's key" — so the answer is
+	 * the full fingerprint rather than the abbreviated one the UI shows.
+	 *
+	 * @return array{state:string, fingerprint:string}
+	 *         state: unconfigured | invalid | unproven | proven
+	 *         fingerprint: full sha256 of the public key, or '' when there isn't one
+	 */
+	public static function key_report(): array {
+		$stored = self::read_public_key_setting();
+		$key    = self::classify_key($stored, self::read_proof_setting());
+		$fpr    = '';
+		if ($key['state'] === 'proven' || $key['state'] === 'unproven') {
+			$fpr = hash('sha256', (string)base64_decode(trim((string)$stored), true));
+		}
+		return array('state' => $key['state'], 'fingerprint' => $fpr);
+	}
+
+	/**
+	 * What a control plane pushing its recovery key to this site should do:
+	 * fill an empty slot, complete a matching one, and never overwrite.
+	 *
+	 * Pure — no settings, no database — because the case that matters is the one
+	 * that must never regress. A site already holding a different key may have
+	 * archives that open only with the private half of THAT key; writing over it
+	 * would leave every one of them unopenable, and the mistake would surface at
+	 * the only moment it cannot be undone. So the rule is exercised directly,
+	 * without a test ever having to stand up a site to try it on.
+	 *
+	 * @param string $here_state    unconfigured | invalid | unproven | proven
+	 * @param string $here_fpr      full sha256 of the key configured here, '' if none
+	 * @param string $incoming_fpr  full sha256 of the key being pushed
+	 * @param bool   $have_proof    whether the pusher also carries a proof marker
+	 * @return string different | already | proof_write | written
+	 */
+	public static function push_decision(string $here_state, string $here_fpr,
+	                                     string $incoming_fpr, bool $have_proof): string {
+		$holds_a_key = ($here_state === 'proven' || $here_state === 'unproven');
+
+		// Somebody else's key, whatever state it is in. Proven, backups may
+		// already be sealed to it; unproven, someone may be part-way through
+		// setting it up by hand. Neither is ours to discard.
+		if ($holds_a_key && !hash_equals($here_fpr, $incoming_fpr)) {
+			return 'different';
+		}
+		if ($here_state === 'proven') {
+			return 'already';
+		}
+		// The same key, missing only its proof. Completing it is not an
+		// overwrite: the key stays exactly what it was, and what changes is that
+		// backups can run. With no proof to offer there is nothing to add.
+		if ($here_state === 'unproven') {
+			return $have_proof ? 'proof_write' : 'already';
+		}
+		// Empty, or holding a value that is not a key at all. An unparseable
+		// value can never have sealed anything, so replacing it destroys nothing.
+		return 'written';
+	}
+
+	/**
+	 * Accept a possession proof that was established somewhere else, for the key
+	 * this site already holds.
+	 *
+	 * The ceremony is mandatory for a key a human typed, and this does not weaken
+	 * that. What the ceremony catches is a transcription mistake: a public key
+	 * that was mistyped seals happily and produces archives nobody can open, and
+	 * only a demonstration of the private half rules that out. A key copied
+	 * machine-to-machine from a control plane that has already run the ceremony
+	 * has no transcription step to go wrong, and re-running the ceremony on each
+	 * site would establish nothing that is not already known.
+	 *
+	 * The fingerprint still has to match what is configured here, so this can
+	 * only ever complete the key this site is actually holding — it cannot mark
+	 * some other key proven, and it cannot make an unparseable value usable.
+	 */
+	public static function accept_proven_fingerprint($fpr): void {
+		$expected = hash('sha256', self::parse_public_key());
+		if (!is_string($fpr) || !hash_equals($expected, strtolower(trim($fpr)))) {
+			throw new BackupRecoveryKeyException(
+				'That fingerprint does not belong to the recovery key configured here, so it proves nothing '
+				. 'about it. Nothing was changed.');
+		}
+		self::write_proof_setting($expected);
 	}
 
 	/**

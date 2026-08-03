@@ -1,0 +1,8 @@
+{
+	"_what": "A recovery keypair produced by a real browser's WebCrypto through recoveryReadiness.generateKeypair(). Captured once so the encoding contract is pinned against bytes a browser actually emitted, not bytes PHP made up.",
+	"_warning": "THROWAWAY. This is test material and protects nothing. Never configure it as a real backup recovery key.",
+	"_captured": "2026-08-03",
+	"_browser": "Chrome 148 (HeadlessChrome/148.0.0.0, Linux x86_64)",
+	"private_key_b64": "7zYai8ySN5ca/FvntaL4YaK97wem/N4Iz0MeQGMHh6c=",
+	"public_key_b64": "bqnUsDY+tPipQDmZUfbcIky6V0zCxIfsVyIVWELDPDs="
+}

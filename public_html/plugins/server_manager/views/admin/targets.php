@@ -19,6 +19,11 @@ require_once(PathHelper::getIncludePath('includes/TargetTester.php'));
 require_once(PathHelper::getIncludePath('includes/TargetBackups.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackups.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/SmAdminCsrf.php'));
+// Read by the recovery-key panel below on every render, not only by the POST
+// handlers that also require it — a plain GET has to have it too.
+require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 
 $session = SessionControl::get_instance();
 $session->check_permission(10);
@@ -334,6 +339,59 @@ if ($rk_state['is_ready']) {
 }
 echo ' <a href="' . BackupRecoveryKey::SETUP_URL . '" class="alert-link">Open backup settings</a>.';
 echo '</div>';
+
+// ── Recovery key across the fleet ──
+// A backup this control plane runs seals to the key above. A backup a node runs
+// on its OWN schedule reads that node's own setting, so each managed site needs
+// the key too — which it gets automatically, into an empty slot only. This table
+// is how the operator sees the exception: a site holding a key nobody here put
+// there, which is left alone on purpose.
+$rk_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
+$rk_nodes->load();
+
+$rk_rows = [];
+foreach ($rk_nodes as $rk_node) {
+	$rk_state = RecoveryKeyFleet::node_state($rk_node);
+	if ($rk_state['state'] === 'n/a') continue;   // not applicable, not a gap
+	$rk_rows[] = ['node' => $rk_node, 'rk' => $rk_state];
+}
+
+if ($rk_rows) {
+	$page->begin_box(['title' => 'Recovery key on managed sites']);
+	echo '<p class="text-muted">Each site needs the recovery key to encrypt the backups it runs on its '
+	   . 'own schedule. An empty slot is filled automatically; a site already holding a different key is '
+	   . 'left exactly as it is.</p>';
+	echo '<table class="table table-sm"><thead><tr>'
+	   . '<th>Site</th><th>Recovery key</th><th></th>'
+	   . '</tr></thead><tbody>';
+	$rk_badges = ['has' => 'success', 'missing' => 'warning', 'different' => 'secondary', 'unknown' => 'secondary'];
+	foreach ($rk_rows as $row) {
+		$n  = $row['node'];
+		$rk = $row['rk'];
+		echo '<tr>';
+		echo '<td><a href="/admin/server_manager/node_detail?mgn_id=' . (int)$n->key . '&tab=backups">'
+		   . htmlspecialchars($n->get('mgn_name')) . '</a></td>';
+		echo '<td><span class="badge bg-' . ($rk_badges[$rk['state']] ?? 'secondary') . '">'
+		   . htmlspecialchars($rk['state'] === 'has' ? 'has the key' : $rk['state']) . '</span> ';
+		echo '<span class="small text-muted">' . htmlspecialchars($rk['summary']);
+		if ($rk['fingerprint'] !== '') {
+			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk['fingerprint'])) . '&hellip;)';
+		}
+		echo '</span></td>';
+		echo '<td class="text-end">';
+		if (RecoveryKeyFleet::is_pushable($rk)) {
+			echo '<form method="post" action="/admin/server_manager/node_detail?mgn_id=' . (int)$n->key
+			   . '" style="display:inline;">';
+			echo '<input type="hidden" name="action" value="push_recovery_key">';
+			echo SmAdminCsrf::field();
+			echo '<button type="submit" class="btn btn-sm btn-outline-primary">Send the key</button>';
+			echo '</form>';
+		}
+		echo '</td></tr>';
+	}
+	echo '</tbody></table>';
+	$page->end_box();
+}
 
 // ── Target List ──
 $provider_labels = ['b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];

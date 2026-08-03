@@ -129,31 +129,58 @@ every backup already sealed to the first one.
 
 ## Recovery key setup
 
-Generate the keypair, keep the private half, give the site the public half:
+Setup happens on the Backups page and needs no shell. The panel is rendered by
+`includes/RecoveryKeySetupPanel.php` — one class for all four states
+(`unconfigured` / `invalid` / `unproven` / `ready`), so every surface that
+offers the setup offers the same one.
+
+1. **Generate.** The page mints an X25519 keypair with WebCrypto
+   (`recoveryReadiness.generateKeypair()`). The private half is shown once, with
+   copy and download, and is never sent anywhere.
+2. **Save the public half.** It fills the declared `backup_recovery_public_key`
+   setting — drawn by `SettingsFieldRenderer`, never by the page — and the save
+   button stays disabled until the operator confirms they saved the private key.
+3. **Prove possession.** Paste the private key back. It is used in the browser
+   (X25519 → HKDF-SHA256 → AES-256-GCM) to open a challenge the server sealed;
+   only the recovered sentence is posted, and the server re-checks it.
+
+The page holds the private key in memory at step 1 and **must not** use it to
+satisfy step 3. The ceremony's job is proving that the copy the operator *saved*
+works: auto-proving would pass just as happily for someone who closed the tab
+without saving, and every backup afterwards would be sealed to a key that exists
+nowhere. That is also why the proof is load-bearing in general — sealing to a
+public key always appears to succeed, so a mistyped key produces backups that
+all report themselves encrypted and recoverable while every one is permanently
+unopenable. Until the proof is recorded, encrypted backups refuse to run.
+
+Both steps have a command-line equivalent for a browser without WebCrypto
+X25519, and `escrow_keypair.php` remains the disaster-recovery tool — it runs on
+any machine with PHP and libsodium, with no platform around it:
 
 ```
 php maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key
+php maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal   --private ~/recovery.key
 ```
 
-Paste the printed public key into the Backups page, then **prove possession**.
-This step is load-bearing, not paperwork: sealing to a public key always appears
-to succeed, so a mistyped key would produce backups that all report themselves
-encrypted and recoverable while every one of them is permanently unopenable —
-discovered only during a real recovery. Until the proof is recorded, encrypted
-backups refuse to run.
-
-Two ways to prove it, both demonstrating the same X25519 secret:
-
-- **In the page** — paste the key from your password manager. It is used in the
-  browser (X25519 → HKDF-SHA256 → AES-256-GCM via WebCrypto) and never sent
-  anywhere; only the recovered sentence is posted, and the server re-checks it.
-- **At the command line** — `escrow_keypair.php unseal --private ~/recovery.key`.
+The encoding is one contract across all of them: both halves are the raw 32
+bytes, base64, one line. `tests/backups/recovery_key_encoding_test.php` holds it
+by running the shipped generator and checking libsodium agrees.
 
 Replacing a proven key is a rotation, not an edit: backups already made carry
 keys sealed to the old public key. Pasting over a proven value is refused.
 
 Standing re-verification lives on **Recovery Readiness**, so "did I really save
 it?" has an answer on demand rather than only at setup time.
+
+### Managed sites are given the key
+
+A site that runs its own scheduled backups reads its own
+`backup_recovery_public_key`, so a site that was never given one makes no
+encrypted backups at all. The control plane hands each managed site the key it
+has already proven, rather than the operator repeating the ceremony per site —
+see [Server Manager](../plugins/server_manager/docs/overview.md#backup-recovery-key-across-the-fleet).
+
+A standalone site sets its own key up on its own Backups page.
 
 ## Retention
 

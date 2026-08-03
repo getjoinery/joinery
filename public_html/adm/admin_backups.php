@@ -89,80 +89,8 @@ $page->end_box();
 // ── Recovery key ────────────────────────────────────────────────────────────
 echo '<a id="recovery-key"></a>';
 $page->begin_box(array('title' => 'Recovery key'));
-
-if ($recovery['state'] === 'unconfigured' || $recovery['state'] === 'invalid') {
-	if ($recovery['state'] === 'invalid') {
-		echo '<div class="alert alert-danger">' . htmlspecialchars($recovery['error']) . '</div>';
-	}
-	echo '<p>Generate a keypair, keep the private half in your password manager, and paste the public half here. '
-	   . 'Every backup this site makes seals its own key to it, so that one private key opens all of them.</p>';
-	echo '<pre class="border rounded p-2 small">php '
-	   . htmlspecialchars(PathHelper::getSiteRoot())
-	   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key</pre>';
-	// The key is a declared setting, so the field comes from the renderer even
-	// though this box owns it — the schedule form below skips it for the same
-	// reason. Only the requirement to fill it in is page context.
-	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
-	$fw = $page->getFormWriter('recovery_key_form');
-	$fw->begin_form();
-	$fw->hiddeninput('action', '', array('value' => 'save_recovery_key'));
-	SettingsFieldRenderer::renderGroup($fw, 'backups', array(
-		'source' => 'core',
-		'only'   => array('backup_recovery_public_key'),
-		'field_options' => array(
-			'backup_recovery_public_key' => array('required' => true),
-		),
-	));
-	$fw->submitbutton('btn_save_recovery', 'Save public key');
-	$fw->end_form();
-
-} elseif ($recovery['state'] === 'unproven') {
-	echo '<p>Key ' . htmlspecialchars($recovery['fingerprint']) . '… is saved but unverified. '
-	   . 'Nothing is sealed to it yet: a mistyped key would seal happily and produce backups nobody could ever open, '
-	   . 'so open this challenge with the private key you saved.</p>';
-
-	echo '<label for="rk-privkey" class="form-label"><strong>Paste your recovery key</strong></label>';
-	echo '<p class="text-muted small mb-1">It is used in your browser and never sent anywhere.</p>';
-	echo '<input type="password" id="rk-privkey" class="form-control" autocomplete="off" spellcheck="false">';
-	echo '<button type="button" id="rk-open" class="btn btn-primary btn-sm mt-2">Open the challenge</button>';
-	echo '<div id="rk-status" class="small mt-2"></div>';
-
-	$fw = $page->getFormWriter('recovery_proof_form');
-	$fw->begin_form();
-	$fw->hiddeninput('action', '', array('value' => 'verify_recovery_key'));
-	$fw->textinput('recovery_proof', 'Result', array('autocomplete' => 'off', 'id' => 'rk-proof'));
-	$fw->submitbutton('btn_verify_recovery', 'Verify');
-	$fw->end_form();
-
-	echo '<details class="mt-2"><summary class="small">Or open it at the command line</summary>';
-	echo '<pre class="border rounded p-2 small">echo \'' . htmlspecialchars(BackupRecoveryKey::possession_challenge())
-	   . '\' | php ' . htmlspecialchars(PathHelper::getSiteRoot())
-	   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal --private ~/recovery.key</pre></details>';
-
-	echo '<script defer src="/assets/js/recovery-readiness.js?v='
-	   . (@filemtime(PathHelper::getIncludePath('assets/js/recovery-readiness.js')) ?: '1') . '"></script>';
-	echo '<script>window.rrCeremonyConfigs = ' . json_encode(array(array(
-		'keyInputId' => 'rk-privkey',
-		'buttonId'   => 'rk-open',
-		'statusId'   => 'rk-status',
-		'proofId'    => 'rk-proof',
-		'challenge'  => BackupRecoveryKey::browser_challenge(),
-		'publicKey'  => base64_encode(BackupRecoveryKey::parse_public_key()),
-		'infoPrefix' => BackupRecoveryKey::BROWSER_INFO,
-	)), JSON_UNESCAPED_SLASHES | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) . ';</script>';
-
-	$fw2 = $page->getFormWriter('recovery_clear_form');
-	$fw2->begin_form();
-	$fw2->hiddeninput('action', '', array('value' => 'clear_recovery_key'));
-	$fw2->submitbutton('btn_clear_recovery', 'Use a different key', array('class' => 'btn btn-sm btn-outline-secondary mt-2'));
-	$fw2->end_form();
-
-} else {
-	echo '<p class="mb-1"><strong>Verified.</strong> Key ' . htmlspecialchars($recovery['fingerprint'])
-	   . '… opens every backup this site makes.</p>';
-	echo '<p class="text-muted small mb-0">Re-check it any time from '
-	   . '<a href="/admin/admin_recovery_readiness">Recovery Readiness</a>.</p>';
-}
+require_once(PathHelper::getIncludePath('includes/RecoveryKeySetupPanel.php'));
+RecoveryKeySetupPanel::render($page, array('state' => $recovery));
 $page->end_box();
 
 // ── Targets ─────────────────────────────────────────────────────────────────

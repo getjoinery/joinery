@@ -1,6 +1,6 @@
 {
     "name": "Store",
-    "version": "1.3.1",
+    "version": "1.3.2",
     "description": "Sell products: cart, checkout, orders, coupons, Stripe/PayPal, Apple/Google mobile billing, recurring subscriptions, billing portal, and product requirements",
     "author": "Joinery",
     "license": "Joinery-Commercial",

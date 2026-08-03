@@ -26,6 +26,13 @@ class SubscriptionTier extends SystemBase {
     public static $ai_description     = 'Membership tier definitions (free, paid tiers, etc.).';
     public static $ai_excluded_fields = [];
 
+    // save() mints the group a new tier points at, so the caller never supplies
+    // sbt_grp_group_id — creating that group is what this model is for. The
+    // model suite asserts the filling-in rather than demanding the value.
+    public static $test_fixture = array(
+        'self_filled' => array('sbt_grp_group_id'),
+    );
+
     public static $field_specifications = array(
         'sbt_subscription_tier_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'sbt_grp_group_id' => array('type'=>'int4', 'required'=>true, 'unique'=>true),
