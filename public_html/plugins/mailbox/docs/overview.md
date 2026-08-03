@@ -2235,19 +2235,23 @@ quote, where the user sees and can edit it before sending — the server does no
 
 ### Contacts + recipient autocomplete
 
-A contact store (`imc_mailbox_contacts`, `MailboxContact` / `MailboxContacts`) warms up
-through use: every send harvests To/Cc/Bcc, and opening a thread harvests the counterparty
-sender.
+A contact store (`imc_mailbox_contacts`, `MailboxContact` / `MailboxContacts`) holds the
+addresses a user chose to keep. **Mail traffic never writes to it.** The only two ways in
+are a hand-add (`imc_source` `manual`) and a vCard / Google CSV import (`import`); sending
+and reading file nobody. That is deliberate: anyone who can send you mail could otherwise
+put themselves in your address book, and a list that fills itself with spam senders is no
+use for what it is for — offering the people you meant to write to. `MailboxContacts`
+enforces this in its shape, exposing only `manualAdd()` and `import()` as writers, and the
+`contacts` test asserts that public surface so a traffic-driven writer cannot creep back.
 
 Contacts belong to **one mailbox** (`imc_iea_inbound_email_alias_id`), not to the account:
-composing from a work address never suggests what was harvested in a personal one. The
-same person seen on two mailboxes is two rows, which the store treats as normal — it is a
-cache, not a person record. Harvest attributes to the mailbox the mail actually moved
-through: the From mailbox on a send, and each message's own mailbox on a thread open (so a
-thread read from "All mail" still lands in the right store, and mail belonging to no
-mailbox is skipped). Scope is a property of the row, not of the sealing: a row still seals
-to the **harvesting user's** vault, so two grantees sharing one mailbox each keep their own
-contacts, readable only by them.
+composing from a work address never suggests what is kept in a personal one. The same
+person added on two mailboxes is two rows, which the store treats as normal — it is a
+cache, not a person record. An add lands in the mailbox it was made from, and one naming
+no mailbox is refused rather than stored where no mailbox-scoped read would surface it.
+Scope is a property of the row, not of the sealing: a row seals to the **adding user's**
+vault, so two grantees sharing one mailbox each keep their own contacts, readable only by
+them.
 
 Rows are sealed when that user holds a vault (`imc_address` / `imc_display_name` under a
 per-row DEK); dedup is `imc_address_hash` — a keyed blind index for vault holders (never
@@ -2261,11 +2265,13 @@ vault makes autocomplete silently absent. Changing the **From** selector re-fetc
 list for the newly chosen mailbox, so suggestions always follow the address being written
 from. Addresses already typed are left alone — only the suggestion list changes.
 
-A row is **saved** when the user added it deliberately (`imc_source` `manual` or `import`)
-and merely **seen** when it warmed up through use (`sent` or `received`). Presence alone
-therefore says nothing about intent — every address in an opened thread is harvested — so
-`MailboxContacts::lookup()` reports the distinction, and `manualAdd()` stamps a seen row
-saved (filling a display name the harvest never captured) instead of inserting a second row.
+Because nothing files itself, a row's mere presence means the user put it there — there is
+no seen-vs-saved distinction to report. `MailboxContacts::lookup()` returns how the row got
+there (`manual` or `import`) and when. Adding an address already held bumps the existing row
+rather than inserting a second: a hand-add re-stamps an imported row `manual` and fills a
+display name the import never carried. An add that cannot be written — a sealed store whose
+vault window has closed has nowhere to put the address — returns false, so the reader reports
+a failed add instead of appearing to have saved it.
 
 ### Contact panel
 
@@ -2288,12 +2294,13 @@ The card names the correspondent, shows their address, and states whether they a
 Contacts** or **Not in Contacts** — the latter with a one-click **+ Add** that posts the
 address (with the display name from the message) to `mailbox/contacts_import` and re-renders
 from the server. Because contacts are per-mailbox, the answer is about **this mailbox
-alone**; the same address may be saved in another. Mail belonging to no mailbox has no store
+alone**; the same address may be kept in another. Mail belonging to no mailbox has no store
 to add to, so the Add control is absent rather than offering a save that cannot land. For a
-known contact the card also shows how often the address has been seen, when it was last and
-first seen, and a link that searches the mailbox for all mail with that address. A sealed
-contact store with no open window can answer neither way, so the card says **Contacts
-locked** and offers Unlock rather than asserting "not a contact".
+known contact the card also shows when it was added or imported, and a link that searches
+the mailbox for all mail with that address — the store itself knows nothing about how much
+mail was exchanged, having never watched the traffic. A sealed contact store with no open
+window can answer neither way, so the card says **Contacts locked** and offers Unlock rather
+than asserting "not a contact".
 
 Below the card, a **Site account** section is **admin-only** (permission 5+), because member
 records, orders and registrations are operator data: it resolves the address with
@@ -2314,7 +2321,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 |---|---|
 | `mailboxes` | The viewer's granted mailboxes with unread/total counts, folder rails, per-mailbox `signature`, `own` flag and `drafts` count, plus `can_compose`; for an all-access viewer also `all_mail` and `unmatched` — an array of one entry per domain holding unrouted mail (`domain_id`, `domain`, `security_level`, `unread`, `total`, `trashed`) |
 | `thread_list` | Paged threads for a mailbox view — params `alias_id`, `q`, `unread_only`, `starred_only`, `spam`, `inbox`, `folder_id`, `drafts`, `page`; same row shapes as the web reader's list endpoint. `alias_id` takes a mailbox id, `unmatched:{domain_id}` for a domain's catch-all box, or nothing for all accessible mail |
-| `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids; harvests inbound senders into contacts |
+| `thread` | One full thread: messages with plain/HTML bodies, attachment manifest, and the thread's folder ids |
 | `thread_action` | The reader's full mutation set: `mark_read`/`mark_unread`, `star`/`unstar`, `archive`/`unarchive`, `delete`, `mark_spam`/`mark_not_spam`, `set_membership`, `create_folder` — targets `ids[]`, a `thread_key`, or `thread_keys[]` (the list's multi-select) |
 | `send` | Reply / reply-all / forward / new message as the mailbox — `source_id` or `alias_id`, plus optional `bcc`, `body_html`, `inline_manifest`, `draft_id` (morph a draft); plain JSON or multipart `attachments[]`; forwards re-attach the original's parts server-side |
 | `draft_save` / `draft_get` / `draft_delete` | Create/update, reopen, and discard a compose draft (multipart attachments + `inline_manifest` on save; save returns the persisted `attachments`/`inline` lists) |

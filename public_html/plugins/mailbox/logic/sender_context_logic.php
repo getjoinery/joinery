@@ -8,10 +8,12 @@
  * the caller can already see). Auth: the message must be in the caller's mailbox scope.
  *
  * Every mailbox user gets the contact half: the counterparty's address, the display name
- * from the message, and what the CALLER'S OWN contact store for THAT MAILBOX knows about the
+ * from the message, and what the CALLER'S OWN contact store for THAT MAILBOX holds for the
  * address ({contact:null} when nothing, {contact:{locked:true}} when their vault is closed).
- * Contacts are per-mailbox, so the answer is about this mailbox alone — the same address may
- * be a saved contact in another one.
+ * A contact row exists only because the caller added or imported it — reading mail never
+ * creates one — so its presence is a statement of intent, and the card offers an Add button
+ * when there is none. Contacts are per-mailbox, so the answer is about this mailbox alone:
+ * the same address may be a contact in another one.
  *
  * The site-account half is admin-only (permission 5+) — member records, orders and
  * registrations are operator data, so a non-admin mailbox grantee never gets another
@@ -21,7 +23,7 @@
  * registrations / orders / conversation count — each section present only when its
  * plugin/feature is active. No match → {is_member:false}.
  *
- * @version 1.3.0
+ * @version 1.4.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -90,8 +92,9 @@ function sender_context_logic(array $input): LogicResult {
 	}
 	$address = $parsed[0];
 
-	// What the caller's own contact store holds for this address ON THIS MAILBOX — saved,
-	// merely seen, or nothing. Independent of whether they also have an account here.
+	// What the caller's own contact store holds for this address ON THIS MAILBOX — a row
+	// they added or imported, or nothing, since reading mail files nobody. Independent of
+	// whether the address also has an account here.
 	// Unmatched mail (alias_id 0) belongs to no mailbox, so it has no contact store to
 	// consult and none to add to; `alias_id` in the payload is what tells the client to
 	// leave the Add control off rather than offer a save that cannot land.

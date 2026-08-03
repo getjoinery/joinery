@@ -51,7 +51,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
- * @version 1.9
+ * @version 1.10
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -305,11 +305,9 @@ class MailboxSender {
 			MailboxIndex::enqueueRefold(intval($alias->key), intval($stored['id']));
 		}
 
-		// Harvest every recipient into the contact store (§ Phase 4) — best-effort,
-		// in-window (send always is), so a sealed store can hash + seal the address.
-		// Into the FROM mailbox's store: who you write to from a work address belongs
-		// to that mailbox and must not surface when composing from a personal one.
-		$this->harvestRecipients(array_merge($to, $cc, $bcc), intval($alias->key));
+		// Sending does NOT touch the contact store (§ Phase 4). A contact is something
+		// the user chose to keep, so it is added by hand or imported — never as a side
+		// effect of traffic, in either direction.
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
 	}
@@ -333,25 +331,6 @@ class MailboxSender {
 			throw new MailboxSenderException('You do not have access to this mailbox.');
 		}
 		return $source;
-	}
-
-	/**
-	 * Harvest sent recipients into the viewer's contact store for one mailbox
-	 * (§ Phase 4). Never throws — a contact-store failure must not affect a
-	 * successful send.
-	 *
-	 * @param string[] $addresses
-	 */
-	private function harvestRecipients(array $addresses, int $alias_id): void {
-		if (!count($addresses) || $alias_id <= 0) {
-			return;
-		}
-		try {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
-			(new MailboxContacts())->harvest($this->viewer->getUserId(), $addresses, MailboxContact::SOURCE_SENT, $alias_id);
-		} catch (\Throwable $e) {
-			error_log('MailboxSender: contact harvest failed: ' . $e->getMessage());
-		}
 	}
 
 	/** The enabled connected IMAP account bound to this alias, or null (hosted). */

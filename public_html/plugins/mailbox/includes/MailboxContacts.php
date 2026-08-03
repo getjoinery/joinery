@@ -1,26 +1,27 @@
 <?php
 /**
  * MailboxContacts — the contact store service (specs/mailbox_compose_maturity.md § Phase 4):
- * harvest, list (for autocomplete + management), import, delete.
+ * add, import, list (for autocomplete + management), look up, delete.
+ *
+ * A CONTACT IS A DELIBERATE ACT. The only two ways in are manualAdd() and import(); mail
+ * traffic writes nothing here. Filing correspondents automatically would mean anyone who can
+ * send you mail can put themselves in your address book, so the list fills with spam senders
+ * and stops being usable for what it is for — offering the people you meant to write to.
  *
  * Every method is scoped to one user id AND one mailbox (alias id). A contact belongs to the
- * mailbox it was seen on, so composing from a work mailbox never suggests an address harvested
+ * mailbox it was added to, so composing from a work mailbox never suggests an address kept
  * in a personal one; the same person on two mailboxes is two rows, which is fine because this
  * store is a cache. The mailbox scope rides in the address hash rather than in a separate key
  * column — see addressHash() — so the existing (hash, user) unique constraint already means one
  * row per (user, mailbox, address).
  *
- * A row is sealed when the harvesting user holds a Sealed Vault; harvest always runs in-window
- * (on send, or on opening a thread), so the plaintext address is available to hash and seal.
+ * A row is sealed when the adding user holds a Sealed Vault; an add always runs in-window (the
+ * user is right there doing it), so the plaintext address is available to hash and seal.
  * Sealing follows the USER, not the mailbox: two grantees sharing one mailbox each build their
  * own contacts, each readable only by them. The address hash is a keyed blind index for vault
  * holders (never leaks the sealed address) and a plain SHA-256 otherwise.
  *
- * A row is SAVED when the user added it deliberately (source manual or import) and merely
- * SEEN when it warmed up through use (source sent or received) — lookup() reports which,
- * and manualAdd() stamps a seen row as saved.
- *
- * @version 1.3
+ * @version 2.0
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -46,8 +47,7 @@ class MailboxContacts {
 	 * mailboxes digests differently — which is what lets the (hash, user) unique
 	 * constraint enforce one row per (user, mailbox, address) without a composite key
 	 * over an encrypted column. Rows written before contacts were mailbox-scoped hashed
-	 * the address alone, so they no longer match and are inert; they re-warm on the next
-	 * send or thread open.
+	 * the address alone, so they no longer match and are inert.
 	 */
 	public function addressHash(string $normalized, ?string $secret, int $alias_id): string {
 		$material = $alias_id . ':' . $normalized;
@@ -83,7 +83,7 @@ class MailboxContacts {
 		return array($addr, $name);
 	}
 
-	// ── harvest ──────────────────────────────────────────────────────────────
+	// ── write ────────────────────────────────────────────────────────────────
 
 	/**
 	 * Upsert a batch of addresses for a user ON ONE MAILBOX (best-effort; never throws
@@ -91,13 +91,17 @@ class MailboxContacts {
 	 * new one is inserted (sealed when the user holds a vault). $tokens are raw
 	 * "Name <email>" / bare-address strings.
 	 *
-	 * A harvest with no mailbox to attribute to is dropped rather than stored unscoped:
+	 * PRIVATE ON PURPOSE. The public writers are manualAdd() and import(), both of which
+	 * are a user deciding to keep an address. Exposing this again is how mail traffic
+	 * would start filing contacts by itself.
+	 *
+	 * A write with no mailbox to attribute to is dropped rather than stored unscoped:
 	 * an unscoped row would be invisible to every mailbox-scoped read, so writing one
 	 * only grows the table.
 	 *
 	 * @param string[] $tokens
 	 */
-	public function harvest(int $user_id, array $tokens, string $source, int $alias_id): void {
+	private function upsertBatch(int $user_id, array $tokens, string $source, int $alias_id): void {
 		if ($user_id <= 0 || $alias_id <= 0 || !count($tokens)) {
 			return;
 		}
@@ -105,7 +109,8 @@ class MailboxContacts {
 			$vault = UserEncryptionVault::loadForUser($user_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			// A vault holder whose window is closed: can't compute the keyed hash or
-			// read for dedup — skip harvest (opportunistic, re-warms next in-window op).
+			// read for dedup, so there is nowhere to put the address. The caller
+			// surfaces this as a failed add rather than silently dropping it.
 			if ($vault !== null && $secret === null) {
 				return;
 			}
@@ -124,7 +129,7 @@ class MailboxContacts {
 				$this->upsertOne($user_id, $addr, $name, $source, $vault, $secret, $alias_id);
 			}
 		} catch (\Throwable $e) {
-			error_log('MailboxContacts::harvest failed for user ' . $user_id . ': ' . $e->getMessage());
+			error_log('MailboxContacts::upsertBatch failed for user ' . $user_id . ': ' . $e->getMessage());
 		}
 	}
 
@@ -180,15 +185,14 @@ class MailboxContacts {
 	// ── lookup ───────────────────────────────────────────────────────────────
 
 	/**
-	 * What the user's contact store knows about one address:
-	 * ['id','name','source','saved','use_count','first_time','last_time'], null when there
-	 * is no row, or ['locked'=>true] when a vault holder's window is closed — the keyed
-	 * hash can't be computed then, so the state is unknown rather than absent, and the
-	 * caller must not present it as "not a contact".
+	 * What the user's contact store holds for one address on one mailbox:
+	 * ['id','name','source','added_time'], null when there is no row, or ['locked'=>true]
+	 * when a vault holder's window is closed — the keyed hash can't be computed then, so
+	 * the state is unknown rather than absent, and the caller must not present it as
+	 * "not a contact".
 	 *
-	 * 'saved' distinguishes a contact the user deliberately added from one the store
-	 * merely warmed up on: every address in an opened thread is harvested, so presence
-	 * alone says nothing about intent.
+	 * A row present at all means the user put it there, so there is no intent flag to
+	 * report: 'source' says by hand or by import, and nothing else can create a row.
 	 */
 	public function lookup(int $user_id, string $address, int $alias_id): ?array {
 		$parsed = self::parseAddress($address);
@@ -205,15 +209,11 @@ class MailboxContacts {
 			if ($row === null) {
 				return null;
 			}
-			$source = (string)$row['imc_source'];
 			return array(
 				'id'         => intval($row['imc_mailbox_contact_id']),
 				'name'       => (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $row['imc_display_name'], $row),
-				'source'     => $source,
-				'saved'      => in_array($source, array(MailboxContact::SOURCE_MANUAL, MailboxContact::SOURCE_IMPORT), true),
-				'use_count'  => intval($row['imc_use_count']),
-				'first_time' => $row['imc_create_time'],
-				'last_time'  => $row['imc_last_used_time'],
+				'source'     => (string)$row['imc_source'],
+				'added_time' => $row['imc_create_time'],
 			);
 		} catch (\Throwable $e) {
 			error_log('MailboxContacts::lookup failed for user ' . $user_id . ': ' . $e->getMessage());
@@ -293,9 +293,9 @@ class MailboxContacts {
 
 	/**
 	 * Import contacts from a vCard (.vcf) or Google-contacts CSV export. Parses name +
-	 * email(s) (everything else discarded) and upserts through the harvest path
-	 * (source='import'). Returns ['imported'=>int, 'skipped'=>int]. A minimal, forgiving
-	 * parser; a row/card with no valid email is skipped.
+	 * email(s) (everything else discarded) and stores them (source='import'). Returns
+	 * ['imported'=>int, 'skipped'=>int]. A minimal, forgiving parser; a row/card with no
+	 * valid email is skipped.
 	 */
 	public function import(int $user_id, string $content, string $filename, int $alias_id): array {
 		$content = (string)$content;
@@ -316,40 +316,43 @@ class MailboxContacts {
 			$imported++;
 		}
 		if (count($batch)) {
-			$this->harvest($user_id, $batch, MailboxContact::SOURCE_IMPORT, $alias_id);
+			$this->upsertBatch($user_id, $batch, MailboxContact::SOURCE_IMPORT, $alias_id);
 		}
 		return array('imported' => $imported, 'skipped' => $skipped);
 	}
 
-	/** Manual single add (the contacts panel's "add" form, the reader's Add button). */
+	/**
+	 * Add one address by hand (the contacts panel's "add" form, the reader's Add button
+	 * beside a sender). Returns false when the address is unusable, no mailbox was named,
+	 * or the row could not be written — a sealed store with a closed vault window has
+	 * nowhere to put it, and the caller must say so rather than appear to have saved it.
+	 */
 	public function manualAdd(int $user_id, string $raw, int $alias_id): bool {
 		$parsed = self::parseAddress($raw);
 		if ($parsed === null || $alias_id <= 0) {
 			return false;
 		}
-		$this->harvest($user_id, array($raw), MailboxContact::SOURCE_MANUAL, $alias_id);
-		// harvest() only bumps a row that already exists, and every address in an opened
-		// thread is already harvested — so a deliberate add stamps the source itself,
-		// which is what turns a merely-seen address into a saved contact.
-		$this->markSaved($user_id, $parsed[0], $parsed[1], $alias_id);
-		return true;
+		$this->upsertBatch($user_id, array($raw), MailboxContact::SOURCE_MANUAL, $alias_id);
+		// An address already held as an import keeps its row; the add re-stamps it manual
+		// and fills a display name the import never carried.
+		return $this->markSaved($user_id, $parsed[0], $parsed[1], $alias_id);
 	}
 
 	/**
-	 * Stamp an existing row as deliberately saved, filling in the display name when the
-	 * add supplied one and the row has none. Best-effort: a locked vault holder or a
-	 * missing row leaves the harvest result as it stands.
+	 * Stamp the stored row as a deliberate save, filling in the display name when the add
+	 * supplied one and the row has none. Returns whether a row was actually found — which
+	 * is what tells manualAdd() the address landed.
 	 */
-	private function markSaved(int $user_id, string $normalized, string $name, int $alias_id): void {
+	private function markSaved(int $user_id, string $normalized, string $name, int $alias_id): bool {
 		try {
 			$vault = UserEncryptionVault::loadForUser($user_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			if ($vault !== null && $secret === null) {
-				return;
+				return false;
 			}
 			$row = $this->findRow($user_id, $normalized, $secret, $alias_id);
 			if ($row === null) {
-				return;
+				return false;
 			}
 			$id = intval($row['imc_mailbox_contact_id']);
 			$stmt = $this->db()->prepare('UPDATE imc_mailbox_contacts SET imc_source = ?
@@ -361,8 +364,10 @@ class MailboxContacts {
 					$this->setDisplayName($row, $name, $secret);
 				}
 			}
+			return true;
 		} catch (\Throwable $e) {
 			error_log('MailboxContacts::markSaved failed for user ' . $user_id . ': ' . $e->getMessage());
+			return false;
 		}
 	}
 

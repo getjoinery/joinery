@@ -14,7 +14,7 @@
  * a discarded conversation is invisible to every other read, so the Trash view
  * says so when it asks.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -42,37 +42,10 @@ function thread_logic(array $input): LogicResult {
 	$messages = $service->getThread($alias_id, $thread_key, $trashed);
 	$messages = $service->withSignedTransport($messages);
 
-	// Harvest the thread's inbound senders into the contact store (§ Phase 4) —
-	// opportunistic, in-window by construction (the thread just decrypted), best-effort.
-	//
-	// Grouped by the MESSAGE's own mailbox, not by the view's alias scope: contacts
-	// belong to a mailbox, and this thread may have been opened from All mail (no alias)
-	// or span two mailboxes that both received it. A message with no mailbox (unmatched)
-	// has no store to land in and is skipped.
-	if (!$service->contentLocked()) {
-		$by_alias = array();
-		foreach ($messages as $m) {
-			if (($m['direction'] ?? 'inbound') === 'outbound' || empty($m['sender'])) {
-				continue;
-			}
-			$aid = intval($m['alias_id'] ?? 0);
-			if ($aid <= 0) {
-				continue;
-			}
-			$by_alias[$aid][] = (string)$m['sender'];
-		}
-		if (count($by_alias)) {
-			try {
-				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
-				$store = new MailboxContacts();
-				foreach ($by_alias as $aid => $senders) {
-					$store->harvest(intval($session->get_user_id()), $senders, MailboxContact::SOURCE_RECEIVED, $aid);
-				}
-			} catch (Throwable $e) {
-				error_log('mailbox/thread contact harvest: ' . $e->getMessage());
-			}
-		}
-	}
+	// Reading a thread does NOT touch the contact store. A contact is something the
+	// user chose to keep (§ Phase 4) — anyone who can send you mail could otherwise
+	// write themselves into your address book, which is how a spam address gets there.
+	// The reader offers an explicit Add beside the sender instead.
 
 	return LogicResult::render(array(
 		'messages' => $messages,
