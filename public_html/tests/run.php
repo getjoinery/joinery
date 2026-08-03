@@ -15,6 +15,7 @@
  *   php tests/run.php live            # only live (never implied)
  *   php tests/run.php deploy          # does the deployed code run here (upgrade.php runs this)
  *   php tests/run.php db --filter=api # narrow by name or path substring
+ *   php tests/run.php db --serial     # disable the test-db lane overlap
  *   php tests/run.php --json          # emit the aggregate JSON contract
  *   php tests/run.php --list          # list discovered tests, run nothing
  *
@@ -23,6 +24,14 @@
  * may execute. dev-only tests are skipped (locked) when the `debug` setting is
  * off. prod-verify and live tests are never part of a batch run — each is run
  * explicitly by naming its tier or filtering to it.
+ *
+ * When a run selects both test-db suites and anything else, the test-db suites
+ * run as one serial lane alongside the main batch: their writes all go through
+ * DbConnector::set_test_mode() to the copied test database, so the two lanes
+ * share nothing that is written (harness_finish() enforces the switch — a
+ * test-db suite that never enters test mode fails its own run). The suites stay
+ * serial INSIDE the lane; two of them concurrently would race on the copy.
+ * --serial forces the fully serial order, for debugging and as the fallback.
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -39,6 +48,7 @@ require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_re
 $args = array_slice($argv, 1);
 $want_json = in_array('--json', $args, true);
 $want_list = in_array('--list', $args, true);
+$want_serial = in_array('--serial', $args, true);
 $filter = '';
 $only = '';                  // exact repo-relative path — run just this one declared test
 $tier_arg = 'safe';
@@ -86,6 +96,29 @@ $selected_tiers = $tiers_to_run[$tier_arg];
 
 $debug_on = (bool)Globalvars::get_instance()->get_setting('debug');
 $ROOT = dirname(__DIR__); // public_html
+
+// ---------------------------------------------------------------------------
+// Lane worker mode (internal — spawned by the overlapped gate, not by hand).
+// Runs the test records received as a JSON array on stdin serially, each in its
+// own subprocess exactly as a serial run would, and emits one sentinel-prefixed
+// JSON result line per suite as it completes. Selection, env gating, and needs
+// gating already happened in the parent; the records arrive pre-gated with an
+// `_timeout` the parent resolved.
+// ---------------------------------------------------------------------------
+const JOINERY_LANE_SENTINEL = '::JOINERY-LANE-RESULT::';
+if (in_array('--lane-worker', $args, true)) {
+	$payload = json_decode((string)stream_get_contents(STDIN), true);
+	if (!is_array($payload)) {
+		fwrite(STDERR, "lane worker: expected a JSON array of test records on stdin\n");
+		exit(2);
+	}
+	foreach ($payload as $d) {
+		$r = run_one($d, $ROOT, (int)$d['_timeout']);
+		fwrite(STDOUT, JOINERY_LANE_SENTINEL . json_encode($r) . "\n");
+		fflush(STDOUT);
+	}
+	exit(0);
+}
 
 /**
  * Return the subset of a test's declared `needs` that are definitively
@@ -260,12 +293,114 @@ if ($selection_matched === 0) {
 	exit(2);
 }
 
-$results = array();
+// The test-db suites form their own lane: every write they make goes through
+// DbConnector::set_test_mode() to the copied test database, so they conflict
+// with nothing the main batch touches. When a run selects both lanes, the
+// test-db lane runs in one worker process (serially within itself) while the
+// main batch runs here — the lane's wall clock hides inside the batch's.
+// The needs probe already ran during selection, so an unrunnable lane
+// (no test-db copy) was skipped above and never spawns a worker.
+$lane_tests = array();
+$main_tests = array();
 foreach ($to_run as $d) {
-	// A test uses its own declared timeout unless --timeout= overrides all tests.
-	$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
-	$results[] = run_one($d, $ROOT, $effective_timeout);
-	if (!$want_json) print_human_line(end($results), $ROOT);
+	if ($d['meta']['tier'] === 'test-db') { $lane_tests[] = $d; } else { $main_tests[] = $d; }
+}
+$overlap = !$want_serial && $only === '' && count($lane_tests) > 0 && count($main_tests) > 0;
+
+$results = array();
+if (!$overlap) {
+	foreach ($to_run as $d) {
+		// A test uses its own declared timeout unless --timeout= overrides all tests.
+		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
+		$results[] = run_one($d, $ROOT, $effective_timeout);
+		if (!$want_json) print_human_line(end($results), $ROOT);
+	}
+} else {
+	$payload = array();
+	foreach ($lane_tests as $d) {
+		$d['_timeout'] = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
+		$payload[] = $d;
+	}
+
+	// The worker's stdout goes to a named file the parent tails through a
+	// SEPARATE read handle. Sharing one handle would share the file offset with
+	// the child's writes (proc_open dups the descriptor), and a parent read
+	// mid-file could put the child's next write there too.
+	$lane_path = tempnam(sys_get_temp_dir(), 'joinery-lane-');
+	$lane_wf = fopen($lane_path, 'wb');
+	$lane_ef = tmpfile();
+	$lane_proc = proc_open(
+		escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg(__FILE__) . ' --lane-worker',
+		array(0 => array('pipe', 'r'), 1 => $lane_wf, 2 => $lane_ef),
+		$lane_pipes, $ROOT
+	);
+	// @: a worker that dies before reading stdin closes the pipe; the crash is
+	// already reported per-suite at join, so a broken-pipe warning adds nothing.
+	@fwrite($lane_pipes[0], json_encode($payload));
+	@fclose($lane_pipes[0]);
+
+	$lane_state = array('rf' => fopen($lane_path, 'rb'), 'buf' => '');
+	$lane_done = array(); // repo-relative path => true, for crash accounting
+	$absorb = function ($records) use (&$results, &$lane_done, $ROOT, $want_json) {
+		foreach ($records as $r) {
+			$lane_done[$r['path']] = true;
+			$results[] = $r;
+			if (!$want_json) print_human_line($r, $ROOT, 'test-db');
+		}
+	};
+
+	foreach ($main_tests as $d) {
+		$effective_timeout = $timeout_override !== null ? $timeout_override : ($d['meta']['timeout'] ?? 180);
+		$results[] = run_one($d, $ROOT, $effective_timeout);
+		if (!$want_json) print_human_line(end($results), $ROOT);
+		$absorb(lane_drain($lane_state)); // print lane completions as they land
+	}
+
+	$lane_exit = proc_close($lane_proc); // join: wait for the lane to finish
+	$absorb(lane_drain($lane_state));
+	fclose($lane_state['rf']);
+	fclose($lane_wf);
+	@unlink($lane_path);
+	rewind($lane_ef);
+	$lane_stderr = stream_get_contents($lane_ef);
+	fclose($lane_ef);
+
+	// A lane suite with no result record means the worker died before running
+	// it — that is a failure of the gate, never a silent drop.
+	foreach ($lane_tests as $d) {
+		$rel = harness_rel($d['path'], $ROOT);
+		if (isset($lane_done[$rel])) continue;
+		$r = array(
+			'name' => $d['meta']['name'], 'path' => $rel,
+			'tier' => $d['meta']['tier'], 'env' => $d['meta']['env'],
+			'status' => 'fail',
+			'stats' => array('total' => 0, 'passed' => 0, 'failed' => 1, 'skipped' => 0),
+			'sections' => array(), 'duration_ms' => 0, 'exit' => $lane_exit,
+			'note' => 'lane worker exited (code ' . $lane_exit . ') before this suite ran',
+		);
+		$tail = trim(substr((string)$lane_stderr, -400));
+		if ($tail !== '') $r['output_tail'] = $tail;
+		$results[] = $r;
+		if (!$want_json) print_human_line($r, $ROOT, 'test-db');
+	}
+}
+
+/** Read any newly completed lane results from the worker's output file.
+ *  Returns the decoded result records; parse state (read handle + partial-line
+ *  buffer) lives in $st across calls. */
+function lane_drain(&$st) {
+	fseek($st['rf'], ftell($st['rf'])); // clear the sticky EOF flag so growth is visible
+	$new = stream_get_contents($st['rf']);
+	if ($new !== false && $new !== '') $st['buf'] .= $new;
+	$records = array();
+	while (($nl = strpos($st['buf'], "\n")) !== false) {
+		$line = substr($st['buf'], 0, $nl);
+		$st['buf'] = substr($st['buf'], $nl + 1);
+		if (strpos($line, JOINERY_LANE_SENTINEL) !== 0) continue;
+		$decoded = json_decode(substr($line, strlen(JOINERY_LANE_SENTINEL)), true);
+		if (is_array($decoded)) $records[] = $decoded;
+	}
+	return $records;
 }
 
 /** Run a single test in a subprocess and normalize it to a result record. A
@@ -355,11 +490,12 @@ function extract_contract($stdout) {
 	return is_array($decoded) ? $decoded : null;
 }
 
-function print_human_line($r, $root) {
+function print_human_line($r, $root, $tag = '') {
 	$mark = $r['status'] === 'pass' ? 'PASS' : 'FAIL';
 	$s = $r['stats'];
 	$counts = $s['total'] > 0 ? "{$s['passed']}/{$s['total']}" . ($s['failed'] ? " ({$s['failed']} failed)" : '') : '—';
 	$line = sprintf("  %-4s %-28s %-9s %6dms  %s", $mark, $r['name'], $counts, $r['duration_ms'], $r['path']);
+	if ($tag !== '') $line .= "  [$tag]";
 	echo $line . "\n";
 	if ($r['status'] === 'fail' && !empty($r['note'])) echo "         ↳ " . $r['note'] . "\n";
 	if ($r['status'] === 'fail' && !empty($r['sections'])) {
