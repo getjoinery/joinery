@@ -1174,4 +1174,17 @@
 		WHERE stg_name = 'backup_output_dir' AND stg_value = '/backups';";
 	$migrations[] = $migration;
 
+	// Contacts became per-mailbox. Rows written before that carry no mailbox, and
+	// every read is mailbox-scoped, so they can never be returned again. Nothing
+	// re-creates them either: contacts are entered deliberately now, not harvested
+	// from mail traffic. Left in place they would be permanently invisible dead
+	// weight, so they go. Idempotent — a second run deletes nothing.
+	$migration = array();
+	$migration['database_version'] = '164';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM imc_mailbox_contacts
+		WHERE imc_iea_inbound_email_alias_id IS NULL;";
+	$migrations[] = $migration;
+
 

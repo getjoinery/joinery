@@ -66,10 +66,11 @@ class MailboxContact extends SystemBase {
 	public static $field_specifications = array(
 		'imc_mailbox_contact_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'imc_usr_user_id'        => array('type'=>'int8', 'is_nullable'=>false),
-		// The mailbox this contact belongs to. Nullable only because rows written
-		// before contacts were mailbox-scoped carry no alias; every write sets it, and
-		// every read filters on it, so a legacy NULL row is simply invisible. Nothing
-		// of the user's own choosing is lost — this is a cache.
+		// The mailbox this contact belongs to. Every write sets it and every read
+		// filters on it, so a NULL here is unreachable by definition — migration 164
+		// deleted the rows that predated scoping. Nullable only because the column
+		// carries a real FK whose ON DELETE is CASCADE, not SET NULL; nothing writes
+		// NULL, and a row that somehow held one would be invisible.
 		'imc_iea_inbound_email_alias_id' => array('type'=>'int4', 'is_nullable'=>true,
 			'foreign_key'=>array('table'=>'iea_inbound_email_aliases',
 				'column'=>'iea_inbound_email_alias_id', 'on_delete'=>'CASCADE')),
