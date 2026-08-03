@@ -9,6 +9,7 @@ class DbConnector {
 	private $dblink;
 	private $dblink_test;
 	private $test_mode;
+	private $test_mode_was_used = false;
 	private $current_query;
 	public $query_history = array();
 	public $last_query_params = array();
@@ -120,8 +121,18 @@ class DbConnector {
 		$this->dblink_test = new GuardedPdo('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname_test') . ' user=' . $settings->get_setting('dbusername_test') . ' password=' . $settings->get_setting('dbpassword_test'));
 		$this->dblink_test->setAttribute (PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
 		$this->test_mode = true;
-		return true; 
-	}	
+		$this->test_mode_was_used = true;
+		return true;
+	}
+
+	/**
+	 * Whether this process ever entered test mode, regardless of whether it has
+	 * since closed it. Lets the test harness refuse a test-db-tier suite whose
+	 * writes silently went to the live database.
+	 */
+	public function test_mode_was_used() {
+		return $this->test_mode_was_used;
+	}
 
 	public function close_test_mode() {
 		$this->test_mode = false;

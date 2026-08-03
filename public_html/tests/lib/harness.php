@@ -558,6 +558,16 @@ function harness_emit_json($sections = null) {
 /** Print the human summary (CLI) or emit the JSON contract, then exit. */
 function harness_finish() {
 	$h = &$GLOBALS['__harness'];
+
+	// A test-db-tier suite that never switched to the copied database wrote
+	// everything to the live one — the exact bug this tier exists to prevent.
+	// The declaration is a promise about blast radius; hold the test to it.
+	if ($h['meta']['tier'] === 'test-db' && $h['booted']
+			&& !DbConnector::get_instance()->test_mode_was_used()) {
+		check(false, 'a test-db tier suite must enter test-database mode',
+			'no set_test_mode()/harness_test_mode() call happened — writes went to the live database');
+	}
+
 	$h['finished'] = true;
 
 	// Deferred fixture cleanup runs on BOTH exits: here on a clean finish, and
