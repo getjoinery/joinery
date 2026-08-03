@@ -124,11 +124,22 @@ section('Drafts excluded from normal views');
 $list = $std_service->listThreads($std_alias, array(), 1, 50);
 check(count($list['threads']) === 0, 'listThreads (normal) hides the draft', json_encode($list['threads']));
 
+// Drafts are counted PER MAILBOX (each mailbox has its own Drafts folder), so the
+// count is read off that mailbox's switcher entry. Returns null when the mailbox is
+// absent entirely, which must not read the same as a zero count — a scoping bug that
+// hid the mailbox would otherwise pass as "0 drafts".
+$drafts_count_for = function (array $payload, $alias_id) {
+	foreach ($payload['mailboxes'] as $m) {
+		if (intval($m['alias_id']) === intval($alias_id)) { return intval($m['drafts']); }
+	}
+	return null;
+};
+
 $mb = $std_service->listMailboxes();
 $std_box = null;
 foreach ($mb['mailboxes'] as $m) { if ($m['alias_id'] === $std_alias) { $std_box = $m; } }
 check($std_box !== null && intval($std_box['total']) === 0, 'listMailboxes alias total excludes drafts', json_encode($std_box['total'] ?? null));
-check(isset($mb['drafts']) && intval($mb['drafts']['total']) === 1, 'listMailboxes reports the drafts count', json_encode($mb['drafts'] ?? null));
+check($drafts_count_for($mb, $std_alias) === 1, 'listMailboxes reports the mailbox drafts count', json_encode($std_box['drafts'] ?? null));
 
 // A draft shares no thread; messageIdsInThread on its singleton key must be empty
 // through the normal (non-draft) scope.
@@ -257,11 +268,16 @@ try {
 } catch (MailboxDraftsException $e) { $hijack_blocked = true; }
 check($hijack_blocked, 'co-grantee cannot update (hijack) the author\'s draft via draft_id');
 
-// Drafts count: the author sees 1; the co-grantee and superadmin see 0.
-$author_mb = $std_service->listMailboxes();
-check(intval($author_mb['drafts']['total']) === 1, 'author\'s drafts count includes the draft', json_encode($author_mb['drafts']));
-check(intval($co_service->listMailboxes()['drafts']['total']) === 0, 'co-grantee\'s drafts count excludes the author\'s draft');
-check(intval($super_service->listMailboxes()['drafts']['total']) === 0, 'superadmin\'s drafts count excludes the author\'s draft');
+// Drafts count: the author sees 1; the co-grantee and superadmin see 0. Asserted
+// with ===, so a mailbox missing from the payload (null) fails rather than reading
+// as an empty Drafts folder — these are the author-scoping checks, and they have to
+// distinguish "0 drafts here" from "no answer".
+check($drafts_count_for($std_service->listMailboxes(), $std_alias) === 1,
+	'author\'s drafts count includes the draft');
+check($drafts_count_for($co_service->listMailboxes(), $std_alias) === 0,
+	'co-grantee\'s drafts count excludes the author\'s draft');
+check($drafts_count_for($super_service->listMailboxes(), $std_alias) === 0,
+	'superadmin\'s drafts count excludes the author\'s draft');
 
 // The Drafts view is likewise empty for the co-grantee, non-empty for the author.
 check(count($co_service->listThreads($std_alias, array('drafts' => true), 1, 50)['threads']) === 0,

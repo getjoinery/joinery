@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.36
+ * No framework. @version 2.37
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -37,8 +37,7 @@
 		draftDirty: false,    // unsaved changes since the last autosave
 		draftSaving: false,   // an autosave is in flight
 		draftAttachments: [], // server-side attachments of a reopened draft (read-only chips)
-		contacts: [],         // the viewer's contacts (§ Phase 4), for recipient autocomplete
-		contactsView: false,  // the Contacts manager pseudo-mailbox
+		contacts: [],         // the OPEN MAILBOX's contacts (§ Phase 4), for autocomplete
 		setupStatus: {},      // alias id → the Setup tab's verdict for that mailbox
 		// List multi-select: thread_key → the thread payload of every ticked row.
 		// Holding the payload (not just the key) is what lets the toolbar decide
@@ -226,36 +225,27 @@
 		var list = $('#mbx-mailboxes');
 		list.innerHTML = '';
 
+		// The rail lists WHERE MAIL LIVES and nothing else. Drafts is a folder inside
+		// each mailbox (renderFolderRail), and Contacts is the right-hand panel — both
+		// belong to a mailbox, so neither is a sibling of one.
 		state.mailboxes.forEach(function (m) {
 			list.appendChild(mailboxItem(m.address, m.alias_id, m.unread, m.folders, m.own));
 		});
-		// Offered whenever it holds anything at all, live OR discarded. Hiding an
-		// emptied box also hides its trash, because Trash is scoped to the selected
-		// mailbox — that made deleted mail unreachable through the UI even though
-		// it was still there (specs/mailbox_unmatched_sealing.md).
-		if (state.allAccess && data.unmatched
-				&& (data.unmatched.total > 0 || data.unmatched.trashed > 0)) {
-			var li = mailboxItem('Unmatched', 'unmatched', data.unmatched.unread, []);
-			li.title = 'Unrouted mail that matched no mailbox';
-			list.appendChild(li);
-		}
-		// Drafts pseudo-mailbox (specs/mailbox_compose_maturity.md § Phase 2) — shown
-		// whenever the viewer can compose. Clicking it lists saved drafts.
-		if (state.mailboxes.length) {
-			var draftsTotal = (data.drafts && data.drafts.total) ? data.drafts.total : 0;
-			var dli = el('li', 'mbx-mailbox mbx-drafts-entry' + (state.draftsView ? ' active' : ''));
-			dli.dataset.alias = 'drafts';
-			dli.appendChild(el('span', 'mbx-mailbox-addr', 'Drafts'));
-			dli.appendChild(el('span', 'mbx-badge' + (draftsTotal ? '' : ' zero'), String(draftsTotal)));
-			dli.addEventListener('click', function () { selectDrafts(); });
-			list.appendChild(dli);
-
-			// Contacts manager (§ Phase 4).
-			var cli = el('li', 'mbx-mailbox mbx-contacts-entry' + (state.contactsView ? ' active' : ''));
-			cli.dataset.alias = 'contacts';
-			cli.appendChild(el('span', 'mbx-mailbox-addr', 'Contacts'));
-			cli.addEventListener('click', function () { selectContacts(); });
-			list.appendChild(cli);
+		// Unmatched, ONE BOX PER DOMAIN: catch-all mail seals to its domain's owner, so
+		// a single lumped box could hold mail sealed to several different people and
+		// state no honest protection level.
+		//
+		// A box is offered whenever it holds anything at all, live OR discarded. Hiding
+		// an emptied box also hides its trash, because Trash is scoped to the selected
+		// box — that made deleted mail unreachable through the UI even though it was
+		// still there (specs/mailbox_unmatched_sealing.md).
+		if (state.allAccess && Array.isArray(data.unmatched)) {
+			data.unmatched.forEach(function (u) {
+				if (!(u.total > 0 || u.trashed > 0)) { return; }
+				var li = mailboxItem('Unmatched · ' + u.domain, 'unmatched:' + u.domain_id, u.unread, []);
+				li.title = 'Mail for ' + u.domain + ' that matched no mailbox';
+				list.appendChild(li);
+			});
 		}
 
 		// Highlight current selection + render the active mailbox's folder rail.
@@ -287,9 +277,10 @@
 		var chip = $('#mbx-level-chip');
 		if (!chip) return;
 		var level = '';
-		// Only a single open mailbox has a level to state. The aggregate views
-		// (Drafts, Contacts, all-mail) span mailboxes that may differ.
-		if (!state.draftsView && !state.contactsView && state.aliasId != null) {
+		// Only a single open mailbox has a level to state. The all-mail view spans
+		// mailboxes that may differ, and a Drafts folder holds compose scratch rather
+		// than delivered mail.
+		if (!state.draftsView && state.aliasId != null) {
 			state.mailboxes.forEach(function (m) {
 				if (String(m.alias_id) !== String(state.aliasId)) return;
 				if (m.security_level && m.security_level !== 'standard') { level = m.security_level; }
@@ -301,6 +292,13 @@
 		chip.title = level ? 'Mail protection level (set on the domain)' : '';
 	}
 
+	// True for a real mailbox id (a positive serial) as opposed to a pseudo-box such as
+	// an `unmatched:{domain_id}` entry. Anything that needs a grant, a signature, a
+	// contact store or a Drafts folder is gated on this.
+	function isRealMailbox(aliasId) {
+		return aliasId != null && aliasId !== '' && !isNaN(Number(aliasId)) && Number(aliasId) > 0;
+	}
+
 	function mailboxItem(label, aliasId, unread, folders, own) {
 		var li = el('li', 'mbx-mailbox');
 		li.dataset.alias = (aliasId == null ? '' : String(aliasId));
@@ -309,7 +307,9 @@
 		li.appendChild(addr);
 		// Signature gear (§ Phase 3) — only on mailboxes the viewer is a member of
 		// (a signature lives on a grant), never the superadmin's all-access extras.
-		if (own && aliasId != null && aliasId !== 'unmatched' && !isNaN(Number(aliasId))) {
+		// isRealMailbox excludes every pseudo-box (the unmatched:{domain} entries),
+		// which have no grant and so can carry no signature.
+		if (own && isRealMailbox(aliasId)) {
 			var gear = el('button', 'mbx-sig-gear', '⚙');
 			gear.type = 'button';
 			gear.title = 'Edit signature';
@@ -351,6 +351,16 @@
 		// Inbox (non-archived) is the default; All Mail shows everything, archived
 		// included. Tracked IMAP folders and the Spam view follow.
 		ul.appendChild(folderItem('inbox', 'Inbox'));
+		// Drafts sits inside the mailbox it composes from: every draft is bound to a
+		// From mailbox at save time, so it always has exactly one place to live. A
+		// pseudo-box (unmatched) has no From identity and so gets no Drafts folder.
+		if (isRealMailbox(state.aliasId)) {
+			var draftCount = 0;
+			state.mailboxes.forEach(function (m) {
+				if (String(m.alias_id) === String(state.aliasId)) { draftCount = m.drafts || 0; }
+			});
+			ul.appendChild(folderItem('drafts', 'Drafts', draftCount));
+		}
 		ul.appendChild(folderItem(null, 'All Mail'));
 		folders.forEach(function (f) { ul.appendChild(folderItem(f.id, f.name)); });
 		ul.appendChild(folderItem('spam', 'Spam'));
@@ -359,10 +369,15 @@
 		highlightFolder();
 	}
 
-	function folderItem(folderId, name) {
+	function folderItem(folderId, name, badge) {
 		var li = el('li', 'mbx-folder');
 		li.dataset.folder = (folderId == null ? '' : String(folderId));
 		li.appendChild(el('span', 'mbx-folder-name', name));
+		// A count only where one is meaningful; Drafts is the only folder that carries
+		// one, and it shows even at zero so the folder never looks broken when emptied.
+		if (badge != null) {
+			li.appendChild(el('span', 'mbx-badge' + (badge ? '' : ' zero'), String(badge)));
+		}
 		li.addEventListener('click', function (e) {
 			e.stopPropagation();
 			selectFolder(folderId, name);
@@ -371,7 +386,8 @@
 	}
 
 	function highlightFolder() {
-		var cur = state.spamView ? 'spam'
+		var cur = state.draftsView ? 'drafts'
+			: state.spamView ? 'spam'
 			: state.trashView ? 'trash'
 			: state.inboxView ? 'inbox'
 			: (state.folderId == null ? '' : String(state.folderId));
@@ -383,12 +399,16 @@
 	function selectFolder(folderId, name) {
 		closeThread();                    // leave any open conversation → show the list
 		state.draftsView = false;
-		state.contactsView = false;
 		state.inboxView = false;
 		state.spamView = false;
 		state.trashView = false;
 		if (folderId === 'inbox') {
 			state.inboxView = true;
+			state.folderId = null;
+		} else if (folderId === 'drafts') {
+			// The mailbox's own Drafts folder — its alias stays selected, so the list
+			// is this mailbox's drafts alone rather than every mailbox's at once.
+			state.draftsView = true;
 			state.folderId = null;
 		} else if (folderId === 'spam') {
 			state.spamView = true;
@@ -430,7 +450,6 @@
 		rememberMailbox(aliasId);
 		state.aliasId = aliasId;
 		state.draftsView = false;
-		state.contactsView = false;
 		state.folderId = null;            // reset to the folder-unfiltered view
 		state.inboxView = true;           // default to the Inbox (non-archived) view
 		state.spamView = false;
@@ -438,8 +457,10 @@
 		state.mailboxLabel = label || 'All mail';
 		setListContext(state.mailboxLabel);
 		highlightMailbox();
-		highlightDrafts();
 		renderFolderRail();
+		// The contacts panel follows the mailbox: switching boxes must not leave the
+		// previous mailbox's contacts on screen (they are a different store).
+		refreshContactsPanel();
 		loadThreads(true);
 	}
 
@@ -450,12 +471,11 @@
 	// green says nothing at all: silence is the normal state, so a banner means
 	// something when it appears.
 	//
-	// Only ever asked for a single open mailbox. The aggregate views (All mail,
-	// Drafts, Contacts) have no one mailbox to check, and the member mount has no
+	// Only ever asked for a single open mailbox. All mail has no one mailbox to check,
+	// a Drafts folder holds nothing delivered, and the member mount has no
 	// setupUrlBase — mail setup is operator work.
 	function setupCheckable() {
-		return !!CFG.setupUrlBase && !!state.aliasId && !isNaN(Number(state.aliasId))
-			&& !state.draftsView && !state.contactsView;
+		return !!CFG.setupUrlBase && isRealMailbox(state.aliasId) && !state.draftsView;
 	}
 
 	// Ask (or re-use the answer) and paint. `fresh` forces a re-run server-side;
@@ -497,32 +517,6 @@
 		listEl.insertBefore(li, listEl.firstChild);
 	}
 
-	// The Drafts pseudo-mailbox: list the viewer's saved drafts (server-scoped to
-	// their mailboxes). No folder rail, no inbox/spam split.
-	function selectDrafts() {
-		closeThread();
-		state.aliasId = null;
-		state.draftsView = true;
-		state.contactsView = false;
-		state.folderId = null;
-		state.inboxView = false;
-		state.spamView = false;
-		state.trashView = false;
-		state.mailboxLabel = 'Drafts';
-		setListContext('Drafts');
-		var prior = $('#mbx-folder-rail');
-		if (prior) prior.parentNode.removeChild(prior);
-		highlightMailbox();
-		highlightDrafts();
-		loadThreads(true);
-	}
-
-	function highlightDrafts() {
-		Array.prototype.forEach.call(document.querySelectorAll('.mbx-drafts-entry'), function (li) {
-			li.classList.toggle('active', !!state.draftsView);
-		});
-	}
-
 	function refreshMailboxes() {
 		// A failed switcher read leaves the rail exactly as it was — repainting it
 		// from nothing would empty the mailbox list the reader navigates by.
@@ -542,9 +536,9 @@
 		return selectedKeys().map(function (k) { return state.selected[k]; });
 	}
 
-	// Checkboxes only where a bulk action can actually land: the Contacts manager
-	// renders no conversations, and the Drafts view gets them for delete alone.
-	function selectionAvailable() { return !state.contactsView; }
+	// Checkboxes wherever a bulk action can land — every list view renders
+	// conversations, and a Drafts folder gets them for delete alone.
+	function selectionAvailable() { return true; }
 
 	function clearSelection() {
 		state.selected = {};
@@ -816,8 +810,12 @@
 	function buildListQuery() {
 		var p = new URLSearchParams();
 		if (state.draftsView) {
-			// Drafts view: server-scoped to the viewer's mailboxes; no other filters.
+			// A mailbox's Drafts folder: this mailbox's own drafts. The alias rides
+			// along so the server scopes to it; with none selected the server falls
+			// back to every accessible mailbox. Always the viewer's own drafts, never
+			// a co-grantee's. No other filters apply to compose scratch.
 			p.set('drafts', '1');
+			if (state.aliasId != null) p.set('alias_id', String(state.aliasId));
 			p.set('page', String(state.page));
 			return CFG.listUrl + '?' + p.toString();
 		}
@@ -2025,7 +2023,10 @@
 		if (!panel) return;
 		if (!CFG.canSeeContext) { panel.hidden = true; return; }
 		var target = lastInboundOrLast(messages);
-		if (!target || target.alias_id == null) { panel.hidden = true; return; }
+		// Nothing to say about a counterparty here (no message, or mail belonging to no
+		// mailbox): the panel goes back to the mailbox's contacts rather than blanking,
+		// so the column does not appear and vanish as threads open.
+		if (!target || target.alias_id == null) { refreshContactsPanel(); return; }
 		var mid = target.id;
 		if (contextCache[mid]) { renderSenderContext(contextCache[mid]); return; }
 		fetchSenderContext(mid);
@@ -2062,6 +2063,10 @@
 	function renderSenderContext(data) {
 		var panel = $('#mbx-context');
 		if (!panel) return;
+		// The counterparty card is the reason the panel is open, so it always shows
+		// expanded — the collapsed spine belongs to the list view's contacts mode.
+		panel.classList.remove('mbx-context-collapsed');
+		panel.hidden = false;
 		panel.innerHTML = '';
 
 		var head = el('div', 'mbx-context-head');
@@ -2099,19 +2104,23 @@
 			card.appendChild(lockRow);
 		} else if (contact && contact.saved) {
 			card.appendChild(el('div', 'mbx-context-badge', 'In Contacts'));
-		} else {
+		} else if (isRealMailbox(data.alias_id)) {
+			// Saving needs a mailbox to save INTO, and contacts are per-mailbox. Mail
+			// that belongs to no mailbox (unmatched) has no store to add to, so the
+			// control is absent rather than offering a save that cannot land.
 			var row = el('div', 'mbx-context-addrow');
 			row.appendChild(el('span', 'mbx-context-note', 'Not in Contacts'));
 			var add = el('button', 'mbx-context-add', '+ Add');
 			add.type = 'button';
-			add.title = 'Add ' + data.address + ' to Contacts';
+			add.title = 'Add ' + data.address + ' to this mailbox\'s contacts';
 			add.addEventListener('click', function () {
 				add.disabled = true;
 				add.textContent = 'Adding…';   // the round trip can take a moment; say so
-				joineryApi.post(CFG.contactsImportUrl, { address: contactToken(data) })
+				joineryApi.post(CFG.contactsImportUrl,
+						{ address: contactToken(data), alias_id: String(data.alias_id) })
 					.then(function () {
 						delete contextCache[data.message_id];
-						loadContacts();                       // keep compose autocomplete current
+						loadContacts(data.alias_id);          // keep compose autocomplete current
 						fetchSenderContext(data.message_id);  // re-render from the server's truth
 					})
 					.catch(function () { add.disabled = false; add.textContent = 'Could not add'; });
@@ -2178,11 +2187,19 @@
 
 	// ---- contacts (§ Phase 4): autocomplete + management ----
 
-	// Fetch the (small) contact list once per compose open. A locked vault returns
-	// no contacts → autocomplete is silently absent (typing by hand still works).
-	function loadContacts() {
-		joineryApi.post(CFG.contactsUrl, {}).then(function (data) {
+	// Fetch the (small) contact list for ONE mailbox. Called on compose open and again
+	// whenever the From identity changes, because contacts are per-mailbox: suggestions
+	// must follow the address you are writing from, or a work compose would offer the
+	// addresses harvested in a personal mailbox. A locked vault returns no contacts →
+	// autocomplete is silently absent (typing by hand still works).
+	function loadContacts(aliasId) {
+		var target = (aliasId != null) ? aliasId : state.draftAlias;
+		if (!isRealMailbox(target)) { state.contacts = []; return Promise.resolve(); }
+		return joineryApi.post(CFG.contactsUrl, { alias_id: String(target) }).then(function (data) {
 			data = data || {};
+			// A slow response for a mailbox the user has since switched away from must
+			// not overwrite the list they are now typing against.
+			if (String(data.alias_id) !== String(target)) { return; }
 			state.contacts = (data.locked || !data.contacts) ? [] : data.contacts;
 		}).catch(function () { state.contacts = []; });
 	}
@@ -2253,54 +2270,90 @@
 		input.addEventListener('blur', function () { setTimeout(hide, 150); });
 	}
 
-	// ---- contacts manager (list / add / delete / import) ----
-	function selectContacts() {
-		closeThread();
-		state.contactsView = true;
-		state.draftsView = false;
-		state.trashView = false;
-		state.mailboxLabel = 'Contacts';
-		setListContext('Contacts');
-		var prior = $('#mbx-folder-rail');
-		if (prior) prior.parentNode.removeChild(prior);
-		highlightMailbox();
-		highlightDrafts();
-		clearSelection();          // contacts are not conversations — nothing to act on
-		renderContactsManager();
+	// ---- contacts panel (list / add / delete / import) ----
+	//
+	// Contacts live in the right-hand aside, not the left rail: the rail lists where
+	// mail LIVES, and a contact store belongs to a mailbox rather than sitting beside
+	// one. The aside has two states over the same element:
+	//
+	//   list view    → the selected mailbox's contact manager, COLLAPSED to a spine by
+	//                  default (it is reference material, not the task at hand)
+	//   open message → the counterparty card, expanded (renderSenderContext)
+	//
+	// The collapsed/expanded choice is remembered, because whether contacts are
+	// worth a column is a working style rather than a per-message decision.
+	var CONTACTS_OPEN_KEY = 'mbx.contactsOpen';
+	function contactsPanelOpen() {
+		try { return window.localStorage.getItem(CONTACTS_OPEN_KEY) === '1'; } catch (e) { return false; }
+	}
+	function setContactsPanelOpen(open) {
+		try { window.localStorage.setItem(CONTACTS_OPEN_KEY, open ? '1' : '0'); } catch (e) {}
 	}
 
-	function renderContactsManager() {
-		enterReadingHistory();   // a full-pane view, so Back returns from it too
-		$('#mbx-reader').classList.add('reading');
-		var pane = $('#mbx-thread');
-		parkCompose();
-		pane.innerHTML = '<div class="mbx-loading">Loading contacts…</div>';
+	// Point the aside at whatever the reader is currently showing. Called on every
+	// mailbox switch and whenever a thread opens or closes.
+	function refreshContactsPanel() {
+		var panel = $('#mbx-context');
+		if (!panel) return;
+		// A thread is open — the counterparty card owns the panel (loadSenderContext
+		// paints it); leave it alone.
+		if (state.threadKey) return;
+		// No real mailbox selected (All mail, or an unmatched box) means no one contact
+		// store to show, so the panel steps aside entirely.
+		if (!isRealMailbox(state.aliasId)) {
+			panel.hidden = true;
+			return;
+		}
+		panel.hidden = false;
+		renderContactsPanel();
+	}
 
-		joineryApi.post(CFG.contactsUrl, {}).then(function (data) {
+	function renderContactsPanel() {
+		var panel = $('#mbx-context');
+		if (!panel) return;
+		var aliasId = state.aliasId;
+		var open = contactsPanelOpen();
+		panel.classList.toggle('mbx-context-collapsed', !open);
+		panel.innerHTML = '';
+
+		// The spine: always present, and the only thing rendered when collapsed. It is
+		// the affordance that says the panel exists at all.
+		var head = el('div', 'mbx-context-head');
+		var toggle = el('button', 'mbx-context-toggle', open ? '›' : '‹');
+		toggle.type = 'button';
+		toggle.title = open ? 'Hide contacts' : 'Show contacts';
+		toggle.setAttribute('aria-expanded', open ? 'true' : 'false');
+		toggle.addEventListener('click', function () {
+			setContactsPanelOpen(!contactsPanelOpen());
+			renderContactsPanel();
+		});
+		head.appendChild(toggle);
+		head.appendChild(el('span', 'mbx-context-title', 'Contacts'));
+		panel.appendChild(head);
+		if (!open) return;
+
+		var body = el('div', 'mbx-context-body');
+		body.appendChild(el('div', 'mbx-loading', 'Loading contacts…'));
+		panel.appendChild(body);
+
+		joineryApi.post(CFG.contactsUrl, { alias_id: String(aliasId) }).then(function (data) {
 			data = data || {};
-			pane.innerHTML = '';
-			var header = el('div', 'mbx-thread-header');
-			var back = el('button', 'mbx-thread-back', null);
-			back.type = 'button';
-			back.appendChild(el('span', 'mbx-back-arrow', '←'));
-			back.appendChild(el('span', null, 'Back'));
-			back.addEventListener('click', function () { closeThread(); });
-			header.appendChild(back);
-			header.appendChild(el('h1', null, 'Contacts'));
-			pane.appendChild(header);
+			// The mailbox may have changed while this was in flight.
+			if (String(state.aliasId) !== String(aliasId)) { return; }
+			body.innerHTML = '';
 
 			if (data.locked) {
 				var lb = el('div', 'mbx-unlock-banner');
 				lb.appendChild(el('span', 'mbx-unlock-text', 'Unlock to view your contacts.'));
 				var ub = el('button', 'mbx-unlock-btn', 'Unlock'); ub.type = 'button';
-				ub.addEventListener('click', async function () { if (await unlockVault()) renderContactsManager(); });
+				ub.addEventListener('click', async function () { if (await unlockVault()) renderContactsPanel(); });
 				lb.appendChild(ub);
-				pane.appendChild(lb);
+				body.appendChild(lb);
 				return;
 			}
 			state.contacts = data.contacts || [];
 
-			// Add + import controls.
+			// Add + import, both landing in the mailbox currently selected.
 			var tools = el('div', 'mbx-contacts-tools');
 			var addInput = document.createElement('input');
 			addInput.type = 'text';
@@ -2311,9 +2364,9 @@
 				var v = addInput.value.trim();
 				if (!v) return;
 				addBtn.disabled = true;
-				joineryApi.post(CFG.contactsImportUrl, { address: v }).then(function () {
-					addInput.value = ''; addBtn.disabled = false; renderContactsManager();
-				}).catch(function () { addBtn.disabled = false; alert('That is not a valid email address.'); });
+				joineryApi.post(CFG.contactsImportUrl, { address: v, alias_id: String(aliasId) })
+					.then(function () { addInput.value = ''; addBtn.disabled = false; renderContactsPanel(); })
+					.catch(function () { addBtn.disabled = false; alert('That is not a valid email address.'); });
 			};
 			addBtn.addEventListener('click', doAdd);
 			addInput.addEventListener('keydown', function (e) { if (e.key === 'Enter') { e.preventDefault(); doAdd(); } });
@@ -2329,21 +2382,23 @@
 				if (!importInput.files || !importInput.files.length) return;
 				var fd = new FormData();
 				fd.append('file', importInput.files[0], importInput.files[0].name);
+				fd.append('alias_id', String(aliasId));
 				fetch(CFG.contactsImportUrl, { method: 'POST', credentials: 'same-origin',
 					headers: { 'X-Joinery-Csrf': joineryApi.csrf() }, body: fd })
 					.then(function (r) { return r.json(); }).then(function (env) {
 						var d = (env && env.data) ? env.data : {};
 						alert('Imported ' + (d.imported || 0) + ', skipped ' + (d.skipped || 0) + '.');
-						renderContactsManager();
+						renderContactsPanel();
 					}).catch(function () { alert('Import failed.'); });
 			});
 			importLabel.appendChild(importInput);
 			tools.appendChild(importLabel);
-			pane.appendChild(tools);
+			body.appendChild(tools);
 
 			var list = el('div', 'mbx-contacts-list');
 			if (!state.contacts.length) {
-				list.appendChild(el('div', 'mbx-loading', 'No contacts yet. They fill in as you send and read mail.'));
+				list.appendChild(el('div', 'mbx-loading',
+					'No contacts in this mailbox yet. They fill in as you send and read mail.'));
 			}
 			state.contacts.forEach(function (c) {
 				var rowEl = el('div', 'mbx-contact-row');
@@ -2360,8 +2415,11 @@
 				rowEl.appendChild(del);
 				list.appendChild(rowEl);
 			});
-			pane.appendChild(list);
-		}).catch(function () { pane.innerHTML = '<div class="mbx-loading">Contacts could not be loaded.</div>'; });
+			body.appendChild(list);
+		}).catch(function () {
+			if (String(state.aliasId) !== String(aliasId)) { return; }
+			body.innerHTML = '<div class="mbx-loading">Contacts could not be loaded.</div>';
+		});
 	}
 
 	// ---- compose (reply / reply all / forward) ----
@@ -2860,7 +2918,9 @@
 		state.threadKey = null;
 		state.messages = [];
 		$('#mbx-thread').innerHTML = '';
-		var ctx = document.getElementById('mbx-context'); if (ctx) ctx.hidden = true;
+		// Leaving a conversation hands the panel back from the counterparty card to
+		// the mailbox's contacts (collapsed unless the viewer opened it before).
+		refreshContactsPanel();
 		$('#mbx-reader').classList.remove('reading');
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-thread-item'), function (n) {
 			n.classList.remove('active');
@@ -3038,6 +3098,12 @@
 			// Swap the signature to the newly-chosen From, but only when the user
 			// hasn't started writing (never clobber real content).
 			if (isComposerEmptyExceptSignature()) { insertSignature(aliasSel.value); }
+			// Re-scope recipient suggestions to the new From. Contacts belong to the
+			// mailbox they were seen on, so changing who you are writing AS changes
+			// which addresses may be suggested — the work mailbox must never offer
+			// what was harvested in a personal one. Addresses already typed stay put;
+			// only the suggestion list changes.
+			loadContacts(aliasSel.value);
 			markDraftDirty();
 		});
 		// Recipient autocomplete on To/Cc/Bcc (§ Phase 4).
@@ -3156,12 +3222,21 @@
 				pick = seed.mailboxes.filter(function (m) {
 					return String(m.alias_id) === want;
 				})[0];
-				if (!pick && want === 'unmatched' && seed.all_access && seed.unmatched) {
-					selectMailbox('unmatched', 'Unmatched');
-					pick = true;
+				// An unmatched box was last open. It is remembered as
+				// `unmatched:{domain_id}`, and is only restorable while that domain
+				// still HAS unmatched mail — an emptied box is no longer in the rail,
+				// so restoring it would land the reader on an entry it cannot see.
+				if (!pick && seed.all_access && String(want).indexOf('unmatched:') === 0) {
+					var wantDomain = String(want).slice('unmatched:'.length);
+					(seed.unmatched || []).forEach(function (u) {
+						if (String(u.domain_id) !== wantDomain) { return; }
+						if (!(u.total > 0 || u.trashed > 0)) { return; }
+						selectMailbox(want, 'Unmatched · ' + u.domain);
+						pick = true;
+					});
 				}
 			}
-			if (pick === true) { /* already selected the Unmatched view above */ }
+			if (pick === true) { /* already selected the unmatched box above */ }
 			else if (pick) { selectMailbox(pick.alias_id, pick.address); }
 			else { selectMailbox(seed.mailboxes[0].alias_id, seed.mailboxes[0].address); }
 		} else {

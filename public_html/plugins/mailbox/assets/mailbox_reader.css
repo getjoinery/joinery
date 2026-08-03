@@ -974,7 +974,11 @@
 }
 .mbx-contact-del:hover { color: #dc2626; }
 
-/* ── compose maturity: contact panel (§ Phase 5) ───────────────────────────── */
+/* ── contact panel (§ Phase 5) ─────────────────────────────────────────────────
+   One aside, two jobs: the open conversation's counterparty card, and — on the
+   list view — the selected mailbox's contact manager, collapsed to a spine by
+   default. Collapsed still shows the header, so the panel announces itself
+   instead of disappearing. */
 .mbx-context {
 	flex: 0 0 260px;
 	border-left: 1px solid #e4e7eb;
@@ -982,13 +986,45 @@
 	padding: .75rem .85rem;
 	overflow-y: auto;
 	font-size: var(--mbx-text-base);
+	transition: flex-basis .15s ease;
+}
+.mbx-context.mbx-context-collapsed {
+	flex-basis: 2.4rem;
+	padding: .75rem .35rem;
+	overflow: hidden;
 }
 .mbx-context-head {
 	display: flex;
 	align-items: center;
 	justify-content: space-between;
+	gap: .35rem;
 	margin-bottom: .5rem;
 }
+/* Collapsed: the title turns on its side so the spine reads as a labelled edge
+   rather than a blank gutter. */
+.mbx-context-collapsed .mbx-context-head {
+	flex-direction: column;
+	justify-content: flex-start;
+	margin-bottom: 0;
+}
+.mbx-context-collapsed .mbx-context-title {
+	writing-mode: vertical-rl;
+	margin-top: .5rem;
+	font-size: var(--mbx-text-sm);
+	color: #52606d;
+	white-space: nowrap;
+}
+.mbx-context-toggle {
+	border: 1px solid #e4e7eb;
+	background: #fff;
+	color: #52606d;
+	border-radius: 6px;
+	cursor: pointer;
+	font-size: var(--mbx-text-base);
+	line-height: 1;
+	padding: .2rem .35rem;
+}
+.mbx-context-toggle:hover { background: #eef2ff; border-color: #2563eb; color: #2563eb; }
 .mbx-context-title { font-weight: 600; color: #111827; }
 .mbx-context-card {
 	background: #fff;
@@ -1057,6 +1093,26 @@
 	border-bottom: 1px solid #eef1f4;
 }
 .mbx-context-muted { color: #6b7280; }
+
+/* The contact manager inside the panel. Its controls were sized for a full pane;
+   in a 260px column they stack instead of sitting on one row, and the list scrolls
+   on its own so the add/import controls stay reachable with many contacts. */
+.mbx-context .mbx-contacts-tools {
+	flex-direction: column;
+	align-items: stretch;
+	gap: .4rem;
+	margin: 0 0 .6rem;
+}
+.mbx-context .mbx-contacts-add { flex: 1 1 auto; width: 100%; }
+.mbx-context .mbx-contacts-list {
+	max-height: 55vh;
+	overflow-y: auto;
+}
+.mbx-context .mbx-contact-row { padding: .3rem 0; }
+/* The address under the name wraps rather than overflowing a narrow column. */
+.mbx-context .mbx-contact-info { min-width: 0; }
+.mbx-context .mbx-contact-addr { overflow-wrap: anywhere; }
+
 /* Hidden below a width breakpoint — the two panes take priority on narrow screens. */
 @media (max-width: 1100px) {
 	.mbx-context { display: none !important; }

@@ -307,7 +307,9 @@ class MailboxSender {
 
 		// Harvest every recipient into the contact store (§ Phase 4) — best-effort,
 		// in-window (send always is), so a sealed store can hash + seal the address.
-		$this->harvestRecipients(array_merge($to, $cc, $bcc));
+		// Into the FROM mailbox's store: who you write to from a work address belongs
+		// to that mailbox and must not surface when composing from a personal one.
+		$this->harvestRecipients(array_merge($to, $cc, $bcc), intval($alias->key));
 
 		return array('ok' => true, 'outbound_id' => $stored['id']);
 	}
@@ -334,18 +336,19 @@ class MailboxSender {
 	}
 
 	/**
-	 * Harvest sent recipients into the viewer's contact store (§ Phase 4). Never
-	 * throws — a contact-store failure must not affect a successful send.
+	 * Harvest sent recipients into the viewer's contact store for one mailbox
+	 * (§ Phase 4). Never throws — a contact-store failure must not affect a
+	 * successful send.
 	 *
 	 * @param string[] $addresses
 	 */
-	private function harvestRecipients(array $addresses): void {
-		if (!count($addresses)) {
+	private function harvestRecipients(array $addresses, int $alias_id): void {
+		if (!count($addresses) || $alias_id <= 0) {
 			return;
 		}
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxContacts.php'));
-			(new MailboxContacts())->harvest($this->viewer->getUserId(), $addresses, MailboxContact::SOURCE_SENT);
+			(new MailboxContacts())->harvest($this->viewer->getUserId(), $addresses, MailboxContact::SOURCE_SENT, $alias_id);
 		} catch (\Throwable $e) {
 			error_log('MailboxSender: contact harvest failed: ' . $e->getMessage());
 		}
