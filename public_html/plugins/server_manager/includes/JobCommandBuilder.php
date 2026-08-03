@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.22 - build_push_recovery_key(): hand a node the control plane's proven backup recovery
+ *                 key so it can encrypt its own scheduled backups; also pushed during install and
+ *                 reported by the status check
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
@@ -478,6 +481,18 @@ class JobCommandBuilder {
 			$container = $node->get('mgn_container_name');
 			$steps[] = ['type' => 'ssh', 'label' => 'Container stats',
 						'cmd' => "docker stats --no-stream {$container}", 'on_host' => true];
+		}
+
+		if (!$skip_joinery) {
+			// Which recovery key this node is holding, if any. Asked here because
+			// the status check is the job that already runs against every node —
+			// the fleet view can then show the answer without reaching out to
+			// each node on page load. Reports, never writes; a node too old to
+			// have the tool simply does not answer.
+			$steps[] = ['type' => 'ssh', 'label' => 'Check backup recovery key',
+				'cmd' => 'php ' . escapeshellarg(self::get_scripts_path($node) . '/sysadmin_tools/set_recovery_key.php')
+					. ' --report',
+				'continue_on_error' => true];
 		}
 
 		if (!$skip_joinery) {
@@ -1113,6 +1128,59 @@ class JobCommandBuilder {
 			. ' --site-key ' . escapeshellarg($site_key);
 
 		return ['type' => 'ssh', 'label' => 'Mint backup encryption key', 'cmd' => $cmd, 'timeout' => 120];
+	}
+
+	/**
+	 * Give a node the control plane's recovery key, so it can encrypt its own
+	 * scheduled backups without the operator repeating the setup ceremony on it.
+	 *
+	 * A manager-driven backup job ships the recovery public key in the step
+	 * command and works on a node that has never heard of it. A backup the node
+	 * runs on its own schedule cannot: it reads its own setting, and refuses
+	 * outright when that is empty. So a node nobody has visited is a node making
+	 * no encrypted backups, and it stays that way silently.
+	 *
+	 * The public key and its proof marker both travel in the command. A public
+	 * key seals but cannot open, and a fingerprint is a hash — a job row that
+	 * persists forever holds nothing worth stealing.
+	 *
+	 * The node decides what to do with it: set_recovery_key.php fills an empty
+	 * slot and never overwrites one, so this is safe to run against any node at
+	 * any time, including one that already has a key of its own.
+	 */
+	public static function build_push_recovery_key($node) {
+		return [self::step_push_recovery_key(self::get_scripts_path($node))];
+	}
+
+	/**
+	 * The push as a single step, so a fresh install can carry it and a node is
+	 * never born without a recovery key.
+	 *
+	 * Reading the key here means a manager whose own key is unconfigured or
+	 * unproven fails when the job is BUILT, with a message the operator sees,
+	 * rather than pushing something no backup could ever be opened with.
+	 */
+	private static function step_push_recovery_key($scripts_path) {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+
+		$pub = base64_encode(BackupRecoveryKey::public_key());   // throws unless proven
+		$fpr = hash('sha256', BackupRecoveryKey::public_key());
+
+		$cmd = 'php ' . escapeshellarg($scripts_path . '/sysadmin_tools/set_recovery_key.php')
+			. ' --public ' . escapeshellarg($pub)
+			. ' --proven-fpr ' . escapeshellarg($fpr);
+
+		return ['type' => 'ssh', 'label' => 'Push backup recovery key', 'cmd' => $cmd, 'timeout' => 120];
+	}
+
+	/**
+	 * Whether the control plane has a recovery key worth pushing. Callers that
+	 * add the push to a bigger job ask first: a manager that has not finished
+	 * its own setup should not fail an install over it.
+	 */
+	public static function can_push_recovery_key(): bool {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		return BackupRecoveryKey::is_ready();
 	}
 
 	/**
@@ -2228,6 +2296,19 @@ class JobCommandBuilder {
 		$steps[] = ['type' => 'ssh', 'label' => 'Verify install',
 			'on_host' => true,
 			'cmd' => $verify_cmd];
+
+		// Hand the new site the recovery key before anyone leaves the install
+		// screen, so it can encrypt its own scheduled backups from day one
+		// rather than waiting for someone to remember to visit its admin. A
+		// manager that has not finished its own recovery setup simply has
+		// nothing to give — that is a gap to fix at the manager, not a reason
+		// to fail an install that otherwise worked.
+		if (self::can_push_recovery_key()) {
+			$steps[] = array_merge(
+				self::step_push_recovery_key("/var/www/html/{$sitename}/maintenance_scripts"),
+				['continue_on_error' => true]
+			);
+		}
 
 		return array_merge($steps, $teardown);
 	}

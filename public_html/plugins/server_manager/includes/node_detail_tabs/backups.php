@@ -66,6 +66,31 @@
 		echo '</div>';
 	}
 
+	// That covers backups this control plane runs. A backup the node runs on its
+	// own schedule reads the node's OWN recovery key, so it needs one of its own
+	// — which the control plane gives it, filling an empty slot and never
+	// overwriting one.
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+	$rk_node = RecoveryKeyFleet::node_state($node);
+	if ($rk_node['state'] !== 'n/a') {
+		$rk_class = ($rk_node['state'] === 'has') ? 'alert-light' : 'alert-warning';
+		echo '<div class="alert ' . $rk_class . ' border mb-3 py-2">';
+		echo '<strong>Recovery key on this site:</strong> ' . htmlspecialchars($rk_node['summary']);
+		if ($rk_node['fingerprint'] !== '') {
+			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip;)';
+		}
+		if (RecoveryKeyFleet::is_pushable($rk_node)) {
+			$fw_rk = $page->getFormWriter('push_recovery_key_form');
+			$fw_rk->begin_form();
+			$fw_rk->hiddeninput('action', '', ['value' => 'push_recovery_key']);
+			$fw_rk->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+			$fw_rk->submitbutton('btn_push_recovery_key', 'Send the recovery key',
+				['class' => 'btn btn-sm btn-primary mt-2']);
+			$fw_rk->end_form();
+		}
+		echo '</div>';
+	}
+
 	// A backup nobody can decrypt is not a backup, so an encrypting backup is
 	// refused server-side until recovery is set up. Don't offer the button that
 	// is going to be refused: a cloud-target node (encryption forced) gets the

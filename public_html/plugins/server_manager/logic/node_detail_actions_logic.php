@@ -50,6 +50,7 @@ class NodeDetailActions {
 		'copy_database_local'      => 'database',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
+		'push_recovery_key'        => 'backups',
 		'apply_update'             => 'updates',
 		'apply_update_all_on_host' => 'updates',
 		'retry_install'            => 'overview',
@@ -106,6 +107,22 @@ class NodeDetailActions {
 			case 'check_status': {
 				$steps = JobCommandBuilder::build_check_status($node);
 				$job = ManagementJob::createJob($node->key, 'check_status', $steps, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'push_recovery_key': {
+				// "Do it now", for an operator who does not want to wait for the
+				// next status check. Nothing depends on anyone pressing it: the
+				// status check fills an empty slot on its own. The node decides
+				// what to do with the key, and it never overwrites one, so this
+				// is safe to press against any node at any time.
+				if (!$node->get('mgn_web_root')) {
+					self::fail($session, $page_regex,
+						'This node does not host a Joinery site, so it has no recovery key to set.');
+					return $base_url . '&tab=backups';
+				}
+				$steps = JobCommandBuilder::build_push_recovery_key($node);
+				$job = ManagementJob::createJob($node->key, 'push_recovery_key', $steps, null, $uid);
 				return self::jobUrl($job);
 			}
 

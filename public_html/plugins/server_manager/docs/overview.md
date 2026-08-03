@@ -212,6 +212,7 @@ Health dot colors reflect actual server health, not check recency:
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
+| `push_recovery_key` | Give a node the control plane's proven backup recovery key, so it can encrypt the backups it runs on its own schedule. Fills an empty slot only — never overwrites | No |
 | `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
@@ -559,11 +560,14 @@ keys sealed to the old public key. Pasting over a proven value is refused.
 
 ### Guided setup
 
-The **Backup key recovery** panel on the Backup Targets page detects how far setup
-has got and walks the outstanding step — create the keypair, then prove possession
-— after which it collapses to a one-line confirmation.
-`BackupRecoveryKey::setup_state()` is the single source of truth for that state, so
-the panel, the node Backups tab, and the dashboard cannot disagree.
+Recovery key setup is core, not fleet — a standalone site needs it just as much —
+so it lives on the Backups page and is rendered by
+`includes/RecoveryKeySetupPanel.php` (see
+[Backups](../../../docs/backups.md#recovery-key-setup)). The Backup Targets page
+shows the current state and links there rather than carrying a second copy of
+the panel. `BackupRecoveryKey::setup_state()` is the single source of truth for
+that state, so the panel, the node Backups tab, and the dashboard cannot
+disagree.
 
 Until setup is finished the platform does not offer backups it would refuse: a node
 with a cloud target shows the explanation in place of the Run Backup forms, and a
@@ -571,6 +575,50 @@ local-only node has encryption switched off with a link to the panel. Creating a
 encrypting backup checks the recovery key when the job is built, so an unconfigured
 or unproven key fails while the operator is looking at the button rather than
 part-way through a backup.
+
+### Backup recovery key across the fleet
+
+A backup this control plane runs seals to the recovery key held here, and works
+against a node that has never heard of it. A backup a node runs on its **own**
+schedule cannot: it reads that node's own `backup_recovery_public_key`, and
+refuses outright when it is empty. So the control plane gives each managed site
+the key it has already proven.
+
+**The rule is that a push fills an empty slot and never overwrites one.** A site
+with no key is a site making no encrypted backups, so writing one there cannot
+destroy anything. A site already holding a different key is left exactly as it
+is and reported — archives on its shelf may open only with the private half of
+that key, and replacing it is a rotation, which is a separate operation nothing
+here performs.
+
+Pushing the proof marker along with the key is deliberate. The possession
+ceremony exists to catch a transcription mistake — a mistyped public key seals
+happily and produces archives nobody can open — and a key copied
+machine-to-machine from a control plane that has already run the ceremony has no
+transcription step to go wrong. `BackupRecoveryKey::accept_proven_fingerprint()`
+still requires the fingerprint to match the key the site is holding, so it can
+only ever complete that key.
+
+Where it happens:
+
+- **At install.** `build_install_node()` carries the push, so a node is never
+  born without a recovery key. A control plane that has not finished its own
+  setup simply has nothing to give; the install is not failed over it.
+- **When the status check finds an empty slot.** The check asks every node which
+  key it holds (`set_recovery_key.php --report` over SSH, or
+  `backup_recovery_state` / `backup_recovery_fpr` from the management API), and
+  `JobResultProcessor` queues a push for any node reporting nothing. This is
+  what brings nodes installed before the push existed into line.
+- **By hand**, from the node's Backups tab or the fleet table on Backup Targets.
+  Nothing depends on anyone pressing it.
+
+The node decides what to do with what it is handed:
+`maintenance_scripts/sysadmin_tools/set_recovery_key.php` boots the platform and
+goes through `BackupRecoveryKey`, so there is one code path that decides whether
+a recovery key may be written. It prints one machine-readable line —
+`RECOVERY_KEY=written|proof_write|already|different|none|invalid` — which
+`JobResultProcessor` records onto `mgn_backup_recovery_fpr`. The fleet table
+reads that column, so it never reaches out to every node on page load.
 
 ### Disaster recovery
 

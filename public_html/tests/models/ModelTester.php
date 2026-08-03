@@ -1705,9 +1705,9 @@ class ModelTester {
     protected function test_required_field($field, $debug) {
         $verbose = $this->is_verbose();
         if ($debug || $verbose) echo "Testing required field: $field<br>\n";
-        
+
         $model_class = $this->model_class;
-        
+
         // Check if this field has a default value in field_specifications
         $field_spec = $model_class::$field_specifications[$field] ?? [];
         if (isset($field_spec['default'])) {
@@ -1716,22 +1716,104 @@ class ModelTester {
             self::$test_warn_count++;
             return;
         }
-        
+
+        // A field the model supplies for itself is required of the DATABASE, not
+        // of the caller — SubscriptionTier mints the group row it points at, and
+        // demanding one from the caller would be asking for the thing the model
+        // exists to create. The claim is inverted rather than dropped: omitting
+        // it must SUCCEED and must leave the field populated. A model that stops
+        // filling it fails here, which is the regression worth catching.
+        if (in_array($field, $this->get_test_fixture_self_filled(), true)) {
+            $this->test_self_filled_field($field);
+            return;
+        }
+
         $model = new $model_class(null);
-        
+
         // Generate valid data for all other required fields
         $test_data = $this->generate_valid_test_data();
         unset($test_data[$field]); // Remove the field we're testing
-        
+
         // Set all other required fields
         foreach ($test_data as $other_field => $value) {
             $model->set($other_field, $value);
         }
-        
+
         // Try to save without the required field - should fail
         $this->expect_exception(function() use ($model) {
             $model->save();
         }, Exception::class, "Saving without required field $field should fail");
+    }
+
+    /**
+     * A required field the model's own save() fills in: saving without it must
+     * work, and the field must be set afterwards.
+     *
+     * The row the model minted to fill the field is removed along with the
+     * model itself. It is not registered for teardown — nothing asked for it,
+     * the model created it as a side effect — and leaving it behind is not
+     * merely untidy: the next run generates the same name, the model refuses
+     * the duplicate, and the test then "passes" on an exception that has
+     * nothing to do with what it is asserting.
+     */
+    protected function test_self_filled_field($field) {
+        $model_class = $this->model_class;
+
+        $model = new $model_class(null);
+        $test_data = $this->generate_valid_test_data();
+        unset($test_data[$field]);
+        foreach ($test_data as $other_field => $value) {
+            $model->set($other_field, $value);
+        }
+
+        $minted_key = null;
+        try {
+            $model->save();
+            $minted_key = (string)$model->get($field);
+            $this->assert_true($minted_key !== '',
+                "Saving without $field succeeds and the model fills it in");
+        } catch (Exception $e) {
+            $this->test_fail("Saving without self-filled field $field should succeed: " . $e->getMessage());
+        } finally {
+            $this->cleanup_constraint_fixtures([$model], "self-filled field test on $field");
+            $this->cleanup_minted_parent($field, $minted_key);
+        }
+    }
+
+    /**
+     * Delete the parent row a self-filled field was pointed at, when the field
+     * resolves to a model class. A field that resolves to nothing (a
+     * polymorphic id, a value that is not a reference at all) has nothing to
+     * clean up.
+     */
+    protected function cleanup_minted_parent($field, $minted_key) {
+        if ($minted_key === null || $minted_key === '') {
+            return;
+        }
+        $target = $this->resolve_fk_target($field);
+        if ($target === null) {
+            return;
+        }
+        try {
+            $parent = new $target['class']((int)$minted_key, TRUE);
+            $parent->permanent_delete();
+        } catch (Exception $e) {
+            $this->test_warn("Cleanup failed for the row {$field} was pointed at: " . $e->getMessage());
+        }
+    }
+
+    /**
+     * Required fields the model's $test_fixture declares its own save() supplies
+     * ('self_filled' key), or [] when it declares none.
+     */
+    protected function get_test_fixture_self_filled() {
+        $model_class = $this->model_class;
+        if (property_exists($model_class, 'test_fixture')
+            && isset($model_class::$test_fixture['self_filled'])
+            && is_array($model_class::$test_fixture['self_filled'])) {
+            return $model_class::$test_fixture['self_filled'];
+        }
+        return [];
     }
     
     protected function test_field_type_constraints($field, $spec, $debug) {

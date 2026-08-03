@@ -79,6 +79,22 @@ function stats_handler($request) {
 		$result['joinery_version'] = $version;
 	}
 
+	// Which backup recovery key this site is holding. A control plane needs it
+	// to see whether the site can encrypt its own scheduled backups yet, and to
+	// tell its own key from one somebody else configured here. Only the
+	// fingerprint and the state travel — the public key is not secret, but
+	// nothing here needs it, and a hash is enough to compare.
+	try {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		$recovery = BackupRecoveryKey::key_report();
+		$result['backup_recovery_state'] = $recovery['state'];
+		if ($recovery['fingerprint'] !== '') {
+			$result['backup_recovery_fpr'] = $recovery['fingerprint'];
+		}
+	} catch (Throwable $e) {
+		// A site too old to have the class answers the rest of the call normally.
+	}
+
 	// Cron health — last time process_scheduled_tasks.php fired
 	$settings = Globalvars::get_instance();
 	$cron_last_run = $settings->get_setting('scheduled_tasks_last_cron_run');

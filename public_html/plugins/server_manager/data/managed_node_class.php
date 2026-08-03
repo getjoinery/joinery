@@ -41,6 +41,12 @@ class ManagedNode extends SystemBase {
 		'mgn_tls_insecure'        => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_bkt_backup_target_id' => array('type'=>'int8'),
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Fingerprint of the backup recovery public key this node is holding, as
+		// the status check last found it. Stored so the fleet view can show which
+		// nodes have the control plane's key without reaching out to every node
+		// on page load — and so a node holding a key the control plane did not
+		// put there is visible rather than silently left behind.
+		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
 		// Compared against the newest escrow row to detect a manually regenerated
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),

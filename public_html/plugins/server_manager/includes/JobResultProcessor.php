@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.13 - records which backup recovery key each node holds, and queues a push to any node
+ *                 the status check finds with an empty slot
  * @version 1.12 - process_decommission_node: soft-delete the node only on a verified host teardown
  *                 (escrow rows + job history preserved); leave it intact on any failure
  * @version 1.11 - every terminal job records a result (sweep never re-processes); CF SSL gated on
@@ -163,7 +165,21 @@ class JobResultProcessor {
 					$node->set('mgn_ssl_state', 'failed');
 				}
 			}
+			// Which recovery key the node is holding. Recorded even when it is
+			// not ours: the fleet view has to be able to show that a node is
+			// carrying a key the control plane did not put there, because that
+			// is the one case the push deliberately walks away from.
+			if (isset($result['backup_recovery_state'])) {
+				$node->set('mgn_backup_recovery_fpr', (string)($result['backup_recovery_fpr'] ?? ''));
+			}
 			$node->save();
+
+			// An empty slot is filled here rather than waiting for someone to
+			// notice it. This is the path that brings nodes installed before the
+			// push existed into line, and that repairs a node whose key was
+			// cleared — without it, "every managed site is covered" would only
+			// ever be true of sites installed after today.
+			self::push_recovery_key_if_empty($node, $result);
 
 			// The first confirmation of an active cert doubles as the
 			// reverse-DNS moment for cloud-born nodes: the domain has just
@@ -185,6 +201,95 @@ class JobResultProcessor {
 		// Save structured result on the job
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * Read the RECOVERY_KEY=<outcome> [fpr=<sha256>] [proven=0|1] line that
+	 * set_recovery_key.php prints, in either of its modes.
+	 *
+	 * The keys it returns are the ones the management API's stats endpoint
+	 * returns for the same facts, so a node reached over SSH and a node reached
+	 * over the API leave mgn_last_status_data looking identical.
+	 *
+	 * @return array{backup_recovery_state:string, backup_recovery_fpr?:string}|null
+	 */
+	private static function parse_recovery_key_token($output) {
+		if (!preg_match('/^RECOVERY_KEY=(\w+)(?:\s+fpr=([0-9a-f]{64}))?(?:\s+proven=([01]))?/m',
+				(string)$output, $m)) {
+			return null;
+		}
+		$fpr    = $m[2] ?? '';
+		$proven = (($m[3] ?? '0') === '1');
+
+		switch ($m[1]) {
+			case 'none':    return ['backup_recovery_state' => 'unconfigured', 'backup_recovery_fpr' => ''];
+			case 'invalid': return ['backup_recovery_state' => 'invalid',      'backup_recovery_fpr' => ''];
+		}
+		if ($fpr === '') return null;
+
+		return [
+			'backup_recovery_state' => $proven ? 'proven' : 'unproven',
+			'backup_recovery_fpr'   => $fpr,
+		];
+	}
+
+	/**
+	 * Record what a push did. The push reports the node's resulting state, so
+	 * the fleet view is right immediately rather than after the next status
+	 * check — including the case where the node turned out to be holding
+	 * somebody else's key and the push walked away.
+	 */
+	private static function process_push_recovery_key($job) {
+		$recovery = self::parse_recovery_key_token($job->get('mjb_output') ?: '');
+		$node_id  = $job->get('mjb_mgn_node_id');
+		if ($recovery === null || !$node_id) return;
+
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+			$node->set('mgn_backup_recovery_fpr', (string)$recovery['backup_recovery_fpr']);
+			$node->save();
+		} catch (Exception $e) {
+			error_log('JobResultProcessor: could not record a recovery key push for node '
+				. $node_id . ': ' . $e->getMessage());
+		}
+
+		$job->set('mjb_result', json_encode($recovery));
+		$job->save();
+	}
+
+	/**
+	 * Queue a recovery-key push for a node the status check just found with an
+	 * empty slot.
+	 *
+	 * Deliberately not an operator action. The chore this replaces scaled with
+	 * the fleet, so the natural response was to skip it, and the site that got
+	 * skipped was the one with no backups. Filling an empty slot cannot destroy
+	 * anything — a node with no key is a node making no encrypted backups — so
+	 * there is nothing here worth asking permission for.
+	 *
+	 * Every other case is left alone: a node already holding a key (ours or
+	 * anyone's), a node that hosts no Joinery site, a node whose Joinery checks
+	 * are switched off, and a control plane that has not finished its own
+	 * recovery setup and so has nothing to give.
+	 */
+	private static function push_recovery_key_if_empty($node, array $result): void {
+		$state = $result['backup_recovery_state'] ?? '';
+		if ($state !== 'unconfigured' && $state !== 'invalid') return;
+		if (!$node->get('mgn_web_root')) return;          // DNS box, relay: not applicable
+		if ($node->get('mgn_skip_joinery_checks')) return;
+
+		try {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+			if (!JobCommandBuilder::can_push_recovery_key()) return;
+
+			$steps = JobCommandBuilder::build_push_recovery_key($node);
+			ManagementJob::createJob($node->key, 'push_recovery_key', $steps, null, null);
+		} catch (Throwable $e) {
+			// A status check that could not queue a follow-up is still a good
+			// status check. The next one tries again.
+			error_log('JobResultProcessor: could not queue a recovery key push for node '
+				. $node->key . ': ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -257,6 +362,11 @@ class JobResultProcessor {
 
 		if (preg_match('/^CRON_LAST_RUN=(.+)$/m', $output, $m)) {
 			$result['cron_last_run'] = trim($m[1]);
+		}
+
+		$recovery = self::parse_recovery_key_token($output);
+		if ($recovery !== null) {
+			$result = array_merge($result, $recovery);
 		}
 
 		if (preg_match('/^CURRENT_DB=(\S+)$/m', $output, $m)) {

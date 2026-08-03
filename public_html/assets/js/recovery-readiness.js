@@ -8,11 +8,20 @@
  * field, cleared the moment it is used. Only the recovered proof string —
  * public by construction — goes into the form.
  *
+ * Generation: the same primitives make the keypair in the first place, so
+ * setting up backup recovery needs no shell. The private half is shown once,
+ * copied or downloaded by the operator, and never sent anywhere. The page
+ * deliberately does NOT use its in-memory copy to satisfy the ceremony above —
+ * the ceremony's job is proving the copy that was SAVED works, and auto-proving
+ * would pass just as happily for someone who closed the tab without saving.
+ *
  * Client vault checks: for client-custody vaults the recovery code must never
  * reach the server, so the dry run happens here too — derive the KEK, attempt
  * the unwrap against the user's own wrapping rows, report pass/fail. Nothing
  * is consumed and nothing secret is transmitted.
  *
+ * @version 1.1.0 - keypair generation in the page (generateKeypair/attachGenerator)
+ *                  and self-attachment from window.rrPanel
  * @version 1.0.0
  */
 window.recoveryReadiness = (function () {
@@ -42,9 +51,60 @@ window.recoveryReadiness = (function () {
 		return out;
 	}
 
+	function b64encode(bytes) {
+		var s = '';
+		for (var i = 0; i < bytes.length; i++) s += String.fromCharCode(bytes[i]);
+		return btoa(s);
+	}
+
 	function utf8(s) { return new TextEncoder().encode(s); }
 
 	function zero(bytes) { if (bytes && bytes.fill) bytes.fill(0); }
+
+	/**
+	 * Mint an X25519 recovery keypair in this page.
+	 *
+	 * The encoding is the contract with everything else that touches this key —
+	 * the ceremony below, escrow_keypair.php, libsodium on the server — so both
+	 * halves come out exactly as the CLI writes them: one line of base64 over
+	 * the raw 32 bytes. The private key is the raw scalar, which WebCrypto will
+	 * only export wrapped in PKCS#8, so the fixed 16-byte header comes back off.
+	 * That header is asserted rather than assumed: a scalar taken from the wrong
+	 * offset would look like a perfectly good key and open nothing.
+	 *
+	 * @returns {Promise<{privateKeyB64: string, publicKeyB64: string}>}
+	 */
+	async function generateKeypair() {
+		if (!subtle) {
+			throw new Error('This browser has no WebCrypto — use the command shown below instead.');
+		}
+
+		var pair;
+		try {
+			pair = await subtle.generateKey({ name: 'X25519' }, true, ['deriveBits']);
+		} catch (e) {
+			throw new Error('This browser cannot make an X25519 key — use the command shown below instead.');
+		}
+
+		var pkcs8 = new Uint8Array(await subtle.exportKey('pkcs8', pair.privateKey));
+		if (pkcs8.length !== PKCS8_PREFIX.length + 32) {
+			zero(pkcs8);
+			throw new Error('This browser exported the key in an unexpected format — use the command shown below instead.');
+		}
+		for (var i = 0; i < PKCS8_PREFIX.length; i++) {
+			if (pkcs8[i] !== PKCS8_PREFIX[i]) {
+				zero(pkcs8);
+				throw new Error('This browser exported the key in an unexpected format — use the command shown below instead.');
+			}
+		}
+
+		var priv = pkcs8.slice(PKCS8_PREFIX.length);
+		var pub = new Uint8Array(await subtle.exportKey('raw', pair.publicKey));
+		var out = { privateKeyB64: b64encode(priv), publicKeyB64: b64encode(pub) };
+		zero(priv);
+		zero(pkcs8);
+		return out;
+	}
 
 	/**
 	 * Open a sealed challenge with a pasted private key.
@@ -141,6 +201,96 @@ window.recoveryReadiness = (function () {
 				button.disabled = false;
 			});
 		});
+	}
+
+	/**
+	 * Wire the generate-a-recovery-key controls on the setup panel.
+	 *
+	 * The Generate button is hidden in the markup and revealed only once a
+	 * throwaway keypair has actually been made here — support for X25519 in
+	 * WebCrypto is recent enough that offering a button which fails on click
+	 * would be worse than not offering it, on the one page whose job is making
+	 * sure recovery works.
+	 *
+	 * After generating, Save is disabled until the operator confirms they saved
+	 * the key. It is the last moment the key exists: nothing on the server has
+	 * it, and regenerating is free right up until the public half is saved.
+	 */
+	function attachGenerator(c) {
+		var button = document.getElementById(c.buttonId);
+		var box = document.getElementById(c.boxId);
+		var result = document.getElementById(c.resultId);
+		var privateOut = document.getElementById(c.privateOutId);
+		var publicField = document.getElementById(c.publicFieldId);
+		var status = document.getElementById(c.statusId);
+		var submit = document.getElementById(c.submitId);
+		var confirmWrap = document.getElementById(c.confirmWrapId);
+		var confirmBox = document.getElementById(c.confirmBoxId);
+		var copyButton = document.getElementById(c.copyButtonId);
+		var download = document.getElementById(c.downloadId);
+		if (!button || !box || !result || !privateOut || !publicField) return;
+
+		function say(message, ok) {
+			if (!status) return;
+			status.textContent = message;
+			status.className = ok ? 'text-success small' : 'text-danger small';
+		}
+
+		// Probe before offering. A key made and thrown away here proves the
+		// whole path works, including the PKCS#8 export shape.
+		generateKeypair().then(function () {
+			box.hidden = false;
+		}).catch(function () {
+			/* no generation on this browser — the pasted-key path and the CLI
+			   disclosure below are still there, so say nothing. */
+		});
+
+		button.addEventListener('click', function () {
+			button.disabled = true;
+			generateKeypair().then(function (pair) {
+				privateOut.value = pair.privateKeyB64;
+				publicField.value = pair.publicKeyB64;
+				result.hidden = false;
+
+				if (download) {
+					var blob = new Blob([pair.privateKeyB64 + '\n'], { type: 'text/plain' });
+					download.href = URL.createObjectURL(blob);
+				}
+				if (confirmWrap && confirmBox && submit) {
+					confirmWrap.hidden = false;
+					confirmBox.checked = false;
+					submit.disabled = true;
+					confirmBox.addEventListener('change', function () {
+						submit.disabled = !confirmBox.checked;
+					});
+				}
+				button.textContent = 'Key generated';
+				say('', true);
+				privateOut.focus();
+				privateOut.select();
+			}).catch(function (err) {
+				button.disabled = false;
+				say(err.message || String(err), false);
+			});
+		});
+
+		if (copyButton) {
+			copyButton.addEventListener('click', function () {
+				var value = privateOut.value;
+				if (!value) return;
+				var done = function () { say('Copied. Paste it into your password manager now.', true); };
+				var failed = function () {
+					privateOut.focus();
+					privateOut.select();
+					say('Could not reach the clipboard — the key is selected, copy it by hand.', false);
+				};
+				if (navigator.clipboard && navigator.clipboard.writeText) {
+					navigator.clipboard.writeText(value).then(done).catch(failed);
+				} else {
+					failed();
+				}
+			});
+		}
 	}
 
 	/**
@@ -248,5 +398,28 @@ window.recoveryReadiness = (function () {
 		});
 	}
 
-	return { openChallenge: openChallenge, attachCeremony: attachCeremony, attachClientChecks: attachClientChecks, attachStepUp: attachStepUp };
+	// RecoveryKeySetupPanel emits window.rrPanel and nothing else — the panel
+	// renders in several places and each one wiring its own listeners is how one
+	// of them ends up with a button that does nothing.
+	function attachPanel() {
+		var cfg = window.rrPanel;
+		if (!cfg) return;
+		if (cfg.generator) attachGenerator(cfg.generator);
+		if (cfg.ceremony) attachCeremony(cfg.ceremony);
+	}
+
+	if (document.readyState === 'loading') {
+		document.addEventListener('DOMContentLoaded', attachPanel);
+	} else {
+		attachPanel();
+	}
+
+	return {
+		openChallenge: openChallenge,
+		generateKeypair: generateKeypair,
+		attachCeremony: attachCeremony,
+		attachGenerator: attachGenerator,
+		attachClientChecks: attachClientChecks,
+		attachStepUp: attachStepUp
+	};
 })();

@@ -1181,7 +1181,16 @@
 	// weight, so they go. Idempotent — a second run deletes nothing.
 	$migration = array();
 	$migration['database_version'] = '164';
-	$migration['test'] = NULL;
+	// Core migrations run on every site, including the ones that have never
+	// installed the mailbox plugin and so have no contacts table at all. Without
+	// this guard the statement is a hard error there, and a failed migration
+	// rolls the whole upgrade back — a site is left on the old release over a
+	// table it was never supposed to have. The guard is skip-when-absent: count
+	// > 0 means "do not run".
+	$migration['test'] = "SELECT CASE WHEN EXISTS (
+			SELECT 1 FROM information_schema.tables
+			WHERE table_name = 'imc_mailbox_contacts' AND table_schema = 'public'
+		) THEN 0 ELSE 1 END as count";
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM imc_mailbox_contacts
 		WHERE imc_iea_inbound_email_alias_id IS NULL;";
