@@ -1,7 +1,7 @@
 # A container rebuild must never move a site's code backward
 
-**Status:** Part 1 built 2026-08-04. Part 2 phase A built 2026-08-04; phase B
-(migrating the seven existing containers) not started.
+**Status:** Implemented 2026-08-04 — guard, code volumes, and all seven
+containers migrated.
 **Date:** 2026-08-04
 
 ## The problem
@@ -295,8 +295,43 @@ check), and volume-exists-but-empty (refuses).
    pin the arrangement in `installer_contract_test`.
 6. ✅ Phase A: `docs/deploy_and_upgrade.md` describes where code lives and what
    a rebuild does to it.
-7. Phase B: the one-time migration for the seven existing containers.
-8. After phase B: retire the phase-1 guard once no unmigrated site is left.
+7. ✅ Phase B: the one-time migration for the seven existing containers.
+8. ✅ Reconsidered: **the phase-1 guard stays.** It was to be retired once no
+   unmigrated site remained, which is true of this fleet — but it disables
+   itself for a site already on a code volume, and it is the only thing standing
+   in front of a site that is *not*: a customer deployment on this installer that
+   has never been migrated, or one whose migration created the volumes and
+   stopped before filling them. It costs a version comparison and protects the
+   case nobody is watching.
+
+## Built — Part 2 phase B (2026-08-04)
+
+All seven containers migrated with
+`maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh`, in
+ascending order of stakes: joinerydemo, phillyzouk, galactictribune,
+mapsofwisdom, getjoinery_orgs, getjoinery, scrolldaddy. Every site afterwards:
+0.8.221, HTTP 200 locally and through the proxy, four code volumes mounted, and
+writable-layer drift down from 14,000–18,000 paths to ~950.
+
+joinerydemo went first and went down twice — root-owned code from a `docker cp`
+without `-a`, then two PHP extensions that had only ever existed in the writable
+layer. Both were fixed in the script rather than only on the box, and the six
+that followed were byte-identical to their pre-migration baselines on every
+measured field, first time, unattended.
+
+Two bugs were caught in the script before it ran again, both of which would have
+reported success while doing nothing: `docker exec` does not forward stdin
+without `-i`, so the package-restore comparison was reading an empty list; and
+`dpkg-query -W` lists packages that are merely *known*, so phillyzouk recorded 45
+where 19 were installed.
+
+getjoinery kept its agent binary and lost `/etc/joinery-agent` and the cron
+keepalive, neither of which was in the capture list at the time. Re-running
+`install_agent.sh` restored those and **downgraded the agent 1.1.0 → 0.4.0**,
+because it gated on version *equality* and the artifact shipped in a site tree
+is older than whatever the release channel has self-updated to. Fixed at source
+in `install_agent.sh` 1.1: `sort -V` comparison, install only when absent or
+older, `JOINERY_AGENT_ALLOW_DOWNGRADE=1` to force a rollback.
 
 ## Built — Part 1 (2026-08-04, install.sh 2.29)
 

@@ -213,4 +213,75 @@ check(file_get_contents($dist_c . '/manifest.json') === $before_c,
 	'failed rebuild leaves the previous agent_dist in place');
 check(!is_dir($dist_c . '.staging'), 'failed rebuild cleans up its staging directory');
 
+
+section('install_agent.sh installs forward only, never backward');
+
+// The other half of self-update. install_agent.sh runs at every root moment —
+// container start, site install, code upgrade, Run Plugin Installers — and
+// ships whatever artifact was current when the site archive was built. A node
+// that has self-updated past that is the normal case, not the exception, so an
+// installer that reinstalls on any version difference walks the fleet backwards
+// one root moment at a time. It cost getjoinery its 1.1.0 agent (2026-08-04),
+// replaced by the 0.4.0 in its site tree, reported as a successful install.
+//
+// The decision is executed here rather than pattern-matched: extract the real
+// comparison out of the shipped script and run it.
+$installer_sh = PathHelper::getIncludePath('plugins/server_manager/provisioning/install_agent.sh');
+$installer_src = is_file($installer_sh) ? file_get_contents($installer_sh) : '';
+check($installer_src !== '', 'install_agent.sh is readable', $installer_sh);
+
+$cmp_fn = '';
+if (preg_match('/version_is_older\(\) \{.*?\n\}/s', $installer_src, $m)) {
+	$cmp_fn = $m[0];
+}
+check($cmp_fn !== '', 'the version comparison is findable');
+check(strpos($cmp_fn, 'sort -V') !== false,
+	'it compares with sort -V',
+	'string comparison ranks 0.10.0 below 0.9.0');
+
+// Same predicate and same guard expression as the script itself.
+$decide = function (string $current, string $dist, string $allow = '0') use ($cmp_fn): string {
+	$script = $cmp_fn . "\n"
+		. 'if [ -n "$1" ] && [ "$3" != "1" ] && ! version_is_older "$1" "$2"; '
+		. 'then echo KEEP; else echo INSTALL; fi';
+	$path = tempnam(sys_get_temp_dir(), 'agentver');
+	file_put_contents($path, $script);
+	$out = shell_exec('bash ' . escapeshellarg($path) . ' '
+		. escapeshellarg($current) . ' ' . escapeshellarg($dist) . ' ' . escapeshellarg($allow));
+	unlink($path);
+	return trim((string)$out);
+};
+
+if ($cmp_fn !== '') {
+	check($decide('', '0.4.0') === 'INSTALL',
+		'a node with no agent gets one');
+	check($decide('0.3.0', '0.4.0') === 'INSTALL',
+		'an older agent is upgraded');
+	check($decide('0.4.0', '0.4.0') === 'KEEP',
+		'the same version is left alone');
+	check($decide('1.1.0', '0.4.0') === 'KEEP',
+		'a self-updated agent is NOT rolled back to the shipped artifact',
+		'this is the regression that took getjoinery back to 0.4.0');
+	check($decide('0.9.0', '0.10.0') === 'INSTALL',
+		'0.9.0 is older than 0.10.0');
+	check($decide('0.10.0', '0.9.0') === 'KEEP',
+		'0.10.0 is newer than 0.9.0',
+		'the pair string comparison gets backwards');
+	check($decide('1.1.0', '0.4.0', '1') === 'INSTALL',
+		'JOINERY_AGENT_ALLOW_DOWNGRADE forces the shipped artifact on');
+}
+
+// Keeping the binary must not mean skipping supervision: the env file and the
+// keepalive are what a container recreation loses, and converging them is the
+// reason to run this script on a node that is already up to date.
+if (preg_match('/! version_is_older "\$CURRENT" "\$DIST_VERSION"; then\n(.*?)\n    exit 0/s', $installer_src, $m)) {
+	check(strpos($m[1], 'ensure_supervision') !== false,
+		'the keep path still converges supervision',
+		'env file and cron keepalive are exactly what a container swap drops');
+	check(strpos($m[1], 'start_agent') !== false,
+		'and starts the agent if it is not running');
+} else {
+	check(false, 'the keep branch is findable');
+}
+
 harness_finish();

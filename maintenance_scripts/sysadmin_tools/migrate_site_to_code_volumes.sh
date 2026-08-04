@@ -38,6 +38,11 @@ SITE_ROOT="/var/www/html/${SITE}"
 # volume suffix : path under the site root
 CODE_TREES=("code:public_html" "vendor:vendor" "scripts:maintenance_scripts")
 
+# Installed php packages, names only. `dpkg-query -W` alone also lists packages
+# that are merely KNOWN — 26 of phillyzouk's 45 were never installed — so the
+# state column is what makes this a record of what the container actually had.
+PKG_LIST_CMD="dpkg -l 'php8.3-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | cut -d: -f1 | sort"
+
 say()  { echo "[$(date -u +%H:%M:%S)] $*"; }
 die()  { echo "FATAL: $*" >&2; exit 1; }
 
@@ -123,8 +128,7 @@ if [ "$STAGE" = "prepare" ]; then
     # writable layer exactly like the code did, and `docker rm` takes them too.
     # Record the installed set now so the swap can restore whatever the new
     # container turns out to be missing.
-    docker exec "$SITE" bash -c "dpkg-query -W -f='\${Package}\n' 'php8.3-*' 2>/dev/null | sort" \
-        > "${WORK_DIR}/${SITE}.php-packages" || true
+    docker exec "$SITE" bash -c "$PKG_LIST_CMD" > "${WORK_DIR}/${SITE}.php-packages" || true
     say "Recorded $(wc -l < "${WORK_DIR}/${SITE}.php-packages") installed php packages"
 
     # System config lives in the writable layer too, and a recreated container
@@ -132,8 +136,12 @@ if [ "$STAGE" = "prepare" ]; then
     # things nothing will complain about: the real-client-IP module, the Apache
     # worker tuning, the management agent binary. Captured whole, because the
     # swap reuses the same image and so the same baseline.
+    # /etc/joinery-agent and /etc/cron.d earn their place the hard way: getjoinery
+    # kept the agent BINARY through its swap and lost the env file naming its site
+    # config and the cron keepalive that starts it, so the node came back with a
+    # management agent that could neither run nor be started.
     CONFIG_PATHS=""
-    for p in etc/apache2 usr/local/bin var/spool/cron/crontabs; do
+    for p in etc/apache2 etc/cron.d etc/joinery-agent usr/local/bin var/spool/cron/crontabs; do
         docker exec "$SITE" test -e "/$p" 2>/dev/null && CONFIG_PATHS="${CONFIG_PATHS} ${p}"
     done
     if [ -n "${CONFIG_PATHS// /}" ]; then
@@ -324,8 +332,11 @@ docker exec "$SITE" bash -c "chmod +x ${SITE_ROOT}/maintenance_scripts/install_t
 # a long-lived site is a much older declaration.
 PKG_FILE="${WORK_DIR}/${SITE}.php-packages"
 if [ -s "$PKG_FILE" ]; then
-    MISSING=$(docker exec "$SITE" bash -c \
-        "comm -23 <(sort) <(dpkg-query -W -f='\${Package}\n' 'php8.3-*' 2>/dev/null | sort)" < "$PKG_FILE" | tr '\n' ' ')
+    # Compare here rather than inside the container: `docker exec` does not
+    # forward stdin without -i, so feeding the recorded list in would silently
+    # give comm an empty side and report nothing missing.
+    INSTALLED_NOW=$(docker exec "$SITE" bash -c "$PKG_LIST_CMD")
+    MISSING=$(comm -23 <(sort "$PKG_FILE") <(echo "$INSTALLED_NOW") | tr '\n' ' ')
     if [ -n "${MISSING// /}" ]; then
         say "Reinstalling php packages lost with the old container: ${MISSING}"
         docker exec "$SITE" bash -c "apt-get update -qq && apt-get install -y ${MISSING}" > /dev/null
