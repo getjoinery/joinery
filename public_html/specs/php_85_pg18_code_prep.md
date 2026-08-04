@@ -1,10 +1,10 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
-**Status:** Phase 1 partially BUILT. 1.2's no-op deletions, 1.7 and 1.9 landed
-2026-08-03 and are committed (`c8c085b3`); 1.1, the rest of 1.2, 1.3,
-1.4 and 1.5 landed 2026-08-04 and are uncommitted. **1.2 through 1.5 are
-complete.** What remains of Phase 1 is 1.6 and 1.8. Phase 2 remains gated on the
-OS campaign.
+**Status:** Phase 1 all but complete. 1.2's no-op deletions, 1.7 and 1.9 landed
+2026-08-03 (`c8c085b3`); 1.1 and the rest of 1.2 landed 2026-08-04 (`d72e6812`);
+1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`). 1.6 landed 2026-08-04 and is
+uncommitted. **1.1 through 1.7 and 1.9 are complete.** What remains of Phase 1 is
+1.8 alone. Phase 2 remains gated on the OS campaign.
 **Date:** 2026-08-01
 **Companion:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (the fleet migration itself)
 
@@ -387,7 +387,7 @@ bound to `0.0.0.0:5432`; whether that is reachable off-box depends on a firewall
 this account cannot read. Both are live-configuration changes on a running
 server and belong to the operator, not to this spec.
 
-### 1.6 CSV escape parameter — RFC 4180
+### 1.6 CSV escape parameter — RFC 4180 — BUILT 2026-08-04
 
 PHP 8.4 deprecates relying on the default `$escape` for `fputcsv()`, `fgetcsv()`,
 and `str_getcsv()`. The default is a backslash, which puts the parser into an
@@ -400,24 +400,38 @@ Nothing round-trips through the platform — the table export is download-only a
 the contact import reads files other tools produced — so there is no pair of
 sites that must change together.
 
-- `data/admin_tableexport_data.php:33` and `:42` — writes arbitrary table
-  contents for admin download. The highest-impact site: JSON blobs, serialized
-  columns, and file paths all contain backslashes, and the current output form
-  is misread by Excel.
-- `plugins/mailbox/includes/MailboxContacts.php:418` and `:447` — parses Google
-  Contacts exports, which are RFC 4180. A backslash in a name or notes field can
-  currently swallow the following quote and shift every subsequent column.
+- `data/admin_tableexport_data.php` (2 sites) — writes arbitrary table contents
+  for admin download. **Measured, and narrower than first recorded:** a plain
+  backslash survives the round trip either way, so file paths were never at
+  risk. What corrupts is a backslash immediately before a quote — any JSON or
+  serialized column, where `\"` is ordinary. `{"k":"v\"q"}` written with the
+  default returns from a spreadsheet as `{"k":"v\q""}"`; with `''` it survives.
+- `plugins/mailbox/includes/MailboxContacts.php` (2 sites) — parses Google
+  Contacts exports, which are RFC 4180. **The worst of the set, and worse than
+  the writer.** Demonstrated on a Notes field ending in a backslash:
+  `Jane Doe,"see C:\Users\jane\",jane@example.com,Team A` parses as **2
+  columns** under the default instead of 4, with the email address swallowed
+  into the notes field — an import that silently drops the contact it was
+  reading.
 - `includes/ApiAuth.php:135` — splits an API key's IP allowlist. IP addresses
   contain neither backslashes nor quotes, so this is a no-op in practice; change
   it for consistency.
-- Test tooling under `tests/tools/` and `plugins/mailbox/tests/` follows the same
-  rule.
+- Test tooling: 10 sites across four files in `tests/tools/`
+  (`fetch_phishing_pot.php`, `fetch_spamassassin_ham.php`,
+  `load_email_corpus.php`, `score_email_corpus.php`). The spec originally also
+  named `plugins/mailbox/tests/`; no plugin test directory contains a CSV call.
+
+**15 sites, 7 files, all converted.** A tree-wide sweep confirms no
+`fputcsv`/`fgetcsv`/`str_getcsv` call is left relying on the default. `fgetcsv`
+needs its length argument passed to reach the escape, so those read
+`fgetcsv($fh, 0, ',', '"', '')`.
 
 **Related defect, not fixed here:** `MailboxContacts::parseCsv()` splits its input
 on newlines with `preg_split()` before parsing any field, so a quoted field
 containing a newline — common in the Google Contacts "Notes" column — breaks the
 row alignment regardless of the escape setting. Worth its own fix; out of scope
-for an upgrade-prep pass.
+for an upgrade-prep pass. Recorded in the docblock at the call site so the next
+reader does not conclude the escape fix made the parser correct.
 
 ### 1.7 Remove dead bulk-user page — BUILT 2026-08-03
 
@@ -581,13 +595,13 @@ These are behaviour changes with no code fix — they need a run, not an edit.
 ## Verification
 
 - `php tests/run.php safe` after each Phase 1 item. **Green as of 2026-08-04 for
-  the built subset (1.1, all of 1.2, 1.3, 1.4, 1.5, 1.7, 1.9): 84/84 tests, 2232
+  the built subset (1.1, all of 1.2, 1.3, 1.4, 1.5, 1.6, 1.7, 1.9): 84/84 tests, 2237
   checks, 0 failed, 147 skipped.**
 - `php tests/run.php db` before committing Phase 1, and again before publishing.
   **Green as of 2026-08-04 through 1.2: 226/226 tests, 6912 checks, 0 failed,
-  159 skipped.** Not re-run for 1.3, 1.4 or 1.5, which touch only shell
-  provisioning scripts, a manual email tool, docs, and a safe-tier test — nothing
-  the db tier loads.
+  159 skipped.** Re-run for 1.6, which changes a live import path
+  (`MailboxContacts`) and the admin table export: **green 2026-08-04 with all of
+  Phase 1 built bar 1.8 — 227/227 tests, 7073 checks, 0 failed, 159 skipped.**
 - `validate_php_file.php` reports `Missing: 0` on every file touched so far, with
   one expected exception: `LearnSpamFeedback.php` flags
   `http_get_last_response_headers()`, which genuinely does not exist on the PHP
