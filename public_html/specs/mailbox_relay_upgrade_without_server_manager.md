@@ -21,92 +21,95 @@ target from `mrl_mgn_managed_node_id`, and `RelayCloudProvisioner::registerRelay
 never sets it — a cloud relay is reached by tunnel address, not through a managed
 node. So the button renders, the job builder gets node id 0, and the customer is
 told *"Select a managed node to provision onto."* On a deployment without Server
-Manager the button does not render at all, and there is no in-product way to
-upgrade the relay by any route.
+Manager the button does not render at all.
 
 This matters more than a missing button, because **the customer's own cloud
 account is the documented primary provisioning path**. The relay most likely to
 exist is the relay with no upgrade control.
 
-### Why this cannot be fixed by pointing Rebuild at the tunnel
+### Nobody holds a login to these machines
 
-The obvious repair — reach the cloud relay over SSH the way the map push and
-spool pull already do — does not work, and the reason is a security property
-worth stating plainly rather than discovering later.
+Not the platform, and not the customer either. Three facts in the tree:
 
-**The platform holds no root credential to a cloud relay.** Provisioning injects
-a per-run keypair at instance creation (`authorized_keys` = `rcp_ssh_public_key`),
-sets a random `root_pass` that is never stored, and `eraseCredentials()` wipes the
-sealed private half at every terminal state — grant-per-act custody, working
-exactly as designed. What survives is the tenant pull key, and that key is locked
-to the `joinery-tenant-shell` forced command: rsync of its own spool and fragment
-drop, `joinery-ack`, `joinery-merge`, `joinery-ping`. It cannot run a shell, and
-it cannot sudo anything but the map merge.
+- `RelayCloudProvisioner.php:110` — `root_pass` is `random_bytes(20)`, commented
+  *never stored*, never shown to anyone.
+- `provision_relay.sh:818,820` — `PasswordAuthentication no`,
+  `PermitRootLogin prohibit-password`.
+- The only key in root's `authorized_keys` is the platform's per-run public half,
+  and `eraseCredentials()` wipes the private half at every terminal state.
 
-So there is nothing to log in with. Any design that assumes a root session on
-these relays is assuming a credential the platform deliberately threw away.
+Nothing anywhere collects a customer SSH key. What survives on the platform side
+is the tenant pull key, locked to the `joinery-tenant-shell` forced command:
+rsync of its own spool and fragment drop, `joinery-ack`, `joinery-merge`,
+`joinery-ping`. It cannot open a shell and cannot sudo anything but the map merge.
 
-### Why not simply let the tenant shell upgrade itself
+So a provisioned cloud relay is a machine with no shell credential in existence.
+That is grant-per-act custody working exactly as designed, and this spec does not
+weaken it.
 
-The tempting alternative — a `joinery-upgrade` verb plus a second sudoers rule,
-mirroring how `joinery-merge` already triggers one root action — is rejected, and
-not narrowly.
+## Doctrine
 
-Upgrading means running new code as root. A verb that fetches and executes a
-bundle turns the tenant credential into root on the machine. **On a shared fleet
-shard that is a cross-tenant compromise**: one tenant's pull key would reach every
-other tenant's spool, the domain allowlists that enforce claim boundaries, and the
-sealing keys. The tenancy model exists precisely to prevent that, and a self-upgrade
-verb would hand it back for the convenience of skipping a copy-paste.
+**A relay is reachable only by the tenant forced command — the mail path and the
+health ping. No root credential exists, is minted, or is retained. Code changes
+reach a relay by replacing the machine's contents, never by logging in.**
 
-A self-hosted fleet-of-one has no other tenant to compromise, so the objection is
-weaker there — but the mechanism would be one flag away from the shard case, and
-a security boundary that depends on a boolean staying correct is not one.
+Three designs are ruled out by that sentence, and it is worth naming them because
+each will look attractive to whoever revisits this:
+
+- **A standing key for the platform.** Any key that survives a run is a credential
+  the platform holds, and the whole custody model is that it holds none.
+- **A key for the customer, collected at provisioning.** Cheaper and tempting —
+  one form field, injected beside the platform's at instance creation. Rejected:
+  it makes every relay permanently shell-reachable by whoever holds that key, and
+  the security argument for the tenancy model stops being "there is no credential"
+  and becomes "the credential is in careful hands."
+- **A `joinery-upgrade` verb on the tenant shell.** Upgrading means running new
+  code as root, so the verb turns a tenant credential into root on the machine.
+  On a shared fleet shard that is a cross-tenant compromise: one tenant's pull key
+  would reach every other tenant's spool, the domain allowlists that enforce claim
+  boundaries, and the sealing keys. A fleet-of-one has no other tenant to harm,
+  but the mechanism would be one boolean away from the shard case, and a security
+  boundary that depends on a flag staying correct is not one.
 
 ## Change
 
-**The customer runs the upgrade, and the platform makes that a guided one-line
-action rather than a documentation exercise.**
+**An upgrade is a second kind of cloud run: drain the relay, wipe the instance,
+build it again.** It reuses the provisioning ceremony end to end — the customer
+approves at Linode (or pastes a scoped token), the platform mints a fresh per-run
+keypair, does the whole build over that key, and erases it at the terminal state.
+No credential outlives the run, exactly as on the first provision.
 
-The Relay section grows an **Upgrade** control for every relay it cannot reach
-with a job. It does not attempt a connection. It renders a single copy-paste
-command the customer runs as root on the relay — on a machine they already have
-access to, using a credential the platform never sees:
+`rcp_kind` already exists on the run row and already carries an
+`allowed_values` list. It gains `'upgrade'`. The state machine gains one state
+before the wipe and one after:
 
 ```
-curl -fsSLo /tmp/joinery-relay.tgz 'https://<this site>/relay-bundle?expires=…&sig=…' \
-  && echo '<sha256>  /tmp/joinery-relay.tgz' | sha256sum -c - \
-  && sudo tar xzf /tmp/joinery-relay.tgz -C /tmp/joinery-relay \
-  && cd /tmp/joinery-relay && sudo bash provision_relay.sh mx.example.com
+awaiting_grant → draining → rebuilding → booting → provisioning → done
 ```
 
-The digest is printed inside the command, so the download verifies itself and a
-tampered bundle stops before anything runs as root. The hostname and the
-`smarthost` argument are filled in from the relay row and
-`mailbox_relay_outbound_mode`, because getting either wrong silently changes what
-the relay is — omitting `smarthost` on a smarthost relay closes the submission
-listener that compose sends leave through.
+`draining` and `rebuilding` are new. `booting`, `provisioning` and the terminal
+handling are the existing code paths, unchanged: `handleProvision()` already runs
+the skeleton, adds this deployment as tenant `main`, parses the
+`RELAY_WG_PUBKEY=` / `RELAY_PUBLIC_IP=` markers, and re-peers the main box's
+WireGuard interface — all of which a wiped relay needs again.
 
-**Only the skeleton run is needed.** The tenant shell, the rspamd configuration,
-the contract digest and the version marker are all written by the skeleton path,
-and every part of that path that would disturb a live relay is guarded: the
-WireGuard keypair and `wg0.conf` are written only if absent (so tenant `[Peer]`
-blocks survive), `routing.json` likewise, and the tenant registry and spool are
-untouched. `add-tenant` does not need re-running. This is what makes a
-customer-run upgrade safe to hand over: it is idempotent, and the destructive
-carry-aside dance `rebuild_relay` performs is not required for a code upgrade.
+Two touches make it an upgrade rather than a first provision:
+`registerRelayRow()` updates the existing relay row instead of inserting one, and
+`RelaySsh::forgetHostKey()` runs before the first connection. That helper already
+exists, and its docblock already says why: *"a rebuilt relay reuses the tunnel
+address."* The design anticipated this.
 
 ### Knowing when to offer it
 
-An Upgrade control that is always present is a permanent to-do item on a relay
-that is fine. `joinery-ping` already returns `provisioned`
+An Upgrade control that is always present is a permanent to-do on a relay that is
+fine. `joinery-ping` already returns `provisioned`
 (specs/mailbox_relay_scanner_health.md) and nothing reads it. This reads it.
 
 The shipped version is parsed from `RELAY_VERSION` in `provision_relay.sh` — one
 regex against the file that is already the source of truth, so there is no second
 place to bump. Three states:
 
-- **Current** — no Upgrade control; a quiet line naming the version.
+- **Current** — no control; a quiet line naming the version.
 - **Behind, or unknown** (a relay answering `PONG` predates the version marker) —
   the Upgrade control, with what changes.
 - **Ahead** — a note, no control. A relay newer than the deployment means the
@@ -114,233 +117,216 @@ place to bump. Three states:
 
 ## Decisions
 
-- **D1 — Who performs the upgrade. RESOLVED: the customer, guided.** The
-  platform holds no root credential to these relays and should not acquire one;
-  see the two rejections above. What the platform owes is not access but
-  precision: the exact command, with the hostname and smarthost argument already
-  correct, and a digest that makes the download self-verifying.
+- **D1 — Who performs the upgrade. RESOLVED: the platform, by replacing the
+  machine's contents.** See the Doctrine section for the three rejected
+  alternatives. The customer's contribution is one approval, the same one
+  provisioning already asks for.
 
-  **Minting a fresh cloud grant was rejected.** It is the obvious symmetry with
-  provisioning, and it does not work: a provider API token manages instances, it
-  does not open a shell. Verified against Linode's API rather than assumed:
+  **A guided copy-paste command was rejected**, and it is worth recording why,
+  because it is the obvious answer: it assumes the customer can log in, and on a
+  cloud-provisioned relay nobody can. Their only route is a provider console
+  recovery drill — on Linode, power off, Reset Root Password, boot, Lish — which
+  is a poor thing to discover while your MX is behind.
 
-  - There is **no endpoint that injects an authorized key into a running
-    instance.** `authorized_keys` is accepted at instance creation, which is past.
-  - `POST /linode/instances/{id}/rebuild` does accept `authorized_keys` — and
-    *"shuts down the Linode, deletes all of its disks and configuration profiles,
-    then deploys a new image."* That is a destroy-and-restore of the whole
-    machine, not a code upgrade.
-  - **`POST /profile/sshkeys` is the trap.** It is titled "Add an SSH key" and
-    will look like the answer to whoever revisits this. It manages keys stored on
-    the *account*, for injection into *future* instances. It touches no running
-    machine's `authorized_keys`.
-  - The remaining route is the Lish console — a human typing at a serial console.
-    Not automatable, and it is the customer's console, not the platform's.
+- **D2 — How the wipe happens. RESOLVED: the provider's rebuild endpoint, not
+  destroy-and-create.** `POST /linode/instances/{id}/rebuild` *"shuts down the
+  Linode, deletes all of its disks and configuration profiles, then deploys a new
+  image"* and accepts `authorized_keys` — which is precisely the shape wanted:
+  every byte on the disk replaced, the fresh per-run key injected at the moment
+  the new image lands, and no window in which the machine is reachable by a
+  credential nobody chose.
 
-  So a fresh grant buys a token that can bill, resize, reimage and destroy the
-  relay, and still cannot open a shell on it. Paying for a credential ceremony
-  that cannot deliver a root session is worse than asking for a copy-paste — and
-  the token it mints would be strictly more dangerous than the thing it replaces.
+  **The instance survives, so its IPv4 does.** That is the load-bearing property.
+  Destroy-and-create would hand back a new address, and the address is the one
+  thing about a relay that must not move: it is the A record an MX points at.
+  Changing it turns a five-minute upgrade into a DNS change plus propagation, on
+  the record whose entire job is to be stable.
 
-- **D2 — How the relay gets the bundle. RESOLVED: a signed download route.**
-  A short-lived HMAC-signed URL on this deployment, served without a session,
-  the same shape as `/uploads` signed URLs (`docs/file_signed_urls.md`) and
-  validated in `serve.php` before any ownership gate. The relay has outbound
-  internet (it installs packages), so this works whether or not the tunnel is up
-  — which matters, because a relay that needs upgrading may be one whose tunnel
-  is the problem.
+  `mrl_cloud_instance_id` and `mrl_cloud_provider` are already on the relay row,
+  so the platform knows what to rebuild without asking.
 
-  Fetching over the WireGuard tunnel was rejected: the relay listens and the main
-  box dials out, the main box's web server is not bound to the tunnel interface,
-  and it would make the upgrade path depend on the link most likely to be broken
-  when someone reaches for it.
+  The interface gains one method: `CloudComputeProvider::rebuildInstance()`,
+  implemented on `LinodeComputeDriver`. A provider that cannot rebuild in place
+  cannot host a relay under this doctrine, and the interface should say so rather
+  than degrade to destroy-and-create silently.
 
-  Reusing `File::mintSignedUrl()` was rejected: it is bound to a `File` row, and
-  the bundle is built from the filesystem on demand, not uploaded. The route
-  borrows the signing contract, not the model.
+- **D3 — Mail sitting on the relay. RESOLVED: drain to empty first, and refuse
+  the wipe if anything is held.** This is the sharp edge of the whole design.
 
-  **It also gets its own key**, `relay_bundle_signing_key` — 32 random bytes,
-  SecretBox-sealed in `stg_settings`, minted by `update_database` the way
-  `File::provisionSigningKey()` already is. Borrowing the file-URL key would
-  destroy the one property that key's own docblock claims for it: *"deleting the
-  row rotates the key, invalidating all outstanding signed URLs and nothing
-  else."* Shared, rotating it would break in-flight relay upgrades, and rotating
-  it for a relay reason would break every outstanding attachment link. Key
-  separation is the existing doctrine here; this follows it rather than being the
-  first exception.
+  A wipe destroys the tenant spool, and the spool holds sealed blobs the platform
+  has not pulled yet. `RelaySpoolConsumer::pull()` already returns exactly the
+  counts needed: it pulls, stores, and acks a batch, reporting `stored`,
+  `pending`, `held` and `acked`.
 
-  **TTL is one hour**, matching the reader's inline-image precedent, and the
-  Relay section re-mints on every page load. The command is copied by a person
-  who may paste it into a terminal on another machine, look up a root password,
-  or hand it to a colleague — five minutes would turn an ordinary interruption
-  into a confusing failure. An expired link is not a dead end: reload the page.
+  The `draining` state pulls in a loop until a pass returns nothing left. Then:
 
-  **The bundle is shipped source, not a secret.** A signed link discloses
-  `provision_relay.sh` and the relay-sealer Go source for its TTL. That is the
-  same code already sitting on every relay this deployment provisioned, so the
-  route is not a new disclosure — but it is a deliberate one, recorded here so
-  nobody later assumes the signature is protecting a secret. It is protecting
-  bandwidth and intent, not confidentiality.
+  - **`held > 0` blocks the wipe.** A held blob is one whose Fortress owner is not
+    yet resolvable, deliberately left un-acked so a later pull can store it. Those
+    are the blobs a wipe would silently destroy, and they are held precisely
+    because something about them is unresolved. The run stops with a plain message
+    naming the count; the customer fixes the cause or waits for the grace window
+    to age them out.
+  - **A drain that will not finish blocks the wipe.** If successive passes stop
+    making progress, the run fails rather than proceeding — an upgrade is elective,
+    and losing mail to it is not a trade the platform gets to make on the
+    customer's behalf.
 
-- **D7 — Comparing versions. RESOLVED: `version_compare()`, never string
-  comparison.** `RELAY_VERSION` is a dotted string, and `'2.10' < '2.9'` is true
-  as text — a relay would report itself current one minor bump after the tenth.
-  A version that does not parse reads as unknown, which offers the upgrade.
+  **Postfix's deferred queue is accepted as lost**, and this is a real if narrow
+  cost. It holds mail Postfix accepted but could not hand to the sealer — a
+  transient state, usually empty, and not reconstructible from the platform side.
+  The drain cannot reach it, because the tenant credential cannot read the queue.
+  The alternative is a verb that can, which is the cross-tenant root the Doctrine
+  section rejects. Named here so it is a known cost rather than a later surprise.
 
-  **The route serves exactly one artifact** — the same
-  `relay-sealer` + `provision_relay.sh` tarball `build_provision_relay()` already
-  packages — built fresh per request from the provisioning directory. It is not a
-  general file-serving endpoint, and the signature covers the expiry so a link
-  cannot be extended.
+  **So the queue is made visible instead**, since an unseen cost cannot be
+  weighed. `joinery-ping` gains a `queue` count, the Relay section shows it, and a
+  non-zero count blocks nothing but is stated plainly beside the Upgrade control:
+  *"3 messages are still queued on the relay and will be lost."* That turns an
+  invisible risk into the customer's decision, which is the most the tenancy model
+  allows.
 
-- **D3 — What happens to Rebuild. RESOLVED: it stops dead-ending, and stays.**
-  Server Manager relays keep it; it is the right tool when the platform genuinely
-  has a root session, and its carry-aside/restore is worth the downtime for a
-  machine being rebuilt. The fix is to stop rendering it on a relay it cannot
-  target: the button is shown only when `mrl_mgn_managed_node_id` resolves to a
-  live node, and the Upgrade control takes its place otherwise.
+  **It is reported only on a fleet-of-one**, and the constraint is not incidental.
+  The tenant shell's own comment forbids exactly this — *"never queue depth,
+  message counts, spool sizes or anything per-tenant: several deployments share
+  this shard, and one tenant's mail volume is not another's to read."* On a shared
+  shard the Postfix queue is shared, so its depth is a readout of every other
+  tenant's volume. The ping therefore emits `queue` only when `tenant_count` is 1
+  — the self-hosted case, where the queue is wholly the asker's. On a shard the
+  field is absent and the surface says nothing rather than guessing zero. The
+  operator, who has root on the shard, reads the queue directly and needs no help
+  from the ping.
 
-- **D5 — A lighter path for Server Manager relays. RESOLVED: add
-  `upgrade_relay`, beside Rebuild rather than replacing it.**
+  Counted with `postqueue -p`, which is setgid `postdrop` and readable by an
+  unprivileged user — so this adds no sudoers rule and no root reach. A relay
+  whose `postqueue` fails or is missing reports the field absent, never zero:
+  "cannot tell" and "nothing queued" must not render alike when the difference is
+  destroyed mail.
 
-  **What a bare skeleton run actually costs, read off the script rather than
-  assumed:**
+- **D4 — Downtime. RESOLVED: acceptable, because SMTP retries.** Port 25 is gone
+  for the whole run: the rebuild, the boot, and the build. Several minutes, and on
+  a slow provider more.
 
-  - It **never touches a tenant spool.** `SPOOL_ROOT` is created and chmod'd as a
-    parent directory; the only `rm -rf` of a tenant spool is in `remove_tenant`,
-    which the skeleton path does not call. The tenant registry is likewise
-    untouched.
-  - `ufw --force reset` **opens rather than closes.** The reset disables ufw
-    before the deny-default and the allows are re-applied, so port 25 stays
-    reachable throughout — the window is a few seconds of extra exposure on a box
-    listening on 25/22/51820 only, not an outage.
-  - The one real interruption is `systemctl restart postfix` at the end. Seconds,
-    in-flight connections retried by the sender, queue preserved on disk.
+  That would be unacceptable for a web front end and is routine for a mail
+  exchanger. A sending server that cannot connect queues and retries, typically
+  for days; the relay's own MX record is unchanged throughout, so there is nothing
+  to re-resolve. The user-visible effect of a well-run upgrade is mail arriving a
+  few minutes later than it would have.
 
-  So `rebuild_relay`'s two sixty-second flushes, its carry-aside of the spool and
-  deferred queue, and its validating restore are protecting against a machine
-  being **replaced**. For a code upgrade they are pure cost: two minutes of
-  deliberately closed port 25, plus moving every sealed blob out and back for no
-  reason — a copy that can itself fail.
+  The Upgrade control says this in one line before the customer commits, because
+  "your mail server will be offline for several minutes" is a fact someone may
+  want to act on at 2pm on a Tuesday.
 
-  **This is the same finding D1 rests on.** If a bare skeleton run were not safe
-  on a live relay, the customer-run copy-paste would be unsafe too, and the whole
-  change would need rethinking. It is safe, and one verification carries both.
+- **D5 — Relays provisioned by hand. RESOLVED: report the version, drive nothing.**
+  A relay someone built by running `provision_relay.sh` themselves is a machine
+  the platform has no provider token for and no instance id. It gets the version
+  line and a plain statement that it is behind, plus the one-line instruction that
+  applies: re-run `provision_relay.sh` on it.
 
-  The builder is nearly free: `build_provision_relay()` already takes
-  `skeleton_only`, which skips the add-tenant step and its pull-key precondition.
-  `build_upgrade_relay()` delegates to it with that flag set. Post-processing
-  re-polls health so the version line refreshes on completion instead of waiting
-  for the next reconcile pass.
+  This is not the copy-paste D1 rejects. The difference is that this customer
+  demonstrably *can* log in — they built the box — and the platform is not
+  pretending to hold a credential or minting a download to make up for one.
 
-  Rebuild stays, because "this machine is sick, redo it" is a real and different
-  act. The version comparison decides which is offered as the obvious one.
+- **D6 — What happens to Rebuild. RESOLVED: it stops dead-ending, and stays.**
+  Server Manager relays keep it. There the platform genuinely holds root through
+  the Go agent, which is a different custody model with its own justification, and
+  `rebuild_relay`'s carry-aside and validating restore are the right tool. The fix
+  is to stop rendering the button on a relay it cannot target: shown only when
+  `mrl_mgn_managed_node_id` resolves to a live node, with the cloud Upgrade control
+  taking its place otherwise.
 
-- **D4 — Hosted fleet slots. RESOLVED: tell the tenant, and stop there.**
-  A tenant cannot upgrade a shard they share with strangers, and should not be
-  offered a control that implies otherwise. The slot shows its shard's version
-  and a plain line saying the relay is operator-managed and upgraded by the
-  operator. No request button: a request the operator has no console to see is a
-  message into nothing.
+- **D7 — Hosted fleet slots. RESOLVED: tell the tenant, and give the operator the
+  control.** A tenant cannot wipe a shard they share with strangers. The slot shows
+  its shard's version and a plain line saying the relay is operator-managed. No
+  request button: a request the operator has no console to see is a message into
+  nothing.
 
-  The operator's half is D6.
+  **D7's tenant-facing half makes a promise on the operator's behalf**, so the
+  operator's half ships with it or the feature is incoherent — the tenant is told
+  to wait for something nobody can do. A shard IS a managed node
+  (`mfs_mgn_managed_node_id`), so the operator already holds root SSH and
+  `rebuild_relay` already builds. The fleet console gains a version column and a
+  per-shard Rebuild control; nothing new is invented.
 
-- **D6 — The operator's view of their shards. RESOLVED: in scope, on the fleet
-  console.**
+  **The operator cannot use `joinery-ping`, and this asymmetry is the design.**
+  The operator's deployment is not a tenant of its own shards — shards are
+  provisioned `skeleton_only`, with no tenant account for the operator — so there
+  is no forced-command credential to ping with. The version is stamped instead from
+  the job's marker block, which costs no script change: step 5 of
+  `build_provision_relay()` already echoes `RELAY_WG_PUBKEY=` and
+  `RELAY_PUBLIC_IP=`, and `RELAY_VERSION=$(sudo cat /opt/joinery-relay/version)`
+  joins them. A new `mfs_provisioned_version` holds it.
 
-  **D4 makes a promise on the operator's behalf** — it tells a tenant their relay
-  is operator-managed and will be upgraded by the operator. Shipping that while
-  the operator has no way to see a shard's version or upgrade it would be
-  internally incoherent: the tenant is told to wait for something nobody can do.
-  That, not convenience, is why this belongs here.
+  A per-pass SSH read of every shard's version was rejected as the wrong trade: one
+  connection per shard per pass, to detect a drift only a hand-reprovisioned shard
+  can cause. Such a shard reads stale until its next job, and that is acceptable —
+  being job-managed is what makes a shard a shard rather than somebody's VPS.
 
-  It is also nearly free now that D5 exists. A shard IS a managed node
-  (`mfs_mgn_managed_node_id`), so the operator already holds root SSH through the
-  Go agent, and `upgrade_relay` already builds. The fleet console gains a version
-  column and a per-shard Upgrade control; nothing new is invented.
-
-  **The operator cannot use `joinery-ping`, and this asymmetry is the design, not
-  a gap.** The operator's deployment is not a tenant of its own shards — shards
-  are provisioned `skeleton_only`, with no tenant account for the operator — so
-  there is no forced-command credential to ping with. The tenant learns the
-  version through the health ping over its restricted credential; the operator
-  learns it through root SSH on a managed node. Different credential, different
-  mechanism, same fact.
-
-  **The version is stamped from the job's marker block**, which costs no change to
-  `provision_relay.sh`: step 5 of `build_provision_relay()` already echoes
-  `RELAY_WG_PUBKEY=` and `RELAY_PUBLIC_IP=` for the result processor to parse, and
-  `RELAY_VERSION=$(sudo cat /opt/joinery-relay/version)` joins them. A new
-  `mfs_provisioned_version` on the shard row holds it.
-
-  A per-pass SSH read of every shard's version file was rejected as the wrong
-  trade: it costs one connection per shard per pass to detect a drift that can
-  only be caused by someone reprovisioning a shard by hand, outside the job
-  system. A shard reprovisioned by hand shows a stale version until its next job,
-  and that is acceptable — being job-managed is what makes a shard a shard rather
-  than somebody's VPS.
+- **D8 — Comparing versions. RESOLVED: `version_compare()`, never string
+  comparison.** `RELAY_VERSION` is a dotted string, and `'2.10' < '2.9'` is true as
+  text — a relay would report itself current one minor bump after the tenth. A
+  version that does not parse reads as unknown, which offers the upgrade.
 
 ## Files
 
 | File | Change | ~Lines |
 |---|---|---|
-| `plugins/mailbox/includes/RelayVersion.php` | **New** — shipped version from `provision_relay.sh`, running version from the cached health answer, the comparison, and the bundle digest | 70 |
-| `serve.php` | Signed `/relay-bundle` route: verify expiry + HMAC, stream the freshly built tarball, no session (D2) | 35 |
-| `plugins/mailbox/includes/relay_admin.php` | Mint the signed URL + digest; render the command; gate Rebuild on a live managed node (D3) | 60 |
-| `plugins/mailbox/includes/relay_section.php` | The Upgrade control, the version line, and the hosted-slot notice (D4) | 70 |
-| `plugins/mailbox/data/mailbox_relay_class.php` | `provisionedVersion()` reading the cached health answer | 15 |
-| `plugins/server_manager/includes/JobCommandBuilder.php` | `build_upgrade_relay()` — delegates to `build_provision_relay()` with `skeleton_only` (D5) | 15 |
-| `plugins/server_manager/includes/JobResultProcessor.php` | `process_upgrade_relay()` — re-poll health so the version refreshes on completion (D5); stamp `mfs_provisioned_version` from the `RELAY_VERSION=` marker (D6) | 30 |
-| `plugins/mailbox/data/mailbox_fleet_shard_class.php` | `mfs_provisioned_version` (D6) | 5 |
-| `plugins/mailbox/includes/relay_admin.php` (operator half) | Per-shard `upgrade_shard` action; version into the shard view vars (D6) | 30 |
-| `plugins/mailbox/admin/admin_mailbox_fleet.php` | Version column + Upgrade control per shard (D6) | 25 |
-| `plugins/mailbox/docs/overview.md` | Upgrade paths by relay origin; why there is no root credential | 45 |
+| `plugins/mailbox/includes/RelayVersion.php` | **New** — shipped version from `provision_relay.sh`, running version from the cached health answer, the comparison (D8) | 55 |
+| `plugins/mailbox/provisioning/provision_relay.sh` | 2.2 → 2.3: `joinery-ping` emits `queue`, on a fleet-of-one only (D3) | 15 |
+| `plugins/mailbox/data/relay_cloud_provision_class.php` | `'upgrade'` in `rcp_kind`'s `allowed_values`; `rcp_mrl_mailbox_relay_id` naming the relay being upgraded | 10 |
+| `plugins/mailbox/includes/RelayCloudProvisioner.php` | `handleDraining()` and `handleRebuilding()`; kind-aware `registerRelayRow()` (update, not insert); `forgetHostKey()` before the first connection | 120 |
+| `includes/cloud_compute/CloudComputeProvider.php` | `rebuildInstance()` on the interface (D2) | 12 |
+| `includes/cloud_compute/LinodeComputeDriver.php` | `rebuildInstance()` — `POST /linode/instances/{id}/rebuild` | 20 |
+| `plugins/mailbox/includes/relay_admin.php` | `relay_upgrade` action opening an upgrade run; gate Rebuild on a live managed node (D6) | 50 |
+| `plugins/mailbox/includes/relay_section.php` | Upgrade control, version line, downtime warning (D4), hand-built guidance (D5), hosted-slot notice (D7) | 80 |
+| `plugins/mailbox/data/mailbox_relay_class.php` | `provisionedVersion()` reading the cached health answer; `readHealth()` parses `queue` — absent stays absent, never 0 (D3) | 25 |
+| `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Advance upgrade runs alongside provision runs in phase 4 | 10 |
+| `plugins/mailbox/data/mailbox_fleet_shard_class.php` | `mfs_provisioned_version` (D7) | 5 |
+| `plugins/server_manager/includes/JobResultProcessor.php` | Stamp `mfs_provisioned_version` from the `RELAY_VERSION=` marker (D7) | 15 |
+| `plugins/mailbox/admin/admin_mailbox_fleet.php` | Version column + per-shard Rebuild (D7) | 25 |
+| `plugins/mailbox/docs/overview.md` | Upgrade paths by relay origin; why no root credential exists | 45 |
 | `plugins/mailbox/tests/relay_upgrade_test.php` | **New** — tier `safe`, `env: any`, `needs: []` | 110 |
 
-**Two schema additions need `update_database`** before either surface works:
-`mfs_provisioned_version` on the shard row, and the `relay_bundle_signing_key`
-setting minted at the same moment `File::provisionSigningKey()` is.
+**Two schema changes need `update_database`**: `rcp_kind`'s widened
+`allowed_values` plus `rcp_mrl_mailbox_relay_id`, and `mfs_provisioned_version`.
 
-**No new job type and no new scheduled task.** The upgrade is an act the customer
-performs; the platform's whole contribution is a correct command and an honest
-statement of whether one is needed.
+**No signed download route, no new signing key, no new job type.** An earlier
+draft of this spec carried all three to support a customer-run copy-paste; the
+wipe-and-reinstall doctrine removes the need for every one of them.
 
 ## Tests
 
 - Version comparison: current, behind, ahead, and unknown (a `PONG` relay) each
   produce the right control — **unknown offers the upgrade, ahead never does**.
 - The shipped version parses out of `provision_relay.sh`, asserted against the
-  file, so a version bump that changes the declaration's shape fails here.
-- The rendered command carries the relay's own hostname, and carries `smarthost`
-  exactly when `mailbox_relay_outbound_mode` says so — the argument whose omission
-  silently closes the submission listener.
-- The digest in the command matches the bytes the route serves.
-- **`version_compare()` semantics (D7):** `2.10` is ahead of `2.9`, not behind —
-  the off-by-one-decade bug a string comparison ships silently. An unparseable
-  version reads as unknown and offers the upgrade.
-- The bundle route signs with `relay_bundle_signing_key` and **not** the file-URL
-  key: rotating one must leave the other's links working.
-- Signed-URL validation: a good link serves, an expired one does not, a link with
-  an altered expiry does not, and **no link at all serves nothing** — the route
-  must never fall through to an unauthenticated download.
+  file, so a bump that changes the declaration's shape fails here.
+- **`version_compare()` semantics (D8):** `2.10` is ahead of `2.9`, not behind —
+  the off-by-one-decade bug a string comparison ships silently.
+- **A held blob blocks the wipe (D3)**, asserted against a drain result carrying
+  `held > 0`. This is the check that stands between an elective upgrade and
+  destroyed mail, so it is the one test that must never be quietly relaxed.
+- **A drain making no progress blocks the wipe (D3)** rather than looping forever
+  or proceeding.
+- **The ping emits `queue` on a fleet-of-one and omits it on a multi-tenant shard
+  (D3)**, asserted by running the extracted tenant shell against both tenant
+  counts — the shard case is a cross-tenant leak, not a cosmetic difference.
+- **An absent `queue` renders as unknown, never as zero (D3)** — a relay whose
+  `postqueue` is missing must not read as "nothing will be lost".
+- The rebuild call carries the fresh per-run public key and the relay's own
+  instance id, and credentials are erased at both terminal states.
+- **An upgrade run updates the existing relay row and mints no second one** — a
+  duplicate relay row would split the alias map and the spool pull between two
+  identities.
+- `forgetHostKey()` runs before the first post-wipe connection; without it the
+  reused tunnel address fails host-key verification.
 - Rebuild renders only for a relay whose `mrl_mgn_managed_node_id` resolves to a
-  live node, and the Upgrade control renders for every relay it does not — the
-  dead-end this spec exists to remove.
-- A hosted slot offers neither control.
-- **`upgrade_relay` carries no add-tenant step and no carry-aside (D5)**, asserted
-  against the built step list — the two things that make it lighter than
-  `rebuild_relay` are exactly the two a regression would quietly restore.
-- A Server Manager relay offers both Upgrade and Rebuild; the version comparison
-  decides which reads as the obvious one.
-- **The shard version parses out of the job marker block (D6)**, and a shard whose
-  job never emitted one reads as unknown rather than as current — an absent marker
+  live node, and the Upgrade control renders for a cloud relay — the dead-end this
+  spec exists to remove.
+- A hand-built relay offers guidance and no control (D5); a hosted slot offers
+  neither (D7).
+- **The shard version parses out of the job marker block (D7)**, and a shard whose
+  job never emitted one reads as unknown rather than current — an absent marker
   must never render as "up to date".
 
 ## Open
 
-Nothing outstanding. Every item raised against this spec has been resolved into a
-decision above, except one that turned out to need no design at all: the
-`MailboxRelayReconcile` docblock claiming destroy-kind cloud runs exist was simply
-wrong — nothing sets `rcp_kind` to anything but `'provision'`, the model forbids
-it, and the provisioner never branches on it. Corrected in place rather than
-carried here.
+Nothing outstanding.
