@@ -527,4 +527,60 @@ check(strpos($guard_body, 'Publish a current release') !== false,
     'the refusal says how to fix it');
 
 
+section('Site code survives the container it runs in');
+
+$dockerfile     = $site_root . '/maintenance_scripts/install_tools/Dockerfile.template';
+$dockerfile_src = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
+check($dockerfile_src !== '', 'Dockerfile.template is readable', $dockerfile);
+
+// Everything utils/upgrade.php writes has to be on a volume, or a rebuild
+// discards it. These three cover public_html, vendor and maintenance_scripts.
+// Two occurrences each: install.sh has a quiet and a verbose docker run.
+foreach (['code' => 'public_html', 'vendor' => 'vendor', 'scripts' => 'maintenance_scripts'] as $vol => $path) {
+    check(substr_count($install_src,
+        '-v "${SITENAME}_' . $vol . '":/var/www/html/"${SITENAME}"/' . $path) === 2,
+        "the {$vol} volume is mounted at {$path} in both docker run blocks");
+}
+
+// Mounting one volume inside another works but is hard to reason about, and
+// the data volumes are all siblings of public_html already. Nothing should
+// claim the site root itself.
+check(preg_match('/-v "\$\{SITENAME\}_[a-z_]+":\/var\/www\/html\/"\$\{SITENAME\}" /', $install_src) === 0,
+    'no volume is mounted at the site root, so none nests inside another');
+
+// A wipe that leaves the code volume behind would reinstall onto old code.
+check(substr_count($install_src, 'for vol in code vendor scripts postgres') === 2,
+    '--wipe-data removes the code volumes too');
+
+// Docker fills an empty volume from the image and ignores the image once the
+// volume has content. That is what makes a stale image inert, so the COPY has
+// to stay: without it a new site has nothing to seed from.
+check(strpos($dockerfile_src, 'COPY ${SITENAME}/ /var/www/html/${SITENAME}/') !== false,
+    'the image still carries a release to seed a new volume from');
+
+// An empty code volume must stop the container, not serve an empty site.
+check(strpos($dockerfile_src, 'FATAL: no site code at') !== false,
+    'the container refuses to start with no code on the volume');
+
+// Once code is on a volume a rebuild cannot touch it, so the 2.29 guard has
+// nothing to protect and would only refuse safe rebuilds.
+check(strpos($install_src, 'code_volume_is_populated()') !== false,
+    'the guard can tell whether a site is on a code volume');
+check(isset($guard_body) && strpos($guard_body, 'code_volume_is_populated') !== false,
+    'and skips the version check when it is');
+
+// Fail closed: an unreadable or missing volume must send the caller to the
+// version comparison, never past it.
+$vol_body = '';
+if (preg_match('/code_volume_is_populated\(\) \{.*?\n\}\n/s', $install_src, $m)) {
+    $vol_body = $m[0];
+}
+check($vol_body !== '', 'the volume probe body is findable');
+check(strpos($vol_body, '|| return 1') !== false,
+    'a missing volume answers no rather than erroring');
+check(strpos($vol_body, '/VERSION') !== false,
+    'an existing but unseeded volume answers no too',
+    'a volume created by a half-finished migration is not a populated one');
+
+
 harness_finish();

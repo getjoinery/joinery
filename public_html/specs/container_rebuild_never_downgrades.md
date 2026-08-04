@@ -1,6 +1,7 @@
 # A container rebuild must never move a site's code backward
 
-**Status:** Part 1 built 2026-08-04. Part 2 unbuilt.
+**Status:** Part 1 built 2026-08-04. Part 2 phase A built 2026-08-04; phase B
+(migrating the seven existing containers) not started.
 **Date:** 2026-08-04
 
 ## The problem
@@ -147,6 +148,54 @@ issued would be blocking a rebuild that is in fact safe. Leaving it in place
 would reintroduce the original problem in mirror image: an operator told not to
 do something harmless learns to reach for `--allow-downgrade` by reflex.
 
+### What the writable layer actually holds
+
+Migrating the first site (joinerydemo, 2026-08-04) proved the writable layer
+holds more than `public_html`. Anything that moves a site has to carry all of
+it:
+
+- **Code** — `public_html`, `vendor`, `maintenance_scripts`.
+- **Installed apt packages.** `upgrade.php` installs the PHP extensions the code
+  declares into the running container, so they live in the writable layer too. A
+  recreated container has only what its image installed, which for a long-lived
+  site is a years-old declaration. joinerydemo lost `ext-apcu` and
+  `ext-sqlite3`, and its start-up failed composer validation and skipped
+  `update_database` until they were reinstalled. The migration records the
+  container's `php8.3-*` packages before the swap and restores the difference
+  after.
+- **Directories with no volume at all.** joinerydemo had no `storage` volume, so
+  `storage/drive_uploads` was in the writable layer and one `docker rm` from
+  gone — independent of the code problem and with no guard in front of it. The
+  migration creates a volume for any site-root directory that lacks one.
+
+- **System configuration and binaries.** `docker diff` across the fleet found
+  accumulated `/etc/apache2` state on every site — the `remoteip` module, the
+  `%h`→`%a` log format that records real client IPs rather than the docker
+  gateway, and the MPM worker tuning — none of it in the images. getjoinery
+  additionally holds `/usr/local/bin/joinery-agent`, the running management
+  agent binary, in its writable layer alone. None of this is data, and nothing
+  fails visibly when it goes: joinerydemo served correctly for an hour while
+  logging every visitor as 172.17.0.1 and running untuned Apache. The migration
+  captures `/etc/apache2`, `/usr/local/bin` and the crontabs before the swap and
+  restores them after — but only when the image is unchanged, since a new image
+  may have deliberately changed those files.
+
+Ownership is the other trap: `docker cp` rewrites uid/gid to the invoking user
+unless given `-a`, which puts root-owned code under a www-data Apache and 500s
+the site. The migration copies with `-a` and re-asserts ownership after
+recreation regardless.
+
+Cleared by the same audit, and worth recording so it is not re-investigated:
+`/etc/letsencrypt` holds only empty `renewal-hooks` directories and `cli.ini`
+from the certbot package — no certificates, because TLS terminates at the host
+proxy. No uploads, database or user content lives outside a volume on any site.
+
+`docker diff` is the tool that answers this question exhaustively: it reports
+every path differing from the image, and volume contents never appear in it, so
+whatever it lists is by definition writable-layer state that `docker rm`
+destroys. Directory-by-directory inspection of the site root, which is where
+this investigation started, covers only one class of it.
+
 ### Migrating the seven existing containers
 
 Each one's only copy of its current code is a writable layer, so the migration
@@ -190,6 +239,48 @@ site image as a build argument, so it sits at rest in an image layer. A shared
 image cannot do that, forcing it out to container runtime configuration where it
 belongs.
 
+## Built — Part 2 phase A (2026-08-04, install.sh 2.30, Dockerfile.template 4.3)
+
+Phase A is the code. It changes what a *new* install does and leaves the seven
+existing containers exactly as they are; phase B is the separate operational
+campaign that moves them.
+
+Two departures from the shape specified above, both found while reading the
+Dockerfile and the installer's `docker run`:
+
+- **The image still carries a copy of the release, and no seeding code was
+  written.** Docker already does this: it fills a named volume from the image
+  the first time the volume is used, and ignores the image completely once the
+  volume has content. That is precisely the roll-forward rule — empty means
+  seed, populated means leave alone — so the bundle, the extract step and the
+  start-up reconcile all turned out to be machinery for something the container
+  runtime does natively. Taking the code *out* of the image is still worth
+  doing, but it belongs with the shared-image work below, because it is what
+  that work needs and not what this safety property needs.
+
+- **Three sibling volumes, not one at the site root.** `{site}_code` at
+  `public_html`, `{site}_vendor` at `vendor`, `{site}_scripts` at
+  `maintenance_scripts`. A single volume at `/var/www/html/{site}` would have
+  had the eleven data volumes mounted inside it; nesting works, but sibling
+  mounts are easier to reason about and match how every existing volume is
+  already arranged. `installer_contract_test` asserts no volume claims the site
+  root, so this cannot drift back.
+
+The phase-1 guard was **kept, not removed**. Once a site's code is on a volume a
+rebuild cannot write code, so the guard skips it — but the seven unmigrated
+sites still need it, and so does a site whose migration created the volume and
+stopped before seeding it. `code_volume_is_populated()` reads the volume's
+mountpoint off the host and requires a VERSION file in it, so an existing-but-
+empty volume answers no and falls through to the version comparison.
+
+The container refuses to start when `public_html/VERSION` is absent, rather than
+serving an empty site.
+
+Verified by exercising the guard against a stubbed `docker` across the four
+states that matter: unmigrated site with a stale archive (refuses), unmigrated
+with a current archive (proceeds), migrated site with a stale archive (skips the
+check), and volume-exists-but-empty (refuses).
+
 ## Build tasks
 
 1. ✅ The guard in `do_site_docker`, ahead of the preflight stop, plus
@@ -197,14 +288,15 @@ belongs.
 2. ✅ `installer_contract_test` assertions for the guard and its ordering.
 3. ✅ Correct `docs/deploy_and_upgrade.md` § *Upgrade-flow split* — its "rebuild
    each site container" instruction is what walks an operator into this.
-4. Part 2: mount `{site}_code` at the site root in the installer's `docker run`,
-   and stop the Dockerfile copying the site tree in.
-5. Part 2: seed the volume from `$ARCHIVE_ROOT` at install time; refuse to start
-   on an empty volume.
-6. Part 2: the one-time migration for the seven existing containers.
-7. Part 2: remove the Part 1 guard and its `installer_contract_test` section,
-   and correct `docs/deploy_and_upgrade.md` to describe a rebuild that no longer
-   touches code.
+4. ✅ Phase A: mount the three code volumes in both `docker run` blocks, add
+   them to the `--wipe-data` removal list, and refuse to start on an empty
+   code volume.
+5. ✅ Phase A: skip the phase-1 guard for sites already on a code volume, and
+   pin the arrangement in `installer_contract_test`.
+6. ✅ Phase A: `docs/deploy_and_upgrade.md` describes where code lives and what
+   a rebuild does to it.
+7. Phase B: the one-time migration for the seven existing containers.
+8. After phase B: retire the phase-1 guard once no unmigrated site is left.
 
 ## Built — Part 1 (2026-08-04, install.sh 2.29)
 

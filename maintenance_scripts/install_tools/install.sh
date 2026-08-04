@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 2.30 - Site code lives on named volumes (spec
+#              container_rebuild_never_downgrades, part 2 phase A): public_html,
+#              vendor and maintenance_scripts each get one, so removing and
+#              recreating a container no longer discards the code an in-place
+#              upgrade wrote. Docker seeds a new volume from the image and
+#              leaves a populated one alone, which is the roll-forward rule the
+#              spec asked for. The 2.29 guard now skips sites whose code volume
+#              is already populated, since a rebuild there cannot write code.
 #VERSION 2.29 - A site rebuild refuses unless it can prove it moves the site's
 #              code forward (spec container_rebuild_never_downgrades, part 1).
 #              Site code lives in the container's writable layer, so a rebuild
@@ -2620,6 +2628,31 @@ do_site_create() {
 # Rebuild guard: a rebuild must never move a site's code backward
 #------------------------------------------------------------------------------
 
+# The three volumes that hold a site's code, as `volume_suffix:container_path`.
+# Everything an in-place upgrade writes is under one of them. They are siblings
+# of the data volumes rather than one volume at the site root, so no volume is
+# ever mounted inside another.
+CODE_VOLUMES=(
+    "code:public_html"
+    "vendor:vendor"
+    "scripts:maintenance_scripts"
+)
+
+# True when the site's code volume already holds a release. Read straight off
+# the host filesystem rather than through a throwaway container: this runs
+# before the base image has been checked for, and a version file is not worth
+# starting a container to read.
+#
+# Anything unexpected — no volume, no mountpoint, unreadable — answers "no", so
+# an unclear result sends the caller to the version comparison rather than
+# skipping it.
+code_volume_is_populated() {
+    local SITENAME="$1"
+    local MOUNTPOINT
+    MOUNTPOINT=$(docker volume inspect -f '{{ .Mountpoint }}' "${SITENAME}_code" 2>/dev/null) || return 1
+    [ -n "$MOUNTPOINT" ] && [ -f "${MOUNTPOINT}/VERSION" ]
+}
+
 # A site's PHP code lives in the container's writable layer, not on a volume.
 # In-place upgrades (utils/upgrade.php) write code there and nowhere else, so a
 # long-lived site runs code the image knows nothing about, against a database
@@ -2648,6 +2681,14 @@ assert_rebuild_moves_code_forward() {
     # running code load-bearing is being deleted in the same breath.
     if [ "$WIPE_DATA" -eq 1 ]; then
         print_info "Skipping the code-version check (--wipe-data: this is a fresh site)"
+        return 0
+    fi
+
+    # A populated code volume puts the site's code out of a rebuild's reach:
+    # Docker seeds a volume from the image only when the volume is empty, so
+    # there is nothing here to move backward and no version worth comparing.
+    if code_volume_is_populated "$SITENAME"; then
+        print_success "${SITENAME}'s code is on a volume — a rebuild cannot replace it"
         return 0
     fi
 
@@ -2862,7 +2903,7 @@ do_site_docker() {
                 print_warning "Auto-removing existing container AND data volumes (-y --wipe-data)"
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
+                for vol in code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
                     docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
                 done
                 print_success "Existing container and volumes removed"
@@ -2884,7 +2925,7 @@ do_site_docker() {
                 print_info "Stopping and removing existing container and volumes..."
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
+                for vol in code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
                     docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
                 done
                 print_success "Existing container and volumes removed"
@@ -3019,6 +3060,9 @@ EOF
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
+            -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
+            -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
+            -v "${SITENAME}_scripts":/var/www/html/"${SITENAME}"/maintenance_scripts \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
             -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \
@@ -3038,6 +3082,9 @@ EOF
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
+            -v "${SITENAME}_code":/var/www/html/"${SITENAME}"/public_html \
+            -v "${SITENAME}_vendor":/var/www/html/"${SITENAME}"/vendor \
+            -v "${SITENAME}_scripts":/var/www/html/"${SITENAME}"/maintenance_scripts \
             -v "${SITENAME}_postgres":/var/lib/postgresql \
             -v "${SITENAME}_uploads":/var/www/html/"${SITENAME}"/uploads \
             -v "${SITENAME}_storage":/var/www/html/"${SITENAME}"/storage \

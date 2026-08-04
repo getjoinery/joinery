@@ -64,39 +64,41 @@ This is the behavioural change most likely to trip up an operator who remembers 
   2. Run `./install.sh build-base` on the host
   3. Rebuild each site container (see migration steps in `specs/implemented/docker_shared_base_image.md`)
 
-##### A container rebuild replaces the site's code
+##### Where a site's code lives, and what a rebuild does to it
 
-A site's PHP code lives in the container's **writable layer**, not on a volume:
-the named volumes cover postgres, config, uploads, static_files, backups, cache,
-logs and sessions, and `public_html` is not among them. `upgrade.php` writes
-code into that layer, so a long-lived container's code drifts far ahead of the
-image it was built from.
+Three named volumes hold everything `upgrade.php` writes: `{site}_code` at
+`public_html`, `{site}_vendor` at `vendor`, and `{site}_scripts` at
+`maintenance_scripts`. They sit alongside the data volumes (postgres, config,
+uploads, storage, static_files, backups, cache, logs, sessions, apache_logs,
+pg_logs), so no volume is mounted inside another.
 
-`install.sh site <name> -y` stops and removes the container and rebuilds the
-image from the archive root. Its "data volumes preserved" message is about
-**data**. The code comes from the archive, so rebuilding from a stale archive
-root would revert the site's code to that archive's version, against a database
-that has already migrated forward.
+The image also carries a copy of the release, and that copy is a **seed**:
+Docker fills a named volume from the image the first time it is used and ignores
+the image entirely once the volume has content. So the image builds a brand new
+site and is inert for every rebuild after that — an in-place upgrade survives
+`docker rm`, and an image older than the site cannot overwrite it.
 
-The installer refuses that rebuild. Before it stops anything, it compares the
-VERSION inside the existing container against `$ARCHIVE_ROOT/public_html/VERSION`
-and continues only when the archive is the same version or newer. An archive
-older than the running site, or either version unreadable, is a hard refusal
-that leaves the container running untouched. `--wipe-data` skips the check,
-since a wipe deletes the database that made the running code load-bearing;
-`--allow-downgrade` is the only override, and it prints what it is about to
-overwrite.
+A container with an empty code volume refuses to start and says so, rather than
+serving an empty site.
 
-So the rebuild step is: publish a current release, extract it, and run
-`install.sh` **from that archive**. Building from whichever tree happens to be
-sitting in `/root` is what the refusal is there to catch.
+**A site whose code volume is not populated keeps its code in the container's
+writable layer instead**, where `docker rm` discards it. For those sites the
+installer compares the VERSION inside the container against
+`$ARCHIVE_ROOT/public_html/VERSION` before it stops anything, and refuses unless
+the archive is the same version or newer — an older archive, or either version
+unreadable, is a hard refusal that leaves the container running untouched.
+`--wipe-data` skips the check, since a wipe deletes the database that made the
+running code load-bearing; `--allow-downgrade` is the only override, and it
+prints what it is about to overwrite.
 
-To see where a site stands before starting:
+To see where a site stands:
 
 ```bash
+# is this site's code on a volume?
+docker volume inspect SITENAME_code
 # what the site is running now
 docker exec SITENAME cat /var/www/html/SITENAME/public_html/VERSION
-# what the rebuild would install
+# what a first-time seed would install
 cat ARCHIVE_ROOT/public_html/VERSION
 ```
 
