@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 2.29 - A site rebuild refuses unless it can prove it moves the site's
+#              code forward (spec container_rebuild_never_downgrades, part 1).
+#              Site code lives in the container's writable layer, so a rebuild
+#              from a stale archive root drops months-old code onto a database
+#              that has already migrated forward. The check compares the
+#              running container's VERSION against the archive's with sort -V
+#              semantics, runs before anything stops or removes the container,
+#              refuses when either version is unreadable, is skipped by
+#              --wipe-data, and is overridden only by --allow-downgrade.
 #VERSION 2.28 - BASE_IMAGE_VERSION 1.1 -> 1.2. The 2.27 SAPI switch changed
 #              do_server_setup (packages and Apache modules), which is exactly
 #              what the base image bakes — without the bump, a container build
@@ -138,6 +147,7 @@ BASE_IMAGE_VERSION="1.2"
 
 ASSUME_YES=0      # -y/--yes: Auto-accept all prompts (never deletes volumes on its own)
 WIPE_DATA=0       # --wipe-data: Also delete data volumes when removing an existing container (requires -y)
+ALLOW_DOWNGRADE=0 # --allow-downgrade: Rebuild a site even when the archive's code is older than what it is running
 QUIET_MODE=0      # -q/--quiet: Suppress most output
 CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
@@ -2287,6 +2297,10 @@ do_site_create() {
                 WIPE_DATA=1
                 shift
                 ;;
+            --allow-downgrade)
+                ALLOW_DOWNGRADE=1
+                shift
+                ;;
             --activate)
                 ACTIVATE_THEME="$2"
                 shift 2
@@ -2375,6 +2389,9 @@ do_site_create() {
                 echo "  -y / --yes     Auto-accept: remove existing container, keep volumes"
                 echo "  --wipe-data    Combined with -y: also delete data volumes (fresh install)"
                 echo "                 DANGER: irreversible, destroys all site data"
+                echo "  --allow-downgrade  Rebuild even though this archive's code is older than"
+                echo "                 what the site is running. DANGER: replaces the running code"
+                echo "                 with older code, against a database already migrated forward"
                 echo ""
                 echo "Parameters:"
                 echo "  SITENAME      Site/database name (required)"
@@ -2600,6 +2617,99 @@ do_site_create() {
 }
 
 #------------------------------------------------------------------------------
+# Rebuild guard: a rebuild must never move a site's code backward
+#------------------------------------------------------------------------------
+
+# A site's PHP code lives in the container's writable layer, not on a volume.
+# In-place upgrades (utils/upgrade.php) write code there and nowhere else, so a
+# long-lived site runs code the image knows nothing about, against a database
+# that migrated forward alongside it. Removing and rebuilding the container
+# therefore replaces the running code with whatever the archive root holds —
+# which is destructive whenever that archive is older, however loudly the
+# rebuild says data volumes are preserved.
+#
+# So a rebuild has to prove it moves the code forward, or refuse. This runs
+# before anything stops or removes the container, so refusing costs the site
+# nothing.
+#
+# $1 SITENAME  $2 archive root
+assert_rebuild_moves_code_forward() {
+    local SITENAME="$1"
+    local ARCHIVE_ROOT="$2"
+    local CONTAINER_VERSION_PATH="/var/www/html/${SITENAME}/public_html/VERSION"
+    local ARCHIVE_VERSION_FILE="${ARCHIVE_ROOT}/public_html/VERSION"
+
+    # Nothing installed under this name yet — there is no code to move backward.
+    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
+        return 0
+    fi
+
+    # --wipe-data asks for a fresh site outright: the database that makes the
+    # running code load-bearing is being deleted in the same breath.
+    if [ "$WIPE_DATA" -eq 1 ]; then
+        print_info "Skipping the code-version check (--wipe-data: this is a fresh site)"
+        return 0
+    fi
+
+    print_step "Checking that this rebuild moves ${SITENAME}'s code forward..."
+
+    # docker cp reads a stopped container as well as a running one, which
+    # docker exec cannot — and a previous failed run may have left it stopped.
+    local RUNNING_VERSION=""
+    local TMP_VERSION
+    TMP_VERSION=$(mktemp)
+    if docker cp "${SITENAME}:${CONTAINER_VERSION_PATH}" "$TMP_VERSION" > /dev/null 2>&1; then
+        RUNNING_VERSION=$(tr -d '[:space:]' < "$TMP_VERSION")
+    fi
+    rm -f "$TMP_VERSION"
+
+    local ARCHIVE_VERSION=""
+    if [ -r "$ARCHIVE_VERSION_FILE" ]; then
+        ARCHIVE_VERSION=$(tr -d '[:space:]' < "$ARCHIVE_VERSION_FILE")
+    fi
+
+    # sort -V, never string comparison: 0.8.24 against 0.8.221 is exactly the
+    # pair string comparison gets backwards, and it is the pair in the field.
+    local VERDICT="forward"
+    if [ -z "$RUNNING_VERSION" ] || [ -z "$ARCHIVE_VERSION" ]; then
+        VERDICT="unknown"
+    elif [ "$RUNNING_VERSION" != "$ARCHIVE_VERSION" ] && \
+         [ "$(printf '%s\n%s\n' "$ARCHIVE_VERSION" "$RUNNING_VERSION" | sort -V | head -n1)" = "$ARCHIVE_VERSION" ]; then
+        VERDICT="backward"
+    fi
+
+    if [ "$VERDICT" = "forward" ]; then
+        print_success "Archive ${ARCHIVE_VERSION} is not older than the running ${RUNNING_VERSION}"
+        return 0
+    fi
+
+    # An archive that cannot say what it is, is the same signal as an older one
+    # with less information — so unknown refuses too.
+    if [ "$VERDICT" = "unknown" ]; then
+        print_warning "Cannot tell whether this rebuild moves ${SITENAME}'s code forward"
+    else
+        print_warning "This rebuild would move ${SITENAME}'s code BACKWARD"
+    fi
+    print_warning "  running in the container:  ${RUNNING_VERSION:-unreadable at $CONTAINER_VERSION_PATH}"
+    print_warning "  in this archive:           ${ARCHIVE_VERSION:-unreadable at $ARCHIVE_VERSION_FILE}"
+    print_warning "  archive root:              ${ARCHIVE_ROOT}"
+
+    if [ "$ALLOW_DOWNGRADE" -eq 1 ]; then
+        print_warning "Proceeding anyway (--allow-downgrade)"
+        print_warning "  ${SITENAME}'s code will be replaced with the archive copy named above."
+        print_warning "  Its database is not rolled back and stays where it is."
+        return 0
+    fi
+
+    print_error "Refusing to rebuild ${SITENAME}."
+    print_error "The site's code lives in the container, so a rebuild replaces it with the"
+    print_error "archive copy — against a database that has already migrated forward."
+    print_error "Publish a current release, extract it, and run that copy's install.sh."
+    print_error "To rebuild from this archive regardless: re-run with --allow-downgrade"
+    exit 1
+}
+
+#------------------------------------------------------------------------------
 # Site creation: Docker mode
 #------------------------------------------------------------------------------
 
@@ -2622,6 +2732,14 @@ do_site_docker() {
             print_info "Auto-detected server IP: $DOMAIN_NAME"
         fi
     fi
+
+    # Archive root: parent of maintenance_scripts, which is parent of install_tools.
+    ARCHIVE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+    # Before anything stops or removes the container, refuse a rebuild that
+    # cannot prove it moves this site's code forward. A refusal here leaves the
+    # site running exactly as it was.
+    assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT"
 
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
@@ -2713,9 +2831,6 @@ do_site_docker() {
 
     # Verify archive structure
     print_step "Verifying archive structure..."
-
-    # Determine archive root (parent of maintenance_scripts which is parent of install_tools)
-    ARCHIVE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
     if [ ! -d "$ARCHIVE_ROOT/public_html" ]; then
         print_error "Cannot find public_html directory in $ARCHIVE_ROOT"

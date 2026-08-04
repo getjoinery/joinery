@@ -468,4 +468,63 @@ check(strpos($handoff_src, '--allow-unsupported-os') === false,
     'and never passes the override');
 
 
+section('A site rebuild cannot move the site backward');
+
+// A site's PHP code lives in the container's writable layer, so removing and
+// rebuilding the container replaces the running code with the archive's. The
+// guard refuses unless it can prove the archive is not older. It is text-only
+// here for the same reason as everything above: install.sh cannot be run.
+check(strpos($install_src, 'assert_rebuild_moves_code_forward()') !== false,
+    'the rebuild guard exists');
+check(substr_count($install_src, 'assert_rebuild_moves_code_forward') >= 2,
+    'and do_site_docker calls it');
+
+// Ordering is the whole safety property. do_site_docker stops the container
+// early as a port-check preflight; a guard after that point would leave a
+// refused site sitting down.
+$guard_call = strpos($install_src, "\n    assert_rebuild_moves_code_forward \"\$SITENAME\"");
+$preflight  = strpos($install_src, 'Existing container \'${SITENAME}\' is running');
+check($guard_call !== false, 'the call site is findable');
+check($preflight !== false, 'the preflight stop is findable');
+check($guard_call !== false && $preflight !== false && $guard_call < $preflight,
+    'the guard runs before anything stops the container',
+    'a refusal must cost the running site nothing');
+
+// Isolate the function body so an unrelated match elsewhere cannot stand in
+// for a rule that was dropped.
+$guard_body = '';
+if (preg_match('/assert_rebuild_moves_code_forward\(\) \{.*?\n\}\n/s', $install_src, $m)) {
+    $guard_body = $m[0];
+}
+check($guard_body !== '', 'the guard body is findable');
+check(strpos($guard_body, 'sort -V') !== false,
+    'versions compare with sort -V',
+    'string comparison puts 0.8.221 below 0.8.24, which is the pair in the field');
+check(strpos($guard_body, 'exit 1') !== false,
+    'the guard refuses rather than warning');
+check(preg_match('/WIPE_DATA["\']? -eq 1/', $guard_body) === 1,
+    '--wipe-data skips the check',
+    'a wipe deletes the database that made the running code load-bearing');
+check(preg_match('/ALLOW_DOWNGRADE["\']? -eq 1/', $guard_body) === 1,
+    '--allow-downgrade is honoured inside the guard');
+check(strpos($install_src, '--allow-downgrade)') !== false,
+    'and --allow-downgrade is a parsed flag');
+check(substr_count($install_src, 'ALLOW_DOWNGRADE=1') === 1,
+    'it is the only bypass',
+    'a second thing setting it would be a silent override path');
+
+// An archive that cannot say what it is, is an older archive with less
+// information — the April tree that started this had no VERSION at all.
+check(strpos($guard_body, 'VERDICT="unknown"') !== false,
+    'an unreadable version is a verdict of its own, not a pass');
+
+// docker exec cannot read a container a previous failed run left stopped.
+check(strpos($guard_body, 'docker cp') !== false,
+    'the running version is read in a way that works on a stopped container');
+
+// The operator hitting this needs the next action, not a diagnosis.
+check(strpos($guard_body, 'Publish a current release') !== false,
+    'the refusal says how to fix it');
+
+
 harness_finish();
