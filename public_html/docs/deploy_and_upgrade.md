@@ -64,6 +64,33 @@ This is the behavioural change most likely to trip up an operator who remembers 
   2. Run `./install.sh build-base` on the host
   3. Rebuild each site container (see migration steps in `specs/implemented/docker_shared_base_image.md`)
 
+##### A container rebuild replaces the site's code
+
+A site's PHP code lives in the container's **writable layer**, not on a volume:
+the named volumes cover postgres, config, uploads, static_files, backups, cache,
+logs and sessions, and `public_html` is not among them. `upgrade.php` writes
+code into that layer, so a long-lived container's code drifts far ahead of the
+image it was built from.
+
+`install.sh site <name> -y` stops and removes the container and rebuilds the
+image from the archive root. Its "data volumes preserved" message is about
+**data**. The code comes from the archive — so rebuilding against a stale
+archive root **reverts the site's code to that archive's version**, against a
+database that has already migrated forward.
+
+Before any container rebuild, confirm the archive is current:
+
+```bash
+# what the site is running now
+docker exec SITENAME cat /var/www/html/SITENAME/public_html/VERSION
+# what the rebuild would install
+cat ARCHIVE_ROOT/public_html/VERSION
+```
+
+If the archive is older, or has no VERSION file, publish a current release and
+extract it as the archive root first. Never build from whichever tree happens to
+be sitting in `/root`.
+
 ### Distribution Architecture
 
 Updates are distributed as separate archives:

@@ -2,6 +2,7 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.4 - mgn_allow_console: per-node opt-in for the node detail Console tab
  * @version 1.3.4
  */
 
@@ -51,6 +52,11 @@ class ManagedNode extends SystemBase {
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Whether the node detail Console tab may run an ad-hoc command here.
+		// Default off: the control plane holds SSH keys to every node, so being
+		// reachable from a browser form is a decision made per node rather than
+		// a property every node acquires the moment it is registered.
+		'mgn_allow_console'       => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_mgh_host_id'         => array('type'=>'int8'),
 		'mgn_ssl_state'           => array('type'=>'varchar(20)'),
 		'mgn_port'                => array('type'=>'int4'),

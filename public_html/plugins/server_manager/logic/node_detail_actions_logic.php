@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.7 - run_command action (node console): superadmin + per-node flag + step-up, and a
+ *                refusal re-renders in place so the typed command survives
  * @version 1.6 - backup key escrow runs as a job step on the control plane (the web user cannot read
  *                node SSH keys); the web request only checks that recovery is set up before letting
  *                an encrypting backup be created
@@ -57,6 +59,7 @@ class NodeDetailActions {
 		'provision_ssl'            => 'overview',
 		'run_plugin_installers'    => 'overview',
 		'set_reverse_dns'          => 'overview',
+		'run_command'              => 'console',
 		'save_api_credential'      => 'api_keys',
 		'clear_api_credential'     => 'api_keys',
 		'save_node'                => 'overview',
@@ -98,8 +101,12 @@ class NodeDetailActions {
 	 * The per-action work. Each case returns the redirect URL. A validation
 	 * bounce sets its own message and returns the tab URL; a builder/save throw
 	 * is turned into a message + tab redirect by the central catch in dispatch().
+	 *
+	 * A handler may instead return null to re-render the current page with its
+	 * message — for a refusal that would otherwise discard what the operator
+	 * typed (the console's command box).
 	 */
-	private static function run($action, $node, $session, $base_url, $page_regex): string {
+	private static function run($action, $node, $session, $base_url, $page_regex): ?string {
 		$uid = $session->get_user_id();
 
 		switch ($action) {
@@ -107,6 +114,49 @@ class NodeDetailActions {
 			case 'check_status': {
 				$steps = JobCommandBuilder::build_check_status($node);
 				$job = ManagementJob::createJob($node->key, 'check_status', $steps, null, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'run_command': {
+				// The node console (specs/server_manager_node_console.md). Every
+				// refusal here returns null rather than a redirect: the operator
+				// has typed a command, and throwing it away to show a message is
+				// the wrong trade. null re-renders this page, message and all,
+				// with the console tab repopulating from $_POST.
+				if ($session->get_permission() < 10) {
+					self::fail($session, $page_regex, 'Running commands on a node is superadmin-only.');
+					return null;
+				}
+				if (!$node->get('mgn_allow_console')) {
+					self::fail($session, $page_regex,
+						'The console is turned off for this site. Turn it on in Overview → Edit before running commands here.');
+					return null;
+				}
+				if (self::step_up_required($session)) {
+					self::fail($session, $page_regex,
+						'Confirm with your passkey or authenticator before running a command.');
+					return null;
+				}
+
+				$command = isset($_POST['console_command']) ? trim((string)$_POST['console_command']) : '';
+				if ($command === '') {
+					self::fail($session, $page_regex, 'Enter a command to run.');
+					return null;
+				}
+				$timeout = isset($_POST['console_timeout']) ? (int)$_POST['console_timeout'] : 0;
+				if (!in_array($timeout, JobCommandBuilder::CONSOLE_TIMEOUTS, true)) {
+					self::fail($session, $page_regex, 'Choose one of the offered timeouts.');
+					return null;
+				}
+
+				$params = [
+					'command' => $command,
+					'timeout' => $timeout,
+					'on_host' => !empty($_POST['console_on_host']),
+					'source'  => 'ui',
+				];
+				$steps = JobCommandBuilder::build_run_command($node, $params);
+				$job = ManagementJob::createJob($node->key, 'run_command', $steps, $params, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -464,11 +514,12 @@ class NodeDetailActions {
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
-			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
+			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks', 'mgn_allow_console',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
 			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds',
 		];
-		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks', 'mgn_uptime_enabled'];
+		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
+			'mgn_allow_console', 'mgn_uptime_enabled'];
 		foreach ($editable_fields as $field) {
 			if (in_array($field, $bool_fields, true)) {
 				$node->set($field, !empty($_POST[$field]));
@@ -513,6 +564,25 @@ class NodeDetailActions {
 		if ($will_encrypt) {
 			BackupRecoveryKey::public_key();
 		}
+	}
+
+	/**
+	 * Does this operator still owe a second-factor confirmation?
+	 *
+	 * True only when the account holds a factor and has not confirmed with it
+	 * recently in this session — the platform's standing step-up rule (see
+	 * docs/account_security.md). An account with no factor passes: the gate
+	 * binds a factor the account has, it does not invent an enrollment
+	 * requirement. The window is the session's, not the command's; asking for
+	 * a fresh touch per command adds friction without adding protection.
+	 */
+	public static function step_up_required($session): bool {
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$account = new User($session->get_user_id(), TRUE);
+		if (!$account->key) {
+			return true;
+		}
+		return $session->user_has_second_factor($account) && !$session->has_recent_second_factor();
 	}
 
 	private static function fail($session, $page_regex, string $message): void {

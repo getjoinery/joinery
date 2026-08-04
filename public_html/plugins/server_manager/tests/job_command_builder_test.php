@@ -43,6 +43,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 
 /** A node fixture. Defaults give it SSH but no API credentials. */
 function jcb_node(array $fields = array()) {
@@ -426,6 +427,56 @@ $steps = JobCommandBuilder::build_delete_backup($ssh_node, array('target' => 'lo
 check(count($steps) === 1, 'deleting nothing still emits one step', 'steps: ' . count($steps));
 check(strpos($steps[0]['cmd'], 'Nothing to delete') !== false,
 	'that step says nothing was deleted rather than pretending it deleted something');
+
+section('Node console: build_run_command');
+
+// The console is the one builder that must NOT sanitise its input — an
+// operator's command is meant to reach the shell as written. What is asserted
+// here is the opposite of the shell-safety section above: the command survives
+// verbatim, and the bounds live in the timeout and the gate instead.
+$console_cmd = "apache2ctl -M | grep -E 'mpm|fcgi' && echo \$PATH";
+$steps = JobCommandBuilder::build_run_command($ssh_node, array(
+	'command' => $console_cmd, 'timeout' => 120));
+check(count($steps) === 1, 'one command produces exactly one step', 'steps: ' . count($steps));
+check($steps[0]['cmd'] === $console_cmd,
+	'the command reaches the step verbatim — pipes, quotes and all');
+check($steps[0]['type'] === 'ssh' && !empty($steps[0]['label']),
+	'the step is a labelled SSH step like every other job');
+check(($steps[0]['timeout'] ?? null) === 120, 'the chosen timeout rides on the step');
+
+// The timeout is the runaway guard, so the offered set is closed: a hand-posted
+// value outside it is refused rather than quietly clamped to something else.
+$refused = false;
+try { JobCommandBuilder::build_run_command($ssh_node, array('command' => 'ls', 'timeout' => 86400)); }
+catch (Exception $e) { $refused = true; }
+check($refused, 'a timeout outside the offered set is refused');
+
+$refused = false;
+try { JobCommandBuilder::build_run_command($ssh_node, array('command' => '   ', 'timeout' => 60)); }
+catch (Exception $e) { $refused = true; }
+check($refused, 'an empty command is refused rather than creating a job that does nothing');
+
+check(in_array(JobCommandBuilder::CONSOLE_TIMEOUT_DEFAULT, JobCommandBuilder::CONSOLE_TIMEOUTS, true),
+	'the default timeout is one the form actually offers');
+
+// on_host is meaningful only where there are two shells to choose between.
+$console_docker = jcb_node(array('mgn_container_name' => 'consolesite', 'mgn_web_root' => '/var/www/html/consolesite/public_html'));
+$steps = JobCommandBuilder::build_run_command($console_docker, array(
+	'command' => 'ls', 'timeout' => 60, 'on_host' => true));
+check(!empty($steps[0]['on_host']), 'a container node can send the command to the host instead');
+$steps = JobCommandBuilder::build_run_command($ssh_node, array(
+	'command' => 'ls', 'timeout' => 60, 'on_host' => true));
+check(empty($steps[0]['on_host']),
+	'a bare-metal node ignores on_host — it has only one shell to run in');
+
+$no_ssh = jcb_node(array('mgn_ssh_key_path' => ''));
+$refused = false;
+try { JobCommandBuilder::build_run_command($no_ssh, array('command' => 'ls', 'timeout' => 60)); }
+catch (Exception $e) { $refused = true; }
+check($refused, 'a node with no SSH credentials refuses instead of building an unrunnable job');
+
+check(in_array('run_command', ManagementJob::filterTypes(), true),
+	'run_command is a filterable job type, so console runs are findable on the jobs pages');
 
 section('Plugin installers');
 
