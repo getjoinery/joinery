@@ -79,14 +79,26 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// were. Declared before every action handler below, all of which redirect
 	// through it, and handed to the view as self_url: a form that posts anywhere
 	// but here drops the focus and dumps the operator back on the picker.
-	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $selected_domain_id, $advanced) {
+	// Whether the operator has explicitly opened the send-protection ceremony
+	// for the focused domain. Pure view state, never stored: every Fortress
+	// domain already HAS a sealed key (the raise seals one), so "has a key but
+	// is not enforcing" is the resting state of a finished domain, not a job in
+	// progress. Only this flag distinguishes an operator who has asked to set
+	// send protection up from one who is simply looking at their domain — and
+	// nothing prescribes the protected DNS shape until they have asked.
+	$protect_setup = !empty($input['protect_setup']);
+
+	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $selected_domain_id,
+			$advanced, $protect_setup) {
 		$alias  = array_key_exists('alias_id', $over)  ? $over['alias_id']  : $selected_alias_id;
 		$domain = array_key_exists('domain_id', $over) ? $over['domain_id'] : $selected_domain_id;
 		$adv    = array_key_exists('advanced', $over)  ? $over['advanced']  : $advanced;
+		$psetup = array_key_exists('protect_setup', $over) ? $over['protect_setup'] : $protect_setup;
 		$parts = array();
 		if ($alias)       { $parts[] = 'alias_id=' . (int)$alias; }
 		elseif ($domain)  { $parts[] = 'domain_id=' . (int)$domain; }
 		if ($adv)         { $parts[] = 'advanced=1'; }
+		if ($psetup)      { $parts[] = 'protect_setup=1'; }
 		return $base . ($parts ? '?' . implode('&', $parts) : '');
 	};
 	$redirect_url = $state_qs();
@@ -112,7 +124,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// DNS publish actions (specs/dns_record_management.md). Handled before the
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
-	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id) {
+	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id,
+			$protect_setup) {
+		// Inside the ceremony the records to publish are the protected ones, and
+		// the operator asked for them. Nowhere else may publish that shape: it
+		// tells the world to reject anything the sealed key did not sign, and
+		// nothing signs with that key until send protection is actually on.
+		if ($protect_setup && $selected_domain_id) {
+			return _setup_dns_plan_for_domain($selected_domain_id, true);
+		}
 		return $selected_alias_id
 			? _setup_dns_plan_for_alias($selected_alias_id)
 			: _setup_dns_plan_for_domain($selected_domain_id);
@@ -190,6 +210,39 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			// domain should leave exactly the decisions that deserve a human,
 			// not a checklist to go and find.
 			return LogicResult::redirect(DnsPublishBox::urlWith($redirect_url, array('dns_show' => '1')));
+		}
+
+		// Destroy the ordinary on-disk signing key for a protected domain. Never
+		// automatic and never a side effect of anything else: this deletes key
+		// material and cannot be undone from a browser. The gates are the two
+		// facts that make it safe — sending is already locked to the sealed key,
+		// and the DNS shape that makes that stick is published and verified.
+		if ($input['action'] === 'destroy_local_key') {
+			$domain_name = strtolower(trim($input['domain'] ?? ''));
+			// GetByDomain() returns FALSE on a miss, never null.
+			$model = $domain_name !== '' ? InboundEmailDomain::GetByDomain($domain_name) : false;
+			if (!$model) {
+				$announce('No such domain on this server.', 'Error');
+				return LogicResult::redirect($redirect_url);
+			}
+			if (!$model->is_protected_identity()) {
+				$announce('Send protection is not on for ' . $domain_name . '. Until it is, this key is what '
+					. 'signs the domain\'s mail — destroying it would leave the domain signing nothing.', 'Not yet');
+				return LogicResult::redirect($redirect_url);
+			}
+			$shape = (new InboundEmailSetupCheck())->protectedDomainChecks($model);
+			foreach ($shape as $row) {
+				if ($row['severity'] === InboundEmailSetupCheck::REQUIRED
+						&& $row['status'] !== InboundEmailSetupCheck::PASS) {
+					$announce('The protected DNS records for ' . $domain_name . ' are not all verified yet ('
+						. $row['label'] . '). Destroying the on-disk key now could leave mail unsigned on a path '
+						. 'that is still in use.', 'Not yet');
+					return LogicResult::redirect($redirect_url);
+				}
+			}
+			$result = mailbox_destroy_local_signing_key($domain_name);
+			$announce($result['message'], $result['ok'] ? 'Destroyed' : 'Error');
+			return LogicResult::redirect($redirect_url);
 		}
 	}
 
@@ -407,6 +460,25 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$dns_box_in_advanced = !_setup_has_dns_work($receiving_rows, $forwarding_rows, $domain_rows)
 		&& empty($input['dns_show']);
 
+	// --- The send-protection ceremony, when the operator has opened it ---------
+	// Everything here costs DNS lookups, so none of it runs for the ordinary
+	// case: a Fortress domain resting with send protection off pays nothing and
+	// is told nothing.
+	$protect_preflight     = array();
+	$protect_dns_box       = null;
+	$protect_vault_unlocked = false;
+	if ($protect_setup && $protect !== null && $focus_domain_model !== null
+			&& !$focus_is_protected && !empty($protect['has_key'])) {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		$protect_vault_unlocked = VaultUnlock::isOpen((int)$session->get_user_id());
+		$protect_preflight = (new InboundEmailSetupCheck())->protectedDomainChecks($focus_domain_model);
+		$protect_dns_box = DnsPublishBox::build(
+			$checker->dnsPlan($focus_domain, true),
+			$input,
+			$state_qs()
+		);
+	}
+
 	return LogicResult::render(array(
 		'dns_box_in_advanced'        => $dns_box_in_advanced,
 		'session'                    => $session,
@@ -439,6 +511,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'focus_is_protected'         => $focus_is_protected,
 		'acting_has_vault'           => $acting_has_vault,
 		'protect'                    => $protect,
+		'protect_setup'              => $protect_setup,
+		'protect_preflight'          => $protect_preflight,
+		'protect_dns_box'            => $protect_dns_box,
+		'protect_vault_unlocked'     => $protect_vault_unlocked,
 		'domain_rows'                => $domain_rows,
 		// Advanced
 		'advanced'                   => $advanced,
@@ -501,8 +577,11 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
  * The DNS plan for a directly focused domain — the same contract as
  * _setup_dns_plan_for_alias(), for a domain that has no mailbox to reach it
  * through.
+ *
+ * $protected asks for the send-protection shape on a domain that has not
+ * enforced it yet; only the ceremony passes it.
  */
-function _setup_dns_plan_for_domain(int $domain_id): ?DnsRecordPlan {
+function _setup_dns_plan_for_domain(int $domain_id, bool $protected = false): ?DnsRecordPlan {
 	if ($domain_id <= 0) {
 		return null;
 	}
@@ -511,7 +590,7 @@ function _setup_dns_plan_for_domain(int $domain_id): ?DnsRecordPlan {
 	if (!$domain->key || $name === '' || $domain->get('ied_is_imap_source')) {
 		return null;
 	}
-	return (new InboundEmailSetupCheck())->dnsPlan($name);
+	return (new InboundEmailSetupCheck())->dnsPlan($name, $protected);
 }
 
 /**

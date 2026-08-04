@@ -41,14 +41,11 @@ $page->admin_header(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
 
-// The relay-or-direct choice comes before everything else — until it is made,
-// the mailbox surfaces show only the choice card.
+// How mail reaches this server is a deployment fact, not a question every page
+// has to have answered first: an undecided deployment receives directly and
+// works. The choice lives in the Setup tab's Advanced section
+// (specs/mailbox_relay_surface_simplification.md).
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-if (mailbox_receive_mode() === '') {
-	echo mailbox_receive_gate_render();
-	$page->admin_footer();
-	return;
-}
 
 mailbox_render_mailbox_reader($page, array(
 	'csrf_token'          => $csrf_token,

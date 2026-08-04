@@ -14,6 +14,8 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.2 - relay rows and cards are scoped to mailboxes whose domain needs
+ *                a relay (specs/mailbox_relay_surface_simplification.md)
  * @version 1.1 - a broken relay scanner surfaces as a Receiving card instead of
  *                waiting in Advanced (specs/mailbox_relay_scanner_health.md)
  */
@@ -58,6 +60,14 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 	$address      = strtolower($alias->get('iea_alias') . '@' . $domain->get('ied_domain'));
 	$focus_domain = strtolower((string)$domain->get('ied_domain'));
 
+	// A RELAY IS ONLY THIS MAILBOX'S BUSINESS AT FORTRESS
+	// (specs/mailbox_relay_surface_simplification.md). The relay is what seals
+	// arriving mail, and only Fortress requires that. A deployment may run one
+	// for its own reasons at any level — that stays possible, and it stays
+	// visible in the Setup tab's Relay section — but it must not surface as a
+	// card, a warning or a verdict on a mailbox whose domain does not need it.
+	$needs_relay = ($domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS);
+
 	$provider = InboundProviderRegistry::active();
 	$arrival  = $is_imap ? 'imap' : ($provider::isWebhook() ? 'webhook' : 'postfix');
 
@@ -88,7 +98,7 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 				$forwarding_rows[] = $r;
 			} elseif (!$forwards && _setup_is_sending_row($r)) {
 				$forwarding_rows[] = $r;
-			} elseif (_setup_is_receiving_row($r, $focus_domain)) {
+			} elseif (_setup_is_receiving_row($r, $focus_domain, $needs_relay)) {
 				$receiving_rows[] = $r;
 			}
 		}
@@ -99,12 +109,15 @@ function mailbox_setup_scoped_rows(int $alias_id, string $relay_advanced_url = '
 	// and optional until a relay exists; its health once one does. The
 	// receiving card only applies to mail this deployment actually receives,
 	// so an IMAP-pull mailbox gets the sending card alone.
-	$relay_cards = admin_mailbox_relay_check_rows($relay_advanced_url);
-	if ($arrival !== 'imap' && $relay_cards['receiving'] !== null) {
-		$receiving_rows[] = $relay_cards['receiving'];
-	}
-	if ($relay_cards['sending'] !== null) {
-		$forwarding_rows[] = $relay_cards['sending'];
+	// ...and only where a relay is this mailbox's business at all.
+	if ($needs_relay) {
+		$relay_cards = admin_mailbox_relay_check_rows($relay_advanced_url);
+		if ($arrival !== 'imap' && $relay_cards['receiving'] !== null) {
+			$receiving_rows[] = $relay_cards['receiving'];
+		}
+		if ($relay_cards['sending'] !== null) {
+			$forwarding_rows[] = $relay_cards['sending'];
+		}
 	}
 
 	return array(
@@ -269,15 +282,20 @@ function _setup_is_sending_row(array $r): bool {
  * is scanning" card is a line of checklist noise for a job the operator never
  * had. Broken is news. Working is not.
  */
-function _setup_is_receiving_row(array $r, string $focus_domain = ''): bool {
+function _setup_is_receiving_row(array $r, string $focus_domain = '', bool $needs_relay = true): bool {
 	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
 	// Deployment-wide, and legitimately so: the relay scans every message for
 	// every hosted domain, so "the relay is not scanning" is equally true of
 	// every mailbox behind it. That is what separates it from
 	// 'plugin.relay_enable' below, which looks deployment-wide but actually
 	// reports on one other domain's MX.
+	//
+	// But only for a mailbox whose domain needs a relay. Promoting this row
+	// unconditionally meant one deployment-wide fault turned EVERY mailbox on
+	// the deployment amber, including mailboxes on domains the relay does
+	// nothing for — one problem, reported as though everything were broken.
 	if ($r['id'] === 'host.relay_scanner') {
-		return in_array($r['status'], array(InboundEmailSetupCheck::WARN,
+		return $needs_relay && in_array($r['status'], array(InboundEmailSetupCheck::WARN,
 			InboundEmailSetupCheck::FAIL), true);
 	}
 	if ($r['layer'] === 'domain')   { return true; }

@@ -127,7 +127,7 @@ class InboundEmailHealth {
             $validation = $class::validateConfiguration();
             if (empty($validation['valid'])) {
                 throw new ProvisioningCheckFailed(
-                    'Forwarding relays through ' . $class::getLabel()
+                    'Outgoing mail leaves through ' . $class::getLabel()
                     . ', but its configuration is incomplete: '
                     . implode('; ', $validation['errors'] ?? array()));
             }
@@ -146,7 +146,7 @@ class InboundEmailHealth {
         } catch (\Throwable $e) {
             // An unexpected error from the SMTP library: rethrow it as the
             // expected dependency-failure signal so it reports as `unmet`.
-            throw new ProvisioningCheckFailed('Forwarding relay error: ' . $e->getMessage());
+            throw new ProvisioningCheckFailed('Sending route error: ' . $e->getMessage());
         }
 
         if (!$connected) {
@@ -553,7 +553,7 @@ class InboundEmailHealth {
             throw new ProvisioningCheckFailed(
                 'The active outbound provider (' . $label . ') submits over SMTP, which would stamp this server\'s '
                 . 'IP into sent mail and defeat the hidden origin. Use an API provider (Mailgun or Amazon SES), '
-                . 'or switch the relay to smarthost mode.');
+                . 'or switch sent mail to leave through the relay.');
         }
     }
 
@@ -670,7 +670,7 @@ class InboundEmailHealth {
             return array('ok' => false, 'message' => 'No active relay — the origin-leak probe only applies to a relay-fronted deployment.');
         }
         if (self::relayOutboundMode() !== 'provider') {
-            return array('ok' => false, 'message' => 'The relay is in smarthost mode; the tunnel-SMTP check covers that path.');
+            return array('ok' => false, 'message' => 'Sent mail leaves through the relay; the tunnel-SMTP check covers that path.');
         }
 
         // The probe target must be a REAL enabled store-mode alias: the relay's

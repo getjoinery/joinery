@@ -43,14 +43,11 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
 
-// The relay-or-direct choice comes before everything else — until it is made,
-// the mailbox surfaces show only the choice card.
+// How mail reaches this server is a deployment fact, not a question every page
+// has to have answered first: an undecided deployment receives directly and
+// works. The choice lives in the Setup tab's Advanced section
+// (specs/mailbox_relay_surface_simplification.md).
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-if (mailbox_receive_mode() === '') {
-	echo mailbox_receive_gate_render();
-	$page->admin_footer();
-	return;
-}
 
 if (isset($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
@@ -546,17 +543,19 @@ if ($show_form) {
 	}
 
 	// Protected sending identity — Fortress only, and driven entirely from the
-	// Setup tab (the key is sealed by the raise; publishing and enforcing are
-	// steps in its checklist). This is a signpost, not a second control surface.
+	// Setup tab's Advanced section. This is a signpost, not a second control
+	// surface, and NOT a to-do: send protection is an optional tightening, so a
+	// domain resting without it is finished rather than half-configured
+	// (specs/mailbox_relay_surface_simplification.md).
 	if ($edit_domain && $edit_domain->key && !$edit_domain->get('ied_is_imap_source')
 			&& $edit_domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
 		$page->begin_box(array('title' => 'Protected sending identity'));
 		if ($edit_domain->is_protected_identity()) {
-			echo '<p class="alert alert-success">Protection is on — while you are signed out, nothing on this server '
+			echo '<p class="alert alert-success">Send protection is on — while you are signed out, nothing on this server '
 				. 'can send mail as this domain that anyone will accept.</p>';
 		} else {
-			echo '<p>The signing key is made. Publishing its DNS and turning protection on are the remaining steps '
-				. 'on the Setup tab.</p>';
+			echo '<p>Arriving mail for this domain is sealed at the relay. Sending is not locked to your key — an '
+				. 'optional extra step, with its cost explained, under Sending identity on the Setup tab.</p>';
 		}
 		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_setup?domain_id='
 			. (int)$edit_domain->key . '">Go to setup for this domain</a>';

@@ -23,7 +23,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.32 - relay scanner health (specs/mailbox_relay_scanner_health.md)
+ * @version 1.33 - the protected shape follows the enforcement flag, not the
+ *                 security level (specs/mailbox_relay_surface_simplification.md)
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -53,6 +54,29 @@ class InboundEmailSetupCheck {
 
 	/** Label for the relay scanner row, shared with the Relay section's button copy. */
 	const RELAY_SCANNER_LABEL = 'Relay spam scanning';
+
+	/**
+	 * Does this domain get the protected (inverted) DNS shape?
+	 *
+	 * THE ENFORCEMENT FLAG IS THE BRANCHING KEY, NOT THE SECURITY LEVEL
+	 * (specs/mailbox_relay_surface_simplification.md). The protected shape tells
+	 * the world to reject anything the sealed key did not sign — but
+	 * MailboxDkimSigner only signs with that key once ied_is_protected_identity
+	 * is set. Prescribing the shape at the level instead would hand a Fortress
+	 * domain that has not opted in a DNS record set that rejects its own
+	 * outgoing mail, and send protection is a deliberate opt-in: a Fortress
+	 * domain resting with it off is a finished domain, not a half-done one.
+	 *
+	 * So the inverted SPF, the strict DMARC, the sealed-key DKIM record and the
+	 * forwarding subdomain are prescribed together with enforcement or not at
+	 * all. The ceremony's own pre-flight (protectedDomainChecks()) renders the
+	 * shape ahead of the flag; that is the one place it belongs before opt-in.
+	 */
+	private function protectedShapeApplies($model) {
+		// Truthy, not !== null: GetByDomain() returns FALSE for an unregistered
+		// domain, so a null-only guard would call a method on a boolean.
+		return ($model ? (bool)$model->is_protected_identity() : false);
+	}
 
 	/** How long mail may sit waiting to seal before it stops being routine.
 	 *  Nothing drains the backlog on a timer, so past this someone has simply
@@ -311,8 +335,14 @@ class InboundEmailSetupCheck {
 	 * A record lives in the operator's zone, not the tenant's, and a plan that
 	 * reached across zones would ask a credential to write somewhere it has no
 	 * business.
+	 *
+	 * $force_protected asks for the protected shape on a domain that has not
+	 * turned send protection on yet. That is the ceremony's own publish step —
+	 * publish, verify, then activate — and it is the only caller allowed to ask,
+	 * because publishing this shape anywhere else would reject the domain's
+	 * ordinary outgoing mail (see protectedShapeApplies()).
 	 */
-	public function dnsPlan($domain) {
+	public function dnsPlan($domain, bool $force_protected = false) {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
 		$domain = strtolower(trim((string)$domain));
 		$plan = new DnsRecordPlan($domain, 'mailbox');
@@ -339,8 +369,7 @@ class InboundEmailSetupCheck {
 				'Points the mail hostname at this server.');
 		}
 
-		$protected = ($model && ($model->is_protected_identity()
-			|| $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS));
+		$protected = ($force_protected && $model) || $this->protectedShapeApplies($model);
 
 		if ($protected) {
 			// The protected shape is INVERTED: SPF must not authorize the box,
@@ -902,10 +931,18 @@ class InboundEmailSetupCheck {
 			// Every relay deployed before this check answers here. Reading that as a
 			// fault would light up red on every existing deployment on the day this
 			// ships, about relays that are very likely scanning perfectly well.
+			//
+			// ONE FACT, ONE REMEDY. A relay this old also reports its version as
+			// unknown, so it produced a second row saying the same thing in other
+			// words. Both are the one finding — this relay predates the current
+			// provisioner — and both are answered by the same Upgrade button, so
+			// this row names that button rather than inventing a parallel fix.
 			return $row(self::INFO,
-				$name . ' is too old to say whether it is scanning for spam.',
-				$detail . ' Rebuilding it enables the check. Nothing is known to be wrong.' . $age_note,
-				$rebuild);
+				$name . ' predates the current relay software, so it cannot say whether it is scanning for spam.',
+				$detail . ' Nothing is known to be wrong. Upgrading it from the Relay section under Advanced '
+				. 'replaces the relay with current software and enables the check.' . $age_note,
+				array('text' => 'Use Upgrade relay in the Relay section under Advanced. This is the same '
+					. 'finding as the relay version reading unknown, and the same fix.'));
 		}
 
 		if ($state !== MailboxRelay::HEALTH_NOT_DELIVERING) {
@@ -1200,17 +1237,10 @@ class InboundEmailSetupCheck {
 		// must be strict (p=reject; aspf=s; adkim=s), the DKIM record must match
 		// the in-app sealed key's public half (not opendkim's on-disk key), the
 		// forwarding subdomain's SPF must authorize the box, and the domain must
-		// not be relay-provider-verified. Non-protected domains keep the ambient
-		// shape below.
-		//
-		// The security level is the single branching key
-		// (specs/mailbox_security_levels.md § Setup/health branching): a Fortress
-		// domain expects the protected shape from the moment the level is chosen —
-		// before the verify-gated protect ceremony flips ied_is_protected_identity —
-		// so the Setup tab guides the operator to publish the inverted records and
-		// reads as incomplete until the ceremony verifies.
-		$protected = ($model && ($model->is_protected_identity()
-			|| $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS));
+		// not be relay-provider-verified. Domains without send protection keep
+		// the ambient shape below — see protectedShapeApplies() for why the
+		// enforcement flag branches this and the security level does not.
+		$protected = $this->protectedShapeApplies($model);
 
 		// SPF — fetch the domain's TXT once; both branches read it.
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
@@ -1220,6 +1250,12 @@ class InboundEmailSetupCheck {
 			foreach ($this->protectedShapeResults($model, $domain, $txtOk, $spf) as $r) {
 				$out[] = $r;
 			}
+			// The last step of the ceremony, and the only one that used to leave no
+			// trace: send protection means only the sealed key can send as this
+			// domain, but an ordinary opendkim key left on the box can still sign
+			// for it. Nothing destroys that key on its own, so nothing but this row
+			// ever says it is there.
+			$out[] = $this->localSigningKeyResult($domain);
 		} else {
 			$plan = $this->spfPlan($domain);
 			if (!$txtOk) {
@@ -1254,7 +1290,7 @@ class InboundEmailSetupCheck {
 			$dkim_plan = $this->dkimPlan();
 			if ($dkim_plan['smarthost']) {
 				$out[] = $this->r('domain.dkim', $domain, 'domain', 'DKIM record', self::RECOMMENDED, self::WARN,
-					'Sent mail leaves through the relay smarthost without a DKIM signature.',
+					'Sent mail leaves through the relay without a DKIM signature.',
 					'Deliverability rides on SPF alone. Switching the relay outbound mode to '
 					. 'provider (with an API provider) restores DKIM signing.');
 			}
@@ -1589,22 +1625,24 @@ class InboundEmailSetupCheck {
 				'SRS is on and a signing secret is set.');
 		}
 
-		// Outbound relay reachability — verifies the resolved relay (the active
-		// provider's credential when provider-relay is active, else the SMTP
-		// relay), so a healthy provider API key reads PASS even with empty smtp_*.
+		// THE SENDING ROUTE, NOT "THE RELAY". This row is about the path outgoing
+		// mail takes — the active provider's credential, or an SMTP host — and it
+		// has nothing whatever to do with the ingest relay the Relay section is
+		// about. Both were called "relay", one row apart, and no reader could tell
+		// which was which (specs/mailbox_relay_surface_simplification.md).
 		try {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
 			InboundEmailHealth::checkForwardingRelay();
 			$relay = (new InboundEmailRouter())->describeRelay();
 			$summary = ($relay['mode'] === 'provider')
-				? 'Forwarding relays through ' . $relay['label'] . ', reusing its credential.'
-				: 'The outbound SMTP relay is reachable.';
-			$out[] = $this->r('plugin.relay', '', 'plugin', 'Outbound forwarding relay', self::REQUIRED, self::PASS,
+				? 'Outgoing mail leaves through ' . $relay['label'] . ', reusing its credential.'
+				: 'Outgoing mail leaves through an SMTP host, and it is reachable.';
+			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::PASS,
 				$summary);
 		} catch (\Throwable $e) {
-			$out[] = $this->r('plugin.relay', '', 'plugin', 'Outbound forwarding relay', self::REQUIRED, self::FAIL,
-				'The outbound forwarding relay could not be verified.', $e->getMessage(),
-				array('text' => 'Check the active email provider credential, or the forwarding SMTP relay settings, on the Settings page.'));
+			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::FAIL,
+				'The route outgoing mail takes could not be verified.', $e->getMessage(),
+				array('text' => 'Check the active email provider credential, or the outgoing SMTP settings, on the Settings page.'));
 		}
 
 		// Cutover progress: relays are born enabled, so this row reports how
@@ -2150,6 +2188,53 @@ class InboundEmailSetupCheck {
 	// Protected sending identity (specs/mailbox_outbound_send_protection.md)
 	// ===================================================================
 
+	/** Where opendkim keeps a domain's ordinary on-disk signing key. */
+	public static function localSigningKeyPath(string $domain): string {
+		return '/etc/opendkim/keys/' . strtolower(trim($domain)) . '/mail.txt';
+	}
+
+	/** The root helper that destroys one, when this box has been provisioned with it. */
+	public static function localSigningKeyHelper(): string {
+		return '/usr/local/sbin/joinery-dkim-remove';
+	}
+
+	/**
+	 * Is an ordinary signing key still sitting on this box for a domain whose
+	 * sending is supposed to be locked to a sealed key?
+	 *
+	 * Emitted only for a domain with send protection ON, because that is the
+	 * only state in which the file is a problem: before the ceremony the key is
+	 * what signs the mail. RECOMMENDED rather than REQUIRED — mail is correct
+	 * either way, and the risk is a second usable signing path, not a broken one.
+	 */
+	private function localSigningKeyResult($domain) {
+		$path = self::localSigningKeyPath($domain);
+		if ($this->readDkimKey($path) === '') {
+			return $this->r('domain.local_signing_key', $domain, 'domain', 'Old signing key destroyed',
+				self::RECOMMENDED, self::PASS,
+				'No ordinary signing key for ' . $domain . ' remains on this server.');
+		}
+		$fix = array(
+			'text' => 'Destroying it leaves the sealed key as the only way to sign as ' . $domain . '. '
+				. 'Nothing else changes: the sealed key already signs everything this domain sends.',
+		);
+		if (is_file(self::localSigningKeyHelper())) {
+			$fix['action'] = array('action' => 'destroy_local_key', 'domain' => $domain,
+				'label' => 'Destroy the old signing key');
+		} else {
+			$fix['command'] = 'sudo bash '
+				. PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh')
+				. ' --remove ' . $domain;
+		}
+		return $this->r('domain.local_signing_key', $domain, 'domain', 'Old signing key destroyed',
+			self::RECOMMENDED, self::WARN,
+			'An ordinary signing key for ' . $domain . ' is still on this server.',
+			'Send protection means only ' . $domain . '\'s sealed key should be able to sign as this domain. '
+			. 'While this key exists, anything that can post mail through this server\'s local signer can sign '
+			. 'as ' . $domain . ' too — without the vault, and without anyone unlocking anything.',
+			$fix);
+	}
+
 	/**
 	 * Run just the protected-identity DNS checks for a domain model, regardless
 	 * of whether its ied_is_protected_identity flag is set yet. The enable
@@ -2326,7 +2411,7 @@ class InboundEmailSetupCheck {
 			// provider, so its mechanism is part of the subdomain's shape too.
 			if ($fwd_mech !== '' && !$this->spfCoversMechanism($spf, $fwd_mech)) {
 				return $this->r('domain.fwd_spf', $domain, 'domain', 'Forwarding subdomain SPF', self::REQUIRED, self::WARN,
-					$sub . ' SPF authorizes ' . $sender_label . ', but not the outbound relay ('
+					$sub . ' SPF authorizes ' . $sender_label . ', but not the sending route ('
 					. $this->relayInfo()['label'] . ') — forwarded mail sent through it will fail SPF.',
 					'Record: ' . $spf,
 					$this->dnsFix('TXT', $sub, $spfValue));
@@ -2407,7 +2492,7 @@ class InboundEmailSetupCheck {
 		$expected = trim((string)$model->get('ied_dkim_public_dns'));
 		if ($selector === '' || $expected === '') {
 			return $this->r('domain.dkim', $domain, 'domain', 'DKIM record (in-app key)', self::REQUIRED, self::FAIL,
-				'Protection is enabled but no in-app DKIM key is provisioned for ' . $domain . '.',
+				'Send protection is on but no sealed signing key is provisioned for ' . $domain . '.',
 				'Run the Enable protection ceremony from the Domains tab to generate and seal the key.');
 		}
 		return $this->dkimRecordResult($domain, $selector, $expected, 'domain.dkim', 'DKIM record (in-app key)');
@@ -2660,7 +2745,7 @@ class InboundEmailSetupCheck {
 		if ($outbound_mode === 'smarthost') {
 			$mech = 'ip4:' . ($t['public_ip'] !== '' ? $t['public_ip'] : 'YOUR_RELAY_IP');
 			return array('prescribe' => 'record', 'value' => 'v=spf1 ' . $mech . ' -all',
-				'mechanism' => $mech, 'label' => 'the relay smarthost');
+				'mechanism' => $mech, 'label' => 'the relay');
 		}
 
 		$class = $this->activeProviderClass();

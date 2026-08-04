@@ -138,7 +138,7 @@ function mailbox_listener_guardrail_failures(array $facts): array {
 	}
 	if (!empty($facts['outbound_local'])) {
 		$failures[] = 'Sent mail currently leaves through ' . $facts['outbound_label']
-			. ' — switch outbound to an API provider or the relay smarthost first.';
+			. ' — switch sent mail to an API provider, or to the relay, first.';
 	}
 	return $failures;
 }
