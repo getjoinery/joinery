@@ -9,6 +9,7 @@
  * includes/, not views/, so a partial is never reachable as a standalone URL
  * that would bypass this file's node loading and check_permission(10).
  *
+ * @version 2.2 - Console tab (ad-hoc command on the node, per-node opt-in)
  * @version 2.1
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -47,9 +48,11 @@ try {
 
 $tab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
 $skip_joinery = $node->get('mgn_skip_joinery_checks');
+// The Console tab is offered for every node — a non-Joinery server is exactly
+// the kind that needs it — but it only runs commands when the node opts in.
 $valid_tabs = $skip_joinery
-	? ['overview', 'jobs', 'api_keys']
-	: ['overview', 'backups', 'database', 'updates', 'jobs', 'api_keys'];
+	? ['overview', 'jobs', 'console', 'api_keys']
+	: ['overview', 'backups', 'database', 'updates', 'jobs', 'console', 'api_keys'];
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
 }
@@ -135,6 +138,7 @@ if (!empty($display_messages)) {
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
 	<?php endif; ?>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
+	<li class="nav-item"><a class="nav-link <?php echo $tab === 'console' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=console">Console</a></li>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'api_keys' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=api_keys">API Keys</a></li>
 </ul>
 

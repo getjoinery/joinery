@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.5 - run_command joins filterTypes (node console)
  * @version 1.4
  */
 
@@ -83,7 +84,7 @@ class ManagementJob extends SystemBase {
 			'check_status', 'backup_database', 'backup_project',
 			'copy_database', 'copy_database_local', 'restore_database',
 			'restore_project', 'apply_update', 'decommission_node',
-			'push_recovery_key',
+			'push_recovery_key', 'run_command',
 		];
 		if ($include_publish) {
 			$types[] = 'publish_upgrade';

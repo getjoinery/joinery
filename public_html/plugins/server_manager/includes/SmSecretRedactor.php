@@ -12,6 +12,8 @@
  * independently. Apply it wherever a persisted command or raw job output is
  * rendered.
  *
+ * @version 1.1 - mask shell env-var assignments (PGPASSWORD=..., *_TOKEN=...), the shape a
+ *                hand-typed console command carries
  * @version 1.0
  */
 
@@ -45,6 +47,21 @@ class SmSecretRedactor {
 
 		// Header-style "secret-key: value" carried in API step commands.
 		$text = preg_replace('/(secret-key\s*:\s*)([^\s\'"]+)/i', '${1}' . self::MASK, $text);
+
+		// Shell env-var assignments — PGPASSWORD=..., AWS_SECRET_ACCESS_KEY=...,
+		// GITHUB_TOKEN=... — the shape a hand-typed console command uses. Matched
+		// on the conventional uppercase spelling so ordinary flags (--key=path)
+		// are left readable.
+		// A name qualifies by containing PASSWORD/PASSWD/TOKEN/SECRET anywhere
+		// (AWS_SECRET_ACCESS_KEY), or by ending in _KEY (API_KEY). Bare "KEY"
+		// anywhere would swallow SSH_KEY_PATH and similar, which carry paths
+		// rather than secrets — a redactor that eats the command is as unhelpful
+		// as one that leaks it.
+		$text = preg_replace(
+			'/\b([A-Z][A-Z0-9_]*(?:PASSWORD|PASSWD|TOKEN|SECRET)[A-Z0-9_]*|[A-Z][A-Z0-9_]*_KEY)=(?!\s)(\'[^\']*\'|"[^"]*"|\S+)/',
+			'${1}=' . self::MASK,
+			$text
+		);
 
 		return $text;
 	}

@@ -17,6 +17,11 @@
  *     | php node_exec.php scrolldaddy --stdin "PGPASSWORD=xxx psql -U postgres scrolldaddy"
  *
  * Exit code mirrors the remote command's exit code.
+ *
+ * Every execution is recorded as a run_command management job, the same row the
+ * node detail Console tab creates, so the CLI is not the one path onto a node
+ * that leaves no trace. Command and output are redacted before storage.
+ * Listing and prefix modes record nothing — only real executions.
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -30,7 +35,112 @@ require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(__DIR__ . '/data/managed_node_class.php');
+require_once(__DIR__ . '/data/management_job_class.php');
 require_once(__DIR__ . '/includes/JobCommandBuilder.php');
+require_once(__DIR__ . '/includes/SmSecretRedactor.php');
+
+/** Most output retained for the job row. Everything still reaches the terminal
+ *  live; only what gets stored is bounded, keeping the tail because that is
+ *  where a command's conclusion is. */
+const NODE_EXEC_OUTPUT_CAP = 262144;
+
+/**
+ * Run a command, streaming its output to this terminal as it arrives while
+ * retaining a copy for the job record. stdout and stderr keep their own
+ * destinations locally and are interleaved in the retained copy, which is what
+ * the job-detail page shows for agent-run jobs too.
+ *
+ * @return array{0: string, 1: int} retained output, exit code
+ */
+function node_exec_run_tee(string $full_cmd, bool $pass_stdin): array {
+	$descriptors = [
+		0 => $pass_stdin ? STDIN : ['pipe', 'r'],
+		1 => ['pipe', 'w'],
+		2 => ['pipe', 'w'],
+	];
+	$proc = proc_open($full_cmd, $descriptors, $pipes);
+	if ($proc === false) {
+		fwrite(STDERR, "node_exec: failed to open process\n");
+		exit(1);
+	}
+	if (!$pass_stdin && isset($pipes[0])) {
+		fclose($pipes[0]);
+	}
+
+	stream_set_blocking($pipes[1], false);
+	stream_set_blocking($pipes[2], false);
+
+	$retained = '';
+	$open = [1 => $pipes[1], 2 => $pipes[2]];
+	while ($open) {
+		$read = array_values($open);
+		$write = $except = null;
+		if (stream_select($read, $write, $except, 1) === false) {
+			break;
+		}
+		foreach ($read as $stream) {
+			$chunk = fread($stream, 8192);
+			if ($chunk === '' || $chunk === false) {
+				if (feof($stream)) {
+					foreach ($open as $fd => $s) {
+						if ($s === $stream) { fclose($s); unset($open[$fd]); }
+					}
+				}
+				continue;
+			}
+			fwrite($stream === $pipes[2] ? STDERR : STDOUT, $chunk);
+			$retained .= $chunk;
+			if (strlen($retained) > NODE_EXEC_OUTPUT_CAP) {
+				$retained = "[earlier output truncated]\n"
+					. substr($retained, -NODE_EXEC_OUTPUT_CAP);
+			}
+		}
+	}
+
+	return [$retained, proc_close($proc)];
+}
+
+/**
+ * Record a finished CLI execution as a run_command job.
+ *
+ * The row is written already-terminal — the command ran here, not through the
+ * agent, so it never passes through pending/running. created_by is null: a
+ * shell on the control plane has no session user, and claiming one would be a
+ * worse record than admitting the run came from the CLI.
+ *
+ * Recording must never change what the CLI does, so any failure here is
+ * reported on stderr and swallowed — an unreachable database is not a reason
+ * to lose the exit code of a command that already ran.
+ */
+function node_exec_record($node, string $command, string $output, int $exit_code, bool $on_host): void {
+	try {
+		$job = new ManagementJob(NULL);
+		$job->set('mjb_mgn_node_id', $node->key);
+		$job->set('mjb_job_type', 'run_command');
+		$job->set('mjb_status', $exit_code === 0 ? 'completed' : 'failed');
+		$job->set('mjb_commands', json_encode(['steps' => [[
+			'type'  => 'ssh',
+			'label' => 'Run command (CLI)',
+			'cmd'   => SmSecretRedactor::redact($command),
+		]]]));
+		$job->set('mjb_parameters', json_encode([
+			'command' => SmSecretRedactor::redact($command),
+			'on_host' => $on_host,
+			'source'  => 'cli',
+		]));
+		$job->set('mjb_output', SmSecretRedactor::redact($output));
+		$job->set('mjb_total_steps', 1);
+		$job->set('mjb_current_step', 1);
+		$job->set('mjb_started_time', gmdate('Y-m-d H:i:s'));
+		$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+		if ($exit_code !== 0) {
+			$job->set('mjb_error_message', 'Command exited ' . $exit_code . '.');
+		}
+		$job->save();
+	} catch (Throwable $e) {
+		fwrite(STDERR, "node_exec: command ran but could not be recorded: " . $e->getMessage() . "\n");
+	}
+}
 
 // Parse args — strip --stdin flag wherever it appears, collect remainder
 $use_stdin = false;
@@ -135,13 +245,10 @@ if ($use_stdin) {
         ? "docker exec -i {$container} bash -c " . escapeshellarg($command)
         : "bash -c " . escapeshellarg($command);
     $full_cmd = $ssh . ' ' . escapeshellarg($remote);
-    $descriptors = [0 => STDIN, 1 => STDOUT, 2 => STDERR];
-    $proc = proc_open($full_cmd, $descriptors, $pipes);
-    if ($proc === false) {
-        fwrite(STDERR, "node_exec: failed to open process\n");
-        exit(1);
-    }
-    exit(proc_close($proc));
+
+    list($output, $exit_code) = node_exec_run_tee($full_cmd, true);
+    node_exec_record($node, $command, $output, $exit_code, false);
+    exit($exit_code);
 }
 
 if ($container) {
@@ -152,6 +259,7 @@ if ($container) {
 
 $full_cmd = $ssh . ' ' . escapeshellarg($remote);
 
-passthru($full_cmd, $exit_code);
+list($output, $exit_code) = node_exec_run_tee($full_cmd, true);
+node_exec_record($node, $command, $output, $exit_code, false);
 exit($exit_code);
 ?>

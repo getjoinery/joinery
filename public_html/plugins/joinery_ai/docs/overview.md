@@ -7,6 +7,8 @@ The `joinery_ai` plugin runs LLM-driven work against the platform through two **
 
 Both surfaces drive the same `AgentLoop` over the same tools; what differs is reached through the run **context** (`ToolContext`).
 
+**Server requirement:** chat's live experience (streamed partial answers and the running activity line) depends on the turn detaching from the request via `fastcgi_finish_request()`, which only the php-fpm SAPI provides — the installer configures Apache with the event MPM + proxy_fcgi accordingly. Under any other SAPI (mod_php, CGI) `ChatAsync::canDetach()` is false and every turn runs synchronously: the reply still arrives, but as one block with no live feedback.
+
 This doc covers what plugin authors and model authors need to know. For original design rationale, see [`specs/implemented/joinery_ai.md`](../../../specs/implemented/joinery_ai.md), [`specs/implemented/joinery_ai_autodiscovery.md`](../../../specs/implemented/joinery_ai_autodiscovery.md), and [`specs/implemented/joinery_ai_write_tools.md`](../../../specs/implemented/joinery_ai_write_tools.md).
 
 ## What's in the plugin

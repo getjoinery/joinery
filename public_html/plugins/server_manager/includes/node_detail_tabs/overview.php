@@ -774,6 +774,11 @@
 		'helptext' => 'Hides Joinery-only tabs (Backups, Database, Updates). Use for servers not running the Joinery platform.',
 	]);
 
+	$formwriter->checkboxinput('mgn_allow_console', 'Allow running commands from the Console tab', [
+		'checked'  => $node->get('mgn_allow_console'),
+		'helptext' => 'Lets a superadmin run any command on this site from the browser, as ' . htmlspecialchars($node->get('mgn_ssh_user') ?: 'root') . '. Every run is recorded as a job with its output.',
+	]);
+
 	$formwriter->checkboxinput('mgn_enabled', 'Enabled', [
 		'checked' => $node->get('mgn_enabled'),
 	]);

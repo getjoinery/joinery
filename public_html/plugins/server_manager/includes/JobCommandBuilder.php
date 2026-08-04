@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.23 - build_run_command(): one ad-hoc command from the node detail Console tab, bounded by
+ *                 a closed timeout set rather than by inspecting the command
  * @version 1.22 - build_push_recovery_key(): hand a node the control plane's proven backup recovery
  *                 key so it can encrypt its own scheduled backups; also pushed during install and
  *                 reported by the status check
@@ -1014,6 +1016,56 @@ class JobCommandBuilder {
 			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
 			 'timeout' => 900],
 		];
+	}
+
+	/** Timeouts the node console offers, in seconds. The console's runaway guard
+	 *  is the step timeout, so the set is closed — a hand-posted value outside it
+	 *  is refused rather than clamped. */
+	const CONSOLE_TIMEOUTS = [60, 120, 300, 600];
+	const CONSOLE_TIMEOUT_DEFAULT = 120;
+
+	/**
+	 * One ad-hoc command, typed by a superadmin on the node detail Console tab
+	 * (specs/server_manager_node_console.md). The command arrives verbatim: it
+	 * is not parsed, classified, or filtered, because no inspection of a shell
+	 * string can decide whether it is safe. What bounds it is the gate in front
+	 * (superadmin + step-up + the node's mgn_allow_console), the timeout below,
+	 * and the fact that every run is a job row nobody can run without leaving.
+	 *
+	 * Privilege is the node's SSH identity's — mgn_ssh_user over its key. The
+	 * console grants nothing the control plane could not already do.
+	 *
+	 * @param array $params command, timeout (from CONSOLE_TIMEOUTS), on_host
+	 */
+	public static function build_run_command($node, $params = []) {
+		if (!self::has_ssh($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run a command: no SSH credentials configured.");
+		}
+
+		$command = isset($params['command']) ? trim((string)$params['command']) : '';
+		if ($command === '') {
+			throw new Exception('Enter a command to run.');
+		}
+
+		$timeout = isset($params['timeout']) ? (int)$params['timeout'] : self::CONSOLE_TIMEOUT_DEFAULT;
+		if (!in_array($timeout, self::CONSOLE_TIMEOUTS, true)) {
+			throw new Exception('Choose one of the offered timeouts.');
+		}
+
+		$step = [
+			'type'    => 'ssh',
+			'label'   => 'Run command',
+			'cmd'     => $command,
+			'timeout' => $timeout,
+		];
+		// on_host only means anything for a container node — there the choice is
+		// the container's shell or the host's. A bare-metal node has one shell.
+		if ($node->get('mgn_container_name') && !empty($params['on_host'])) {
+			$step['on_host'] = true;
+		}
+
+		return [$step];
 	}
 
 	/**

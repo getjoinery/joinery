@@ -1,4 +1,11 @@
 # Joinery Docker Template
+# VERSION 4.2 - Default BASE_IMAGE_VERSION 1.1 -> 1.2. The fpm module switch
+#               lives in install.sh do_server_setup, which the base image
+#               bakes, so starting fpm here only serves PHP through it once
+#               the base is rebuilt at 1.2.
+# VERSION 4.1 - Start php8.3-fpm in the container CMD: PHP serves via fpm
+#               (event MPM + proxy_fcgi), never mod_php — the AI chat async
+#               turn path needs fastcgi_finish_request(), fpm-only.
 # VERSION 4.0 - Declared-dependency install at build + generic plugin host
 #               installers at start (spec plugin_dependency_installation).
 #               A build step installs every PHP extension the source declares
@@ -54,7 +61,7 @@
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the
 # default only exists to satisfy BuildKit's static-evaluation check.
-ARG BASE_IMAGE_VERSION=1.1
+ARG BASE_IMAGE_VERSION=1.2
 FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
@@ -164,5 +171,6 @@ CMD set +H && \
     sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
     chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
     service cron start && \
+    service php8.3-fpm start && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "${SITENAME}" || true && \
     apache2ctl -D FOREGROUND

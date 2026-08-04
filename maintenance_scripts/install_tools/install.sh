@@ -1,4 +1,15 @@
 #!/usr/bin/env bash
+#VERSION 2.28 - BASE_IMAGE_VERSION 1.1 -> 1.2. The 2.27 SAPI switch changed
+#              do_server_setup (packages and Apache modules), which is exactly
+#              what the base image bakes — without the bump, a container build
+#              reuses joinery-base:1.1 and ships mod_php no matter what this
+#              script now says.
+#VERSION 2.27 - PHP serves via php-fpm (event MPM + proxy_fcgi), never mod_php:
+#              the AI chat async turn path needs fastcgi_finish_request(),
+#              which only the fpm SAPI provides. mod_php/prefork silently
+#              disabled live streaming and turn activity on every install.
+#              Package list drops libapache2-mod-php8.3, php.ini tuning moved
+#              to the fpm SAPI, prefork tuning replaced by event tuning.
 #VERSION 2.26 - Core half of spec linode_stackscript:
 #              (1) UPGRADE_SERVER defaults to https://getjoinery.com — the
 #              published one-liner handed every public install a dev build.
@@ -119,7 +130,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # joinery-base image tag. Bump when Dockerfile.base or do_server_setup changes
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
-BASE_IMAGE_VERSION="1.1"
+BASE_IMAGE_VERSION="1.2"
 
 #==============================================================================
 # GLOBAL FLAGS (parsed before command dispatch)
@@ -1800,7 +1811,6 @@ do_server_setup() {
     # Install PHP 8.3 and extensions
     print_step "Installing PHP 8.3..."
     apt install -y \
-        php8.3 \
         php8.3-fpm \
         php8.3-cli \
         php8.3-common \
@@ -1817,8 +1827,7 @@ do_server_setup() {
         php8.3-bcmath \
         php8.3-intl \
         php8.3-readline \
-        php8.3-sqlite3 \
-        libapache2-mod-php8.3
+        php8.3-sqlite3
 
     print_success "PHP installation completed. Version: $(php -v | head -n1)"
 
@@ -1841,7 +1850,12 @@ do_server_setup() {
     a2enmod rewrite
     a2enmod ssl
     a2enmod headers
-    a2enmod php8.3
+    # PHP runs under php-fpm (event MPM + proxy_fcgi), never mod_php: the AI
+    # chat async path needs fastcgi_finish_request(), which only fpm provides.
+    # The a2dismod covers re-runs on a box that previously used mod_php.
+    a2dismod php8.3 mpm_prefork > /dev/null 2>&1 || true
+    a2enmod mpm_event proxy_fcgi setenvif
+    a2enconf php8.3-fpm
 
     # Configure Apache settings
     print_step "Configuring Apache..."
@@ -1867,15 +1881,14 @@ do_server_setup() {
 </Directory>
 EOF
 
-    # Right-size MPM prefork for low-traffic sites.
-    # ServerLimit must match MaxRequestWorkers — without it prefork allocates
-    # shared memory for the compiled default of 256 slots regardless.
-    cat > /etc/apache2/mods-available/mpm_prefork.conf << 'EOF'
-# prefork MPM
-ServerLimit             50
-StartServers            2
-MinSpareServers         2
-MaxSpareServers         4
+    # Right-size the event MPM for low-traffic sites. PHP work happens in the
+    # fpm pool, so Apache threads only shuttle requests and static files.
+    cat > /etc/apache2/mods-available/mpm_event.conf << 'EOF'
+# event MPM
+StartServers             2
+MinSpareThreads         10
+MaxSpareThreads         25
+ThreadsPerChild         25
 MaxRequestWorkers       50
 MaxConnectionsPerChild  2000
 EOF
@@ -2008,24 +2021,24 @@ EOF
     print_step "Installing Certbot for SSL certificates..."
     apt install -y certbot python3-certbot-apache
 
-    # Configure PHP for production
+    # Configure PHP for production (fpm SAPI serves all web requests)
     print_step "Configuring PHP settings..."
-    cp /etc/php/8.3/apache2/php.ini /etc/php/8.3/apache2/php.ini.backup
+    cp /etc/php/8.3/fpm/php.ini /etc/php/8.3/fpm/php.ini.backup
 
     # Update PHP settings optimized for 1GB VPS
-    sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' /etc/php/8.3/apache2/php.ini
-    sed -i 's/post_max_size = .*/post_max_size = 32M/' /etc/php/8.3/apache2/php.ini
-    sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/apache2/php.ini
-    sed -i 's/memory_limit = .*/memory_limit = 128M/' /etc/php/8.3/apache2/php.ini
+    sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/post_max_size = .*/post_max_size = 32M/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/memory_limit = .*/memory_limit = 128M/' /etc/php/8.3/fpm/php.ini
     # UTC, matching what the CLI and a Docker site already get. Every stored
     # time in the platform is UTC and display conversion is per user, so a web
     # request and a scheduled task on the same box have to agree about what
     # date() means. Individual users still see their own timezone.
-    sed -i 's/;date.timezone =/date.timezone = UTC/' /etc/php/8.3/apache2/php.ini
+    sed -i 's/;date.timezone =/date.timezone = UTC/' /etc/php/8.3/fpm/php.ini
 
     # Enable PDO PostgreSQL extension
-    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' /etc/php/8.3/apache2/php.ini
-    sed -i 's/^;extension=pgsql/extension=pgsql/' /etc/php/8.3/apache2/php.ini
+    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/^;extension=pgsql/extension=pgsql/' /etc/php/8.3/fpm/php.ini
 
     print_success "PHP configured"
 

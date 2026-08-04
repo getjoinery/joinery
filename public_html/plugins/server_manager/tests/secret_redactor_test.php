@@ -69,6 +69,33 @@ check(strpos($out, $SECRET) === false, 'secret-key header value masked');
 check(strpos($out, 'pub_abc123') !== false, 'public-key header value survives');
 
 // ---------------------------------------------------------------------------
+section('shell env-var shape (a hand-typed console command)');
+// ---------------------------------------------------------------------------
+
+// The console records commands verbatim, and the credential shape a person
+// types at a shell is an env-var prefix — a form neither of the structured
+// patterns above would catch.
+$env = "PGPASSWORD={$SECRET} psql -U postgres -c 'select 1'";
+$out = SmSecretRedactor::redact($env);
+check(strpos($out, $SECRET) === false, 'PGPASSWORD value masked');
+check(strpos($out, 'psql -U postgres') !== false, 'the rest of the command survives');
+
+$out = SmSecretRedactor::redact("AWS_SECRET_ACCESS_KEY=\"{$SECRET}\" aws s3 ls");
+check(strpos($out, $SECRET) === false, 'a quoted env-var value is masked too');
+
+$out = SmSecretRedactor::redact("GITHUB_TOKEN={$SECRET}");
+check(strpos($out, $SECRET) === false, 'a token env var is masked');
+
+// Ordinary flags share the word "key" and must stay readable — a redactor that
+// eats the command is as unhelpful as one that leaks it.
+check(SmSecretRedactor::redact('ssh -i ~/.ssh/id_ed25519 --key=/etc/ssl/site.pem')
+	=== 'ssh -i ~/.ssh/id_ed25519 --key=/etc/ssl/site.pem',
+	'lowercase flags carrying paths are left alone');
+check(SmSecretRedactor::redact('PATH=/usr/local/bin:$PATH make release')
+	=== 'PATH=/usr/local/bin:$PATH make release',
+	'a non-credential env var is left alone');
+
+// ---------------------------------------------------------------------------
 section('non-credential text and edge cases pass through');
 // ---------------------------------------------------------------------------
 
