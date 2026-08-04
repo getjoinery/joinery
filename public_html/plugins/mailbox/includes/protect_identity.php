@@ -19,11 +19,17 @@
  *
  * THIS FILE OWNS THE STATE TRANSITIONS, NOT A PAGE. Every surface that drives
  * protection posts an action here and is redirected back to itself; the Setup
- * tab is that surface. Nothing renders the DNS records or the verification from
- * here, because InboundEmailSetupCheck already produces both for a Fortress
- * domain from the moment the level is chosen (dnsPlan() and
- * protectedShapeResults() both branch on security_level(), not on the enforced
- * flag) — a second rendering could only ever drift from it.
+ * tab's Advanced section is that surface. Nothing renders the DNS records or the
+ * verification from here — InboundEmailSetupCheck produces both, and a second
+ * rendering could only ever drift from it.
+ *
+ * THE SHAPE IS PRESCRIBED ONLY ONCE PROTECTION IS ON, or inside the ceremony
+ * that turns it on. It tells the world to reject anything the sealed key did not
+ * sign, and nothing signs with that key until ied_is_protected_identity is set —
+ * so prescribing it at the security level would hand a Fortress domain that has
+ * not opted in a record set that rejects its own outgoing mail. Send protection
+ * is a deliberate opt-in; a Fortress domain resting without it is finished
+ * (specs/mailbox_relay_surface_simplification.md).
  *
  * PROOF OF PRESENCE SITS ON ENFORCEMENT, NOT ON KEY CREATION. Sealing needs
  * only the owner's public key, and a key that exists publishes nothing and
@@ -37,7 +43,9 @@
  * live key is never overwritten or destroyed until its replacement is proven in
  * DNS.
  *
- * @version 1.0
+ * @version 1.2 - the whole ceremony is an opt-in that lives in Advanced, and the
+ *                old on-disk key is a checked state rather than a remembered
+ *                command (specs/mailbox_relay_surface_simplification.md)
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -205,7 +213,7 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	// ── seal the first key (only reached when the owner was ambiguous) ───────
 	if ($action === 'protect_generate') {
 		if ($domain->is_protected_identity()) {
-			return $say('Protection is already on. Use Replace my key — it keeps the current key working until the '
+			return $say('Send protection is already on. Use Replace my key — it keeps the current key working until the '
 				. 'new one is proven in DNS.', 'Already on');
 		}
 		$owner_id = intval($input['owner_user_id'] ?? 0) ?: $user_id;
@@ -261,17 +269,20 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 		$domain->set('ied_is_protected_identity', true);
 		$domain->save();
 
-		$remove_cmd = 'sudo bash ' . PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh')
-			. ' --remove ' . $domain->get('ied_domain');
-		return $say('Protection is on. One last step, as root on this server: run  ' . $remove_cmd
-			. '  to destroy the old signing key on disk. Until you do, a usable key is still sitting on the machine.',
-			'Protection is on');
+		// The old on-disk key is NOT named here as a command to remember. It is a
+		// checked state now (domain.local_signing_key), so it keeps asking from
+		// the Setup tab until it is actually gone — which is what a one-shot
+		// flash message could never do.
+		return $say('Send protection is on. From now on nothing can send as ' . $domain->get('ied_domain')
+			. ' that your key did not sign. One step is left, and the Setup tab is holding it: the ordinary '
+			. 'signing key still on this server has to be destroyed.',
+			'Send protection is on');
 	}
 
 	// ── rotate: stage a replacement; the live key keeps signing ──────────────
 	if ($action === 'protect_rotate') {
 		if (!$domain->is_protected_identity()) {
-			return $say('Protection is not on yet, so there is nothing to replace — finish turning it on first.',
+			return $say('Send protection is not on yet, so there is nothing to replace — turn it on first.',
 				'Not on yet');
 		}
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -346,11 +357,68 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	if ($action === 'protect_disable') {
 		$domain->set('ied_is_protected_identity', false);
 		$domain->save();
-		return $say('Protection is off. This server can send as this domain again without you signed in. If mail '
-			. 'stops being accepted, re-run provision_dkim.sh to put an ordinary signing key back on disk.',
-			'Protection is off');
+		return $say('Send protection is off. This server can send as this domain again without you signed in, and '
+			. 'arriving mail is still sealed — this only affected sending. If mail stops being accepted, re-run '
+			. 'provision_dkim.sh to put an ordinary signing key back on disk.',
+			'Send protection is off');
 	}
 
 	return $say('Unknown protection action.', 'Not done');
+}
+
+/**
+ * Destroy the ordinary on-disk signing key for one domain.
+ *
+ * Runs a fixed-verb root helper, in the same shape the listener on/off controls
+ * use: one allowlisted binary, one argument this side validates against the
+ * registered domains, a success marker the caller demands, and no shell the web
+ * user composes. Never blanket sudo, and never called on a schedule — deleting
+ * key material is a thing a person decides to do.
+ *
+ * The caller is responsible for the safety gates (send protection on, protected
+ * DNS verified); this function only refuses what it can see itself.
+ *
+ * @return array{ok:bool,message:string}
+ */
+function mailbox_destroy_local_signing_key(string $domain): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+	$domain = strtolower(trim($domain));
+
+	// The argument has to be a domain this deployment actually hosts. Anything
+	// else is either a mistake or an attempt to point the helper somewhere else.
+	// GetByDomain() returns FALSE for a miss, not null — a === null guard here
+	// would be dead code that let every unknown domain through.
+	if ($domain === '' || !InboundEmailDomain::GetByDomain($domain)) {
+		return array('ok' => false, 'message' => 'No such domain on this server — nothing was touched.');
+	}
+
+	$path = InboundEmailSetupCheck::localSigningKeyPath($domain);
+	$helper = InboundEmailSetupCheck::localSigningKeyHelper();
+	if (!is_file($helper)) {
+		return array('ok' => false, 'message' =>
+			'This server has no key-removal helper installed, so it cannot do this for you. Run once as root: '
+			. 'sudo bash ' . PathHelper::getIncludePath('plugins/mailbox/provisioning/provision_dkim.sh')
+			. ' --remove ' . $domain);
+	}
+
+	$output = array();
+	$code = 1;
+	exec('sudo -n ' . escapeshellarg($helper) . ' ' . escapeshellarg($domain) . ' 2>&1', $output, $code);
+	$text = trim(implode("\n", $output));
+	if ($code !== 0 || strpos($text, 'DKIM_REMOVED') === false) {
+		return array('ok' => false, 'message' =>
+			'The key was not removed (exit ' . intval($code) . '): ' . ($text !== '' ? $text : 'no output')
+			. ' — nothing changed, and your mail is unaffected.');
+	}
+	// Believe the marker, but check the file: this is the one operation whose
+	// whole point is that the file is gone.
+	if (is_readable($path)) {
+		return array('ok' => false, 'message' =>
+			'The helper reported success but the key file is still readable at ' . $path
+			. ' — treat the key as live and remove it by hand.');
+	}
+	return array('ok' => true, 'message' =>
+		'The old signing key for ' . $domain . ' is gone. Your sealed key is now the only thing on this server '
+		. 'that can sign as this domain.');
 }
 ?>

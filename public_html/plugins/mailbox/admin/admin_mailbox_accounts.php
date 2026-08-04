@@ -40,14 +40,11 @@ echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Accounts');
 // Flash messages render in the AdminPage header (admin pages must not
 // fetch or render session messages themselves).
 
-// The relay-or-direct choice comes before everything else — until it is made,
-// the mailbox surfaces show only the choice card.
+// How mail reaches this server is a deployment fact, not a question every page
+// has to have answered first: an undecided deployment receives directly and
+// works. The choice lives in the Setup tab's Advanced section
+// (specs/mailbox_relay_surface_simplification.md).
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/receive_mode.php'));
-if (mailbox_receive_mode() === '') {
-	echo mailbox_receive_gate_render();
-	$page->admin_footer();
-	return;
-}
 
 $domain_base  = '/plugins/mailbox/admin/admin_mailbox_domains';
 $alias_base   = '/plugins/mailbox/admin/admin_mailbox_alias';

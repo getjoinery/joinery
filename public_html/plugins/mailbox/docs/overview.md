@@ -47,19 +47,20 @@ host may be a Docker container or bare metal.
 
 ### The receive-mode choice (relay or direct)
 
-Before anything else, the deployment answers one question: does mail come
-straight to this server, or does a relay front it so the server's address
-stays hidden? Until the answer is known, the Mailboxes, Accounts, and Setup
-tabs (and the domain/mailbox editors) render only a choice card — domains and
-mailboxes cannot be created first, because every DNS prescription hangs on
-the answer.
+One deployment-wide fact shapes every domain's DNS prescription: does mail come
+straight to this server, or does a relay front it so the server's address stays
+hidden?
 
-The card is a brief pros/cons comparison (setup effort, whether the server's
+**It is a setting, not a gate.** An undecided deployment receives directly and
+works; the choice lives in the Setup tab's Advanced section and can be changed at
+any time. A relay is only load-bearing at the Fortress security level, so the
+answer is asked for where it becomes true — raising a domain to Fortress — rather
+than in front of every mailbox page before any domain has a level.
+
+The control is a brief pros/cons comparison (setup effort, whether the server's
 address is public or hidden, and that a relay is **required for the Fortress
-email security level**) with one choose button per column. The choice belongs
-to the admin: a relay provisioned as part of setup does not decide it — the
-card still appears, with the relay column noting the relay is already
-provisioned.
+email security level**) with one choose button per column. The choice belongs to
+the admin: a relay provisioned as part of setup does not decide it.
 
 `mailbox_receive_mode()` (`includes/receive_mode.php`) resolves the mode:
 
@@ -67,13 +68,11 @@ provisioned.
    **relay** redirects to the Setup tab's Relay section; choosing **direct** redirects to
    Accounts to add the first domain (with a pointer to remove any provisioned
    relay).
-2. Live domains with no stored choice → the deployment is running and is
-   never gated; the mode reports what it is doing (live relay row → `relay`,
-   else `direct`).
-3. Otherwise undecided — gated pages show the card.
+2. Live domains with no stored choice → the mode reports what the deployment is
+   actually doing (live relay row → `relay`, else `direct`).
+3. Otherwise `''` — undecided, which every consumer treats as direct.
 
-The choice is deployment-wide and reversible (the setting can be changed
-later).
+The choice is deployment-wide and reversible.
 
 ### Setup & verification (mailbox-first)
 
@@ -493,8 +492,8 @@ report their required records from their own API, and the Setup tab renders one
 row per record, each checked against live DNS with a copy-paste fix. A domain
 not registered at the provider gets a row saying so (mail from it fails DMARC
 alignment until it is added at the provider dashboard); a provider without the
-capability gets generic guidance naming it. Under the relay smarthost outbound
-mode, the row states plainly that sends carry no DKIM signature.
+capability gets generic guidance naming it. When sent mail leaves through the
+relay, the row states plainly that sends carry no DKIM signature.
 
 ### Firewall
 
@@ -558,7 +557,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_spam_filtering_enabled` | `1` | Move suspected spam to the Spam view. The one spam question; on by default. See [Spam filtering](#spam-filtering). |
 | `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam. Relay/webhook mail is re-scored locally wherever a scanner runs; this setting makes that local verdict the one that counts (replacing the upstream's) instead of merely adding to it. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
 | `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the ingest scan and the spam/ham feedback loop POST to. No password (loopback-trusted). |
-| `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). See [Outbound sending](#outbound-sending). |
+| `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). The stored value keeps the Postfix term; the reader is shown *Through the relay*. See [Outbound sending](#outbound-sending). |
 
 ## Plugin Structure
 
@@ -659,10 +658,14 @@ bounces, so the SRS envelope is best-effort there and SRS bounce-decoding does
 not apply — the From-header rewrite to the verified address is what carries
 deliverability either way.
 
-The **Outbound forwarding relay** check on the Setup tab verifies the
-*resolved* relay: when provider relay is active it confirms the provider's own
-credential is configured (so a healthy API key reads PASS even with empty
-`smtp_*`); on the SMTP fallback path it connects to the SMTP relay and closes.
+The **Sending route** check on the Setup tab verifies the *resolved* outbound
+path: when provider relay is active it confirms the provider's own credential is
+configured (so a healthy API key reads PASS even with empty `smtp_*`); on the
+SMTP fallback path it connects to the SMTP host and closes. It is named for what
+it is — the route outgoing mail takes — and has nothing to do with the ingest
+relay described under [The relay](#the-relay); the two are unrelated, and
+sharing the word *relay* between them left no way to tell which a row was
+about.
 
 ## Knowing a mailbox is unfinished
 
@@ -979,8 +982,13 @@ editor as a required three-card picker (outcome language only, default **Standar
   Joinery opens at pull and re-seals per the domain's own level.
 - **Setup/health DNS shape** — `InboundEmailSetupCheck` expects the inverted protected
   shape (SPF without the box, `p=reject; aspf=s; adkim=s`, DKIM matching the sealed
-  key) for any Fortress domain, from the moment the level is chosen — before the
-  protect ceremony flips `ied_is_protected_identity`.
+  key) for a domain whose `ied_is_protected_identity` flag is set, and for that
+  domain only. The **enforcement flag is the branching key, not the security
+  level**: the shape instructs the world to reject anything the sealed key did not
+  sign, and `MailboxDkimSigner` signs with that key only once the flag is on, so
+  prescribing it at the level would hand a Fortress domain without send protection
+  a record set that rejects its own outgoing mail. The ceremony asks for the shape
+  explicitly while it runs (`dnsPlan($domain, true)`), which is the one exception.
 
 **Raising a level runs the protection ceremony**
 (specs/mailbox_protection_ceremony.md, `includes/protection_ceremony.php`).
@@ -1387,25 +1395,54 @@ forwarding subdomain included — is published. One assembly
 (`InboundEmailSetupCheck::protectedShapeResults()`) feeds both the Setup tab and
 the ceremony's pre-activation verify, so they can never disagree.
 
-**Enabling starts with the Fortress raise itself.** Saving a domain at Fortress
-seals its DKIM key (`mailbox_protect_seal_new_key()`) and defaults
-`ied_forwarding_subdomain` to `fwd.<domain>`, so the operator lands on the Setup
-tab with the work only they can do: publish the DNS shown, then turn protection
-on. The key's owner is only asked for when the domain's mailboxes already have
-holders, since the admin performing the raise need not be the person who reads
-the mail.
+**Send protection is a deliberate opt-in, and an advanced one.** It appears in
+no wizard, guide or checklist. Raising a domain to Fortress turns on *arrival
+sealing* — mail is sealed at the relay and unreadable while locked — and seals a
+DKIM key (`mailbox_protect_seal_new_key()`), defaulting
+`ied_forwarding_subdomain` to `fwd.<domain>`. **A Fortress domain resting with
+send protection off is a finished domain**: arriving mail is sealed, sending
+works normally, and nothing prescribes a protected DNS record. Locking outbound
+sending to the owner's key is a separate choice with a real cost — every
+interactive send needs an unlock, and automated mail must move to a Standard
+subdomain — so it is offered where that cost can be stated, not as step four of
+a list.
 
-**Protection has no page of its own — the Setup tab is its whole surface.**
-`includes/protect_identity.php` owns the state transitions and nothing else;
-`mailbox_protect_handle_action()` runs any `protect_*` action posted to Setup and
-redirects back to the focused domain with a flash. The DNS records and the
-verification are not re-rendered anywhere: `dnsPlan()` and
-`protectedShapeResults()` both branch on `security_level()` rather than the
-enforced flag, so Setup's publish box and check rows already carry the protected
-shape from the moment Fortress is chosen. The tab splits the same way the relay
-does — the guided *Protected setup* box carries state and the one forward
-action, and Advanced carries the lifecycle (replace the key, switch over, cancel,
-turn off, and the return address behind a disclosure).
+**Send protection has no page of its own — the Setup tab's Advanced section is
+its whole surface.** `includes/protect_identity.php` owns the state transitions
+and nothing else; `mailbox_protect_handle_action()` runs any `protect_*` action
+posted to Setup and redirects back to the focused domain with a flash. The
+*Sending identity* box under Advanced holds the entire arc: what send protection
+buys and what it costs, the owner question when the raise could not guess, the
+publish step, the pre-flight verification, the switch, and afterwards the
+lifecycle (replace the key, switch over, cancel, turn off, and the return address
+behind a disclosure).
+
+The ceremony opens on an explicit gesture (`?protect_setup=1`), never on the mere
+presence of a sealed key — every Fortress domain has one from the moment of the
+raise, so "has a key, not enforcing" is the resting state of a working domain
+rather than a job half done. Only inside that gesture does `dnsPlan($domain,
+true)` prescribe the protected shape; the DNS records and the verification are
+not re-rendered anywhere else, and `protectedShapeResults()` remains the single
+assembly.
+
+**The old on-disk signing key is a checked state, not a remembered command.**
+Send protection means only the domain's sealed key should be able to sign as it —
+but an ordinary opendkim key at `/etc/opendkim/keys/<domain>/mail.txt` can still
+sign for that domain with no vault and no unlock involved. Nothing destroys it on
+its own. So for a domain with send protection on, `domain.local_signing_key`
+(RECOMMENDED/WARN) reports that the key is still there and says what it means, and
+keeps reporting it until it is gone.
+
+Beside the row is a **Destroy the old signing key** action, gated on send
+protection being on **and** every required row of the protected shape passing. It
+runs a fixed-verb root helper — `sudo -n /usr/local/sbin/joinery-dkim-remove
+<domain>`, installed by `provision_relay_main.sh` with its own sudoers line, the
+domain validated against the registered set on both sides, and a `DKIM_REMOVED`
+marker the caller demands — then confirms the file is actually gone before
+reporting success. Where the helper is not installed the row falls back to the
+manual `provision_dkim.sh --remove` command. **It never runs automatically**:
+deleting key material is irreversible from a browser, so it happens because a
+person pressed it.
 
 **Proof of presence sits on enforcement, not on key creation.** Sealing needs
 only the owner's vault public key, and a key that exists publishes nothing and
@@ -1423,10 +1460,11 @@ the raise is refused with an enrollment link rather than completing and
 stranding the operator. Callers that omit `$acting_user_id` omit the fact, and
 the row is skipped rather than failed.
 
-The **Setup tab is that ceremony's parent surface**. Its *Protected setup* box
-lists every remaining step for a Private or Fortress domain — the vault, this
-ceremony, the relay, the automated-mail subdomain — and the ceremony page's
-breadcrumb and footer link return there. Saving a domain at Fortress lands on
+The **Setup tab is that ceremony's parent surface**. Its *Still to set up* box
+lists what a Private or Fortress domain genuinely cannot work without — the
+vault, and at Fortress the relay — and the ceremony page's breadcrumb and footer
+link return there. The box carries outstanding work only and does not render at
+all when there is none; send protection is not among its steps. Saving a domain at Fortress lands on
 Setup focused on that domain, not on the ceremony. The ceremony keeps its own
 page rather than becoming a Setup card because it holds destructive actions
 (rotate, disable, re-generate) that do not belong on a diagnostics surface.
@@ -1606,13 +1644,16 @@ encrypted-interop path, which is ciphertext before it leaves the box and stays
 ciphertext through any transport. The asymmetry lives on **inbound**, which lands
 in the operator's own archive under the user's keys — and inbound keeps the relay.
 
-The **relay smarthost** is the opt-in alternative (`mailbox_relay_outbound_mode =
-smarthost`, chosen on the Settings tab's "Sent mail leaves through" select). Compose
-sends then leave through the relay over the tunnel, so no third party carries
-outbound plaintext — in exchange the deployment owns the relay IP's sending
-reputation (warmup, blocklist monitoring, PTR hygiene). `OutboundTransport` routes
-hosted-alias sends through `SmtpConfig::fromRelaySmarthost()`; DKIM signing stays
-in-app, the relay only transports. The smarthost hop is deliberately plaintext
+**Sending through the relay** is the opt-in alternative (`mailbox_relay_outbound_mode
+= smarthost`, offered on the Settings tab's "Sent mail leaves through" select as
+*Through the relay*). Compose sends then leave through the relay over the tunnel, so
+no third party carries outbound plaintext — in exchange the deployment owns the relay
+IP's sending reputation (warmup, blocklist monitoring, PTR hygiene). The stored value
+and the internal identifiers keep Postfix's word *smarthost*; no reader is shown it,
+because it names the plumbing rather than what happens to their mail.
+`OutboundTransport` routes hosted-alias sends through
+`SmtpConfig::fromRelaySmarthost()`; DKIM signing stays in-app, the relay only
+transports. The hop is deliberately plaintext
 SMTP — the WireGuard tunnel already encrypts it — so `fromRelaySmarthost()` sets
 `encryption = 'none'` and `SmtpMailer` disables PHPMailer's opportunistic
 auto-STARTTLS for an explicit `'none'` (otherwise it would upgrade into the
@@ -1620,8 +1661,8 @@ relay's self-signed cert and fail the handshake). `provision_relay.sh` opens the
 tunnel submission listener (`permit_mynetworks` on the WireGuard subnet) only in
 this mode — pass `smarthost` as its second argument. The listener state is baked
 at provision time, so changing the outbound mode takes effect on the relay itself
-at its next Rebuild: switching to smarthost leaves compose sends refused (and the
-tunnel check failing) until the Rebuild opens the listener, and switching back to
+at its next Rebuild: switching to the relay leaves compose sends refused (and the
+tunnel check failing) until the Rebuild opens the listener, and switching back to a
 provider leaves the listener open until the next Rebuild closes it. The mode
 select's save message says so.
 
@@ -1762,7 +1803,19 @@ on whether this server is covering:
 
 A dead scanner and a drifted contract share a severity on purpose: different
 faults, one finding (the verdict is not reaching the tenant) and one remedy
-(rebuild the relay). Which it was survives in the detail text.
+(rebuild the relay). Which it was survives in the detail text. A relay answering
+`PONG` also reports its version as unknown; both are the one finding — this relay
+predates the current provisioner — so the scanner row names the same **Upgrade
+relay** control rather than offering a parallel fix.
+
+**Relay findings reach only mailboxes whose domain needs a relay.** A WARN or FAIL
+scanner is promoted from Advanced to a Receiving card, and the relay's two state
+cards render, only for a mailbox on a **Fortress** domain — the level the relay is
+load-bearing for. A deployment may run a relay at any level, and the Relay section
+stays available to set one up, but on a Standard or Private domain the relay does
+nothing for that mailbox, so its health is not that mailbox's verdict. Promoting it
+unconditionally turned one deployment-wide fault into an `attention` banner on every
+mailbox on the deployment.
 
 The reconcile pass also raises the change on the signal bus —
 `mailbox.relay_scanner_down` and `mailbox.relay_scanner_recovered`, both

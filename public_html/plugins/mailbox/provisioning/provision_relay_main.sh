@@ -16,6 +16,10 @@
 #     local-listener decommission switch the Setup tab's Relay section drives
 #     (specs/mailbox_listener_decommission.md) — re-run this script on an
 #     existing relay-fronted box to add it
+#   - installs /usr/local/sbin/joinery-dkim-remove <domain>, which destroys one
+#     domain's ordinary on-disk signing key once its sending is locked to a
+#     vault-sealed key (specs/mailbox_relay_surface_simplification.md) — also
+#     added by re-running this script
 #   - generates the RELAY PULL KEY at {site root}/config/relay_pull_key, a
 #     dedicated SSH identity owned by the web user (spool pull, map push and the
 #     health battery all run as the web user, and ssh requires the key file to
@@ -246,10 +250,57 @@ esac
 LISTENERHELPER
 chmod 755 "${LISTENER_HELPER}"
 
+# Fourth narrow helper: destroy one domain's ordinary on-disk signing key
+# (specs/mailbox_relay_surface_simplification.md). Once a domain's sending is
+# locked to a vault-sealed key, an opendkim key left on the box is a second way
+# to sign as that domain with no unlock involved. The Setup tab's Destroy action
+# runs this; it never runs on a schedule.
+DKIM_REMOVE_HELPER="/usr/local/sbin/joinery-dkim-remove"
+cat > "${DKIM_REMOVE_HELPER}" <<'DKIMREMOVEHELPER'
+#!/usr/bin/env bash
+# joinery-dkim-remove <domain>
+# Strips <domain> from opendkim's signing and key tables and deletes its key
+# directory, then reloads opendkim.            -> DKIM_REMOVED <domain>
+# Installed by provision_relay_main.sh; invoked via sudo by the web user, which
+# validates the domain against the registered set before calling.
+set -euo pipefail
+DOMAIN="${1:-}"
+
+# The argument reaches a path and a regex, so it is checked here too rather than
+# trusted from the caller: letters, digits, dots and hyphens, no leading dot.
+if [[ ! "${DOMAIN}" =~ ^[a-zA-Z0-9]([a-zA-Z0-9.-]*[a-zA-Z0-9])?$ ]]; then
+    echo "joinery-dkim-remove: refusing malformed domain" >&2
+    exit 2
+fi
+DOMAIN="$(echo "${DOMAIN}" | tr '[:upper:]' '[:lower:]')"
+
+SIGNING_TABLE="/etc/opendkim/signing.table"
+KEY_TABLE="/etc/opendkim/key.table"
+KEY_DIR="/etc/opendkim/keys/${DOMAIN}"
+
+if [[ -f "${SIGNING_TABLE}" ]]; then
+    sed -i "\#^\*@${DOMAIN}[[:space:]]#d" "${SIGNING_TABLE}"
+fi
+if [[ -f "${KEY_TABLE}" ]]; then
+    sed -i "\#^${DOMAIN}[[:space:]]#d" "${KEY_TABLE}"
+fi
+if [[ -d "${KEY_DIR}" ]]; then
+    rm -rf "${KEY_DIR}"
+fi
+if [[ -d "${KEY_DIR}" ]]; then
+    echo "joinery-dkim-remove: ${KEY_DIR} still present" >&2
+    exit 4
+fi
+systemctl reload opendkim >/dev/null 2>&1 || systemctl restart opendkim >/dev/null 2>&1 || true
+echo "DKIM_REMOVED ${DOMAIN}"
+DKIMREMOVEHELPER
+chmod 755 "${DKIM_REMOVE_HELPER}"
+
 {
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${PEER_HELPER}"
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${ADDR_HELPER}"
     echo "${WEB_USER} ALL=(root) NOPASSWD: ${LISTENER_HELPER}"
+    echo "${WEB_USER} ALL=(root) NOPASSWD: ${DKIM_REMOVE_HELPER}"
 } > "${SUDOERS_FILE}"
 chmod 440 "${SUDOERS_FILE}"
 if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
@@ -257,7 +308,7 @@ if ! visudo -cf "${SUDOERS_FILE}" >/dev/null; then
     echo "ERROR: generated sudoers rule failed validation - removed." >&2
     exit 1
 fi
-echo "sudoers: ${WEB_USER} may run ${PEER_HELPER}, ${ADDR_HELPER} and ${LISTENER_HELPER}"
+echo "sudoers: ${WEB_USER} may run ${PEER_HELPER}, ${ADDR_HELPER}, ${LISTENER_HELPER} and ${DKIM_REMOVE_HELPER}"
 
 # --- 4. relay pull key (the web user's own SSH identity for the tunnel) --------
 # Must match RelaySsh::pullKeyPath(): {site root}/config/relay_pull_key.

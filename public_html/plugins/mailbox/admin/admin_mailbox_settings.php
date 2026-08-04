@@ -133,7 +133,7 @@ if (!empty($has_active_relay)) {
 		. 'Deliverability is your provider\'s job, and it carries the message in transit. '
 		. 'The sent message\'s Received chain begins inside the provider, so this server\'s address stays hidden.</p>';
 	echo '<p class="text-muted small" id="smarthost_note" style="display:' . ($is_smarthost ? '' : 'none') . '">'
-		. 'No third party carries sent mail — it leaves through the relay over the tunnel. In exchange this '
+		. 'No third party carries sent mail — it leaves through your own relay over the tunnel. In exchange this '
 		. 'deployment owns the relay IP\'s sending reputation: warmup, blocklist monitoring, and PTR hygiene.</p>';
 	$page->end_box();
 }

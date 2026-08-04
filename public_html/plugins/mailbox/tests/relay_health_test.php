@@ -308,13 +308,25 @@ class RelayHealthTest {
 		};
 
 		foreach (array(InboundEmailSetupCheck::WARN, InboundEmailSetupCheck::FAIL) as $status) {
-			check(_setup_is_receiving_row($row($status), 'example.com') === true,
+			check(_setup_is_receiving_row($row($status), 'example.com', true) === true,
 				'a ' . $status . ' scanner is a Receiving card, not an Advanced row');
 		}
 		foreach (array(InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO,
 			InboundEmailSetupCheck::UNKNOWN) as $status) {
-			check(_setup_is_receiving_row($row($status), 'example.com') === false,
+			check(_setup_is_receiving_row($row($status), 'example.com', true) === false,
 				'a ' . $status . ' scanner stays in Advanced — a working component is not a checklist item');
+		}
+
+		// ...but only for a mailbox whose domain needs a relay. A relay is only
+		// load-bearing at Fortress, so on a Standard or Private domain a broken
+		// scanner is not that mailbox's business at any status — one
+		// deployment-wide fault must not read as every mailbox being broken
+		// (specs/mailbox_relay_surface_simplification.md).
+		foreach (array(InboundEmailSetupCheck::WARN, InboundEmailSetupCheck::FAIL,
+			InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO,
+			InboundEmailSetupCheck::UNKNOWN) as $status) {
+			check(_setup_is_receiving_row($row($status), 'example.com', false) === false,
+				'a ' . $status . ' scanner is invisible to a mailbox whose domain needs no relay');
 		}
 
 		// The consequence, asserted deliberately rather than discovered later: a

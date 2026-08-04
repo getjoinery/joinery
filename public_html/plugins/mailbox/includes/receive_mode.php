@@ -4,19 +4,23 @@
  *
  * Every hosted domain's DNS prescription hangs on one deployment-level fact:
  * does mail come straight to this server, or does a relay front it so the
- * server's address stays hidden? This helper resolves that fact and gates the
- * mailbox admin surfaces until it is known — the first thing an admin sees is
- * the choice, and domains/mailboxes cannot be created before it is made.
+ * server's address stays hidden? This helper resolves that fact.
+ *
+ * IT IS A SETTING, NOT A GATE (specs/mailbox_relay_surface_simplification.md).
+ * An undecided deployment receives directly and works; the choice lives in the
+ * Setup tab's Advanced section and can be changed at any time. A relay is only
+ * load-bearing at the Fortress security level, so demanding the answer before
+ * any domain has a level asked the operator to decide about infrastructure they
+ * may never need, in front of every mailbox page.
  *
  * The choice belongs to the admin: a relay provisioned as part of setup does
- * NOT silently decide it — the card still appears (annotated that a relay is
- * ready) until the admin picks. Resolution order:
+ * NOT silently decide it. Resolution order:
  *   1. The stored choice (mailbox_receive_mode setting) => its value.
- *   2. Live domains already registered => the deployment is running, never
- *      gate it; report what it is doing (relay row => 'relay', else 'direct').
- *   3. Otherwise '' — undecided; gated pages render the choice card only.
+ *   2. Live domains already registered => report what the deployment is
+ *      actually doing (relay row => 'relay', else 'direct').
+ *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
- * @version 1.2
+ * @version 1.3 - the choice no longer gates the mailbox surfaces
  */
 
 /**
@@ -111,8 +115,8 @@ function mailbox_receive_gate_handle(array $input): ?LogicResult {
 
 /**
  * The choice card: a brief pros/cons comparison with one choose button per
- * column. Gated pages render ONLY this (then the footer) while the mode is
- * undecided. Both forms post back to the page showing the card.
+ * column. Rendered as a control in the Setup tab's Advanced section; both forms
+ * post back to the page showing the card.
  */
 function mailbox_receive_gate_render(): string {
 	$relay_ready = mailbox_receive_relay_exists();
@@ -142,7 +146,6 @@ function mailbox_receive_gate_render(): string {
 	);
 
 	$h = '<div class="iem-receive-gate" style="max-width:900px;">'
-		. '<h4>How does mail reach this server?</h4>'
 		. '<div style="overflow-x:auto;"><table class="table" style="margin-top:1rem;">'
 		. '<thead><tr><th style="width:22%;"></th>'
 		. '<th>Straight to this server</th><th>Through a relay</th></tr></thead><tbody>';

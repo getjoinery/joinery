@@ -91,7 +91,7 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			// so a mode switch takes effect on the relay itself only at the next
 			// Rebuild (Setup tab). The tunnel check fails honestly until then.
 			if ($mode === 'smarthost' && $prior !== 'smarthost') {
-				$outbound_note = ' Sent mail now leaves through the relay smarthost — this deployment owns the '
+				$outbound_note = ' Sent mail now leaves through the relay — this deployment owns the '
 					. 'relay IP\'s sending reputation. Run Rebuild on the relay (Setup tab) to open its tunnel '
 					. 'submission listener; until then compose sends are refused.';
 			} elseif ($mode === 'provider' && $prior === 'smarthost') {
