@@ -98,6 +98,15 @@ if (!$run_test) {
                 </div>
             </div>
             
+            <?php if (!function_exists('imap_open')): ?>
+            <div class="alert alert-danger">
+                <strong>Unavailable on this server.</strong> Reading the delivered message back
+                needs the PHP IMAP extension, which is not loaded and is not part of current PHP
+                releases. The <a href="/tests/email/" class="text-decoration-none">DNS and domain
+                checks</a> do not need it and still run.
+            </div>
+            <?php endif; ?>
+
             <!-- Requirements Alert -->
             <div class="alert alert-warning">
                 <h6 class="alert-heading mb-2">⚠️ Important Requirements:</h6>
@@ -203,6 +212,20 @@ if (!$run_test) {
 echo '<div class="row"><div class="col-12">';
 echo '<h4>Running Advanced Email Authentication Analysis...</h4>';
 
+// Checked before Step 1, not at Step 3 where the extension is first used: the
+// steps in between send a real email and then sleep out the delivery wait, and
+// a run that cannot read the message back should not spend either.
+if (!function_exists('imap_open')) {
+    echo '<div class="alert alert-danger"><strong>Nothing was sent.</strong> '
+        . 'Retrieving the delivered message needs the PHP IMAP extension, which is not '
+        . 'loaded and is not part of current PHP releases. '
+        . 'Run the <a href="/tests/email/" class="text-decoration-none">DNS and domain '
+        . 'checks</a> instead — they do not need it.</div>';
+    echo '</div></div>';
+    $page->admin_footer();
+    exit;
+}
+
 try {
     // Step 1: Send test email
     echo '<div class="alert alert-info"><strong>Step 1:</strong> Sending test email...</div>';
@@ -276,10 +299,6 @@ try {
     
     // Step 3: Connect to IMAP and retrieve email
     echo '<div class="alert alert-info"><strong>Step 3:</strong> Connecting to Gmail IMAP...</div>';
-    
-    if (!function_exists('imap_open')) {
-        throw new Exception('IMAP extension is not installed. Please install php-imap extension.');
-    }
     
     // Connect to Gmail IMAP
     $imap = imap_open($config['imap_host'], $config['imap_username'], $config['imap_password']);

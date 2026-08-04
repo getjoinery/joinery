@@ -16,7 +16,7 @@ For Docker and bare-metal deployments, see **[Installation Guide](../../maintena
 
 ### Docker Shared Base Image
 
-Docker site images build `FROM joinery-base:VERSION` rather than `FROM ubuntu:24.04`. The base image contains Ubuntu + Apache + PHP 8.3 + PostgreSQL + Composer + cron and is shared across all site containers on a host. Per-site images only layer the site code, config, and VirtualHost on top.
+Docker site images build `FROM joinery-base:VERSION` rather than from a stock Ubuntu image. The base image contains Ubuntu + Apache + PHP + PostgreSQL + Composer + cron and is shared across all site containers on a host. Per-site images only layer the site code, config, and VirtualHost on top.
 
 **Two-step build on a Docker host:**
 

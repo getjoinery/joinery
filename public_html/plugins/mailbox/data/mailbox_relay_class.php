@@ -35,6 +35,8 @@
  * enrollment instead of self-provisioned ones. Either way this row remains the
  * deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.3 - scanner health: readHealth()/pollHealth() and the cached answer
+ *                (specs/mailbox_relay_scanner_health.md)
  * @version 1.2 - tenant coordinates (slug, hosted-slot fields) + derived
  *                pull-account/spool/fragment-path helpers; recorded authserv-id
  */
@@ -119,6 +121,12 @@ class MailboxRelay extends SystemBase {
 		// live gauge — held blobs are re-counted each pull until the domain
 		// returns / the owner resolves, or they age out past the grace window.
 		'mrl_last_pull_held'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+		// Last answer to joinery-ping, cached (specs/mailbox_relay_scanner_health.md).
+		// Cached rather than probed on demand for two reasons: an SSH round-trip does
+		// not belong in a page render, and an unreachable relay is exactly when a
+		// last-seen answer is worth most. The stored shape is readHealth()'s output.
+		'mrl_last_health_json'   => array('type'=>'text'),
+		'mrl_last_health_time'   => array('type'=>'timestamp(6)'),
 		'mrl_mgn_managed_node_id'=> array('type'=>'int8'),
 		// Cloud-provisioned relays (specs/mailbox_relay_cloud_provisioning.md):
 		// the customer-account instance a destroy/rebuild targets.
@@ -229,6 +237,159 @@ class MailboxRelay extends SystemBase {
 	/** The tenant's map-fragment drop area on the relay (fixed relay layout). */
 	public function fragmentDir(): string {
 		return '/opt/joinery-relay/home/' . $this->tenantSlug() . '/fragments';
+	}
+
+	// --- Scanner health (specs/mailbox_relay_scanner_health.md) ----------------
+	//
+	// The relay's content scanner is the one part of it a tenant cannot verify from
+	// stored mail. opendkim/opendmarc write their verdicts into every message, so a
+	// dead one shows up as unverified mail; rspamd writes a header ONLY when it
+	// flags something, and milter_default_action is accept — so a relay that scans
+	// and finds nothing and a relay whose rspamd is dead send identical evidence,
+	// which is none. The relay has to be asked.
+
+	const HEALTH_OK             = 'ok';            // scanning, wired, contract intact
+	const HEALTH_NOT_DELIVERING = 'not_delivering';// alive-but-useless or dead — see reason
+	const HEALTH_LEGACY         = 'legacy';        // relay predates the health ping
+	const HEALTH_UNREADABLE     = 'unreadable';    // answered something we cannot parse
+	const HEALTH_UNREACHABLE    = 'unreachable';   // the ping itself did not complete
+
+	/**
+	 * Interpret one joinery-ping answer. Pure and static — the whole verdict is a
+	 * function of the relay's reply, so it is testable without a relay.
+	 *
+	 * An old relay answers the plain text `PONG <slug>`, and that is the capability
+	 * probe: it is unambiguous, unlike an unknown verb, which answers `denied:
+	 * unknown command` — indistinguishable from every other refusal the tenant
+	 * shell can issue.
+	 *
+	 * @return array{state:string,reason:string,detail:string,services:array,
+	 *               milters:array,contract:?bool,provisioned:string,slug:string}
+	 */
+	public static function readHealth(string $raw, int $exit_code = 0): array {
+		$out = array('state' => self::HEALTH_UNREADABLE, 'reason' => '', 'detail' => '',
+			'services' => array(), 'milters' => array(), 'contract' => null,
+			'provisioned' => '', 'slug' => '');
+		$text = trim($raw);
+		$snippet = substr($text, 0, 300);
+
+		$decoded = json_decode($text, true);
+		if (!is_array($decoded) || !isset($decoded['services']) || !is_array($decoded['services'])
+			|| !isset($decoded['milters']) || !is_array($decoded['milters'])) {
+			if (stripos($text, 'PONG') === 0) {
+				$out['state'] = self::HEALTH_LEGACY;
+				$out['detail'] = 'The relay answered ' . $snippet . ' — it was built before the health ping.';
+				return $out;
+			}
+			if ($exit_code !== 0) {
+				$out['state'] = self::HEALTH_UNREACHABLE;
+				$out['detail'] = 'The ping did not complete (exit ' . $exit_code . ')'
+					. ($snippet !== '' ? ': ' . $snippet : '.');
+				return $out;
+			}
+			$out['detail'] = 'The relay answered something this server cannot read'
+				. ($snippet !== '' ? ': ' . $snippet : '.');
+			return $out;
+		}
+
+		$out['services']    = $decoded['services'];
+		$out['milters']     = $decoded['milters'];
+		$out['contract']    = !empty($decoded['contract']);
+		$out['provisioned'] = (string)($decoded['provisioned'] ?? '');
+		$out['slug']        = (string)($decoded['slug'] ?? '');
+
+		$rspamd_state = strtolower(trim((string)($decoded['services']['rspamd'] ?? '')));
+		$rspamd_wired = !empty($decoded['milters']['rspamd']);
+
+		// Order matters: report the FIRST thing that stops a verdict reaching this
+		// server, because that is the thing to fix. A drifted contract on a dead
+		// scanner is not news.
+		if ($rspamd_state !== 'active') {
+			$out['state']  = self::HEALTH_NOT_DELIVERING;
+			$out['reason'] = 'dead';
+			$out['detail'] = 'The content scanner on the relay is ' . ($rspamd_state !== '' ? $rspamd_state : 'not running') . '.';
+			return $out;
+		}
+		if (!$rspamd_wired) {
+			$out['state']  = self::HEALTH_NOT_DELIVERING;
+			$out['reason'] = 'unwired';
+			$out['detail'] = 'The content scanner is running but is not in the relay\'s mail path, '
+				. 'so nothing is scanned.';
+			return $out;
+		}
+		if (!$out['contract']) {
+			$out['state']  = self::HEALTH_NOT_DELIVERING;
+			$out['reason'] = 'drift';
+			$out['detail'] = 'The content scanner is running, but the settings that decide which headers '
+				. 'it stamps have been changed on the relay — so its verdicts no longer reach this server.';
+			return $out;
+		}
+
+		$out['state']  = self::HEALTH_OK;
+		$out['detail'] = 'The relay is scanning and its verdicts reach this server.';
+		return $out;
+	}
+
+	/**
+	 * Ask the relay how it is, and cache the answer on this row.
+	 *
+	 * An UNREACHABLE result is deliberately not stored: it says nothing about the
+	 * scanner, and overwriting the last real answer with it would destroy the only
+	 * information available during an outage. The cached answer simply ages, and
+	 * its age is shown.
+	 */
+	public function pollHealth(bool $store = true): array {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
+		list($code, $out) = RelaySsh::run(RelaySsh::sshCommand($this, 'joinery-ping'));
+		$health = self::readHealth((string)$out, (int)$code);
+		$health['checked_time'] = gmdate('Y-m-d H:i:s');
+
+		if ($store && $health['state'] !== self::HEALTH_UNREACHABLE) {
+			$this->set('mrl_last_health_json', json_encode($health));
+			$this->set('mrl_last_health_time', $health['checked_time']);
+			$this->save();
+		}
+		return $health;
+	}
+
+	/** The cached health answer, or null if this relay has never answered one. */
+	public function lastHealth(): ?array {
+		$json = trim((string)$this->get('mrl_last_health_json'));
+		if ($json === '') {
+			return null;
+		}
+		$health = json_decode($json, true);
+		if (!is_array($health) || !isset($health['state'])) {
+			return null;
+		}
+		$health['checked_time'] = (string)$this->get('mrl_last_health_time');
+		return $health;
+	}
+
+	/**
+	 * What changed between two health answers: 'down', 'recovered' or 'none'.
+	 *
+	 * Only a real transition is worth raising — a relay that stays broken is
+	 * announced once, not every cron pass. A first-ever answer of "not delivering"
+	 * IS a transition (from nothing known), because the operator has never been
+	 * told. Legacy, unreadable and unreachable never transition: they are absences
+	 * of information, and announcing an absence as a fault would fire on every
+	 * relay built before this check existed.
+	 */
+	public static function healthTransition(string $before, string $after): string {
+		if ($after === self::HEALTH_NOT_DELIVERING && $before !== self::HEALTH_NOT_DELIVERING) {
+			return 'down';
+		}
+		if ($after === self::HEALTH_OK && $before === self::HEALTH_NOT_DELIVERING) {
+			return 'recovered';
+		}
+		return 'none';
+	}
+
+	/** The cached state alone ('' when never polled) — what a transition compares. */
+	public function lastHealthState(): string {
+		$health = $this->lastHealth();
+		return ($health === null) ? '' : (string)$health['state'];
 	}
 
 	/**

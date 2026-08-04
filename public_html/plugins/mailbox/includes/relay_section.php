@@ -11,7 +11,7 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
- * @version 1.9
+ * @version 2.0 - relay scanner health: last answer + Check spam scanning now
  */
 
 /** A single-button action form (hidden inputs + submit only). */
@@ -74,6 +74,14 @@ function mailbox_relay_section_render($page, array $v): void {
 			echo '<tr><th>Address-list version</th><td>v' . (int)$relay->get('mrl_map_version') . '</td></tr>';
 			echo '<tr><th>Last address-list push</th><td>' . (htmlspecialchars((string)$relay->get('mrl_last_push_time')) ?: '—') . '</td></tr>';
 			echo '<tr><th>Last mail pull</th><td>' . (htmlspecialchars((string)$relay->get('mrl_last_pull_time')) ?: '—') . '</td></tr>';
+			// Spam scanning is the one relay capability stored mail cannot confirm,
+			// so the relay's own last answer is shown here as a fact about the relay.
+			$scanner = $relay->lastHealth();
+			echo '<tr><th>Spam scanning</th><td>'
+				. ($scanner === null ? '<span class="text-muted">Not asked yet</span>'
+					: htmlspecialchars((string)$scanner['detail'])
+						. ' <span class="text-muted">(' . htmlspecialchars((string)$scanner['checked_time']) . ' UTC)</span>')
+				. '</td></tr>';
 			echo '</tbody></table>';
 			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
 			if (!empty($v['server_manager_active']) && !(bool)$relay->get('mrl_is_hosted')) {
@@ -86,6 +94,17 @@ function mailbox_relay_section_render($page, array $v): void {
 			echo '</div></details>';
 			echo '</div>';
 		}
+	}
+
+	// A relay that scans and finds nothing looks exactly like a relay whose scanner
+	// is dead, so the only way to tell is to ask it.
+	if (!empty($v['has_active_relay'])) {
+		echo '<form method="post" style="display:inline">';
+		echo '<input type="hidden" name="action" value="scanner_probe">';
+		echo '<button type="submit" class="btn btn-sm btn-outline-secondary">Check spam scanning now</button>';
+		echo '</form>';
+		echo ' <span class="text-muted small">Asks the relay whether its spam scanner is running and whether '
+			. 'its verdicts still reach this server.</span><br>';
 	}
 
 	// Provider mode: an out-and-back probe proves sent mail carries no origin leak.

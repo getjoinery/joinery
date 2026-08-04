@@ -10,6 +10,10 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
+# Version: 2.2 - joinery-ping answers the relay's health as JSON (service liveness,
+#                milter wiring, and a hash check of the rspamd header contract), so
+#                a tenant can tell a scanning relay from a silently dead one.
+#                specs/mailbox_relay_scanner_health.md
 # Version: 2.1 - Only Spamhaus (zen + dbl) is rejected on at RCPT time; SpamCop
 #                and Barracuda list shared ESP outbound IPs on brief triggers, so
 #                rejecting on them permanently bounced ordinary Mailgun/SendGrid mail
@@ -51,6 +55,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
+RELAY_VERSION="2.2"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -402,13 +407,18 @@ if [[ "$(readlink -f "${BASH_SOURCE[0]}")" != "${RELAY_HOME}/provision_relay.sh"
     echo "installed: ${RELAY_HOME}/provision_relay.sh (tenant lifecycle operations)"
 fi
 
+# What built this relay, so joinery-ping can say so and a tenant can tell an
+# old shard from a current one without guessing from behaviour.
+printf '%s' "${RELAY_VERSION}" > "${RELAY_HOME}/version"
+chmod 644 "${RELAY_HOME}/version"
+
 # --- 2b. tenant shell (the ONLY surface a tenant's SSH key reaches) -----------
 cat > "${TENANT_SHELL}" <<'TENANTSHELL'
 #!/usr/bin/env bash
 # joinery-tenant-shell <slug> — forced command for tenant pull accounts on a
 # Joinery relay (managed by provision_relay.sh; specs/mailbox_relay_shared_fleet.md).
 # Allows exactly: rsync pull of the tenant's own spool, rsync push into the
-# tenant's own fragment drop area, spool ack, map-merge trigger, ping.
+# tenant's own fragment drop area, spool ack, map-merge trigger, health ping.
 set -euo pipefail
 SLUG="${1:-}"
 [[ "${SLUG}" =~ ^[a-z0-9][a-z0-9-]{0,27}$ ]] || { echo "denied: bad tenant" >&2; exit 1; }
@@ -463,7 +473,35 @@ case "${TOK[0]}" in
     fi
     ;;
   joinery-ping)
-    echo "PONG ${SLUG}"
+    # Health, as one JSON object (specs/mailbox_relay_scanner_health.md). A dead
+    # content scanner is INVISIBLE from the tenant's side — milter_default_action
+    # is accept, so unscanned mail arrives looking exactly like clean mail — which
+    # is why the relay has to be asked rather than inferred from.
+    #
+    # SHARD-LEVEL SERVICE LIVENESS ONLY. Never queue depth, message counts, spool
+    # sizes or anything per-tenant: several deployments share this shard, and one
+    # tenant's mail volume is not another's to read. Service state is not tenant data.
+    svc() { local s; s="$(systemctl is-active "$1" 2>/dev/null || true)"; [[ -n "${s}" ]] || s="unknown"; printf '%s' "${s}"; }
+    MILTERS="$(postconf -h smtpd_milters 2>/dev/null || true)"
+    wired() { case "${MILTERS}" in *":$1"*) printf 'true';; *) printf 'false';; esac; }
+    # The header contract by HASH: provisioning writes these two rspamd configs
+    # itself and records their digest, so drift is a comparison rather than a
+    # config parser. What drifted is not reported because the remedy does not
+    # vary — reprovision the relay.
+    CONTRACT="false"
+    RS_HDR="/etc/rspamd/local.d/milter_headers.conf"
+    RS_ACT="/etc/rspamd/local.d/actions.conf"
+    CONTRACT_FILE="${RELAY_HOME}/contract.sha256"
+    if [[ -r "${CONTRACT_FILE}" && -r "${RS_HDR}" && -r "${RS_ACT}" ]]; then
+      WANT="$(cat "${CONTRACT_FILE}" 2>/dev/null || true)"
+      HAVE="$(cat "${RS_HDR}" "${RS_ACT}" 2>/dev/null | sha256sum 2>/dev/null | cut -d' ' -f1 || true)"
+      [[ -n "${WANT}" && "${WANT}" == "${HAVE}" ]] && CONTRACT="true"
+    fi
+    PROVISIONED="$(cat "${RELAY_HOME}/version" 2>/dev/null || true)"
+    printf '{"status":"ok","services":{"rspamd":"%s","opendkim":"%s","opendmarc":"%s"},"milters":{"opendkim":%s,"opendmarc":%s,"rspamd":%s},"contract":%s,"provisioned":"%s","slug":"%s"}\n' \
+      "$(svc rspamd)" "$(svc opendkim)" "$(svc opendmarc)" \
+      "$(wired 8891)" "$(wired 8893)" "$(wired 11332)" \
+      "${CONTRACT}" "${PROVISIONED}" "${SLUG}"
     ;;
   *)
     echo "denied: unknown command" >&2
@@ -693,6 +731,15 @@ reject = null;
 greylist = null;
 add_header = 6;
 RSPAMDACT
+# The digest of the two files that ARE the contract, recorded at the moment we
+# write them so joinery-ping can report drift without parsing rspamd's config
+# format (specs/mailbox_relay_scanner_health.md). World-readable: a tenant's
+# forced-command shell computes the comparison, and a hash of our own published
+# configuration is not tenant data.
+cat /etc/rspamd/local.d/milter_headers.conf /etc/rspamd/local.d/actions.conf \
+    | sha256sum | cut -d' ' -f1 > "${RELAY_HOME}/contract.sha256"
+chmod 644 "${RELAY_HOME}/contract.sha256"
+echo "content-spam: header contract digest recorded (${RELAY_HOME}/contract.sha256)"
 cat > /etc/rspamd/local.d/classifier-bayes.conf <<'RSPAMDBAYES'
 # joinery-managed - STATELESS relay: Bayes off. Learned state on a shared
 # relay is a cross-tenant privacy leak and a poisoning vector; each tenant's

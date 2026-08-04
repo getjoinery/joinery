@@ -1,9 +1,10 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
 **Status:** Phase 1 partially BUILT. 1.2's no-op deletions, 1.7 and 1.9 landed
-2026-08-03 and are committed (`c8c085b3`); 1.1 and the rest of 1.2 landed
-2026-08-04 and are uncommitted. **1.2 is now complete.** What remains of Phase 1
-is 1.3–1.6 and 1.8. Phase 2 remains gated on the OS campaign.
+2026-08-03 and are committed (`c8c085b3`); 1.1, the rest of 1.2, 1.3,
+1.4 and 1.5 landed 2026-08-04 and are uncommitted. **1.2 through 1.5 are
+complete.** What remains of Phase 1 is 1.6 and 1.8. Phase 2 remains gated on the
+OS campaign.
 **Date:** 2026-08-01
 **Companion:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (the fleet migration itself)
 
@@ -235,44 +236,89 @@ All of the following are valid on 8.3 and behave identically there.
   Code 0 fails the learn, which leaves the row diverged and re-selecting on every
   15-minute pass forever. Now `/\s(\d{3})(?:\s|$)/`.
 
-### 1.3 Remove the IMAP extension dependency
+### 1.3 Remove the IMAP extension dependency — BUILT 2026-08-04
 
 PHP 8.4 unbundled `ext/imap` to PECL, so 26.04 will not carry a distro
 `php8.5-imap`. The only consumer in the tree is `tests/email/auth_analysis.php`,
 which opens Gmail over IMAP for authentication analysis; production inbound mail
-uses `bytestream/horde-imap-client`, which is pure PHP and unaffected.
+uses `bytestream/horde-imap-client`, which is pure PHP and unaffected. Confirmed
+by sweep: no `ext-imap` in `composer.json`, no `imap` in any plugin manifest's
+`requires.extensions`, and every other `imap` match in the tree is either Horde
+or the `iia_inbound_imap_accounts` naming.
 
-- Drop `php8.3-imap` from the package list at `install.sh:1812`.
-- Guard `tests/email/auth_analysis.php` to skip when `imap_open()` is absent.
-- The copies in `maintenance_scripts/archive/` are archived scripts; leave them.
+- `php8.3-imap` dropped from the package list in `install.sh` (2.33 → 2.34).
+  The failure it removes is not a missing feature: `apt install` refuses the
+  batch, so every extension listed beside it — pgsql, mbstring, sodium — also
+  goes uninstalled and the install stops there.
+- `tests/email/auth_analysis.php` now reports the extension as absent instead of
+  advising the operator to install a package that no longer exists, and reports
+  it **before Step 1**. The old guard sat at Step 3, after the tool had sent a
+  real email and slept out the delivery wait for a run that could not finish.
+  The form page carries the same notice, so the Gmail app password is never
+  typed in for nothing.
+- The copies in `maintenance_scripts/archive/` are archived scripts; left alone.
+- Pinned by `installer_contract_test` (171 → 176 checks): the apt list names no
+  `php*-imap` (matched at line start, so the version history can keep naming the
+  package it dropped), nothing in the tree declares the extension, and the tool's
+  guard precedes its send.
 
-### 1.4 Installer PHP parameterization
+### 1.4 Installer PHP parameterization — BUILT 2026-08-04
 
-`install.sh` carries 37 occurrences of `8.3`: the package list from `:1803`, the
-Apache module (`a2enmod php8.3` at `:1844`), the FPM service (`:2005`, `:2208`),
-and the INI paths under `/etc/php/8.3/apache2/` (`:2013` onward). Detect the
-distro's PHP once and derive package names, module name, service name, and INI
-directory from it. On 24.04 this resolves to 8.3 and produces the same
-configuration it produces today, so it is safe to land and exercise immediately.
-`utils/list_dependencies.php` already derives its `php{MAJOR}.{MINOR}-{ext}`
-prefix this way and is the pattern to follow.
+`install.sh` carried 21 version literals across the package list, the Apache
+module and conf (`a2dismod php8.3`, `a2enconf php8.3-fpm`), the FPM service at
+two sites, and nine `/etc/php/8.3/fpm/php.ini` paths. All are derived now
+(`install.sh` 2.34 → 2.35). Verified on 24.04: the derivation resolves to `8.3`
+and the generated package list is byte-identical to the one it replaced.
 
-Same treatment for `plugins/mailbox/provisioning/install_email.sh:179`, which
-pins `php8.3-sqlite3` in its `PACKAGES` array.
+**Detection** — `detect_php_version()`, resolved once after `apt update` and used
+for everything below it. A box that already has PHP keeps that version; only a
+box without one asks apt, via `apt-cache depends php-cli`, which is the same
+question apt answers for `apt install php-cli`. So the version installed and the
+version configured cannot diverge. Consequence worth knowing: on a box carrying
+the Ondřej PPA the fallback picks the PPA's newest rather than the distro's —
+correct, because that is what apt would install, but it is not always the distro
+default. Verified on the dev box, which has the PPA: the primary path returns
+`8.3` (the installed PHP) and the fallback alone would return `8.4`.
 
-Widening the OS gate at `install.sh:1722` to accept both 24.04 and 26.04 is
-additive and belongs here, but only after the parameterization above — otherwise
-the gate would admit a release the script cannot yet configure. The comment block
-above the gate, and the `--allow-unsupported-os` help text, both state that PHP
-8.3 paths are hardcoded; those statements stop being true and must be rewritten
-in the same change.
+**Two new stops**, both for failures that were silent:
+- An undetectable version. Every path built from it becomes `/etc/php//fpm/`,
+  which `sed` neither matches nor complains about — the tuning is skipped and
+  the setup reports success.
+- An fpm `php.ini` that is not where the tuning writes. Same outcome, so the
+  file is checked before the first `sed` rather than after all nine.
 
-### 1.5 PostgreSQL authentication hardening
+**Package list** — the sixteen extensions are now suffixes with the version
+applied in a loop. This is not cosmetic: apt takes the list as one transaction,
+so one name that does not resolve on a release fails the batch and every other
+extension goes uninstalled with it. Suffixes have no version to be wrong about.
 
-`install.sh` writes `md5` as the authentication method throughout the generated
-`pg_hba.conf` (`:1931`–`:1960`), and both `install.sh` (`:1982`, `:1991`) and
-`Dockerfile.template` (`:139`, `:142`) contain a `sed` dance that flips the
-`postgres` local line between `trust` and `md5` while setting the role password.
+**`plugins/mailbox/provisioning/install_email.sh`** (2.14 → 2.15) reads the
+version off `PHP_BIN`, the interpreter it already resolved for the Postfix pipe
+transport. Noted in the file: a box whose web PHP differs from its CLI PHP needs
+that version's `sqlite3` package too, which this script does not provision.
+
+**OS gate** widened to `Ubuntu (24|26)\.04`, which is why the parameterization
+had to land first. Its comment and the `--allow-unsupported-os` help text no
+longer claim hardcoded 8.3 paths — the gate is now about which package and
+service layouts have been verified, not what the script can express. Matching
+checked against `24.04.4`, `26.04`, `24.10`, `22.04.5`, and Debian 12.
+
+**Docs** — `installation.md`, `quickstart.md`, and `deploy_and_upgrade.md`
+carried the hardcoded-8.3 rationale and a 24.04-only requirement. `quickstart.md`
+also offered 22.04 as a fallback, which the gate has never accepted; corrected.
+
+Pinned by `installer_contract_test` (176 → 185 checks): no `php\d+\.\d+` and no
+`/etc/php/\d+\.\d+/` anywhere in either script outside comments, both stops exit
+1, `detect_php_version()` exists, the gate admits both releases, and the mail
+provisioner reads its version from `PHP_BIN`. Proven non-vacuous — the same
+regexes match 21 and 9 times against the previous revision.
+
+### 1.5 PostgreSQL authentication hardening — BUILT 2026-08-04
+
+`install.sh` wrote `md5` as the authentication method throughout the generated
+`pg_hba.conf`, and both `install.sh` and `Dockerfile.template` contained a `sed`
+dance flipping the `postgres` local line between `trust` and `md5` while setting
+the role password.
 
 PostgreSQL 18 deprecates MD5 passwords and warns on `CREATE ROLE`/`ALTER ROLE`
 that set one. In practice nothing here creates an MD5 verifier —
@@ -280,15 +326,35 @@ that set one. In practice nothing here creates an MD5 verifier —
 line in `pg_hba.conf` accepts a SCRAM verifier — so no warning fires and nothing
 breaks on 18. The change is hardening ahead of the eventual removal, not a fix.
 
-Switch the generated rules to `scram-sha-256`. This works on PG 16 and is safe to
-land now. One caution: the `sed` match strings appear in two files and must be
-updated together or they silently match nothing.
+Re-verified on the dev box 2026-08-04, PostgreSQL 16.14: `password_encryption` is
+`scram-sha-256`, both roles (`postgres`, `iemap_joinerytest`) hold SCRAM
+verifiers, and the connection that read this authenticated over a live
+`host all all 127.0.0.1/32 md5` rule. The keyword was accepting SCRAM already.
 
-The `md5` keyword is already vestigial. `password_encryption` has defaulted to
-`scram-sha-256` since PG 14, and verified on the dev box 2026-08-01 both real
-roles (`postgres`, the site role) store SCRAM verifiers — so an `md5` line in
-`pg_hba.conf` is accepting SCRAM authentication today. Changing it is deleting a
-word that stopped meaning anything, not migrating an auth method.
+**What landed** (`install.sh` 2.35 → 2.36, `Dockerfile.template` 4.5 → 4.6):
+
+- Generated rules name `scram-sha-256`, from a single `PG_AUTH_METHOD` variable
+  that also feeds the post-password restore. The spec's caution was that the
+  match strings live in two files and must move together; a variable removes the
+  question inside `install.sh` entirely.
+- Across the two files the coupling is broken differently: the container reads
+  the method out of `pg_hba.conf` before flipping and puts *that* back. It no
+  longer carries its own answer, so it cannot disagree with whatever `install.sh`
+  wrote — including on a box installed by an older release.
+- Both `sed` calls match the method as a field
+  (`^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+`) rather than as a
+  whitespace-exact copy of a generated line. Demonstrated: against a
+  single-spaced rule the old literal `sed` changes nothing and reports success;
+  the field form rewrites it.
+- **The restore is now verified in both files.** This is the part worth having.
+  `sed` exits 0 when it matches nothing, so a drifted pattern left the local
+  `postgres` role on `trust` — superuser for anyone with a shell — while every
+  later step still succeeded. A restore that did not take is a hard stop naming
+  the file and the line to fix.
+
+Pinned by `installer_contract_test` (185 → 193 checks). All five assertions fail
+against the previous revision: it had no field-matched `sed`, no restore check,
+no method variable, five generated `md5` rules, and a container naming its own.
 
 **Existing nodes** are handled by the campaign's per-node checklist rather than a
 separate sweep (resolved 2026-08-01). Procedure A nodes get it free from the
@@ -302,11 +368,24 @@ an explicit step:
    re-encrypts it under the current `password_encryption`.
 3. Only then flip `md5` to `scram-sha-256` in `pg_hba.conf` and reload.
 4. Verify one real connection before moving on.
+5. While in the file, check the `local all postgres` line is not on `trust`.
+   `SELECT type, database, user_name, auth_method FROM pg_hba_file_rules;` reads
+   the live rules without opening the file. The dev box was found on `trust`
+   2026-08-04 — see the note below.
 
 Step 1 is not optional. Flipping a node to `scram-sha-256` while a role still
 holds an md5 verifier locks that role out immediately. The reason not to simply
 skip the whole thing is that `md5` is on PostgreSQL's removal track and procedure
 B nodes are exactly the ones that never get rebuilt out of it.
+
+**Found on the dev box while verifying the above (2026-08-04), not fixed:**
+`local all postgres` is on `trust`, so anyone with a shell there is a PostgreSQL
+superuser without a password. That is exactly the state the new restore check
+stops an install from leaving behind, observed in the wild. Separately, the box
+has `listen_addresses = '*'`, a `host all all 0.0.0.0/0 md5` rule, and postgres
+bound to `0.0.0.0:5432`; whether that is reachable off-box depends on a firewall
+this account cannot read. Both are live-configuration changes on a running
+server and belong to the operator, not to this spec.
 
 ### 1.6 CSV escape parameter — RFC 4180
 
@@ -502,11 +581,13 @@ These are behaviour changes with no code fix — they need a run, not an edit.
 ## Verification
 
 - `php tests/run.php safe` after each Phase 1 item. **Green as of 2026-08-04 for
-  the built subset (1.1, all of 1.2, 1.7, 1.9): 83/83 tests, 2116 checks,
-  0 failed.**
+  the built subset (1.1, all of 1.2, 1.3, 1.4, 1.5, 1.7, 1.9): 84/84 tests, 2232
+  checks, 0 failed, 147 skipped.**
 - `php tests/run.php db` before committing Phase 1, and again before publishing.
-  **Green as of 2026-08-04 for the built subset: 226/226 tests, 6912 checks,
-  0 failed, 159 skipped.**
+  **Green as of 2026-08-04 through 1.2: 226/226 tests, 6912 checks, 0 failed,
+  159 skipped.** Not re-run for 1.3, 1.4 or 1.5, which touch only shell
+  provisioning scripts, a manual email tool, docs, and a safe-tier test — nothing
+  the db tier loads.
 - `validate_php_file.php` reports `Missing: 0` on every file touched so far, with
   one expected exception: `LearnSpamFeedback.php` flags
   `http_get_last_response_headers()`, which genuinely does not exist on the PHP
@@ -520,14 +601,21 @@ These are behaviour changes with no code fix — they need a run, not an edit.
   installing a declared extension still reloads FPM. The bug being fixed is
   silence, so the test has to assert the reload happened, not that the command
   returned.
+- Phase 1.4 specifically: run `install.sh server` end to end on a scratch 24.04
+  box and confirm it produces the same configuration as before — PHP 8.3
+  installed, `php8.3-fpm` enabled and running, `/etc/php/8.3/fpm/php.ini`
+  carrying all six tunings, and a page served. The test assertions cover only
+  that no literal survives; nothing in them executes a package install, and the
+  derivation is the part that has to be right on a real box.
 
 ## Out of Scope
 
 - The fleet migration itself, per-node procedure, and ordering — see
   `specs/fleet_ubuntu_2604_postgres_upgrade.md`.
 - Multi-distro support beyond Ubuntu — see `specs/multi_distro_install_refactor.md`,
-  which covers the same `install.sh` parameterization for a wider target set. If
-  that spec is built first, Phase 1.4 here is subsumed by it.
+  which covers the same `install.sh` parameterization for a wider target set.
+  With 1.4 built, that spec inherits a script with no PHP version literal in it
+  and its own examples now read as the state it is proposing to move away from.
 - Application adoption of PostgreSQL 18 features. Incremental base backups land
   via `specs/backups_core_and_incremental.md`.
 

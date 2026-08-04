@@ -14,7 +14,8 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
- * @version 1.0
+ * @version 1.1 - a broken relay scanner surfaces as a Receiving card instead of
+ *                waiting in Advanced (specs/mailbox_relay_scanner_health.md)
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
@@ -257,9 +258,28 @@ function _setup_is_sending_row(array $r): bool {
  *
  * A mail host outside the domain (a shared devmail.example.net, a relay in the
  * operator's zone) stays in Advanced: it is not this domain owner's record.
+ *
+ * The relay's spam scanning is the one row whose PRESENCE depends on its status:
+ * it comes up front when it is a problem and stays in Advanced when it is not.
+ * That is the opposite of the mailhost rule two paragraphs up, deliberately,
+ * because the two rows are different kinds of thing. A mailhost record is a TASK
+ * — it must remain visible after it goes green, or the page appears to forget
+ * what the operator just did. Relay scanning is a FAULT REPORT about a component
+ * nobody configured and that is supposed to work silently; a green "your relay
+ * is scanning" card is a line of checklist noise for a job the operator never
+ * had. Broken is news. Working is not.
  */
 function _setup_is_receiving_row(array $r, string $focus_domain = ''): bool {
 	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
+	// Deployment-wide, and legitimately so: the relay scans every message for
+	// every hosted domain, so "the relay is not scanning" is equally true of
+	// every mailbox behind it. That is what separates it from
+	// 'plugin.relay_enable' below, which looks deployment-wide but actually
+	// reports on one other domain's MX.
+	if ($r['id'] === 'host.relay_scanner') {
+		return in_array($r['status'], array(InboundEmailSetupCheck::WARN,
+			InboundEmailSetupCheck::FAIL), true);
+	}
 	if ($r['layer'] === 'domain')   { return true; }
 	if ($r['layer'] === 'address')  { return true; }
 	if ($r['layer'] === 'e2e')      { return true; }

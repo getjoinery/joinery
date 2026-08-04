@@ -2,7 +2,7 @@
 
 > **New to Joinery?** The [Quick Start guide](quickstart.md) walks you through renting a server, configuring your domain, and installing Joinery step by step — no prior experience required.
 
-Deploy Joinery on a fresh Ubuntu 24.04 server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied.
+Deploy Joinery on a fresh Ubuntu 24.04 or 26.04 LTS server, either in a Docker container or directly on the host (bare-metal). The same `install.sh` script handles both — the deployment mode is auto-detected from whether a port is supplied.
 
 ## Table of Contents
 
@@ -92,7 +92,7 @@ The presence of a port signals Docker mode; omitting it signals bare-metal. To f
 
 ### Server requirements
 
-- Fresh Ubuntu 24.04 LTS — `install.sh server` refuses to run on anything else. PHP 8.3 paths are hardcoded throughout, so continuing would configure a server that does not work while looking like it installed. To proceed anyway and finish the setup by hand, pass `--allow-unsupported-os`; the check is not repeated by `install.sh site`, which presupposes `server` already ran.
+- Fresh Ubuntu 24.04 or 26.04 LTS — `install.sh server` refuses to run on anything else. It installs whichever PHP the release offers and derives every package, service, and config path from that, so no version is pinned; the gate is about which releases the package and service layout has been verified on. On an unverified release the setup can leave a server that does not work while looking like it installed. To proceed anyway and finish the setup by hand, pass `--allow-unsupported-os`; the check is not repeated by `install.sh site`, which presupposes `server` already ran.
 - Root access
 - 1 GB RAM minimum
 - 3 GB disk minimum

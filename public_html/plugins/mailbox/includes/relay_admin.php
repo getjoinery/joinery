@@ -13,7 +13,7 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
- * @version 1.8
+ * @version 1.9 - scanner_probe action (specs/mailbox_relay_scanner_health.md)
  */
 
 /** True when the Linode OAuth client is configured (the one-click branch). */
@@ -77,6 +77,23 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
 		$res = InboundEmailHealth::sendOriginProbe();
 		admin_mailbox_relay_flash($session, $res['message'], $res['ok'] ? 'Probe sent' : 'Probe not sent');
+		return LogicResult::redirect($self_url);
+	}
+
+	// Ask the relay about its spam scanner right now. The cron pass already asks
+	// once per reconcile, and the Setup tab reads that cached answer — but an
+	// operator mid-incident needs a fresh one, not a cached answer of unknown age
+	// (specs/mailbox_relay_scanner_health.md, D1).
+	if ($action === 'scanner_probe') {
+		$relay = MailboxRelay::active();
+		if ($relay === null) {
+			admin_mailbox_relay_flash($session, 'No relay is enabled to ask.', 'Nothing to check');
+			return LogicResult::redirect($self_url);
+		}
+		$health = $relay->pollHealth();
+		$ok = ($health['state'] === MailboxRelay::HEALTH_OK);
+		admin_mailbox_relay_flash($session, (string)$health['detail'],
+			$ok ? 'Scanner is working' : 'Checked');
 		return LogicResult::redirect($self_url);
 	}
 

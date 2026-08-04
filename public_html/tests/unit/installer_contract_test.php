@@ -860,16 +860,46 @@ check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
     'nothing missing means apt is never called');
 
 
+section('The installer asks for no extension the distro cannot supply');
+
+// ext/imap left the PHP distribution in 8.4, so from 8.5 on there is no
+// php{version}-imap to install. Naming it in the apt list does not degrade
+// gracefully: apt refuses the whole batch, so every extension listed beside it
+// goes missing too and the install stops there. Matched at the start of a line
+// so the version history above can keep naming the package it dropped.
+check(preg_match('/^\s*php[0-9.]*-imap\b/m', $install_src) === 0,
+    'install.sh does not apt-install php-imap');
+
+// The check above is only right while nothing needs the extension. If a future
+// require adds it, the declared-dependency resolver installs it on its own and
+// this section becomes the thing that is wrong.
+$declares_imap = strpos(file_get_contents($site_root . '/public_html/composer.json'), 'ext-imap') !== false;
+foreach (glob($site_root . '/public_html/plugins/*/plugin.json') ?: array() as $manifest) {
+    if (strpos(file_get_contents($manifest), '"imap"') !== false) { $declares_imap = true; }
+}
+check(!$declares_imap, 'and nothing in the tree declares it as a dependency');
+
+// The one caller reads a delivered message back over IMAP. It has to say so
+// before Step 1: the steps between send a real email and sleep out the delivery
+// wait, and a run that cannot finish should spend neither.
+$auth_src = file_get_contents($site_root . '/public_html/tests/email/auth_analysis.php');
+// The brace form is the run-block guard; the form page carries an alternate-
+// syntax one that would otherwise match first and prove nothing about the run.
+$guard_at = strpos($auth_src, "if (!function_exists('imap_open')) {");
+$send_at  = strpos($auth_src, 'Step 1:</strong> Sending test email');
+check($guard_at !== false, 'the email auth tool checks for the extension');
+check($guard_at !== false && $send_at !== false && $guard_at < $send_at,
+    'and checks before it sends anything');
+check(strpos($auth_src, 'Please install php-imap') === false,
+    'without telling the operator to install a package that no longer exists');
+
+
 section('Runtime paths name no PHP or PostgreSQL version');
 
 // A pinned version in a path is drift with a delay on it: correct until the
-// host moves, then wrong everywhere at once. These three run on every deployed
+// host moves, then wrong everywhere at once. These all run on every deployed
 // node, so each is checked for the literal rather than for the fix — a future
 // edit that reintroduces one fails here.
-//
-// install.sh is deliberately not covered yet: its 37 occurrences are their own
-// piece of work (spec php_85_pg18_code_prep 1.4) and asserting on it now would
-// pin a state that does not exist.
 
 check($upgrade_src !== '', 'utils/upgrade.php is readable', $upgrade);
 
@@ -927,6 +957,118 @@ $migrate_src = is_file($migrate_sh) ? file_get_contents($migrate_sh) : '';
 check($migrate_src !== '', 'migrate_site_to_code_volumes.sh is readable', $migrate_sh);
 check(preg_match("/dpkg -l 'php\d+\.\d+-/", $migrate_src) === 0,
     'the installed-package probe is not pinned to one PHP version');
+
+// The server setup is the largest of these: package names, the Apache module
+// and conf, the fpm service, and the ini path all named one version. Comment
+// lines are excluded for the same reason as the Dockerfile — the version log
+// has to be able to say which version it stopped naming.
+$install_exec = implode("\n", array_filter(
+    explode("\n", $install_src),
+    function ($line) { return strpos(ltrim($line), '#') !== 0; }
+));
+check(preg_match('/php\d+\.\d+/', $install_exec) === 0,
+    'install.sh names no PHP version in a package, service, conf or path');
+check(preg_match('#/etc/php/\d+\.\d+/#', $install_exec) === 0,
+    'and no PHP version in an ini path');
+check(strpos($install_src, 'detect_php_version()') !== false,
+    'it detects one version and derives the rest from it');
+
+// Both stops exist because both failures are silent. An empty version builds
+// /etc/php//fpm/php.ini, which sed will not match and will not complain about;
+// a version that installed but laid its ini elsewhere does the same. Either way
+// the tuning is skipped and the setup reports success.
+check(strpos($install_exec, 'Could not determine which PHP version to install') !== false
+    && preg_match('/Could not determine which PHP version to install.*?exit 1/s', $install_exec) === 1,
+    'an undetectable version stops the run rather than configuring an empty path');
+check(preg_match('/Expected PHP configuration at.*?exit 1/s', $install_exec) === 1,
+    'and so does an fpm ini that is not where the tuning writes');
+
+// The gate is the reason the parameterization had to come first: widening it
+// while paths were pinned would have admitted a release the script could not
+// configure.
+check(preg_match('/grep -qE "Ubuntu \(24\|26\)\\\\\.04"/', $install_src) === 1,
+    'the OS gate admits both tested releases');
+
+// The mail host provisioner names its own package. It runs on a box that
+// already has PHP, so it reads the version off the interpreter it resolved.
+$email_sh  = $site_root . '/public_html/plugins/mailbox/provisioning/install_email.sh';
+$email_src = is_file($email_sh) ? file_get_contents($email_sh) : '';
+check($email_src !== '', 'install_email.sh is readable', $email_sh);
+$email_exec = implode("\n", array_filter(
+    explode("\n", $email_src),
+    function ($line) { return strpos(ltrim($line), '#') !== 0; }
+));
+check(preg_match('/php\d+\.\d+-/', $email_exec) === 0,
+    'install_email.sh names no PHP version in its package list');
+check(strpos($email_exec, '${PHP_BIN}" -r') !== false,
+    'it reads the version from the interpreter it already resolved');
+
+
+section('Nothing is left granting trust on the postgres socket');
+
+// Setting the postgres password needs trust on the local socket for the length
+// of one ALTER USER, so both installers flip it and flip it back. The flip back
+// is the whole risk: sed exits 0 when it matches nothing, so a pattern that no
+// longer fits the file leaves trust in place — superuser for anyone with a
+// shell — and every later step still reports success.
+// Twice: the flip to trust and the flip back. Either one written as a literal
+// line is a silent no-op the moment the generated spacing changes.
+check(substr_count($install_exec, 'sed -i -E') >= 2
+    && substr_count($install_exec, 'local[[:space:]]+all[[:space:]]+postgres[[:space:]]+') >= 3,
+    'install.sh matches the postgres rule by field, not as a whitespace-exact line');
+check(preg_match('/grep -qE .\^local\[\[:space:\]\]\+all\[\[:space:\]\]\+postgres\[\[:space:\]\]\+trust/', $install_exec) === 1,
+    'and confirms the restore took rather than assuming it');
+check(preg_match('/Could not restore authenticated access.*?exit 1/s', $install_exec) === 1,
+    'a restore that did not take stops the install');
+
+// One variable feeds the generated rules and the restore, so they cannot name
+// different methods. md5 is what that variable replaced: password_encryption
+// has defaulted to scram-sha-256 since PG 14 and an md5 line accepts a SCRAM
+// verifier, so the word was doing nothing — and PG 18 deprecates it.
+check(strpos($install_exec, 'PG_AUTH_METHOD="scram-sha-256"') !== false,
+    'the auth method is declared once');
+check(preg_match('/^\s*(local|host)\s+\S+\s+\S+.*\bmd5\s*$/m', $install_exec) === 0,
+    'and no generated pg_hba rule names md5');
+
+// The container repeats the dance at first run against a file install.sh wrote,
+// so it reads the method out of that file instead of carrying its own copy of
+// the answer. Two scripts that each name a method can disagree; one that asks
+// cannot.
+check(strpos($dockerfile_exec, 'PG_LOCAL_METHOD=') !== false
+    && strpos($dockerfile_exec, '$3=="postgres"') !== false,
+    'the container reads the method out of pg_hba rather than naming one');
+check(preg_match('/local postgres left on trust.*?exit 1/s', $dockerfile_exec) === 1,
+    'and a container whose restore did not take stops instead of running that way');
+check(preg_match('/no method to restore.*?exit 1/s', $dockerfile_exec) === 1,
+    'as does one with no method to put back');
+
+
+section('A connection attempt can be attributed to a source');
+
+// PostgreSQL logs failed logins and not successful ones, and the packaged
+// log_line_prefix carries no client address. A box found under attack could
+// therefore say how many attempts it refused but not whether any had worked —
+// which is the only question worth asking. Both halves are set at install.
+check(strpos($install_exec, 'log_connections = on') !== false,
+    'install.sh turns on connection logging');
+check(strpos($install_exec, '%h') !== false
+    && preg_match("/log_line_prefix = '[^']*%h/", $install_exec) === 1,
+    'and puts the client address in every session line');
+
+// A drop-in, not a sed. log_line_prefix ships uncommented and already set, so a
+// sed written against the commented form matches nothing and reports success —
+// the same silent no-op this file guards against everywhere else.
+check(strpos($install_exec, 'conf.d/10-joinery-logging.conf') !== false,
+    'written as a conf.d drop-in rather than an edit of postgresql.conf');
+check(preg_match('/sed -i.*log_line_prefix/', $install_exec) === 0,
+    'and never by seding a line the package may already have set');
+
+// A drop-in in a directory nothing includes is worse than no drop-in: it reads
+// as configured. Ubuntu ships the include, so this only fires on a distro that
+// does not — but it fires rather than silently doing nothing.
+check(strpos($install_exec, "include_dir = 'conf.d'") !== false
+    && preg_match('/if ! grep -qE.*include_dir/', $install_exec) === 1,
+    'and the include is added when the packaged config lacks it');
 
 
 harness_finish();

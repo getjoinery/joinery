@@ -1665,7 +1665,9 @@ layers:
   (`/var/spool/joinery-relay/<slug>`, mode 2770, owner the sealer, group the
   tenant), SSH account `jt-<slug>` whose authorized key is locked to the tenant
   shell (rsync pull of its own spool, rsync push into its own fragment drop,
-  `joinery-ack`, `joinery-merge`, `joinery-ping` — nothing else), WireGuard
+  `joinery-ack`, `joinery-merge`, `joinery-ping` — nothing else; `joinery-ping`
+  answers the shard's health as JSON, see **Is the relay still scanning?**),
+  WireGuard
   peer pinned to its allocated tunnel address, and the root-owned registry
   entry (allowlist + limits). `remove-tenant` refuses while the tenant's spool
   holds undrained sealed mail unless forced. The smarthost is single-tenant
@@ -1698,8 +1700,76 @@ self-hosted default).
 
 The **Setup tab's Relay section** (rendered whenever the receive mode is relay
 or a relay row exists) is the dashboard: it lists each relay with the four
-provisioning checks (tunnel, spool draining, map fresh, origin hidden), and its
-guided controls provision, rebuild, enable/disable, and delete.
+provisioning checks (tunnel, spool draining, map fresh, origin hidden) plus the
+relay's last spam-scanning answer, and its guided controls provision, rebuild,
+enable/disable, delete, and **Check spam scanning now**.
+
+#### Is the relay still scanning?
+
+Everything else the relay does leaves evidence in the tenant's database.
+opendkim and opendmarc stamp a verdict onto every message, so a broken verifier
+shows up as unverified mail. rspamd does not: it stamps a header only when it
+**flags** something, and `milter_default_action = accept` means a dead scanner
+lets mail through rather than deferring it. A relay that scanned and found
+nothing and a relay whose scanner is dead therefore send identical evidence —
+none — and no amount of reading stored mail can separate them. Warning on "no
+message carried a content verdict in N days" reports every quiet mailbox behind
+a healthy relay as broken.
+
+So the relay is asked. `joinery-ping` answers one JSON object:
+
+```json
+{"status":"ok",
+ "services":{"rspamd":"active","opendkim":"active","opendmarc":"active"},
+ "milters":{"opendkim":true,"opendmarc":true,"rspamd":true},
+ "contract":true,"provisioned":"2.2","slug":"example"}
+```
+
+`services` is `systemctl is-active`; `milters` is read from `postconf -h
+smtpd_milters`; `contract` is the header contract — provisioning writes
+`local.d/milter_headers.conf` and `local.d/actions.conf` itself and records
+their digest in `/opt/joinery-relay/contract.sha256`, so ping re-hashes and
+returns a boolean rather than PHP modelling rspamd's config format. A relay
+whose contract drifted scans perfectly and stamps nothing
+`InboundEmailRouter::readSpamHeader()` can parse, which is why service liveness
+alone is not the question. A relay built before this answers the plain text
+`PONG <slug>`, and that is the capability probe.
+
+**Shard-level service liveness only.** A shared fleet shard serves several
+deployments, so the answer never carries queue depth, message counts, spool
+sizes, or anything per-tenant — that would leak one tenant's mail volume to
+another. Service state is not tenant data.
+
+`MailboxRelay::readHealth()` turns one answer into a state (`ok`,
+`not_delivering`, `legacy`, `unreadable`, `unreachable`) plus a reason (`dead`,
+`unwired`, `drift`). `pollHealth()` runs the ping and caches the answer on the
+relay row (`mrl_last_health_json` / `mrl_last_health_time`); an unreachable
+result is deliberately not cached, because overwriting the last real answer
+destroys the only information available during an outage.
+
+`MailboxRelayReconcile` polls once per pass — the SSH session is already open —
+and `InboundEmailSetupCheck::checkRelayScannerHealth()` reads the cached answer,
+so no page render pays for a round trip. **Check spam scanning now** in the
+Relay section forces a fresh one for an operator mid-incident. Severity depends
+on whether this server is covering:
+
+| Relay | Local scan (`scanAtIngest` + `scannerAvailable`) | Result |
+|---|---|---|
+| delivering usable verdicts | either | PASS |
+| not delivering — dead, unwired, or drifted | active | WARN — the relay is not delivering verdicts; this server is covering |
+| not delivering — dead, unwired, or drifted | not available | FAIL — nothing is scanning content anywhere |
+| answers `PONG` | either | INFO — the relay predates the check |
+
+A dead scanner and a drifted contract share a severity on purpose: different
+faults, one finding (the verdict is not reaching the tenant) and one remedy
+(rebuild the relay). Which it was survives in the detail text.
+
+The reconcile pass also raises the change on the signal bus —
+`mailbox.relay_scanner_down` and `mailbox.relay_scanner_recovered`, both
+topic-subscribable — **on transition only**, comparing against the cached state,
+so a relay that stays broken is announced once rather than every pass. A finding
+that lives only on the Setup tab is found by opening the Setup tab, which nobody
+does until mail already looks wrong.
 
 **Provisioning paths**, primary first:
 

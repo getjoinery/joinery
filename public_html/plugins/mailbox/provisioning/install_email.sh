@@ -2,6 +2,9 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.15 - The sqlite3 package is named for the PHP actually on the box,
+#                not pinned to 8.3, so provisioning on any other PHP stops asking
+#                apt for a package that does not exist there
 # Version: 2.14 - Only Spamhaus (zen + dbl) is rejected on at RCPT time; SpamCop
 #                and Barracuda list shared ESP outbound IPs on brief triggers, so
 #                rejecting on them permanently bounced ordinary Mailgun/SendGrid mail
@@ -172,11 +175,22 @@ fi
 echo "PHP CLI: ${PHP_BIN}"
 
 # --- 1. install packages -----------------------------------------------------
-# php8.3-sqlite3 (ext-sqlite3, FTS5 compiled in) backs MailboxIndex, the sealed
-# mailbox search index (specs/implemented/inbound_email_encryption_at_rest.md §
-# 6) — pinned to the dev/prod PHP 8.3 line; bump alongside a PHP version
-# upgrade. ext-apcu (the unlock window's key store) ships with the base image.
-PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc php8.3-sqlite3)
+# ext-sqlite3 (FTS5 compiled in) backs MailboxIndex, the sealed mailbox search
+# index (specs/implemented/inbound_email_encryption_at_rest.md § 6). The package
+# is named for the PHP that loads it, so it is derived from the interpreter
+# resolved above rather than written out: a pinned name either does not exist on
+# the box, or installs the extension into a PHP nothing here runs — and then the
+# extension is present, apt is satisfied, and the index fails at first use.
+# Derived from PHP_BIN because that is the interpreter the Postfix pipe
+# transport calls. A box whose web PHP is a different version needs that one's
+# sqlite3 package too, which is not something this script provisions.
+# ext-apcu (the unlock window's key store) ships with the base image.
+PHP_VERSION="$("${PHP_BIN}" -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)"
+if [[ -z "${PHP_VERSION}" ]]; then
+    echo "ERROR: could not read a version from ${PHP_BIN}; cannot name the sqlite3 package." >&2
+    exit 1
+fi
+PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc "php${PHP_VERSION}-sqlite3")
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then
