@@ -12,8 +12,9 @@
  * A site owner answers one question (file spam?) plus one optional capability
  * (learn from corrections?). The scanner itself ships with the mail stack and
  * is never derived — what IS derived is how it is used: whether learning
- * resolves on (clamped by filing), what scanned a message upstream, and
- * whether arriving mail is re-scored here. This test walks the full matrix:
+ * resolves on (clamped by filing), what scanned a message upstream, whether
+ * arriving mail is re-scored here, and whether that local answer replaces the
+ * upstream one or merely adds to it. This test walks the full matrix:
  *
  *   topology  colocated / self-hosted relay / hosted fleet slot
  *   provider  postfix / webhook (mailgun) / empty string (resolves to postfix)
@@ -25,14 +26,20 @@
  * and a hand-built fact array would step straight over the class of bug where
  * an unloaded collection silently reports nothing.
  *
- * The cell that matters most: relay/webhook + learning on → mail IS re-scored
- * here through the tenant corpus (the capability a stateless shared relay
- * cannot provide), while colocated mail never is — its own milter already
- * scored it.
+ * The two cells that matter most are both on a fronted deployment. With
+ * learning OFF, mail is still re-scored here — a stateless upstream's header
+ * may never have been stamped, which looks exactly like a clean verdict — but
+ * that answer can only ADD spam. With learning ON it REPLACES the upstream
+ * verdict, the only arrangement in which "not spam" can subtract. Colocated
+ * mail is never re-scored in any cell: its own milter already did this scan.
+ *
+ * scanAtIngest() is deliberately pure (settings + topology), never the live
+ * scanner probe — that is scannerAvailable(), which the router ANDs in — so
+ * this matrix asserts the same on a box with no rspamd running.
  *
  * Run: php tests/run.php db --filter=spam_policy
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -64,6 +71,9 @@ class SpamPolicyTest {
 		check(MailboxSpamPolicy::scanAtIngest() === $expect['scan'],
 			$label . ': ingest re-scan ' . ($expect['scan'] ? 'on' : 'off'),
 			'got ' . var_export(MailboxSpamPolicy::scanAtIngest(), true));
+		check(MailboxSpamPolicy::localVerdictReplaces() === $expect['replaces'],
+			$label . ': local verdict ' . ($expect['replaces'] ? 'replaces' : 'only adds'),
+			'got ' . var_export(MailboxSpamPolicy::localVerdictReplaces(), true));
 	}
 
 	/**
@@ -74,16 +84,17 @@ class SpamPolicyTest {
 		// No ingest re-scan in any colocated cell: the box's own milter already
 		// scored the mail through the same rspamd and the same corpus.
 		$this->assertCell($prefix . ' filing=on learning=off', true, false,
-			array('learning' => false, 'scan' => false));
-		// Learning adds the corpus but not a second scan of the same mail.
+			array('learning' => false, 'scan' => false, 'replaces' => false));
+		// Learning adds the corpus but not a second scan of the same mail. The
+		// milter's verdict IS the local one, so there is nothing to replace.
 		$this->assertCell($prefix . ' filing=on learning=on', true, true,
-			array('learning' => true, 'scan' => false));
+			array('learning' => true, 'scan' => false, 'replaces' => true));
 		// Filing off: nothing is filed, so nothing needs scanning or learning.
 		$this->assertCell($prefix . ' filing=off learning=off', false, false,
-			array('learning' => false, 'scan' => false));
+			array('learning' => false, 'scan' => false, 'replaces' => false));
 		// Learning is CLAMPED by filing — a stored preference, inert.
 		$this->assertCell($prefix . ' filing=off learning=on (clamped)', false, true,
-			array('learning' => false, 'scan' => false));
+			array('learning' => false, 'scan' => false, 'replaces' => false));
 	}
 
 	/**
@@ -91,18 +102,22 @@ class SpamPolicyTest {
 	 * webhook provider) already scanned every message.
 	 */
 	private function walkFronted(string $prefix): void {
-		// Filing on, learning off: the upstream verdict is enough — no corpus
-		// here means a local re-score would add nothing.
+		// Filing on, learning off: mail IS re-scored here. The upstream scanner
+		// is stateless and a header it never stamped is indistinguishable from a
+		// clean verdict, so the only way to know is to look. Without a corpus
+		// that local answer merely ADDS spam — it never overrules the upstream.
 		$this->assertCell($prefix . ' filing=on learning=off', true, false,
-			array('learning' => false, 'scan' => false));
-		// Learning on: the corpus lives nowhere else, so the upstream verdict
-		// is re-scored here against what it knows.
+			array('learning' => false, 'scan' => true, 'replaces' => false));
+		// Learning on: the corpus lives nowhere else, so the local answer now
+		// REPLACES the upstream one — the only arrangement in which a user's
+		// "not spam" correction can subtract.
 		$this->assertCell($prefix . ' filing=on learning=on', true, true,
-			array('learning' => true, 'scan' => true));
+			array('learning' => true, 'scan' => true, 'replaces' => true));
+		// Filing off short-circuits the whole feature, scanning included.
 		$this->assertCell($prefix . ' filing=off learning=off', false, false,
-			array('learning' => false, 'scan' => false));
+			array('learning' => false, 'scan' => false, 'replaces' => false));
 		$this->assertCell($prefix . ' filing=off learning=on (clamped)', false, true,
-			array('learning' => false, 'scan' => false));
+			array('learning' => false, 'scan' => false, 'replaces' => false));
 	}
 
 	/** Create a relay row so topology() resolves through a real collection load. */

@@ -23,21 +23,27 @@
  *   - content layer (specs/mailbox_spam_filtering_simplification.md): classifySpam
  *     OR semantics, readSpamHeader parsing, and that resolveContentSpam reads an
  *     arriving verdict whether or not this box runs its own scanner
- *   - ingest-time re-scan: with learning on and something upstream having scanned,
- *     the local verdict REPLACES the upstream one in BOTH directions — local spam
- *     overrides an upstream ham, and local ham RESCUES a message the upstream
- *     flagged. A scanner that is down leaves the upstream verdict standing.
+ *   - ingest-time re-scan, where something upstream scanned and a scanner runs
+ *     here. Learning OFF: the scan runs and can only ADD — local spam fires on a
+ *     message the upstream let through, but local ham never overturns an upstream
+ *     spam verdict. Learning ON: the local verdict REPLACES the upstream one in
+ *     BOTH directions, so local ham RESCUES a message the upstream flagged. A
+ *     scanner that is down leaves the upstream verdict standing; a box with no
+ *     scanner at all is never called.
  *   - the /checkv2 response reading, including the score fallback and garbage
  *
  * The ingest scan is exercised through a router subclass that substitutes the
  * transport, so the test needs no rspamd; the response READING is tested against
- * literal rspamd bodies. Topology stays out of it — the webhook provider makes
- * "something upstream scanned" true from settings alone, so this stays a safe
- * (no DB write, no host state) test. The topology matrix is spam_policy_test.
+ * literal rspamd bodies. Scanner PRESENCE is pinned with
+ * MailboxSpamPolicy::overrideScannerAvailable() rather than probed, so the same
+ * assertions hold on a box that happens to be running rspamd and on one that is
+ * not. Topology stays out of it — the webhook provider makes "something upstream
+ * scanned" true from settings alone, so this stays a safe (no DB write, no host
+ * state) test. The topology matrix is spam_policy_test.
  *
  * Run: php plugins/mailbox/tests/spam_filtering_test.php
  *
- * @version 1.3
+ * @version 1.4
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -223,8 +229,10 @@ class SpamFilteringTest {
 		// --- resolveContentSpam(): an arriving verdict is always read ---
 		section('resolveContentSpam');
 		$hamBody = "From: a@b.com\nSubject: hi\n\nbody";
-		// A relay-fronted deployment runs no local rspamd, so nothing about the
-		// local scanner may decide whether the relay's verdict is believed.
+		// No scanner here, so this section reads arriving verdicts only — pinned
+		// rather than probed so it asserts the same on any box (and never fires a
+		// real HTTP scan from a test).
+		MailboxSpamPolicy::overrideScannerAvailable(false);
 		$this->setLearning(false);
 		$this->eq('spam', $this->resolveContentSpam($spamRaw)['signal'],
 			'no local scanner → the relay-stamped X-Spam header is still read');
@@ -243,16 +251,41 @@ class SpamFilteringTest {
 		$this->eq('none', $provNone['signal'], 'provider result=none → none (score recorded, no flag)');
 		$this->eq(1.0, $provNone['score'], 'provider score still recorded');
 
-		// --- ingest-time re-scan replaces the upstream verdict ---
+		// --- ingest-time re-scan ---
 		section('ingest re-scan');
 		$LOCAL_SPAM = array('signal' => 'spam', 'score' => 11.5);
 		$LOCAL_HAM  = array('signal' => 'ham',  'score' => -1.2);
+		MailboxSpamPolicy::overrideScannerAvailable(true);
 
-		// Learning off: no re-scan happens at all, whatever the topology.
+		// Learning off: the scan still RUNS — a stateless upstream's header may
+		// never have been stamped, which is indistinguishable from a clean
+		// verdict — but its answer can only ADD spam.
 		$this->setUpstreamScanned(true);
 		$this->setLearning(false);
 		$r = $this->resolveWithScan($LOCAL_SPAM, $hamBody);
-		$this->eq('none', $r['signal'], 'learning off → no local scan, upstream verdict stands');
+		$this->eq('spam', $r['signal'], 'learning off → local scan still adds spam the upstream missed');
+		$this->eq(11.5, $r['score'], 'the local score is recorded when the local scan is what fired');
+
+		// ...and it must NOT subtract. Without a corpus the local scan is the same
+		// static ruleset the upstream ran, minus the milter's live SMTP context.
+		$r = $this->resolveWithScan($LOCAL_HAM, $spamRaw);
+		$this->eq('spam', $r['signal'], 'learning off → local ham never overturns an upstream spam verdict');
+		$this->eq(7.31, $r['score'], 'the upstream score stands: it is what decided the disposition');
+		$r = $this->resolveWithScan($LOCAL_HAM, $hamBody,
+			array('result' => 'spam', 'score' => 9.9, 'source' => 'mailgun'));
+		$this->eq('spam', $r['signal'], 'learning off → nor does it overturn a webhook provider flag');
+
+		// A colocated box is never re-scanned even with a scanner right there:
+		// its own milter already ran exactly this scan.
+		$this->setUpstreamScanned(false);
+		$router = new ScriptedScanRouter();
+		$router->scan_result = $LOCAL_SPAM;
+		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
+		$m->setAccessible(true);
+		$m->invoke($router, $hamBody, null);
+		check($router->scan_calls === 0, 'colocated → the scanner is not called',
+			'scan_calls = ' . $router->scan_calls);
+		$this->setUpstreamScanned(true);
 
 		// Learning on, something upstream scanned: the local verdict wins.
 		$this->setLearning(true);
@@ -302,6 +335,27 @@ class SpamFilteringTest {
 		check($router->scan_calls === 0,
 			'colocated + learning on → no ingest re-scan (the milter already scored it)',
 			'scan_calls = ' . $router->scan_calls);
+
+		// No scanner on the box: the posture still says "should", but nothing is
+		// attempted — a webhook-only deployment must not spend a failed request
+		// and an error_log line on every message it receives.
+		$this->setUpstreamScanned(true);
+		MailboxSpamPolicy::overrideScannerAvailable(false);
+		$router = new ScriptedScanRouter();
+		$router->scan_result = $LOCAL_SPAM;
+		$m->invoke($router, $hamBody, null);
+		check($router->scan_calls === 0, 'no scanner running → the scanner is not called',
+			'scan_calls = ' . $router->scan_calls);
+		check(MailboxSpamPolicy::scanAtIngest() === true,
+			'...though the posture still reads "scan" — presence is observed, not policy');
+
+		// Filing off short-circuits the whole feature, scanning included.
+		$this->setGate(false);
+		MailboxSpamPolicy::overrideScannerAvailable(true);
+		check(MailboxSpamPolicy::scanAtIngest() === false,
+			'filing off → no ingest scan (no verdict is recorded, so none could matter)');
+		$this->setGate(true);
+		MailboxSpamPolicy::overrideScannerAvailable(null);
 
 		// --- reading an rspamd /checkv2 response ---
 		section('interpretScanResponse');

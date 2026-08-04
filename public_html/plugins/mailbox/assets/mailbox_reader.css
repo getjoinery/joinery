@@ -461,6 +461,14 @@
 }
 .mbx-message-from { font-weight: 600; color: #1f2933; }
 .mbx-message-meta { color: #6b7280; font-size: var(--mbx-text-sm); }
+
+/* Authentication line. A message nothing checked is the ordinary case for
+   imported and IMAP-collected mail, so it stays neutral grey — only a verdict
+   that actually FAILED earns colour, or the warning stops meaning anything. */
+.mbx-auth { cursor: help; }
+.mbx-auth-verified { color: #3f7c53; }
+.mbx-auth-failed { color: #b23c3c; font-weight: 600; }
+.mbx-auth-partial { color: #8a6d3b; }
 .mbx-message-time { color: #9097a1; font-size: var(--mbx-text-sm); white-space: nowrap; }
 .mbx-message-right { display: flex; align-items: center; gap: 4px; flex: 0 0 auto; }
 

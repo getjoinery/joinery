@@ -423,7 +423,7 @@
             "group": "spam",
             "label": "Learn from what users mark as spam",
             "type": "checkbox",
-            "helptext": "Corrections in the reader train a spam filter on this deployment own mail. What it learns is yours alone — a shared relay is deliberately stateless and cannot learn for you.",
+            "helptext": "Corrections in the reader train a spam filter on this deployment own mail, and its answer then outranks the upstream scanner's — which is what lets marking a message not spam bring it back. What it learns is yours alone — a shared relay is deliberately stateless and cannot learn for you.",
             "show_when": {
                 "mailbox_spam_filtering_enabled": "1"
             }

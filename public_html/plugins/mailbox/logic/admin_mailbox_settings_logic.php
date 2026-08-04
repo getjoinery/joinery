@@ -10,7 +10,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * hostname/IP, SRS, the relay, and the health run). One POST saves the whole
  * form; values are read back fresh on the redirect.
  *
- * @version 1.3
+ * @version 1.4
  */
 function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -172,13 +172,18 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			default:
 				$scanner_state = 'This server receives mail directly, so it scans mail itself.';
 		}
-		if (MailboxSpamPolicy::learningEnabled() && $upstream !== 'none') {
-			$scanner_state .= ' Because this deployment is learning, it scores that mail again'
-				. ' itself using what it has learned.';
+		if ($upstream !== 'none' && $scanner_present) {
+			$scanner_state .= MailboxSpamPolicy::learningEnabled()
+				? ' This server scores that mail again itself, using what it has learned'
+					. ' from your corrections, and its own answer is the one that counts.'
+				: ' This server scores that mail again itself as a second opinion — it can'
+					. ' catch spam the upstream scanner missed, but it never overrules it.'
+					. ' Turn on learning below and its answer becomes the one that counts,'
+					. ' so marking a message "not spam" can bring it back.';
 		}
 		if (!$scanner_present) {
-			$scanner_state .= ' No spam scanner is running on this server, so learning from '
-				. 'user corrections is unavailable.';
+			$scanner_state .= ' No spam scanner is running on this server, so mail is not'
+				. ' scored again here and learning from user corrections is unavailable.';
 		}
 	}
 

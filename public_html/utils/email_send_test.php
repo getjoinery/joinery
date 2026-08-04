@@ -16,10 +16,11 @@
  * and the stored authentication verdicts — with no external mailbox, no IMAP, no
  * app password. The verdicts shown are the ones the router stored from the
  * message's Authentication-Results header (read by AuthenticationResults, never
- * recomputed here); without a verifying milter they read "unverified". A second
- * mode sends to any external address for a manual deliverability spot-check.
+ * recomputed here); where nothing on the way in checked the message they read
+ * "unverified". A second mode sends to any external address for a manual
+ * deliverability spot-check.
  *
- * @version 2.1
+ * @version 2.2
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -134,9 +135,12 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
 
     // The SPF/DKIM/DMARC verdicts are the ones the router already stored —
     // read from the message's Authentication-Results header by
-    // AuthenticationResults at receive time, never recomputed here. auth_source
-    // tells the client whether a verifying milter stamped them ('milter') or
-    // the message is honestly 'unverified' (source 'none').
+    // AuthenticationResults at receive time, never recomputed here. Whether the
+    // source counts as a trusted verifier is InboundEmailMessage::
+    // authIsVerified()'s call, resolved here rather than by a list in the page's
+    // JavaScript — one that lagged the router and called relay- and SES-verified
+    // mail "unverified".
+    require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
     echo json_encode([
         'found'       => true,
         'id'          => (int)$row['iem_inbound_email_message_id'],
@@ -148,7 +152,8 @@ if (isset($_GET['check']) && $_GET['check'] !== '') {
             'spf'    => $row['iem_spf_result'],
             'dkim'   => $row['iem_dkim_result'],
             'dmarc'  => $row['iem_dmarc_result'],
-            'source' => $row['iem_auth_source'] ?: 'none',
+            'source'   => $row['iem_auth_source'] ?: 'none',
+            'verified' => InboundEmailMessage::authIsVerified($row['iem_auth_source']),
         ],
         'reader_url'  => '/plugins/mailbox/admin/admin_mailbox_message?iem_inbound_email_message_id=' . (int)$row['iem_inbound_email_message_id'],
     ]);
@@ -327,7 +332,7 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
     function render(d) {
         wait.style.display = 'none';
         var a = d.auth || {};
-        var verified = (a.source === 'milter' || a.source === 'mailgun');
+        var verified = !!a.verified;
         var html = '<div class="card"><div class="card-header bg-success text-white">✓ Round-trip complete — message received and stored</div><div class="card-body">';
         html += '<p><strong>From:</strong> ' + esc(d.sender) + '<br><strong>Subject:</strong> ' + esc(d.subject) + '<br><strong>Received:</strong> ' + esc(d.received) + '</p>';
         var dk = d.dkim || {};
@@ -348,9 +353,12 @@ echo '<a href="/utils/email_send_test" class="btn btn-outline-secondary mt-3">Ru
                   + esc(a.source) + '). The app never computes them itself.</p>';
         } else {
             html += '<p class="text-muted small">This shows a DKIM signature is present and which domain signed it. '
-                  + 'SPF/DKIM/DMARC <em>verdicts</em> read <strong>unverified</strong> because no verifying milter stamped an '
-                  + '<code>Authentication-Results</code> header on receipt — install/repair the opendkim-verify + opendmarc '
-                  + 'milters (Inbound Email &rarr; Setup), or use <strong>External</strong> mode and check the message\'s "Show original".</p>';
+                  + 'The SPF/DKIM/DMARC <em>verdicts</em> read <strong>unverified</strong>: nothing checked this message '
+                  + 'on the way in, so there is no result to report. Whatever receives your mail is what performs those '
+                  + 'checks and records the answer in an <code>Authentication-Results</code> header — on a server that '
+                  + 'hosts its own mail that is the <code>opendkim</code> + <code>opendmarc</code> pair, which you can '
+                  + 'install or repair from Inbound Email &rarr; Setup. Alternatively use <strong>External</strong> mode '
+                  + 'and read the receiving provider\'s own verdict under "Show original".</p>';
         }
         html += '<a class="btn btn-sm btn-outline-primary" href="' + d.reader_url + '">Open the stored message</a>';
         html += '</div></div>';

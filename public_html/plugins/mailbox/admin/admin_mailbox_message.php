@@ -11,13 +11,14 @@
  * logic layer before the body reaches this view (the sandboxed iframe sends
  * no cookies, so the URLs must authorize themselves).
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_message_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
 $page_vars = process_logic(admin_mailbox_message_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
@@ -67,13 +68,26 @@ echo '<dt class="col-sm-2">Alias</dt><dd class="col-sm-10">' . htmlspecialchars(
 echo '<dt class="col-sm-2">Message-ID</dt><dd class="col-sm-10">' . htmlspecialchars($message->get('iem_message_id_header') ?: '(none)') . '</dd>';
 
 // Authentication: SPF/DKIM/DMARC are READ from the verifying MTA's
-// Authentication-Results header (iem_auth_source = 'milter'), never computed
-// here. With no verifying milter the message is honestly "unverified" — we
-// never render a bare red fail the app can't stand behind.
-$auth_source = $message->get('iem_auth_source') ?: 'none';
-$auth_verified = ($auth_source === 'milter' || $auth_source === 'mailgun');
+// Authentication-Results header, never computed here — and we never render a
+// bare red fail the app can't stand behind. What the verdicts MEAN in plain
+// language, and which sources count as verified at all, is
+// InboundEmailMessage::authReadout() — shared with the reader so the two views
+// cannot drift.
+$auth = InboundEmailMessage::authReadout(
+	$message->get('iem_auth_source'), $message->get('iem_spf_result'),
+	$message->get('iem_dkim_result'), $message->get('iem_dmarc_result'),
+	$message->get('iem_mir_mail_import_run_id') ? 'import'
+		: ($message->get('iem_iia_inbound_imap_account_id') ? 'imap' : null));
+$state_cls = array('verified' => 'bg-success', 'failed' => 'bg-danger',
+	'partial' => 'bg-warning', 'unchecked' => 'bg-secondary');
 echo '<dt class="col-sm-2">Authentication</dt><dd class="col-sm-10">';
-if ($auth_verified) {
+echo '<span class="badge ' . ($state_cls[$auth['state']] ?? 'bg-secondary') . ' me-1">'
+	. htmlspecialchars($auth['headline']) . '</span>';
+if ($auth['state'] === 'unchecked') {
+	echo ' <span class="text-muted small">' . htmlspecialchars($auth['detail']) . '</span>';
+} else {
+	// The raw verdicts stay visible here — this is the diagnostic view, and an
+	// operator chasing a delivery problem needs which of the three failed.
 	$verdict_cols = array('SPF' => 'iem_spf_result', 'DKIM' => 'iem_dkim_result', 'DMARC' => 'iem_dmarc_result');
 	foreach ($verdict_cols as $lbl => $col) {
 		$v = strtolower((string)$message->get($col));
@@ -82,11 +96,7 @@ if ($auth_verified) {
 			: (in_array($v, array('fail', 'softfail', 'permerror', 'temperror'), true) ? 'bg-danger' : 'bg-secondary');
 		echo '<span class="badge ' . $cls . ' me-1">' . htmlspecialchars($lbl . ': ' . $v) . '</span>';
 	}
-	$src_text = ($auth_source === 'milter') ? 'verified by this mail server' : 'verified by ' . $auth_source;
-	echo ' <span class="text-muted small">(' . htmlspecialchars($src_text) . ')</span>';
-} else {
-	echo '<span class="badge bg-secondary">unverified</span> '
-		. '<span class="text-muted small">no verifying milter installed — SPF/DKIM/DMARC were not checked on receipt</span>';
+	echo ' <span class="text-muted small">(checked by ' . htmlspecialchars((string)$auth['checked_by']) . ')</span>';
 }
 echo '</dd>';
 

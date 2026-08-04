@@ -15,9 +15,32 @@
  * (install_email.sh installs it unconditionally) and is never removed by the
  * platform, so activating learning on day 2 is a pure settings toggle — no
  * command to run, nothing to install. What IS derived is how the scanner is
- * used:
+ * used, and that splits into three questions kept deliberately apart:
  *
- *   scanAtIngest() = learningEnabled() AND something upstream scanned
+ *   scanAtIngest()        = filingEnabled() AND something upstream scanned
+ *   scannerAvailable()    = the controller is answering right now (OBSERVED)
+ *   localVerdictReplaces() = learningEnabled()
+ *
+ * The first is POSTURE — pure settings and topology, so it is deterministic and
+ * testable on any box. The second is CAPABILITY — a live observation, memoized
+ * per request, that the router ANDs in before it tries. Keeping them apart is
+ * what lets the posture be asserted in a test without a scanner running, and
+ * stops a dead scanner from reading as a policy decision.
+ *
+ * Scanning at ingest does NOT require learning. An upstream scanner — a shared
+ * relay or a webhook provider — is deliberately stateless, and its verdict is
+ * the only content signal a fronted deployment would otherwise ever get. Where
+ * a scanner is running here, running it is worth more than trusting a header
+ * that may never have been stamped. What learning changes is how much that
+ * local verdict is trusted:
+ *
+ *   - Learning OFF: the local verdict is OR'd into the upstream one. It can add
+ *     spam, never subtract it. Without a corpus the local scan is the same
+ *     static ruleset the upstream ran, minus the live SMTP client context a
+ *     milter sees, so it is not better informed and must not override.
+ *   - Learning ON: the local verdict REPLACES the upstream one. The corpus is
+ *     knowledge that exists nowhere else, and replacement is what lets a user's
+ *     "not spam" correction actually subtract — an OR could only ever add.
  *
  * A box with no mail stack of its own (webhook-only, or relay-fronted from
  * birth) never ran a root provisioning script and has no scanner; learning is
@@ -36,7 +59,7 @@
  *     reached. The stored row survives as a remembered preference, inert until
  *     filing returns.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
@@ -57,6 +80,12 @@ class MailboxSpamPolicy {
 
 	/** @var InboundEmailSetupCheck|null Topology source, resolved once per request. */
 	private static $setup_check = null;
+
+	/** @var bool|null Memoized scannerAvailable() probe, one per request. */
+	private static $scanner_available = null;
+
+	/** @var bool|null Test-pinned scanner presence; outranks the probe. */
+	private static $scanner_override = null;
 
 	/**
 	 * Whether suspected spam is filed into the reviewable Spam view. The one
@@ -105,27 +134,73 @@ class MailboxSpamPolicy {
 	}
 
 	/**
-	 * Whether a message should be re-scored locally at ingest, replacing the
-	 * verdict that arrived with it.
+	 * Whether a message SHOULD be re-scored locally at ingest — posture only.
+	 * The caller ANDs in scannerAvailable() before it actually tries.
 	 *
 	 * Two conditions, both necessary:
-	 *   - Learning is on, so a tenant corpus exists that the upstream scanner
-	 *     does not have. Without it a local re-score adds nothing.
+	 *   - Filing is on. With it off no verdict is recorded at all, so scanning
+	 *     could not change an outcome.
 	 *   - Something OTHER than this box's own milter produced the arriving
 	 *     verdict. On a colocated deployment the milter already scored the
 	 *     message through the same rspamd and the same corpus, so re-scanning
 	 *     would repeat work on a raw that already carries the headers rspamd
 	 *     stamped.
 	 *
-	 * The local verdict REPLACES the upstream content signal rather than being
-	 * OR'd with it: a Bayes-less relay verdict that OR'd in could only ever add
-	 * spam, never subtract it, so a user's "not spam" corrections would never
-	 * change a disposition. The local scanner runs the same static ruleset PLUS
-	 * the tenant corpus, so it is strictly better informed. (Auth-rule
-	 * classification is unaffected and still OR's in — see classifySpam.)
+	 * Learning is deliberately NOT a condition — see the class docblock. A
+	 * fronted deployment's only content signal is a header from a stateless
+	 * upstream, and a header that was never stamped is indistinguishable from a
+	 * clean verdict. Scanning here is how that becomes observable. Whether the
+	 * local verdict replaces the upstream one or merely adds to it is the
+	 * separate question localVerdictReplaces() answers.
+	 *
+	 * (Auth-rule classification is unaffected and still OR's in — see
+	 * classifySpam.)
 	 */
 	public static function scanAtIngest(): bool {
-		return self::learningEnabled() && self::upstreamScanner() !== 'none';
+		return self::filingEnabled() && self::upstreamScanner() !== 'none';
+	}
+
+	/**
+	 * Whether the local verdict REPLACES the upstream content signal rather than
+	 * being OR'd with it. True only where a tenant corpus exists, because only
+	 * then is the local scanner better informed than the upstream one — and only
+	 * then does replacement buy anything, since an OR can add spam but never
+	 * subtract it, so a user's "not spam" correction could never change a
+	 * disposition. See the class docblock.
+	 */
+	public static function localVerdictReplaces(): bool {
+		return self::learningEnabled();
+	}
+
+	/**
+	 * Whether a scan can actually be attempted right now — controllerReachable()
+	 * memoized for the request, so a spool run pulling a hundred messages probes
+	 * once rather than per message.
+	 *
+	 * Separate from controllerReachable() itself, which the Settings page and the
+	 * health probe call directly and must always see fresh.
+	 */
+	public static function scannerAvailable(): bool {
+		if (self::$scanner_override !== null) {
+			return self::$scanner_override;
+		}
+		if (self::$scanner_available === null) {
+			self::$scanner_available = self::controllerReachable();
+		}
+		return self::$scanner_available;
+	}
+
+	/**
+	 * Pin scanner presence for a test run; null restores live probing.
+	 *
+	 * Whether a message is re-scored is half posture (scanAtIngest, pure) and
+	 * half live observation (scannerAvailable). A test asserting the behaviour
+	 * that follows from both has to pin the observation, or it would pass or
+	 * fail on whether rspamd happens to be running on the box executing it.
+	 * Deliberately survives reset(), which clears the ordinary memo.
+	 */
+	public static function overrideScannerAvailable(?bool $available): void {
+		self::$scanner_override = $available;
 	}
 
 	/** The rspamd controller endpoint, defaulted to loopback. */
@@ -195,12 +270,13 @@ class MailboxSpamPolicy {
 	}
 
 	/**
-	 * Forget the cached topology source. Tests that create or delete relay rows
-	 * mid-run call this; nothing in production needs it (topology cannot change
-	 * within one request).
+	 * Forget the cached topology source and the memoized scanner probe. Tests
+	 * that create or delete relay rows mid-run call this; nothing in production
+	 * needs it (neither can change within one request).
 	 */
 	public static function reset(): void {
 		self::$setup_check = null;
+		self::$scanner_available = null;
 	}
 }
 ?>

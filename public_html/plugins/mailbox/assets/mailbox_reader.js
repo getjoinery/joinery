@@ -1449,16 +1449,23 @@
 	}
 
 	// SPF/DKIM/DMARC verdicts are READ from the message's Authentication-Results
-	// header (auth_source 'milter'/'mailgun'), never computed. Without a
-	// verifying milter the message is honestly "unverified".
+	// header, never computed. The plain-language reading of them is resolved
+	// server-side (InboundEmailMessage::authReadout) so this view, the admin
+	// message view and any native client cannot drift apart — and so no client
+	// keeps its own list of which auth_source values count as verified.
+	//
+	// The line leads with what it means to a person and keeps the acronyms as
+	// supporting detail: "Sender verified · checked by your mail relay", with
+	// "SPF pass · DKIM pass · DMARC pass" on hover.
 	function authText(m) {
+		var a = m.auth;
 		var base;
-		if (m.auth_source === 'milter' || m.auth_source === 'mailgun') {
-			base = 'SPF ' + (m.spf_result || 'none')
-				+ ' · DKIM ' + (m.dkim_result || 'none')
-				+ ' · DMARC ' + (m.dmarc_result || 'none');
+		if (a && a.headline) {
+			base = a.headline;
+			if (a.checked_by) base += ' · checked by ' + a.checked_by;
+			else if (a.detail) base += ' — ' + a.detail;
 		} else {
-			base = 'Authentication: unverified (no verifying milter)';
+			base = 'Sender not checked';
 		}
 		// Content-spam score (specs/inbound_email_content_spam_filtering.md): shown for
 		// transparency when the scanner reported one; never affects disposition.
@@ -1466,6 +1473,16 @@
 			base += ' · spam score ' + m.spam_score;
 		}
 		return base;
+	}
+
+	// The acronyms behind the headline, for the line's title attribute. A checked
+	// message shows its three verdicts; an unchecked one shows why nothing checked
+	// it, which is the question the headline actually raises.
+	function authTitle(m) {
+		var a = m.auth;
+		if (!a) return '';
+		if (a.state === 'unchecked') return a.detail || '';
+		return a.detail + (a.checked_by ? ' (verified by ' + a.checked_by + ')' : '');
 	}
 
 	// AI security scan (specs/joinery_ai_email_security_scan.md). ai_scan is
@@ -1503,7 +1520,13 @@
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
 		// Bcc line: only your own Sent copy carries it (its own sealed column).
 		if (outbound && m.bcc) left.appendChild(el('div', 'mbx-message-meta', 'Bcc: ' + m.bcc));
-		if (!outbound) left.appendChild(el('div', 'mbx-message-meta', authText(m)));
+		if (!outbound) {
+			var authLine = el('div',
+				'mbx-message-meta mbx-auth mbx-auth-' + ((m.auth && m.auth.state) || 'unchecked'),
+				authText(m));
+			authLine.title = authTitle(m);
+			left.appendChild(authLine);
+		}
 		head.appendChild(left);
 
 		var right = el('div', 'mbx-message-right');

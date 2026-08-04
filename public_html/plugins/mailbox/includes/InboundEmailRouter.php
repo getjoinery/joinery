@@ -58,14 +58,16 @@
  * path by resolveContentSpam(). An arriving verdict is ALWAYS read, whatever this
  * box runs: the X-Spam header readSpamHeader() parses (stamped by the relay's rspamd
  * on a relay-fronted deployment, by the local milter on a colocated one) or a webhook
- * provider's own spam flag passed in as $provider_spam. On top of that, a deployment
- * that learns from its users' corrections re-scores relay- and webhook-sourced mail
- * through its own rspamd at ingest (scanContentSpam), and that verdict REPLACES the
- * upstream one — the local scanner runs the same static rules plus a corpus of this
- * deployment's own mail, so it is the better-informed of the two, and only it can
- * rescue a false positive. Colocated mail is not re-scored: its milter already did
- * exactly this scan. A scanner that is absent or down costs nothing — the upstream
- * verdict stands and the message stores normally. The scanner's numeric score is
+ * provider's own spam flag passed in as $provider_spam. On top of that, any deployment
+ * with a scanner running re-scores relay- and webhook-sourced mail through its own
+ * rspamd at ingest (scanContentSpam) — an upstream scanner is stateless and its header
+ * may never have been stamped at all, which is indistinguishable from a clean verdict
+ * until something here looks. That local verdict is OR'd into the upstream one, or
+ * REPLACES it where the deployment learns from its users' corrections and so holds a
+ * corpus the upstream cannot have; only replacement can rescue a false positive.
+ * Colocated mail is not re-scored: its milter already did exactly this scan. A scanner
+ * that is absent or down costs nothing — the upstream verdict stands and the message
+ * stores normally. The scanner's numeric score is
  * recorded on the row (iem_spam_score) for transparency only — never read for
  * disposition. MailboxSpamPolicy owns every one of these decisions.
  *
@@ -82,7 +84,7 @@
  * senderDisplayString() owns the decode-and-sanitize; the IMAP and archive paths get
  * the same shape from Horde's envelope.
  *
- * @version 1.27
+ * @version 1.28
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -2051,10 +2053,10 @@ class InboundEmailRouter {
 	 * ['signal' => 'spam'|'ham'|'none', 'score' => ?float].
 	 *
 	 * A verdict another system already computed is always read — reading a header
-	 * costs nothing and needs no scanner here, and a relay-fronted deployment has
-	 * no local rspamd by design while its relay stamps X-Spam on every message.
-	 * Whether the signal changes any disposition is the filing switch's call,
-	 * enforced separately in classifySpam.
+	 * costs nothing and needs no scanner here, and on a box with no scanner of its
+	 * own the upstream's X-Spam is the only content signal there is. Whether the
+	 * signal changes any disposition is the filing switch's call, enforced
+	 * separately in classifySpam.
 	 *
 	 *   - Webhook providers (Mailgun/SendGrid/SES) supply their own content/reputation
 	 *     spam flag in the authenticated payload; the dispatcher hands it in as
@@ -2064,13 +2066,20 @@ class InboundEmailRouter {
 	 *     the raw, trusted on the same basis as the Authentication-Results line (the
 	 *     milter is ours; an external X-Spam is stripped by rspamd before it re-stamps).
 	 *
-	 * When this deployment learns from its users' corrections AND the arriving
-	 * verdict came from something other than this box's own milter (a relay or a
-	 * webhook provider), the message is re-scored here through the local rspamd
-	 * and that verdict REPLACES the upstream one — see MailboxSpamPolicy::
-	 * scanAtIngest() for why replacement rather than OR. A scanner that is
-	 * missing, down or slow simply yields the upstream verdict: no message is
-	 * ever held, bounced or retried on the scanner's account.
+	 * When the arriving verdict came from something other than this box's own
+	 * milter (a relay or a webhook provider) and a scanner is running here, the
+	 * message is re-scored locally. How much that local verdict counts is
+	 * MailboxSpamPolicy::localVerdictReplaces():
+	 *
+	 *   - learning off → OR'd into the upstream signal. Without a corpus the
+	 *     local scan is the same static ruleset the upstream ran, minus the live
+	 *     SMTP client context a milter sees, so it may add spam but must never
+	 *     overturn an upstream spam verdict.
+	 *   - learning on  → REPLACES it, so a user's "not spam" corrections can
+	 *     actually subtract. An OR could only ever add.
+	 *
+	 * A scanner that is missing, down or slow simply yields the upstream verdict:
+	 * no message is ever held, bounced or retried on the scanner's account.
 	 *
 	 * @param string     $raw_email
 	 * @param array|null $provider_spam  ['result'=>spam|ham|none,'score'=>?float,'source'=>key]
@@ -2080,14 +2089,25 @@ class InboundEmailRouter {
 		$upstream = $this->readUpstreamContentSpam($raw_email, $provider_spam);
 
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
-		if (MailboxSpamPolicy::scanAtIngest() && (string)$raw_email !== '') {
-			$local = $this->scanContentSpam((string)$raw_email);
-			if ($local !== null) {
-				return $local;
-			}
+		if (!MailboxSpamPolicy::scanAtIngest() || (string)$raw_email === ''
+			|| !MailboxSpamPolicy::scannerAvailable()) {
+			return $upstream;
 		}
 
-		return $upstream;
+		$local = $this->scanContentSpam((string)$raw_email);
+		if ($local === null) {
+			return $upstream;
+		}
+		if (MailboxSpamPolicy::localVerdictReplaces()) {
+			return $local;
+		}
+
+		// OR: the local scan can only ADD spam. An upstream 'spam' always stands,
+		// and its score is kept — it is the verdict that decided the disposition.
+		if ($upstream['signal'] === 'spam') {
+			return $upstream;
+		}
+		return ($local['signal'] === 'spam') ? $local : $upstream;
 	}
 
 	/**
