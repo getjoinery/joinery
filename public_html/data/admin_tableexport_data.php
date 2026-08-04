@@ -30,7 +30,16 @@
 		if (empty($chead)) {
 			die("Invalid table name or table has no columns");
 		}
-		fputcsv($fp, $chead);
+		// Empty escape, not the default backslash. This writes arbitrary table
+		// contents, so a value holding a backslash immediately before a quote —
+		// any JSON or serialized column, where \" is ordinary — is written in a
+		// form no spreadsheet reads back correctly: the default suppresses the
+		// quote after the backslash, and {"k":"v\"q"} returns from Excel as
+		// {"k":"v\q""}". A plain backslash, a Windows path say, survives either
+		// way; it is escaped quotes that corrupt. '' is RFC 4180, which is what
+		// Excel and Sheets emit and expect, and is also what PHP 8.4 deprecates
+		// relying on the default for.
+		fputcsv($fp, $chead, ',', '"', '');
 
 		// GET TABLE DATA - Use validated table name (already sanitized on line 4)
 		// Note: Table names cannot be parameterized in FROM clause, but $tablename is pre-validated
@@ -39,7 +48,7 @@
 
 		while($row = $results->fetch(PDO::FETCH_NUM)){
 
-			fputcsv($fp, $row);
+			fputcsv($fp, $row, ',', '"', '');
 		}
 
 		fclose($fp);

@@ -132,7 +132,11 @@ class ApiAuth {
 		}
 
 		if ($authorized_ips = $api_entry->get('apk_ip_restriction')) {
-			$ip_list = array_map('trim', str_getcsv($authorized_ips));
+			// Empty escape (RFC 4180) rather than the deprecated default. An IP
+			// allowlist holds neither backslashes nor quotes, so this parses the
+			// same either way; it is here so no CSV call in the tree relies on a
+			// default PHP 8.4 deprecates.
+			$ip_list = array_map('trim', str_getcsv($authorized_ips, ',', '"', ''));
 			if (count($ip_list) && !in_array($source_ip, $ip_list)) {
 				self::auth_failure(401, 'Unauthorized IP: ' . $source_ip, 'Unauthorized IP');
 			}

@@ -422,6 +422,16 @@ class MailboxContacts {
 
 	/**
 	 * Extract "Name <email>" tokens from a Google-contacts CSV export.
+	 *
+	 * Parsed with an empty escape character. Google Contacts emits RFC 4180,
+	 * where a backslash is an ordinary character; PHP's default treats it as an
+	 * escape, so a backslash in a name or notes field swallows the quote after
+	 * it and shifts every remaining column on that row.
+	 *
+	 * Known limitation, unrelated to the escape: the split below is done before
+	 * any field is parsed, so a quoted field containing a newline — the Notes
+	 * column, routinely — still breaks row alignment.
+	 *
 	 * @return array{tokens: string[], empty: int}
 	 */
 	private function parseCsv(string $content): array {
@@ -429,7 +439,7 @@ class MailboxContacts {
 		if (!count($lines)) {
 			return array();
 		}
-		$header = str_getcsv(array_shift($lines));
+		$header = str_getcsv(array_shift($lines), ',', '"', '');
 		$name_cols = array();
 		$email_cols = array();
 		foreach ($header as $i => $col) {
@@ -458,7 +468,7 @@ class MailboxContacts {
 			if (trim($line) === '') {
 				continue;
 			}
-			$cells = str_getcsv($line);
+			$cells = str_getcsv($line, ',', '"', '');
 			$name = '';
 			foreach ($name_cols as $ci) {
 				if (isset($cells[$ci]) && trim($cells[$ci]) !== '') { $name = trim($cells[$ci]); break; }
