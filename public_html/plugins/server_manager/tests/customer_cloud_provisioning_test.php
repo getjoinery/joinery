@@ -492,6 +492,7 @@ class RdnsFakeDriver implements CloudComputeProvider {
 
 	public function createInstance(array $opts): array { throw new CloudComputeException('not used'); }
 	public function getInstance(string $instance_id): array { throw new CloudComputeException('not used'); }
+	public function rebuildInstance(string $instance_id, array $opts): array { throw new CloudComputeException('not used'); }
 	public function deleteInstance(string $instance_id): void { throw new CloudComputeException('not used'); }
 
 	public function setReverseDns(string $instance_id, string $ip, string $hostname): array {

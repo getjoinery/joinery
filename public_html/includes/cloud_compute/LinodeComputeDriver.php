@@ -6,7 +6,7 @@
  * instances it creates are billed by Linode to the customer. Requires the
  * 'linodes:read_write' OAuth scope.
  *
- * @version 1.1
+ * @version 1.2 - rebuildInstance().
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -55,6 +55,26 @@ class LinodeComputeDriver implements CloudComputeProvider {
 
 	public function getInstance(string $instance_id): array {
 		return $this->normalize($this->request('GET', 'linode/instances/' . rawurlencode($instance_id)));
+	}
+
+	public function rebuildInstance(string $instance_id, array $opts): array {
+		foreach (array('image', 'root_pass') as $required) {
+			if (empty($opts[$required])) {
+				throw new CloudComputeException('rebuildInstance missing required option: ' . $required);
+			}
+		}
+		$body = array(
+			'image'     => $opts['image'],
+			'root_pass' => $opts['root_pass'],
+			'booted'    => true,
+		);
+		if (!empty($opts['authorized_keys'])) {
+			$body['authorized_keys'] = array_values($opts['authorized_keys']);
+		}
+		// Linode keeps the Linode object and its IPv4 across a rebuild; only the
+		// disks and configuration profiles are replaced.
+		return $this->normalize($this->request('POST',
+			'linode/instances/' . rawurlencode($instance_id) . '/rebuild', $body));
 	}
 
 	public function deleteInstance(string $instance_id): void {

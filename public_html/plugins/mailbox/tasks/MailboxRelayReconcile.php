@@ -196,11 +196,17 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	 * done | failed. Credentials are erased at every terminal state by the run
 	 * model.
 	 *
-	 * Provisioning is the only kind of run there is (`rcp_kind` allows one
-	 * value). The platform does not delete a customer's running server: a failed
-	 * run destroys the instance IT created inside the same grant, which is
-	 * cleanup, not a lifecycle operation. Removing a cloud relay drops this
-	 * deployment's row and leaves the instance to its owner.
+	 * An UPGRADE run takes the same path with two states in front of it —
+	 * draining, then rebuilding — because a relay cannot be logged in to and so
+	 * cannot be patched; its contents are replaced instead
+	 * (specs/mailbox_relay_upgrade_without_server_manager.md). This phase is
+	 * kind-agnostic: it advances whatever live runs exist.
+	 *
+	 * The platform does not delete a customer's running server. A failed
+	 * PROVISION destroys the instance IT created inside the same grant, which is
+	 * cleanup, not a lifecycle operation; a failed UPGRADE destroys nothing,
+	 * because the instance is the customer's existing relay. Removing a cloud
+	 * relay drops this deployment's row and leaves the instance to its owner.
 	 */
 	private function advanceCloudProvisions() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));

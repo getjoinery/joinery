@@ -8,7 +8,7 @@
  * Reached from the Server Manager dashboard; tenant relay surfaces live on
  * the mailbox Setup/Settings tabs.
  *
- * @version 1.2
+ * @version 1.3 - shard relay version column + per-shard Rebuild
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -55,17 +55,51 @@ if (!empty($fleet_service_on)) {
 	$page->begin_box(array('title' => 'Shards'));
 
 	if (!empty($fleet_shards)) {
+		// Version and Rebuild are the operator's half of the promise the tenant
+		// surface makes: a hosted slot tells its tenant the relay is upgraded by
+		// the operator, which needs somewhere the operator can see and do it.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayVersion.php'));
+		$shipped = RelayVersion::shipped();
 		echo '<table class="table"><thead><tr>'
 			. '<th>Shard</th><th>Hostname</th><th>Public IP</th><th>Tenants</th><th>Active</th>'
+			. '<th>Relay version</th><th></th>'
 			. '</tr></thead><tbody>';
 		foreach ($fleet_shards as $row) {
 			$shard = $row['model'];
+			$running  = trim((string)$shard->get('mfs_provisioned_version'));
+			$standing = RelayVersion::compare($running, $shipped);
 			echo '<tr>';
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_name')) . '</td>';
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_hostname')) . '</td>';
 			echo '<td>' . htmlspecialchars((string)$shard->get('mfs_public_ip')) . '</td>';
 			echo '<td>' . intval($row['slots']) . ' / ' . intval($shard->get('mfs_capacity')) . '</td>';
 			echo '<td>' . ((bool)$shard->get('mfs_is_active') ? 'Yes' : 'No') . '</td>';
+			switch ($standing) {
+				case RelayVersion::CURRENT:
+					$version_cell = htmlspecialchars($running); break;
+				case RelayVersion::BEHIND:
+					$version_cell = '<span class="text-danger">' . htmlspecialchars($running)
+						. '</span> <span class="text-muted">(ships ' . htmlspecialchars($shipped) . ')</span>'; break;
+				case RelayVersion::AHEAD:
+					$version_cell = htmlspecialchars($running)
+						. ' <span class="text-muted">(newer than this site)</span>'; break;
+				default:
+					// A shard whose job emitted no marker. Unknown must never read
+					// as up to date — that is the whole point of showing this.
+					$version_cell = '<span class="text-muted">Unknown</span>';
+			}
+			echo '<td>' . $version_cell . '</td>';
+			echo '<td>';
+			if (RelayVersion::offersUpgrade($standing) && intval($shard->get('mfs_mgn_managed_node_id')) > 0) {
+				echo '<form method="post" style="display:inline" onsubmit="return confirm('
+					. htmlspecialchars(json_encode('Rebuild this shard now? Every tenant on it stops '
+						. 'receiving mail for several minutes; senders retry.'), ENT_QUOTES) . ')">';
+				echo '<input type="hidden" name="action" value="rebuild_shard">';
+				echo '<input type="hidden" name="shard_id" value="' . intval($shard->key) . '">';
+				echo '<button type="submit" class="btn btn-sm btn-warning">Rebuild</button>';
+				echo '</form>';
+			}
+			echo '</td>';
 			echo '</tr>';
 		}
 		echo '</tbody></table>';

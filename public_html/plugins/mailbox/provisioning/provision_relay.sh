@@ -10,6 +10,17 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
+# Version: 2.4 - joinery-ping answers "sole": is the asking tenant the only one on
+#                this relay? An upgrade replaces every byte on the machine, and the
+#                deployment asking can only see its own tenancy — so the relay has
+#                to answer, and anything but a confirmed count of one answers false.
+#                specs/mailbox_relay_upgrade_without_server_manager.md
+# Version: 2.3 - joinery-ping also reports Postfix queue depth, but ONLY on a relay
+#                with exactly one tenant: on a shard the queue is shared and its
+#                depth would read out every other tenant's mail volume. An upgrade
+#                wipes the machine and the queue with it, so a self-hosted operator
+#                has to be able to see what a wipe would cost.
+#                specs/mailbox_relay_upgrade_without_server_manager.md
 # Version: 2.2 - joinery-ping answers the relay's health as JSON (service liveness,
 #                milter wiring, and a hash check of the rspamd header contract), so
 #                a tenant can tell a scanning relay from a silently dead one.
@@ -55,7 +66,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="2.2"
+RELAY_VERSION="2.4"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -478,9 +489,16 @@ case "${TOK[0]}" in
     # is accept, so unscanned mail arrives looking exactly like clean mail — which
     # is why the relay has to be asked rather than inferred from.
     #
-    # SHARD-LEVEL SERVICE LIVENESS ONLY. Never queue depth, message counts, spool
-    # sizes or anything per-tenant: several deployments share this shard, and one
-    # tenant's mail volume is not another's to read. Service state is not tenant data.
+    # SHARD-LEVEL SERVICE LIVENESS ONLY. No message counts, spool sizes or
+    # anything per-tenant: several deployments share this shard, and one tenant's
+    # mail volume is not another's to read. Service state is not tenant data.
+    #
+    # The queue depth below is the one measured exception, and it is gated rather
+    # than excepted: it is emitted ONLY when this relay has exactly one tenant, so
+    # the queue being reported is wholly the asker's. On a shard the key is absent
+    # and the caller says nothing rather than guessing. An upgrade wipes the
+    # machine and the Postfix queue with it, so a self-hosted operator has to be
+    # able to see what a wipe would cost (specs/mailbox_relay_upgrade_without_server_manager.md).
     svc() { local s; s="$(systemctl is-active "$1" 2>/dev/null || true)"; [[ -n "${s}" ]] || s="unknown"; printf '%s' "${s}"; }
     MILTERS="$(postconf -h smtpd_milters 2>/dev/null || true)"
     wired() { case "${MILTERS}" in *":$1"*) printf 'true';; *) printf 'false';; esac; }
@@ -498,10 +516,45 @@ case "${TOK[0]}" in
       [[ -n "${WANT}" && "${WANT}" == "${HAVE}" ]] && CONTRACT="true"
     fi
     PROVISIONED="$(cat "${RELAY_HOME}/version" 2>/dev/null || true)"
-    printf '{"status":"ok","services":{"rspamd":"%s","opendkim":"%s","opendmarc":"%s"},"milters":{"opendkim":%s,"opendmarc":%s,"rspamd":%s},"contract":%s,"provisioned":"%s","slug":"%s"}\n' \
+    # Queue depth, fleet-of-one only (see the gate note above). An unreadable or
+    # missing postqueue leaves the key ABSENT — never 0. "Cannot tell" and
+    # "nothing queued" must not render alike when the difference is lost mail.
+    TENANTS=0
+    for d in "${RELAY_HOME}"/tenants/*/; do
+      [[ -d "${d}" ]] && TENANTS=$((TENANTS+1))
+    done
+    # SOLE is the wipe guard. An upgrade replaces every byte on this machine, and
+    # the deployment asking has no idea whether anyone else lives here — it can
+    # only see its own tenancy. So the RELAY answers the question. Anything but a
+    # confirmed count of one answers false, including an unreadable registry:
+    # "cannot tell" must never authorise a wipe. It reveals whether the asker is
+    # alone, not who or how many, so it leaks nothing a tenant should not know.
+    SOLE="false"
+    [[ "${TENANTS}" -eq 1 ]] && SOLE="true"
+    QUEUE_JSON=""
+    if [[ "${TENANTS}" -eq 1 ]]; then
+      # postqueue is setgid postdrop, so an unprivileged tenant can list the
+      # queue: no sudoers rule and no root reach are added by this.
+      PQ="$(command -v postqueue 2>/dev/null || true)"
+      [[ -n "${PQ}" ]] || PQ="/usr/sbin/postqueue"
+      if [[ -x "${PQ}" ]]; then
+        QOUT="$("${PQ}" -p 2>/dev/null || true)"
+        QN=""
+        if [[ "${QOUT}" == *"Mail queue is empty"* ]]; then
+          QN=0
+        elif [[ -n "${QOUT}" ]]; then
+          # Summary line: "-- 5 Kbytes in 3 Requests." Read the count from the
+          # summary rather than the entries, whose queue-id shape varies with
+          # enable_long_queue_ids.
+          QN="$(printf '%s\n' "${QOUT}" | awk '/^-- .*Request/ {print $(NF-1)}' | tail -1)"
+        fi
+        [[ "${QN}" =~ ^[0-9]+$ ]] && QUEUE_JSON=",\"queue\":${QN}"
+      fi
+    fi
+    printf '{"status":"ok","services":{"rspamd":"%s","opendkim":"%s","opendmarc":"%s"},"milters":{"opendkim":%s,"opendmarc":%s,"rspamd":%s},"contract":%s,"provisioned":"%s","slug":"%s","sole":%s%s}\n' \
       "$(svc rspamd)" "$(svc opendkim)" "$(svc opendmarc)" \
       "$(wired 8891)" "$(wired 8893)" "$(wired 11332)" \
-      "${CONTRACT}" "${PROVISIONED}" "${SLUG}"
+      "${CONTRACT}" "${PROVISIONED}" "${SLUG}" "${SOLE}" "${QUEUE_JSON}"
     ;;
   *)
     echo "denied: unknown command" >&2

@@ -35,6 +35,9 @@
  * enrollment instead of self-provisioned ones. Either way this row remains the
  * deployment's ONE relay, so active() stays a singleton.
  *
+ * @version 1.4 - readHealth() carries the relay's Postfix queue depth (NULL when
+ *                unknown, never 0); provisionedVersion() and queuedCount()
+ *                (specs/mailbox_relay_upgrade_without_server_manager.md)
  * @version 1.3 - scanner health: readHealth()/pollHealth() and the cached answer
  *                (specs/mailbox_relay_scanner_health.md)
  * @version 1.2 - tenant coordinates (slug, hosted-slot fields) + derived
@@ -264,12 +267,13 @@ class MailboxRelay extends SystemBase {
 	 * shell can issue.
 	 *
 	 * @return array{state:string,reason:string,detail:string,services:array,
-	 *               milters:array,contract:?bool,provisioned:string,slug:string}
+	 *               milters:array,contract:?bool,provisioned:string,slug:string,
+	 *               queue:?int,sole:?bool}
 	 */
 	public static function readHealth(string $raw, int $exit_code = 0): array {
 		$out = array('state' => self::HEALTH_UNREADABLE, 'reason' => '', 'detail' => '',
 			'services' => array(), 'milters' => array(), 'contract' => null,
-			'provisioned' => '', 'slug' => '');
+			'provisioned' => '', 'slug' => '', 'queue' => null, 'sole' => null);
 		$text = trim($raw);
 		$snippet = substr($text, 0, 300);
 
@@ -297,6 +301,21 @@ class MailboxRelay extends SystemBase {
 		$out['contract']    = !empty($decoded['contract']);
 		$out['provisioned'] = (string)($decoded['provisioned'] ?? '');
 		$out['slug']        = (string)($decoded['slug'] ?? '');
+
+		// Queue depth is absent on a shard (it would read out other tenants' mail
+		// volume) and absent when the relay could not measure it. Both stay NULL:
+		// an upgrade destroys whatever is queued, so "cannot tell" must never
+		// render as "nothing to lose".
+		if (isset($decoded['queue']) && is_numeric($decoded['queue'])) {
+			$out['queue'] = max(0, intval($decoded['queue']));
+		}
+
+		// Is this deployment the only tenant on the relay? Only a relay new enough
+		// to answer says; older ones leave it NULL, which means "cannot tell" and
+		// NOT "yes". Nothing may wipe a relay on a null.
+		if (isset($decoded['sole']) && is_bool($decoded['sole'])) {
+			$out['sole'] = $decoded['sole'];
+		}
 
 		$rspamd_state = strtolower(trim((string)($decoded['services']['rspamd'] ?? '')));
 		$rspamd_wired = !empty($decoded['milters']['rspamd']);
@@ -390,6 +409,51 @@ class MailboxRelay extends SystemBase {
 	public function lastHealthState(): string {
 		$health = $this->lastHealth();
 		return ($health === null) ? '' : (string)$health['state'];
+	}
+
+	/**
+	 * The relay's own provisioning version, as it last reported it. '' when the
+	 * relay has never answered, or answered a legacy PONG that predates the
+	 * marker — both of which read as "unknown" upstream, which offers an upgrade.
+	 */
+	public function provisionedVersion(): string {
+		$health = $this->lastHealth();
+		return ($health === null) ? '' : trim((string)($health['provisioned'] ?? ''));
+	}
+
+	/**
+	 * How many messages sat in the relay's Postfix queue when it last answered,
+	 * or NULL for "not known" — a shared shard (where the depth is not this
+	 * tenant's to read) or a relay that could not measure it.
+	 *
+	 * NULL is not zero, and callers must not collapse the two: this number exists
+	 * to say what an upgrade would destroy.
+	 */
+	/**
+	 * Is this deployment the ONLY tenant on the relay? TRUE, FALSE, or NULL for
+	 * "the relay is too old to say".
+	 *
+	 * This is the wipe guard. A rebuild replaces every byte on the machine —
+	 * every other tenant's account, allowlist, WireGuard peer and un-pulled mail
+	 * with it — and the drain only ever empties THIS tenant's spool subdirectory,
+	 * so nothing else is even preserved in passing. A deployment can see only its
+	 * own tenancy, so the relay has to answer this, and NULL must never be read as
+	 * yes.
+	 */
+	public function isSoleTenant(): ?bool {
+		$health = $this->lastHealth();
+		if ($health === null || !isset($health['sole']) || $health['sole'] === null) {
+			return null;
+		}
+		return (bool)$health['sole'];
+	}
+
+	public function queuedCount(): ?int {
+		$health = $this->lastHealth();
+		if ($health === null || !isset($health['queue']) || $health['queue'] === null) {
+			return null;
+		}
+		return intval($health['queue']);
 	}
 
 	/**

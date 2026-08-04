@@ -2514,6 +2514,11 @@ BASH;
 		$steps[] = ['type' => 'ssh', 'label' => 'Verify relay + report WireGuard details', 'on_host' => true,
 			'cmd' => "echo RELAY_WG_PUBKEY=$(sudo cat /etc/wireguard/relay_public.key 2>/dev/null); "
 			       . "echo RELAY_PUBLIC_IP=$(curl -fsS --max-time 5 https://api.ipify.org 2>/dev/null || hostname -I | awk '{print $1}'); "
+			       // The operator is not a tenant of their own shards, so there is no
+			       // joinery-ping credential to ask a shard its version with. It comes
+			       // back through root SSH here instead, and an absent marker reads as
+			       // unknown rather than as up to date.
+			       . "echo RELAY_VERSION=$(sudo cat /opt/joinery-relay/version 2>/dev/null); "
 			       . "sudo postfix status >/dev/null 2>&1 && echo PROVISION_RELAY_SUCCESS"];
 
 		return $steps;

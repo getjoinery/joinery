@@ -276,10 +276,17 @@ class RelayHealthTest {
 
 		// Multi-tenancy: several deployments share a shard, so one tenant's mail
 		// volume must never ride out in another tenant's health answer.
-		foreach (array('queue', 'spool', 'messages', 'count', 'tenants', 'recipients') as $leak) {
+		foreach (array('spool', 'messages', 'count', 'tenants', 'recipients') as $leak) {
 			check(stripos(json_encode(array_keys($decoded)), $leak) === false,
 				'the answer carries no ' . $leak . ' field — service state is not tenant data');
 		}
+		// Queue depth is the one measured exception, and it is GATED, not excepted:
+		// emitted only where the relay has exactly one tenant, so the queue being
+		// reported is wholly the asker's. This extraction runs with no relay home,
+		// so the tenant count is zero and the key must be absent. The gate itself is
+		// exercised at both counts in relay_upgrade_test.
+		check(!array_key_exists('queue', $decoded),
+			'no queue depth without a tenant registry proving a fleet-of-one');
 	}
 
 	/**

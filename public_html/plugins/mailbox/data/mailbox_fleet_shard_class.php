@@ -12,7 +12,7 @@
  * Capacity is the blast-radius dial: a compromise is bounded to a shard's
  * tenant list, so shard size is policy, not architecture.
  *
- * @version 1.0
+ * @version 1.1 - mfs_provisioned_version (the operator's view of shard code age)
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -49,6 +49,12 @@ class MailboxFleetShard extends SystemBase {
 		// Inactive shards accept no new enrollments (draining before rebuild or
 		// retirement); existing tenants keep running.
 		'mfs_is_active'              => array('type'=>'bool', 'is_nullable'=>false, 'default'=>true),
+		// The relay code version this shard last reported, stamped from a job's
+		// RELAY_VERSION= marker. The operator is not a tenant of their own shards,
+		// so there is no joinery-ping credential to ask with — the version arrives
+		// through root SSH on the managed node instead. Empty reads as UNKNOWN, and
+		// unknown must never render as up to date.
+		'mfs_provisioned_version'    => array('type'=>'varchar(20)'),
 		'mfs_create_time'            => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'mfs_update_time'            => array('type'=>'timestamp(6)'),
 		'mfs_delete_time'            => array('type'=>'timestamp(6)'),

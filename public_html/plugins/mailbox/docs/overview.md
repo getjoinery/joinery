@@ -1810,6 +1810,80 @@ does until mail already looks wrong.
 - **By hand** — run `provision_relay.sh` as root on any fresh VPS: the
   standalone floor.
 
+#### Keeping a relay's code current
+
+A relay runs code that ships with the platform — the tenant shell, the sealing
+binary, the rspamd configuration — so it goes out of date when the platform moves
+on. The Relay section reads the version out of the relay's own health answer
+(`joinery-ping` reports `provisioned`), compares it against `RELAY_VERSION` in
+`provision_relay.sh` with `version_compare()`, and offers an upgrade when the
+relay is **behind or silent**. A relay that answers the legacy plain-text `PONG`
+predates the version marker and reads as unknown, which offers the upgrade. A
+relay **newer** than the deployment offers nothing: the deployment is the thing
+to update.
+
+**Nobody holds a shell credential to a cloud relay, by design.** Provisioning
+sets a random root password that is never stored, injects a per-run key that
+`eraseCredentials()` wipes at the run's terminal state, and
+`provision_relay.sh` leaves sshd key-only (`PasswordAuthentication no`,
+`PermitRootLogin prohibit-password`). What survives is the tenant pull key, locked
+to the `joinery-tenant-shell` forced command. So a relay cannot be logged in to
+and patched — its contents are replaced instead.
+
+The route depends on what the platform can reach:
+
+| Relay origin | Upgrade route |
+|---|---|
+| Cloud (the customer's own account) | An **upgrade run** — the same grant-per-act ceremony as provisioning, with two states in front: **draining**, then **rebuilding** |
+| Server Manager managed node | **Rebuild** — a `rebuild_relay` job over root SSH. Rendered only when `mrl_mgn_managed_node_id` resolves to a live node |
+| Run by hand | The Relay section states the version and says to re-run `provision_relay.sh`. That customer built the box and is the one who can act on it |
+| Hosted fleet slot | Operator-managed. The slot says so and offers no control |
+
+**An upgrade run drains before it wipes.** The rebuild destroys every byte on the
+machine, so `handleDraining()` pulls the spool until it is empty, and refuses to
+advance if anything is **held** (a blob whose owner is not yet resolvable,
+deliberately left un-acked) or if successive passes stop making progress. An
+upgrade is elective, and losing mail to it is not a trade the platform makes on
+the customer's behalf.
+
+**A relay somebody else lives on is never wiped.** A deployment can see only its
+own tenancy, so `joinery-ping` answers `sole` — is the asking tenant the only one
+here? A `false` renders no control, refuses a hand-posted upgrade, and refuses
+again at drain time (re-asked live, because a tenant can have been added since the
+relay last spoke). Anything short of a confirmed count of one answers `false`,
+including an unreadable tenant registry. A relay too old to answer reports
+`null`, which is not consent: the upgrade proceeds only with an explicit
+acknowledgement that the relay serves this site alone. Without the guard, one
+tenant clicking Upgrade would destroy every other tenant's mail, accounts,
+allowlists and WireGuard peers — the drain empties only the asking tenant's spool.
+
+**The wipe is a rebuild in place, not a recreate.** `rebuildInstance()` replaces
+every disk while keeping the instance and its public IPv4 — the address an MX
+record points at. A destroy-and-create would turn a few minutes of downtime into a
+DNS change plus propagation. Port 25 is gone for the whole run; SMTP senders queue
+and retry for days, so the visible effect is mail arriving late.
+
+A failed upgrade **destroys nothing**. `destroyInstanceQuietly()` refuses on an
+upgrade run: the instance is the customer's working relay, not the run's to throw
+away. That refusal lives at the single choke point every cleanup path funnels
+through.
+
+**Postfix's own queue is lost with the machine.** It holds mail Postfix accepted
+but has not handed to the sealer — normally empty, and unreachable by the drain
+because the tenant credential cannot read the queue. So `joinery-ping` reports its
+depth and the upgrade control states it, blocking nothing. That count is emitted
+**only on a relay with exactly one tenant**: on a shared shard the queue is shared,
+and its depth would read out every other tenant's mail volume. Absent is not zero
+— a relay that could not measure its queue reports nothing rather than a reassuring
+`0`.
+
+**The operator's half** is the fleet console. A shard is a managed node, so the
+operator holds root SSH and rebuilds through the ordinary job path. There is no
+`joinery-ping` for them — the operator is not a tenant of their own shards, which
+are provisioned `skeleton_only` with no tenant account — so the version arrives
+from the job's `RELAY_VERSION=` marker into `mfs_provisioned_version`. A shard
+whose job emitted no marker reads as unknown, never as up to date.
+
 ### The shrunken main box
 
 With every domain fronted, the relay is the sole mail listener: the main box's

@@ -640,6 +640,12 @@ class JobResultProcessor {
 			if (empty($job_params['skeleton_only'])) {
 				self::register_relay_row($node, $public_ip, $wg_pubkey, $output,
 					(string)($job_params['mail_hostname'] ?? ''));
+			} else {
+				// A skeleton run IS a fleet shard. Stamp the version it reported so
+				// the operator can see which shards are behind — the tenants on them
+				// have been told the operator upgrades their relay, and nobody can
+				// keep that promise without being able to see the answer.
+				self::stamp_shard_version($node, self::extract_marker($output, 'RELAY_VERSION'));
 			}
 
 			// Peer the relay on the MAIN box's WireGuard interface — the other half
@@ -675,6 +681,33 @@ class JobResultProcessor {
 	/** rebuild_relay post-processing is identical to a fresh provision. */
 	private static function process_rebuild_relay($job) {
 		self::process_provision_relay($job);
+	}
+
+	/**
+	 * Record the relay code version a fleet shard reported, on the shard row for
+	 * this node. Owned by the mailbox plugin, so it is required lazily and skipped
+	 * (no fatal) when that plugin is absent.
+	 *
+	 * An EMPTY version is written as empty, never skipped: a shard whose job
+	 * emitted no marker must read as unknown rather than keeping a stale value
+	 * that would render as up to date.
+	 */
+	private static function stamp_shard_version($node, string $version): void {
+		$shard_class = PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php');
+		if (!is_file($shard_class)) {
+			return; // mailbox plugin not present
+		}
+		try {
+			require_once($shard_class);
+			$shards = new MultiMailboxFleetShard(array('node_id' => intval($node->key), 'deleted' => false));
+			$shards->load();
+			foreach ($shards as $shard) {
+				$shard->set('mfs_provisioned_version', substr(trim($version), 0, 20));
+				$shard->save();
+			}
+		} catch (\Throwable $e) {
+			error_log('stamp_shard_version failed for node ' . intval($node->key) . ': ' . $e->getMessage());
+		}
 	}
 
 	/**

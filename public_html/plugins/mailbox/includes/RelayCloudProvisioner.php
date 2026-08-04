@@ -19,6 +19,11 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
+ * @version 1.6 - the 'upgrade' kind: drain the relay, rebuild the instance in
+ *                place (address preserved), rebuild it from the same script. A
+ *                failed upgrade never destroys the instance — it is the
+ *                customer's working relay, not this run's to throw away.
+ *                specs/mailbox_relay_upgrade_without_server_manager.md
  * @version 1.5 - records the relay's authserv-id alongside its MX hostname
  */
 
@@ -31,6 +36,11 @@ class RelayCloudProvisioner {
 
 	const BOOT_TIMEOUT_SECONDS = 1800; // instance create -> running + IP
 	const LABEL_MAX_LENGTH = 64;       // provider cap on an instance label (Linode)
+	// Drain passes allowed before an upgrade gives up. Each is a network round
+	// trip, so this is a bound on one cron tick, not a patience setting: a spool
+	// still filling after this many passes is not draining, and the run stops
+	// rather than wiping mail it never collected.
+	const DRAIN_MAX_PASSES = 12;
 
 	/** @var callable|null fn(RelayCloudProvision): CloudComputeProvider — test seam. */
 	public static $driver_factory = null;
@@ -42,7 +52,13 @@ class RelayCloudProvisioner {
 	public function advance(RelayCloudProvision $run): string {
 		switch ((string)$run->get('rcp_status')) {
 			case 'ready':
-				return $this->handleReady($run);
+				// An upgrade has an instance already; what it needs first is for
+				// the relay to be empty, because the wipe takes the spool with it.
+				return $run->isUpgrade() ? $this->handleDraining($run) : $this->handleReady($run);
+			case 'draining':
+				return $this->handleDraining($run);
+			case 'rebuilding':
+				return $this->handleRebuilding($run);
 			case 'booting':
 				return $this->handleBooting($run);
 			case 'provisioning':
@@ -122,6 +138,154 @@ class RelayCloudProvisioner {
 		return 'instance created, booting';
 	}
 
+	/**
+	 * UPGRADE ONLY. ready|draining -> rebuilding: empty the relay's spool first.
+	 *
+	 * The wipe destroys every byte on the machine, and sealed blobs the platform
+	 * has not pulled yet are mail nobody else has a copy of. So the drain is a
+	 * GATE, not a courtesy: this method refuses to advance unless the spool is
+	 * genuinely empty.
+	 *
+	 * Two refusals, both deliberate:
+	 *
+	 *   held > 0     A held blob is one whose owner is not yet resolvable, left
+	 *                un-acked on purpose so a later pull can store it. Those are
+	 *                exactly the blobs a wipe would destroy silently, and they are
+	 *                held because something about them is unresolved. The customer
+	 *                fixes the cause or waits for the grace-window age-out.
+	 *   no progress  Successive passes that move nothing but leave entries behind
+	 *                mean the drain cannot finish. An upgrade is elective; losing
+	 *                mail to an elective act is not a trade to make on the
+	 *                customer's behalf.
+	 */
+	private function handleDraining(RelayCloudProvision $run): string {
+		$relay = $run->relay();
+		if ($relay === null) {
+			$run->fail('The relay this upgrade targets no longer exists.');
+			return 'relay gone — failed';
+		}
+
+		// THE WIPE GUARD, checked live rather than from a cached answer, because a
+		// tenant can have been added since the relay last spoke. A rebuild destroys
+		// every other tenant's account, allowlist, WireGuard peer and un-pulled
+		// mail — and the drain above empties only THIS tenant's spool, so nothing
+		// else is preserved even in passing. The deployment asking can see only its
+		// own tenancy, so the relay is asked, and only an explicit TRUE proceeds.
+		$health = $relay->pollHealth();
+		if (($health['sole'] ?? null) === false) {
+			$run->fail('This relay serves other deployments as well as this one. Rebuilding it would '
+				. 'destroy their mail and their configuration, so it has been stopped. Nothing has been '
+				. 'changed on the relay.');
+			return 'refused: relay is shared';
+		}
+
+		if ((string)$run->get('rcp_status') !== 'draining') {
+			$run->set('rcp_status', 'draining');
+			$run->set('rcp_error', null);
+			$run->save();
+		}
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySpoolConsumer.php'));
+		$consumer = new RelaySpoolConsumer($relay);
+
+		// Bounded: each pass is a network round trip, and an unbounded loop inside
+		// one cron tick would hold the pass open indefinitely. Anything still left
+		// after this many passes is not draining, it is stuck.
+		$passes = 0;
+		$last_remaining = null;
+		while ($passes < self::DRAIN_MAX_PASSES) {
+			$passes++;
+			$result = $consumer->pull();
+			$status = (string)($result['status'] ?? 'error');
+
+			if ($status === 'error') {
+				$run->set('rcp_error', mb_substr('Drain failed: ' . (string)($result['message'] ?? ''), 0, 4000));
+				$run->save();
+				return 'drain error — will retry next pass';
+			}
+			if ($status === 'skipped') {
+				$run->set('rcp_error', 'The relay has no tunnel address, so its spool cannot be drained before the wipe.');
+				$run->save();
+				return 'drain skipped — no tunnel';
+			}
+
+			$held      = intval($result['held'] ?? 0);
+			$seals     = intval($result['seals'] ?? 0);
+			$remaining = $held + intval($result['errors'] ?? 0);
+
+			if ($held > 0) {
+				$run->fail($held . ' message(s) on the relay cannot be stored here yet, and a rebuild would '
+					. 'destroy them. They are held because their domain is disabled or unconfigured, or their '
+					. 'owner cannot be resolved. Fix that — or wait for the grace window to expire them — and '
+					. 'start the upgrade again.');
+				return 'drain blocked: ' . $held . ' held';
+			}
+			if ($seals === 0) {
+				break; // The relay had nothing left. Safe to wipe.
+			}
+			if ($last_remaining !== null && $remaining >= $last_remaining && $remaining > 0) {
+				$run->fail('The relay\'s spool is not emptying (' . $remaining . ' entr(y/ies) stuck across '
+					. 'successive passes), and a rebuild would destroy what is left. Nothing has been changed '
+					. 'on the relay.');
+				return 'drain stalled — failed';
+			}
+			$last_remaining = $remaining;
+		}
+
+		if ($passes >= self::DRAIN_MAX_PASSES) {
+			$run->fail('The relay still had mail after ' . self::DRAIN_MAX_PASSES . ' drain passes. Nothing '
+				. 'has been changed on the relay; try the upgrade again when it is quieter.');
+			return 'drain did not finish — failed';
+		}
+
+		$run->set('rcp_status', 'rebuilding');
+		$run->set('rcp_error', null);
+		$run->save();
+		return 'relay drained in ' . $passes . ' pass(es) — rebuilding';
+	}
+
+	/**
+	 * UPGRADE ONLY. rebuilding -> booting: replace the instance's contents.
+	 *
+	 * The instance and its public IPv4 survive, which is the whole point: the
+	 * address is what an MX record points at, so a rebuild is downtime while a
+	 * destroy-and-create would be a DNS change.
+	 */
+	private function handleRebuilding(RelayCloudProvision $run): string {
+		$instance_id = (string)$run->get('rcp_instance_id');
+		if ($instance_id === '') {
+			$run->fail('This upgrade has no provider instance to rebuild.');
+			return 'no instance — failed';
+		}
+
+		// A fresh per-run key, injected as the new image lands. The old machine's
+		// authorized_keys went with its disks, so nothing outlives this run.
+		if ((string)$run->get('rcp_ssh_public_key') === '') {
+			list($private_key, $public_key) = $this->generateSshKeypair();
+			$run->sealSshKey($private_key);
+			$run->set('rcp_ssh_public_key', $public_key);
+			$run->save();
+		}
+
+		try {
+			$instance = $this->driverFor($run)->rebuildInstance($instance_id, array(
+				'image'           => $this->imageId(),
+				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)), // never stored
+				'authorized_keys' => array((string)$run->get('rcp_ssh_public_key')),
+			));
+		} catch (CloudComputeException $e) {
+			return $this->handleComputeFailure($run, $e, 'rebuild');
+		}
+
+		if (!empty($instance['ip'])) {
+			$run->set('rcp_instance_ip', (string)$instance['ip']);
+		}
+		$run->set('rcp_status', 'booting');
+		$run->set('rcp_error', null);
+		$run->save();
+		return 'instance rebuilding, booting';
+	}
+
 	/** booting -> provisioning (and straight into the SSH build). */
 	private function handleBooting(RelayCloudProvision $run): string {
 		$driver = $this->driverFor($run);
@@ -155,9 +319,20 @@ class RelayCloudProvisioner {
 	 */
 	public function advanceCheap(RelayCloudProvision $run): string {
 		switch ((string)$run->get('rcp_status')) {
-			case 'ready':   return $this->handleReady($run);
-			case 'booting': return $this->handleBooting($run);
-			default:        return 'nothing cheap to do';
+			case 'ready':
+				// PROVISION ONLY. handleReady() CREATES an instance, which for an
+				// upgrade would leave the customer paying for a second machine
+				// while their relay carried on untouched. An upgrade's first step
+				// is the drain, which is a loop of network round trips and has no
+				// business inside a page load.
+				return $run->isUpgrade() ? 'nothing cheap to do' : $this->handleReady($run);
+			case 'rebuilding':
+				// One API call, same cost as creating an instance.
+				return $this->handleRebuilding($run);
+			case 'booting':
+				return $this->handleBooting($run);
+			default:
+				return 'nothing cheap to do';
 		}
 	}
 
@@ -266,6 +441,18 @@ class RelayCloudProvisioner {
 		$run->set('rcp_status', 'done');
 		$run->set('rcp_error', null);
 		$run->eraseCredentials();
+
+		// The rebuilt relay reports its new version on the next health poll; ask
+		// now so the Relay section reads "current" the moment the run finishes
+		// rather than at the next reconcile pass.
+		if ($run->isUpgrade()) {
+			try {
+				$relay->pollHealth();
+			} catch (\Throwable $e) {
+				error_log('RelayCloudProvisioner: post-upgrade health poll failed: ' . $e->getMessage());
+			}
+			return 'relay upgraded (relay row #' . intval($relay->key) . ')';
+		}
 		return 'relay provisioned (relay row #' . intval($relay->key) . ')';
 	}
 
@@ -278,20 +465,31 @@ class RelayCloudProvisioner {
 	 * explicit admin act once the Setup checks go green.
 	 */
 	private function registerRelayRow(RelayCloudProvision $run, string $public_ip, string $wg_pubkey, string $mail_hostname): MailboxRelay {
-		$existing = new MultiMailboxRelay(array('deleted' => false));
-		$existing->load();
-		$relay = null;
-		foreach ($existing as $row) {
-			if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) {
-				$relay = $row;
-				break;
+		// An upgrade names its relay outright. Trusting that over the instance-id
+		// scan is what guarantees an upgrade can never mint a SECOND relay row —
+		// two rows for one machine would split the alias map and the spool pull
+		// between two identities, and the relay would half-work in a way that
+		// looks like a network fault.
+		$relay = $run->isUpgrade() ? $run->relay() : null;
+		if ($relay === null) {
+			$existing = new MultiMailboxRelay(array('deleted' => false));
+			$existing->load();
+			foreach ($existing as $row) {
+				if ((string)$row->get('mrl_cloud_instance_id') === (string)$run->get('rcp_instance_id')) {
+					$relay = $row;
+					break;
+				}
 			}
 		}
 		// No row for this instance means the tunnel address is changing hands:
 		// a different machine is about to answer on 10.99.0.1 with its own SSH
 		// host key, and the previous relay's key must be forgotten or every
 		// connection fails with REMOTE HOST IDENTIFICATION HAS CHANGED.
-		$is_new_machine = ($relay === null);
+		// An upgrade finds its own row (same instance id) but is still a different
+		// machine: the rebuild replaced every disk, including the SSH host key,
+		// and it answers on the same tunnel address. Without forgetting the old
+		// key every connection fails with REMOTE HOST IDENTIFICATION HAS CHANGED.
+		$is_new_machine = ($relay === null) || $run->isUpgrade();
 		if ($relay === null) {
 			$relay = new MailboxRelay(NULL);
 			// Born enabled: the relay starts pulling and receives its address
@@ -358,6 +556,13 @@ class RelayCloudProvisioner {
 	}
 
 	private function destroyInstanceQuietly(RelayCloudProvision $run): void {
+		// An UPGRADE's instance is the customer's existing, working relay — this
+		// run did not create it and has no business deleting it. Every cleanup
+		// path funnels through here, so the refusal lives here rather than being
+		// repeated (and eventually missed) at each call site.
+		if ($run->isUpgrade()) {
+			return;
+		}
 		$instance_id = (string)$run->get('rcp_instance_id');
 		if ($instance_id === '') {
 			return;

@@ -202,6 +202,41 @@ place to bump. Three states:
   "cannot tell" and "nothing queued" must not render alike when the difference is
   destroyed mail.
 
+- **D9 — Wiping a relay somebody else lives on. RESOLVED: the relay answers, and
+  only an explicit yes proceeds.**
+
+  `mrl_is_hosted` is not enough. It records what this deployment's own row
+  believes, and a relay that grew a second tenant after provisioning does not
+  update anybody's row. A deployment can see only its own tenancy — **the nodes do
+  not know about each other** — so nothing on this side can answer the question.
+
+  What a wrong answer costs is total: the rebuild destroys every other tenant's
+  account, domain allowlist, WireGuard peer and un-pulled sealed mail, and the
+  drain (D3) empties only *this* tenant's spool subdirectory, so nothing else is
+  preserved even in passing. One tenant clicking Upgrade would silently destroy
+  every other tenant on the box.
+
+  So `joinery-ping` answers **`sole`**: is the asking tenant the only one here?
+  The relay already counts its tenants to gate the queue depth; this makes the
+  fact explicit rather than leaving callers to infer it from a field's absence.
+  It reveals whether the asker is alone, not who or how many — nothing a tenant
+  should not know.
+
+  **Anything short of a confirmed count of one answers false**, including an
+  unreadable registry. "Cannot tell" must never authorise a wipe.
+
+  Three states, kept distinct end to end:
+
+  - **`true`** — proceed.
+  - **`false`** — the control is not rendered, a hand-posted upgrade is refused,
+    and the drain refuses again before anything is touched.
+  - **`null`** (a relay too old to answer, including every relay answering the
+    legacy `PONG`) — the platform cannot prove it is safe and does not decide. It
+    asks, carrying an explicit acknowledgement, and refuses without one.
+
+  **The guard is re-asked live at drain time**, not read from the cached health
+  answer: a tenant can have been added since the relay last spoke.
+
 - **D4 — Downtime. RESOLVED: acceptable, because SMTP retries.** Port 25 is gone
   for the whole run: the rebuild, the boot, and the build. Several minutes, and on
   a slow provider more.
@@ -306,6 +341,17 @@ wipe-and-reinstall doctrine removes the need for every one of them.
   destroyed mail, so it is the one test that must never be quietly relaxed.
 - **A drain making no progress blocks the wipe (D3)** rather than looping forever
   or proceeding.
+- **A relay reporting `sole: false` is never wiped (D9)** — no control rendered, a
+  hand-posted upgrade refused, and the drain refuses again. Asserted against a
+  real second tenant staged on disk, because this is the check that stands between
+  one tenant and every other tenant's mail.
+- **`sole` absent reads NULL, never true (D9)**, including from a legacy `PONG`
+  relay and from a non-boolean value — `"false"` as a string is truthy in PHP, so
+  a sloppy cast would turn a shared relay into a sole one.
+- **A relay with no readable tenant registry reports `sole: false`** — "cannot
+  tell" may not authorise a wipe.
+- **The drain re-asks the relay live (D9)** rather than trusting the cached health
+  answer: a tenant can have been added since it last spoke.
 - **The ping emits `queue` on a fleet-of-one and omits it on a multi-tenant shard
   (D3)**, asserted by running the extracted tenant shell against both tenant
   counts — the shard case is a cross-tenant leak, not a cosmetic difference.
