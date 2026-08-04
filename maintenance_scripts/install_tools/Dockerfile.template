@@ -1,4 +1,10 @@
 # Joinery Docker Template
+# VERSION 4.5 - Detect the PostgreSQL config path and the php-fpm service at
+#               start instead of naming a version. Both were pinned, and both
+#               sit in the start command's && chain, so on a host with any
+#               other PostgreSQL or PHP the container aborted before Apache
+#               ever came up. Each now fails with a message naming what it
+#               could not find.
 # VERSION 4.4 - Re-assert the source's declared PHP extensions on every start,
 #               before update_database. They are apt packages in the writable
 #               layer (utils/upgrade.php installs them there), so recreating a
@@ -167,7 +173,8 @@ CMD set +H && \
     service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
-    PG_CONF="/etc/postgresql/16/main/pg_hba.conf" && \
+    PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | sort -V | tail -1)" && \
+    if [ -z "${PG_CONF}" ]; then echo "FATAL: no pg_hba.conf under /etc/postgresql"; exit 1; fi && \
     if [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then \
         sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' "$PG_CONF" && \
         service postgresql reload && \
@@ -198,6 +205,8 @@ CMD set +H && \
     sed "s|{{SITE_ROOT}}|/var/www/html/${SITENAME}|g" "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/logrotate_joinery.conf" > "/etc/logrotate.d/joinery-${SITENAME}" && \
     chmod 644 "/etc/logrotate.d/joinery-${SITENAME}" && \
     service cron start && \
-    service php8.3-fpm start && \
+    FPM_SERVICE="$(basename "$(ls -1 /etc/init.d/php*-fpm 2>/dev/null | sort -V | tail -1)")" && \
+    if [ -z "${FPM_SERVICE}" ] || [ "${FPM_SERVICE}" = "." ]; then echo "FATAL: no php-fpm init script under /etc/init.d"; exit 1; fi && \
+    service "${FPM_SERVICE}" start && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_plugin_installers_start.sh" "${SITENAME}" || true && \
     apache2ctl -D FOREGROUND

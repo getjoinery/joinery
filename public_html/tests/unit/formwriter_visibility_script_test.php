@@ -16,8 +16,9 @@
  *   - checkbox trigger reads .checked and keys on 'checked'/'unchecked'
  *   - radio group reads the :checked option's value and wires every radio
  *   - a checkboxList radio addresses its name="{name}[]" group
- *   - validation rejects keying a checkbox on a value, and rejects a
- *     multi-select checkbox list as a trigger
+ *   - validation rejects keying a checkbox on a value, a field both shown and
+ *     hidden for one value, a non-string field reference, and a multi-select
+ *     checkbox list as a trigger — each as a thrown InvalidArgumentException
  *
  * A failure here means generateVisibilityScript() / validateVisibilityRules()
  * in FormWriterV2Base changed shape. See docs/formwriter.md "Field Visibility".
@@ -26,7 +27,7 @@
  *
  * Run:  php tests/unit/formwriter_visibility_script_test.php
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -129,14 +130,50 @@ ok('checkboxList radio addresses the name="{name}[]" group',
 
 // ── validation: reject misuse ──────────────────────────────────────────────
 
-ok('checkbox keyed on a value (not checked/unchecked) is rejected', thrown(function () {
-    set_error_handler(function ($n, $s) { throw new RuntimeException($s); });
-    try {
-        render_field('checkboxinput', ['bad', 'Bad', [
-            'visibility_rules' => ['1' => ['show' => ['x']]],
-        ]]);
-    } finally { restore_error_handler(); }
-}) !== null);
+// Every rejection below is a mistake in the calling code, so each throws rather
+// than warning. It is an exception and not a fatal on purpose: a malformed rules
+// array must still stop the render, but a caller that wants to probe a form
+// definition can catch it, and the trace names the offending call.
+/** Returns the Throwable $fn raises, or null if it doesn't. */
+function raised(callable $fn) {
+    try { $fn(); return null; }
+    catch (Throwable $e) { return $e; }
+}
+
+$badKey = raised(function () {
+    render_field('checkboxinput', ['bad', 'Bad', [
+        'visibility_rules' => ['1' => ['show' => ['x']]],
+    ]]);
+});
+ok('checkbox keyed on a value (not checked/unchecked) is rejected', $badKey !== null);
+ok('and it throws InvalidArgumentException, not a deprecated E_USER_ERROR',
+      $badKey instanceof InvalidArgumentException);
+ok('the message names the keys that are valid',
+      $badKey !== null && strpos($badKey->getMessage(), "'checked', 'unchecked', or 'default'") !== false);
+
+// Showing and hiding the same field for one value is contradictory; whichever
+// the emitted script applied last would win, silently.
+$conflict = raised(function () {
+    render_field('dropinput', ['mode', 'Mode', [
+        'options' => ['a' => 'A'],
+        'visibility_rules' => ['a' => ['show' => ['x', 'y'], 'hide' => ['y']]],
+    ]]);
+});
+ok('a field both shown and hidden for one value is rejected',
+      $conflict instanceof InvalidArgumentException);
+ok('and the message names the conflicting field',
+      $conflict !== null && strpos($conflict->getMessage(), 'y') !== false);
+
+// Field references become DOM ids in the emitted script; a non-string would be
+// interpolated into a selector that matches nothing.
+$badRef = raised(function () {
+    render_field('dropinput', ['mode', 'Mode', [
+        'options' => ['a' => 'A'],
+        'visibility_rules' => ['a' => ['show' => [['nested']]]],
+    ]]);
+});
+ok('a non-string field reference is rejected',
+      $badRef instanceof InvalidArgumentException);
 
 ok('multi-select checkbox list cannot be a visibility trigger', thrown(function () {
     render_field('checkboxList', ['multi', 'Multi', [

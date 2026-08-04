@@ -1,9 +1,9 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
-**Status:** Phase 1 partially BUILT 2026-08-03 (uncommitted) — the no-op deletions
-in 1.2 and all of 1.7 are done and `safe` is green (79/79, 1904 checks). The rest
-of Phase 1 (1.1, the `trigger_error` and `$http_response_header` items in 1.2, and
-1.3–1.6, 1.8) is ready to build. Phase 2 remains gated on the OS campaign.
+**Status:** Phase 1 partially BUILT. 1.2's no-op deletions, 1.7 and 1.9 landed
+2026-08-03 and are committed (`c8c085b3`); 1.1 and the rest of 1.2 landed
+2026-08-04 and are uncommitted. **1.2 is now complete.** What remains of Phase 1
+is 1.3–1.6 and 1.8. Phase 2 remains gated on the OS campaign.
 **Date:** 2026-08-01
 **Companion:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (the fleet migration itself)
 
@@ -121,25 +121,57 @@ are plain `pg_dump | gzip` and `psql`, forward-compatible 16 → 18.
 Every item lands on the current stack and behaves identically there. Order matters
 only within 1.1: those two are the silent-failure fixes and go first.
 
-### 1.1 Version literals that fail silently on the new stack
+### 1.1 Version literals that fail silently on the new stack — BUILT 2026-08-04
 
-**`utils/upgrade.php:1227`** — `exec('service php8.3-fpm reload 2>/dev/null')`.
-This runs on every deployed node at the end of an upgrade, after installing a
+Four sites, not the two originally recorded. Each resolves on the current stack
+to exactly the literal it replaced (`php8.3-fpm`, `/etc/postgresql/16/main`),
+verified on the dev box, so the change is observable only on a host that is not
+8.3 / PG 16.
+
+**`utils/upgrade.php`** — `exec('service php8.3-fpm reload 2>/dev/null')`. This
+runs on every deployed node at the end of an upgrade, after installing a
 plugin-declared PHP extension. On a 26.04 node there is no `php8.3-fpm`, stderr
 is discarded, and the exit code is not checked, so the reload silently does not
 happen and opcache keeps serving pre-upgrade code while the upgrade reports
-success. Derive the service name from `PHP_MAJOR_VERSION` and `PHP_MINOR_VERSION`
-— `upgrade.php` runs under the same PHP the web tier loads — and fall back to a
-glob if that service does not exist. The `apache2ctl graceful` on the preceding
-line is version-independent and stays.
+success. A new `upgrade_find_fpm_service()` prefers
+`php{PHP_MAJOR_VERSION}.{PHP_MINOR_VERSION}-fpm` — `upgrade.php` runs under the
+same PHP the web tier loads — and falls back to globbing `/etc/init.d/php*-fpm`
+and the systemd unit directories, taking the highest version by
+`version_compare`. It returns `''` rather than a guess when nothing is
+installed. The caller now reads the exit code and warns on a failed reload;
+`''` is reported separately as "no FPM here", so a mod_php host stays quiet
+while a broken reload does not. The `apache2ctl graceful` on the preceding line
+is version-independent and stays.
 
-**`maintenance_scripts/install_tools/Dockerfile.template:137`** —
-`PG_CONF="/etc/postgresql/16/main/pg_hba.conf"`. The only hardcoded PostgreSQL
-version left in executable code. It sits inside the container start command's
-`&&` chain, so on PG 18 the `sed` against a missing file fails and container
-initialisation aborts. Derive it the way `install.sh:1909` already does. Note
-that `install.sh`'s own detection (`psql --version` parsed to a major number)
-resolves PG 18 correctly and needs no change.
+**`maintenance_scripts/install_tools/Dockerfile.template`** — two sites, both in
+the container start command's `&&` chain, so neither degrades: the container
+aborts before Apache with nothing saying which path was wrong.
+
+- `PG_CONF="/etc/postgresql/16/main/pg_hba.conf"` — on PG 18 the `sed` against a
+  missing file fails. Now `ls -1d /etc/postgresql/*/main/pg_hba.conf | sort -V |
+  tail -1`, with an explicit FATAL naming the missing file.
+- `service php8.3-fpm start` — the same failure one line from the end, after the
+  whole site had already initialised. Now globs `/etc/init.d/php*-fpm` the same
+  way, with its own FATAL.
+
+Template version 4.4 → 4.5. `install.sh`'s own PostgreSQL detection
+(`psql --version` parsed to a major number) resolves PG 18 correctly and needs
+no change; its 37 PHP literals are 1.4 and deliberately untouched here.
+
+**`maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh`** —
+`dpkg -l 'php8.3-*'` captures the installed extension packages before a
+container swap and compares after. `prepare` and `swap` share the command, so on
+any other PHP both sides return empty and the swap reports "No php packages
+missing" while every declared extension is gone — the exact failure the record
+exists to catch. Glob widened to `php[0-9]*-*`; output verified identical on the
+dev box.
+
+`tests/unit/installer_contract_test.php` gained a section asserting no
+`php\d+\.\d+-fpm` and no `/etc/postgresql/\d+/` literal survives in any of the
+three, that the reload reads its exit code and warns, and that both Dockerfile
+paths fail with a message naming what they could not find. Comment lines are
+excluded from the Dockerfile scan so the version log can keep naming the old
+literal. 158 checks, green.
 
 ### 1.2 PHP deprecations
 
@@ -147,10 +179,20 @@ All of the following are valid on 8.3 and behave identically there.
 
 **Deprecated in 8.4:**
 
-- `trigger_error(..., E_USER_ERROR)` — `includes/FormWriterV2Base.php:3952`,
-  `:3969`, `:3979`, all inside `validateVisibilityRules()`. These are
-  developer-error assertions intended to halt; replace with a thrown
-  `InvalidArgumentException`, which preserves the intent and the message.
+- ~~`trigger_error(..., E_USER_ERROR)`~~ **BUILT 2026-08-04** — three sites in
+  `includes/FormWriterV2Base.php`, all inside `validateVisibilityRules()`. Each
+  is a developer-error assertion intended to halt, so each became a thrown
+  `InvalidArgumentException` carrying the same message. It still stops the
+  render, and it is now catchable and carries a trace to the offending call.
+  FormWriter 2.18.0 → 2.19.0. The `E_USER_ERROR` constant remains in
+  `includes/ErrorHandler.php`, where it is compared against
+  `error_get_last()['type']` — the constant is not deprecated, only raising it
+  through `trigger_error()` is.
+  `tests/unit/formwriter_visibility_script_test.php` (12 → 17 checks) previously
+  wrapped the one covered case in a `set_error_handler` shim to catch the fatal;
+  that scaffolding is gone, the exception class is asserted, and the two rules
+  that had no coverage at all — a field both shown and hidden for one value, and
+  a non-string field reference — now have it.
 - ~~Implicitly nullable parameters~~ **BUILT 2026-08-03** —
   `includes/VaultDeferredWork.php:118`: `string $scope = null` and
   `float $budget_seconds = null` became `?string` and `?float`. A whole-tree
@@ -178,10 +220,20 @@ All of the following are valid on 8.3 and behave identically there.
   `return $image && imagedestroy($image);`, so the call was part of the return
   expression and became `return (bool)$image;`, preserving the result.
 - ~~`finfo_close()`~~ **BUILT 2026-08-03** — `data/files_class.php:717` and `:747`.
-- `$http_response_header` — `plugins/mailbox/tasks/LearnSpamFeedback.php:177`,
-  reading the rspamd controller's status line. The replacement,
-  `http_get_last_response_headers()`, is 8.4-and-later only, so this needs a
-  `function_exists()` shim to keep working on 8.3 nodes during the mixed window.
+- ~~`$http_response_header`~~ **BUILT 2026-08-04** —
+  `plugins/mailbox/tasks/LearnSpamFeedback.php`, reading the rspamd controller's
+  status line in the stream fallback taken when curl is unavailable. The
+  replacement, `http_get_last_response_headers()`, is 8.4-and-later only, so both
+  paths are kept behind `function_exists()` until the fleet is past 8.3.
+  `validate_php_file.php` reports `Missing: 1` on this file for exactly that
+  call — it does not exist on the 8.3 that runs the validator, which is why the
+  guard is there. That flag is expected until the fleet moves and should not be
+  re-investigated.
+
+  **Adjacent defect fixed in passing:** the status-line regex was `/\s(\d{3})\s/`,
+  which requires trailing whitespace and so read 0 from a bare `HTTP/1.1 200`.
+  Code 0 fails the learn, which leaves the row diverged and re-selecting on every
+  15-minute pass forever. Now `/\s(\d{3})(?:\s|$)/`.
 
 ### 1.3 Remove the IMAP extension dependency
 
@@ -390,8 +442,9 @@ is permanently false and no block check ever runs. The doc was corrected to stat
 that the platform has no blocking system and that callers must enforce their own
 restrictions; the guards were left as the integration point if blocking is built.
 The same file's "reporting" claim was also dropped — no report class or table
-exists either. The `agf_agent_files` "Internal CLAUDE.md" record still repeats
-both claims and needs the same correction through `/admin/admin_agent_files`.
+exists either. The `agf_agent_files` "Internal CLAUDE.md" record carries the same
+correction, applied through the `AgentFile` model so the drift hash stays
+consistent.
 
 ## Phase 2 — Requires the New Stack
 
@@ -448,13 +501,19 @@ These are behaviour changes with no code fix — they need a run, not an edit.
 
 ## Verification
 
-- `php tests/run.php safe` after each Phase 1 item. **Green as of 2026-08-03 for
-  the built subset (1.2 deletions, 1.7, 1.9): 79/79 tests, 1904 checks, 0 failed.**
+- `php tests/run.php safe` after each Phase 1 item. **Green as of 2026-08-04 for
+  the built subset (1.1, all of 1.2, 1.7, 1.9): 83/83 tests, 2116 checks,
+  0 failed.**
 - `php tests/run.php db` before committing Phase 1, and again before publishing.
-  **Not yet run against the built subset.**
-- `validate_php_file.php` reports `Missing: 0` on every file touched so far. Note
-  that it *executes* its target, so it is run only on class/definition files —
-  `utils/` scripts and other run-on-include bodies get `php -l` and review by eye.
+  **Green as of 2026-08-04 for the built subset: 226/226 tests, 6912 checks,
+  0 failed, 159 skipped.**
+- `validate_php_file.php` reports `Missing: 0` on every file touched so far, with
+  one expected exception: `LearnSpamFeedback.php` flags
+  `http_get_last_response_headers()`, which genuinely does not exist on the PHP
+  8.3 running the validator and is guarded by `function_exists()` for that
+  reason. Note the validator *executes* its target, so it is run only on
+  class/definition files — `utils/` scripts and other run-on-include bodies get
+  `php -l` and review by eye.
 - `tests/deploy/syntax_sweep_test.php` covers the parse level for every file the
   deployed site can load; it is the existing deploy gate and needs no change.
 - Phase 1.1 specifically: confirm on a current 24.04 node that an upgrade

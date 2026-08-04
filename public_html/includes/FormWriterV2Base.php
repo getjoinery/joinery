@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.18.0
+ * @version 2.19.0
+ * @changelog 2.19.0 - validateVisibilityRules() throws InvalidArgumentException instead of trigger_error(E_USER_ERROR), which PHP 8.4 deprecates; the failure is a caller mistake, so it still halts, but it is now catchable and carries a trace to the bad call
  * @changelog 2.18.0 - Added the inputmode option on text inputs, so a code or numeric field can raise the numeric keypad on a phone without becoming type=number
  * @changelog 2.16.0 - min/max validation tests presence against ''/null instead of empty(), so a `min: 1` rule rejects 0 (empty('0') is true, so it had been accepting the one value it exists to reject)
  * @changelog 2.15.0 - Added registerValidationField(): a caller with authoritative rules (SettingsWriter, from the setting declarations) can validate names this form never drew, so validation scope stops depending on what a page happened to render
@@ -3937,9 +3938,16 @@ JS;
 
     /**
      * Validate visibility rules for conflicts and errors
+     *
+     * Every failure here is a mistake in the calling code, not bad user input:
+     * the rules array is written by whoever built the form. Each one throws,
+     * which halts rendering the same way the previous E_USER_ERROR did while
+     * staying catchable and carrying a stack trace to the offending call.
+     *
      * @param string $fieldId - Field ID being configured
      * @param array $rules - Visibility rules to validate
      * @param string $type - Trigger type: 'select' (default), 'checkbox', 'radio'
+     * @throws InvalidArgumentException when the rules array is malformed
      */
     protected function validateVisibilityRules($fieldId, $rules, $type = 'select') {
         // Checkbox triggers key on checked-state, not on a value. Catch the
@@ -3949,11 +3957,10 @@ JS;
             $allowed = array('checked', 'unchecked', 'default');
             $bad = array_diff(array_keys($rules), $allowed);
             if (!empty($bad)) {
-                trigger_error(
+                throw new InvalidArgumentException(
                     "Invalid visibility_rules keys on checkbox '{$fieldId}': " .
                     implode(', ', $bad) . ". A checkbox trigger keys on its checked state — " .
-                    "use 'checked', 'unchecked', or 'default'.",
-                    E_USER_ERROR
+                    "use 'checked', 'unchecked', or 'default'."
                 );
             }
         }
@@ -3966,20 +3973,18 @@ JS;
             $conflicts = array_intersect($show, $hide);
             if (!empty($conflicts)) {
                 $conflictList = implode(', ', $conflicts);
-                trigger_error(
+                throw new InvalidArgumentException(
                     "Visibility conflict in field '{$fieldId}' for value '{$selectValue}': " .
-                    "Fields cannot be both shown and hidden: {$conflictList}",
-                    E_USER_ERROR
+                    "Fields cannot be both shown and hidden: {$conflictList}"
                 );
             }
 
             // Check for non-string values
             foreach (array_merge($show, $hide) as $fieldRef) {
                 if (!is_string($fieldRef)) {
-                    trigger_error(
+                    throw new InvalidArgumentException(
                         "Invalid field reference in '{$fieldId}': field IDs must be strings, " .
-                        "got " . gettype($fieldRef),
-                        E_USER_ERROR
+                        "got " . gettype($fieldRef)
                     );
                 }
             }

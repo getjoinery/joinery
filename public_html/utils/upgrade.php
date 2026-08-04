@@ -133,6 +133,44 @@
 		echo '</div>';
 	}
 
+	// Name of the PHP-FPM service on this host, or '' if there is none.
+	// Prefers the version running this script, because that is the PHP the web
+	// tier loads; falls back to whatever FPM service is installed so a host whose
+	// CLI and web PHP differ still gets reloaded. Never guesses a name that has
+	// no init script or unit behind it - reloading a service that does not exist
+	// is the silent no-op this exists to prevent.
+	function upgrade_find_fpm_service() {
+		$has_service = function ($name) {
+			return file_exists('/etc/init.d/' . $name)
+				|| file_exists('/lib/systemd/system/' . $name . '.service')
+				|| file_exists('/usr/lib/systemd/system/' . $name . '.service')
+				|| file_exists('/etc/systemd/system/' . $name . '.service');
+		};
+
+		$preferred = 'php' . PHP_MAJOR_VERSION . '.' . PHP_MINOR_VERSION . '-fpm';
+		if ($has_service($preferred)) {
+			return $preferred;
+		}
+
+		$found = array();
+		foreach (glob('/etc/init.d/php*-fpm') ?: array() as $path) {
+			$found[] = basename($path);
+		}
+		foreach (glob('/lib/systemd/system/php*-fpm.service') ?: array() as $path) {
+			$found[] = basename($path, '.service');
+		}
+		foreach (glob('/usr/lib/systemd/system/php*-fpm.service') ?: array() as $path) {
+			$found[] = basename($path, '.service');
+		}
+		$found = array_unique($found);
+		if (empty($found)) {
+			return '';
+		}
+		// Highest version wins when a host carries more than one.
+		usort($found, 'version_compare');
+		return (string) end($found);
+	}
+
 	// Abort the upgrade with a styled error message; clears staging unless told not to.
 	// Use for pre-deployment failures (validation, missing prerequisites, bad downloads).
 	// Post-deployment failures should use DeploymentHelper::performRollback() instead.
@@ -1273,8 +1311,30 @@
 				// Web PHP won't see a new extension until its process reloads.
 				// Graceful reload only — never a stop/start from inside the box.
 				exec('apache2ctl graceful 2>/dev/null');
-				exec('service php8.3-fpm reload 2>/dev/null');
-				if ($verbose) upgrade_echo('Reloaded web PHP after extension install<br>');
+
+				// Derive the FPM service from the PHP running this script - it is
+				// the same PHP the web tier loads. A hardcoded name matches nothing
+				// on a host running any other version, and because the failure is
+				// silent the upgrade would report success while opcache kept
+				// serving pre-upgrade code.
+				$fpm_service = upgrade_find_fpm_service();
+				if ($fpm_service === '') {
+					// No FPM on this host (mod_php, or PHP served some other way).
+					// apache2ctl graceful above already reloaded it.
+					if ($verbose) upgrade_echo('No PHP-FPM service present; Apache reloaded<br>');
+				} else {
+					$fpm_out = array();
+					$fpm_return = 0;
+					exec('service ' . escapeshellarg($fpm_service) . ' reload 2>&1', $fpm_out, $fpm_return);
+					if ($fpm_return !== 0) {
+						out_alert('warning', 'Could not reload ' . htmlspecialchars($fpm_service),
+							'The extension is installed but the running PHP has not picked it up. '
+							. 'Reload it by hand: service ' . htmlspecialchars($fpm_service) . ' reload<br>'
+							. htmlspecialchars(implode(' ', array_slice($fpm_out, -3))));
+					} else if ($verbose) {
+						upgrade_echo('Reloaded web PHP after extension install (' . htmlspecialchars($fpm_service) . ')<br>');
+					}
+				}
 			} else if ($verbose) {
 				upgrade_echo('All declared extensions already present<br>');
 			}
