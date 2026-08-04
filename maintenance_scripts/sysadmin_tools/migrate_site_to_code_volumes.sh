@@ -41,7 +41,11 @@ CODE_TREES=("code:public_html" "vendor:vendor" "scripts:maintenance_scripts")
 # Installed php packages, names only. `dpkg-query -W` alone also lists packages
 # that are merely KNOWN — 26 of phillyzouk's 45 were never installed — so the
 # state column is what makes this a record of what the container actually had.
-PKG_LIST_CMD="dpkg -l 'php8.3-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | cut -d: -f1 | sort"
+# The glob is version-agnostic on purpose: pinned to one PHP version it matches
+# nothing on a container running any other, and since prepare and swap use the
+# same command both sides come back empty and the swap reports "no php packages
+# missing" while every extension is in fact gone.
+PKG_LIST_CMD="dpkg -l 'php[0-9]*-*' 2>/dev/null | grep '^ii' | tr -s ' ' | cut -d' ' -f2 | cut -d: -f1 | sort"
 
 say()  { echo "[$(date -u +%H:%M:%S)] $*"; }
 die()  { echo "FATAL: $*" >&2; exit 1; }

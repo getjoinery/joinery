@@ -172,8 +172,22 @@ class LearnSpamFeedback implements ScheduledTaskInterface {
 			error_log('LearnSpamFeedback: controller ' . $cmd . ' POST failed (stream).');
 			return false;
 		}
+		// The status line of the response file_get_contents just read. PHP 8.5
+		// deprecates the magic $http_response_header local; its replacement is
+		// 8.4-and-later, so both are kept while the fleet spans both.
+		$status_line = '';
+		if (function_exists('http_get_last_response_headers')) {
+			$headers = http_get_last_response_headers();
+			if (is_array($headers) && isset($headers[0])) {
+				$status_line = (string)$headers[0];
+			}
+		} else if (isset($http_response_header[0])) {
+			$status_line = (string)$http_response_header[0];
+		}
+		// A status line need not have anything after the code ("HTTP/1.1 200"),
+		// and reading 0 there would fail the learn and re-select the row forever.
 		$code = 0;
-		if (isset($http_response_header[0]) && preg_match('/\s(\d{3})\s/', $http_response_header[0], $m)) {
+		if ($status_line !== '' && preg_match('/\s(\d{3})(?:\s|$)/', $status_line, $m)) {
 			$code = (int)$m[1];
 		}
 		return $this->learnSucceeded($code, (string)$body, $cmd);

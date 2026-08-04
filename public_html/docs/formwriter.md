@@ -1033,7 +1033,9 @@ $formwriter->radioinput('rec_ends', 'Ends', [
 ]);
 ```
 
-**A multi-select checkbox list (`checkboxList` with `type='checkbox'`) cannot be a trigger** — it has no single current value. Attaching `visibility_rules` to one throws at generation time. It works fine as a show/hide *target*, and a single-select `type='radio'` list is a valid trigger. Likewise, keying a checkbox on anything other than `checked`/`unchecked`/`default` is rejected immediately rather than failing silently in the browser.
+**A multi-select checkbox list (`checkboxList` with `type='checkbox'`) cannot be a trigger** — it has no single current value. Attaching `visibility_rules` to one throws at generation time. It works fine as a show/hide *target*, and a single-select `type='radio'` list is a valid trigger.
+
+**A malformed rules array throws `InvalidArgumentException` while the field renders**, rather than emitting a script that misbehaves in the browser. Three things are rejected: keying a checkbox on anything other than `checked`/`unchecked`/`default`; listing the same field under both `show` and `hide` for one value; and a field reference that is not a string. The message names the field and what was wrong with it. These are mistakes in the calling code, so the exception is meant to surface during development — catch it only if you are deliberately probing a form definition.
 
 ### Level 2: Field-Level Custom Scripts
 

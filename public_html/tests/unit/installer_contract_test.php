@@ -860,4 +860,73 @@ check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
     'nothing missing means apt is never called');
 
 
+section('Runtime paths name no PHP or PostgreSQL version');
+
+// A pinned version in a path is drift with a delay on it: correct until the
+// host moves, then wrong everywhere at once. These three run on every deployed
+// node, so each is checked for the literal rather than for the fix — a future
+// edit that reintroduces one fails here.
+//
+// install.sh is deliberately not covered yet: its 37 occurrences are their own
+// piece of work (spec php_85_pg18_code_prep 1.4) and asserting on it now would
+// pin a state that does not exist.
+
+check($upgrade_src !== '', 'utils/upgrade.php is readable', $upgrade);
+
+// The original bug: `service php8.3-fpm reload 2>/dev/null` on a host running
+// anything else. stderr discarded, exit code unread, so the reload silently did
+// not happen and opcache kept serving pre-upgrade code under a green upgrade.
+check(preg_match('/php\d+\.\d+-fpm/', $upgrade_src) === 0,
+    'upgrade.php names no PHP version when reloading FPM');
+check(strpos($upgrade_src, 'function upgrade_find_fpm_service') !== false,
+    'it resolves the service against what is installed instead');
+
+// Resolving the name is only half of it. The failure mode was silence, so the
+// reload has to be checked, and a host with no FPM at all has to be told apart
+// from one where the reload failed.
+if (preg_match('/\$fpm_service = upgrade_find_fpm_service\(\);.*?\n\t{3}\}\n/s', $upgrade_src, $m)) {
+    $reload_body = $m[0];
+} else {
+    $reload_body = '';
+}
+check($reload_body !== '', 'the reload block is findable');
+check(strpos($reload_body, '$fpm_return') !== false
+    && strpos($reload_body, "if (\$fpm_return !== 0)") !== false,
+    'the reload exit code is read rather than discarded');
+check(strpos($reload_body, "out_alert('warning'") !== false,
+    'and a failed reload warns instead of passing silently');
+check(strpos($reload_body, "\$fpm_service === ''") !== false,
+    'a host with no FPM is distinguished from a reload that failed');
+
+// Both Dockerfile sites sit in the start command's && chain, so a path that
+// does not resolve stops the container before Apache — the container never
+// came up at all, with no message saying which path was wrong.
+// Comment lines are excluded: the version log at the top records what each
+// revision changed and naming the old literal there is the point of it.
+$dockerfile_exec = implode("\n", array_filter(
+    explode("\n", $dockerfile_src),
+    function ($line) { return strpos(ltrim($line), '#') !== 0; }
+));
+check(preg_match('#/etc/postgresql/\d+/#', $dockerfile_exec) === 0,
+    'Dockerfile.template names no PostgreSQL version in a config path');
+check(preg_match('/php\d+\.\d+-fpm/', $dockerfile_exec) === 0,
+    'and no PHP version in the fpm service it starts');
+foreach ([
+    'FATAL: no pg_hba.conf under /etc/postgresql' => 'an unresolvable pg_hba.conf',
+    'FATAL: no php-fpm init script under /etc/init.d' => 'a missing fpm service',
+] as $needle => $label) {
+    check(strpos($dockerfile_src, $needle) !== false,
+        "{$label} stops the container with a message naming it");
+}
+
+// prepare and swap run the same command, so a glob matching nothing on both
+// sides makes the swap report that no packages were lost while every PHP
+// extension the site declared is in fact gone.
+$migrate_sh  = $site_root . '/maintenance_scripts/sysadmin_tools/migrate_site_to_code_volumes.sh';
+$migrate_src = is_file($migrate_sh) ? file_get_contents($migrate_sh) : '';
+check($migrate_src !== '', 'migrate_site_to_code_volumes.sh is readable', $migrate_sh);
+check(preg_match("/dpkg -l 'php\d+\.\d+-/", $migrate_src) === 0,
+    'the installed-package probe is not pinned to one PHP version');
+
+
 harness_finish();
