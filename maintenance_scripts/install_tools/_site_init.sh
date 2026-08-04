@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.5 - create_config_file refuses to overwrite an existing
+#                Globalvars_site.php. It generates a fresh secret_box_key, so a
+#                re-run over a live site orphaned every secret encrypted at rest
+#                while leaving the database intact.
 # VERSION: 2.4 - Core half of spec linode_stackscript: honour JOINERY_ADMIN_EMAIL
 #                so the admin account is recoverable by email from the start;
 #                record upgrade_source as whatever endpoint this install came
@@ -161,6 +165,19 @@ ESCAPED_PASSWORD=$(sed_escape "$PASSWORD")
 
 # Helper function to create config file
 create_config_file() {
+    # Never overwrite a config that is already there. It holds this deployment's
+    # secret_box_key, and the block below mints a fresh one — so rewriting the
+    # file leaves every secret encrypted at rest undecryptable: sealed vault
+    # wrappings, stored credentials, DKIM keys. The database check further down
+    # already skips a database that exists; this is the same guard for the file
+    # that holds the keys to it. Silent, unrecoverable, and it looks like a clean
+    # install right up until something tries to decrypt.
+    if [ -f "$SITE_ROOT/config/Globalvars_site.php" ]; then
+        log "Config already exists at $SITE_ROOT/config/Globalvars_site.php - leaving it."
+        log "  (it carries this site's secret_box_key; regenerating it would orphan every encrypted secret)"
+        return 0
+    fi
+
     log "Configuring site..."
     cp "$GLOBALVARS_TEMPLATE" "$SITE_ROOT/config/Globalvars_site.php"
     sed -i "s/{{PASSWORD}}/${ESCAPED_PASSWORD}/g" "$SITE_ROOT/config/Globalvars_site.php"

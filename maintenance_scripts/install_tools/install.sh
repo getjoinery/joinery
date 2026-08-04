@@ -1,4 +1,34 @@
 #!/usr/bin/env bash
+#VERSION 2.33 - The forward-only guard covers bare metal too, not just Docker.
+#              An install over an existing bare-metal site rsyncs the archive
+#              onto the live tree with no --delete, so an older archive merges
+#              rather than replaces: shared files roll back, newer-release files
+#              stay, and VERSION names the older release — a tree no release
+#              shipped, against a forward-migrated database. With -y there was
+#              no prompt at all. The guard runs before the overwrite prompt, so
+#              a refusal has touched nothing, and --wipe-data is not a bypass
+#              there (it deletes volumes, of which bare metal has none).
+#VERSION 2.32 - Only default_Globalvars_site.php goes into a site image's
+#              config/, never the directory wholesale. A release archive holds
+#              just the template, but `install.sh site` run from a live site
+#              directory copied that site's Globalvars_site.php — database
+#              password, secret_box_key — along with any signing, provisioning
+#              or relay keys kept beside it, into an image layer. It also broke
+#              the new site: a Globalvars_site.php in the image makes the
+#              container skip _site_init.sh, so no database is ever created.
+#              .dockerignore allowlists config/ for the same reason.
+#VERSION 2.31 - Two data-loss fixes and one silent-breakage fix:
+#              (1) A rebuild only deletes data volumes under --wipe-data. The
+#              interactive path deleted every volume — database, uploads,
+#              storage, config, backups — on a plain yes to a rebuild prompt,
+#              ignoring the flag that exists to gate exactly that, and undoing
+#              the 2.29 guard for sites whose code is on a volume. Both removal
+#              sites now share one ALL_SITE_VOLUMES list.
+#              (2) Declared PHP extensions are installed at every container
+#              start, not just on bare metal. They are apt packages in the
+#              writable layer, so a rebuild dropped them; composer validation
+#              then failed and update_database was skipped in silence.
+#              _install_declared_dependencies.sh is the shared implementation.
 #VERSION 2.30 - Site code lives on named volumes (spec
 #              container_rebuild_never_downgrades, part 2 phase A): public_html,
 #              vendor and maintenance_scripts each get one, so removing and
@@ -1009,46 +1039,16 @@ deploy_application_code() {
     print_success "Application code deployed to $site_root"
 }
 
-# Install every PHP extension the deployed source declares (root composer.json
-# ext-* plus plugin requires.extensions), resolved by utils/list_dependencies.php.
-# The resolver emits "primary|fallback" apt package pairs; a package that
-# installs from neither name is a warning, not a failure - the plugin
-# activation gate is the runtime backstop.
+# Install every PHP extension the deployed source declares. The work lives in
+# _install_declared_dependencies.sh so the container CMD can run the same code
+# at every start — in Docker these are apt packages in the writable layer, which
+# a rebuild destroys.
 # Usage: install_declared_dependencies /var/www/html/SITENAME/public_html
 install_declared_dependencies() {
     local public_html="$1"
-    local resolver="$public_html/utils/list_dependencies.php"
-
-    if [ ! -f "$resolver" ]; then
-        print_warning "Dependency resolver not found at $resolver - skipping declared-dependency install"
-        return 0
-    fi
 
     print_step "Installing declared PHP extensions..."
-    local specs
-    specs=$(php "$resolver" --apt 2>/dev/null || true)
-    if [ -z "$specs" ]; then
-        print_info "No installable declared extensions."
-        return 0
-    fi
-
-    apt-get update -qq
-    local spec primary fallback
-    for spec in $specs; do
-        primary="${spec%%|*}"
-        fallback="${spec##*|}"
-        if dpkg -s "$primary" > /dev/null 2>&1 || dpkg -s "$fallback" > /dev/null 2>&1; then
-            print_info "Already installed: $primary"
-            continue
-        fi
-        if apt-get install -y "$primary" > /dev/null 2>&1; then
-            print_success "Installed $primary"
-        elif apt-get install -y "$fallback" > /dev/null 2>&1; then
-            print_success "Installed $fallback"
-        else
-            print_warning "Could not install $primary (or $fallback) - a plugin requiring it will refuse activation"
-        fi
-    done
+    bash "$SCRIPT_DIR/_install_declared_dependencies.sh" "$public_html" || true
 }
 
 #==============================================================================
@@ -2638,6 +2638,27 @@ CODE_VOLUMES=(
     "scripts:maintenance_scripts"
 )
 
+# Every volume a site owns, code and data alike — the full set `--wipe-data`
+# deletes. Held in one place because it was previously spelled out at each
+# removal site, and a list that is written twice is a list that drifts: a volume
+# added to one copy and not the other survives a wipe that promised to be total.
+ALL_SITE_VOLUMES=(
+    code vendor scripts
+    postgres uploads storage config backups static
+    logs cache sessions apache_logs pg_logs
+)
+
+# Delete every volume belonging to a site. Irreversible: this is the database,
+# the uploads, the config that holds secret_box_key, and the backups. Only ever
+# called behind --wipe-data.
+remove_site_volumes() {
+    local SITENAME="$1"
+    local vol
+    for vol in "${ALL_SITE_VOLUMES[@]}"; do
+        docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
+    done
+}
+
 # True when the site's code volume already holds a release. Read straight off
 # the host filesystem rather than through a throwaway container: this runs
 # before the base image has been checked for, and a version file is not worth
@@ -2669,40 +2690,67 @@ code_volume_is_populated() {
 assert_rebuild_moves_code_forward() {
     local SITENAME="$1"
     local ARCHIVE_ROOT="$2"
-    local CONTAINER_VERSION_PATH="/var/www/html/${SITENAME}/public_html/VERSION"
+    local DEPLOY_MODE="${3:-docker}"
+    local LIVE_VERSION_PATH="/var/www/html/${SITENAME}/public_html/VERSION"
     local ARCHIVE_VERSION_FILE="${ARCHIVE_ROOT}/public_html/VERSION"
-
-    # Nothing installed under this name yet — there is no code to move backward.
-    if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
-        return 0
-    fi
-
-    # --wipe-data asks for a fresh site outright: the database that makes the
-    # running code load-bearing is being deleted in the same breath.
-    if [ "$WIPE_DATA" -eq 1 ]; then
-        print_info "Skipping the code-version check (--wipe-data: this is a fresh site)"
-        return 0
-    fi
-
-    # A populated code volume puts the site's code out of a rebuild's reach:
-    # Docker seeds a volume from the image only when the volume is empty, so
-    # there is nothing here to move backward and no version worth comparing.
-    if code_volume_is_populated "$SITENAME"; then
-        print_success "${SITENAME}'s code is on a volume — a rebuild cannot replace it"
-        return 0
-    fi
-
-    print_step "Checking that this rebuild moves ${SITENAME}'s code forward..."
-
-    # docker cp reads a stopped container as well as a running one, which
-    # docker exec cannot — and a previous failed run may have left it stopped.
     local RUNNING_VERSION=""
-    local TMP_VERSION
-    TMP_VERSION=$(mktemp)
-    if docker cp "${SITENAME}:${CONTAINER_VERSION_PATH}" "$TMP_VERSION" > /dev/null 2>&1; then
-        RUNNING_VERSION=$(tr -d '[:space:]' < "$TMP_VERSION")
+    local ACTION="rebuild"
+
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        # Nothing installed under this name yet — there is no code to move backward.
+        if ! docker ps -a --format '{{.Names}}' 2>/dev/null | grep -q "^${SITENAME}$"; then
+            return 0
+        fi
+
+        # --wipe-data asks for a fresh site outright: the database that makes the
+        # running code load-bearing is being deleted in the same breath.
+        if [ "$WIPE_DATA" -eq 1 ]; then
+            print_info "Skipping the code-version check (--wipe-data: this is a fresh site)"
+            return 0
+        fi
+
+        # A populated code volume puts the site's code out of a rebuild's reach:
+        # Docker seeds a volume from the image only when the volume is empty, so
+        # there is nothing here to move backward and no version worth comparing.
+        if code_volume_is_populated "$SITENAME"; then
+            print_success "${SITENAME}'s code is on a volume — a rebuild cannot replace it"
+            return 0
+        fi
+
+        print_step "Checking that this rebuild moves ${SITENAME}'s code forward..."
+
+        # docker cp reads a stopped container as well as a running one, which
+        # docker exec cannot — and a previous failed run may have left it stopped.
+        local TMP_VERSION
+        TMP_VERSION=$(mktemp)
+        if docker cp "${SITENAME}:${LIVE_VERSION_PATH}" "$TMP_VERSION" > /dev/null 2>&1; then
+            RUNNING_VERSION=$(tr -d '[:space:]' < "$TMP_VERSION")
+        fi
+        rm -f "$TMP_VERSION"
+    else
+        ACTION="install"
+
+        # Bare metal has no volume to put the code out of reach: an install over
+        # an existing site rsyncs the archive straight onto the live tree. There
+        # is no --delete, so an older archive does not replace that tree, it
+        # merges into it — files present in both roll back, files only the newer
+        # release shipped stay behind, and VERSION ends up naming the older one.
+        # The result is a tree no release ever shipped, describing itself as a
+        # version it is not.
+        #
+        # A site is "there" by the same test the overwrite prompt uses, so the
+        # guard and the prompt never disagree about whether one exists.
+        if [ ! -d "/var/www/html/${SITENAME}" ] || \
+           [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then
+            return 0
+        fi
+
+        print_step "Checking that this install moves ${SITENAME}'s code forward..."
+
+        if [ -r "$LIVE_VERSION_PATH" ]; then
+            RUNNING_VERSION=$(tr -d '[:space:]' < "$LIVE_VERSION_PATH")
+        fi
     fi
-    rm -f "$TMP_VERSION"
 
     local ARCHIVE_VERSION=""
     if [ -r "$ARCHIVE_VERSION_FILE" ]; then
@@ -2727,11 +2775,15 @@ assert_rebuild_moves_code_forward() {
     # An archive that cannot say what it is, is the same signal as an older one
     # with less information — so unknown refuses too.
     if [ "$VERDICT" = "unknown" ]; then
-        print_warning "Cannot tell whether this rebuild moves ${SITENAME}'s code forward"
+        print_warning "Cannot tell whether this ${ACTION} moves ${SITENAME}'s code forward"
     else
-        print_warning "This rebuild would move ${SITENAME}'s code BACKWARD"
+        print_warning "This ${ACTION} would move ${SITENAME}'s code BACKWARD"
     fi
-    print_warning "  running in the container:  ${RUNNING_VERSION:-unreadable at $CONTAINER_VERSION_PATH}"
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        print_warning "  running in the container:  ${RUNNING_VERSION:-unreadable at $LIVE_VERSION_PATH}"
+    else
+        print_warning "  installed on this server:  ${RUNNING_VERSION:-unreadable at $LIVE_VERSION_PATH}"
+    fi
     print_warning "  in this archive:           ${ARCHIVE_VERSION:-unreadable at $ARCHIVE_VERSION_FILE}"
     print_warning "  archive root:              ${ARCHIVE_ROOT}"
 
@@ -2742,11 +2794,19 @@ assert_rebuild_moves_code_forward() {
         return 0
     fi
 
-    print_error "Refusing to rebuild ${SITENAME}."
-    print_error "The site's code lives in the container, so a rebuild replaces it with the"
-    print_error "archive copy — against a database that has already migrated forward."
+    print_error "Refusing to ${ACTION} ${SITENAME}."
+    if [ "$DEPLOY_MODE" = "docker" ]; then
+        print_error "The site's code lives in the container, so a rebuild replaces it with the"
+        print_error "archive copy — against a database that has already migrated forward."
+    else
+        print_error "The archive is copied onto the live tree without deleting anything, so an"
+        print_error "older one leaves a mix: shared files rolled back, newer-release files left"
+        print_error "behind, VERSION naming the older release — against a database that has"
+        print_error "already migrated forward. To move a bare-metal site forward in place, run"
+        print_error "its own utils/upgrade.php instead of reinstalling over it."
+    fi
     print_error "Publish a current release, extract it, and run that copy's install.sh."
-    print_error "To rebuild from this archive regardless: re-run with --allow-downgrade"
+    print_error "To ${ACTION} from this archive regardless: re-run with --allow-downgrade"
     exit 1
 }
 
@@ -2780,7 +2840,7 @@ do_site_docker() {
     # Before anything stops or removes the container, refuse a rebuild that
     # cannot prove it moves this site's code forward. A refusal here leaves the
     # site running exactly as it was.
-    assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT"
+    assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT" docker
 
     # Preflight: if a container with this SITENAME is already running, stop it
     # BEFORE the port check. Otherwise is_port_in_use sees the target's own
@@ -2903,9 +2963,7 @@ do_site_docker() {
                 print_warning "Auto-removing existing container AND data volumes (-y --wipe-data)"
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
-                    docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
-                done
+                remove_site_volumes "$SITENAME"
                 print_success "Existing container and volumes removed"
             else
                 # Safe rebuild: remove only the container; volumes survive and reattach
@@ -2916,22 +2974,38 @@ do_site_docker() {
                 print_success "Existing container removed (volumes intact)"
             fi
         else
+            # Deleting the data volumes is what --wipe-data asks for, and asking
+            # interactively does not make it any less irreversible. Answering yes
+            # to a rebuild prompt is not consent to lose the database, so the
+            # prompt only ever offers what the flags allow.
             echo ""
-            print_warning "Removing container will also delete all site data (database, uploads, config)!"
-            read -p "Would you like to remove it and continue? [y/N] " -n 1 -r
-            echo ""
-
-            if [[ $REPLY =~ ^[Yy]$ ]]; then
+            if [ "$WIPE_DATA" -eq 1 ]; then
+                print_warning "--wipe-data will DELETE this site's database, uploads, storage,"
+                print_warning "config (including its secret_box_key) and backups. Irreversible."
+                read -p "Remove the container AND every data volume? [y/N] " -n 1 -r
+                echo ""
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    print_error "Aborted. Nothing was removed."
+                    exit 1
+                fi
                 print_info "Stopping and removing existing container and volumes..."
                 docker stop "$SITENAME" 2>/dev/null || true
                 docker rm "$SITENAME" 2>/dev/null || true
-                for vol in code vendor scripts postgres uploads storage config backups static logs cache sessions apache_logs pg_logs; do
-                    docker volume rm "${SITENAME}_${vol}" 2>/dev/null || true
-                done
+                remove_site_volumes "$SITENAME"
                 print_success "Existing container and volumes removed"
             else
-                print_error "Cannot continue with existing container."
-                exit 1
+                print_info "The container will be removed and rebuilt. Data volumes are kept:"
+                print_info "the database, uploads, storage, config and backups all survive."
+                read -p "Remove and rebuild it? [y/N] " -n 1 -r
+                echo ""
+                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
+                    print_error "Aborted. Nothing was removed."
+                    exit 1
+                fi
+                print_info "Stopping and removing existing container..."
+                docker stop "$SITENAME" 2>/dev/null || true
+                docker rm "$SITENAME" 2>/dev/null || true
+                print_success "Existing container removed (volumes intact)"
             fi
         fi
     else
@@ -2993,8 +3067,34 @@ do_site_docker() {
         # This ensures first-run initialization happens with the clone
         print_info "Skipping config copy (will be configured during clone)"
     else
-        # Normal install: copy the archive config
-        cp -r "$ARCHIVE_ROOT/config"/* "$BUILD_DIR/$SITENAME/config/"
+        # Only the template travels into the image, never the directory wholesale.
+        #
+        # A release archive's config/ holds exactly one file, so copying it all
+        # looked harmless. A LIVE site's config/ is a different thing: it holds
+        # Globalvars_site.php — database password and secret_box_key — beside
+        # whatever the deployment keeps next to it, which on a control plane is
+        # the agent signing key, the provisioning and relay keys, and the DNS
+        # token. `install.sh site` run from a site directory rather than an
+        # extracted archive baked all of that into an image layer.
+        #
+        # It breaks the install too: a Globalvars_site.php in the image means the
+        # container's start-up test for one finds it, skips _site_init.sh, and
+        # the new site comes up with no database and someone else's keys. So
+        # nothing is lost by narrowing this — a config/ with more in it than the
+        # template has never produced a working site.
+        if [ -f "$ARCHIVE_ROOT/config/default_Globalvars_site.php" ]; then
+            cp "$ARCHIVE_ROOT/config/default_Globalvars_site.php" "$BUILD_DIR/$SITENAME/config/"
+        fi
+
+        local SKIPPED_CONFIG
+        SKIPPED_CONFIG=$(find "$ARCHIVE_ROOT/config" -maxdepth 1 -type f \
+            ! -name 'default_Globalvars_site.php' -printf '%f ' 2>/dev/null)
+        if [ -n "$SKIPPED_CONFIG" ]; then
+            print_warning "Live configuration found beside this archive — not copying it into the image:"
+            print_warning "  ${SKIPPED_CONFIG}"
+            print_warning "  ${ARCHIVE_ROOT} looks like a running site rather than an extracted release."
+            print_warning "  The new site generates its own config and keys at first start."
+        fi
     fi
 
     print_info "Copying maintenance_scripts..."
@@ -3004,11 +3104,18 @@ do_site_docker() {
     print_info "Setting up Dockerfile..."
     cp "$SCRIPT_DIR/Dockerfile.template" "$BUILD_DIR/Dockerfile"
 
+    # config/ is an allowlist, not a denylist: the only file that belongs in a
+    # site image is the template. Anything else under config/ is this
+    # deployment's live secrets, and a denylist would have to guess their names.
+    # Belt and braces over the copy above — it also covers a build directory
+    # left behind by an earlier run.
     cat > "$BUILD_DIR/.dockerignore" << 'EOF'
 .git
 *.log
 */backups/*
 */storage/*
+*/config/*
+!*/config/default_Globalvars_site.php
 EOF
 
     print_success "Build context prepared at $BUILD_DIR"
@@ -3233,6 +3340,17 @@ do_site_baremetal() {
         fi
     fi
 
+    # Archive root: parent of maintenance_scripts, which is parent of install_tools.
+    # Resolved here rather than further down because the guard below needs it, and
+    # the guard has to run before anything is asked or overwritten.
+    ARCHIVE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
+
+    # Refuse an install that cannot prove it moves this site's code forward,
+    # before the overwrite prompt rather than after it: there is no point asking
+    # a question the next check is going to override, and a refusal here has
+    # touched nothing.
+    assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT" baremetal
+
     # Check if site already exists
     if [ -d "/var/www/html/$SITENAME" ] && [ -f "/var/www/html/$SITENAME/config/Globalvars_site.php" ]; then
         if [ "$ASSUME_YES" -eq 1 ]; then
@@ -3248,11 +3366,9 @@ do_site_baremetal() {
         fi
     fi
 
-    # Verify archive structure and locate source files
+    # Verify archive structure and locate source files. ARCHIVE_ROOT is already
+    # resolved above, where the forward-only guard needed it.
     print_step "Locating source files..."
-
-    # Determine archive root (parent of maintenance_scripts which is parent of install_tools)
-    ARCHIVE_ROOT="$(dirname "$(dirname "$SCRIPT_DIR")")"
 
     if [ ! -d "$ARCHIVE_ROOT/public_html" ]; then
         print_error "Cannot find public_html directory in $ARCHIVE_ROOT"

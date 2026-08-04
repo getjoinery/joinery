@@ -549,8 +549,8 @@ check(preg_match('/-v "\$\{SITENAME\}_[a-z_]+":\/var\/www\/html\/"\$\{SITENAME\}
     'no volume is mounted at the site root, so none nests inside another');
 
 // A wipe that leaves the code volume behind would reinstall onto old code.
-check(substr_count($install_src, 'for vol in code vendor scripts postgres') === 2,
-    '--wipe-data removes the code volumes too');
+check(strpos($install_src, 'ALL_SITE_VOLUMES=(') !== false,
+    'the set of volumes a wipe deletes is written down once');
 
 // Docker fills an empty volume from the image and ignores the image once the
 // volume has content. That is what makes a stale image inert, so the COPY has
@@ -581,6 +581,283 @@ check(strpos($vol_body, '|| return 1') !== false,
 check(strpos($vol_body, '/VERSION') !== false,
     'an existing but unseeded volume answers no too',
     'a volume created by a half-finished migration is not a populated one');
+
+
+section('Only --wipe-data deletes a site\'s data');
+
+// A rebuild removes the container; that is routine and reversible. Deleting the
+// volumes takes the database, the uploads, the config that holds secret_box_key
+// and the backups, and nothing brings those back. Saying yes to a rebuild prompt
+// is not consent to that, so the flag is the only thing that authorises it.
+// Left ungated this also cancelled the guard above: it prints "code is on a
+// volume - a rebuild cannot replace it" and then the removal deletes the volume.
+
+// The wipe list has to cover every volume the site actually mounts, or a wipe
+// silently leaves state behind for the next install to inherit. Derived from
+// the docker run blocks rather than restated, so a new volume fails here.
+$declared_wipe = [];
+if (preg_match('/ALL_SITE_VOLUMES=\((.*?)\n\)/s', $install_src, $m)) {
+    $declared_wipe = preg_split('/\s+/', trim(preg_replace('/#.*/', '', $m[1])), -1, PREG_SPLIT_NO_EMPTY);
+}
+check($declared_wipe !== [], 'the wipe list is findable');
+
+preg_match_all('/-v "\$\{SITENAME\}_([a-z_]+)"/', $install_src, $mounted);
+$mounted_vols = array_values(array_unique($mounted[1]));
+$unwiped = array_diff($mounted_vols, $declared_wipe);
+check($unwiped === [], 'every volume the site mounts is in the wipe list',
+    $unwiped ? 'missing from ALL_SITE_VOLUMES: ' . implode(', ', $unwiped) : '');
+
+// One list, one deletion helper — the two removal paths previously spelled the
+// volumes out separately, which is how the two copies drift apart.
+check(substr_count($install_src, 'remove_site_volumes "$SITENAME"') === 2,
+    'both removal paths go through the one helper');
+check(preg_match('/for vol in code vendor scripts postgres/', $install_src) === 0,
+    'and neither still carries its own copy of the list');
+
+// The container-exists block is where the decision is made. Every deletion in
+// it must sit under a WIPE_DATA test — one for the -y path, one for the prompt.
+$exists_block = '';
+if (preg_match('/Checking for existing container.*?No existing container found/s', $install_src, $m)) {
+    $exists_block = $m[0];
+}
+check($exists_block !== '', 'the container-exists block is findable');
+check(substr_count($exists_block, 'remove_site_volumes') === 2,
+    'volumes are deleted in exactly two places');
+check(substr_count($exists_block, '"$WIPE_DATA" -eq 1') === 2,
+    'and each is behind its own --wipe-data test');
+
+// The prompt an operator reads has to match what the run will actually do.
+check(strpos($exists_block, 'Data volumes are kept') !== false,
+    'the rebuild prompt says the data survives');
+check(strpos($exists_block, 'Remove the container AND every data volume?') !== false,
+    'the wipe prompt says it does not');
+
+
+section('A bare-metal install cannot move a site backward either');
+
+// The same defect as the container one, on the deployment type with no volume
+// to hide behind. deploy_application_code rsyncs the archive onto the live tree
+// with no --delete, so an older archive does not replace it, it merges into it:
+// files in both roll back, files only the newer release shipped stay, and
+// VERSION names the older one. A tree no release ever shipped, misreporting
+// itself, against a database that migrated forward. With -y there is not even a
+// prompt — and -y is what Server Manager always passes.
+check(substr_count($install_src, 'assert_rebuild_moves_code_forward "$SITENAME" "$ARCHIVE_ROOT" baremetal') === 1,
+    'the bare-metal path calls the guard');
+
+// Before the overwrite prompt, not after: there is no point asking a question
+// the next check overrides, and a refusal at that point has touched nothing.
+$bm_guard = strpos($install_src, '"$ARCHIVE_ROOT" baremetal');
+$bm_prompt = strpos($install_src, 'Site $SITENAME already exists. Overwrite?');
+$bm_deploy = strpos($install_src, 'deploy_application_code "$SITENAME"');
+check($bm_guard !== false && $bm_prompt !== false && $bm_guard < $bm_prompt,
+    'it runs before the overwrite prompt');
+check($bm_guard !== false && $bm_deploy !== false && $bm_guard < $bm_deploy,
+    'and before any code is copied over the live tree');
+
+// Executed, not asserted. The version comparison is the part that has to be
+// right, and text matching cannot tell sort -V from string comparison — which
+// is the difference between catching 0.8.221 -> 0.8.24 and shipping it.
+$gr = sys_get_temp_dir() . '/joinery_guard_' . getmypid();
+$harness = $gr . '/run.sh';
+@mkdir($gr, 0700, true);
+file_put_contents($harness, <<<'SH'
+#!/usr/bin/env bash
+SRC="$1"; ROOT="$2"; SITE="$3"; ARCH="$4"; WIPE_DATA="${5:-0}"; ALLOW_DOWNGRADE="${6:-0}"
+print_step() { :; }; print_info() { :; }; print_success() { :; }
+print_warning() { :; }; print_error() { :; }
+code_volume_is_populated() { return 1; }
+eval "$(awk '/^assert_rebuild_moves_code_forward\(\) \{/,/^}$/' "$SRC" \
+        | sed "s#/var/www/html/#${ROOT}/#g")"
+assert_rebuild_moves_code_forward "$SITE" "$ARCH" baremetal
+echo PROCEED
+SH
+);
+
+$mk_site = function ($name, $version) use ($gr) {
+    @mkdir("$gr/$name/public_html", 0700, true);
+    @mkdir("$gr/$name/config", 0700, true);
+    touch("$gr/$name/config/Globalvars_site.php");
+    if ($version !== null) file_put_contents("$gr/$name/public_html/VERSION", $version . "\n");
+};
+$mk_arch = function ($name, $version) use ($gr) {
+    @mkdir("$gr/$name/public_html", 0700, true);
+    if ($version !== null) file_put_contents("$gr/$name/public_html/VERSION", $version . "\n");
+};
+
+$mk_site('live', '0.8.221');
+$mk_site('live9', '0.9.0');
+$mk_site('noversion', null);
+@mkdir("$gr/nocfg/public_html", 0700, true);          // code but never initialised
+$mk_arch('a_newer', '0.8.222');
+$mk_arch('a_same',  '0.8.221');
+$mk_arch('a_older', '0.8.24');
+$mk_arch('a_ten',   '0.10.0');
+$mk_arch('a_none',  null);
+
+$guard_run = function ($site, $arch, $wipe = 0, $allow = 0) use ($harness, $install_sh, $gr) {
+    $cmd = 'bash ' . escapeshellarg($harness) . ' ' . escapeshellarg($install_sh) . ' '
+         . escapeshellarg($gr) . ' ' . escapeshellarg($site) . ' '
+         . escapeshellarg($gr . '/' . $arch) . " {$wipe} {$allow} 2>&1";
+    return strpos((string)shell_exec($cmd), 'PROCEED') !== false;
+};
+
+// Nothing installed yet is not a downgrade — a fresh install must not be blocked.
+check($guard_run('absent', 'a_newer') === true, 'an absent site installs normally');
+check($guard_run('nocfg', 'a_newer') === true,
+    'a directory that was never initialised installs normally');
+
+check($guard_run('live', 'a_newer') === true, '0.8.221 to 0.8.222 proceeds');
+check($guard_run('live', 'a_same') === true, 'the same version proceeds');
+
+// The pair string comparison gets backwards, and the pair that was in the field.
+check($guard_run('live', 'a_older') === false, '0.8.221 to 0.8.24 is refused');
+check($guard_run('live9', 'a_ten') === true, '0.9.0 to 0.10.0 proceeds',
+    'the other ordering string comparison inverts');
+
+// Unreadable is the same signal as older, with less information.
+check($guard_run('live', 'a_none') === false, 'an archive with no VERSION is refused');
+check($guard_run('noversion', 'a_newer') === false, 'a site with no VERSION is refused');
+
+check($guard_run('live', 'a_older', 0, 1) === true, '--allow-downgrade overrides it');
+
+// --wipe-data means "delete the volumes" and there are none here, so it must not
+// read as consent to overwrite a bare-metal site with older code.
+check($guard_run('live', 'a_older', 1, 0) === false,
+    '--wipe-data is not a bare-metal bypass');
+
+exec('rm -rf ' . escapeshellarg($gr));
+
+
+section('A site image carries no live configuration');
+
+// A release archive's config/ holds one file: the template. A live site's holds
+// Globalvars_site.php — database password, secret_box_key — and, on a control
+// plane, the agent signing key, provisioning and relay keys, and the DNS token.
+// Copying the directory wholesale put whichever of those existed into an image
+// layer. It also broke the install: a Globalvars_site.php in the image makes the
+// container skip _site_init.sh, so the site never gets a database.
+check(strpos($install_src, 'cp -r "$ARCHIVE_ROOT/config"/*') === false,
+    'the config directory is not copied wholesale into the build context');
+check(strpos($install_src, 'cp "$ARCHIVE_ROOT/config/default_Globalvars_site.php"') !== false,
+    'only the template is copied');
+
+// Second line of defence, and the one that also covers a build directory left
+// over from an earlier run. Denylisting would mean guessing secret filenames.
+$ignore = '';
+if (preg_match('/cat > "\$BUILD_DIR\/\.dockerignore".*?\nEOF/s', $install_src, $m)) {
+    $ignore = $m[0];
+}
+check($ignore !== '', 'the dockerignore block is findable');
+$excl_at = strpos($ignore, '*/config/*');
+$negate_at = strpos($ignore, '!*/config/default_Globalvars_site.php');
+check($excl_at !== false, 'dockerignore excludes config/');
+check($negate_at !== false, 'and re-admits the template');
+check($excl_at !== false && $negate_at !== false && $excl_at < $negate_at,
+    'in that order, since the last matching dockerignore rule wins');
+
+// The warning names what it skipped. Executed against a fixture shaped like a
+// live control-plane config, because a find predicate that quietly misses a file
+// is a file that ships.
+$fixture = sys_get_temp_dir() . '/joinery_cfgfix_' . getmypid();
+@mkdir($fixture, 0700, true);
+$live_files = ['Globalvars_site.php', 'agent_signing_key', 'backup_site_key',
+               'cloudflare_dns_token', 'provisioning_key', 'relay_pull_key.pub'];
+foreach (array_merge($live_files, ['default_Globalvars_site.php']) as $f) {
+    file_put_contents($fixture . '/' . $f, 'x');
+}
+
+$find_cmd = '';
+if (preg_match('/find "\$ARCHIVE_ROOT\/config".*?-printf \'%f \' 2>\/dev\/null/s', $install_src, $m)) {
+    $find_cmd = str_replace('"$ARCHIVE_ROOT/config"', escapeshellarg($fixture), $m[0]);
+    $find_cmd = preg_replace('/\s*\\\\\n\s*/', ' ', $find_cmd);
+}
+check($find_cmd !== '', 'the skipped-file scan is findable');
+
+$skipped = $find_cmd === '' ? '' : shell_exec($find_cmd);
+$skipped_list = preg_split('/\s+/', trim((string)$skipped), -1, PREG_SPLIT_NO_EMPTY);
+sort($skipped_list);
+$expect = $live_files; sort($expect);
+check($skipped_list === $expect, 'every live config file is named as skipped',
+    'got: ' . implode(', ', $skipped_list));
+check(!in_array('default_Globalvars_site.php', $skipped_list, true),
+    'and the template is not, because it is the one file that travels');
+
+array_map('unlink', glob($fixture . '/*'));
+@rmdir($fixture);
+
+
+section('A reinstall never rotates a live site\'s encryption key');
+
+// create_config_file mints a fresh secret_box_key. Run over a site that already
+// has one, it leaves the database untouched and orphans everything encrypted at
+// rest in it — sealed vault wrappings, stored credentials, DKIM keys. The site
+// comes up looking fine; the failure surfaces whenever something decrypts.
+$init_src = is_file($site_init) ? file_get_contents($site_init) : '';
+check($init_src !== '', '_site_init.sh is readable', $site_init);
+
+$mk_config = '';
+if (preg_match('/create_config_file\(\) \{.*?\n\}/s', $init_src, $m)) {
+    $mk_config = $m[0];
+}
+check($mk_config !== '', 'the config writer is findable');
+
+$guard_at = strpos($mk_config, 'Globalvars_site.php" ]; then');
+$keygen_at = strpos($mk_config, 'openssl rand -base64 32');
+check($guard_at !== false, 'it checks whether a config is already there');
+check($keygen_at !== false, 'and it is still the thing that generates the key');
+check($guard_at !== false && $keygen_at !== false && $guard_at < $keygen_at,
+    'the check comes first, so an existing key is never regenerated');
+check(preg_match('/Globalvars_site\.php" \]; then.*?\n\s*return 0/s', $mk_config) === 1,
+    'and an existing config returns rather than falling through');
+
+// The guard belongs inside the writer, not at one call site: clone mode calls
+// it from a second place after the clone completes.
+check(substr_count($init_src, 'create_config_file') >= 3,
+    'both call sites are covered because the guard is in the function');
+
+
+section('A rebuilt container gets its declared extensions back');
+
+// These are apt packages that utils/upgrade.php installs into the writable
+// layer, so `docker rm` takes them with it. Without them composer validation
+// fails, update_database never runs, and the site serves an unmigrated schema
+// with nothing in the log to say why. It has to be re-asserted at every start,
+// not only at install, because a rebuild is exactly when they go missing.
+$deps_sh = $site_root . '/maintenance_scripts/install_tools/_install_declared_dependencies.sh';
+$deps_src = is_file($deps_sh) ? file_get_contents($deps_sh) : '';
+check($deps_src !== '', 'the dependency installer exists', $deps_sh);
+
+$cmd_call = strpos($dockerfile_src, '_install_declared_dependencies.sh');
+$cmd_updb = strpos($dockerfile_src, 'utils/update_database.php');
+check($cmd_call !== false, 'the container start runs it');
+check($cmd_call !== false && $cmd_updb !== false && $cmd_call < $cmd_updb,
+    'before update_database, which is what depends on the extensions');
+
+// One implementation. install.sh had its own copy, which is how the bare-metal
+// path stayed correct while the container path had no equivalent at all.
+check(strpos($install_src, '_install_declared_dependencies.sh') !== false,
+    'install.sh runs the same script rather than its own copy');
+check(preg_match('/specs=\$\(php "\$resolver" --apt/', $install_src) === 0,
+    'and no longer carries a second implementation');
+
+// Never fatal: a site that cannot reach apt, or is handed nothing, must still
+// start. Executed, because "exits 0" is a claim worth running.
+foreach ([
+    ''                        => 'no argument',
+    '/nonexistent-public-html' => 'a path that is not there',
+] as $arg => $label) {
+    exec('bash ' . escapeshellarg($deps_sh) . ' ' . escapeshellarg($arg) . ' 2>&1', $o, $rc);
+    check($rc === 0, "given {$label} it exits 0 rather than stopping the container",
+        'exit ' . $rc . ': ' . implode(' / ', $o));
+}
+
+// Missing packages are computed before apt is touched, so the common case (all
+// present) costs no network — this runs on every container start.
+$update_at = strpos($deps_src, "\napt-get update");   // the call, not the comment about it
+$missing_at = strpos($deps_src, 'if [ -z "$MISSING" ]');
+check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
+    'nothing missing means apt is never called');
 
 
 harness_finish();
