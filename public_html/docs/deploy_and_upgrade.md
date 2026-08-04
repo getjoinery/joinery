@@ -58,7 +58,7 @@ Cloudflare-fronted sites are partial: the container sees Cloudflare's edge IP, n
 This is the behavioural change most likely to trip up an operator who remembers the pre-shared-base model:
 
 - **Code / theme / plugin changes** (PHP files under `public_html/`, migrations, settings) — deliver via the existing publish/upgrade pipeline (`publish_upgrade.php` + `upgrade.php`). **No base image work required.** Nothing changes here.
-- **Declared PHP extensions** (root `composer.json` `ext-*`, plugin `requires.extensions`) — travel with the code: `upgrade.php` installs them post-swap and reloads web PHP, and site image rebuilds install them at build time. No base image work required.
+- **Declared PHP extensions** (root `composer.json` `ext-*`, plugin `requires.extensions`) — travel with the code: `upgrade.php` installs them post-swap and reloads web PHP. In a container they are apt packages in the writable layer, so `_install_declared_dependencies.sh` re-asserts the declared set at every container start, ahead of `update_database` — a rebuilt container gets them back before anything needs them. Nothing missing means apt is not called at all. No base image work required.
 - **Other system stack changes** (new apt package outside the declared-extension mechanism, Ubuntu bump, PHP bump, anything in `do_server_setup`) — require **base rebuild + container rebuild**, not just `upgrade.php`. Operators must:
   1. Bump `BASE_IMAGE_VERSION` in `install.sh`
   2. Run `./install.sh build-base` on the host
@@ -81,6 +81,19 @@ site and is inert for every rebuild after that — an in-place upgrade survives
 A container with an empty code volume refuses to start and says so, rather than
 serving an empty site.
 
+The image carries no live configuration. Only `default_Globalvars_site.php`
+travels into it from the archive's `config/`; the site's own
+`Globalvars_site.php` — database password and `secret_box_key` — is generated at
+first start, along with its admin password. Running `install.sh site` from a
+directory that holds live configuration rather than an extracted release prints
+what it declined to copy.
+
+Rebuilding a site removes and recreates its container; every volume survives.
+Deleting the volumes — the database, uploads, storage, backups, and the config
+that holds `secret_box_key` — happens only under `--wipe-data`, on both the
+`-y` path and the interactive prompt. The prompt states which of the two is
+about to happen, and declining it leaves everything in place.
+
 **A site whose code volume is not populated keeps its code in the container's
 writable layer instead**, where `docker rm` discards it. For those sites the
 installer compares the VERSION inside the container against
@@ -90,6 +103,15 @@ unreadable, is a hard refusal that leaves the container running untouched.
 `--wipe-data` skips the check, since a wipe deletes the database that made the
 running code load-bearing; `--allow-downgrade` is the only override, and it
 prints what it is about to overwrite.
+
+**Bare-metal installs get the same check**, against
+`/var/www/html/SITENAME/public_html/VERSION`, and it runs before the overwrite
+prompt so a refusal has changed nothing. `--wipe-data` is not a bypass there: it
+deletes volumes, and bare metal has none. To move a bare-metal site forward in
+place, run its own `utils/upgrade.php` rather than reinstalling over it —
+`install.sh site` copies the archive on without deleting anything, so an older
+one leaves shared files rolled back, newer-release files behind, and VERSION
+naming the older release.
 
 To see where a site stands:
 

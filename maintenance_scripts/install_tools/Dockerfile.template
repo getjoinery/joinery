@@ -1,4 +1,10 @@
 # Joinery Docker Template
+# VERSION 4.4 - Re-assert the source's declared PHP extensions on every start,
+#               before update_database. They are apt packages in the writable
+#               layer (utils/upgrade.php installs them there), so recreating a
+#               container dropped them: composer validation failed,
+#               update_database was skipped, and the site served happily on an
+#               unmigrated schema with nothing in the log to say why.
 # VERSION 4.3 - Site code is mounted from named volumes at run time
 #               (public_html, vendor, maintenance_scripts). The COPY steps
 #               below still put a release in the image, but only as the seed
@@ -180,6 +186,7 @@ CMD set +H && \
     ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R www-data:www-data "/var/www/html/${SITENAME}/vendor" || true) && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
+    bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_install_declared_dependencies.sh" "/var/www/html/${SITENAME}/public_html" || true && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_upgradable_assets.sh" || true && \
     echo "*/5 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
