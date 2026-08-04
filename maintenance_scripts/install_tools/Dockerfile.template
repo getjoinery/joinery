@@ -1,4 +1,12 @@
 # Joinery Docker Template
+# VERSION 4.3 - Site code is mounted from named volumes at run time
+#               (public_html, vendor, maintenance_scripts). The COPY steps
+#               below still put a release in the image, but only as the seed
+#               Docker seeds an EMPTY volume from — a populated volume is left
+#               untouched, so an in-place upgrade survives container recreation
+#               and a stale image cannot overwrite a newer site. The CMD fails
+#               loudly when the code path is empty rather than serving an
+#               empty site. Spec container_rebuild_never_downgrades.
 # VERSION 4.2 - Default BASE_IMAGE_VERSION 1.1 -> 1.2. The fpm module switch
 #               lives in install.sh do_server_setup, which the base image
 #               bakes, so starting fpm here only serves PHP through it once
@@ -77,6 +85,12 @@ ENV DOMAIN_NAME=${DOMAIN_NAME}
 
 # Copy source files
 # System dependencies (Apache, PHP, PostgreSQL, Composer, cron) come from joinery-base.
+#
+# public_html, vendor and maintenance_scripts are each mounted from a named
+# volume at run time. What is copied here is therefore a seed, not the code the
+# site serves: Docker fills an empty volume from the image on first use and
+# ignores the image entirely once the volume has content. So this copy builds a
+# brand new site, and is inert for every rebuild after that.
 COPY ${SITENAME}/ /var/www/html/${SITENAME}/
 COPY maintenance_scripts/ /var/www/html/${SITENAME}/maintenance_scripts/
 
@@ -138,6 +152,12 @@ CMD set +H && \
     echo "Container starting: SITENAME=${SITENAME}, DOMAIN=${DOMAIN_NAME}" && \
     if [ -z "${SITENAME}" ]; then echo "FATAL: SITENAME is empty"; exit 1; fi && \
     if [ -z "${POSTGRES_PASSWORD}" ]; then echo "FATAL: POSTGRES_PASSWORD is empty"; exit 1; fi && \
+    if [ ! -f "/var/www/html/${SITENAME}/public_html/VERSION" ]; then \
+        echo "FATAL: no site code at /var/www/html/${SITENAME}/public_html"; \
+        echo "       The code volume is mounted but empty. Seed it from a release"; \
+        echo "       archive, or reinstall this site with install.sh."; \
+        exit 1; \
+    fi && \
     service postgresql start && \
     sleep 3 && \
     export PGPASSWORD="${POSTGRES_PASSWORD}" && \
