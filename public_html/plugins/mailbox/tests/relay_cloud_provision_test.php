@@ -29,6 +29,7 @@ class RcpFakeDriver implements CloudComputeProvider {
 	public $create_exception = null;
 	public $boot_sequence = array(); // statuses returned by successive getInstance calls
 	public $deleted = array();
+	public $rebuilt = array();
 	public $rdns = array();
 	private $boot_i = 0;
 
@@ -45,6 +46,13 @@ class RcpFakeDriver implements CloudComputeProvider {
 		$this->boot_i++;
 		$ip = ($status === 'running') ? '198.51.100.99' : '';
 		return array('id' => $instance_id, 'status' => $status, 'ip' => $ip, 'label' => 'x');
+	}
+	public function rebuildInstance(string $instance_id, array $opts): array {
+		$this->rebuilt[] = array('id' => $instance_id, 'opts' => $opts);
+		// A real rebuild keeps the instance and its address; the fake must too,
+		// or a test could pass while the address silently moved.
+		return array('id' => $instance_id, 'status' => 'rebuilding',
+			'ip' => '198.51.100.99', 'label' => 'x');
 	}
 	public function deleteInstance(string $instance_id): void {
 		$this->deleted[] = $instance_id;

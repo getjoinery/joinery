@@ -11,6 +11,9 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.1 - relay version line and the upgrade affordance, which differs by
+ *                what the platform can reach (job / cloud wipe / the customer's
+ *                own box / operator-managed shard)
  * @version 2.0 - relay scanner health: last answer + Check spam scanning now
  */
 
@@ -22,6 +25,88 @@ function mailbox_relay_action_button(int $relay_id, string $action, string $labe
 		. '<input type="hidden" name="action" value="' . htmlspecialchars($action, ENT_QUOTES) . '">'
 		. '<button type="submit" class="btn btn-sm ' . htmlspecialchars($cls, ENT_QUOTES) . '">' . htmlspecialchars($label) . '</button>'
 		. '</form> ';
+}
+
+/**
+ * The upgrade affordance for one relay, which differs by what the platform can
+ * reach — a button where it can act, a sentence where only the customer can.
+ *
+ * Every route states the downtime before the customer commits. A relay stops
+ * accepting mail for the whole rebuild, and while SMTP senders retry for days
+ * (so nothing is lost), "your mail server will be offline for several minutes"
+ * is a fact somebody may want to act on at 2pm on a Tuesday.
+ */
+function mailbox_relay_upgrade_control(int $relay_id, array $up): string {
+	$route = (string)($up['route'] ?? '');
+
+	if ($route === 'hosted') {
+		// A tenant cannot wipe a shard they share with strangers, and should not
+		// be offered a control implying otherwise. No request button either: a
+		// request the operator has no console to see is a message into nothing.
+		return '<p class="text-muted small" style="margin-top:.5rem;">This relay is run and upgraded by '
+			. 'the relay service operator.</p>';
+	}
+
+	if ($route === 'manual') {
+		// This customer built the box, so they are the one who can act on it —
+		// and unlike a cloud relay, they demonstrably have a way in.
+		return '<p class="small" style="margin-top:.5rem;">This relay was set up by hand, so this site '
+			. 'cannot rebuild it for you. Re-run <code>provision_relay.sh</code> on the relay to bring it '
+			. 'up to date.</p>';
+	}
+
+	if ($route === 'job') {
+		return '<p class="text-muted small" style="margin-top:.5rem;">Use Rebuild to bring this relay up '
+			. 'to date. It stops accepting mail while it rebuilds; senders retry.</p>';
+	}
+
+	// A relay that says outright it serves other deployments is never offered a
+	// wipe: the rebuild would destroy their mail and their configuration, and the
+	// drain only empties this tenant's own spool.
+	$sole = $up['sole'] ?? null;
+	if ($sole === false) {
+		return '<p class="text-danger small" style="margin-top:.5rem;">This relay serves other '
+			. 'deployments as well as this one, so it cannot be rebuilt from here — doing so would '
+			. 'destroy their mail and their configuration.</p>';
+	}
+
+	// Cloud: the platform can do this, with the customer's one-time approval.
+	$queue = $up['queue'] ?? null;
+	$warn = '';
+	if ($queue !== null && intval($queue) > 0) {
+		// Mail Postfix accepted but has not handed to the sealer yet. The drain
+		// cannot reach it — the tenant credential cannot read the Postfix queue —
+		// so a rebuild destroys it. Stated, not blocked: it is the customer's call.
+		$warn = ' <span class="text-danger">' . intval($queue) . ' message(s) are still queued on the '
+			. 'relay and would be lost.</span>';
+	}
+
+	$confirm = 'Rebuild this relay now? It is drained of stored mail first, then wiped and rebuilt. '
+		. 'It stops accepting mail for several minutes — senders retry, so nothing bounces. '
+		. 'Its address does not change.';
+	$ack = '';
+	if ($sole === null) {
+		// Too old to answer. The platform will not decide this on the customer's
+		// behalf, and will not proceed silently either.
+		$confirm = 'This relay is too old to report whether other deployments share it. If it does, '
+			. 'rebuilding destroys their mail and their configuration. Continue only if this relay '
+			. 'serves this site alone. ' . $confirm;
+		$ack = '<input type="hidden" name="shared_ack" value="1">';
+		$warn .= ' <span class="text-danger">This relay cannot report whether others share it — '
+			. 'confirm it serves only this site.</span>';
+	}
+
+	$onsubmit = ' onsubmit="return confirm(' . htmlspecialchars(json_encode($confirm), ENT_QUOTES) . ')"';
+	return '<div style="margin-top:.5rem;">'
+		. '<form method="post" style="display:inline"' . $onsubmit . '>'
+		. '<input type="hidden" name="mrl_mailbox_relay_id" value="' . $relay_id . '">'
+		. '<input type="hidden" name="action" value="relay_upgrade">'
+		. $ack
+		. '<button type="submit" class="btn btn-sm btn-warning">Upgrade relay</button>'
+		. '</form> '
+		. '<span class="text-muted small">Drains the relay, then rebuilds it from this site\'s current '
+		. 'code. It stops accepting mail for several minutes; senders retry and its address does not '
+		. 'change.' . $warn . '</span></div>';
 }
 
 /** Echo the Relay section (one box, anchored #relay-section). */
@@ -82,10 +167,22 @@ function mailbox_relay_section_render($page, array $v): void {
 					: htmlspecialchars((string)$scanner['detail'])
 						. ' <span class="text-muted">(' . htmlspecialchars((string)$scanner['checked_time']) . ' UTC)</span>')
 				. '</td></tr>';
+			$up = is_array($row['upgrade'] ?? null) ? $row['upgrade'] : array();
+			if ($up !== array()) {
+				echo '<tr><th>Relay version</th><td>' . htmlspecialchars((string)$up['describe']) . '</td></tr>';
+			}
 			echo '</tbody></table>';
 			echo mailbox_relay_action_button($rid, $enabled ? 'disable' : 'enable', $enabled ? 'Disable' : 'Enable');
-			if (!empty($v['server_manager_active']) && !(bool)$relay->get('mrl_is_hosted')) {
+			// Rebuild renders only where a job can actually land: the button used to
+			// appear on cloud relays too, and dead-ended on "Select a managed node".
+			if (($up['route'] ?? '') === 'job') {
 				echo mailbox_relay_action_button($rid, 'rebuild', 'Rebuild', 'btn-warning');
+			}
+			// The hosted notice shows regardless of standing: a tenant is owed the
+			// plain statement that this relay is somebody else's to upgrade, not
+			// just silence until it happens to fall behind.
+			if (!empty($up['offers']) || ($up['route'] ?? '') === 'hosted') {
+				echo mailbox_relay_upgrade_control($rid, $up);
 			}
 			$delete_confirm = ((string)$relay->get('mrl_cloud_instance_id') !== '')
 				? 'Remove this relay from your mail setup? The server itself keeps running (and billing) at your cloud provider until you delete it there.'

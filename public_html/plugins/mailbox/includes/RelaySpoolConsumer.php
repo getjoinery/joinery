@@ -28,6 +28,8 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.5 - pull() reports 'seals' and 'errors' so a caller can tell an empty
+ *                spool from an unproductive pass (the drain-before-wipe gate)
  * @version 1.4
  */
 
@@ -137,8 +139,12 @@ class RelaySpoolConsumer {
 			$status = $errors > 0 && ($stored + $pending) === 0 ? 'error' : 'success';
 			$msg = sprintf('pulled %d entr(y/ies): %d stored, %d pending-parse, %d held, %d acked, %d error(s)',
 				count($seals), $stored, $pending, $held, $acked, $errors);
-			return array('status' => $status, 'message' => $msg,
-				'stored' => $stored, 'pending' => $pending, 'held' => $held, 'acked' => $acked);
+			// 'seals' is what the relay still had at the start of this pass, and it
+			// is the only way a caller can tell "the spool is empty" from "this pass
+			// moved nothing". A drain-before-wipe depends on that distinction.
+			return array('status' => $status, 'message' => $msg, 'seals' => count($seals),
+				'stored' => $stored, 'pending' => $pending, 'held' => $held,
+				'acked' => $acked, 'errors' => $errors);
 		} finally {
 			$this->cleanup($stage);
 		}

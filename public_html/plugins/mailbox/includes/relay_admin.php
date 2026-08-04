@@ -13,6 +13,9 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.0 - relay_upgrade action + per-relay upgrade standing; Rebuild is
+ *                gated on a managed node that actually resolves
+ *                (specs/mailbox_relay_upgrade_without_server_manager.md)
  * @version 1.9 - scanner_probe action (specs/mailbox_relay_scanner_health.md)
  */
 
@@ -100,6 +103,76 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
 	if (($action === 'provision' || $action === 'rebuild') && $server_manager_active) {
 		$result = admin_mailbox_relay_dispatch_job($action, $input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	// Upgrade a cloud relay: open an upgrade run against its existing instance.
+	// The relay cannot be logged in to — no root credential exists for it — so the
+	// upgrade drains it and replaces the machine's contents in place
+	// (specs/mailbox_relay_upgrade_without_server_manager.md).
+	if ($action === 'relay_upgrade') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
+		$relay_id = intval($input['mrl_mailbox_relay_id'] ?? 0);
+		$relay = null;
+		if ($relay_id > 0) {
+			try {
+				$relay = new MailboxRelay($relay_id, true);
+			} catch (\Throwable $e) {
+				$relay = null;
+			}
+		}
+		if ($relay === null || !$relay->key) {
+			admin_mailbox_relay_flash($session, 'That relay no longer exists.', 'Cannot upgrade');
+			return LogicResult::redirect($self_url);
+		}
+		$vars = admin_mailbox_relay_upgrade_vars($relay);
+		if ($vars['route'] !== 'cloud') {
+			// The button is not rendered for these, so reaching here means a stale
+			// page or a hand-posted form. Refuse rather than guess a route.
+			admin_mailbox_relay_flash($session,
+				'This relay is not one this site can rebuild for you.', 'Cannot upgrade');
+			return LogicResult::redirect($self_url);
+		}
+		if (RelayCloudProvision::live() !== null) {
+			admin_mailbox_relay_flash($session,
+				'A relay cloud act is already in flight — one at a time.', 'Cannot upgrade');
+			return LogicResult::redirect($self_url);
+		}
+
+		// The wipe guard, first pass. The provisioner re-asks the relay live before
+		// draining; this catches it at the button so the customer is told before a
+		// run exists rather than by a failed run afterwards.
+		$sole = $vars['sole'];
+		if ($sole === false) {
+			admin_mailbox_relay_flash($session,
+				'This relay serves other deployments as well as this one. Rebuilding it would destroy '
+				. 'their mail and their configuration.', 'Cannot upgrade a shared relay');
+			return LogicResult::redirect($self_url);
+		}
+		if ($sole === null && empty($input['shared_ack'])) {
+			// A relay too old to answer. The platform cannot prove it is safe, so
+			// it does not decide — but it does not proceed silently either.
+			admin_mailbox_relay_flash($session,
+				'This relay is too old to say whether other deployments share it. Confirm you know it '
+				. 'serves only this site before rebuilding.', 'Confirmation needed');
+			return LogicResult::redirect($self_url);
+		}
+
+		$run = new RelayCloudProvision(NULL);
+		$run->set('rcp_kind', 'upgrade');
+		$run->set('rcp_mrl_mailbox_relay_id', intval($relay->key));
+		$run->set('rcp_provider', (string)$relay->get('mrl_cloud_provider'));
+		$run->set('rcp_instance_id', (string)$relay->get('mrl_cloud_instance_id'));
+		$run->set('rcp_instance_ip', (string)$relay->get('mrl_public_ip'));
+		// The rebuild re-runs provision_relay.sh, which needs the same hostname the
+		// relay already answers to: it is the milters' AuthservID and the HELO name,
+		// so a different value here would silently change what the relay is.
+		$run->set('rcp_mail_hostname', (string)$relay->get('mrl_mx_hostname')
+			?: (string)$relay->get('mrl_name'));
+		$run->save();
+		admin_mailbox_relay_flash($session,
+			'Approve access to your cloud account to continue. The relay is drained first, then rebuilt — '
+			. 'it stops accepting mail for several minutes, and senders retry.');
 		return LogicResult::redirect($self_url);
 	}
 
@@ -247,6 +320,73 @@ function admin_mailbox_relay_tenant_actions(array $input, $session, string $self
  * (health attached to the active one, MX hostname reconciled), provisionable
  * nodes, and live hosted-slot state.
  */
+/**
+ * Where one relay stands on code age, and which of the three upgrade routes (if
+ * any) applies to it.
+ *
+ * The routes are decided by what the platform can actually reach, not by
+ * preference: a managed node means root SSH and a job; a cloud instance means a
+ * grant-per-act wipe-and-rebuild; anything else means the customer built the box
+ * and is the only one who can act on it.
+ *
+ * @return array{standing:string,running:string,shipped:string,offers:bool,
+ *               route:string,queue:?int,describe:string}
+ */
+function admin_mailbox_relay_upgrade_vars(MailboxRelay $relay): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayVersion.php'));
+	$running  = $relay->provisionedVersion();
+	$shipped  = RelayVersion::shipped();
+	$standing = RelayVersion::compare($running, $shipped);
+
+	if ((bool)$relay->get('mrl_is_hosted')) {
+		// A tenant cannot wipe a shard they share with strangers.
+		$route = 'hosted';
+	} elseif (admin_mailbox_relay_node_is_live($relay)) {
+		$route = 'job';
+	} elseif ((string)$relay->get('mrl_cloud_instance_id') !== ''
+			&& (string)$relay->get('mrl_cloud_provider') !== '') {
+		$route = 'cloud';
+	} else {
+		$route = 'manual';
+	}
+
+	return array(
+		'standing' => $standing,
+		'running'  => $running,
+		'shipped'  => $shipped,
+		'offers'   => RelayVersion::offersUpgrade($standing),
+		'route'    => $route,
+		'queue'    => $relay->queuedCount(),
+		// TRUE / FALSE / NULL for "the relay is too old to say" — never collapse
+		// NULL into either, it decides whether a wipe is safe.
+		'sole'     => $relay->isSoleTenant(),
+		'describe' => RelayVersion::describe($standing, $running, $shipped),
+	);
+}
+
+/**
+ * Does this relay's managed node still resolve to something a job can run on?
+ *
+ * Rebuild renders off this rather than off "server_manager is active": a cloud
+ * relay carries no node id at all, so the button used to render and then dead-end
+ * on "Select a managed node to provision onto."
+ */
+function admin_mailbox_relay_node_is_live(MailboxRelay $relay): bool {
+	$node_id = intval($relay->get('mrl_mgn_managed_node_id'));
+	if ($node_id <= 0 || !PluginHelper::isPluginActive('server_manager')) {
+		return false;
+	}
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+	try {
+		$node = new ManagedNode($node_id, true);
+	} catch (\Throwable $e) {
+		return false;
+	}
+	return ($node->key
+		&& (string)$node->get('mgn_delete_time') === ''
+		&& (bool)$node->get('mgn_enabled'));
+}
+
 function admin_mailbox_relay_tenant_vars(): array {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
@@ -268,8 +408,9 @@ function admin_mailbox_relay_tenant_vars(): array {
 		admin_mailbox_relay_backfill_mx_hostname($relay);
 		$is_active = ($active !== null && intval($relay->key) === intval($active->key));
 		$relays[] = array(
-			'model'  => $relay,
-			'health' => $is_active ? $active_health : null,
+			'model'   => $relay,
+			'health'  => $is_active ? $active_health : null,
+			'upgrade' => admin_mailbox_relay_upgrade_vars($relay),
 		);
 	}
 
@@ -380,6 +521,12 @@ function admin_mailbox_relay_operator_actions(array $input, $session, string $se
 
 	if ($action === 'provision_shard' && PluginHelper::isPluginActive('server_manager')) {
 		$result = admin_mailbox_relay_provision_shard($input, $session);
+		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
+		return LogicResult::redirect($self_url);
+	}
+
+	if ($action === 'rebuild_shard' && PluginHelper::isPluginActive('server_manager')) {
+		$result = admin_mailbox_relay_rebuild_shard($input, $session);
 		admin_mailbox_relay_flash($session, $result['message'], $result['title']);
 		return LogicResult::redirect($self_url);
 	}
@@ -594,6 +741,50 @@ function admin_mailbox_relay_provision_shard(array $input, $session): array {
 	return array('title' => 'Shard job queued',
 		'message' => 'Skeleton provisioning queued on ' . $node->get('mgn_name')
 			. '. Tenants land on it through fleet enrollment once it reports ready.');
+}
+
+/**
+ * Re-run the skeleton provisioning on an existing shard, which is how a shard's
+ * relay code gets brought up to date.
+ *
+ * Unlike a tenant's own cloud relay this needs no wipe: the operator holds root
+ * on the shard through the Go agent, so the script can simply run again. Every
+ * part of the skeleton path that would disturb a live relay is guarded — the
+ * WireGuard keypair, wg0.conf and routing.json are written only if absent, so
+ * tenant peers survive, and the tenant registry and spools are never touched.
+ */
+function admin_mailbox_relay_rebuild_shard(array $input, $session): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_fleet_shard_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
+
+	$shard_id = intval($input['shard_id'] ?? 0);
+	if ($shard_id <= 0) {
+		return array('title' => 'Cannot rebuild shard', 'message' => 'No shard selected.');
+	}
+	try {
+		$shard = new MailboxFleetShard($shard_id, TRUE);
+	} catch (\Throwable $e) {
+		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard no longer exists.');
+	}
+	if (!$shard->key) {
+		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard no longer exists.');
+	}
+	$node_id = intval($shard->get('mfs_mgn_managed_node_id'));
+	try {
+		$node = new ManagedNode($node_id, TRUE);
+	} catch (\Throwable $e) {
+		return array('title' => 'Cannot rebuild shard', 'message' => 'That shard\'s managed node no longer exists.');
+	}
+
+	$params = array('mail_hostname' => (string)$shard->get('mfs_hostname'), 'skeleton_only' => true);
+	$steps = JobCommandBuilder::build_provision_relay($node, $params);
+	ManagementJob::createJob($node->key, 'rebuild_relay', $steps, $params, $session->get_user_id());
+
+	return array('title' => 'Shard rebuild queued',
+		'message' => 'Queued on ' . $node->get('mgn_name') . '. Its tenants stop receiving mail while it '
+			. 'rebuilds; senders retry.');
 }
 
 /**
