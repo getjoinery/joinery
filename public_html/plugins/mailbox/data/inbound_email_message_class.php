@@ -24,10 +24,14 @@
  * Authentication verdicts (iem_dkim_result / iem_spf_result / iem_dmarc_result)
  * are NOT computed by the app — they are read from the message's
  * Authentication-Results header (stamped by the verifying MTA milters) via
- * AuthenticationResults. iem_auth_source records where the verdict came from
- * ('milter' / 'none'; 'mailgun' reserved for the deferred webhook path). When
- * no trusted verdict is present the columns read 'unverified', never a
- * hand-rolled 'fail'. See InboundEmailRouter and AuthenticationResults.
+ * AuthenticationResults. iem_auth_source records where the verdict came from —
+ * 'milter' (our own MTA), 'relay' (the fronting relay's milters), a webhook
+ * provider key ('mailgun' / 'sendgrid' / 'ses'), or 'none'. When no trusted
+ * verdict is present the columns read 'unverified', never a hand-rolled 'fail'.
+ * authIsVerified() / authReadout() below are the ONE place that turns a source
+ * into "does this row's verdict mean anything, and what does it mean to a
+ * person" — display surfaces ask them rather than keeping their own list.
+ * See InboundEmailRouter and AuthenticationResults.
  *
  * IMAP-sourced messages are reference-backed: the poller stores headers + body
  * columns but leaves iem_raw_message empty and records a locator
@@ -99,7 +103,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.17
+ * @version 1.18
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -367,6 +371,101 @@ class InboundEmailMessage extends SystemBase {
 	/** True for a row direction whose recipient/bcc/draft columns are sealed content. */
 	public static function isComposedDirection(?string $direction): bool {
 		return $direction === 'outbound' || $direction === 'draft';
+	}
+
+	/**
+	 * Human names for the things that can verify a message, keyed by
+	 * iem_auth_source. A source absent from this map is a source nothing here
+	 * checked — see authIsVerified().
+	 */
+	private static $AUTH_SOURCE_NAMES = array(
+		'milter'   => 'this mail server',
+		'relay'    => 'your mail relay',
+		'mailgun'  => 'Mailgun',
+		'sendgrid' => 'SendGrid',
+		'ses'      => 'Amazon SES',
+	);
+
+	/**
+	 * Whether a stored verdict came from something trusted, i.e. whether the
+	 * SPF/DKIM/DMARC columns mean anything on this row.
+	 *
+	 * Derived from the source map, never from a hand-kept list at each call site:
+	 * every consumer that hardcoded its own pair of source names silently called
+	 * relay- and SES-verified mail "unverified" for as long as that list lagged
+	 * the router.
+	 */
+	public static function authIsVerified(?string $source): bool {
+		return isset(self::$AUTH_SOURCE_NAMES[strtolower(trim((string)$source))]);
+	}
+
+	/**
+	 * A plain-language readout of a message's authentication state, for every
+	 * surface that shows one (the reader, the admin message view).
+	 *
+	 * Leads with what it means to a person — did this really come from who it
+	 * says? — and keeps SPF/DKIM/DMARC as supporting detail rather than the
+	 * headline. Where nothing checked the message it says WHY, because the
+	 * commonest reason by far is benign: imported and IMAP-collected mail was
+	 * never received by a mail server of ours, so there was nothing to verify.
+	 *
+	 * This is a READOUT, not a disposition. What a verdict does to a message is
+	 * InboundEmailRouter::classifySpam()'s call and nothing here should be read
+	 * as duplicating it — the states below are deliberately coarser (a reader
+	 * needs "can I trust this sender", not the filing rule).
+	 *
+	 * @param string|null $source  iem_auth_source
+	 * @param string|null $spf     iem_spf_result
+	 * @param string|null $dkim    iem_dkim_result
+	 * @param string|null $dmarc   iem_dmarc_result
+	 * @param string|null $origin  'import' | 'imap' | null — how the row arrived,
+	 *                             used only to explain an unchecked message.
+	 * @return array{state:string,headline:string,detail:string,checked_by:?string}
+	 *         state is 'verified' | 'failed' | 'partial' | 'unchecked'.
+	 */
+	public static function authReadout(?string $source, ?string $spf, ?string $dkim,
+			?string $dmarc, ?string $origin = null): array {
+		$norm = function ($v) { return strtolower(trim((string)$v)); };
+
+		if (!self::authIsVerified($source)) {
+			if ($origin === 'import') {
+				$detail = 'imported from a mail archive, so it never arrived here to be checked';
+			} elseif ($origin === 'imap') {
+				$detail = 'collected from another mailbox, which did its own checks';
+			} else {
+				$detail = 'this message did not arrive through your mail server';
+			}
+			return array('state' => 'unchecked', 'headline' => 'Sender not checked',
+				'detail' => $detail, 'checked_by' => null);
+		}
+
+		$spf = $norm($spf); $dkim = $norm($dkim); $dmarc = $norm($dmarc);
+		$checked_by = self::$AUTH_SOURCE_NAMES[$norm($source)];
+
+		// DMARC is alignment-based and subsumes the other two, so where it has an
+		// opinion it is the whole answer. Otherwise fall back to the pair.
+		if ($dmarc === 'pass') {
+			$state = 'verified';
+		} elseif ($dmarc === 'fail') {
+			$state = 'failed';
+		} elseif ($spf === 'pass' && $dkim === 'pass') {
+			$state = 'verified';
+		} elseif ($spf === 'fail' && $dkim === 'fail') {
+			$state = 'failed';
+		} else {
+			$state = 'partial';
+		}
+
+		$headlines = array(
+			'verified' => 'Sender verified',
+			'failed'   => 'Sender could NOT be verified',
+			'partial'  => 'Sender partly verified',
+		);
+		$detail = 'SPF ' . ($spf ?: 'none') . ' · DKIM ' . ($dkim ?: 'none')
+			. ' · DMARC ' . ($dmarc ?: 'none');
+
+		return array('state' => $state, 'headline' => $headlines[$state],
+			'detail' => $detail, 'checked_by' => $checked_by);
 	}
 
 	/**

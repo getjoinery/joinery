@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.18
+ * @version 1.19
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -1136,6 +1136,7 @@ class MailboxService {
 					iem_sender, iem_recipient, iem_bcc, iem_subject, iem_received_time,
 					iem_is_read, iem_is_starred, iem_read_time, iem_dkim_result,
 					iem_spf_result, iem_dmarc_result, iem_auth_source, iem_spam_score,
+					iem_mir_mail_import_run_id, iem_iia_inbound_imap_account_id,
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
 					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
@@ -1172,6 +1173,14 @@ class MailboxService {
 				'spf_result'        => $r['iem_spf_result'],
 				'dmarc_result'      => $r['iem_dmarc_result'],
 				'auth_source'       => $r['iem_auth_source'],
+				// Plain-language authentication readout, resolved server-side so the
+				// web reader and every native/API consumer say the same thing — and
+				// so no client keeps its own list of which sources count as verified.
+				'auth'              => InboundEmailMessage::authReadout(
+										$r['iem_auth_source'], $r['iem_spf_result'],
+										$r['iem_dkim_result'], $r['iem_dmarc_result'],
+										($r['iem_mir_mail_import_run_id'] !== null) ? 'import'
+											: (($r['iem_iia_inbound_imap_account_id'] !== null) ? 'imap' : null)),
 				// Content-spam score (specs/inbound_email_content_spam_filtering.md):
 				// display only, NULL when none reported. Never drives disposition.
 				'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,

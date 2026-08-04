@@ -281,8 +281,27 @@ value falls through to `none` (or, when no verdict field is present at all,
 `unverified`) — never a synthesized `pass`. The valid `iem_auth_source` values
 are `milter`, `relay`, `mailgun`, `sendgrid`, `ses`, and `none`.
 
-The message detail page and the Mailbox reader show the sourced verdicts, or an
-explicit "unverified — no verifying milter installed", never a bare red `fail`.
+**One place turns a source into a readout.** `InboundEmailMessage::authIsVerified()`
+answers whether a row's verdicts mean anything (derived from the source→name map,
+so it can never lag the router's list), and `authReadout()` turns them into a
+plain-language state every display surface shares:
+
+| `state` | Headline | When |
+|---|---|---|
+| `verified` | Sender verified | DMARC `pass`, or no DMARC verdict with SPF and DKIM both `pass` |
+| `failed` | Sender could NOT be verified | DMARC `fail`, or no DMARC verdict with SPF and DKIM both `fail` |
+| `partial` | Sender partly verified | a trusted source, mixed results |
+| `unchecked` | Sender not checked | no trusted source — with the reason: imported from an archive, collected over IMAP, or simply never received here |
+
+It is a **readout, not a disposition** — what a verdict does to a message is
+`InboundEmailRouter::classifySpam()`'s call alone, and the states above are
+deliberately coarser than the filing rule. The Mailbox reader renders the
+headline plus who checked it (`Sender verified · checked by your mail relay`)
+with the acronyms on hover; the admin message detail page shows the headline
+*and* the three raw verdicts, because an operator chasing a delivery problem
+needs to see which one failed. Neither ever renders a bare red `fail`. The
+reader payload carries the whole readout under `auth`, so native and API
+consumers say the same thing without reimplementing any of it.
 
 #### Verification-capability warning (Setup tab)
 
@@ -537,7 +556,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
 | `mailbox_forwarding_smtp_password` | (empty) | Falls back to `smtp_password` |
 | `mailbox_spam_filtering_enabled` | `1` | Move suspected spam to the Spam view. The one spam question; on by default. See [Spam filtering](#spam-filtering). |
-| `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam; with it on, relay/webhook mail is re-scored at ingest through the tenant corpus. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
+| `mailbox_spam_learning_enabled` | `0` | Learn from what users mark as spam. Relay/webhook mail is re-scored locally wherever a scanner runs; this setting makes that local verdict the one that counts (replacing the upstream's) instead of merely adding to it. Clamped off whenever filing is off; offered only where a scanner is running (it ships with the mail stack). See [Content scanner](#content-scanner-rspamd). |
 | `mailbox_rspamd_controller_url` | `http://127.0.0.1:11334` | Loopback rspamd controller endpoint the ingest scan and the spam/ham feedback loop POST to. No password (loopback-trusted). |
 | `mailbox_relay_outbound_mode` | `provider` | On a relay-fronted deployment, where compose sends leave: `provider` (default — the configured provider's raw-MIME API, hiding the origin) or `smarthost` (through the relay over the tunnel; the deployment owns the relay IP's sending reputation). See [Outbound sending](#outbound-sending). |
 
@@ -2450,17 +2469,28 @@ across every tenant's mail would be both a privacy leak and a poisoning vector �
 so learning cannot be delegated upstream; it runs on the scanner that ships with
 the mail stack, whatever the topology.
 
-**Which mail is re-scored here.** With learning on, relay- and webhook-sourced
-messages are scanned again locally at ingest through the controller's `/checkv2`,
-and that verdict **replaces** the one that arrived with the message. Replacement
-rather than OR is the point: a Bayes-less relay verdict OR'd in could only ever
-add spam, never subtract it, so a user's *Not spam* corrections would never
-change a disposition. The local scanner runs the same static ruleset **plus** the
-tenant corpus, so it is strictly better informed, and only it can rescue a false
-positive. Colocated mail is not re-scored — its own milter already ran exactly
-that scan. A scanner that is absent, down or slow costs nothing: the upstream
-verdict stands, the message stores normally, and nothing is ever held, bounced or
-retried on the scanner's account.
+**Which mail is re-scored here.** Relay- and webhook-sourced messages are scanned
+again locally at ingest through the controller's `/checkv2`, on any box where
+filing is on and a scanner is running. Learning is **not** a condition. An
+upstream scanner is stateless and its header is the only content signal a fronted
+deployment would otherwise ever get — and a header that was never stamped is
+indistinguishable from a clean verdict, so scanning here is what makes the
+difference observable. Colocated mail is not re-scored: its own milter already ran
+exactly that scan.
+
+**How much the local verdict counts** is what learning changes:
+
+| Learning | Local verdict | Why |
+|---|---|---|
+| off | **OR'd** into the upstream signal — can add spam, never subtract it | Without a corpus the local scan is the same static ruleset the upstream ran, minus the live SMTP client context a milter sees. It is not better informed, so it must not overturn an upstream `spam`. |
+| on | **Replaces** the upstream signal, in both directions | The corpus is knowledge that exists nowhere else. Replacement is also the only arrangement in which a user's *Not spam* correction can subtract — an OR could only ever add. |
+
+A scanner that is absent, down or slow costs nothing: the upstream verdict
+stands, the message stores normally, and nothing is ever held, bounced or retried
+on the scanner's account. Presence is observed once per request
+(`MailboxSpamPolicy::scannerAvailable()`) rather than per message, and a box with
+no scanner is never called at all — so a webhook-only deployment spends no failed
+request per message.
 
 **The scanner ships with the mail stack.** `install_email.sh` installs rspamd +
 redis unconditionally on every box that hosts its own mail, and the platform
@@ -3337,7 +3367,10 @@ platform models a bin.
 
 Imported mail carries **no authentication verdict** — `unverified` across the board.
 The stamps in an archived message were written by whichever server received it years
-ago, and this deployment cannot vouch for them.
+ago, and this deployment cannot vouch for them. The reader says so in as many words
+("Sender not checked — imported from a mail archive, so it never arrived here to be
+checked"), because on a deployment that has imported an archive this is the majority
+of stored mail and reads as alarming otherwise.
 
 ### Attachments and where the bytes go
 
