@@ -23,7 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
- * @version 1.31
+ * @version 1.32 - relay scanner health (specs/mailbox_relay_scanner_health.md)
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -50,6 +50,9 @@ class InboundEmailSetupCheck {
 	// severity values
 	const REQUIRED = 'required';
 	const RECOMMENDED = 'recommended';
+
+	/** Label for the relay scanner row, shared with the Relay section's button copy. */
+	const RELAY_SCANNER_LABEL = 'Relay spam scanning';
 
 	/** How long mail may sit waiting to seal before it stops being routine.
 	 *  Nothing drains the backlog on a timer, so past this someone has simply
@@ -248,6 +251,13 @@ class InboundEmailSetupCheck {
 		// Inbound-verification capability: provider-agnostic, so it runs for
 		// every provider (not delegated to the provider's host layer).
 		$results[] = $this->checkInboundVerification();
+
+		// Relay content scanning — the one capability no amount of stored mail can
+		// confirm. Nothing to report on a colocated deployment.
+		$scanner = $this->checkRelayScannerHealth();
+		if ($scanner !== null) {
+			$results[] = $scanner;
+		}
 
 		if ($address) {
 			foreach ($this->checkAddress($address) as $r) { $results[] = $r; }
@@ -789,6 +799,138 @@ class InboundEmailSetupCheck {
 			. 'to confirm it.',
 			'Send a test message to an address on a hosted domain and re-check.',
 			null, true);
+	}
+
+	/**
+	 * Is the relay's spam scanner actually working?
+	 *
+	 * The companion to checkRelayInboundVerification(), and deliberately shaped the
+	 * opposite way. Authentication verdicts land in the database on every message,
+	 * so a broken verifier is visible in stored mail. A content verdict is recorded
+	 * only when something is FLAGGED — and the relay accepts unscanned mail rather
+	 * than deferring it — so a relay that scans and finds nothing and a relay whose
+	 * scanner is dead leave identical traces here: none. Inferring from stored mail
+	 * would report the quiet mailbox behind a healthy relay as a fault, which is
+	 * exactly the false positive that motivated this check
+	 * (specs/mailbox_relay_scanner_health.md).
+	 *
+	 * So this reads the relay's own answer, cached on the relay row by the
+	 * reconcile pass. Returns null when nothing fronts this deployment.
+	 */
+	private function checkRelayScannerHealth() {
+		if (!$this->fronted()) {
+			return null;
+		}
+		$topo = $this->topology();
+		$relay = $topo['relay'];
+		if ($relay === null) {
+			return null;
+		}
+		$name = trim((string)$relay->get('mrl_name')) ?: ($topo['mx_hostname'] !== '' ? $topo['mx_hostname'] : 'the relay');
+
+		$health = $relay->lastHealth();
+		if ($health === null) {
+			return $this->r('host.relay_scanner', '', 'host', self::RELAY_SCANNER_LABEL,
+				self::RECOMMENDED, self::INFO,
+				'Haven\'t asked ' . $name . ' about its spam scanner yet.',
+				'The relay is asked once per reconcile pass. Use Check scanner now in the Relay section '
+				. 'under Advanced to ask immediately.', null, true);
+		}
+
+		return self::relayScannerResult($health, $name, self::healthAge($health));
+	}
+
+	/** ' Last checked 3 minutes ago.' — or '' when the answer carries no timestamp. */
+	private static function healthAge(array $health): string {
+		$when = trim((string)($health['checked_time'] ?? ''));
+		if ($when === '') {
+			return '';
+		}
+		$age = time() - strtotime($when . ' UTC');
+		if ($age < 0) {
+			return '';
+		}
+		if ($age < 120)   { $said = 'moments ago'; }
+		elseif ($age < 7200)  { $said = intval($age / 60) . ' minutes ago'; }
+		elseif ($age < 172800) { $said = intval($age / 3600) . ' hours ago'; }
+		else { $said = intval($age / 86400) . ' days ago'; }
+		return ' Last checked ' . $said . '.';
+	}
+
+	/**
+	 * One relay health answer, as a check row.
+	 *
+	 * The severity is CONDITIONAL on whether this deployment still needs the
+	 * relay's scanner: since specs/implemented/mailbox_ingest_scan_decoupled_from_learning.md
+	 * a fronted deployment re-scans at ingest with its own rspamd, so a dead relay
+	 * scanner may be fully covered here. Covered is a warning (a component is
+	 * broken, but nothing is getting through unscanned); uncovered is a failure
+	 * (nothing anywhere is reading message content).
+	 *
+	 * A dead scanner and a drifted header contract share a severity on purpose.
+	 * They are different faults but one finding — the relay's verdict is not
+	 * reaching this server — and one remedy. Which of the two it was survives in
+	 * the detail.
+	 *
+	 * Public and static so the severity matrix can be tested against synthetic
+	 * answers. $covered is the "is this server covering?" answer; null asks the
+	 * policy, which is what production does. A test passes it explicitly, because
+	 * whether local scanning is configured on the machine running the test is not
+	 * allowed to decide which half of the matrix gets exercised.
+	 */
+	public static function relayScannerResult(array $health, string $name, string $age_note = '', ?bool $covered = null) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		$row = function ($status, $summary, $detail = '', $fix = null) {
+			return array(
+				'id' => 'host.relay_scanner', 'scope' => '', 'layer' => 'host',
+				'label' => self::RELAY_SCANNER_LABEL, 'severity' => self::RECOMMENDED,
+				'status' => $status, 'summary' => $summary, 'detail' => $detail,
+				'fix' => $fix, 'recheckable' => true,
+			);
+		};
+		$state  = (string)($health['state'] ?? '');
+		$detail = trim((string)($health['detail'] ?? ''));
+		$rebuild = array('text' => 'Rebuild the relay from the Relay section under Advanced — provisioning '
+			. 'rewrites the scanner configuration and puts it back in the mail path.');
+
+		if ($state === MailboxRelay::HEALTH_OK) {
+			return $row(self::PASS, $name . ' is scanning incoming mail for spam.', $detail . $age_note);
+		}
+
+		if ($state === MailboxRelay::HEALTH_LEGACY) {
+			// Every relay deployed before this check answers here. Reading that as a
+			// fault would light up red on every existing deployment on the day this
+			// ships, about relays that are very likely scanning perfectly well.
+			return $row(self::INFO,
+				$name . ' is too old to say whether it is scanning for spam.',
+				$detail . ' Rebuilding it enables the check. Nothing is known to be wrong.' . $age_note,
+				$rebuild);
+		}
+
+		if ($state !== MailboxRelay::HEALTH_NOT_DELIVERING) {
+			// Unreachable, or an answer in a shape we do not recognise: honestly
+			// unknown, never reported as a scanner fault.
+			return $row(self::UNKNOWN,
+				'Couldn\'t get an answer from ' . $name . ' about its spam scanner.',
+				$detail . $age_note);
+		}
+
+		if ($covered === null) {
+			$covered = MailboxSpamPolicy::scanAtIngest() && MailboxSpamPolicy::scannerAvailable();
+		}
+		if ($covered) {
+			return $row(self::WARN,
+				$name . ' is not delivering spam verdicts — this server is scanning the mail itself.',
+				$detail . ' Incoming mail is still being checked for spam here, so nothing is getting through '
+				. 'unscanned. The relay half of it is broken and worth fixing.' . $age_note,
+				$rebuild);
+		}
+		return $row(self::FAIL,
+			$name . ' is not delivering spam verdicts, and nothing here is scanning either.',
+			$detail . ' Incoming mail is not being checked for spam anywhere. Fix the relay, or turn on '
+			. 'spam filing on this server so it scans at delivery.' . $age_note,
+			$rebuild);
 	}
 
 	// ===================================================================

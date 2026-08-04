@@ -27,7 +27,7 @@ We recommend **Linode** (now part of Akamai Cloud). It's reliable, straightforwa
 Once you have a Linode account, follow these steps to create your server:
 
 1. Log in and click **Create → Linode**.
-2. **Choose an image:** Select **Ubuntu 24.04 LTS**. This is the operating system your server will run — Joinery requires this version (Ubuntu 22.04 LTS also works as a fallback).
+2. **Choose an image:** Select **Ubuntu 24.04 LTS** or **Ubuntu 26.04 LTS**. This is the operating system your server will run — the installer stops on any other version.
 3. **Choose a region:** Pick a data center geographically close to your expected users. Any region works.
 4. **Choose a plan:** The **Nanode 1 GB** ($5/month) is sufficient for a small site. If you expect real users from day one, the **Linode 2 GB** ($12/month) gives more breathing room. You can resize later if needed.
 5. **Set a root password:** This is the master password for your server. Use a strong, random password and save it in a password manager. Avoid these characters, which can cause problems during installation: `'  "  \  $  `  !`

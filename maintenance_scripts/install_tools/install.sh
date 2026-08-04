@@ -1,4 +1,35 @@
 #!/usr/bin/env bash
+#VERSION 2.37 - PostgreSQL logs connections and the address they came from, via
+#              a conf.d drop-in. Successful logins were not logged at all and
+#              failures carried no client address, so a box under attack could
+#              report how many attempts it refused but not whether any had
+#              succeeded. Found the hard way: the dev box was answering
+#              password attempts from the public internet with no way to tell
+#              whether any had worked.
+#VERSION 2.36 - The generated pg_hba.conf names scram-sha-256, which is what the
+#              roles on these boxes have held since PostgreSQL 14 defaulted
+#              password_encryption to it - md5 was a word that had stopped
+#              meaning anything, and PostgreSQL 18 deprecates it. The method is
+#              one variable, so the rules and the post-password restore cannot
+#              describe different things, and both seds match the method as a
+#              field rather than as an exact line. A restore that does not take
+#              is now a stop: sed exits 0 on no match, so the box was otherwise
+#              left granting trust on the postgres socket with nothing said.
+#VERSION 2.35 - The server setup no longer names a PHP version anywhere. It
+#              detects one - keeping the box's existing PHP if it has one, else
+#              asking apt what it would install - and derives every package,
+#              service, Apache conf and ini path from it. An undetectable
+#              version and a missing fpm ini are both stops: each would have
+#              configured /etc/php//fpm/ and reported success. The OS gate
+#              accepts 24.04 and 26.04, and reads as what has been tested rather
+#              than what the script can express, which is what it now is.
+#VERSION 2.34 - Stop installing php-imap. PHP 8.4 unbundled ext/imap to PECL, so
+#              no distro ships php8.5-imap and the whole apt install would abort
+#              on 26.04 over an extension nothing in the platform uses. Inbound
+#              mail speaks IMAP through bytestream/horde-imap-client, which is
+#              pure PHP; the one ext/imap caller was a manual email-analysis
+#              tool, which now reports the extension as absent instead of
+#              telling the operator to install a package that no longer exists.
 #VERSION 2.33 - The forward-only guard covers bare metal too, not just Docker.
 #              An install over an existing bare-metal site rsyncs the archive
 #              onto the live tree with no --delete, so an older archive merges
@@ -1713,6 +1744,36 @@ do_build_base() {
     fi
 }
 
+# The PHP version this box runs, as MAJOR.MINOR. Every package name, service
+# name, Apache conf name and ini path in the server setup is built from it, so
+# it has to be decided once, before any of them are used.
+#
+# Resolution order is deliberate. A box that already has PHP keeps that version:
+# configuring a different one installs a second PHP alongside the first, and the
+# two halves of the setup then disagree - Apache proxying to one fpm socket
+# while the ini tuning lands on the other. Only a box with no PHP asks apt, and
+# it asks the question apt itself would answer for `apt install php-cli`, so the
+# version installed and the version configured cannot diverge.
+#
+# Prints nothing when it cannot tell. Callers must treat that as a stop: every
+# path built from an empty version silently becomes /etc/php//fpm/php.ini.
+detect_php_version() {
+    local ver=""
+
+    if command -v php > /dev/null 2>&1; then
+        ver=$(php -r 'echo PHP_MAJOR_VERSION . "." . PHP_MINOR_VERSION;' 2>/dev/null)
+    fi
+
+    if [ -z "$ver" ]; then
+        ver=$(apt-cache depends php-cli 2>/dev/null \
+              | grep -oE 'php[0-9]+\.[0-9]+-cli' \
+              | head -1 \
+              | grep -oE '[0-9]+\.[0-9]+')
+    fi
+
+    echo "$ver"
+}
+
 #==============================================================================
 # SUBCOMMAND: server - Set up bare-metal server (integrated from server_setup.sh)
 #==============================================================================
@@ -1740,25 +1801,28 @@ do_server_setup() {
         exit 1
     fi
 
-    # Ubuntu 24.04 is not a preference, it is the only thing this produces a
-    # working box on: PHP 8.3 paths are hardcoded from here down. Continuing on
-    # anything else used to leave a half-configured server that looked
-    # installed, and the failure surfaced much later and much less clearly.
+    # The releases this is exercised on. Nothing below hardcodes a PHP version -
+    # it is detected and every path derives from it - so the gate is about what
+    # has been tested end to end, not about what the script can express. On an
+    # untested release the likely failure is a package or service name the
+    # distro arranges differently, which leaves a half-configured server that
+    # looks installed and fails much later and much less clearly.
     #
     # `site` deliberately does not repeat this check. It presupposes `server`
     # ran, so this is the one place it can fire on a real path, and nothing
     # persists the override for a second command to find.
-    if ! grep -q "Ubuntu 24.04" /etc/os-release; then
+    if ! grep -qE "Ubuntu (24|26)\.04" /etc/os-release; then
         local detected
         detected=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
         if [ "$ALLOW_UNSUPPORTED_OS" -eq 1 ]; then
             print_warning "Unsupported OS: ${detected:-unknown}. Proceeding because --allow-unsupported-os was given."
-            print_warning "PHP 8.3 paths are hardcoded throughout this script. Expect to finish the setup by hand."
+            print_warning "Package and service layout is only verified on Ubuntu 24.04 and 26.04. Expect to finish the setup by hand."
         else
             print_error "Unsupported OS: ${detected:-unknown}"
             echo ""
-            echo "Joinery server setup targets Ubuntu 24.04 LTS. This script hardcodes PHP 8.3"
-            echo "paths, so on another release it would configure a server that does not work."
+            echo "Joinery server setup targets Ubuntu 24.04 and 26.04 LTS. Package and service"
+            echo "layout is not verified on any other release, so it could configure a server"
+            echo "that does not work."
             echo ""
             echo "To proceed anyway and finish the setup by hand:"
             echo -e "  ${BLUE}sudo ./install.sh server --allow-unsupported-os${NC}"
@@ -1826,26 +1890,35 @@ do_server_setup() {
         prevent_service_start
     fi
 
-    # Install PHP 8.3 and extensions
-    print_step "Installing PHP 8.3..."
-    apt install -y \
-        php8.3-fpm \
-        php8.3-cli \
-        php8.3-common \
-        php8.3-pgsql \
-        php8.3-xml \
-        php8.3-curl \
-        php8.3-gd \
-        php8.3-dev \
-        php8.3-imap \
-        php8.3-mbstring \
-        php8.3-opcache \
-        php8.3-soap \
-        php8.3-zip \
-        php8.3-bcmath \
-        php8.3-intl \
-        php8.3-readline \
-        php8.3-sqlite3
+    # Decided once, here, and used for every package, service, conf and ini path
+    # from this point down. Must come after `apt update` above, because with no
+    # PHP installed the answer comes out of the package lists that call refreshes.
+    local PHP_VERSION
+    PHP_VERSION="$(detect_php_version)"
+    if [ -z "$PHP_VERSION" ]; then
+        print_error "Could not determine which PHP version to install"
+        echo ""
+        echo "No php binary is present and apt offers no php-cli package, so there is"
+        echo "no version to build package and path names from. Configuring anything"
+        echo "further would write to /etc/php//fpm/ and appear to succeed."
+        echo ""
+        echo "Check that the distribution's PHP repository is enabled, then re-run."
+        exit 1
+    fi
+
+    # Install PHP and extensions
+    print_step "Installing PHP ${PHP_VERSION}..."
+    # Suffixes, not package names: apt takes the whole list as one transaction,
+    # so a name that does not resolve on this release fails the batch and takes
+    # every other extension down with it.
+    local PHP_EXTENSIONS=(fpm cli common pgsql xml curl gd dev mbstring opcache
+                          soap zip bcmath intl readline sqlite3)
+    local PHP_PACKAGES=()
+    local ext
+    for ext in "${PHP_EXTENSIONS[@]}"; do
+        PHP_PACKAGES+=("php${PHP_VERSION}-${ext}")
+    done
+    apt install -y "${PHP_PACKAGES[@]}"
 
     print_success "PHP installation completed. Version: $(php -v | head -n1)"
 
@@ -1871,9 +1944,9 @@ do_server_setup() {
     # PHP runs under php-fpm (event MPM + proxy_fcgi), never mod_php: the AI
     # chat async path needs fastcgi_finish_request(), which only fpm provides.
     # The a2dismod covers re-runs on a box that previously used mod_php.
-    a2dismod php8.3 mpm_prefork > /dev/null 2>&1 || true
+    a2dismod "php${PHP_VERSION}" mpm_prefork > /dev/null 2>&1 || true
     a2enmod mpm_event proxy_fcgi setenvif
-    a2enconf php8.3-fpm
+    a2enconf "php${PHP_VERSION}-fpm"
 
     # Configure Apache settings
     print_step "Configuring Apache..."
@@ -1957,14 +2030,25 @@ EOF
     # listens on '*' with the bridge subnet allowed in pg_hba. The exposure
     # boundary for containers is the docker -p binding, which is loopback-only.
     print_info "Configuring PostgreSQL authentication..."
+
+    # One variable, used by the rules written below and by the restore after the
+    # password is set, so the two cannot describe different methods.
+    #
+    # scram-sha-256 is what the roles on these boxes actually hold:
+    # password_encryption has defaulted to it since PostgreSQL 14, and an md5
+    # line accepts a SCRAM verifier, so md5 in this file was a word that had
+    # stopped meaning anything. Naming the method the roles use costs nothing on
+    # 16 and keeps working on 18, which deprecates md5 passwords.
+    local PG_AUTH_METHOD="scram-sha-256"
+
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 1 ]; then
         # Container image: allow loopback + the docker bridge subnets.
-        PG_HOST_RULES="host    all             all             127.0.0.1/32            md5
-host    all             all             172.16.0.0/12           md5"
+        PG_HOST_RULES="host    all             all             127.0.0.1/32            ${PG_AUTH_METHOD}
+host    all             all             172.16.0.0/12           ${PG_AUTH_METHOD}"
         PG_LISTEN="*"
     else
         # Bare metal: loopback only.
-        PG_HOST_RULES="host    all             all             127.0.0.1/32            md5"
+        PG_HOST_RULES="host    all             all             127.0.0.1/32            ${PG_AUTH_METHOD}"
         PG_LISTEN="localhost"
     fi
 
@@ -1975,20 +2059,20 @@ host    all             all             172.16.0.0/12           md5"
 # TYPE  DATABASE        USER            ADDRESS                 METHOD
 
 # "local" is for Unix domain socket connections only
-local   all             postgres                                md5
-local   all             all                                     md5
+local   all             postgres                                ${PG_AUTH_METHOD}
+local   all             all                                     ${PG_AUTH_METHOD}
 
 # IPv4 connections:
 ${PG_HOST_RULES}
 
 # IPv6 local connections:
-host    all             all             ::1/128                 md5
+host    all             all             ::1/128                 ${PG_AUTH_METHOD}
 
 # Allow replication connections from localhost, by a user with the
 # replication privilege.
 local   replication     all                                     peer
-host    replication     all             127.0.0.1/32            md5
-host    replication     all             ::1/128                 md5
+host    replication     all             127.0.0.1/32            ${PG_AUTH_METHOD}
+host    replication     all             ::1/128                 ${PG_AUTH_METHOD}
 EOF
 
     # Configure PostgreSQL listening
@@ -1999,18 +2083,55 @@ EOF
     sed -i "s/max_wal_size = 1GB/max_wal_size = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
     sed -i "s/shared_buffers = 128MB/shared_buffers = 64MB/" ${PG_CONFIG_DIR}/postgresql.conf
 
+    # Record who connects, and from where.
+    #
+    # Without this a break-in leaves no trace: PostgreSQL logs failed logins but
+    # not successful ones, and the packaged log_line_prefix carries no client
+    # address, so even the failures cannot be attributed. A box found under
+    # attack can then be asked how many attempts happened, but not whether any
+    # of them worked - which is the only question that matters.
+    #
+    # A drop-in rather than a sed on postgresql.conf: log_line_prefix ships
+    # uncommented and already set, so a sed written against the commented form
+    # matches nothing and reports success. conf.d is included at the end of
+    # postgresql.conf, so these win, and re-running the installer rewrites one
+    # small file instead of editing lines that may already have been edited.
+    #
+    # log_disconnections stays off deliberately - it doubles the line count for
+    # a duration figure nothing here needs.
+    print_info "Configuring PostgreSQL connection logging..."
+    mkdir -p ${PG_CONFIG_DIR}/conf.d
+    tee ${PG_CONFIG_DIR}/conf.d/10-joinery-logging.conf > /dev/null << 'EOF'
+# Managed by Joinery install.sh. Overwritten on reinstall.
+# Attribution for connection attempts: %h is the client address.
+log_connections = on
+log_disconnections = off
+log_line_prefix = '%m [%p] %q%u@%d %h '
+EOF
+
+    # conf.d is included by the packaged postgresql.conf on Debian and Ubuntu,
+    # but a file that is never read is worse than no file - it looks configured.
+    if ! grep -qE "^[[:space:]]*include_dir[[:space:]]*=[[:space:]]*'conf\.d'" ${PG_CONFIG_DIR}/postgresql.conf; then
+        echo "include_dir = 'conf.d'" >> ${PG_CONFIG_DIR}/postgresql.conf
+        print_info "Added include_dir = 'conf.d' to postgresql.conf"
+    fi
+
     # Restart PostgreSQL to apply configuration
     service_restart postgresql
 
     # Set PostgreSQL postgres user password automatically.
     # Skipped when --skip-postgres-password is set (shared base image build);
-    # in that case _site_init.sh handles the same trust/ALTER/md5 dance at
+    # in that case the Dockerfile CMD runs the same trust/ALTER/restore dance at
     # first container run per-site.
+    #
+    # Both seds match the method as a field rather than as a literal line, so
+    # neither depends on the exact column spacing above, and neither has to know
+    # which method is in force.
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ]; then
         print_info "Setting PostgreSQL postgres user password..."
 
         # Temporarily allow trust authentication for postgres user to set password
-        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' ${PG_CONFIG_DIR}/pg_hba.conf
+        sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' ${PG_CONFIG_DIR}/pg_hba.conf
 
         # Reload PostgreSQL configuration
         service_reload postgresql
@@ -2018,8 +2139,24 @@ EOF
         # Set the postgres user password
         su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres
 
-        # Restore secure md5 authentication
-        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' ${PG_CONFIG_DIR}/pg_hba.conf
+        # Restore authenticated access
+        sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_AUTH_METHOD}/" ${PG_CONFIG_DIR}/pg_hba.conf
+
+        # The restore is the dangerous half of the dance. sed exits 0 when it
+        # matches nothing, so a pattern that no longer fits the file leaves the
+        # local postgres role on trust - superuser for anyone with a shell on
+        # this box - and every later step still succeeds. Checked, not assumed.
+        if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' ${PG_CONFIG_DIR}/pg_hba.conf; then
+            print_error "Could not restore authenticated access for the local postgres role"
+            echo ""
+            echo "pg_hba.conf still grants trust on the Unix socket, which makes anyone"
+            echo "with a shell on this server a PostgreSQL superuser."
+            echo ""
+            echo "Set the method on the 'local all postgres' line in"
+            echo "${PG_CONFIG_DIR}/pg_hba.conf to ${PG_AUTH_METHOD} and reload PostgreSQL"
+            echo "before using this server."
+            exit 1
+        fi
 
         # Reload PostgreSQL configuration again
         service_reload postgresql
@@ -2033,7 +2170,7 @@ EOF
     print_step "Starting services..."
     service_start apache2
     service_start postgresql
-    service_start php8.3-fpm
+    service_start "php${PHP_VERSION}-fpm"
 
     # Install Certbot for SSL
     print_step "Installing Certbot for SSL certificates..."
@@ -2041,22 +2178,30 @@ EOF
 
     # Configure PHP for production (fpm SAPI serves all web requests)
     print_step "Configuring PHP settings..."
-    cp /etc/php/8.3/fpm/php.ini /etc/php/8.3/fpm/php.ini.backup
+    local PHP_INI="/etc/php/${PHP_VERSION}/fpm/php.ini"
+    if [ ! -f "$PHP_INI" ]; then
+        print_error "Expected PHP configuration at ${PHP_INI}, which does not exist"
+        echo ""
+        echo "PHP ${PHP_VERSION} installed but did not lay its fpm ini down where this"
+        echo "script expects. Every tuning below would silently write nothing."
+        exit 1
+    fi
+    cp "$PHP_INI" "${PHP_INI}.backup"
 
     # Update PHP settings optimized for 1GB VPS
-    sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' /etc/php/8.3/fpm/php.ini
-    sed -i 's/post_max_size = .*/post_max_size = 32M/' /etc/php/8.3/fpm/php.ini
-    sed -i 's/max_execution_time = .*/max_execution_time = 300/' /etc/php/8.3/fpm/php.ini
-    sed -i 's/memory_limit = .*/memory_limit = 128M/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/upload_max_filesize = .*/upload_max_filesize = 32M/' "$PHP_INI"
+    sed -i 's/post_max_size = .*/post_max_size = 32M/' "$PHP_INI"
+    sed -i 's/max_execution_time = .*/max_execution_time = 300/' "$PHP_INI"
+    sed -i 's/memory_limit = .*/memory_limit = 128M/' "$PHP_INI"
     # UTC, matching what the CLI and a Docker site already get. Every stored
     # time in the platform is UTC and display conversion is per user, so a web
     # request and a scheduled task on the same box have to agree about what
     # date() means. Individual users still see their own timezone.
-    sed -i 's/;date.timezone =/date.timezone = UTC/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/;date.timezone =/date.timezone = UTC/' "$PHP_INI"
 
     # Enable PDO PostgreSQL extension
-    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' /etc/php/8.3/fpm/php.ini
-    sed -i 's/^;extension=pgsql/extension=pgsql/' /etc/php/8.3/fpm/php.ini
+    sed -i 's/^;extension=pdo_pgsql/extension=pdo_pgsql/' "$PHP_INI"
+    sed -i 's/^;extension=pgsql/extension=pgsql/' "$PHP_INI"
 
     print_success "PHP configured"
 
@@ -2236,7 +2381,7 @@ EOF
     # Restart services
     print_step "Restarting services..."
     service_restart apache2
-    service_restart php8.3-fpm
+    service_restart "php${PHP_VERSION}-fpm"
 
     # Remove policy-rc.d if we created it (Docker cleanup)
     allow_service_start
@@ -2244,9 +2389,11 @@ EOF
     # Display completion message
     print_header "Server Setup Complete!"
 
-    echo -e "${GREEN}✓${NC} Ubuntu 24.04 system updated"
+    local OS_PRETTY
+    OS_PRETTY=$(grep '^PRETTY_NAME=' /etc/os-release 2>/dev/null | cut -d'"' -f2)
+    echo -e "${GREEN}✓${NC} ${OS_PRETTY:-System} updated"
     echo -e "${GREEN}✓${NC} user1 configured"
-    echo -e "${GREEN}✓${NC} PHP 8.3 with required extensions installed"
+    echo -e "${GREEN}✓${NC} PHP ${PHP_VERSION} with required extensions installed"
     echo -e "${GREEN}✓${NC} Composer installed globally"
     echo -e "${GREEN}✓${NC} Apache web server configured"
     echo -e "${GREEN}✓${NC} PostgreSQL database server configured"

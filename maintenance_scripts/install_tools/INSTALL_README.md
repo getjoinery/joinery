@@ -951,7 +951,7 @@ If database initialization fails during site creation, the cause is almost alway
 
 **What is NOT the problem:**
 - PostgreSQL `pg_hba.conf` restrict statements are not the cause
-- PostgreSQL authentication method (trust vs md5) is handled correctly by the installer
+- The PostgreSQL authentication method is handled correctly by the installer
 - Database user permissions are set up automatically
 
 **Debugging steps:**

@@ -1,4 +1,10 @@
 # Joinery Docker Template
+# VERSION 4.6 - The first-run password dance reads the auth method out of
+#               pg_hba.conf and puts that back, instead of naming md5 in a
+#               whitespace-exact match of a line install.sh writes. The two
+#               files can no longer disagree about the method, and a restore
+#               that does not take is a FATAL rather than a container left
+#               granting trust on the postgres socket.
 # VERSION 4.5 - Detect the PostgreSQL config path and the php-fpm service at
 #               start instead of naming a version. Both were pinned, and both
 #               sit in the start command's && chain, so on a host with any
@@ -176,10 +182,17 @@ CMD set +H && \
     PG_CONF="$(ls -1d /etc/postgresql/*/main/pg_hba.conf 2>/dev/null | sort -V | tail -1)" && \
     if [ -z "${PG_CONF}" ]; then echo "FATAL: no pg_hba.conf under /etc/postgresql"; exit 1; fi && \
     if [ ! -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ]; then \
-        sed -i 's/local   all             postgres                                md5/local   all             postgres                                trust/' "$PG_CONF" && \
+        PG_LOCAL_METHOD="$(awk '$1=="local" && $2=="all" && $3=="postgres" {print $4; exit}' "$PG_CONF")" && \
+        if [ -z "${PG_LOCAL_METHOD}" ] || [ "${PG_LOCAL_METHOD}" = "trust" ]; then \
+            echo "FATAL: no method to restore on the local postgres line in ${PG_CONF}"; exit 1; \
+        fi && \
+        sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' "$PG_CONF" && \
         service postgresql reload && \
         su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres && \
-        sed -i 's/local   all             postgres                                trust/local   all             postgres                                md5/' "$PG_CONF" && \
+        sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_LOCAL_METHOD}/" "$PG_CONF" && \
+        if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' "$PG_CONF"; then \
+            echo "FATAL: local postgres left on trust in ${PG_CONF}"; exit 1; \
+        fi && \
         service postgresql reload; \
     fi && \
     CLONE_OPTS="" && \

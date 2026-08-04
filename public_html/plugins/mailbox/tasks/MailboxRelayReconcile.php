@@ -5,7 +5,7 @@
  * Everything that keeps a hardened ingest relay in step with this deployment,
  * in one pass with one place to look when mail stops arriving.
  *
- * The four phases have a real order, which is why they belong together:
+ * The five phases have a real order, which is why they belong together:
  *
  *  1. Alias map      push the routing map BEFORE pulling spool, so a newly
  *                    created alias is valid on the relay and reject_unmatched
@@ -16,16 +16,19 @@
  *  2. Spool          rsync sealed blobs off the relay spool (copy-only), store
  *                    each durably, then delete what was stored — the
  *                    delete-after-store is the ack.
- *  3. Cloud provision  advance the relay cloud-provision state machine.
- *  4. Fleet          reconcile the hosted relay fleet (operator side only).
+ *  3. Relay scanner  ask the relay whether its spam scanner is working, cache
+ *                    the answer, and raise it when it changes.
+ *  4. Cloud provision  advance the relay cloud-provision state machine.
+ *  5. Fleet          reconcile the hosted relay fleet (operator side only).
  *
- * Phases 1 and 2 no-op on a colocated deployment, phase 3 when nothing is
- * provisioning, phase 4 unless this deployment runs the fleet service — so the
+ * Phases 1-3 no-op on a colocated deployment, phase 4 when nothing is
+ * provisioning, phase 5 unless this deployment runs the fleet service — so the
  * pass is cheap on the deployments that use none of it.
  *
  * A phase that throws is caught and recorded, and the later phases still run.
  * Phase 1 failing must not strand mail already sitting on the relay's spool.
  *
+ * @version 1.1 - phase 3: relay scanner health (specs/mailbox_relay_scanner_health.md)
  * @version 1.0
  */
 
@@ -38,6 +41,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 		$phases = array(
 			'Relay map'   => function () use ($config) { return $this->syncAliasMap($config); },
 			'Relay spool' => function () use ($config) { return $this->pullSpool($config); },
+			'Relay scanner' => function () { return $this->pollScannerHealth(); },
 			'Cloud'       => function () { return $this->advanceCloudProvisions(); },
 			'Fleet'       => function () { return $this->reconcileFleet(); },
 		);
@@ -120,12 +124,83 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * Phase 3 — advance the relay cloud-provision state machine.
+	 * Phase 3 — ask the relay whether its spam scanner is working, and raise the
+	 * answer when it CHANGES.
+	 *
+	 * Why the poll lives here: this pass already holds an SSH session to the relay,
+	 * so the health question costs one extra ping and no new connection. Why it is
+	 * raised rather than merely recorded: a warning that only ever appears on the
+	 * Setup tab is discovered by opening the Setup tab, which nobody does until
+	 * mail already looks wrong — the exact failure this check exists to catch.
+	 *
+	 * Dispatch is on TRANSITION only, comparing against the answer cached on the
+	 * row, so a relay that stays broken is announced once rather than every pass.
+	 * The same shape RunNodeUptimeChecks uses for node up/down.
+	 */
+	private function pollScannerHealth() {
+		$relay = MailboxRelay::active();
+		if ($relay === null) {
+			return array('status' => 'skipped', 'message' => '');
+		}
+
+		$before = $relay->lastHealthState();
+		$health = $relay->pollHealth();
+		$after  = (string)$health['state'];
+
+		$transition = MailboxRelay::healthTransition($before, $after);
+		if ($transition === 'down') {
+			$this->announceScanner('mailbox.relay_scanner_down', $relay, $health);
+		} elseif ($transition === 'recovered') {
+			$this->announceScanner('mailbox.relay_scanner_recovered', $relay, $health);
+		}
+
+		// An unreachable relay is a real failure of this phase, and one the spool
+		// phase will have reported too — but silence here would read as health.
+		return array(
+			'status'  => ($after === MailboxRelay::HEALTH_UNREACHABLE) ? 'error' : 'success',
+			'message' => $after . ($health['reason'] !== '' ? ' (' . $health['reason'] . ')' : ''),
+		);
+	}
+
+	/**
+	 * Raise a scanner transition on the signal bus.
+	 *
+	 * Best-effort by construction — SignalBus::dispatch swallows its own failures,
+	 * and a lost notification must never cost the pass its remaining phases.
+	 */
+	private function announceScanner(string $signal, MailboxRelay $relay, array $health): void {
+		try {
+			require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSpamPolicy.php'));
+
+			$covered = MailboxSpamPolicy::scanAtIngest() && MailboxSpamPolicy::scannerAvailable();
+			SignalBus::dispatch($signal, array(
+				'relay_name' => trim((string)$relay->get('mrl_name'))
+					?: (trim((string)$relay->get('mrl_mx_hostname')) ?: 'the relay'),
+				'reason'     => (string)($health['reason'] ?? ''),
+				'detail'     => (string)($health['detail'] ?? ''),
+				'coverage'   => $covered
+					? 'This server is scanning the mail itself, so nothing is arriving unscanned.'
+					: 'Nothing is scanning message content anywhere right now.',
+			));
+		} catch (Throwable $e) {
+			error_log('MailboxRelayReconcile: could not announce ' . $signal . ' — ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Phase 4 — advance the relay cloud-provision state machine.
 	 *
 	 * ready -> create instance -> booting -> (running + IP) -> provisioning
 	 * (the SSH relay build, run synchronously here — it is the long step) ->
-	 * done | failed. Destroy-kind runs delete their target instance.
-	 * Credentials are erased at every terminal state by the run model.
+	 * done | failed. Credentials are erased at every terminal state by the run
+	 * model.
+	 *
+	 * Provisioning is the only kind of run there is (`rcp_kind` allows one
+	 * value). The platform does not delete a customer's running server: a failed
+	 * run destroys the instance IT created inside the same grant, which is
+	 * cleanup, not a lifecycle operation. Removing a cloud relay drops this
+	 * deployment's row and leaves the instance to its owner.
 	 */
 	private function advanceCloudProvisions() {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/relay_cloud_provision_class.php'));
@@ -167,7 +242,7 @@ class MailboxRelayReconcile implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * Phase 4 — operator-side brain of the shared relay fleet.
+	 * Phase 5 — operator-side brain of the shared relay fleet.
 	 *
 	 * Reconciles finished shard lifecycle jobs into slot statuses, dispatches
 	 * flagged work as server_manager jobs, and re-checks each active slot's
