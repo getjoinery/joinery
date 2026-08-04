@@ -74,11 +74,24 @@ image it was built from.
 
 `install.sh site <name> -y` stops and removes the container and rebuilds the
 image from the archive root. Its "data volumes preserved" message is about
-**data**. The code comes from the archive — so rebuilding against a stale
-archive root **reverts the site's code to that archive's version**, against a
-database that has already migrated forward.
+**data**. The code comes from the archive, so rebuilding from a stale archive
+root would revert the site's code to that archive's version, against a database
+that has already migrated forward.
 
-Before any container rebuild, confirm the archive is current:
+The installer refuses that rebuild. Before it stops anything, it compares the
+VERSION inside the existing container against `$ARCHIVE_ROOT/public_html/VERSION`
+and continues only when the archive is the same version or newer. An archive
+older than the running site, or either version unreadable, is a hard refusal
+that leaves the container running untouched. `--wipe-data` skips the check,
+since a wipe deletes the database that made the running code load-bearing;
+`--allow-downgrade` is the only override, and it prints what it is about to
+overwrite.
+
+So the rebuild step is: publish a current release, extract it, and run
+`install.sh` **from that archive**. Building from whichever tree happens to be
+sitting in `/root` is what the refusal is there to catch.
+
+To see where a site stands before starting:
 
 ```bash
 # what the site is running now
@@ -86,10 +99,6 @@ docker exec SITENAME cat /var/www/html/SITENAME/public_html/VERSION
 # what the rebuild would install
 cat ARCHIVE_ROOT/public_html/VERSION
 ```
-
-If the archive is older, or has no VERSION file, publish a current release and
-extract it as the archive root first. Never build from whichever tree happens to
-be sitting in `/root`.
 
 ### Distribution Architecture
 
