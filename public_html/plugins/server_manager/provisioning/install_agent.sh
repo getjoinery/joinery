@@ -3,7 +3,7 @@
 # install_agent.sh - server_manager host_installer: install or converge the
 # joinery-agent from the shipped agent_dist artifact.
 #
-# Version: 1.0 (specs/agent_release_channel.md)
+# Version: 1.1 (specs/agent_release_channel.md)
 #
 # Runs at the platform's root moments (container start, site install, code
 # upgrade, and the Run Plugin Installers action) on any deployment where the
@@ -78,6 +78,13 @@ installed_version() {
     "$BINARY_PATH" --version 2>/dev/null | awk '{print $2}'
 }
 
+# True when $1 sorts strictly before $2. sort -V, never string comparison:
+# 1.1.0 against 0.4.0 is fine either way, but 0.10.0 against 0.9.0 is not.
+version_is_older() {
+    [ "$1" != "$2" ] && \
+        [ "$(printf '%s\n%s\n' "$1" "$2" | sort -V | head -n1)" = "$1" ]
+}
+
 write_env_file() {
     mkdir -p "$ENV_DIR"
     if [ ! -f "$ENV_FILE" ]; then
@@ -149,13 +156,28 @@ start_agent() {
     fi
 }
 
+# Ordering, not equality. This script does first install only — every later
+# version change comes from the agent's own signed self-update — so a node
+# routinely runs a version NEWER than the artifact shipped in this tree. Testing
+# equality treats "newer" and "older" alike and reinstalls the shipped one over
+# a self-updated agent, rolling it back with nothing to say so. Anything at or
+# above the shipped version keeps its binary; only supervision converges.
+#
+# JOINERY_AGENT_ALLOW_DOWNGRADE=1 forces the shipped artifact on regardless, for
+# a deliberate rollback.
 CURRENT="$(installed_version)"
-if [ "$CURRENT" = "$DIST_VERSION" ]; then
+if [ -n "$CURRENT" ] && [ "${JOINERY_AGENT_ALLOW_DOWNGRADE:-0}" != "1" ] \
+    && ! version_is_older "$CURRENT" "$DIST_VERSION"; then
     ensure_supervision
-    if agent_running; then
-        say "v${DIST_VERSION} already installed and running - nothing to do"
+    if [ "$CURRENT" = "$DIST_VERSION" ]; then
+        STATE="v${DIST_VERSION} already installed"
     else
-        say "v${DIST_VERSION} installed but not running - starting"
+        STATE="v${CURRENT} is newer than the shipped v${DIST_VERSION} - keeping it"
+    fi
+    if agent_running; then
+        say "${STATE} and running - nothing to do"
+    else
+        say "${STATE}, but not running - starting"
         start_agent
     fi
     exit 0
