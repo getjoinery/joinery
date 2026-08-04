@@ -36,29 +36,38 @@ to *ask the relay*, not infer from what did or did not arrive.
 
 ## Change
 
-A `joinery-health` verb on the relay's tenant shell, and a check that reads it.
+`joinery-ping` answers with the relay's health, and a check reads it.
 
 ### The verb
 
-`provision_relay.sh` installs it alongside the existing five verbs
-(`rsync` pull/push, `joinery-ack`, `joinery-merge`, `joinery-ping`). It returns
-one JSON object on stdout:
+There is no new verb. `joinery-ping` exists in the tenant shell today and
+**nothing in PHP calls it** — it is a free slot. It returns one JSON object on
+stdout:
 
 ```json
 {
   "status": "ok",
   "services": {"rspamd": "active", "opendkim": "active", "opendmarc": "active"},
   "milters": {"opendkim": true, "opendmarc": true, "rspamd": true},
-  "headers": {"use": ["spam-header", "x-spam-status", "authentication-results"],
-              "extended_spam_headers": true},
-  "actions": {"reject": null, "greylist": null, "add_header": 6}
+  "contract": true,
+  "provisioned": "2.14",
+  "slug": "example"
 }
 ```
 
 `services` is `systemctl is-active`; `milters` is parsed from `postconf -h
-smtpd_milters` against the ports provisioning wired; `headers` and `actions` are
-read back from `/etc/rspamd/local.d/milter_headers.conf` and `actions.conf`
-(D4). Nothing else.
+smtpd_milters` against the ports provisioning wired; `contract` is the header
+contract check (D4). Nothing else.
+
+**An old relay answers `PONG <slug>`**, and that plain-text reply is how the
+check knows the relay predates this. It is a better capability probe than a new
+verb would have given: an unknown verb answers `denied: unknown command` on
+stderr, which is indistinguishable from every other refusal the shell can
+issue, whereas `PONG` is unambiguous and already the documented answer.
+
+Ping's contract therefore changes. `plugins/mailbox/docs/overview.md` is the
+doc of record and gets updated; `specs/implemented/mailbox_relay_shared_fleet.md`
+describes ping as it was and is not edited, per the rule on implemented specs.
 
 **Multi-tenancy is the binding constraint.** A shared fleet shard serves several
 deployments, so the verb reports **shard-level service liveness only** — never
@@ -72,25 +81,29 @@ A relay-side counterpart to `checkRelayInboundVerification()`, in the same
 relay's scanner**, which after `specs/implemented/mailbox_ingest_scan_decoupled_from_learning.md`
 it may not:
 
-| Relay scanner | Local scan (`scanAtIngest` + `scannerAvailable`) | Result |
+| Relay | Local scan (`scanAtIngest` + `scannerAvailable`) | Result |
 |---|---|---|
-| alive, header contract intact | either | PASS |
-| alive, header contract drifted | active | WARN — relay scans but its verdict cannot reach you; this server is covering it |
-| alive, header contract drifted | not available | FAIL — the relay's verdict is being scanned and then discarded |
-| dead | active | WARN — your relay is not scanning; this server is covering it |
-| dead | not available | FAIL — nothing is scanning content anywhere |
-| verb absent | either | INFO — relay predates the verb |
+| delivering usable verdicts | either | PASS |
+| not delivering — dead scanner **or** drifted contract | active | WARN — your relay is not delivering spam verdicts; this server is covering it |
+| not delivering — dead scanner **or** drifted contract | not available | FAIL — nothing is scanning content anywhere |
+| answers `PONG` | either | INFO — relay predates this check |
 
-That last row matters: every relay already deployed answers `denied: unknown
-command`. Reading that as a failure would light up red on every existing
-deployment the moment this ships. It is an INFO with a "rebuild the relay to
-enable" note, never a warning.
+**Dead and drifted share a severity deliberately.** They are different faults
+but one finding — the relay's verdict is not reaching the tenant — and one
+remedy: reprovision the relay. Splitting them would double the matrix to say
+the same thing twice. The distinction survives in the detail text, which names
+which of the two it was.
+
+That last row matters: every relay already deployed answers `PONG`. Reading
+that as a failure would light up red on every existing deployment the moment
+this ships. It is an INFO with a "rebuild the relay to enable" note, never a
+warning.
 
 ## Decisions
 
 - **D1 — Who asks, and when. RESOLVED: both.** A poll folded into the existing
   `MailboxRelayReconcile` task, which already holds an SSH session to the relay
-  every cron pass — one extra verb, no new connection — plus the Setup tab check
+  every cron pass — one extra ping, no new connection — plus the Setup tab check
   reading the cached result and able to force a fresh probe. On-demand alone was
   rejected: nobody opens the Setup tab until mail already looks wrong, which is
   the failure this spec exists to catch. Cron alone was rejected: an operator
@@ -127,11 +140,17 @@ enable" note, never a warning.
   can parse — reporting healthy while the tenant sees the same silent clean
   verdict this whole spec exists to eliminate.
 
-  So the verb also reads back `/etc/rspamd/local.d/milter_headers.conf` and
-  `actions.conf` and reports what they declare: the `use` list, `reject`,
-  `add_header`. The check compares that against what `readSpamHeader()` actually
-  parses (`X-Spam`, `X-Spam-Flag`, `X-Spam-Score`, `X-Spam-Status`) and fails on a
-  mismatch. One extra file read, no mail sent.
+  **The contract is checked by hash, not by parsing.** Provisioning *writes*
+  `/etc/rspamd/local.d/milter_headers.conf` and `actions.conf` itself, from
+  heredocs in `provision_relay.sh`, so their correct content is known at write
+  time. It records a `contract.sha256` beside them; ping re-hashes both files and
+  returns `"contract": true|false`. PHP reads a boolean.
+
+  Reading the files back into PHP and modelling rspamd's config format against
+  `InboundEmailRouter`'s header constants was rejected: it is ~150 lines and a
+  test group to reach the same verdict. A hash reports that the config drifted,
+  not how — but the remedy is reprovision the relay either way, and these are
+  our own files in `local.d/`, which distro packages do not rewrite.
 
   **A manual end-to-end mail probe was rejected.** GTUBE is special-cased to
   `reject` in rspamd — proven in this investigation, `554 5.7.1 Gtube pattern` —
@@ -142,33 +161,35 @@ enable" note, never a warning.
 
 ## Files
 
-| File | Change |
-|---|---|
-| `plugins/mailbox/provisioning/provision_relay.sh` | `joinery-health` verb in the tenant shell, reporting services + milters + header contract (D4); version bump |
-| `plugins/mailbox/includes/RelayHealth.php` | **New** — runs the verb, parses/validates the JSON, compares the header contract against what `readSpamHeader()` parses, tolerates the old-relay refusal |
-| `plugins/mailbox/includes/InboundEmailSetupCheck.php` | `checkRelayScannerHealth()` reading the cached row; severity reads `MailboxSpamPolicy`; a Re-check forces a fresh probe (D1) |
-| `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Poll the verb once per pass, cache to the relay row, dispatch the transition signal (D1, D3) |
-| `plugins/mailbox/data/mailbox_relay_class.php` | `mrl_last_health_json`, `mrl_last_health_time` via `$field_specifications` (D2) |
-| `plugins/mailbox/plugin.json` | `mailbox.relay_scanner_down` / `mailbox.relay_scanner_recovered` signals with `notify` blocks (D3) |
-| `plugins/mailbox/docs/overview.md` | Health section + the verb's contract |
-| `plugins/mailbox/tests/relay_health_test.php` | **New** |
+| File | Change | ~Lines |
+|---|---|---|
+| `plugins/mailbox/provisioning/provision_relay.sh` | `joinery-ping` answers health JSON; write `contract.sha256` beside the two rspamd configs; version bump | 25 |
+| `plugins/mailbox/data/mailbox_relay_class.php` | `pollHealth()` — run ping, decode, tolerate `PONG`, cache to the row; plus `mrl_last_health_json` / `mrl_last_health_time` in `$field_specifications` (D2) | 60 |
+| `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Poll once per pass, dispatch the transition signal (D1, D3) | 50 |
+| `plugins/mailbox/includes/InboundEmailSetupCheck.php` | `checkRelayScannerHealth()` reading the cached row; severity reads `MailboxSpamPolicy`; a Re-check forces a fresh probe (D1) | 90 |
+| `plugins/mailbox/plugin.json` | `mailbox.relay_scanner_down` / `mailbox.relay_scanner_recovered` signals with `notify` blocks (D3) | 30 |
+| `plugins/mailbox/docs/overview.md` | Health section + ping's contract | 40 |
+| `plugins/mailbox/tests/relay_health_test.php` | **New** | 120 |
+
+**No `RelayHealth.php`.** Once the contract check is a boolean and the verb is
+one `RelaySsh::run(RelaySsh::sshCommand($relay, 'joinery-ping'))`, what is left
+is decode-and-store — so it lives on `MailboxRelay`, the row that stores it,
+the way `RelayMapSync` handles the merge verdict inline rather than behind a
+class of its own.
 
 ## Tests
 
-- Parsing: a well-formed payload, a truncated one, non-JSON, and the
-  `denied: unknown command` refusal — the last must resolve to "verb absent",
-  never "scanner dead".
-- The severity matrix above, all six rows, with `MailboxSpamPolicy` pinned via
+- Parsing: a well-formed payload, a truncated one, non-JSON, and `PONG example`
+  — the last must resolve to "relay predates this", never "scanner dead".
+- The severity matrix above, all four rows, with `MailboxSpamPolicy` pinned via
   `overrideScannerAvailable()`.
-- **Header-contract comparison (D4):** a payload whose `use` list drops
-  `spam-header` must fail even with every service `active` — the failure mode a
-  services-only verb would have called healthy. Assert against the same header
-  names `readSpamHeader()` parses, read from the constants rather than retyped, so
-  the two cannot drift.
+- **Contract drift (D4):** `"contract": false` with every service `active` must
+  not pass — the failure mode a services-only ping would have called healthy —
+  and must land on the same severity as a dead scanner while saying which it was.
 - Transition dispatch (D3): healthy→dead fires once, dead→dead fires nothing,
   dead→healthy fires the recovery. A cron pass that changes nothing must be silent.
-- The verb's own output shape, asserted against the shell script, so a
-  provisioning edit that changes the contract fails here rather than in the field.
+- Ping's output shape, asserted against the shell script, so a provisioning edit
+  that changes the contract fails here rather than in the field.
 - **A guard that the check never infers from stored messages** — the regression
   this spec exists to prevent.
 
