@@ -360,16 +360,23 @@
                     tr.appendChild(lastUsedTd);
 
                     var active = !!activeIds[passkey.pkc_passkey_credential_id];
+                    var capability = passkey.vault_capability || 'unknown';
                     if (vaultStatus) {
                         var vaultTd = document.createElement('td');
                         var badge = document.createElement('span');
                         if (active) {
                             badge.className = 'badge badge-success';
                             badge.textContent = 'Vault active';
+                        } else if (capability === 'incapable') {
+                            // Not a warning: nothing is wrong and there is nothing
+                            // to do. This key does its whole job already.
+                            badge.className = 'badge badge-muted';
+                            badge.textContent = 'Sign-in only';
+                            badge.title = 'This is a U2F-only security key. It signs you in, but it cannot unlock your vault — no setting or PIN changes that.';
                         } else {
                             badge.className = 'badge badge-warning';
                             badge.textContent = 'Not activated';
-                            badge.title = passkey.pkc_prf_capable
+                            badge.title = capability === 'capable'
                                 ? 'This passkey signs you in but cannot unlock your vault yet — activate it from Actions.'
                                 : 'This passkey signs you in but cannot unlock your vault yet. Activating will test whether this authenticator supports vault unlock.';
                         }
@@ -392,7 +399,12 @@
                     if (vaultStatus) {
                         if (active) {
                             menu.appendChild(menuItem('Deactivate for vault', function () { deactivateForVault(passkey); }));
-                        } else {
+                        } else if (capability !== 'incapable') {
+                            // Offered for 'unknown' too: registration-time reporting
+                            // is not proof, and the ceremony is the real test. Only
+                            // a credential that provably cannot derive a secret has
+                            // the action withheld, because it would fail by
+                            // construction.
                             menu.appendChild(menuItem('Activate for vault', function () { activateForVault(passkey); }));
                         }
                     }
@@ -460,22 +472,45 @@
                     });
                 }
 
-                // Wrap the vault key under a passkey (an unlock-capable
-                // "activation"). The derivation ceremony decides which passkey
-                // gets activated — the one the user actually touches.
-                async function runVaultActivation() {
-                    var options = await apiFetch('/api/v1/action/vault_add_passkey_options', { method: 'POST', body: '{}' });
+                // Wrap the vault key under one named passkey (an unlock-capable
+                // "activation"). The credential id scopes the ceremony to that
+                // passkey — without it the browser would accept any enrolled
+                // credential and activate whichever one the user happened to
+                // touch, leaving the row they clicked still reading "Not
+                // activated". Returns the label the server actually activated.
+                async function runVaultActivation(credentialId) {
+                    var options = await apiFetch('/api/v1/action/vault_add_passkey_options', {
+                        method: 'POST',
+                        body: JSON.stringify({ credential_id: credentialId }),
+                    });
                     var credential = (await JoineryPasskeys.derive(options.data.options)).response;
-                    await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
+                    var result = await apiFetch('/api/v1/action/vault_add_passkey_verify', { method: 'POST', body: JSON.stringify({ credential: credential }) });
                     document.dispatchEvent(new CustomEvent('joinery:vault-changed'));
+                    return (result.data && result.data.label) || 'Passkey';
+                }
+
+                // The browser reports every assertion failure as the same opaque
+                // error — a refusal and a cancel are indistinguishable, by design.
+                // So name the live possibilities without asserting which one it is,
+                // and say which passkey was expected, since tapping the wrong
+                // authenticator now fails here rather than silently activating it.
+                function activationFailureMessage(passkey, err) {
+                    return 'Could not activate "' + (passkey.pkc_label || 'this passkey') + '" for your vault. '
+                        + 'Either a different passkey answered the prompt, or this security key has no PIN set, '
+                        + 'or it cannot unlock a vault at all. '
+                        + (err && err.message ? '(' + err.message + ') ' : '')
+                        + <?php echo (int)SessionControl::get_instance()->get_permission() >= 10
+                            ? "'Test the authenticator one variable at a time at /admin/admin_passkey_lab.'"
+                            : "''"; ?>;
                 }
 
                 async function activateForVault(passkey) {
                     if (!await JoineryModal.confirmAsync('Activate "' + (passkey.pkc_label || 'this passkey') + '" for your vault? Use that passkey when the browser prompts.', { confirmLabel: 'Activate', confirmStyle: 'primary' })) return;
                     try {
-                        await runVaultActivation();
+                        var activated = await runVaultActivation(passkey.pkc_passkey_credential_id);
+                        JoineryModal.alert('"' + activated + '" can now unlock your vault.');
                     } catch (e) {
-                        JoineryModal.alert(e.message || 'Could not activate this passkey for your vault.');
+                        JoineryModal.alert(activationFailureMessage(passkey, e));
                     }
                 }
 
@@ -517,10 +552,7 @@
                             await stepUp();
                             showFlowHint('Step 2 of 2 — Now create the new passkey. This is where you pick a security key or another device.');
                         }
-                        // Always request PRF: the extension can only be enabled at
-                        // creation time, and vault consumers need PRF-capable
-                        // credentials. Harmless when the authenticator lacks it.
-                        var body = { prf_capable_requested: 1 };
+                        var body = {};
                         if (currentPassword) body.current_password = currentPassword;
                         var options = await apiFetch('/api/v1/action/passkey_register_options', { method: 'POST', body: JSON.stringify(body) });
                         var credential = await JoineryPasskeys.register(options.data.options);
@@ -536,6 +568,48 @@
                         pwRow.classList.add('d-none');
                         pwInput.value = '';
                         await reloadAll();
+
+                        var newPasskey = (regResult.data && regResult.data.passkey) || {};
+                        var newId = newPasskey.pkc_passkey_credential_id;
+
+                        // A U2F-only key can never unlock a vault, so running the
+                        // activation ceremony on it would only produce the browser's
+                        // opaque "this security key can't be used". Say so here
+                        // instead, and make the user answer for it.
+                        //
+                        // The modal necessarily lands AFTER the credential exists —
+                        // capability is only knowable from the registration response,
+                        // so there is nothing to warn about until the key is
+                        // enrolled. That is why the second button removes it rather
+                        // than cancelling: the choice offered has to be a real one.
+                        if (vaultStatus && newPasskey.vault_capability === 'incapable') {
+                            var remove = await JoineryModal.confirmAsync(
+                                'Your passkey was added and will sign you in. But this is a U2F-only security key: '
+                                + 'it cannot unlock your encrypted vault, and no PIN or setting will change that. '
+                                + 'Keep it as a sign-in key, or remove it?',
+                                { confirmLabel: 'Remove it', cancelLabel: 'Keep for sign-in', confirmStyle: 'danger' });
+                            if (remove) {
+                                try {
+                                    // The step-up at the top of this flow already
+                                    // satisfies the server's recent-second-factor
+                                    // demand, so there is no second prompt here.
+                                    await apiFetch('/api/v1/action/passkey_revoke', {
+                                        method: 'POST',
+                                        body: JSON.stringify({ credential_id: newId }),
+                                    });
+                                    await reloadAll();
+                                } catch (e) {
+                                    JoineryModal.alert(e.message || 'Could not remove the passkey. You can remove it from its Actions menu.');
+                                }
+                                // Nothing was enrolled in the end, so a guided flow
+                                // that sent the user here has not been satisfied —
+                                // stay put rather than returning as if it had.
+                                return;
+                            }
+                            if (window.jyMaybeReturn && jyMaybeReturn()) return;
+                            return;
+                        }
+
                         // Vault-active by default: when a vault exists and is
                         // unlocked, chain straight into activation so the new
                         // passkey can unlock it too — one more touch, of the
@@ -544,7 +618,7 @@
                         if (vaultStatus && vaultStatus.unlocked) {
                             showFlowHint('One more touch — use the NEW passkey again to let it unlock your vault.');
                             try {
-                                await runVaultActivation();
+                                await runVaultActivation(newId);
                             } catch (e) {
                                 JoineryModal.alert('The passkey was added, but is not activated for your vault yet: '
                                     + (e.message || 'activation failed.') + ' You can activate it any time from its Actions menu.');

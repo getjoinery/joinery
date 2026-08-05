@@ -27,9 +27,18 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 		return LogicResult::error('Unlock your vault before adding another passkey to it.', ['locked' => true]);
 	}
 
+	// Activation is per-credential, so the ceremony is scoped to the passkey the
+	// caller named. Unscoped, the browser decides which credential answers: pick
+	// the security key's row, tap Touch ID at the prompt, and Touch ID gets the
+	// wrapping while the row you clicked still reads Not activated. Omitting the
+	// id keeps the old any-credential behaviour for a caller that genuinely has
+	// no preference.
+	$credential_id = isset($input['credential_id']) ? (int)$input['credential_id'] : 0;
+
 	try {
 		$service = new PasskeyService();
-		$options = $service->getDerivationOptions($user, 'vault-kek');
+		$options = $service->getDerivationOptions($user, 'vault-kek',
+			$credential_id ? [$credential_id] : null);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
@@ -41,7 +50,7 @@ function vault_add_passkey_options_logic_api() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),
-		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); vault must already be unlocked',
+		'description' => 'Begin adding a vault wrapping for another PRF-capable passkey (returns WebAuthn PRF request options); pass credential_id to scope the ceremony to one passkey; vault must already be unlocked',
 	];
 }
 ?>

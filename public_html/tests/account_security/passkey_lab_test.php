@@ -197,5 +197,33 @@ check(($res->data['options']['userVerification'] ?? '') === 'preferred'
 	&& !empty($res->data['options']['extensions']['prf']['eval']['first']),
 	'the requested variant shape flows through the action');
 
+// ---------------------------------------------------------------------------
+section('The credential table');
+
+// The lab is where someone goes when they do not believe the vault badge on
+// /profile/security, so its table must show the verdict AND the signals behind
+// it — a verdict alone would just be the same claim in a second place.
+require_once(PathHelper::getIncludePath('adm/logic/admin_passkey_lab_logic.php'));
+$res = admin_passkey_lab_logic(array());
+$rows = array();
+foreach ($res->data['credentials'] ?? array() as $row) {
+	$rows[$row['label']] = $row;
+}
+check(isset($rows['Lab platform key']) && isset($rows['Lab security key']),
+	'the table lists the signed-in superadmin\'s own credentials',
+	'labels: ' . json_encode(array_keys($rows)));
+
+$signals = array('vault_capability', 'prf_capable', 'discoverable', 'attachment', 'uv_never_performed');
+$missing = array_diff($signals, array_keys($rows['Lab security key'] ?? array()));
+check(!$missing, 'each row carries the capability verdict and every signal behind it',
+	'missing: ' . json_encode(array_values($missing)));
+
+check(($rows['Lab platform key']['vault_capability'] ?? '') === Passkey::VAULT_CAPABLE,
+	'a credential that reported PRF reads as capable',
+	'got: ' . var_export($rows['Lab platform key']['vault_capability'] ?? null, true));
+check(($rows['Lab security key']['vault_capability'] ?? '') === Passkey::VAULT_UNKNOWN,
+	'a credential with no PRF report and no negative evidence reads as unknown, not incapable',
+	'got: ' . var_export($rows['Lab security key']['vault_capability'] ?? null, true));
+
 $_SESSION = array();
 harness_finish();

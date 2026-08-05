@@ -39,15 +39,34 @@ $page->admin_header(array(
 <?php else: ?>
 	<table class="table">
 		<thead>
-			<tr><th>Label</th><th>Type</th><th>Transports</th><th>PRF reported</th><th>Last used</th></tr>
+			<tr><th>Label</th><th>Type</th><th>Transports</th><th>Vault capability</th><th>Signals</th><th>Last used</th></tr>
 		</thead>
 		<tbody>
-		<?php foreach ($credentials as $cred): ?>
+		<?php
+		$capability_notes = array(
+			'capable'   => 'has evaluated PRF at least once',
+			'incapable' => 'CTAP1 fallback — can never unlock a vault',
+			'unknown'   => 'not proven either way; the ceremony is the real test',
+		);
+		foreach ($credentials as $cred):
+			// Null is "the signal was never reported", which is not the same
+			// answer as false and must not read like it.
+			$tri = function ($value) {
+				return $value === null ? '—' : ($value ? 'yes' : 'no');
+			};
+		?>
 			<tr>
 				<td><?php echo htmlspecialchars($cred['label']); ?></td>
 				<td><?php echo $cred['is_platform'] ? 'Platform' : 'Security key'; ?></td>
 				<td><?php echo htmlspecialchars(implode(', ', $cred['transports']) ?: '—'); ?></td>
-				<td><?php echo $cred['prf_capable'] ? 'Yes' : 'No'; ?></td>
+				<td><?php echo htmlspecialchars($cred['vault_capability']); ?><br>
+					<small class="text-muted"><?php echo htmlspecialchars($capability_notes[$cred['vault_capability']] ?? ''); ?></small></td>
+				<td><small>
+					PRF reported: <?php echo $cred['prf_capable'] ? 'yes' : 'no'; ?><br>
+					discoverable: <?php echo $tri($cred['discoverable']); ?><br>
+					attachment: <?php echo htmlspecialchars($cred['attachment'] ?: '—'); ?><br>
+					user verification ever performed: <?php echo $cred['uv_never_performed'] ? 'no' : 'yes'; ?>
+				</small></td>
 				<td><?php echo $cred['last_used_time']
 					? htmlspecialchars(LibraryFunctions::convert_time($cred['last_used_time'], 'UTC', $session->get_timezone(), 'M j, Y g:i A T'))
 					: '<em>never</em>'; ?></td>

@@ -12,6 +12,7 @@ function vault_client_prf_options_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 	$settings = Globalvars::get_instance();
@@ -26,8 +27,14 @@ function vault_client_prf_options_logic(array $input): LogicResult {
 	$scope = isset($input['scope']) ? (string)$input['scope'] : '';
 	try {
 		$context = VaultClientCustody::contextForScope($scope);
+		// One endpoint serves both enrollment and unlock for a scope, and the
+		// offer rule tells them apart without being told which is which: if this
+		// scope's vault already has passkey wrappings, this is an unlock and only
+		// those credentials can succeed. The server cannot read a client-custody
+		// KEK, but it does know which credentials hold a wrapping for the scope.
 		$service = new PasskeyService();
-		$options = $service->getDerivationOptions($user, $context);
+		$options = $service->getDerivationOptions($user, $context,
+			VaultUnlock::offerableCredentialIds((int)$user->key, $scope));
 	} catch (VaultClientCustodyException $e) {
 		return LogicResult::error($e->getMessage());
 	} catch (Exception $e) {

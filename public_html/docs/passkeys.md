@@ -38,6 +38,14 @@ and reused across every ceremony call in `PasskeyService`.
 | Step-up | `getStepUpOptions()` / `verifyStepUp()` / `hasRecentStepUp()` | Re-confirm with an existing passkey before a sensitive action (user verification required) |
 | Secret derivation | `getDerivationOptions()` / `verifyDerivation()` | WebAuthn PRF extension — a stable 32-byte secret per (credential, context) that the server never holds at rest |
 
+A derivation ceremony may be **scoped to named credentials**:
+`getDerivationOptions($user, $context, $credential_ids)` restricts
+`allowCredentials` to that subset. A caller acting on one particular passkey must
+scope it, because the browser decides which credential answers an unscoped
+prompt — the caller that adds a vault unlocker always does. An empty array means
+"no opinion" and offers every live credential, never nothing: an empty
+`allowCredentials` on an unlock path is a lockout.
+
 Each `get*Options()` call mints a random 32-byte challenge, stashes it in
 `pks_passkey_ceremonies` keyed by the browser-session id and tagged with a
 purpose string and a five-minute expiry, and returns a JSON-ready options array
@@ -86,9 +94,10 @@ sign-in is withdrawn.
 - `pkc_source_json` — the library's serialized `CredentialRecord`. Authoritative:
   every ceremony round-trips through it. Never exported over the API
   (`$api_unreadable_fields`).
-- `pkc_sign_count`, `pkc_transports`, `pkc_aaguid`, `pkc_prf_capable`, `pkc_label`,
-  `pkc_created_time`, `pkc_last_used_time` — denormalized-on-write conveniences
-  for lookup and UI display.
+- `pkc_sign_count`, `pkc_transports`, `pkc_aaguid`, `pkc_prf_capable`,
+  `pkc_discoverable`, `pkc_attachment`, `pkc_label`, `pkc_created_time`,
+  `pkc_last_used_time` — denormalized-on-write conveniences for lookup, UI
+  display, and capability detection.
 
 The model is API-readable **owner-only** — `Passkey::authenticate_read` is
 tightened past the owner-or-staff default because passkeys are authentication
@@ -96,6 +105,49 @@ credentials: no one but the owner has a reason to read them, staff included
 (admin surfaces manage users, not credentials). Any caller's collection read
 returns only their own rows. Not API-writable — rename and revoke are actions
 with their own authorization and side effects, not raw CRUD.
+
+### Capability detection
+
+A U2F-only security key enrolls as a passkey and signs in fine, but it can never
+unlock a [Sealed Vault](sealed_vault.md): it can neither verify a user nor
+evaluate hmac-secret. `Passkey::vault_capability()` is the one place that answer
+is decided, and it returns one of three states derived on read from stored
+signals:
+
+| State | Means | Built from |
+|---|---|---|
+| `capable` | Has evaluated PRF at least once | `pkc_prf_capable`, which `verifyDerivation()` sets on the first success |
+| `incapable` | The browser fell back to CTAP1 — can never unlock a vault | Either evidence set below |
+| `unknown` | Not proven either way | Everything else |
+
+Two independent evidence sets reach `incapable`, and either is sufficient. The
+first is what registration records: PRF not reported, the credential explicitly
+non-discoverable (`pkc_discoverable`), and attachment explicitly `cross-platform`
+(`pkc_attachment`). **All three must be known and negative** — a null is the
+absence of a signal, not a negative one. The second reads the serialized
+`CredentialRecord`'s `uvInitialized`, a latch set at registration and raised by
+the first assertion that verifies the user, which therefore reads false only for
+a credential that has never verified a user in its life; paired with transports
+that exclude `internal`, that is the same conclusion for credentials enrolled
+before the two columns existed.
+
+The distinction that makes this work: **a FIDO2 authenticator reports
+`prf.enabled` at creation whether or not a PIN is set.** hmac-secret is a
+capability of the key, not a permission granted by the PIN. So a key that reports
+no PRF, made no discoverable credential, and is not built into the device is one
+the browser could only reach over CTAP1.
+
+`unknown` is deliberately **permissive** — the ceremony is still offered and still
+allowed to run. Windows Hello omits `prf.enabled` at creation and evaluates PRF
+fine at assertion, so registration-time reporting must never be the thing that
+stops an attempt. Only `incapable` is acted on, and only in one direction:
+withholding a vault action. That is provably safe, because a credential that
+never supported PRF cannot have completed a derivation and so cannot hold a
+wrapping — excluding it can never remove a working unlocker.
+
+`vault_capability` rides along on the API export as a derived field, so the
+owner's security page and the [lab](#diagnostics) read the same answer rather
+than each re-deriving it.
 
 ## Consumer contract
 
@@ -121,10 +173,13 @@ key beyond the vault is a **PRF consumer** in the same shape:
    protected key per credential the user has activated for it
    (`PasskeyService::listCredentials($user)` to enumerate credentials).
    `pkc_prf_capable` is registration-time reporting and is never load-bearing:
-   derivation options list **every** live credential (the ceremony itself is
-   the capability test — some authenticators, notably Windows Hello, omit the
-   creation-time report while evaluating PRF fine), and a successful
-   `verifyDerivation()` upgrades a false flag to true from that evidence.
+   within whatever subset a caller scopes to, derivation options list **every**
+   live credential (the ceremony itself is the capability test — some
+   authenticators, notably Windows Hello, omit the creation-time report while
+   evaluating PRF fine), and a successful `verifyDerivation()` upgrades a false
+   flag to true from that evidence. The one credential a consumer may drop is
+   one `Passkey::vault_capability()` reports as `incapable`, which by
+   construction can hold no wrapping.
 3. The derived secret is produced in the browser and transits TLS to the server,
    which uses it transiently (e.g. as a KEK) and holds it at most in session RAM —
    never at rest.
@@ -157,9 +212,14 @@ session cookie: a second (or later) passkey requires a fresh step-up assertion
 first, and the very first passkey (nothing to step up with yet) requires the
 account password (`current_password` in the `passkey_register_options` body).
 Accounts with no password (e.g. OAuth-only) have only the session as an anchor
-for the bootstrap enrollment. The profile UI always requests PRF at enrollment
-(`prf_capable_requested`) — the extension can only be enabled at creation time,
-and vault consumers need PRF-capable credentials.
+for the bootstrap enrollment.
+
+Registration always requests both the PRF and `credProps` extensions, server-side
+and unconditionally — there is no caller flag. PRF can only be enabled at creation
+time and is inert on an authenticator that lacks it, so asking always costs
+nothing and is what makes `pkc_prf_capable = false` mean one thing forever: were
+the request caller-controlled, "did not report PRF" and "was never asked" would be
+the same stored value.
 
 ## JS helper
 
@@ -195,7 +255,11 @@ support at the first real evaluation.
 request shape is chosen per run — user verification required or preferred, PRF
 extension on or off, credential subset — against the signed-in superadmin's own
 passkeys, so a misbehaving browser/authenticator combination can be isolated
-one variable at a time. Every outcome is recorded in the request log under
+one variable at a time. Its credential table shows each passkey's
+[vault capability](#capability-detection) next to the raw signals behind it —
+PRF reported, discoverable, attachment, and whether user verification has ever
+been performed — because the lab is where someone goes when they do not believe
+the badge on `/profile/security`. Every outcome is recorded in the request log under
 feature `passkey_lab`, including browser-side rejections that never reach the
 server (the page posts the error name back). Completing a lab ceremony grants
 nothing: `verifyDiagnostic()` sets no step-up marker and unlocks nothing.

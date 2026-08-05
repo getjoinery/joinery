@@ -21,7 +21,11 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - Registration always requests PRF and credProps, and records
+ *   discoverability/attachment, so a credential's vault capability is known at
+ *   enrollment (Passkey::vault_capability()). getDerivationOptions() takes an
+ *   optional credential filter so a ceremony can be scoped to one passkey.
  * @changelog 1.5 - Diagnostics: getDiagnosticOptions()/verifyDiagnostic() mint a
  *   parameterized assertion ceremony (UV / PRF / credential subset) for the
  *   superadmin passkey lab; grants nothing on success.
@@ -31,6 +35,7 @@ use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\AttestationStatement\AttestationStatementSupportManager;
 use Webauthn\AttestationStatement\NoneAttestationStatementSupport;
 use Webauthn\AuthenticationExtensions\AuthenticationExtensions;
+use Webauthn\AuthenticationExtensions\CredentialPropertiesInputExtension;
 use Webauthn\AuthenticationExtensions\PseudoRandomFunctionInputExtensionBuilder;
 use Webauthn\AuthenticatorAssertionResponse;
 use Webauthn\AuthenticatorAssertionResponseValidator;
@@ -127,7 +132,7 @@ class PasskeyService {
 	// Enrollment
 	// ========================================================================
 
-	public function getRegistrationOptions(User $user, bool $prf_capable_requested = false): array {
+	public function getRegistrationOptions(User $user): array {
 		$existing = new MultiPasskey(['user_id' => $user->key]);
 		$existing->load();
 		$exclude = [];
@@ -138,12 +143,22 @@ class PasskeyService {
 			);
 		}
 
-		$extensions = null;
-		if ($prf_capable_requested) {
-			$extensions = AuthenticationExtensions::create([
-				PseudoRandomFunctionInputExtensionBuilder::create()->build(),
-			]);
-		}
+		// Both extensions, unconditionally, on every enrollment.
+		//
+		// PRF can only be enabled at creation time and is inert on an
+		// authenticator that lacks it, so asking always costs nothing — and it
+		// is what makes pkc_prf_capable = false mean one thing forever. Were the
+		// request caller-controlled, "did not report PRF" and "was never asked"
+		// would be the same stored value, and a caller that forgot the flag
+		// would mint credentials that look incapable and are not.
+		//
+		// credProps reports whether a discoverable (resident) credential was
+		// actually created. A CTAP1 fallback cannot make one, so that answer is
+		// half the evidence behind Passkey::vault_capability().
+		$extensions = AuthenticationExtensions::create([
+			PseudoRandomFunctionInputExtensionBuilder::create()->build(),
+			CredentialPropertiesInputExtension::enable(),
+		]);
 
 		$challenge = random_bytes(32);
 		$options = PublicKeyCredentialCreationOptions::create(
@@ -178,6 +193,20 @@ class PasskeyService {
 		}
 		$prf_reported = !empty($data['clientExtensionResults']['prf']['enabled']);
 
+		// The other two capability signals, both absent-tolerant: a client that
+		// reports neither yields nulls, which leave the credential `unknown`
+		// (Passkey::vault_capability()). Never inferred — an unreported signal
+		// is not a negative one.
+		$discoverable = null;
+		if (isset($data['clientExtensionResults']['credProps']['rk'])) {
+			$discoverable = (bool)$data['clientExtensionResults']['credProps']['rk'];
+		}
+		$attachment = null;
+		if (isset($data['authenticatorAttachment'])
+			&& in_array($data['authenticatorAttachment'], ['platform', 'cross-platform'], true)) {
+			$attachment = (string)$data['authenticatorAttachment'];
+		}
+
 		$pk_credential = $this->serializer->deserialize($client_response_json, PublicKeyCredential::class, 'json');
 		if (!$pk_credential->response instanceof AuthenticatorAttestationResponse) {
 			throw new PasskeyException('Expected a passkey registration response.');
@@ -203,6 +232,12 @@ class PasskeyService {
 		$passkey->set('pkc_transports', json_encode($credential_record->transports));
 		$passkey->set('pkc_aaguid', (string)$credential_record->aaguid);
 		$passkey->set('pkc_prf_capable', $prf_reported);
+		if ($discoverable !== null) {
+			$passkey->set('pkc_discoverable', $discoverable);
+		}
+		if ($attachment !== null) {
+			$passkey->set('pkc_attachment', $attachment);
+		}
 		$passkey->set('pkc_label', trim($label) !== '' ? trim($label) : 'Passkey');
 		try {
 			$passkey->save();
@@ -335,27 +370,52 @@ class PasskeyService {
 	// PRF secret derivation
 	// ========================================================================
 
-	public function getDerivationOptions(User $user, string $context): array {
+	/**
+	 * @param int[]|null $credential_ids internal pkc row ids the ceremony is
+	 *   restricted to. Null offers every live credential — the historical
+	 *   behaviour, and still the right one for a caller with no opinion. A
+	 *   caller that DOES have an opinion must pass it, because the browser
+	 *   decides which credential answers: an unscoped ceremony run to activate a
+	 *   named passkey will happily accept a different one (§ 3.1 of
+	 *   specs/passkey_vault_capability_detection.md).
+	 *
+	 *   An empty array is treated as "no opinion" rather than "offer nothing".
+	 *   Minting an empty allowCredentials on the unlock path is a vault lockout,
+	 *   so the fallback is deliberate and lives here, at the one place every
+	 *   caller passes through, rather than in each of them.
+	 */
+	public function getDerivationOptions(User $user, string $context, ?array $credential_ids = null): array {
 		if (!in_array($context, self::ALLOWED_PRF_CONTEXTS, true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
 
-		// Every live credential may attempt derivation — pkc_prf_capable is
-		// registration-time reporting, which some authenticators (notably
-		// Windows Hello) omit while evaluating PRF fine at assertion. The
-		// ceremony itself is the real capability test; verifyDerivation()
-		// upgrades the flag on the first successful evaluation.
+		$filter = null;
+		if (is_array($credential_ids) && $credential_ids) {
+			$filter = array_map('intval', $credential_ids);
+		}
+
+		// Within the caller's subset, every live credential may attempt
+		// derivation — pkc_prf_capable is registration-time reporting, which
+		// some authenticators (notably Windows Hello) omit while evaluating PRF
+		// fine at assertion. The ceremony itself is the real capability test;
+		// verifyDerivation() upgrades the flag on the first successful
+		// evaluation.
 		$creds = new MultiPasskey(['user_id' => $user->key]);
 		$creds->load();
 		$allow = [];
 		foreach ($creds as $passkey) {
+			if ($filter !== null && !in_array((int)$passkey->key, $filter, true)) {
+				continue;
+			}
 			$allow[] = PublicKeyCredentialDescriptor::create(
 				PublicKeyCredentialDescriptor::CREDENTIAL_TYPE_PUBLIC_KEY,
 				Base64UrlSafe::decodeNoPadding($passkey->get('pkc_credential_id'))
 			);
 		}
 		if (!$allow) {
-			throw new PasskeyException('No passkeys are enrolled on this account.');
+			throw new PasskeyException($filter === null
+				? 'No passkeys are enrolled on this account.'
+				: 'That passkey is not enrolled on your account.');
 		}
 
 		$extensions = AuthenticationExtensions::create([

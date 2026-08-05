@@ -5,7 +5,9 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - Registration responses forward authenticatorAttachment, one
+ *   of the signals behind a credential's vault capability.
  * @changelog 1.3 - runFlow() merges extraBody into the verify POST too, so
  *   per-attempt choices (e.g. trust_device) reach the completing action.
  * @changelog 1.2 - Automatic failure telemetry: every register/authenticate
@@ -114,6 +116,13 @@ window.JoineryPasskeys = (function () {
 			id: credential.id,
 			rawId: bufferToB64url(credential.rawId),
 			type: credential.type,
+			// Whether the credential lives on a removable security key or is
+			// built into this device. Combined with credProps.rk (which arrives
+			// through clientExtensionResults for free) it tells the server
+			// whether the browser fell back to CTAP1 — a key that can never
+			// unlock a vault. Not every browser reports it; absent is absent,
+			// and the server treats it as unknown rather than as a negative.
+			authenticatorAttachment: credential.authenticatorAttachment || null,
 			response: {
 				clientDataJSON: bufferToB64url(response.clientDataJSON),
 				attestationObject: bufferToB64url(response.attestationObject),
