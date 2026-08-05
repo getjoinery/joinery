@@ -14,7 +14,9 @@
  * where it already is has no blast radius; moving a zone takes the website and
  * every other name with it, and is not something this platform offers.
  *
- * @version 1.3
+ * @version 1.5 - the box heading can be overridden, so a page rendering two of
+ *                them says which records each is for
+ * @changelog 1.4 - Apply is gated while the current ticks would publish nothing
  * @changelog 1.3 - The diff renders each record value in a copy field, so a value stays hand-publishable when an automatic publish is blocked
  * @changelog 1.2 - Renders the credential guide on the first credential field, and the OAuth app registration form when one is missing
  */
@@ -25,7 +27,13 @@ require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
  * @param AdminPage $page
  * @param array     $vars From DnsPublishBox::build().
  */
-function dns_publish_box_render($page, array $vars): void {
+/**
+ * @param string $title Overrides the box heading. A page rendering more than one
+ *                      publish box must say which records each one is for —
+ *                      two identical headings over different record sets is a
+ *                      page that cannot be read.
+ */
+function dns_publish_box_render($page, array $vars, string $title = ''): void {
 	// Nothing to offer, so nothing is shown. A domain whose DNS lives somewhere
 	// this platform has no driver for gets the page it has always had: the
 	// checks below, each carrying the record to publish. An empty box explaining
@@ -39,7 +47,7 @@ function dns_publish_box_render($page, array $vars): void {
 	$domain = $vars['domain'];
 	$label  = $vars['provider_label'];
 
-	$page->begin_box(array('title' => 'Automatically configure DNS for ' . $domain));
+	$page->begin_box(array('title' => $title !== '' ? $title : 'Automatically configure DNS for ' . $domain));
 
 	// Where the DNS lives, stated before the action that will write to it.
 	dns_publish_box_host_line($vars);
@@ -169,6 +177,71 @@ function dns_publish_box_primary($page, array $vars): void {
 		. 'Reading your live DNS needs no credential — only the write does.</p>';
 }
 
+/**
+ * Keep Apply disabled while the current ticks would publish nothing.
+ *
+ * Pressing Apply with every confirmation unticked skips every record and
+ * publishes nothing. That is now reported honestly rather than in green, but
+ * being told afterwards is a poor second to not being able to do it.
+ *
+ * THE TEST IS PER RECORD, NOT A COUNT OF TICKS. A record can need both
+ * confirmations — a conflicting MX is a cutover AND an overwrite — so ticking
+ * one box for it still writes nothing. A record publishes when every gate that
+ * applies to it is satisfied:
+ *
+ *   (not a cutover OR its cutover is ticked) AND (no conflict OR its adopt is ticked)
+ *
+ * Records needing no confirmation satisfy this with nothing ticked, so a diff of
+ * ordinary additions never disables the button.
+ *
+ * Vanilla JS, no framework, matching the admin theme. With scripting off the
+ * button simply stays enabled and the honest summary catches it.
+ */
+function dns_publish_box_apply_gate(array $rows): void {
+	$gated = array();
+	$free = 0;
+	foreach ($rows as $row) {
+		$needs_cutover = !empty($row['cutover']);
+		$needs_adopt   = ($row['outcome'] === DnsReconciler::CONFLICTS);
+		if (!$needs_cutover && !$needs_adopt) {
+			// Unchanged records are not writes either — only a record that would
+			// actually change anything counts towards enabling the button.
+			if ($row['outcome'] === DnsReconciler::MISSING || $row['outcome'] === DnsReconciler::DIFFERS) {
+				$free++;
+			}
+			continue;
+		}
+		$gated[] = array('key' => (string)$row['key'], 'cutover' => $needs_cutover, 'adopt' => $needs_adopt);
+	}
+	if ($free > 0 || empty($gated)) {
+		return;   // something publishes whatever is ticked; no gate needed
+	}
+
+	$payload = json_encode($gated);
+	echo '<script>(function(){'
+		. 'var gated=' . $payload . ';'
+		. 'var form=document.getElementById("dns_apply_form")||document.querySelector("form");'
+		. 'if(!form)return;'
+		. 'var btn=form.querySelector("[name=btn_dns_apply]")||form.querySelector("[type=submit]");'
+		. 'if(!btn)return;'
+		. 'var note=document.createElement("p");'
+		. 'note.className="text-muted small mb-0";'
+		. 'note.textContent="Tick a confirmation above — with none ticked this would publish nothing.";'
+		. 'btn.parentNode.insertBefore(note,btn.nextSibling);'
+		. 'function ticked(name){var out={};'
+		. 'form.querySelectorAll("input[name=\'"+name+"[]\']:checked").forEach(function(el){out[el.value]=true;});'
+		. 'return out;}'
+		. 'function sync(){'
+		. 'var c=ticked("dns_cutover"),a=ticked("dns_adopt");'
+		. 'var any=gated.some(function(g){'
+		. 'return (!g.cutover||c[g.key])&&(!g.adopt||a[g.key]);});'
+		. 'btn.disabled=!any;note.style.display=any?"none":"";}'
+		. 'form.addEventListener("change",function(e){'
+		. 'if(e.target&&e.target.type==="checkbox")sync();});'
+		. 'sync();'
+		. '})();</script>';
+}
+
 /** The diff: four outcomes, cutovers called out, then Apply. */
 function dns_publish_box_diff($page, array $vars): void {
 	$rows = $vars['rows'];
@@ -253,6 +326,15 @@ function dns_publish_box_diff($page, array $vars): void {
 	echo '</tbody></table></div>';
 
 	// The two decisions that are genuinely the operator's, asked once each.
+	//
+	// NEITHER IS TICKED BY DEFAULT, and that is deliberate. These are the only
+	// choices in this box that can take mail down: overwriting a record somebody
+	// else put there, or moving an MX that is carrying live traffic. Unticked
+	// costs a second press; ticked-by-default costs the mail, and only one of
+	// those is undone by pressing the button again.
+	//
+	// Both say what leaving them unticked does, because the failure they used to
+	// produce was silent — the records were skipped and the banner went green.
 	if (!empty($conflicts)) {
 		$form->checkboxList('dns_adopt', 'Records to adopt and overwrite', array(
 			'options'   => $conflicts,
@@ -263,7 +345,8 @@ function dns_publish_box_diff($page, array $vars): void {
 	if (!empty($cutovers)) {
 		$form->checkboxList('dns_cutover', 'Cutovers to confirm', array(
 			'options'   => $cutovers,
-			'help_text' => 'These changes redirect traffic that already flows.',
+			'help_text' => 'These changes redirect traffic that already flows. Leave one unticked and it is '
+				. 'skipped — nothing moves, and the record stays as it is.',
 		));
 	}
 
@@ -324,6 +407,10 @@ function dns_publish_box_diff($page, array $vars): void {
 			: 'Apply');
 	}
 	echo $form->end_form();
+
+	if (!$blocked) {
+		dns_publish_box_apply_gate($rows);
+	}
 
 	if ($blocked) {
 		return;

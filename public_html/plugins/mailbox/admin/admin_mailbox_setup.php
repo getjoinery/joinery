@@ -25,6 +25,17 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.8 - key ownership leaves this tab entirely; it is a property of
+ *                the domain, decided on the domain editor
+ * @version 3.7 - only one DNS publish box renders at a time: the page's own is
+ *                suppressed while the ceremony shows its protected-shape one
+ * @version 3.6 - the send-protection ceremony renders at the TOP of the page
+ *                while it is open: whatever you are working on should be the
+ *                first thing you see after a reload, not buried in Advanced
+ * @version 3.5 - the full health run under Advanced renders only what is not
+ *                already on screen, and the provider-supplied records table is
+ *                removed: it prescribed the colocated shape on a relay-fronted
+ *                domain, next to the publish box showing the correct one
  * @version 3.4 - send protection leaves the guided box entirely and becomes an
  *                explicit opt-in ceremony under Advanced; the unlock gate is
  *                shown rather than discovered on the press
@@ -133,7 +144,16 @@ $render_fix = function ($fix) use ($address) {
 	}
 };
 
-$render_check = function ($c) use ($status_badge, $render_fix) {
+// Every check row this page has actually put on screen, so the full health run
+// under Advanced can render what is left rather than everything again. Recorded
+// at the point of rendering rather than derived from the row lists, so it can
+// never drift from what the operator is looking at.
+$rendered_checks = array();
+
+$render_check = function ($c) use ($status_badge, $render_fix, &$rendered_checks) {
+	// id alone is not unique — mailhost rows repeat per hostname — so the scope
+	// is part of the identity.
+	$rendered_checks[($c['id'] ?? '') . '|' . ($c['scope'] ?? '')] = true;
 	$border = $c['status'] === InboundEmailSetupCheck::FAIL ? 'border-danger'
 		: ($c['status'] === InboundEmailSetupCheck::WARN ? 'border-warning'
 		: ($c['status'] === InboundEmailSetupCheck::PASS ? 'border-success'
@@ -185,6 +205,201 @@ if (empty($focus_options)) {
 }
 $page->end_box();
 
+// --- Sending identity (Fortress) -------------------------------------------
+// WHATEVER YOU ARE DOING BELONGS AT THE TOP OF THE PAGE. The ceremony normally
+// lives under Advanced, which is right for a control you have gone looking for
+// — but the moment an operator opens it, it is the task, and leaving it buried
+// meant every press reloaded the page to the top and sent them scrolling back
+// down to find where they were. So the same box renders in one of two places:
+// at the top while the ceremony is open, and under Advanced otherwise.
+//
+// Defined once as a closure rather than written twice, because two copies of a
+// 170-line panel is how they drift apart.
+$prot_hidden = array('ied_inbound_email_domain_id' => (int)($focus_domain_id ?? 0));
+$setup_open  = !empty($protect_setup) && !empty($protect)
+	&& empty($protect['is_protected']) && !empty($protect['has_key']);
+$adv_focus_qs = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
+	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
+$adv_base    = $base . $adv_focus_qs;
+// Opening the ceremony does NOT open Advanced: the panel moves to the top of the
+// page instead, so expanding the server-wide section as well would bury the task
+// under everything the operator was not asking about.
+$setup_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'protect_setup=1';
+// Leaving puts it back where it lives, with Advanced open around it.
+$leave_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'advanced=1';
+
+$render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
+		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
+		$protect_preflight, $protect_vault_unlocked, $render_check) {
+// --- Sending identity (Fortress) ---
+// THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
+// (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
+// not a setup step: the guided box above never mentions it, so this is the
+// only place it is offered, explained, carried out, and later changed.
+if (!empty($protect) && $focus_domain !== '') {
+	$page->begin_box(array('title' => 'Sending identity — ' . $focus_domain));
+
+	if ($protect['is_protected']) {
+		echo '<p class="mb-2">Send protection is on. While you are signed out, nothing on this server can send '
+			. 'mail as ' . htmlspecialchars($focus_domain) . ' that anyone will accept.</p>';
+	} elseif ($protect['has_key'] && !$setup_open) {
+		// THE RESTING STATE, AND IT IS A FINISHED ONE. Every Fortress domain
+		// has a sealed key the moment it is raised, so "has a key, not
+		// enforcing" is not a job half done — it is the normal state of a
+		// working domain. Say what turning it on would buy and what it would
+		// cost, then leave it alone.
+		echo '<p class="mb-2">Mail arriving for ' . htmlspecialchars($focus_domain) . ' is sealed at the relay '
+			. 'and unreadable without your vault. That is Fortress, and it is working.</p>';
+		echo '<p class="mb-2"><strong>Send protection is a separate, optional step</strong> that covers mail going '
+			. 'OUT. Turn it on and every other mail server on the internet rejects anything claiming to be from '
+			. 'this domain that your sealed key did not sign — including anything sent by someone who breaks into '
+			. 'this server.</p>';
+		echo '<p class="mb-2">It costs you two things, and they are the reason it is not switched on for you:</p>';
+		echo '<ul class="mb-2">';
+		echo '<li>You have to unlock your vault to send mail as this domain — every time.</li>';
+		echo '<li>Automated mail (order confirmations, notifications) can no longer come from this domain, '
+			. 'because nobody is signed in when it is sent. It moves to a Standard subdomain'
+			. (_setup_has_standard_subdomain($focus_domain)
+				? ' — you already have one, so this part is covered.'
+				: ', which you do not have yet.') . '</li>';
+		echo '</ul>';
+		echo '<p class="mb-3"><a class="btn btn-primary" href="' . htmlspecialchars($setup_url) . '">'
+			. 'Set up send protection</a></p>';
+	}
+
+	// --- The ceremony, once the operator has explicitly opened it -----------
+	if ($setup_open) {
+		echo '<p class="mb-2"><strong>Setting up send protection for ' . htmlspecialchars($focus_domain)
+			. '.</strong> Nothing is enforced and your mail is unaffected until the last step, and you can '
+			. 'stop at any point. <a href="' . htmlspecialchars($leave_url) . '">Leave this for now</a></p>';
+		echo '<p class="text-muted small mb-3">Publish the records below, wait for them to travel, then turn '
+			. 'protection on. The records and the switch have to match, so the switch checks them itself and '
+			. 'refuses rather than half-doing it.</p>';
+
+		if (!empty($protect_dns_box)) {
+			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			dns_publish_box_render($page, $protect_dns_box,
+				'Publish the send-protection records for ' . $focus_domain);
+		}
+
+		if (!empty($protect_preflight)) {
+			echo '<h5 class="mt-3 mb-2">The records this needs</h5>';
+			foreach ($protect_preflight as $r) { $render_check($r); }
+		}
+
+		// THE UNLOCK GATE IS SHOWN, NOT DISCOVERED. A button that accepts a
+		// press and then explains why it did nothing is the same defect as a
+		// checklist step that is already done.
+		if (empty($protect_vault_unlocked)) {
+			echo '<p class="alert alert-warning mb-2">Your vault is locked. Turning send protection on decides what '
+				. 'the rest of the world will accept as this domain, so we need to know you are really here. '
+				. '<a class="btn btn-sm btn-primary ms-2" href="/profile/security">Unlock your vault</a></p>';
+		} else {
+			echo '<div class="mb-2">' . PublicPageBase::action_button('Check DNS and turn on send protection',
+				$self_url,
+				array('hidden' => $prot_hidden + array('action' => 'protect_activate'),
+					'class' => 'btn btn-primary',
+					'confirm' => 'Turn send protection on for ' . $focus_domain . '? From this moment only your '
+						. 'key can send as this domain, and you will need your vault unlocked to send mail.'))
+				. '</div>';
+		}
+	}
+
+	// No key at all. The Fortress raise seals one automatically, so this only
+	// happens where it could not guess: a domain whose mailboxes already have
+	// holders, where the admin raising the level need not be the person who
+	// reads the mail. The ANSWER is given on the domain editor, because who owns
+	// the key is a property of the domain rather than a step in setting it up.
+	if (!$protect['is_protected'] && empty($protect['has_key'])) {
+		echo '<p class="mb-2">This domain has no signing key yet, because more than one person could own it — '
+			. 'and only its owner will ever be able to send as ' . htmlspecialchars($focus_domain) . '. '
+			. 'That is decided on the domain itself; nothing here can start until it is answered.</p>';
+		echo '<p class="mb-0"><a class="btn btn-primary" '
+			. 'href="/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
+			. (int)$focus_domain_id . '">Choose who this key belongs to</a></p>';
+	}
+
+	if (!empty($protect['has_pending'])) {
+		echo '<p class="alert alert-warning">A replacement key is staged under <code>'
+			. htmlspecialchars($protect['pending_selector']) . '</code>. The old key is still signing, so '
+			. 'nothing is broken — publish the new record, then switch over.</p>';
+	}
+
+	echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">';
+	if ($protect['is_protected'] && !empty($protect['has_pending'])) {
+		echo PublicPageBase::action_button('Check DNS and switch over', $self_url,
+			array('hidden' => $prot_hidden + array('action' => 'protect_activate_rotation'),
+				'class' => 'btn btn-primary'));
+		echo PublicPageBase::action_button('Forget the new key', $self_url,
+			array('hidden' => $prot_hidden + array('action' => 'protect_cancel_rotation'),
+				'class' => 'btn btn-soft-default',
+				'confirm' => 'Throw away the replacement key? Your current key was never touched and keeps working.'));
+	} elseif ($protect['is_protected']) {
+		echo PublicPageBase::action_button('Replace my key', $self_url,
+			array('hidden' => $prot_hidden + array('action' => 'protect_rotate'),
+				'class' => 'btn btn-soft-default',
+				'confirm' => 'Make a replacement key? Your current one keeps working the whole time — you publish '
+					. 'the new record, check it, and only then switch over.'));
+	}
+	// "Start over with a new key" USED TO BE HERE, and is deliberately gone. Its
+	// only real use was a key sealed to the wrong person — and it was the one
+	// control that never asked who the new owner should be, so it silently
+	// resealed the domain to whoever pressed it. On a domain with two holders
+	// that took the sending identity away from the other, with no warning.
+	//
+	// Who the key belongs to is a property of the domain, so it is decided on the
+	// domain editor, where the level is chosen and the owner can be named.
+	if ($protect['is_protected']) {
+		// "Send protection", not "protection": turning this off does not stop
+		// arriving mail being sealed, and a confirm that reads as though it
+		// might would stop somebody making a change they are entitled to make.
+		//
+		// The confirm states every consequence concretely, including the one
+		// that bites afterwards: the published records reject unsigned mail,
+		// so they have to come down too or this domain sends nothing.
+		echo PublicPageBase::action_button('Turn send protection off', $self_url,
+			array('hidden' => $prot_hidden + array('action' => 'protect_disable'),
+				'class' => 'btn btn-soft-danger',
+				'confirm' => 'Turn send protection off for ' . $focus_domain . '?' . "\n\n"
+					. 'This server will be able to send as this domain again without you signed in — and so '
+					. 'will anyone who breaks into it.' . "\n\n"
+					. 'Your DNS currently tells other servers to reject mail this domain sends that your key '
+					. 'did not sign. Those records have to come down as well, or this domain will send '
+					. 'nothing. You will be taken straight to them.' . "\n\n"
+					. 'Arriving mail stays sealed and still needs your vault. This only affects sending.'));
+	}
+	echo '</div>';
+
+	// Nobody sees this name and fwd.<domain> is right for everyone, so it is
+	// folded away rather than asked for. It stays changeable for whoever has
+	// a reason, with the explanation next to the control.
+	echo '<details><summary class="fix-toggle small">Change the return address for outgoing mail</summary>';
+	echo '<div class="mt-2">';
+	echo '<p class="text-muted small">Every message has two senders: the one people see, and a hidden one '
+		. 'servers use to report delivery problems. Your protected name tells the world that no server may send '
+		. 'as it, so the hidden sender travels under this name instead. Nobody sees it and there is nothing to '
+		. 'register. Changing it means republishing its two DNS records.</p>';
+	$ra_form = $page->getFormWriter('return_address_form', array('action' => $self_url));
+	echo $ra_form->begin_form();
+	$ra_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => (int)$focus_domain_id));
+	$ra_form->hiddeninput('action', '', array('value' => 'protect_return_address'));
+	$ra_form->textinput('ied_forwarding_subdomain', 'Return address', array(
+		'value'    => $protect['return_address'],
+		'helptext' => 'Must end in .' . $focus_domain . '.',
+	));
+	$ra_form->submitbutton('btn_return_address', 'Save this name');
+	echo $ra_form->end_form();
+	echo '</div></details>';
+	$page->end_box();
+}
+};
+
+// The active task, first on the page.
+if ($setup_open) {
+	$render_sending_identity();
+}
+
+
 // =====================================================================
 // Scoped results for the chosen mailbox or domain
 // =====================================================================
@@ -199,12 +414,6 @@ $level        = $security_level ?? 'standard';
 $dom_id       = (int)($focus_domain_id ?? 0);
 $has_vault    = !empty($acting_has_vault);
 $is_protected = !empty($focus_is_protected);
-// Straight into the ceremony under Advanced, with it already open. Built from
-// the focus this page resolved, not from the request, so the link survives a
-// visit that arrived without one.
-$adv_link_base = $base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
-	: ($dom_id ? '?domain_id=' . $dom_id : '?'))
-	. '&advanced=1&protect_setup=1';
 if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 	// THIS BOX CARRIES OUTSTANDING WORK ONLY, and disappears when there is none.
 	//
@@ -269,13 +478,13 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 		// it — and it disappears the moment protection is on, so it never narrates
 		// back a step already taken.
 		if (!$is_protected && $active_relay !== null && _setup_domain_mx_is_cut_over($domain_rows ?? array())) {
-			$steps[] = function () use ($adv_link_base) {
+			$steps[] = function () use ($setup_url) {
 				echo '<li class="mb-0"><strong>Finish Fortress: lock sending to your key.</strong> '
 					. 'Arriving mail is sealed, which is half of what Fortress promises. The other half is that '
 					. 'nobody can send mail claiming to be you — including someone who has broken into this '
 					. 'server. Until this is done, anyone can.'
 					. '<div class="mt-2"><a class="btn btn-sm btn-primary" href="'
-					. htmlspecialchars($adv_link_base) . '">Finish it under Sending identity</a></div>'
+					. htmlspecialchars($setup_url) . '">Finish it under Sending identity</a></div>'
 					. '<p class="text-muted small mb-0 mt-1">Nothing changes for your mail until the last step, '
 					. 'and you can stop at any point.</p></li>';
 			};
@@ -353,7 +562,12 @@ function _setup_has_standard_subdomain(string $domain): bool {
 // the one control that can make those checks pass without leaving the page.
 // Once there is no DNS left to fix it moves to Advanced — a finished domain
 // should not be led with an offer to configure it.
-if (($selected || $domain_selected) && !empty($dns_box) && empty($dns_box_in_advanced)) {
+// NOT WHILE THE CEREMONY IS OPEN. The ceremony renders its own publish box, for
+// the protected shape, and this one renders the ordinary shape — two panels with
+// the same heading showing records that contradict each other, which is the exact
+// failure the provider-supplied table was removed for. Mid-ceremony there is one
+// correct set of records to publish, and it is the ceremony's.
+if (!$setup_open && ($selected || $domain_selected) && !empty($dns_box) && empty($dns_box_in_advanced)) {
 	require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
 	dns_publish_box_render($page, $dns_box);
 }
@@ -410,10 +624,8 @@ if ($selected) {
 // Advanced — server-wide setup & diagnostics
 // =====================================================================
 // Links only — every form and button on the page posts to $self_url, which
-// already carries the focus and the advanced state.
-$adv_focus_qs = $selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
-	: ($selected_domain_id ? '?domain_id=' . (int)$selected_domain_id : '');
-$adv_base = $base . $adv_focus_qs;
+// already carries the focus and the advanced state. $adv_base and $adv_focus_qs
+// are built once, above, where the sending-identity closure also needs them.
 if (!$advanced) {
 	$sep = $adv_focus_qs !== '' ? '&' : '?';
 	echo '<p class="mt-3"><a href="' . htmlspecialchars($adv_base . $sep . 'advanced=1') . '">Advanced server setup &amp; diagnostics &rarr;</a></p>';
@@ -423,176 +635,9 @@ if (!$advanced) {
 	echo '<p class="text-muted small mb-3">Server-wide settings and the full inbound health run — shared by every hosted mailbox. '
 		. '<a href="' . htmlspecialchars($adv_base) . '">Hide advanced</a></p>';
 
-	// --- Sending identity (Fortress) ---
-	// THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
-	// (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
-	// not a setup step: the guided box above never mentions it, so this is the
-	// only place it is offered, explained, carried out, and later changed.
-	if (!empty($protect) && $focus_domain !== '') {
-		$page->begin_box(array('title' => 'Sending identity — ' . $focus_domain));
-		$prot_hidden = array('ied_inbound_email_domain_id' => (int)$focus_domain_id);
-		$setup_open  = !empty($protect_setup) && !$protect['is_protected'] && !empty($protect['has_key']);
-		$setup_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'advanced=1&protect_setup=1';
-		$leave_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'advanced=1';
-
-		if ($protect['is_protected']) {
-			echo '<p class="mb-2">Send protection is on. While you are signed out, nothing on this server can send '
-				. 'mail as ' . htmlspecialchars($focus_domain) . ' that anyone will accept.</p>';
-		} elseif ($protect['has_key'] && !$setup_open) {
-			// THE RESTING STATE, AND IT IS A FINISHED ONE. Every Fortress domain
-			// has a sealed key the moment it is raised, so "has a key, not
-			// enforcing" is not a job half done — it is the normal state of a
-			// working domain. Say what turning it on would buy and what it would
-			// cost, then leave it alone.
-			echo '<p class="mb-2">Mail arriving for ' . htmlspecialchars($focus_domain) . ' is sealed at the relay '
-				. 'and unreadable without your vault. That is Fortress, and it is working.</p>';
-			echo '<p class="mb-2"><strong>Send protection is a separate, optional step</strong> that covers mail going '
-				. 'OUT. Turn it on and every other mail server on the internet rejects anything claiming to be from '
-				. 'this domain that your sealed key did not sign — including anything sent by someone who breaks into '
-				. 'this server.</p>';
-			echo '<p class="mb-2">It costs you two things, and they are the reason it is not switched on for you:</p>';
-			echo '<ul class="mb-2">';
-			echo '<li>You have to unlock your vault to send mail as this domain — every time.</li>';
-			echo '<li>Automated mail (order confirmations, notifications) can no longer come from this domain, '
-				. 'because nobody is signed in when it is sent. It moves to a Standard subdomain'
-				. (_setup_has_standard_subdomain($focus_domain)
-					? ' — you already have one, so this part is covered.'
-					: ', which you do not have yet.') . '</li>';
-			echo '</ul>';
-			echo '<p class="mb-3"><a class="btn btn-primary" href="' . htmlspecialchars($setup_url) . '">'
-				. 'Set up send protection</a></p>';
-		}
-
-		// --- The ceremony, once the operator has explicitly opened it -----------
-		if ($setup_open) {
-			echo '<p class="mb-2"><strong>Setting up send protection for ' . htmlspecialchars($focus_domain)
-				. '.</strong> Nothing is enforced and your mail is unaffected until the last step, and you can '
-				. 'stop at any point. <a href="' . htmlspecialchars($leave_url) . '">Leave this for now</a></p>';
-			echo '<p class="text-muted small mb-3">Publish the records below, wait for them to travel, then turn '
-				. 'protection on. The records and the switch have to match, so the switch checks them itself and '
-				. 'refuses rather than half-doing it.</p>';
-
-			if (!empty($protect_dns_box)) {
-				require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
-				dns_publish_box_render($page, $protect_dns_box);
-			}
-
-			if (!empty($protect_preflight)) {
-				echo '<h5 class="mt-3 mb-2">The records this needs</h5>';
-				foreach ($protect_preflight as $r) { $render_check($r); }
-			}
-
-			// THE UNLOCK GATE IS SHOWN, NOT DISCOVERED. A button that accepts a
-			// press and then explains why it did nothing is the same defect as a
-			// checklist step that is already done.
-			if (empty($protect_vault_unlocked)) {
-				echo '<p class="alert alert-warning mb-2">Your vault is locked. Turning send protection on decides what '
-					. 'the rest of the world will accept as this domain, so we need to know you are really here. '
-					. '<a class="btn btn-sm btn-primary ms-2" href="/profile/security">Unlock your vault</a></p>';
-			} else {
-				echo '<div class="mb-2">' . PublicPageBase::action_button('Check DNS and turn on send protection',
-					$self_url,
-					array('hidden' => $prot_hidden + array('action' => 'protect_activate'),
-						'class' => 'btn btn-primary',
-						'confirm' => 'Turn send protection on for ' . $focus_domain . '? From this moment only your '
-							. 'key can send as this domain, and you will need your vault unlocked to send mail.'))
-					. '</div>';
-			}
-		}
-
-		// No key at all. The Fortress raise seals one automatically, so this only
-		// happens where it could not guess: a domain whose mailboxes already have
-		// holders, where the admin raising the level need not be the person who
-		// reads the mail. Ask, because only the answer decides who can ever send
-		// as this domain.
-		if (!$protect['is_protected'] && empty($protect['has_key'])) {
-			echo '<p class="mb-2">This domain has no signing key yet, because more than one person could own it — '
-				. 'and only its owner will ever be able to send as ' . htmlspecialchars($focus_domain) . '. '
-				. 'That is not ours to guess.</p>';
-			$own_form = $page->getFormWriter('owner_form', array('action' => $self_url));
-			echo $own_form->begin_form();
-			$own_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => (int)$focus_domain_id));
-			$own_form->hiddeninput('action', '', array('value' => 'protect_generate'));
-			$own_form->dropinput('owner_user_id', 'Key belongs to', array(
-				'options' => $protect['owner_options'],
-				'value'   => $protect['default_owner_id'],
-			));
-			$own_form->submitbutton('btn_protect_generate', 'Make the key');
-			echo $own_form->end_form();
-		}
-
-		if (!empty($protect['has_pending'])) {
-			echo '<p class="alert alert-warning">A replacement key is staged under <code>'
-				. htmlspecialchars($protect['pending_selector']) . '</code>. The old key is still signing, so '
-				. 'nothing is broken — publish the new record, then switch over.</p>';
-		}
-
-		echo '<div style="display:flex;gap:.5rem;flex-wrap:wrap;margin-bottom:1rem">';
-		if ($protect['is_protected'] && !empty($protect['has_pending'])) {
-			echo PublicPageBase::action_button('Check DNS and switch over', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_activate_rotation'),
-					'class' => 'btn btn-primary'));
-			echo PublicPageBase::action_button('Forget the new key', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_cancel_rotation'),
-					'class' => 'btn btn-soft-default',
-					'confirm' => 'Throw away the replacement key? Your current key was never touched and keeps working.'));
-		} elseif ($protect['is_protected']) {
-			echo PublicPageBase::action_button('Replace my key', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_rotate'),
-					'class' => 'btn btn-soft-default',
-					'confirm' => 'Make a replacement key? Your current one keeps working the whole time — you publish '
-						. 'the new record, check it, and only then switch over.'));
-		} elseif ($protect['has_key'] && $setup_open) {
-			// Only inside the ceremony: on a resting domain this is an invitation
-			// to fiddle with a key that is doing its job.
-			echo PublicPageBase::action_button('Start over with a new key', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_generate'),
-					'class' => 'btn btn-soft-default',
-					'confirm' => 'This throws away the key you have and makes a fresh one. You will have to publish a '
-						. 'new DNS record for it. Nothing is protected yet, so nothing breaks — continue?'));
-		}
-		if ($protect['is_protected']) {
-			// "Send protection", not "protection": turning this off does not stop
-			// arriving mail being sealed, and a confirm that reads as though it
-			// might would stop somebody making a change they are entitled to make.
-			//
-			// The confirm states every consequence concretely, including the one
-			// that bites afterwards: the published records reject unsigned mail,
-			// so they have to come down too or this domain sends nothing.
-			echo PublicPageBase::action_button('Turn send protection off', $self_url,
-				array('hidden' => $prot_hidden + array('action' => 'protect_disable'),
-					'class' => 'btn btn-soft-danger',
-					'confirm' => 'Turn send protection off for ' . $focus_domain . '?' . "\n\n"
-						. 'This server will be able to send as this domain again without you signed in — and so '
-						. 'will anyone who breaks into it.' . "\n\n"
-						. 'Your DNS currently tells other servers to reject mail this domain sends that your key '
-						. 'did not sign. Those records have to come down as well, or this domain will send '
-						. 'nothing. You will be taken straight to them.' . "\n\n"
-						. 'Arriving mail stays sealed and still needs your vault. This only affects sending.'));
-		}
-		echo '</div>';
-
-		// Nobody sees this name and fwd.<domain> is right for everyone, so it is
-		// folded away rather than asked for. It stays changeable for whoever has
-		// a reason, with the explanation next to the control.
-		echo '<details><summary class="fix-toggle small">Change the return address for outgoing mail</summary>';
-		echo '<div class="mt-2">';
-		echo '<p class="text-muted small">Every message has two senders: the one people see, and a hidden one '
-			. 'servers use to report delivery problems. Your protected name tells the world that no server may send '
-			. 'as it, so the hidden sender travels under this name instead. Nobody sees it and there is nothing to '
-			. 'register. Changing it means republishing its two DNS records.</p>';
-		$ra_form = $page->getFormWriter('return_address_form', array('action' => $self_url));
-		echo $ra_form->begin_form();
-		$ra_form->hiddeninput('ied_inbound_email_domain_id', '', array('value' => (int)$focus_domain_id));
-		$ra_form->hiddeninput('action', '', array('value' => 'protect_return_address'));
-		$ra_form->textinput('ied_forwarding_subdomain', 'Return address', array(
-			'value'    => $protect['return_address'],
-			'helptext' => 'Must end in .' . $focus_domain . '.',
-		));
-		$ra_form->submitbutton('btn_return_address', 'Save this name');
-		echo $ra_form->end_form();
-		echo '</div></details>';
-		$page->end_box();
+	// Rendered at the top instead while the ceremony is open — see the closure.
+	if (!$setup_open) {
+		$render_sending_identity();
 	}
 
 	// --- How mail reaches this server ---
@@ -612,24 +657,12 @@ if (!$advanced) {
 		mailbox_relay_section_render($page, $relay_section);
 	}
 
-	// --- Inbound provider ---
-	$page->begin_box(array('title' => 'Inbound provider'));
-	echo '<p class="mb-2">How this site receives inbound mail. Switching is a single setting change — '
-		. 'the same domain, alias and store machinery runs underneath.</p>';
-	$pform = $page->getFormWriter('provider_form', array('action' => $self_url));
-	echo $pform->begin_form();
-	$pform->hiddeninput('action', '', array('value' => 'set_provider'));
-	$pform->dropinput('provider', 'Provider', array(
-		'options' => $provider_options,
-		'value'   => $active_provider_key,
-	));
-	$pform->submitbutton('btn_provider', 'Use this provider');
-	echo $pform->end_form();
-	if ($active_provider_is_webhook && $webhook_url !== '') {
-		echo '<p class="mt-3 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
-		echo '<code class="iem-code-break">' . htmlspecialchars($webhook_url) . '</code></p>';
-	}
-	$page->end_box();
+	// THE INBOUND PROVIDER LIVES ON THE SETTINGS TAB, with how sent mail leaves.
+	// It was always a declared setting — group `inbound`, options resolved from
+	// InboundProviderRegistry — and this tab hand-rendered it anyway. Setup is
+	// where you come to see whether things work; changing which stack receives
+	// your mail is not that. The webhook URL moved with it, because it is useless
+	// without the control that produces it.
 
 	// --- Server mail identity ---
 	$page->begin_box(array('title' => "This server's mail identity"));
@@ -655,37 +688,62 @@ if (!$advanced) {
 
 	// --- DNS publish box, once there is nothing left to fix ---
 	// Above the copy-paste table, which is the manual version of the same thing.
-	if (!empty($dns_box) && !empty($dns_box_in_advanced)) {
+	if (!$setup_open && !empty($dns_box) && !empty($dns_box_in_advanced)) {
 		require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
 		dns_publish_box_render($page, $dns_box);
 	}
 
-	// --- Provider-supplied DNS records for the focused domain ---
-	if (!empty($dns_records) && $focus_domain !== '') {
-		$page->begin_box(array('title' => 'DNS records to publish for ' . $focus_domain));
-		echo '<p class="mb-2">Copy these into your DNS provider for <code>' . htmlspecialchars($focus_domain) . '</code>:</p>';
-		echo '<table class="table table-sm table-bordered iem-table-900">';
-		echo '<thead><tr><th>Type</th><th>Name</th><th>Value</th><th>Note</th></tr></thead><tbody>';
-		foreach ($dns_records as $rec) {
-			echo '<tr>';
-			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
-			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-			echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
-			echo '<td class="text-muted small">' . htmlspecialchars($rec['note'] ?? '') . '</td>';
-			echo '</tr>';
-		}
-		echo '</tbody></table>';
-		$page->end_box();
-	}
+	// THE PROVIDER-SUPPLIED RECORDS TABLE IS GONE, and must not come back.
+	//
+	// It rendered $active_provider_class::getDnsRecords(), a fixed list that
+	// predates both the relay and the security levels and reads neither. On a
+	// relay-fronted Fortress domain it prescribed the colocated shape — MX at
+	// mail.<domain>, SPF publishing this server's own IP, DMARC p=none — under
+	// the heading "DNS records to publish". Copying those three records moves the
+	// MX off the relay so mail arrives unsealed, publishes the address the relay
+	// exists to hide, and drops the domain's impersonation protection. It sat
+	// directly beneath the publish box, which was showing the correct records at
+	// the same time.
+	//
+	// Everything it offered, dnsPlan() already produces correctly: the publish box
+	// renders each value in a copy field, and where no driver covers the domain's
+	// DNS host the check rows carry the same records in their fix. One source of
+	// truth for what to publish, which is what docs/dns_management.md has always
+	// said it must be.
 
 	// --- Full server-wide diagnostic ---
+	//
+	// WHAT IS LEFT, NOT EVERYTHING AGAIN. The sections above are a filter over
+	// this same battery, so rendering the unfiltered run here repeated almost all
+	// of them: on a focused mailbox, 14 of the 15 cards above came back a second
+	// time and the page ran to 40 cards for 26 facts. A page that says everything
+	// twice is one an operator learns to skim, which is how the row that mattered
+	// gets missed.
+	//
+	// The subtraction is against what was actually rendered, not a fixed list, so
+	// a focus that shows nothing above (a domain with no mailbox, no selection at
+	// all) still gets the complete run here.
+	$remaining = array();
+	foreach ($results as $r) {
+		if (empty($rendered_checks[($r['id'] ?? '') . '|' . ($r['scope'] ?? '')])) {
+			$remaining[] = $r;
+		}
+	}
 	$page->begin_box(array('title' => 'Full inbound health run'
 		. ($focus_domain !== '' ? ' (' . $focus_domain . ')' : '')));
 	if (empty($results)) {
 		echo '<p class="text-muted mb-0">No checks returned.</p>';
+	} elseif (empty($remaining)) {
+		echo '<p class="text-muted mb-0">Every check for this mailbox is already shown above &mdash; '
+			. 'there is nothing server-wide left to report.</p>';
 	} else {
+		if (count($remaining) < count($results)) {
+			echo '<p class="text-muted small mb-3">The server-wide checks. '
+				. (count($results) - count($remaining))
+				. ' more are shown above, scoped to this mailbox, and are not repeated here.</p>';
+		}
 		$by_layer = array();
-		foreach ($results as $r) { $by_layer[$r['layer']][] = $r; }
+		foreach ($remaining as $r) { $by_layer[$r['layer']][] = $r; }
 		$layer_titles = array(
 			'host'     => 'Mail server software',
 			'mailhost' => "This server's mail identity",

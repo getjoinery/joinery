@@ -365,37 +365,99 @@ class ProtectOptinTest {
 
 		$view = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/admin/admin_mailbox_setup.php'));
-		$guided = substr($view, 0, strpos($view, 'Advanced — server-wide setup & diagnostics'));
-		check($guided !== '' && $guided !== false, 'the guided half of the page was located');
 
-		// The ceremony itself stays in Advanced. What the guided box carries is a
-		// statement that Fortress is unfinished, and a link.
+		// SCOPED BY STRUCTURE, NOT BY POSITION IN THE FILE. An earlier version of
+		// this split the source at the Advanced heading and asserted the ceremony
+		// markup fell below it — which broke the moment the panel was made to
+		// render at the top of the page while it is open, even though the rule it
+		// was protecting had not changed at all.
+		$guided = substr($view, strpos($view, '$steps = array();'));
+		$guided = substr($guided, 0, strpos($guided, 'if (!empty($steps))'));
+		check($guided !== '' && $guided !== false, 'the guided box steps were located');
+
 		check(strpos($guided, 'protect_activate') === false,
-			'the turn-it-on button is not in the guided box — the ceremony lives in Advanced');
+			'no turn-it-on button among the guided steps — the ceremony is its own panel');
 		check(strpos($guided, 'protect_generate') === false,
-			'no owner question in the guided box');
+			'no owner question among the guided steps');
 		check(strpos($guided, 'prefill_domain') === false,
-			'no Standard-subdomain offer in the guided box');
+			'no Standard-subdomain offer among the guided steps');
 
-		// Fortress is a two-sided promise and the guided box says so. Gated on the
-		// arrival side actually working first: offering the sending half before
-		// mail reaches the relay asks someone to finish what has not started.
+		// Fortress is a two-sided promise and the guided box says so — with a link,
+		// not a control. Gated on the arrival side working first.
 		check(strpos($guided, 'Finish Fortress') !== false,
 			'the guided box names Fortress as unfinished while sending is unlocked');
+		check(strpos($guided, '$setup_url') !== false,
+			'and links to the ceremony rather than reimplementing it');
 		check(preg_match('/!\$is_protected\s*&&\s*\$active_relay !== null\s*&&\s*_setup_domain_mx_is_cut_over/', $guided) === 1,
-			'and renders only when unprotected, with a live relay, and the MX cut over');
+			'rendering only when unprotected, with a live relay, and the MX cut over');
 		check(strpos($view, 'function _setup_domain_mx_is_cut_over') !== false,
 			'the cutover test reads the domain.mx row the page already computed');
 
-		// The whole ceremony lives in one place instead.
-		$advanced = substr($view, strpos($view, 'Advanced — server-wide setup & diagnostics'));
-		foreach (array('protect_activate', 'protect_generate', 'protect_rotate', 'protect_disable') as $act) {
-			check(strpos($advanced, $act) !== false, $act . ' lives under Advanced');
+		// The whole ceremony lives in one closure, defined once.
+		$panel = substr($view, strpos($view, '$render_sending_identity = function ()'));
+		$panel = substr($panel, 0, strpos($panel, "\n};"));
+		foreach (array('protect_activate', 'protect_rotate', 'protect_disable') as $act) {
+			check(strpos($panel, $act) !== false, $act . ' lives in the sending-identity panel');
 		}
-		check(strpos($advanced, 'protect_setup') !== false,
-			'the ceremony opens on an explicit gesture, not on the mere presence of a key');
-		check(strpos($advanced, 'Your vault is locked') !== false,
+
+		// OWNERSHIP IS NOT A SETUP STEP. Who the signing key belongs to is a
+		// property of the domain, decided where the security level is. It was also
+		// the one control that never asked: the old Start-over button posted no
+		// owner, so it silently resealed the domain to whoever pressed it.
+		check(strpos($view, 'protect_generate') === false,
+			'the Setup tab hosts no key-ownership control at all');
+		// The comment where it used to be still names it, deliberately — a future
+		// reader should find out why it went rather than reinvent it. So assert on
+		// the control, not the words.
+		check(strpos($view, "action_button('Start over") === false,
+			'and the button that reassigned the owner without asking is gone');
+		$domains = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/admin/admin_mailbox_domains.php'));
+		check(strpos($domains, "'value' => 'protect_generate'") !== false,
+			'ownership is decided on the domain editor');
+		check(strpos($domains, "'owner_user_id'") !== false,
+			'and it always asks who, rather than defaulting to the person clicking');
+		check(strpos($domains, 'The signing key belongs to') !== false,
+			'the owner is stated — it was written by the raise and shown on no screen');
+		$dlogic = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/logic/admin_mailbox_domains_logic.php'));
+		check(strpos($dlogic, 'mailbox_protect_handle_action') !== false,
+			'the domain page routes the action to protect_identity.php rather than reimplementing it');
+		check(strpos($panel, 'Your vault is locked') !== false,
 			'the unlock gate is rendered before the press, not discovered by pressing');
+		check(substr_count($view, '$render_sending_identity = function ()') === 1,
+			'the panel is written once, not duplicated per position');
+
+		// WHATEVER IS BEING WORKED ON GOES TO THE TOP. The panel renders in one of
+		// two places and never both: at the top while the ceremony is open, under
+		// Advanced otherwise. A reload that dumps the operator at the top of a long
+		// page, with the thing they just pressed still buried, is the jank this
+		// exists to remove.
+		check(substr_count($view, '$render_sending_identity();') === 2,
+			'the panel is called from exactly two places');
+		check(strpos($view, "if (\$setup_open) {\n\t\$render_sending_identity();") !== false,
+			'rendered at the top of the page while the ceremony is open');
+		check(strpos($view, "if (!\$setup_open) {\n\t\t\$render_sending_identity();") !== false,
+			'and under Advanced when it is not');
+
+		// ONE PUBLISH BOX AT A TIME. The ceremony renders its own, for the
+		// protected shape; the page's own renders the ordinary shape. Both on
+		// screen meant two panels with the same heading showing contradictory
+		// records — the failure the provider-supplied table was removed for,
+		// reintroduced by a different route.
+		check(substr_count($view, 'if (!$setup_open && ') >= 2,
+			'the page suppresses its own publish box while the ceremony is open');
+		check(strpos($view, "'Publish the send-protection records for '") !== false,
+			'and the ceremony box says which records it is for');
+		$box = (string)file_get_contents(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+		check(strpos($box, 'string $title = \'\'') !== false,
+			'the renderer takes a heading override so two boxes can never read alike');
+
+		// Opening the ceremony must not also expand Advanced — that would bury the
+		// task under every server-wide box the operator did not ask about.
+		check(strpos($view, "'protect_setup=1';") !== false
+			&& strpos($view, "'advanced=1&protect_setup=1';") === false,
+			'opening the ceremony does not turn Advanced on as well');
 	}
 
 	private function assertNoReceiveModeGate() {

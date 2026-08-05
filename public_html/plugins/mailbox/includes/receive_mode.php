@@ -20,6 +20,8 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
+ * @version 1.4 - a settled deployment reads its state in a sentence; the
+ *                comparison is a decision aid and waits behind a disclosure
  * @version 1.3 - the choice no longer gates the mailbox surfaces
  */
 
@@ -114,11 +116,59 @@ function mailbox_receive_gate_handle(array $input): ?LogicResult {
 }
 
 /**
- * The choice card: a brief pros/cons comparison with one choose button per
- * column. Rendered as a control in the Setup tab's Advanced section; both forms
- * post back to the page showing the card.
+ * How mail reaches this server: what it is now, and how to change it.
+ *
+ * A DECIDED DEPLOYMENT IS NOT ASKED AGAIN. The pros-and-cons comparison is a
+ * decision aid, and it reads as one — two columns and two big choose buttons is
+ * a question. In front of a deployment that answered it long ago and has a relay
+ * carrying live mail, it reads as though the choice were still open, or worse as
+ * though something were unfinished. So a settled deployment gets one sentence
+ * saying what is true, and the comparison waits behind a disclosure for the
+ * operator who actually wants to change it.
+ *
+ * An undecided deployment gets the comparison straight away — there, it is the
+ * question, and the whole point of the surface.
  */
 function mailbox_receive_gate_render(): string {
+	$mode = mailbox_receive_mode();
+	$table = mailbox_receive_mode_comparison();
+
+	if ($mode === '') {
+		return $table;
+	}
+
+	$relay = null;
+	if ($mode === 'relay') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		$relay = mailbox_receive_relay_exists() ? MailboxRelay::active() : null;
+	}
+
+	if ($mode === 'relay') {
+		$now = $relay !== null
+			? 'A relay fronts this server. Mail arrives at the relay, is sealed there, and is passed here over '
+				. 'a private tunnel — this server\'s address stays out of DNS.'
+			: 'This server is set up to receive through a relay, but no relay is enabled yet. Until one is, '
+				. 'mail cannot reach it.';
+	} else {
+		$now = 'Mail comes straight to this server. Your domains\' DNS names it, and the internet connects to '
+			. 'it directly.';
+	}
+
+	return '<p class="mb-2">' . htmlspecialchars($now) . '</p>'
+		. '<details><summary class="fix-toggle small">Change how mail reaches this server</summary>'
+		. '<div class="mt-2">' . $table . '</div></details>';
+}
+
+/**
+ * The pros-and-cons comparison, with one choose button per column. Both forms
+ * post back to the page showing it.
+ */
+function mailbox_receive_mode_comparison(): string {
+	$active_relay = false;
+	if (mailbox_receive_relay_exists()) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_relay_class.php'));
+		$active_relay = (MailboxRelay::active() !== null);
+	}
 	$relay_ready = mailbox_receive_relay_exists();
 
 	$choose = function (string $mode, string $label): string {
@@ -132,11 +182,16 @@ function mailbox_receive_gate_render(): string {
 	$rows = array(
 		array('Setup',
 			'Nothing extra — your domains\' DNS points at this server.',
-			$relay_ready
-				? 'A relay spot is already reserved for this server — choosing this continues its setup.'
-				: (mailbox_hosted_relay_offered()
-					? 'A relay to set up — a hosted slot, or one you run yourself.'
-					: 'A relay to set up on a server you control.')),
+			// A relay that is live is not "a spot reserved, choosing this continues
+			// its setup" — that told an operator whose relay was already carrying
+			// mail that they had work left to do.
+			$active_relay
+				? 'Already running — this server has a relay in front of it now.'
+				: ($relay_ready
+					? 'A relay is set up but not enabled; choosing this continues where it left off.'
+					: (mailbox_hosted_relay_offered()
+						? 'A relay to set up — a hosted slot, or one you run yourself.'
+						: 'A relay to set up on a server you control.'))),
 		array('Your server\'s address',
 			'Public. DNS names this server and the internet connects to it directly.',
 			'Hidden. DNS names the relay; mail is passed along over a private tunnel.'),

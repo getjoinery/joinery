@@ -4,13 +4,13 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
 /**
  * Logic for the Inbound Email Settings tab.
  *
- * Server-wide DELIVERY POLICY — spam filtering, forwarding limits, the
- * forwarded-From display, and retention/storage caps. These are distinct from
- * the Setup tab, which owns provisioning and server identity (provider, mail
- * hostname/IP, SRS, the relay, and the health run). One POST saves the whole
- * form; values are read back fresh on the redirect.
+ * Server-wide CHOICES — which stack receives mail, which route sends it, spam
+ * filtering, forwarding limits, the forwarded-From display, and retention and
+ * storage caps. Distinct from the Setup tab, which owns provisioning, server
+ * identity and the health run: Setup is where you check whether things work.
+ * One POST saves the whole form; values are read back fresh on the redirect.
  *
- * @version 1.4
+ * @version 1.5
  */
 function admin_mailbox_settings_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -78,6 +78,19 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 			$clear_key = SettingsFieldRenderer::CLEAR_PREFIX . 'mailbox_fleet_api_secret_key';
 			if (!empty($input[$clear_key])) {
 				$to_write[$clear_key] = $input[$clear_key];
+			}
+		}
+
+		// How mail ARRIVES, saved beside how it leaves. Validated against the
+		// registry rather than trusted: the options are resolved from it at render
+		// time, so a value naming no installed provider could only come from a
+		// hand-made POST, and storing it would leave the deployment with no
+		// working receive path at all.
+		if (array_key_exists('mailbox_provider', $input)) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+			$provider_key = trim((string)$input['mailbox_provider']);
+			if ($provider_key !== '' && InboundProviderRegistry::get($provider_key) !== null) {
+				$to_write['mailbox_provider'] = $provider_key;
 			}
 		}
 
@@ -187,10 +200,33 @@ function admin_mailbox_settings_logic(array $input): LogicResult {
 		}
 	}
 
+	// The active inbound provider, and — when it is a webhook one — the URL that
+	// provider has to POST to. That URL is useless without the provider set, so
+	// it belongs beside the control that sets it rather than a tab away.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+	// active() answers with the CLASS; the key is the stored setting, defaulted
+	// the same way the registry defaults it.
+	$active_provider_key = trim((string)$settings->get_setting('mailbox_provider'));
+	if ($active_provider_key === '' || InboundProviderRegistry::get($active_provider_key) === null) {
+		$active_provider_key = 'postfix';
+	}
+	$active_provider = InboundProviderRegistry::get($active_provider_key);
+	$webhook_url = '';
+	if ($active_provider && $active_provider::isWebhook()) {
+		$scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
+		$host = $_SERVER['HTTP_HOST'] ?? '';
+		if ($host !== '') {
+			$webhook_url = $scheme . '://' . $host . '/ajax/inbound_email_webhook?provider='
+				. rawurlencode($active_provider_key);
+		}
+	}
+
 	return LogicResult::render(array(
 		'session'                 => $session,
 		'base'                    => $base,
 		'values'                  => $values,
+		'active_provider_key'     => $active_provider_key,
+		'webhook_url'             => $webhook_url,
 		'show_relay_config'       => $show_relay_config,
 		'fleet_secret_set'        => $fleet_secret_set,
 		'has_active_relay'        => (MailboxRelay::active() !== null),

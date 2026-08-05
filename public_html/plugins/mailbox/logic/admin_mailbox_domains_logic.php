@@ -381,6 +381,22 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 	}
 
+	// WHO THE SIGNING KEY BELONGS TO IS A PROPERTY OF THE DOMAIN, so its control
+	// lives here rather than in the Setup tab's ceremony. Setup is where you
+	// publish, verify and switch on; ownership is decided where the level is.
+	// The transitions themselves still belong to protect_identity.php — this only
+	// routes the action and comes back to the domain being edited.
+	if (($input['action'] ?? '') === 'protect_generate') {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+		$owner_domain_id = (int)($input['ied_inbound_email_domain_id'] ?? 0);
+		$owner_return = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
+			. $owner_domain_id;
+		$owner_redirect = mailbox_protect_handle_action($input, $session, $owner_return);
+		if ($owner_redirect !== null) {
+			return $owner_redirect;
+		}
+	}
+
 	// Handle delete/undelete/permanent_delete actions
 	if ($input && isset($input['action'])) {
 		$action = $input['action'];
@@ -507,12 +523,41 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 	}
 
+	// Protection facts for the Fortress box below the form: who holds the key,
+	// and who else could. Cheap — column reads plus the holder scan — and only
+	// asked for a Fortress domain.
+	$protect = null;
+	$owner_label = '';
+	if ($edit_domain && $edit_domain->key
+			&& $edit_domain->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
+		$acting_uid = (int)$session->get_user_id();
+		$protect = mailbox_protect_state($edit_domain, $acting_uid);
+		$owner_uid = (int)$edit_domain->get('ied_owner_usr_user_id');
+		if ($owner_uid > 0) {
+			// Prefer the candidate list's label — it already says "(you)" where
+			// that applies — and fall back to the user record for an owner who no
+			// longer holds a mailbox here, which is exactly when this matters most.
+			$owner_label = $protect['owner_options'][$owner_uid] ?? '';
+			if ($owner_label === '') {
+				require_once(PathHelper::getIncludePath('data/users_class.php'));
+				$owner_user = new User($owner_uid, TRUE);
+				$name = trim((string)$owner_user->get('usr_first_name') . ' '
+					. (string)$owner_user->get('usr_last_name'));
+				$owner_label = $name !== '' ? $name : (string)$owner_user->get('usr_email');
+				if ($owner_label === '') { $owner_label = 'user #' . $owner_uid; }
+			}
+		}
+	}
+
 	return LogicResult::render(array(
 		'edit_domain' => $edit_domain,
 		'domain_type' => $domain_type,
 		'session' => $session,
 		'settings' => $settings,
 		'ceremony' => $ceremony,
+		'protect' => $protect,
+		'owner_label' => $owner_label,
 	));
 }
 ?>
