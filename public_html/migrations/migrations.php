@@ -1197,3 +1197,20 @@
 	$migrations[] = $migration;
 
 
+
+	// debug_css is gone. It did one thing: on the two Tailwind page classes it
+	// loaded Tailwind's browser JIT from a CDN and SKIPPED the theme's compiled
+	// output.css, so a single setting could unstyle a production site. No theme
+	// in use extends those classes, every Tailwind theme ships a compiled
+	// stylesheet, and pulling a third-party script into a rendered page is not
+	// something a setting should be able to switch on.
+	//
+	// Dropping the declaration alone would leave the row behind, and an
+	// undeclared row fails the every-row-is-declared check (docs/settings.md).
+	// Idempotent: a second run deletes nothing.
+	$migration = array();
+	$migration['database_version'] = '165';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = NULL;
+	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'debug_css';";
+	$migrations[] = $migration;

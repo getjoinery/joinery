@@ -66,10 +66,7 @@ abstract class PublicPageBase {
 
 		$settings = Globalvars::get_instance();
 		$session = SessionControl::get_instance();
-		$this->debug_css = $settings->get_setting('debug_css');
 
-
-		
 		$this->location_data = $session->get_location_data();
 
 		// This is for apache specific logging, so we have to check to make sure we are

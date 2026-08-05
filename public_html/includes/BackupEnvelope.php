@@ -136,7 +136,11 @@ class BackupEnvelope {
 		if (@file_put_contents($tmp, base64_encode($keypair)) === false) {
 			throw new BackupEnvelopeException('Could not write the site backup key at ' . $path . '.');
 		}
-		@chmod($tmp, 0600);
+		// 0640, not 0600: whichever account mints the key first, the other
+		// accounts that run backups here still have to read it. The web user
+		// takes the scheduled run and the deploy account runs one from a shell,
+		// and both are in the file's group. fix_permissions.sh pins the same mode.
+		@chmod($tmp, 0640);
 
 		// link() fails when the destination exists, which is the atomic
 		// "only if absent" primitive rename() does not give us.
@@ -322,12 +326,16 @@ class BackupEnvelope {
 		return $data;
 	}
 
-	/** Write an envelope beside its archive, owner-readable only. */
+	/** Write an envelope beside its archive, group-readable only. */
 	public static function write_sidecar($path, array $envelope) {
 		if (@file_put_contents($path, self::encode($envelope)) === false) {
 			throw new BackupEnvelopeException('Could not write the backup envelope to ' . $path . '.');
 		}
-		@chmod($path, 0600);
+		// 0640 for the same reason as the site key it is opened with: the web
+		// user writes this on the scheduled run, and the deploy account has to
+		// read it back to restore from a shell. Owner-only would mean an archive
+		// whose envelope only one account can open.
+		@chmod($path, 0640);
 		return $path;
 	}
 

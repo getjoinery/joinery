@@ -1,6 +1,6 @@
 {
     "name": "Event Manager",
-    "version": "1.1.2",
+    "version": "1.1.3",
     "description": "Events toolkit: events, locations, event sessions and waiting lists, with store integration for ticketed events and event surveys at checkout",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",

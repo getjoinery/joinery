@@ -28,7 +28,8 @@
  *   mint:      php backup_envelope.php mint --recovery-pub B64 --artifact NAME \
  *                  --key-out PATH --sidecar-out PATH [--site-key PATH]
  *              Mints a data key, seals it, writes the key file (0600) and the
- *              sidecar. Prints nothing secret.
+ *              sidecar (0640, so the account that restores can read it back).
+ *              Prints nothing secret.
  *
  *   open:      php backup_envelope.php open --sidecar PATH [--private PATH] [--key-out PATH]
  *              Recovers the data key. --private takes the recovery private key
@@ -91,15 +92,23 @@ function be_require_opt(array $opts, $name) {
     return $v;
 }
 
-/** Write owner-only, creating nothing world-readable along the way. */
-function be_write_private($path, $contents) {
+/**
+ * Write restricted, creating nothing world-readable along the way.
+ *
+ * Defaults to owner-only, which is right for a plaintext data key: one process
+ * mints it, uses it, and destroys it. Callers pass 0640 for the two things that
+ * outlive the run and get read back by a different account — the site key and
+ * the envelope sidecar — since the web user writes those on the scheduled run
+ * and the deploy account reads them to restore from a shell.
+ */
+function be_write_private($path, $contents, $mode = 0600) {
     $old = umask(0077);
     $ok = @file_put_contents($path, $contents);
     umask($old);
     if ($ok === false) {
         be_fail("could not write {$path}.");
     }
-    @chmod($path, 0600);
+    @chmod($path, $mode);
 }
 
 /** Decode a base64 public key, or fail with a message that names the mistake. */
@@ -150,7 +159,7 @@ function be_site_keypair($path) {
 
     $kp  = sodium_crypto_box_keypair();
     $tmp = $path . '.' . getmypid() . '.tmp';
-    be_write_private($tmp, base64_encode($kp));
+    be_write_private($tmp, base64_encode($kp), 0640);
 
     if (@link($tmp, $path)) {
         @unlink($tmp);
@@ -237,7 +246,7 @@ if ($mode === 'mint') {
     }
 
     be_write_private($key_out, $data_key);
-    be_write_private($sidecar_out, $json . "\n");
+    be_write_private($sidecar_out, $json . "\n", 0640);
 
     // Names only — the caller needs to know where things landed, and neither of
     // these lines may ever carry key material into a job output row.
@@ -354,7 +363,7 @@ if ($mode === 'relabel') {
         be_fail('could not encode the backup envelope.');
     }
 
-    be_write_private($out, $json . "\n");
+    be_write_private($out, $json . "\n", 0640);
     if (realpath($sidecar) !== realpath($out)) {
         @unlink($sidecar);
     }

@@ -122,8 +122,11 @@ The plaintext data key exists only as a `0600` file for the length of the run
 and is destroyed before the run ends. It is never passed in argv, and on the
 fleet path it never enters a management job row.
 
-`config/backup_site_key` is pinned to `600 www-data:www-data` by
-`fix_permissions.sh`. A key that exists but cannot be read is an error, never
+`config/backup_site_key` is pinned to `640 www-data:www-data` by
+`fix_permissions.sh`, and minted at the same mode. Backups run under more than
+one account — the web user takes the scheduled run, the deploy account runs one
+from a shell — and both are in the `www-data` group, so the key is group-readable
+rather than owner-only. A key that exists but cannot be read is an error, never
 treated as absent — minting over a live key would orphan the site recipient for
 every backup already sealed to the first one.
 
