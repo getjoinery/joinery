@@ -1214,3 +1214,16 @@
 	$migration['migration_file'] = NULL;
 	$migration['migration_sql'] = "DELETE FROM stg_settings WHERE stg_name = 'debug_css';";
 	$migrations[] = $migration;
+
+	// A U2F-only security key enrolls as a passkey and signs in fine, but can
+	// never unlock a vault — and until it was classified, the security page kept
+	// offering it an activation whose only possible outcome was the browser's
+	// opaque "this security key can't be used". Credentials enrolled before the
+	// platform recorded credProps/attachment are classified from what was stored
+	// all along; see the migration file for the three guard conditions.
+	$migration = array();
+	$migration['database_version'] = '166';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'backfill_passkey_vault_capability.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

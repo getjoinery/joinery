@@ -15,8 +15,17 @@ class PasskeyException extends SystemBaseException {}
  * serialized CredentialRecord — the authoritative state every ceremony
  * round-trips through. The other columns are denormalized-on-write
  * conveniences for lookup and UI display.
+ *
+ * @version 1.1
  */
 class Passkey extends SystemBase {
+
+	/** vault_capability() answers. See the method for what each one is built
+	 *  from and which of them is safe to act on. */
+	const VAULT_CAPABLE   = 'capable';
+	const VAULT_INCAPABLE = 'incapable';
+	const VAULT_UNKNOWN   = 'unknown';
+
 	public static $prefix = 'pkc';
 	public static $tablename = 'pkc_passkey_credentials';
 	public static $pkey_column = 'pkc_passkey_credential_id';
@@ -25,7 +34,9 @@ class Passkey extends SystemBase {
 	public static $api_writable = false;
 	public static $api_unreadable_fields = array('pkc_source_json');
 	public static $api_unwritable_fields = array();
-	public static $api_derived_fields = array();
+	// The owner's own security page badges each passkey with what it can do for
+	// the vault, and that answer is derived (vault_capability()), not a column.
+	public static $api_derived_fields = array('vault_capability');
 
 	public static $field_specifications = array(
 		'pkc_passkey_credential_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
@@ -37,6 +48,8 @@ class Passkey extends SystemBase {
 		'pkc_transports'            => array('type'=>'text', 'is_nullable'=>true),
 		'pkc_aaguid'                => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'pkc_prf_capable'           => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		'pkc_discoverable'          => array('type'=>'bool', 'is_nullable'=>true),
+		'pkc_attachment'            => array('type'=>'varchar(16)', 'is_nullable'=>true),
 		'pkc_label'                 => array('type'=>'varchar(255)', 'is_nullable'=>true),
 		'pkc_created_time'          => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'pkc_last_used_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -70,6 +83,91 @@ class Passkey extends SystemBase {
 			throw new SystemAuthenticationError(
 				'Passkeys are readable only by their owner.');
 		}
+	}
+
+	/**
+	 * Can this credential ever unlock a Sealed Vault? Three answers, derived on
+	 * read from stored signals rather than held as a stored verdict:
+	 *
+	 *   capable   - it has already evaluated PRF. verifyDerivation() sets
+	 *               pkc_prf_capable on the first success, so this is evidence.
+	 *   incapable - the browser fell back to CTAP1 at registration: a U2F-only
+	 *               key, which can neither verify a user nor evaluate
+	 *               hmac-secret, so it can never unlock a vault whatever the
+	 *               owner does to it.
+	 *   unknown   - anything else, and deliberately PERMISSIVE. Windows Hello
+	 *               omits prf.enabled at creation and evaluates PRF fine at
+	 *               assertion, so registration-time reporting must never be the
+	 *               thing that stops an attempt.
+	 *
+	 * Two independent evidence sets reach `incapable`; either is sufficient.
+	 *
+	 * The first is what registration records now: PRF not reported, the
+	 * credential explicitly non-discoverable, and attachment explicitly
+	 * cross-platform. All three must be KNOWN and negative — a null is the
+	 * absence of a signal, not a negative one.
+	 *
+	 * The second reads what was stored all along, for credentials enrolled
+	 * before those columns existed. `uvInitialized` in the library's
+	 * CredentialRecord is a latch: set at registration and, while false, raised
+	 * by the first assertion that verifies the user
+	 * (AuthenticatorAssertionResponseValidator, WebAuthn § 26.3). It never
+	 * returns to false. So false here means this credential has never verified a
+	 * user in its life — which a FIDO2 key with a PIN would have done at its
+	 * first sign-in. Paired with transports that exclude `internal` (platform
+	 * authenticators are the known false negative this whole design exists to
+	 * accommodate), that is the same conclusion from the signals available.
+	 *
+	 * `incapable` is safe to act on in one specific way: a credential that never
+	 * supported PRF cannot have completed a derivation, so it cannot hold a
+	 * vault wrapping. Excluding it from a vault ceremony can never remove a
+	 * working unlocker.
+	 */
+	public function vault_capability(): string {
+		if ($this->get('pkc_prf_capable')) {
+			return self::VAULT_CAPABLE;
+		}
+
+		$discoverable = $this->get('pkc_discoverable');
+		$attachment   = $this->get('pkc_attachment');
+		if ($discoverable !== null && !$discoverable && $attachment === 'cross-platform') {
+			return self::VAULT_INCAPABLE;
+		}
+
+		if ($this->uv_never_performed() && !$this->is_platform_authenticator()) {
+			return self::VAULT_INCAPABLE;
+		}
+
+		return self::VAULT_UNKNOWN;
+	}
+
+	/** True only when the stored CredentialRecord says user verification has
+	 *  never happened. A missing flag is not evidence and returns false. */
+	public function uv_never_performed(): bool {
+		$source = json_decode((string)$this->get('pkc_source_json'), true);
+		return is_array($source) && array_key_exists('uvInitialized', $source)
+			&& $source['uvInitialized'] === false;
+	}
+
+	/** Carries the derived capability alongside the columns, so every reader —
+	 *  the API, the security page, the passkey lab — gets the same answer from
+	 *  the same method rather than re-deriving it from raw signals. */
+	function export_as_array() {
+		$out = parent::export_as_array();
+		$out['vault_capability'] = $this->vault_capability();
+		return $out;
+	}
+
+	/** Built into the device (Touch ID, Windows Hello) rather than a removable
+	 *  security key. An empty/absent transport list is not a claim either way,
+	 *  so it counts as platform — the conservative side, since that is what
+	 *  keeps a credential out of `incapable`. */
+	public function is_platform_authenticator(): bool {
+		$transports = json_decode((string)$this->get('pkc_transports'), true);
+		if (!is_array($transports) || !$transports) {
+			return true;
+		}
+		return in_array('internal', $transports, true);
 	}
 }
 

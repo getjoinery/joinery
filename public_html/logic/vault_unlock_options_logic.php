@@ -4,6 +4,7 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 function vault_unlock_options_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 
@@ -22,7 +23,8 @@ function vault_unlock_options_logic(array $input): LogicResult {
 
 	try {
 		$service = new PasskeyService();
-		$options = $service->getDerivationOptions($user, 'vault-kek');
+		$options = $service->getDerivationOptions($user, 'vault-kek',
+			VaultUnlock::offerableCredentialIds((int)$user->key, UserEncryptionVault::SCOPE_USER));
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}

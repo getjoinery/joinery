@@ -61,7 +61,16 @@ function vault_add_passkey_verify_logic(array $input): LogicResult {
 		$passkey->key, $passkey->get('pkc_label'), (int)$vault->get('uev_key_generation')
 	);
 
-	return LogicResult::render(['wrapping_id' => (int)$wrapping->key]);
+	// Name the credential that was actually activated, so the page can confirm it
+	// by label. Belt and braces alongside the scoping in
+	// vault_add_passkey_options: scoping stops the wrong passkey being activated,
+	// and the echo means a future caller that forgets to scope cannot activate
+	// one silently.
+	return LogicResult::render([
+		'wrapping_id' => (int)$wrapping->key,
+		'credential_id' => (int)$passkey->key,
+		'label' => (string)$passkey->get('pkc_label'),
+	]);
 }
 
 function vault_add_passkey_verify_logic_api() {

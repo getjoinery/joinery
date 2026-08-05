@@ -126,6 +126,31 @@ contract rather than left to fail incidentally.
 | `vault_passphrase_enroll` / `vault_passphrase_remove` | Add or remove the optional bypass phrase. Requires a recent step-up; enroll also requires an unlocked vault. |
 | `vault_status` | Read-only: set-up/unlock state and the wrapping list (no secret material) for the keyring UI. |
 
+**Which passkeys a vault prompt offers** is one rule, shared by every ceremony
+above and by unlock and rotation:
+`VaultUnlock::offerableCredentialIds($user_id, $scope)` returns the credentials
+holding a wrapping for that scope's vault; if none do, this is an enrollment, so
+it returns everything except the credentials
+[known to be incapable](passkeys.md#capability-detection) of ever deriving a
+secret. The two halves answer different questions and the first is much the
+stronger: which credentials hold a wrapping is a stored fact about this vault, so
+unlock and rotation — the paths where a wrong answer means someone cannot reach
+their own sealed content — never consult capability at all. A partially-rotated
+vault holds wrappings across generations and the offer is their union. Client-
+custody scopes need no special case: the server cannot read those KEKs, but it
+does store each scope's wrapping rows tagged with the credential id, so it knows
+*which* credentials unlock a scope without knowing *what* they unlock. An empty
+result means "no opinion" and offers every live credential — never nothing, since
+an empty `allowCredentials` on the unlock path is a lockout.
+
+Adding an unlocker is the exception: `vault_add_passkey_options` takes a
+`credential_id` and scopes the ceremony to that one passkey, because the browser
+otherwise decides which credential answers — pick the security key's row, tap
+Touch ID at the prompt, and Touch ID would get the wrapping while the row that
+was clicked still read *Not activated*. `vault_add_passkey_verify` echoes the
+credential id and label it actually activated, so a caller that forgets to scope
+cannot activate one silently.
+
 ## The unlock window
 
 `includes/VaultUnlock.php` — the secret key lives in APCu, keyed
@@ -227,7 +252,10 @@ count) and bypass-phrase removal (nothing to exclude — a bypass phrase never
 counts toward the floor itself, so removing one only matters when the
 passkey/recovery counts are already at the floor). A passkey wrapping counts only if its
 credential row is still live (`pkc_delete_time IS NULL`) — belt-and-suspenders
-against old data predating the cleanup below.
+against old data predating the cleanup below. A credential the platform knows to
+be [PRF-incapable](passkeys.md#capability-detection) can never count toward the
+floor, and needs no special case to be excluded: it cannot have completed a
+derivation, so it holds no wrapping to count.
 
 `VaultUnlock::registerRevocationHooks()` (called once, from
 `logic/passkey_revoke_logic.php`) subscribes to both of

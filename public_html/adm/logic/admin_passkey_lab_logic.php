@@ -26,6 +26,13 @@ function admin_passkey_lab_logic(array $input): LogicResult {
 			'transports' => $transports,
 			'is_platform' => in_array('internal', $transports, true),
 			'prf_capable' => (bool)$passkey->get('pkc_prf_capable'),
+			// The verdict and the signals it was built from, side by side — the
+			// lab is where someone goes when they do not believe the badge on
+			// /profile/security, so it has to show its work.
+			'vault_capability' => $passkey->vault_capability(),
+			'discoverable' => $passkey->get('pkc_discoverable'),
+			'attachment' => $passkey->get('pkc_attachment'),
+			'uv_never_performed' => $passkey->uv_never_performed(),
 			'created_time' => $passkey->get('pkc_created_time'),
 			'last_used_time' => $passkey->get('pkc_last_used_time'),
 		];

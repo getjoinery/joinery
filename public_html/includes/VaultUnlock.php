@@ -19,7 +19,9 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - offerableCredentialIds(): which passkeys a scope's vault
+ *   ceremony offers — the ones holding a wrapping, else all but the incapable.
  */
 
 /** Thrown by a consumer's decrypt path when it needs the vault open but the
@@ -398,6 +400,74 @@ class VaultUnlock {
 	public static function resealCallbacks(): array {
 		self::loadConsumerBootstraps();
 		return self::$reseal_callbacks;
+	}
+
+	/**
+	 * Which passkeys a vault ceremony for this scope should put in front of the
+	 * user. One rule, and it reads the same way for every caller:
+	 *
+	 *   Offer the credentials that hold a wrapping for this scope's vault. If
+	 *   none do, this is an enrollment — offer everything except the ones known
+	 *   to be incapable of ever unlocking a vault.
+	 *
+	 * The two halves answer different questions, and the first is much the
+	 * stronger. "Which credentials hold a wrapping for this vault" is a stored
+	 * fact about this vault, not an inference from what an authenticator said at
+	 * registration — so unlock and rotate, the paths where a wrong answer means
+	 * someone cannot reach their own sealed content, never consult
+	 * Passkey::vault_capability() at all. Capability only decides where there is
+	 * nothing to intersect with, which is first-time setup.
+	 *
+	 * A partially-rotated vault holds wrappings across generations; the offer is
+	 * their union, because any of them still opens the vault.
+	 *
+	 * Client-custody scopes work without being special-cased: the server cannot
+	 * read those KEKs, but it does store each scope's wrapping rows tagged with
+	 * the credential id (VaultClientCustody::insertOpaqueWrapping()), so it knows
+	 * WHICH credentials unlock the scope without knowing WHAT they unlock.
+	 *
+	 * @return int[] internal pkc row ids, or an empty array meaning "no opinion"
+	 *   — never "offer nothing". getDerivationOptions() turns empty back into
+	 *   every live credential, which is the safe direction: an empty
+	 *   allowCredentials on the unlock path is a vault lockout.
+	 */
+	public static function offerableCredentialIds(int $user_id, string $scope = 'user'): array {
+		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+
+		$vault = UserEncryptionVault::loadForUser($user_id, $scope);
+		if ($vault) {
+			$wrappings = new MultiUserEncryptionWrapping([
+				'vault_id' => $vault->key,
+				'unlocker_type' => UserEncryptionWrapping::TYPE_PASSKEY,
+			]);
+			$wrappings->load();
+			$ids = [];
+			foreach ($wrappings as $wrapping) {
+				$credential_id = (int)$wrapping->get('uew_pkc_credential_id');
+				if ($credential_id) {
+					$ids[$credential_id] = true;
+				}
+			}
+			if ($ids) {
+				return array_keys($ids);
+			}
+		}
+
+		// No wrappings: an enrollment. Drop only the credentials the platform
+		// KNOWS can never derive a secret, so the browser stops listing keys it
+		// would then refuse. `unknown` stays on offer — the ceremony is the real
+		// capability test.
+		$creds = new MultiPasskey(['user_id' => $user_id]);
+		$creds->load();
+		$ids = [];
+		foreach ($creds as $passkey) {
+			if ($passkey->vault_capability() !== Passkey::VAULT_INCAPABLE) {
+				$ids[] = (int)$passkey->key;
+			}
+		}
+		return $ids;
 	}
 
 	/**

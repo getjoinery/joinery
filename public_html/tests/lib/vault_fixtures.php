@@ -21,7 +21,11 @@ require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.ph
 function vault_fixture_passkey(int $user_id, string $label = 'Vault Test Passkey'): Passkey {
 	$p = new Passkey(NULL);
 	$p->set('pkc_usr_user_id', $user_id);
-	$p->set('pkc_credential_id', 'vault-test-' . bin2hex(random_bytes(8)));
+	// Recognizable as a fixture (referential_integrity_test sweeps
+	// 'vault-test-%') AND decodable: every ceremony base64url-decodes this back
+	// to raw bytes, so the whole string must be valid base64url on a 4-character
+	// boundary — a 12-character prefix plus 20 characters of encoded randomness.
+	$p->set('pkc_credential_id', 'vault-test-A' . rtrim(strtr(base64_encode(random_bytes(15)), '+/', '-_'), '='));
 	$p->set('pkc_source_json', '{}');
 	$p->set('pkc_prf_capable', true);
 	$p->set('pkc_label', $label);
