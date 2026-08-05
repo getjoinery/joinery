@@ -15,7 +15,8 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
- * @version 1.0
+ * @version 1.1 - rate-limit handling: retry budget, write safety, the operator
+ *                message, and that the credential never reaches the log
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -468,5 +469,135 @@ ob_start();
 $fw->textinput('plain_field', 'Plain field', array());
 $plain = ob_get_clean();
 check(strpos($plain, 'data-jy-help') === false, 'a field with no guide emits no trigger');
+
+// ===================================================================
+section('Rate limiting (429)');
+// ===================================================================
+//
+// A publish that hit Cloudflare's 429 reached the operator as the vendor's own
+// sentence — "please wait and consider throttling your request speed" — which is
+// a machine talking to a machine. Nothing was logged either, so afterwards there
+// was no status, no trace id and no Retry-After to work from.
+//
+// Handled in DnsDriverBase so all fifteen drivers get it, not the one that
+// happened to fail.
+
+require_once(PathHelper::getIncludePath('includes/dns/DnsDriverBase.php'));
+
+use GuzzleHttp\Psr7\Request as Psr7Request;
+use GuzzleHttp\Psr7\Response as Psr7Response;
+use GuzzleHttp\Exception\RequestException as GuzzleRequestException;
+
+/** Answers every request with one canned response, and counts the attempts. */
+class RateLimitedHttp {
+	public $calls = 0;
+	private $response;
+	public function __construct(Psr7Response $response) { $this->response = $response; }
+	public function request($method, $url, $options = array()) {
+		$this->calls++;
+		throw new GuzzleRequestException('rate limited',
+			new Psr7Request($method, $url), $this->response);
+	}
+}
+
+class RateLimitProbeDriver extends DnsDriverBase {
+	public static function getKey(): string { return 'probe'; }
+	public static function getLabel(): string { return 'ProbeDNS'; }
+	public static function credentialType(): string { return DnsProvider::CREDENTIAL_API; }
+	public static function credentialFields(): array { return array(); }
+	public function accounts(): array { return array(); }
+	public function zoneFor(string $domain): ?string { return $domain; }
+	public function listRecords(string $zone): array { return array(); }
+	public function createRecord(string $zone, DnsRecord $record): void {}
+	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {}
+	public function deleteRecord(string $zone, DnsRecord $live): void {}
+	protected function authHeaders(): array {
+		return array('Authorization' => 'Bearer ' . $this->cred('api_token'));
+	}
+	/** Reach the protected plumbing from the test. */
+	public function probe(string $method, string $url) { return $this->request($method, $url); }
+}
+
+$cf_body = '{"success":false,"errors":[{"code":971,'
+	. '"message":"Please wait and consider throttling your request speed"}]}';
+
+$make = function (array $headers) use ($cf_body) {
+	$http = new RateLimitedHttp(new Psr7Response(429, $headers, $cf_body));
+	$driver = new RateLimitProbeDriver(array('api_token' => 'shhh-secret-token'), null);
+	// The fake client replaces Guzzle after construction; the constructor's own
+	// client is never used.
+	$ref = new ReflectionProperty('DnsDriverBase', 'http');
+	$ref->setAccessible(true);
+	$ref->setValue($driver, $http);
+	return array($driver, $http);
+};
+
+// A READ is free to repeat — nothing changed, so the only cost is the wait.
+list($driver, $http) = $make(array('Retry-After' => '1', 'CF-RAY' => 'abc123-ATL'));
+$caught = null;
+try { $driver->probe('GET', 'https://api.example.com/client/v4/zones'); }
+catch (Throwable $e) { $caught = $e; }
+check($caught instanceof DnsRateLimitedException, 'a 429 raises a rate-limit error of its own type',
+	$caught ? get_class($caught) : 'nothing thrown');
+check($http->calls === 1 + DnsDriverBase::RATE_LIMIT_MAX_RETRIES,
+	'a rate-limited read is retried within the budget', 'calls: ' . $http->calls);
+check($caught->getRetryAfter() === 1, 'the vendor Retry-After is carried on the exception');
+
+// A WRITE is never retried: the vendor may have applied it before deciding to
+// rate-limit the response, and repeating a create would leave a duplicate.
+list($driver, $http) = $make(array('Retry-After' => '1'));
+$caught = null;
+try { $driver->probe('POST', 'https://api.example.com/client/v4/zones/z/dns_records'); }
+catch (Throwable $e) { $caught = $e; }
+check($http->calls === 1, 'a rate-limited write is attempted exactly once', 'calls: ' . $http->calls);
+check(stripos($caught->getMessage(), 'may already have been updated') !== false,
+	'and says records may already have been written');
+
+// A read says the opposite, and that is the first thing an operator needs.
+list($driver, $http) = $make(array());
+$caught = null;
+try { $driver->probe('GET', 'https://api.example.com/client/v4/zones'); }
+catch (Throwable $e) { $caught = $e; }
+check(stripos($caught->getMessage(), 'nothing was changed') !== false,
+	'a rate-limited read states plainly that nothing changed');
+
+// The message has to be actionable, and has to correct the natural misreading
+// that the server is being blocked.
+$msg = $caught->getMessage();
+check(stripos($msg, 'your account, not this server') !== false,
+	'names the account as what is limited, not the server');
+check(stripos($msg, 'shared with the ProbeDNS website') !== false,
+	'and warns that the vendor dashboard spends the same quota');
+check(stripos($msg, 'throttling your request speed') === false,
+	'the vendor sentence written for a program is not what the operator reads');
+
+// Retry-After in HTTP-date form, which vendors are entitled to send.
+list($driver, $http) = $make(array('Retry-After' => gmdate('D, d M Y H:i:s \G\M\T', time() + 30)));
+$caught = null;
+try { $driver->probe('GET', 'https://api.example.com/x'); }
+catch (Throwable $e) { $caught = $e; }
+check($caught->getRetryAfter() >= 28 && $caught->getRetryAfter() <= 31,
+	'a date-form Retry-After is converted to seconds', (string)$caught->getRetryAfter());
+// Beyond the budget the operator is told, never held: this runs inside a page
+// request and a spinner is worse than a sentence.
+check($http->calls === 1, 'a wait longer than the budget is reported rather than slept through',
+	'calls: ' . $http->calls);
+
+// THE CREDENTIAL NEVER REACHES THE LOG. The whole subsystem's promise is that
+// the token exists only for the length of one request.
+$log = tempnam(sys_get_temp_dir(), 'dnslog');
+$prev = ini_set('error_log', $log);
+list($driver, $http) = $make(array('CF-RAY' => 'ray-9', 'Retry-After' => '1'));
+try { $driver->probe('GET', 'https://api.example.com/client/v4/zones?token=shhh-secret-token'); }
+catch (Throwable $e) { /* expected */ }
+ini_set('error_log', $prev === false ? '' : $prev);
+$written = (string)@file_get_contents($log);
+@unlink($log);
+check(strpos($written, 'shhh-secret-token') === false,
+	'the credential is absent from the log, including from the query string');
+check(strpos($written, 'status=429') !== false, 'the status is logged');
+check(strpos($written, 'CF-RAY=ray-9') !== false, 'the vendor trace id is logged');
+check(strpos($written, 'dns_publish') !== false && strpos($written, 'probe') !== false,
+	'the line is greppable by subsystem and driver');
 
 harness_finish();

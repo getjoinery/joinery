@@ -17,7 +17,8 @@
  * publish box reads those to decide what to show without instantiating
  * anything.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Added DnsRateLimitedException: a 429 is the account being limited, not this server, and carries the vendor Retry-After
  * @changelog 1.1 - Added credentialGuide(): a driver says where its credential comes from, rendered beside the field it fills
  */
 
@@ -47,6 +48,29 @@ class DnsManagedRecordException extends DnsProviderException {
 
 /** The credential cannot see a zone covering the requested domain. */
 class DnsZoneNotFoundException extends DnsProviderException {}
+
+/**
+ * The provider is rate-limiting, and it is the ACCOUNT being limited, not this
+ * server. Every vendor here counts requests per user or per token, shared with
+ * their own dashboard — which is API-driven and chatty — so an operator who was
+ * just clicking around in it can exhaust the window before pressing publish once.
+ *
+ * Carries the vendor's own Retry-After when it sent one, because "wait a bit" is
+ * not advice anyone can act on and the number is the only part that helps. Zero
+ * means the vendor did not say.
+ */
+class DnsRateLimitedException extends DnsProviderException {
+
+	/** @var int Seconds the vendor asked us to wait; 0 when it did not say. */
+	private $retry_after;
+
+	public function __construct(string $message, int $retry_after = 0, ?Throwable $previous = null) {
+		parent::__construct($message, 429, $previous);
+		$this->retry_after = max(0, $retry_after);
+	}
+
+	public function getRetryAfter(): int { return $this->retry_after; }
+}
 
 interface DnsProvider {
 

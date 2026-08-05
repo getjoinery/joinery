@@ -17,7 +17,9 @@
  *    cannot leak into a session, a log line or an error report. There is no
  *    persistence path in this code at all.
  *
- * @version 1.0
+ * @version 1.1 - rate limiting (429) is retried on reads, never on writes, and
+ *                reported to a person; every vendor failure is logged with its
+ *                status, trace id and Retry-After, and never the credential
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -30,6 +32,13 @@ abstract class DnsDriverBase implements DnsProvider {
 
 	/** A single TXT character-string may hold at most 255 bytes (RFC 1035). */
 	const TXT_CHUNK_BYTES = 255;
+
+	// Rate-limit retry budget. Deliberately small: this runs inside a page
+	// request, and an operator staring at a spinner is worse than an operator
+	// told plainly to press the button again in a moment.
+	const RATE_LIMIT_MAX_RETRIES      = 2;
+	const RATE_LIMIT_MAX_WAIT_SECONDS = 5;
+	const RATE_LIMIT_BACKOFF_SECONDS  = 2;
 
 	/** @var array The one-publish credential. Never persisted, never printed. */
 	private $credential;
@@ -272,13 +281,36 @@ abstract class DnsDriverBase implements DnsProvider {
 			$this->authHeaders(),
 			$options['headers'] ?? array()
 		);
-		try {
-			$response = $this->http->request($method, $url, $options);
-		} catch (RequestException $e) {
-			$status = $e->getResponse() ? $e->getResponse()->getStatusCode() : 0;
-			throw $this->translateError($e, $method, $url, $status);
-		} catch (Throwable $e) {
-			throw new DnsProviderException(static::getLabel() . ' request failed: ' . $e->getMessage(), 0, $e);
+		$attempt = 0;
+		while (true) {
+			try {
+				$response = $this->http->request($method, $url, $options);
+				break;
+			} catch (RequestException $e) {
+				$status = $e->getResponse() ? $e->getResponse()->getStatusCode() : 0;
+				$this->logVendorFailure($method, $url, $status, $e);
+
+				// A 429 on a READ is free to repeat — nothing changed, so the only
+				// cost of trying again is the wait. A 429 on a WRITE is never
+				// retried here: the vendor may have applied it before deciding to
+				// rate-limit the response, and a repeated create would leave a
+				// duplicate record behind. Those are reported for a human instead.
+				if ($status === 429 && $this->isSafeToRepeat($method)
+						&& $attempt < self::RATE_LIMIT_MAX_RETRIES) {
+					$wait = $this->retryAfterSeconds($e);
+					// Sleeping is bounded because this runs inside a page request.
+					// A vendor asking for longer than we are willing to hold the
+					// operator is reported to them rather than waited out.
+					if ($wait <= self::RATE_LIMIT_MAX_WAIT_SECONDS) {
+						$attempt++;
+						sleep(max(1, $wait ?: self::RATE_LIMIT_BACKOFF_SECONDS * $attempt));
+						continue;
+					}
+				}
+				throw $this->translateError($e, $method, $url, $status);
+			} catch (Throwable $e) {
+				throw new DnsProviderException(static::getLabel() . ' request failed: ' . $e->getMessage(), 0, $e);
+			}
 		}
 		$body = (string)$response->getBody();
 		if (trim($body) === '') {
@@ -286,6 +318,57 @@ abstract class DnsDriverBase implements DnsProvider {
 		}
 		$decoded = json_decode($body, true);
 		return is_array($decoded) ? $decoded : array();
+	}
+
+	/** Reads may be repeated safely; anything that writes may not. */
+	protected function isSafeToRepeat(string $method): bool {
+		return in_array(strtoupper($method), array('GET', 'HEAD'), true);
+	}
+
+	/** The vendor's Retry-After in seconds, honouring both the delta and date forms. */
+	protected function retryAfterSeconds(RequestException $e): int {
+		if (!$e->getResponse()) {
+			return 0;
+		}
+		$raw = trim($e->getResponse()->getHeaderLine('Retry-After'));
+		if ($raw === '') {
+			return 0;
+		}
+		if (ctype_digit($raw)) {
+			return (int)$raw;
+		}
+		$when = strtotime($raw);
+		return ($when === false) ? 0 : max(0, $when - time());
+	}
+
+	/**
+	 * Record what the vendor actually said, so a failure can be diagnosed after
+	 * the operator has closed the page.
+	 *
+	 * A publish failure used to reach the operator as one flashed sentence and
+	 * leave nothing behind — no status, no vendor trace id, no Retry-After — so
+	 * the only way to investigate afterwards was to reason from the outside.
+	 *
+	 * THE CREDENTIAL IS NEVER PART OF THIS. Only the response is logged, plus the
+	 * trace ids vendors put in headers; request headers, where the token lives,
+	 * are not touched.
+	 */
+	protected function logVendorFailure(string $method, string $url, int $status, RequestException $e): void {
+		$parts = array(
+			'dns_publish', static::getKey(), $method,
+			// The path only — a query string can carry a token on some vendors.
+			(string)parse_url($url, PHP_URL_PATH),
+			'status=' . $status,
+		);
+		if ($e->getResponse()) {
+			foreach (array('Retry-After', 'CF-RAY', 'X-Request-Id', 'X-Amzn-Requestid',
+				'X-RateLimit-Remaining', 'X-RateLimit-Reset', 'RateLimit-Reset') as $h) {
+				$v = trim($e->getResponse()->getHeaderLine($h));
+				if ($v !== '') { $parts[] = $h . '=' . $v; }
+			}
+		}
+		$parts[] = 'body=' . str_replace("\n", ' ', substr($this->errorBody($e), 0, 400));
+		error_log(implode(' | ', $parts));
 	}
 
 	/** Credential headers for this vendor. */
@@ -298,8 +381,43 @@ abstract class DnsDriverBase implements DnsProvider {
 	 * recognise their own managed-record refusals and name the feature.
 	 */
 	protected function translateError(RequestException $e, string $method, string $url, int $status): DnsProviderException {
+		if ($status === 429) {
+			return $this->rateLimitError($e, $method);
+		}
 		return new DnsProviderException(static::getLabel() . ' API ' . $method . ' failed ('
 			. $status . '): ' . $this->errorBody($e), $status, $e);
+	}
+
+	/**
+	 * A 429, said to a person.
+	 *
+	 * Vendors answer this in their own voice and they are all talking to a
+	 * program — Cloudflare's is "please wait and consider throttling your request
+	 * speed", which an operator can do nothing with. What they need is: it is the
+	 * account being limited and not this server, whether anything changed, how
+	 * long to wait, and that their own dashboard spends the same quota.
+	 */
+	protected function rateLimitError(RequestException $e, string $method): DnsRateLimitedException {
+		$wait = $this->retryAfterSeconds($e);
+		$vendor = static::getLabel();
+
+		// Whether anything changed is the first thing worth knowing, and it is
+		// answerable: reads happen before any write in every driver here, so a
+		// rate-limited read means the records were never touched.
+		$changed = $this->isSafeToRepeat($method)
+			? 'Nothing was changed — this failed while reading your existing records, before anything is written.'
+			: 'This failed while writing, so some records may already have been updated. Check the difference '
+				. 'before publishing again; publishing is safe to repeat once you have looked.';
+
+		$when = $wait > 0
+			? $vendor . ' asked us to wait ' . $wait . ' second' . ($wait === 1 ? '' : 's') . '.'
+			: 'Wait a minute or two.';
+
+		return new DnsRateLimitedException(
+			$vendor . ' is rate-limiting your account, not this server. ' . $changed . ' ' . $when
+			. ' That limit is shared with the ' . $vendor . ' website, which spends it quickly while you '
+			. 'click around — so if you have it open, close it and try again.',
+			$wait, $e);
 	}
 
 	/** The vendor's response body, trimmed to something safe to show an admin. */
