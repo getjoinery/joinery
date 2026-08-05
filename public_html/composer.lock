@@ -4,7 +4,7 @@
         "Read more about it at https://getcomposer.org/doc/01-basic-usage.md#installing-dependencies",
         "This file is @generated automatically"
     ],
-    "content-hash": "b6bf01385d17bfe544306aae8ac8b4b2",
+    "content-hash": "fb8176c8133806d24156c72ee695a6a4",
     "packages": [
         {
             "name": "aws/aws-crt-php",
@@ -1317,66 +1317,56 @@
         },
         {
             "name": "getbrevo/brevo-php",
-            "version": "v2.0.14",
+            "version": "5.0.1",
             "source": {
                 "type": "git",
                 "url": "https://github.com/getbrevo/brevo-php.git",
-                "reference": "1abb1b75e06aa2ca3a6893d8e8d1968a8a76dc3f"
+                "reference": "227c17e33bd67b6f9c13b838f74c37a3d885ab27"
             },
             "dist": {
                 "type": "zip",
-                "url": "https://api.github.com/repos/getbrevo/brevo-php/zipball/1abb1b75e06aa2ca3a6893d8e8d1968a8a76dc3f",
-                "reference": "1abb1b75e06aa2ca3a6893d8e8d1968a8a76dc3f",
+                "url": "https://api.github.com/repos/getbrevo/brevo-php/zipball/227c17e33bd67b6f9c13b838f74c37a3d885ab27",
+                "reference": "227c17e33bd67b6f9c13b838f74c37a3d885ab27",
                 "shasum": ""
             },
             "require": {
-                "ext-curl": "*",
                 "ext-json": "*",
-                "ext-mbstring": "*",
-                "guzzlehttp/guzzle": "^7.4.0",
-                "php": ">=5.6"
+                "php": "^8.1",
+                "php-http/discovery": "^1.0",
+                "php-http/multipart-stream-builder": "^1.0",
+                "psr/http-client": "^1.0",
+                "psr/http-client-implementation": "^1.0",
+                "psr/http-factory": "^1.0",
+                "psr/http-factory-implementation": "^1.0",
+                "psr/http-message": "^1.1 || ^2.0"
             },
             "require-dev": {
-                "friendsofphp/php-cs-fixer": "~1.12",
-                "phpunit/phpunit": "^4.8",
-                "squizlabs/php_codesniffer": "~2.6"
+                "friendsofphp/php-cs-fixer": "3.5.0",
+                "guzzlehttp/guzzle": "^7.4",
+                "phpstan/phpstan": "^1.12",
+                "phpunit/phpunit": "^12.5.22"
             },
             "type": "library",
-            "extra": {
-                "branch-alias": {
-                    "dev-master": "1.x.x-dev"
-                }
-            },
             "autoload": {
                 "psr-4": {
-                    "Brevo\\Client\\": "lib/"
+                    "Brevo\\": "src/"
                 }
             },
             "notification-url": "https://packagist.org/downloads/",
             "license": [
                 "MIT"
             ],
-            "authors": [
-                {
-                    "name": "Brevo Developers",
-                    "email": "contact@brevo.com",
-                    "homepage": "https://www.brevo.com/"
-                }
-            ],
-            "description": "Official Brevo provided RESTFul API V3 php library",
-            "homepage": "https://github.com/getbrevo/brevo-php",
+            "description": "Official PHP SDK for the Brevo API.",
             "keywords": [
                 "api",
                 "brevo",
-                "php",
-                "sdk",
-                "swagger"
+                "sdk"
             ],
             "support": {
                 "issues": "https://github.com/getbrevo/brevo-php/issues",
-                "source": "https://github.com/getbrevo/brevo-php/tree/v2.0.14"
+                "source": "https://github.com/getbrevo/brevo-php/tree/v5.0.1"
             },
-            "time": "2025-11-06T10:13:45+00:00"
+            "time": "2026-07-03T12:32:58+00:00"
         },
         {
             "name": "guzzlehttp/guzzle",
@@ -5760,8 +5750,14 @@
     "prefer-stable": false,
     "prefer-lowest": false,
     "platform": {
-        "php": ">=7.4"
+        "php": ">=8.3",
+        "ext-sodium": "*",
+        "ext-apcu": "*",
+        "ext-sqlite3": "*"
     },
     "platform-dev": {},
+    "platform-overrides": {
+        "php": "8.3.0"
+    },
     "plugin-api-version": "2.6.0"
 }

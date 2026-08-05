@@ -2,18 +2,23 @@
 /**
  * BrevoProvider - Brevo (formerly Sendinblue) email service provider
  *
- * Implements EmailServiceProvider using getbrevo/brevo-php v2.x.
+ * Implements EmailServiceProvider using getbrevo/brevo-php v5.x.
  * Batch sending uses messageVersions[] for separate envelopes (up to 1000 per call).
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
 
-use Brevo\Client\Configuration as BrevoConfiguration;
-use Brevo\Client\Api\TransactionalEmailsApi;
-use Brevo\Client\Api\AccountApi;
-use Brevo\Client\Model\SendSmtpEmail;
-use Brevo\Client\ApiException as BrevoApiException;
-use GuzzleHttp\Client as GuzzleClient;
+use Brevo\Brevo as BrevoClient;
+use Brevo\Exceptions\BrevoApiException;
+use Brevo\TransactionalEmails\Requests\SendTransacEmailRequest;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestAttachmentItem;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestBccItem;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestCcItem;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestMessageVersionsItem;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestMessageVersionsItemToItem;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestReplyTo;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestSender;
+use Brevo\TransactionalEmails\Types\SendTransacEmailRequestToItem;
 
 class BrevoProvider implements EmailServiceProvider {
 
@@ -62,30 +67,21 @@ class BrevoProvider implements EmailServiceProvider {
         }
 
         try {
-            $config = BrevoConfiguration::getDefaultConfiguration()->setApiKey('api-key', $key);
-            $account_api = new AccountApi(new GuzzleClient(), $config);
-            $account = $account_api->getAccount();
+            $account = (new BrevoClient($key))->account->getAccount();
 
             $details = [];
-            if (method_exists($account, 'getEmail')) {
-                $details['Account Email'] = $account->getEmail();
-            }
-            if (method_exists($account, 'getCompanyName')) {
-                $name = $account->getCompanyName();
-                if (!empty($name)) {
-                    $details['Company Name'] = $name;
+            if ($account !== NULL) {
+                if (!empty($account->email)) {
+                    $details['Account Email'] = $account->email;
                 }
-            }
-            if (method_exists($account, 'getPlan')) {
-                $plan = $account->getPlan();
-                if (is_array($plan) && !empty($plan[0])) {
-                    $first = $plan[0];
-                    if (method_exists($first, 'getType')) {
-                        $details['Plan'] = $first->getType();
-                    }
-                    if (method_exists($first, 'getCredits')) {
-                        $details['Credits'] = $first->getCredits();
-                    }
+                if (!empty($account->companyName)) {
+                    $details['Company Name'] = $account->companyName;
+                }
+                // plan is a list; the first entry is the active one, as in the API docs.
+                $plan = $account->plan[0] ?? NULL;
+                if ($plan !== NULL) {
+                    $details['Plan'] = $plan->type;
+                    $details['Credits'] = $plan->credits;
                 }
             }
             if (!empty($configured_domain)) {
@@ -136,18 +132,19 @@ class BrevoProvider implements EmailServiceProvider {
         $settings = Globalvars::get_instance();
 
         try {
-            $api = $this->buildApi($settings->get_setting('brevo_api_key'));
-            $email = $this->buildBaseEmail($message, $settings);
+            $values = $this->buildBaseEmail($message, $settings);
 
-            $email->setTo($this->mapRecipients($message->getRecipients()));
-            if ($cc = $this->mapRecipients($message->getCc())) {
-                $email->setCc($cc);
+            $values['to'] = $this->mapRecipients($message->getRecipients(), SendTransacEmailRequestToItem::class);
+            if ($cc = $this->mapRecipients($message->getCc(), SendTransacEmailRequestCcItem::class)) {
+                $values['cc'] = $cc;
             }
-            if ($bcc = $this->mapRecipients($message->getBcc())) {
-                $email->setBcc($bcc);
+            if ($bcc = $this->mapRecipients($message->getBcc(), SendTransacEmailRequestBccItem::class)) {
+                $values['bcc'] = $bcc;
             }
 
-            $api->sendTransacEmail($email);
+            $this->buildApi($settings->get_setting('brevo_api_key'))
+                 ->transactionalEmails
+                 ->sendTransacEmail(new SendTransacEmailRequest($values));
             return true;
         } catch (\Exception $e) {
             error_log('[BrevoProvider] Send failed: ' . $e->getMessage());
@@ -165,17 +162,19 @@ class BrevoProvider implements EmailServiceProvider {
 
             foreach ($chunks as $chunk) {
                 try {
-                    $email = $this->buildBaseEmail($message, $settings);
-                    // Brevo SDK requires `to` even when using messageVersions — set to first recipient.
-                    $email->setTo([['email' => $chunk[0]]]);
+                    $values = $this->buildBaseEmail($message, $settings);
+                    // Brevo requires `to` even when using messageVersions — set to first recipient.
+                    $values['to'] = [new SendTransacEmailRequestToItem(['email' => $chunk[0]])];
 
                     $versions = [];
                     foreach ($chunk as $email_addr) {
-                        $versions[] = ['to' => [['email' => $email_addr]]];
+                        $versions[] = new SendTransacEmailRequestMessageVersionsItem([
+                            'to' => [new SendTransacEmailRequestMessageVersionsItemToItem(['email' => $email_addr])],
+                        ]);
                     }
-                    $email->setMessageVersions($versions);
+                    $values['messageVersions'] = $versions;
 
-                    $api->sendTransacEmail($email);
+                    $api->transactionalEmails->sendTransacEmail(new SendTransacEmailRequest($values));
                 } catch (\Exception $e) {
                     error_log('[BrevoProvider] Batch chunk failed: ' . $e->getMessage());
                     $failed = array_merge($failed, $chunk);
@@ -193,28 +192,34 @@ class BrevoProvider implements EmailServiceProvider {
     }
 
     /**
-     * Build a SendSmtpEmail with subject/body/from/replyTo/headers — no recipients.
+     * Build the subject/body/from/replyTo/headers half of a send — no recipients.
+     *
+     * Returns the constructor array rather than a request object: `to` and the
+     * batch-only `messageVersions` are filled in by the caller, and the v5
+     * request is populated once at construction rather than through setters.
+     *
+     * @return array<string, mixed>
      */
-    private function buildBaseEmail(EmailMessage $message, Globalvars $settings): SendSmtpEmail {
-        $email = new SendSmtpEmail();
+    private function buildBaseEmail(EmailMessage $message, Globalvars $settings): array {
+        $values = [];
 
         $sender = ['email' => $message->getFrom()];
         if ($message->getFromName()) {
             $sender['name'] = $message->getFromName();
         }
-        $email->setSender($sender);
+        $values['sender'] = new SendTransacEmailRequestSender($sender);
 
-        $email->setSubject($message->getSubject());
+        $values['subject'] = $message->getSubject();
 
         if ($message->getHtmlBody()) {
-            $email->setHtmlContent($message->getHtmlBody());
+            $values['htmlContent'] = $message->getHtmlBody();
         }
         if ($message->getTextBody()) {
-            $email->setTextContent($message->getTextBody());
+            $values['textContent'] = $message->getTextBody();
         }
 
         if ($replyTo = $message->getReplyTo()) {
-            $email->setReplyTo(['email' => $replyTo]);
+            $values['replyTo'] = new SendTransacEmailRequestReplyTo(['email' => $replyTo]);
         }
 
         $headers = $message->getHeaders();
@@ -222,17 +227,17 @@ class BrevoProvider implements EmailServiceProvider {
             $headers['X-Sib-Sandbox'] = 'drop';
         }
         if (!empty($headers)) {
-            $email->setHeaders($headers);
+            $values['headers'] = $headers;
         }
 
         // Attachments
         $attachments = [];
         foreach ($message->getAttachments() as $a) {
             if (!empty($a['path']) && is_readable($a['path'])) {
-                $attachments[] = [
+                $attachments[] = new SendTransacEmailRequestAttachmentItem([
                     'name' => $a['name'] ?: basename($a['path']),
                     'content' => base64_encode(file_get_contents($a['path'])),
-                ];
+                ]);
             } elseif (isset($a['data'])) {
                 if (!empty($a['cid'])) {
                     // The Brevo API has no Content-ID field, so an inline part cannot
@@ -240,20 +245,24 @@ class BrevoProvider implements EmailServiceProvider {
                     // provider limitation, logged once so the fallback is visible.
                     error_log('[BrevoProvider] Inline attachment degraded to regular attachment (no Content-ID support): cid=' . $a['cid']);
                 }
-                $attachments[] = [
+                $attachments[] = new SendTransacEmailRequestAttachmentItem([
                     'name' => $a['name'] ?: 'attachment',
                     'content' => base64_encode($a['data']),
-                ];
+                ]);
             }
         }
         if (!empty($attachments)) {
-            $email->setAttachment($attachments);
+            $values['attachment'] = $attachments;
         }
 
-        return $email;
+        return $values;
     }
 
-    private function mapRecipients(array $list): array {
+    /**
+     * @param class-string $item_class Recipient value object for the field being filled.
+     * @return array<object>
+     */
+    private function mapRecipients(array $list, string $item_class): array {
         $out = [];
         foreach ($list as $r) {
             if (!empty($r['email'])) {
@@ -261,14 +270,13 @@ class BrevoProvider implements EmailServiceProvider {
                 if (!empty($r['name'])) {
                     $entry['name'] = $r['name'];
                 }
-                $out[] = $entry;
+                $out[] = new $item_class($entry);
             }
         }
         return $out;
     }
 
-    private function buildApi(string $api_key): TransactionalEmailsApi {
-        $config = BrevoConfiguration::getDefaultConfiguration()->setApiKey('api-key', $api_key);
-        return new TransactionalEmailsApi(new GuzzleClient(), $config);
+    private function buildApi(string $api_key): BrevoClient {
+        return new BrevoClient($api_key);
     }
 }

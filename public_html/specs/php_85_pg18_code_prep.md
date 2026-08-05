@@ -1,10 +1,19 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
-**Status:** Phase 1 all but complete. 1.2's no-op deletions, 1.7 and 1.9 landed
+**Status:** Phase 1 complete. 1.2's no-op deletions, 1.7 and 1.9 landed
 2026-08-03 (`c8c085b3`); 1.1 and the rest of 1.2 landed 2026-08-04 (`d72e6812`);
-1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`). 1.6 landed 2026-08-04 and is
-uncommitted. **1.1 through 1.7 and 1.9 are complete.** What remains of Phase 1 is
-1.8 alone. Phase 2 remains gated on the OS campaign.
+1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`); 1.6 landed 2026-08-05
+(`a03aaa0f`). 1.8 landed 2026-08-05 and is uncommitted. **All of Phase 1 is
+complete.** Phase 2 remains gated on the OS campaign.
+
+Bumping Brevo exposed a deploy gap that belongs to no item here and is now
+closed: `ComposerValidator` checked only that a required package was *present*
+in the vendor tree, never that its version matched. A node carrying Brevo v2
+would have passed validation, skipped `composer install`, and fatalled on the
+first Brevo send. An installed version differing from `composer.lock` is now an
+install-fixable error, so such a node converges on the lock instead. A fleet
+survey taken before the change found zero drift across all eight sites, so
+nothing fails that was previously passing.
 **Date:** 2026-08-01
 **Companion:** `specs/fleet_ubuntu_2604_postgres_upgrade.md` (the fleet migration itself)
 
@@ -443,38 +452,60 @@ raw fields to the page. It was absent from `admin_menus.json` and from
 after confirming zero code references and zero `amu_admin_menus` rows. This also
 removed one site from 1.6.
 
-### 1.8 Composer floor, platform pin, and dependency constraints
+### 1.8 Composer floor, platform pin, and dependency constraints — BUILT 2026-08-05
 
-**Floor.** `public_html/composer.json` declares `"php": ">=7.4"`. Raise it to
-`>=8.3`, the declared floor from the compatibility policy above. This does not
-change any currently installed version — it makes the floor machine-readable,
-which is the only enforcement the policy gets.
+**Floor.** `public_html/composer.json` declared `"php": ">=7.4"`; it declares
+`>=8.3`, the floor from the compatibility policy above. No installed version
+changes — it makes the floor machine-readable, which is the only enforcement the
+policy gets.
 
-**Platform pin.** Add `config.platform.php` set to the floor. Without it,
-Composer resolves against whatever PHP the build box happens to run, so a
-`composer update` on a 26.04 box could select a package that no longer installs
-on an 8.3 node. With it, resolution is deterministic and a package that cannot
-satisfy the floor fails loudly at resolution time instead of at install time on
-someone else's server.
+**Platform pin.** `config.platform.php` is set to `8.3.0`. Without it, Composer
+resolves against whatever PHP the build box happens to run, so a `composer update`
+on a 26.04 box could select a package that no longer installs on an 8.3 node. With
+it, resolution is deterministic and a package that cannot satisfy the floor fails
+at resolution time rather than at install time on someone else's server.
 
-**Constraint audit — the real 8.5 dependency risk.** All 86 installed packages
-that declare a PHP constraint declare an *open* one, so `composer install` works
-on 8.5 with the current lockfile untouched. The hazard is not today's tree; it is
-a future update pulling in an upper-bounded constraint. The live example:
-`wildbit/postmark-php` v7.0.0 requires `~8.1 || ~8.2 || ~8.3 || ~8.4`, which
-excludes 8.5 — while the installed v4.0.5 declares `>=7.0.0` and is fine.
-Constrain Postmark below v7 until it admits 8.5. Re-run the audit
-(every `require.php` in `vendor/composer/installed.json`, flagged if it cannot
-admit the target version) after any dependency change.
+**Constraint audit.** Every one of the 86 installed packages declares a PHP
+constraint, and all of them admit 8.5: `composer why-not php 8.5` reports no
+blocker. Re-run that command after any dependency change — it is the whole audit,
+and it is authoritative in a way that reading `require.php` strings is not.
 
-**Brevo.** `getbrevo/brevo-php` is the source of 363 of the tree's 462 vendor
-deprecation notices. v5.0.1 requires `^8.1` — open, safe on 8.5 — so move the
-constraint from `^2.0` to `^5.0`. Three majors, but the blast radius is one file,
-`includes/email_providers/BrevoProvider.php`, which touches only
-`Brevo\Client\Configuration`, `Api\TransactionalEmailsApi`, `Api\AccountApi`,
-`Model\SendSmtpEmail`, and `ApiException`. Verify those symbols survived the
-v2→v5 move; `tests/integration/email_inline_attachments_test.php` already
-exercises `BrevoProvider::buildBaseEmail()` and is the regression check.
+*Correction to the original draft.* This spec claimed `wildbit/postmark-php` v7.0.0
+was a live 8.5 hazard because it requires `~8.1 || ~8.2 || ~8.3 || ~8.4`. That
+reading is wrong. Composer's two-part tilde means `>=8.1 <9.0`, so the constraint
+admits 8.5; resolving `^7.0` against a pinned platform of 8.5.0 succeeds. There is
+no Postmark hazard and no cap was added. The constraint stays `^4.0`, which pins
+to 4.x for unrelated reasons. Read tilde and caret ranges with Composer's own
+semantics, or better, let `composer why-not` answer the question.
+
+**Brevo.** `getbrevo/brevo-php` moved from `^2.0` to `^5.0` (installed 5.0.1,
+requires `^8.1`). The deprecation payoff is real and larger than drafted: counted
+with the tokenizer rather than a regex — so that `?Type $x = null` and
+`Type|null $x = null` are not miscounted as implicit — the vendor tree held **462**
+implicit-nullable parameters, of which **417 were Brevo v2**. After the bump the
+tree holds **45**, and Brevo holds **0**. One library was 90% of the 8.4
+deprecation surface.
+
+*This was a rewrite, not a symbol check.* The draft expected the five v2 symbols to
+survive. None did: v5 is a Fern-generated client that replaces the whole
+`Brevo\Client\*` namespace. `Configuration` + `Api\TransactionalEmailsApi` +
+`Api\AccountApi` + `Model\SendSmtpEmail` + `ApiException` become
+`Brevo\Brevo` (constructed with the API key directly, no Guzzle client passed),
+`->transactionalEmails->sendTransacEmail()`, `->account->getAccount()`, and
+`Brevo\Exceptions\BrevoApiException`. Setters become constructor arrays of typed
+value objects (`SendTransacEmailRequestToItem` and siblings), so
+`buildBaseEmail()` returns the constructor array and the caller fills in `to` and
+`messageVersions`. Account fields are public properties, not getters, which
+removes the `method_exists()` probing the v2 code needed.
+
+Verified by capturing the outbound PSR-18 request rather than trusting the types:
+both the single-send and `messageVersions` batch paths still `POST
+https://api.brevo.com/v3/smtp/email` with the documented v3 field names
+(`sender`, `to`, `cc`, `bcc`, `subject`, `htmlContent`, `textContent`, `replyTo`,
+`headers`, `attachment`, `messageVersions`). `BrevoApiException::getCode()` still
+returns the HTTP status, so the 401/403 branches of `validateApiConnection()` still
+map. `tests/integration/email_inline_attachments_test.php` passes, but note it
+only asserts a log marker and would not have caught a wrong payload shape.
 
 ### 1.9 Latent fatals surfaced by the validator sweep — BUILT 2026-08-03
 
