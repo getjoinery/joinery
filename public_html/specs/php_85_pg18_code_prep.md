@@ -3,8 +3,10 @@
 **Status:** Phase 1 complete. 1.2's no-op deletions, 1.7 and 1.9 landed
 2026-08-03 (`c8c085b3`); 1.1 and the rest of 1.2 landed 2026-08-04 (`d72e6812`);
 1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`); 1.6 landed 2026-08-05
-(`a03aaa0f`). 1.8 landed 2026-08-05 and is uncommitted. **All of Phase 1 is
-complete.** Phase 2 remains gated on the OS campaign.
+(`a03aaa0f`); 1.8 landed 2026-08-05 (`16584d95`). **All of Phase 1 is built and
+committed.** What remains is a publish and a fleet upgrade — goal 1 is that
+Phase 1 reaches every node *before* the first one is migrated — plus the live
+gates listed under Verification. Phase 2 remains gated on the OS campaign.
 
 Bumping Brevo exposed a deploy gap that belongs to no item here and is now
 closed: `ComposerValidator` checked only that a required package was *present*

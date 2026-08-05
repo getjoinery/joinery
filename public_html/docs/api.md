@@ -69,6 +69,10 @@ The `errortype` vocabulary is closed: `AuthenticationError`, `TransactionError`,
 
 Collection reads accept `page` (0-based), `numperpage`, `sort` (column name), `sdirection` (`ASC`/`DESC`) as query parameters and respond with integer `num_results` (total rows matching the query, after owner-scoping), `page`, and `numperpage` alongside the `data` array. There is no cursor form; `num_results` with `page * numperpage` is the whole model.
 
+**`numperpage` defaults to 3.** A page that lists a whole small collection must pass it explicitly — relying on the default silently truncates the list at three rows, and the caller cannot tell a short page from a complete one without reading `num_results`.
+
+`sort` must name a declared column of the model being read; anything else is a `400`. A sort column is an identifier, which SQL cannot bind as a parameter, so it is validated against `$field_specifications` rather than escaped. The bare column name works too — the table prefix is inferred (`sort=user_id` and `sort=usr_user_id` are equivalent on `Users`). Sorting by an expression is not supported.
+
 ### Timestamps
 
 Timestamps are strings in **UTC**, formatted `YYYY-MM-DD HH:MM:SS` — space separator, seconds precision, no fractional seconds, no timezone suffix. Clients parse them as UTC. An unset timestamp is `null`, never `""` or a zero date. Producing code uses `LibraryFunctions::api_timestamp()` (payloads assembled by hand) or inherits the format from `export_for_api()` (CRUD reads).
@@ -557,9 +561,9 @@ Add a trailing **s** to the class name for collections.
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `page` | 0 | Page number (0-based) |
-| `numperpage` | 3 | Items per page |
-| `sort` | (none) | Database column to sort by |
-| `sdirection` | ASC | Sort direction: `ASC` or `DESC` |
+| `numperpage` | 3 | Items per page — pass it explicitly to list a whole collection |
+| `sort` | (none) | Declared column of the model; the prefix may be omitted. Anything else is a 400 |
+| `sdirection` | ASC | Sort direction: `ASC` or `DESC` (any other value is read as `ASC`) |
 
 Any additional query parameters are passed as filter options to the Multi class. Check the specific Multi class to see which filter keys it accepts.
 

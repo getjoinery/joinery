@@ -417,8 +417,21 @@
                 }
 
                 function loadPasskeys() {
-                    return apiFetch('/api/v1/Passkeys?user_id=<?php echo (int)SessionControl::get_instance()->get_user_id(); ?>').then(function (json) {
+                    // numperpage is REQUIRED, not a tuning knob: an API collection
+                    // read defaults to 3 rows per page (docs/api.md), so without it
+                    // a fourth passkey enrolls successfully and then never appears —
+                    // unrenamable, unrevokable, and unactivatable, with the browser
+                    // still refusing to enroll it again because it is already there.
+                    // This list is never paged, so it asks for all of them.
+                    return apiFetch('/api/v1/Passkeys?numperpage=500&user_id=<?php echo (int)SessionControl::get_instance()->get_user_id(); ?>').then(function (json) {
                         var credentials = json.data || [];
+                        // A collection read applies no ORDER BY unless one is asked
+                        // for, so without this the rows arrive in whatever order the
+                        // database returns them. Oldest first, matching what the
+                        // Added column implies.
+                        credentials.sort(function (a, b) {
+                            return String(a.pkc_created_time || '').localeCompare(String(b.pkc_created_time || ''));
+                        });
                         credentialCount = credentials.length;
                         var activeIds = vaultActiveIds();
                         document.getElementById('passkeys-vault-th').classList.toggle('d-none', !vaultStatus);

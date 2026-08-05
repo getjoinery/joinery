@@ -2205,6 +2205,11 @@ abstract class SystemBase {
  */
 class UnknownMultiOptionException extends SystemBaseException {}
 
+/** Thrown when a sort names something that is not a column of the table being
+ *  queried. A sort column cannot be a bound parameter — SQL has no placeholder
+ *  for an identifier — so it is validated instead. */
+class UnsortableColumnException extends SystemBaseException {}
+
 abstract class SystemMultiBase implements IteratorAggregate, Countable {
 
 	private $multi_data;
@@ -2344,6 +2349,45 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 	}
 
+	/**
+	 * Validate one ORDER BY column. A sort column is an IDENTIFIER, and SQL has
+	 * no bind placeholder for an identifier — it has to be interpolated, so the
+	 * only safe form is to prove it is a column name before it goes near the
+	 * query. Everything reaching a sort passes through here, not just the REST
+	 * collection endpoint, so a future internal caller that forwards user input
+	 * is covered by construction rather than by remembering to sanitize.
+	 *
+	 * Two gates, in order of strength:
+	 *
+	 *  1. It must be a bare identifier. This alone closes the injection: with no
+	 *     spaces, parentheses, commas or quotes, an attacker cannot form the
+	 *     expression a boolean oracle needs. An unrecognized identifier can only
+	 *     ever be a nonexistent column, which is a SQL error, not a disclosure.
+	 *  2. When the query is against the model's own table, it must be a declared
+	 *     column. This turns a 500 into a named refusal and removes the
+	 *     column-probing side channel that gate 1 would otherwise leave. Skipped
+	 *     when a collection queries some other table (a join or a view), where
+	 *     $field_specifications is not the authority on what is sortable.
+	 */
+	private function assert_sortable_column($column, $table) {
+		$column = (string)$column;
+		if (!preg_match('/^[A-Za-z_][A-Za-z0-9_]*$/', $column)) {
+			throw new UnsortableColumnException(
+				'Sort column must be a plain column name.');
+		}
+
+		$model = isset(static::$model_class) ? static::$model_class : null;
+		if ($model && class_exists($model)
+			&& isset($model::$tablename) && $model::$tablename === $table
+			&& !empty($model::$field_specifications)
+			&& !array_key_exists($column, $model::$field_specifications)) {
+			throw new UnsortableColumnException(
+				"'" . $column . "' is not a sortable column of " . $table . '.');
+		}
+
+		return $column;
+	}
+
 	protected function _get_resultsv2($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
 		$this->assert_options_known();
 		$where_clauses = [];
@@ -2386,6 +2430,7 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 				if ($prefix && strpos($column, $prefix . '_') !== 0) {
 					$column = $prefix . '_' . $column;
 				}
+				$column = $this->assert_sortable_column($column, $table);
 				$direction = strtoupper($direction) === 'DESC' ? 'DESC' : 'ASC'; // Ensure only ASC or DESC
 				$order_clauses[] = "$column $direction";
 			}
