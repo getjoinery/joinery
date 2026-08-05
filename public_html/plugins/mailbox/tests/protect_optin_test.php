@@ -41,22 +41,34 @@ harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protect_identity.php'));
 
-/** Stands in for an InboundEmailDomain: the branching rule reads one method. */
-class PoFakeDomain {
-	private $protected;
-	private $level;
+/**
+ * A real InboundEmailDomain with the two facts under test overridden.
+ *
+ * A subclass rather than a duck-typed stub on purpose: the methods being
+ * exercised type-hint InboundEmailDomain, and loosening a production signature
+ * so a test can pass something else would be the test damaging the code it is
+ * meant to protect. Constructed with NULL — an unsaved row, no database.
+ */
+class PoFakeDomain extends InboundEmailDomain {
+	private $po_protected;
+	private $po_level;
 	public function __construct(bool $protected, string $level) {
-		$this->protected = $protected;
-		$this->level = $level;
+		parent::__construct(NULL);
+		$this->po_protected = $protected;
+		$this->po_level = $level;
+		$this->set('ied_domain', 'example.com');
 	}
-	public function is_protected_identity() { return $this->protected; }
-	public function security_level() { return $this->level; }
+	public function is_protected_identity() { return $this->po_protected; }
+	public function security_level() { return $this->po_level; }
 }
 
 class ProtectOptinTest {
 
 	public function run() {
 		$this->assertShapeFollowsTheFlag();
+		$this->assertFortressCompletionCard();
+		$this->assertSigningStartsBeforeStrictRecords();
+		$this->assertLiftingDoesNotStrandDns();
 		$this->assertCeremonyCanStillPrescribe();
 		$this->assertOnDiskKeyRow();
 		$this->assertDestroyRefusesUnknownDomain();
@@ -98,14 +110,160 @@ class ProtectOptinTest {
 		check($applies->invoke($check, false) === false,
 			'a GetByDomain miss (false, not null) is handled without fataling');
 
-		// Belt and braces: the level must not appear in the rule at all. A future
-		// edit that reintroduces `|| security_level() === LEVEL_FORTRESS` restores
-		// the defect exactly, and would pass the four checks above only if it also
-		// kept the flag — which is precisely what the broken version did.
+		// Belt and braces against the exact edit that caused it: reintroducing
+		// `|| security_level() === LEVEL_FORTRESS` into the shape rule would pass
+		// the checks above only if it also kept the flag — which is precisely what
+		// the broken version did.
+		//
+		// Scoped to the shape rule, not the whole file: the level IS legitimately
+		// consulted elsewhere, to decide whether to emit the send-protection row
+		// at all. Which shape to prescribe and whether Fortress is finished are
+		// different questions.
 		$src = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
-		check(strpos($src, 'LEVEL_FORTRESS') === false,
-			'the security level is not consulted anywhere in the check engine\'s shape branching');
+		$rule = substr($src, strpos($src, 'private function protectedShapeApplies'));
+		$rule = substr($rule, 0, strpos($rule, "\n\t}"));
+		check(strpos($rule, 'LEVEL_FORTRESS') === false && strpos($rule, 'security_level') === false,
+			'the shape rule consults the enforcement flag and nothing else');
+		check(preg_match('/is_protected_identity\(\)\s*\|\|\s*\$model->security_level\(\)/', $src) === 0,
+			'the old level-or-flag disjunction is gone from the whole engine');
+	}
+
+	private function assertFortressCompletionCard() {
+		section('Fortress is not finished until sending is locked');
+
+		$m = new ReflectionMethod('InboundEmailSetupCheck', 'sendProtectionResult');
+		$m->setAccessible(true);
+
+		// Four states, four fixes. Driven by stubbing the two facts the row reads,
+		// so no DNS is touched: is it signing, and do the published records already
+		// demand that signature.
+		$row = function (bool $signing, bool $strict) use ($m) {
+			$check = new class($strict) extends InboundEmailSetupCheck {
+				private $strict;
+				public function __construct($strict) { parent::__construct(); $this->strict = $strict; }
+				public function strictRecordsPublished(InboundEmailDomain $model): bool { return $this->strict; }
+			};
+			$mm = new ReflectionMethod($check, 'sendProtectionResult');
+			$mm->setAccessible(true);
+			return $mm->invoke($check, 'example.com', new PoFakeDomain($signing, 'fortress'));
+		};
+
+		$done = $row(true, true);
+		check($done['status'] === InboundEmailSetupCheck::PASS,
+			'signing with the strict records live is finished', $done['status']);
+
+		$unfinished = $row(false, false);
+		check($unfinished['status'] === InboundEmailSetupCheck::FAIL,
+			'not signing is a REQUIRED failure — Fortress is not finished');
+		check($unfinished['severity'] === InboundEmailSetupCheck::REQUIRED,
+			'so it turns the mailbox verdict to attention');
+
+		$half = $row(true, false);
+		check($half['status'] === InboundEmailSetupCheck::WARN,
+			'signing without the strict records warns: forgeries are not rejected yet');
+
+		// THE OUTAGE. Records demanding a signature nothing is producing — mail
+		// accepted by the provider and silently discarded by recipients. This is
+		// the state the whole change exists to catch, and it must not read as one
+		// more amber row.
+		$broken = $row(false, true);
+		check($broken['status'] === InboundEmailSetupCheck::FAIL,
+			'strict records without signing is a failure');
+		check(stripos($broken['summary'], 'rejecting your own mail') !== false,
+			'and says plainly that the domain is rejecting its own mail', $broken['summary']);
+		check($broken['summary'] !== $unfinished['summary'],
+			'the outage and the merely-unfinished state do not share wording');
+
+		// POLARITY. Whether the published records already demand a signature is
+		// what separates "unfinished" from "actively rejecting your own mail", and
+		// getting it backwards reports every stranded domain as merely unfinished
+		// — which is what a first cut of this did, on a real domain that was
+		// dropping its own mail at the time.
+		$spf = new ReflectionMethod('InboundEmailSetupCheck', 'spfAuthorizesNothing');
+		$spf->setAccessible(true);
+		$c = new InboundEmailSetupCheck();
+		foreach (array('v=spf1 -all', 'V=SPF1 -ALL', 'v=spf1   -all  ') as $rec) {
+			check($spf->invoke($c, $rec) === true, 'authorizes nothing: ' . trim($rec));
+		}
+		foreach (array('v=spf1 include:mailgun.org -all', 'v=spf1 ip4:1.2.3.4 -all',
+			'v=spf1 ~all', 'v=spf1 a mx -all', '') as $rec) {
+			check($spf->invoke($c, $rec) === false,
+				'may authorize somebody, so never alarms: ' . ($rec ?: '(empty)'));
+		}
+		$engine = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+		check(strpos($engine, '$spf_rejects = ($spf !== \'\' && $this->spfAuthorizesNothing($spf));') !== false,
+			'the caller reads it un-negated');
+
+		// The verdict consequence, asserted rather than assumed.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
+		foreach (array($unfinished, $broken) as $r) {
+			$verdict = mailbox_setup_verdict(array('receiving' => array($r), 'forwarding' => array()));
+			check($verdict['status'] === 'attention',
+				'an unfinished Fortress domain reads attention', $verdict['status']);
+		}
+	}
+
+	private function assertSigningStartsBeforeStrictRecords() {
+		section('No step of the ceremony causes silent rejection');
+
+		// Gating activation on the finished shape forced the operator to publish
+		// reject-anything-unsigned while nothing was signing — a guaranteed window
+		// of mail accepted by the provider and discarded downstream. Signing now
+		// starts first, needing only records that ask nothing of anyone.
+		check(method_exists('InboundEmailSetupCheck', 'signingReadinessChecks'),
+			'there is a readiness set distinct from the finished shape');
+
+		$src = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/protect_identity.php'));
+		$activate = substr($src, strpos($src, "\$action === 'protect_activate'"));
+		$activate = substr($activate, 0, strpos($activate, 'protect_rotate'));
+
+		check(strpos($activate, 'signingReadinessChecks') !== false,
+			'activation gates on signing readiness');
+		check(strpos($activate, 'protectedDomainChecks') === false,
+			'and no longer demands the strict records first');
+		check(strpos($activate, 'VaultUnlock::isOpen') !== false,
+			'the unlock gate is untouched — this still decides what the world accepts');
+
+		// The readiness set must not contain the two records that do the rejecting.
+		$readiness = substr($src, 0, 0);   // read from the engine, not this file
+		$engine = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+		$fn = substr($engine, strpos($engine, 'public function signingReadinessChecks'));
+		$fn = substr($fn, 0, strpos($fn, "\n\t}"));
+		check(strpos($fn, 'protectedSpfResult') === false && strpos($fn, 'protectedDmarcResult') === false,
+			'readiness excludes the strict SPF and DMARC — those are the last step, not the first');
+		check(strpos($fn, 'protectedDkimResult') !== false,
+			'and includes the sealed key record, which asks nobody to reject anything');
+	}
+
+	private function assertLiftingDoesNotStrandDns() {
+		section('Lifting protection does not strand the DNS');
+
+		$src = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/protect_identity.php'));
+		$disable = substr($src, strpos($src, "\$action === 'protect_disable'"));
+
+		check(function_exists('mailbox_protect_restore_ambient_dns'),
+			'lifting computes what the DNS must become');
+		check(strpos($disable, 'mailbox_protect_restore_ambient_dns') !== false,
+			'and the disable path calls it');
+		check(strpos($disable, "'dns_show' => '1'") !== false,
+			'landing the operator on the records that would otherwise reject their mail');
+
+		// The confirm has to state the consequence, not just ask.
+		$view = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/admin/admin_mailbox_setup.php'));
+		$confirm = substr($view, strpos($view, "'action' => 'protect_disable'"));
+		$confirm = substr($confirm, 0, 1400);
+		check(stripos($confirm, 'anyone who breaks into it') !== false,
+			'the confirm names who else gains the ability to send');
+		check(stripos($confirm, 'send nothing') !== false || stripos($confirm, 'have to come down') !== false,
+			'and warns that the records must come down too');
+		check(stripos($confirm, 'arriving mail stays sealed') !== false,
+			'and says what is NOT affected, so nobody is scared off a change they are entitled to make');
 	}
 
 	private function assertCeremonyCanStillPrescribe() {
@@ -203,22 +361,31 @@ class ProtectOptinTest {
 	// ------------------------------------------------------------------
 
 	private function assertGuidedBoxHasNoProtectionStep() {
-		section('The guided box never mentions send protection');
+		section('The guided box carries the finishing step, and only that');
 
 		$view = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/admin/admin_mailbox_setup.php'));
 		$guided = substr($view, 0, strpos($view, 'Advanced — server-wide setup & diagnostics'));
 		check($guided !== '' && $guided !== false, 'the guided half of the page was located');
 
+		// The ceremony itself stays in Advanced. What the guided box carries is a
+		// statement that Fortress is unfinished, and a link.
 		check(strpos($guided, 'protect_activate') === false,
-			'no turn-it-on button in the guided box');
+			'the turn-it-on button is not in the guided box — the ceremony lives in Advanced');
 		check(strpos($guided, 'protect_generate') === false,
 			'no owner question in the guided box');
 		check(strpos($guided, 'prefill_domain') === false,
-			'no Standard-subdomain offer in the guided box — it exists only because of send protection');
-		check(stripos($guided, 'send protection') === false
-				|| stripos($guided, 'SEND PROTECTION IS NOT A STEP HERE') !== false,
-			'send protection appears in the guided half only as the comment saying it must not');
+			'no Standard-subdomain offer in the guided box');
+
+		// Fortress is a two-sided promise and the guided box says so. Gated on the
+		// arrival side actually working first: offering the sending half before
+		// mail reaches the relay asks someone to finish what has not started.
+		check(strpos($guided, 'Finish Fortress') !== false,
+			'the guided box names Fortress as unfinished while sending is unlocked');
+		check(preg_match('/!\$is_protected\s*&&\s*\$active_relay !== null\s*&&\s*_setup_domain_mx_is_cut_over/', $guided) === 1,
+			'and renders only when unprotected, with a live relay, and the MX cut over');
+		check(strpos($view, 'function _setup_domain_mx_is_cut_over') !== false,
+			'the cutover test reads the domain.mx row the page already computed');
 
 		// The whole ceremony lives in one place instead.
 		$advanced = substr($view, strpos($view, 'Advanced — server-wide setup & diagnostics'));

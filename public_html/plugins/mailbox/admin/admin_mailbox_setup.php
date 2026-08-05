@@ -198,6 +198,13 @@ $page->end_box();
 $level        = $security_level ?? 'standard';
 $dom_id       = (int)($focus_domain_id ?? 0);
 $has_vault    = !empty($acting_has_vault);
+$is_protected = !empty($focus_is_protected);
+// Straight into the ceremony under Advanced, with it already open. Built from
+// the focus this page resolved, not from the request, so the link survives a
+// visit that arrived without one.
+$adv_link_base = $base . ($selected_alias_id ? '?alias_id=' . (int)$selected_alias_id
+	: ($dom_id ? '?domain_id=' . $dom_id : '?'))
+	. '&advanced=1&protect_setup=1';
 if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 	// THIS BOX CARRIES OUTSTANDING WORK ONLY, and disappears when there is none.
 	//
@@ -229,23 +236,6 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 	}
 
 	if ($level === 'fortress') {
-		// SEND PROTECTION IS NOT A STEP HERE, DELIBERATELY
-		// (specs/mailbox_relay_surface_simplification.md). Raising a domain to
-		// Fortress turns on arrival sealing: mail is sealed at the relay and
-		// unreadable while locked. That is the whole level, and a domain resting
-		// there is FINISHED.
-		//
-		// Locking outbound sending to the owner's key is a separate, advanced
-		// choice with a real cost — every interactive send needs an unlock, and
-		// automated mail has to move to a subdomain. Offering it as step 4 of a
-		// checklist made a complete domain read as an unfinished one, and no
-		// wording fixed that: a numbered list means these are things you have not
-		// done yet. It lives in Advanced under Sending identity, where the cost
-		// is stated next to the offer.
-		//
-		// What is left here is what Fortress genuinely requires and cannot work
-		// without: somewhere to put the keys, and the relay that does the sealing.
-
 		// The relay, shared by every Fortress domain — so on the second domain
 		// onward this is normally already done and says nothing.
 		if ($active_relay === null) {
@@ -262,6 +252,32 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 						. 'before it reaches Joinery. Provision it once (shared by all Fortress domains). '
 						. '<a class="btn btn-sm btn-outline-secondary" href="#relay-section">Relay setup</a></li>';
 				}
+			};
+		}
+
+		// FORTRESS IS NOT FINISHED UNTIL SENDING IS LOCKED TOO
+		// (specs/mailbox_fortress_send_protection_completion.md). Fortress is a
+		// two-sided promise — nobody can read your mail, nobody can send as you.
+		// The raise delivers the first half; this is the second, and until it is
+		// done the domain is one anybody can still impersonate. The raise ceremony
+		// has always said so ("one step still remains") and this is the same fact
+		// where the operator is actually working.
+		//
+		// ORDERED LAST, AND GATED. Offering the sending half before mail is
+		// arriving through the relay asks someone to finish what has not started.
+		// It renders only once the relay is live and this domain's MX points at
+		// it — and it disappears the moment protection is on, so it never narrates
+		// back a step already taken.
+		if (!$is_protected && $active_relay !== null && _setup_domain_mx_is_cut_over($domain_rows ?? array())) {
+			$steps[] = function () use ($adv_link_base) {
+				echo '<li class="mb-0"><strong>Finish Fortress: lock sending to your key.</strong> '
+					. 'Arriving mail is sealed, which is half of what Fortress promises. The other half is that '
+					. 'nobody can send mail claiming to be you — including someone who has broken into this '
+					. 'server. Until this is done, anyone can.'
+					. '<div class="mt-2"><a class="btn btn-sm btn-primary" href="'
+					. htmlspecialchars($adv_link_base) . '">Finish it under Sending identity</a></div>'
+					. '<p class="text-muted small mb-0 mt-1">Nothing changes for your mail until the last step, '
+					. 'and you can stop at any point.</p></li>';
 			};
 		}
 	}
@@ -283,13 +299,30 @@ if ($dom_id && ($level === 'private' || $level === 'fortress')) {
 }
 
 /**
+ * Has this domain's MX actually moved to the relay?
+ *
+ * Read off the domain.mx check row the page already computed rather than asked
+ * again — the answer must be the same one the operator is looking at, and a
+ * second lookup could disagree with it. Absent rows mean "not established", so
+ * the finishing step waits rather than being offered prematurely.
+ */
+function _setup_domain_mx_is_cut_over(array $domain_rows): bool {
+	foreach ($domain_rows as $r) {
+		if (($r['id'] ?? '') === 'domain.mx') {
+			return ($r['status'] ?? '') === InboundEmailSetupCheck::PASS;
+		}
+	}
+	return false;
+}
+
+/**
  * Does this domain already have a Standard subdomain to send automated mail from?
  *
- * A Fortress domain cannot send unless its owner is signed in, so the guided box
- * offers a Standard subdomain for confirmations and notifications. Once one
- * exists the offer has been taken and must stop being made — any Standard
- * subdomain counts, not just the suggested mail.* name, because the operator was
- * free to pick their own.
+ * A Fortress domain cannot send unless its owner is signed in, so the Sending
+ * identity box offers a Standard subdomain for confirmations and notifications.
+ * Once one exists the offer has been taken and must stop being made — any
+ * Standard subdomain counts, not just the suggested mail.* name, because the
+ * operator was free to pick their own.
  */
 function _setup_has_standard_subdomain(string $domain): bool {
 	$domain = strtolower(trim($domain));
@@ -522,11 +555,20 @@ if (!$advanced) {
 			// "Send protection", not "protection": turning this off does not stop
 			// arriving mail being sealed, and a confirm that reads as though it
 			// might would stop somebody making a change they are entitled to make.
+			//
+			// The confirm states every consequence concretely, including the one
+			// that bites afterwards: the published records reject unsigned mail,
+			// so they have to come down too or this domain sends nothing.
 			echo PublicPageBase::action_button('Turn send protection off', $self_url,
 				array('hidden' => $prot_hidden + array('action' => 'protect_disable'),
 					'class' => 'btn btn-soft-danger',
-					'confirm' => 'Turn send protection off? This server will be able to send as this domain again '
-						. 'without you being signed in. Arriving mail is still sealed — this only affects sending.'));
+					'confirm' => 'Turn send protection off for ' . $focus_domain . '?' . "\n\n"
+						. 'This server will be able to send as this domain again without you signed in — and so '
+						. 'will anyone who breaks into it.' . "\n\n"
+						. 'Your DNS currently tells other servers to reject mail this domain sends that your key '
+						. 'did not sign. Those records have to come down as well, or this domain will send '
+						. 'nothing. You will be taken straight to them.' . "\n\n"
+						. 'Arriving mail stays sealed and still needs your vault. This only affects sending.'));
 		}
 		echo '</div>';
 
