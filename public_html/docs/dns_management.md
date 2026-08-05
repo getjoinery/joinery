@@ -207,6 +207,28 @@ problem, because the two need opposite fixes. Cloudflare mishandles /48 and /64
 ranges in that filter; list an IPv6 address on its own. Namecheap's allowlist has
 the same shape.
 
+**The two confirmations are unticked by default, and that is deliberate.** A
+record that collides with one the platform does not own needs an explicit *adopt*
+tick; a change that redirects traffic already flowing needs a *cutover* tick.
+They are the only choices in the box that can take mail down, and the asymmetry
+decides the default: unticked costs a second press, ticked-by-default costs the
+mail, and only one of those is undone by pressing again. Ordinary additions need
+neither tick and are written without asking.
+
+**Leaving one unticked skips that record, and a skip is never green.** Both lists
+say so at the point of choice, `resultSeverity()` grades any skip amber, and the
+summary names the records and the reason rather than printing a count. A publish
+where nothing was written leads with *nothing was published*. The alternative —
+green after a diff that wrote nothing — is the failure the severity contract
+exists to prevent, and it read as success to the operator who hit it.
+
+**Apply is disabled while the current ticks would publish nothing.** The test is
+per record, not a count of ticks: a conflicting MX is both a cutover and an
+overwrite, so ticking one of its boxes still writes nothing. A record publishes
+when every gate on it is satisfied, and a diff containing any unconditional write
+emits no gate at all. With scripting off the button stays enabled and the amber
+summary catches it.
+
 **A 429 is the account being rate-limited, not this server.** Every vendor here
 counts requests per user or per token, and that quota is shared with the vendor's
 own dashboard — which is API-driven and spends it quickly while an operator

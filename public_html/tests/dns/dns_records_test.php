@@ -15,6 +15,8 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.2 - a skipped record is never green, and Apply is gated while the
+ *                selection would publish nothing
  * @version 1.1 - rate-limit handling: retry budget, write safety, the operator
  *                message, and that the credential never reaches the log
  */
@@ -599,5 +601,116 @@ check(strpos($written, 'status=429') !== false, 'the status is logged');
 check(strpos($written, 'CF-RAY=ray-9') !== false, 'the vendor trace id is logged');
 check(strpos($written, 'dns_publish') !== false && strpos($written, 'probe') !== false,
 	'the line is greppable by subsystem and driver');
+
+// ===================================================================
+section('A skipped record is never reported as a success');
+// ===================================================================
+//
+// The adopt and cutover confirmations are unticked by default on purpose: they
+// are the only choices in the box that can take mail down. But submitting with
+// none ticked skipped every record needing one and reported it in green, with a
+// bare count and no reason — so an operator could press Apply, read success, and
+// have published nothing.
+
+require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+
+$result_row = function (string $action, bool $ok, string $reason = '') {
+	return array(
+		'key'    => 'k' . $action . $reason,
+		'record' => new DnsRecord('TXT', 'example.com', 'v=spf1 -all'),
+		'action' => $action,
+		'ok'     => $ok,
+		'reason' => $reason,
+	);
+};
+$publish = function (array $results, string $error = '') {
+	return array('results' => $results, 'error' => $error, 'accounts' => array());
+};
+
+$all_skipped = $publish(array(
+	$result_row('skipped', true, 'This change redirects traffic that already flows, so it needs its own confirmation.'),
+	$result_row('skipped', true, 'A record already exists here that the platform does not own.'),
+));
+check(DnsPublishBox::resultSeverity($all_skipped) !== DisplayMessage::MESSAGE_ANNOUNCEMENT,
+	'a publish that skipped everything is never green');
+check(DnsPublishBox::resultSeverity($all_skipped) === DisplayMessage::MESSAGE_WARNING,
+	'it warns — nothing failed, but nothing the operator asked for happened');
+
+$summary = DnsPublishBox::summarizeResults($all_skipped);
+check(stripos($summary, 'nothing was published') !== false,
+	'and the summary leads with that, rather than a count', $summary);
+check(stripos($summary, 'redirects traffic') !== false,
+	'the reason each record was skipped is named, not just tallied');
+check(stripos($summary, 'v=spf1 -all') !== false, 'and the records themselves are named');
+
+// A clean publish is still green — the fix must not turn every result amber.
+$all_written = $publish(array($result_row('created', true), $result_row('updated', true)));
+check(DnsPublishBox::resultSeverity($all_written) === DisplayMessage::MESSAGE_ANNOUNCEMENT,
+	'a publish where everything landed is still a success');
+$nothing_to_do = $publish(array($result_row('unchanged', true), $result_row('matches', true)));
+check(DnsPublishBox::resultSeverity($nothing_to_do) === DisplayMessage::MESSAGE_ANNOUNCEMENT,
+	'a diff with nothing to change is still a success');
+
+// Partial: some landed, some were skipped for want of a tick.
+$partial = $publish(array($result_row('created', true), $result_row('skipped', true, 'needs confirmation')));
+check(DnsPublishBox::resultSeverity($partial) === DisplayMessage::MESSAGE_WARNING,
+	'a partial publish warns');
+check(stripos(DnsPublishBox::summarizeResults($partial), 'nothing was published') === false,
+	'but is not described as nothing published, because something was');
+
+// A real failure still reads as one.
+$failed = $publish(array($result_row('failed', false, 'refused')));
+check(DnsPublishBox::resultSeverity($failed) === DisplayMessage::MESSAGE_ERROR,
+	'a publish where nothing reached the provider is an error');
+
+// ===================================================================
+section('Apply is disabled while it would publish nothing');
+// ===================================================================
+//
+// Being told afterwards is a poor second to not being able to do it. The test is
+// PER RECORD: a conflicting MX is both a cutover and an overwrite, so ticking one
+// of its two boxes still publishes nothing.
+
+require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+
+$gate_html = function (array $rows) {
+	ob_start();
+	dns_publish_box_apply_gate($rows);
+	return ob_get_clean();
+};
+$row = function (string $outcome, bool $cutover, string $key) {
+	return array('key' => $key, 'outcome' => $outcome, 'cutover' => $cutover,
+		'record' => new DnsRecord('TXT', 'example.com', 'x'), 'live' => array());
+};
+
+// Nothing gated: an ordinary set of additions must never disable the button.
+check($gate_html(array($row(DnsReconciler::MISSING, false, 'a'))) === '',
+	'a diff of plain additions emits no gate at all');
+
+// One free write alongside gated ones: pressing Apply still publishes something.
+check($gate_html(array($row(DnsReconciler::MISSING, false, 'a'),
+	$row(DnsReconciler::CONFLICTS, false, 'b'))) === '',
+	'a diff with any unconditional write emits no gate');
+
+// Everything gated: the button must start disabled.
+$html = $gate_html(array($row(DnsReconciler::CONFLICTS, false, 'b'),
+	$row(DnsReconciler::MISSING, true, 'c')));
+check($html !== '', 'a diff where every record needs a tick emits the gate');
+check(strpos($html, 'btn.disabled=!any') !== false, 'the gate drives the button disabled state');
+check(strpos($html, 'publish nothing') !== false, 'and says why the button is off');
+
+// The per-record shape is what makes a conflicting cutover correct.
+$both = $gate_html(array($row(DnsReconciler::CONFLICTS, true, 'mx')));
+check(strpos($both, '"cutover":true') !== false && strpos($both, '"adopt":true') !== false,
+	'a record that is both a cutover and an overwrite carries both gates');
+check(strpos($both, '(!g.cutover||c[g.key])&&(!g.adopt||a[g.key])') !== false,
+	'and the rule requires every gate on a record, not any one box anywhere');
+
+// Unchanged records are not writes: a diff of only matches plus one gated record
+// must not count the matches as a reason to enable Apply.
+$matches_only = $gate_html(array($row(DnsReconciler::MATCHES, false, 'm'),
+	$row(DnsReconciler::CONFLICTS, false, 'b')));
+check($matches_only !== '', 'an already-correct record does not count as a pending write');
 
 harness_finish();

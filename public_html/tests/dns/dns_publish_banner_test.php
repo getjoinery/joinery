@@ -19,7 +19,8 @@
  *
  * Run:  php tests/dns/dns_publish_banner_test.php
  *
- * @version 1.0
+ * @version 1.1 - a skipped record is amber, matching this file's own contract:
+ *                green only when every planned record is in place
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -80,10 +81,22 @@ check(DnsPublishBox::resultSeverity(publish_result(array(
 	result_row('unchanged', true), result_row('unchanged', true),
 ))) === DisplayMessage::MESSAGE_ANNOUNCEMENT, 'a domain that already matched is success with nothing written');
 
-// A skip is a choice the operator made in the diff, not a failure of the
-// publish — a plan where one record was left alone still succeeded.
+// A SKIP IS NOT A SUCCESS, and this check used to say the opposite — against
+// this file's own stated contract, two dozen lines above: green only when every
+// planned record is in place.
+//
+// The reasoning it carried was that a skip is a choice the operator made in the
+// diff. In practice it is usually the choice they did not know they were making:
+// the adopt and cutover confirmations are unticked by default, so pressing Apply
+// without noticing them skips every record needing one. Reported green, that is
+// an operator who believes their DNS is live and whose records were never
+// written — the exact failure this file exists to prevent.
 check(DnsPublishBox::resultSeverity(publish_result(array(
 	result_row('created', true), result_row('skipped', true),
-))) === DisplayMessage::MESSAGE_ANNOUNCEMENT, 'a record deliberately skipped does not turn the banner amber');
+))) === DisplayMessage::MESSAGE_WARNING, 'a skipped record turns the banner amber — it was asked for and is not published');
+
+check(DnsPublishBox::resultSeverity(publish_result(array(
+	result_row('skipped', true), result_row('skipped', true),
+))) === DisplayMessage::MESSAGE_WARNING, 'a publish that skipped everything is never green');
 
 harness_finish();

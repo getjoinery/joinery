@@ -25,7 +25,7 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
- * @version 2.10
+ * @version 2.12
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -175,15 +175,6 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			return LogicResult::redirect($redirect_url);
 		}
 
-		if ($input['action'] === 'set_provider') {
-			$key = trim((string)($input['provider'] ?? ''));
-			if ($key !== '' && InboundProviderRegistry::get($key) !== null) {
-				mailbox_setup_write_setting('mailbox_provider', $key);
-				$announce('Inbound provider switched to ' . $key . '.', 'Provider');
-			}
-			return LogicResult::redirect($state_qs(array('advanced' => true)));
-		}
-
 		if ($input['action'] === 'add_domain') {
 			$domain_name = strtolower(trim($input['domain'] ?? ''));
 			if ($domain_name !== '') {
@@ -315,16 +306,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	$focus_value = $selected_alias_id ? 'a' . $selected_alias_id
 		: ($selected_domain_id ? 'd' . $selected_domain_id : '');
 
-	// --- Inbound provider (global) — needed for arrival shape + Advanced ---
-	$provider_classes = InboundProviderRegistry::all();
-	$provider_options = array();
-	foreach ($provider_classes as $key => $class) {
-		$provider_options[$key] = $class::getLabel();
-	}
-	$active_provider_key = trim((string)$settings->get_setting('mailbox_provider'));
-	if ($active_provider_key === '') { $active_provider_key = 'postfix'; }
-	$active_provider_class = $provider_classes[$active_provider_key] ?? null;
-	$active_provider_is_webhook = $active_provider_class ? $active_provider_class::isWebhook() : false;
+	// The inbound provider is NOT resolved here any more. Choosing it moved to the
+	// Settings tab, and nothing on this page needed the answer: how mail arrives
+	// for the focused mailbox comes back as $arrival from mailbox_setup_scope.php,
+	// which asks the registry itself.
 
 	// --- Scoped checks for the chosen mailbox ---
 	// The grouping lives in mailbox_setup_scope.php, so the reader's setup
@@ -408,24 +393,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 
 	// --- Advanced (server-wide) — only run the full suite when expanded ---
 	$results     = array();
-	$dns_records = array();
 	$checker     = new InboundEmailSetupCheck();
 	if ($advanced) {
 		$results = $checker->run($focus_domain !== '' ? $focus_domain : null, $address !== '' ? $address : null);
-		if ($active_provider_class && $focus_domain !== '') {
-			$dns_records = $active_provider_class::getDnsRecords($focus_domain);
-		}
 	}
-
-	// Webhook URL — shown in Advanced when the active provider is a webhook.
-	$webhook_url = '';
-	if ($active_provider_is_webhook) {
-		$scheme = (isset($_SERVER['HTTPS']) && $_SERVER['HTTPS'] !== 'off') ? 'https' : 'http';
-		$host = $_SERVER['HTTP_HOST'] ?? '';
-		if ($host !== '') {
-			$webhook_url = $scheme . '://' . $host . '/ajax/inbound_email_webhook?provider=' . rawurlencode($active_provider_key);
-		}
-	}
+	// The provider's own getDnsRecords() is NOT read here. It is a fixed list that
+	// reads neither the receive topology nor the security level, so on a
+	// relay-fronted or protected domain it prescribes records that would undo both.
+	// dnsPlan() is the single source of what to publish
+	// (specs/implemented/mailbox_relay_surface_simplification.md, docs/dns_management.md).
 
 	// The Relay section renders whenever the deployment's receive mode is
 	// relay, or a relay row exists whatever the stored choice says.
@@ -519,11 +495,6 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		// Advanced
 		'advanced'                   => $advanced,
 		'results'                    => $results,
-		'dns_records'                => $dns_records,
-		'provider_options'           => $provider_options,
-		'active_provider_key'        => $active_provider_key,
-		'active_provider_is_webhook' => $active_provider_is_webhook,
-		'webhook_url'                => $webhook_url,
 		'mail_hostname'              => $checker->getMailHostname(),
 		'public_ip'                  => $checker->getPublicIp(),
 		'public_ip_private'          => $checker->publicIpIsPrivate(),

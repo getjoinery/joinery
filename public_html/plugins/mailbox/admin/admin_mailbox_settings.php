@@ -3,11 +3,17 @@ require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 /**
  * Inbound Email - Settings (server-wide delivery policy).
  *
- * Spam filtering, forwarding limits, the forwarded-From display, and
- * retention/storage caps. One form, grouped into boxes, saved in a single POST.
- * Provisioning and server identity live on the Setup tab, not here.
+ * How mail arrives and how sent mail leaves, spam filtering, forwarding limits,
+ * the forwarded-From display, and retention/storage caps. One form, grouped into
+ * boxes, saved in a single POST.
  *
- * @version 1.3
+ * Provisioning and server identity stay on the Setup tab: the relay, the mail
+ * hostname and the public IP are verified by the checks standing next to them,
+ * and a field beside the check that grades it is worth more than tidiness. What
+ * belongs here is the choices — which stack receives mail, which route sends it.
+ *
+ * @version 1.4 - the inbound provider moved here from the Setup tab, beside the
+ *                outbound route it pairs with
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -36,6 +42,28 @@ $form->hiddeninput('save_settings', '', array('value' => '1'));
 // Every box asks for a declared group. What this page decides is which boxes
 // exist, whether a control is reachable on this deployment, and what state to
 // print around it — none of which is field metadata.
+
+// --- How mail arrives ---
+// This is a setting, and was always declared as one (group `inbound`, options
+// resolved from InboundProviderRegistry) — it was just hand-rendered on the
+// Setup tab, which is where you go to check whether things work, not to change
+// them. Its sibling, how sent mail leaves, was already here; the pair belongs
+// together.
+//
+// Server identity — the mail hostname and public IP — deliberately stays on
+// Setup. Those two are verified by the checks standing next to them, and a field
+// beside the check that grades it is worth more than tidiness.
+$page->begin_box(array('title' => 'How mail arrives'));
+SettingsFieldRenderer::renderGroup($form, 'inbound', array(
+	'source' => 'mailbox',
+	'only'   => array('mailbox_provider'),
+	'values' => array('mailbox_provider' => $active_provider_key),
+));
+if (!empty($webhook_url)) {
+	echo '<p class="mt-2 mb-0"><strong>Webhook URL.</strong> Configure your provider to POST inbound mail to:<br>';
+	echo '<code class="iem-code-break">' . htmlspecialchars($webhook_url) . '</code></p>';
+}
+$page->end_box();
 
 // --- Spam filtering ---
 // One question, plus one genuinely optional capability. Where the scanning

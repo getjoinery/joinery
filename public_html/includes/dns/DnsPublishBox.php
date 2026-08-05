@@ -472,6 +472,12 @@ class DnsPublishBox {
 			$counts[$result['action']] = ($counts[$result['action']] ?? 0) + 1;
 			if (!$result['ok']) {
 				$failures[] = $result['record']->describe() . ' — ' . $result['reason'];
+			} elseif ($result['action'] === 'skipped') {
+				// Name the records and say why. A bare count of skips reads as
+				// housekeeping; what it actually means is that these records were
+				// asked for and are not published, usually because a confirmation
+				// was left unticked.
+				$failures[] = $result['record']->describe() . ' — ' . $result['reason'];
 			}
 		}
 		$parts = array();
@@ -481,6 +487,14 @@ class DnsPublishBox {
 			}
 		}
 		$summary = $parts ? implode(', ', $parts) . '.' : 'Nothing to change.';
+
+		// Lead with the fact that matters when nothing landed. A summary opening
+		// "6 skipped." is read as a tally; an operator scanning it can finish the
+		// sentence believing the publish worked.
+		$wrote = ($counts['created'] ?? 0) + ($counts['updated'] ?? 0) + ($counts['adopted'] ?? 0);
+		if ($wrote === 0 && !empty($counts['skipped'])) {
+			$summary = 'Nothing was published — every record needing your confirmation was skipped. ' . $summary;
+		}
 		if (!empty($failures)) {
 			$summary .= ' ' . implode(' ', $failures);
 		}
@@ -536,16 +550,29 @@ class DnsPublishBox {
 	public static function resultSeverity(array $publish): int {
 		$wrote = false;
 		$failed = $publish['error'] !== '';
+		$skipped = false;
 		foreach ($publish['results'] as $result) {
 			if (empty($result['ok'])) {
 				$failed = true;
 			} elseif (in_array($result['action'], array('created', 'updated', 'adopted'), true)) {
 				$wrote = true;
+			} elseif ($result['action'] === 'skipped') {
+				// A SKIP IS NOT A SUCCESS. The reconciler marks a skipped record
+				// ok — correctly, since nothing went wrong — but the operator asked
+				// for a record and did not get one, and grading that green is the
+				// silent wrong answer this subsystem exists to end. Submitting the
+				// diff without ticking the adopt or cutover confirmations skips
+				// every record needing one and used to report success.
+				$skipped = true;
 			}
 		}
-		if (!$failed) {
+		if (!$failed && !$skipped) {
 			return DisplayMessage::MESSAGE_ANNOUNCEMENT;
 		}
-		return $wrote ? DisplayMessage::MESSAGE_WARNING : DisplayMessage::MESSAGE_ERROR;
+		if (!$wrote && !$failed) {
+			// Asked for, and none of it happened. Never green.
+			return DisplayMessage::MESSAGE_WARNING;
+		}
+		return ($wrote || $skipped) ? DisplayMessage::MESSAGE_WARNING : DisplayMessage::MESSAGE_ERROR;
 	}
 }
