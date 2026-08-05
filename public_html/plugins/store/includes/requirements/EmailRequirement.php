@@ -17,7 +17,6 @@ class EmailRequirement extends AbstractProductRequirement {
         $email = isset($existing_data['usr_email']) ? $existing_data['usr_email'] : '';
 
         $formwriter->textinput('email', 'Email', [
-            'size' => 20,
             'value' => $email,
             'maxlength' => 255,
             'validation' => ['required' => true],

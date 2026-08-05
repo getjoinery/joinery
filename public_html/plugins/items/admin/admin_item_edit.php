@@ -142,7 +142,7 @@
 		'rows' => 5,
 		'cols' => 80,
 		'value' => $content,
-		'use_editor' => true
+		'htmlmode' => 'yes'
 	]);
 
 	$formwriter->submitbutton('btn_submit', 'Submit', ['class' => 'btn btn-primary']);

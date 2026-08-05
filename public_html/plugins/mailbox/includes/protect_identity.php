@@ -447,6 +447,9 @@ function mailbox_protect_restore_ambient_dns(InboundEmailDomain $domain): array 
 	$wanted = array();
 	try {
 		foreach ($checker->dnsPlan($name)->getRecords() as $rec) {
+			// A removal is not something to publish. The ambient shape asks for
+			// none, but this list is what the operator is told to go and set.
+			if ($rec->absent) { continue; }
 			if ($rec->type !== DnsRecord::TYPE_TXT) { continue; }
 			if ($rec->name === $name || $rec->name === '_dmarc.' . $name) {
 				$wanted[] = $rec->describe();

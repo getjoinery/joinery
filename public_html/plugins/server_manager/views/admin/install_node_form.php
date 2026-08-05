@@ -398,7 +398,6 @@ $formwriter->textinput('domain', 'Domain', [
 	'placeholder' => 'e.g., orgs.getjoinery.com',
 	'helptext'    => 'Domain only — no http:// or https://. SSL is configured separately after DNS cutover.',
 	'pattern'     => '^(?!https?://).+',
-	'title'       => 'Enter the domain only, without http:// or https://',
 ]);
 
 // Fresh install panel (empty placeholder — nothing extra needed)

@@ -711,7 +711,7 @@ if (!$advanced) {
 	$formwriter->textinput('mail_hostname', 'Mail server hostname', array(
 		'value'       => $mail_hostname,
 		'placeholder' => 'mail.example.com',
-		'help_text'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name.',
+		'helptext'   => 'The fully-qualified name of THIS mail server — the target of your MX records, its HELO name, and its reverse-DNS name.',
 	));
 	if ($public_ip_private) {
 		$formwriter->addError('public_ip',
@@ -720,7 +720,7 @@ if (!$advanced) {
 	$formwriter->textinput('public_ip', 'Mail server public IP', array(
 		'value'       => $configured_public_ip,
 		'placeholder' => $public_ip !== '' ? 'auto-detected: ' . $public_ip : 'auto-detected',
-		'help_text'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
+		'helptext'   => 'Leave blank to auto-detect. Set this only if the server is behind NAT and auto-detection finds a private address.',
 	));
 	$formwriter->submitbutton('btn_save', 'Save & Run Checks');
 	echo $formwriter->end_form();

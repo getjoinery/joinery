@@ -12,6 +12,7 @@
  *   MISSING   nothing is there; creating it takes nothing away
  *   DIFFERS   the platform owns this slot and its value has drifted
  *   CONFLICTS something is there that the platform does not own
+ *   REMAINS   the plan requires this record gone and it is still published
  *   UNKNOWN   the public resolver did not answer, so nothing is claimed
  *
  * Two things make it safe:
@@ -27,7 +28,12 @@
  *    only rollback would be another write; re-running publish converges whatever
  *    is left, which is why re-publishing a correct domain is a no-op.
  *
- * @version 1.0
+ * **Deleting is not the inverse of publishing, and is not treated as one.** A
+ * removal always needs its own tick, is never part of an additive publish, and
+ * claims no ownership when it finds nothing — because the record it deletes is,
+ * by definition, one the platform did not write.
+ *
+ * @version 1.1 - a plan can require a record to be absent, and applying it deletes
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -41,6 +47,14 @@ class DnsReconciler {
 	const MISSING   = 'missing';
 	const DIFFERS   = 'differs';
 	const CONFLICTS = 'conflicts';
+	/**
+	 * The plan says this record must not exist, and it does.
+	 *
+	 * Never produced for a record the plan wants published — the two are opposite
+	 * instructions and carry different keys, so a confirmation for one can never
+	 * authorize the other.
+	 */
+	const REMAINS   = 'remains';
 	const UNKNOWN   = 'unknown';
 	/**
 	 * Written here, and public DNS has not caught up yet.
@@ -135,6 +149,21 @@ class DnsReconciler {
 
 		if (!$resolved) {
 			$outcome = self::UNKNOWN;
+		} elseif ($record->absent) {
+			// A removal is judged only against what it actually targets, and the
+			// row narrows to that: a name holding one foreign key and two of the
+			// deployment's own records must not display all three as things about
+			// to be deleted.
+			$found = array();
+			foreach ($live as $existing) {
+				if ($record->targets($existing)) {
+					$found[] = $existing;
+				}
+			}
+			$live = $found;
+			// Gone is done. No write receipt, and no ownership claim — the
+			// platform is not responsible for a record it wants to not exist.
+			$outcome = empty($found) ? self::MATCHES : self::REMAINS;
 		} else {
 			$satisfied = false;
 			foreach ($live as $existing) {
@@ -224,6 +253,17 @@ class DnsReconciler {
 			$current[] = $existing->value;
 		}
 		$current = implode(', ', array_unique($current));
+		// A removal puts nothing in place of what it takes away, which is the
+		// whole difference between it and a repoint, and is what the operator has
+		// to weigh before ticking.
+		if ($record->absent) {
+			if ($record->type === DnsRecord::TYPE_MX) {
+				return 'Mail for ' . $record->name . ' is delivered to ' . $current
+					. ' today. Removing this record stops that, and nothing takes its place.';
+			}
+			return $record->name . ' resolves to ' . $current . ' today. Removing this record '
+				. 'stops it resolving at all, and anything still talking to ' . $current . ' stops arriving.';
+		}
 		if ($record->type === DnsRecord::TYPE_MX) {
 			return 'Mail for ' . $record->name . ' is delivered to ' . $current
 				. ' today. Publishing this record stops that and sends it to ' . $record->value . ' instead.';
@@ -285,18 +325,20 @@ class DnsReconciler {
 	/**
 	 * Write the plan, one record at a time.
 	 *
-	 * @param array  $decisions Per-record confirmations from the diff the
-	 *                          operator saw: ['adopt' => [key, …], 'cutover' => [key, …]].
+	 * @param array  $decisions Per-record confirmations from the diff the operator
+	 *                          saw: ['adopt' => [key, …], 'cutover' => [key, …],
+	 *                          'remove' => [key, …]].
 	 * @param string $mode      APPLY_CONFIRMED or APPLY_ADDITIVE.
 	 * @return array[] One result per planned record:
 	 *   [key, record, action, ok, reason] where action is
-	 *   created|updated|adopted|unchanged|skipped|failed.
+	 *   created|updated|adopted|deleted|unchanged|skipped|failed.
 	 */
 	public function apply(DnsProvider $driver, string $zone, DnsRecordPlan $plan,
 			array $decisions = array(), string $mode = self::APPLY_CONFIRMED): array {
 
 		$adopt_ok   = array_flip((array)($decisions['adopt'] ?? array()));
 		$cutover_ok = array_flip((array)($decisions['cutover'] ?? array()));
+		$remove_ok  = array_flip((array)($decisions['remove'] ?? array()));
 		$provider_key = $driver::getKey();
 
 		$results = array();
@@ -306,6 +348,14 @@ class DnsReconciler {
 			$record  = $row['record'];
 			$key     = $row['key'];
 			$outcome = $row['outcome'];
+
+			// Deleting has its own gates and its own bookkeeping, and shares none
+			// of the create/update path's — least of all the ownership claim.
+			if ($record->absent) {
+				$results[] = $this->applyRemoval($driver, $zone, $plan, $row,
+					$remove_ok, $cutover_ok, $mode);
+				continue;
+			}
 
 			// A record whose live value is already exactly what the plan wants is
 			// adopted without touching DNS: the platform and the zone already
@@ -372,6 +422,60 @@ class DnsReconciler {
 		}
 
 		return $results;
+	}
+
+	/**
+	 * Apply one removal.
+	 *
+	 * Three rules, and each of them exists because deleting is not undone by
+	 * pressing the button again:
+	 *
+	 *  - **Never additive.** Adding a domain, provisioning a node, any flow that
+	 *    publishes without a human reading a diff, deletes nothing. Ever.
+	 *  - **Never without its own tick.** The adopt confirmation does not cover it:
+	 *    adopting overwrites a record with a known replacement, and this leaves a
+	 *    name answering with nothing.
+	 *  - **Never an ownership claim.** A removal that finds nothing is done, not
+	 *    adopted. Recording the platform as responsible for a record that does not
+	 *    exist would make the next withdraw() try to delete it again.
+	 */
+	private function applyRemoval(DnsProvider $driver, string $zone, DnsRecordPlan $plan,
+			array $row, array $remove_ok, array $cutover_ok, string $mode): array {
+		$record = $row['record'];
+		$key    = $row['key'];
+
+		if ($row['outcome'] !== self::REMAINS) {
+			return $this->result($key, $record, 'unchanged', true,
+				'Nothing is published here, so there is nothing to remove.');
+		}
+		if ($mode === self::APPLY_ADDITIVE) {
+			return $this->result($key, $record, 'skipped', true,
+				'Deleting a record is never part of a publish that runs without someone reading it first.');
+		}
+		if (!isset($remove_ok[$key])) {
+			return $this->result($key, $record, 'skipped', true,
+				'A record is never deleted without an explicit choice. This one is still published.');
+		}
+		if (!empty($row['cutover']) && !isset($cutover_ok[$key])) {
+			return $this->result($key, $record, 'skipped', true,
+				'Removing this record stops traffic that already flows, so it needs its own confirmation.');
+		}
+
+		try {
+			foreach ($row['live'] as $live) {
+				$driver->deleteRecord($zone, $live);
+			}
+			// Only if the platform was claiming this slot. Forgetting a slot it
+			// never owned is harmless but dishonest bookkeeping.
+			if (!empty($row['owned'])) {
+				$this->store->forget($plan->getDomain(), $record->type, $record->name);
+			}
+			$count = count($row['live']);
+			return $this->result($key, $record, 'deleted', true,
+				$count > 1 ? $count . ' records at this name were deleted.' : '');
+		} catch (Throwable $e) {
+			return $this->result($key, $record, 'failed', false, $e->getMessage());
+		}
 	}
 
 	/** The live record an update should replace: the first in the slot. */
@@ -453,7 +557,8 @@ class DnsReconciler {
 	/** Count of each outcome in a diff, for a one-line page summary. */
 	public static function summarize(array $rows): array {
 		$counts = array(self::MATCHES => 0, self::MISSING => 0, self::DIFFERS => 0,
-			self::CONFLICTS => 0, self::UNKNOWN => 0, self::PENDING => 0, 'cutover' => 0);
+			self::CONFLICTS => 0, self::REMAINS => 0, self::UNKNOWN => 0,
+			self::PENDING => 0, 'cutover' => 0);
 		foreach ($rows as $row) {
 			$counts[$row['outcome']] = ($counts[$row['outcome']] ?? 0) + 1;
 			if (!empty($row['cutover'])) {

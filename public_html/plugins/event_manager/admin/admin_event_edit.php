@@ -284,7 +284,7 @@ foreach ($surveys as $survey) {
 if (!empty($survey_options)) {
 	$formwriter->dropinput('evt_svy_survey_id', 'Event Survey', [
 		'options' => $survey_options,
-		'showdefault' => 'No Survey'
+		'empty_option' => 'No Survey'
 	]);
 
 	$display_options = array(
@@ -295,7 +295,6 @@ if (!empty($survey_options)) {
 	);
 	$formwriter->dropinput('evt_survey_display', 'Survey display', [
 		'options' => $display_options,
-		'showdefault' => false
 	]);
 }
 

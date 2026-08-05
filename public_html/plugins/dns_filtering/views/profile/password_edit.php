@@ -50,7 +50,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	}
 	$formwriter->passwordinput('usr_password', 'New Password', [
 		'maxlength' => 255,
-		'hint' => 'Must be at least 5 characters.'
+		'helptext' => 'Must be at least 5 characters.'
 	]);
 	$formwriter->passwordinput('usr_password_again', 'Retype New Password', [
 		'maxlength' => 255

@@ -73,11 +73,51 @@ Two rules for a plan author:
   relay hostname), leave the record out. Publishing `YOUR_SERVER_IP` into
   someone's zone is worse than publishing nothing.
 
+### Records that must not exist
+
+Desired state includes what must **not** be there. A plan that could only add and
+change would report *nothing to change* on a domain still holding a record that
+makes the plan's promise false — and a page saying that beside a check card
+naming a record to delete is two things disagreeing about whether a domain is
+finished.
+
+```php
+// Whatever is published at this name, at this type, must go.
+$plan->addAbsent('TXT', 'mailo._domainkey.example.com', DnsRecord::ANY_VALUE,
+    'A signing key that is not yours — it can send as example.com and pass DMARC.');
+
+// Or one specific value, leaving anything else at the name alone.
+$plan->addAbsent('TXT', 'example.com', 'v=spf1 include:oldhost.test ~all');
+```
+
+The **type is part of the requirement**, not decoration: a delegated DKIM
+selector is a CNAME and a held one is a TXT, and asking for both when only one is
+live puts a permanently-satisfied row on the page. Whoever writes the plan is
+expected to know which answers, because they had to look to know there was
+anything to remove.
+
+Removals are gated harder than anything else in the box, because every other
+outcome converges by publishing again and a deleted record does not come back:
+
+- **Never additive.** `APPLY_ADDITIVE` — adding a domain, provisioning a node,
+  anything that publishes without a human reading a diff — deletes nothing.
+- **Never without its own tick.** The *adopt* confirmation does not cover it:
+  adopting overwrites a record with a known replacement, a removal leaves the
+  name answering with nothing. Deleting a live MX or A record needs the *cutover*
+  tick as well.
+- **Never an ownership claim.** A removal that finds nothing is done, not
+  adopted — recording the platform as responsible for a record that does not
+  exist would make the next `withdraw()` try to delete it again.
+
+`hasContradiction()` catches a plan that both publishes and removes the same
+record. That is the plan author's to resolve: applying it would depend on which
+record came first.
+
 The two plans that ship:
 
 | Consumer | Method | Records |
 |---|---|---|
-| Mailbox domain setup | `InboundEmailSetupCheck::dnsPlan($domain)` | MX, SPF, DKIM, DMARC, the mail host's A record, the fleet ownership proof, and the inverted protected shape for a Fortress domain |
+| Mailbox domain setup | `InboundEmailSetupCheck::dnsPlan($domain)` | MX, SPF, DKIM, DMARC, the mail host's A record, the fleet ownership proof, and the inverted protected shape for a Fortress domain — which also requires any foreign signing key to be absent |
 | Node provisioning | `NodeDnsPlan::forNode($node)` | The node's site A (or AAAA) record — the one certificate issuance waits on |
 
 `InboundEmailSetupCheck::dnsPlan()` computes desired state from the same
@@ -145,16 +185,17 @@ exactly this reason.
 reseller or parent/child login) makes the box ask which, once, as a one-click
 choice for that publish. No account identifier is persisted.
 
-## The four outcomes
+## The outcomes
 
 For each planned record, comparing against live state yields exactly one of:
 
 | Outcome | Meaning | What Apply does |
 |---|---|---|
-| **matches** | Already published as planned | Adopts it — recorded as ours, no DNS write |
+| **matches** | Already published as planned (or, for a removal, already gone) | Adopts it — recorded as ours, no DNS write. A removal claims nothing |
 | **missing** | Nothing is there | Creates it |
 | **differs** | We own this slot and its value drifted | Updates it |
 | **conflicts** | Something is there that we do not own | Nothing, unless explicitly adopted |
+| **remains** | The plan requires this record gone and it is still published | Nothing, unless explicitly confirmed for removal |
 | **unknown** | The resolver did not answer | Nothing. A failed lookup is not evidence of absence |
 
 **Applying is per-record and best-effort.** If one record fails — a rate limit, a
@@ -207,13 +248,22 @@ problem, because the two need opposite fixes. Cloudflare mishandles /48 and /64
 ranges in that filter; list an IPv6 address on its own. Namecheap's allowlist has
 the same shape.
 
-**The two confirmations are unticked by default, and that is deliberate.** A
-record that collides with one the platform does not own needs an explicit *adopt*
-tick; a change that redirects traffic already flowing needs a *cutover* tick.
-They are the only choices in the box that can take mail down, and the asymmetry
-decides the default: unticked costs a second press, ticked-by-default costs the
-mail, and only one of those is undone by pressing again. Ordinary additions need
-neither tick and are written without asking.
+**The confirmations are unticked by default, and that is deliberate.** A record
+that collides with one the platform does not own needs an explicit *adopt* tick;
+a change that redirects traffic already flowing needs a *cutover* tick; a record
+the plan requires gone needs a *remove* tick. They are the only choices in the
+box that can take mail down, and the asymmetry decides the default: unticked
+costs a second press, ticked-by-default costs the mail, and only one of those is
+undone by pressing again. Ordinary additions need no tick and are written without
+asking.
+
+The action column grades by what is at stake, and every label is a verb — a badge
+sitting alone in a column is read as an adjective, so a word that could describe
+the record rather than the action is the wrong word. **Add** carries no alarm
+colour (nothing is there to lose), **Change** is amber (a live value goes away),
+**Replace** is stronger (it destroys a record the platform did not create, but
+puts a known value in its place), and **Remove** is the only red: it is the one
+thing the box does that publishing again cannot undo.
 
 **Leaving one unticked skips that record, and a skip is never green.** Both lists
 say so at the point of choice, `resultSeverity()` grades any skip amber, and the

@@ -12,7 +12,12 @@
  * The owner string is the subsystem that will be recorded as responsible for
  * each record it creates or adopts (see ManagedDnsRecord).
  *
- * @version 1.0
+ * Desired state includes what must NOT be there. A plan carries removals
+ * alongside publications (addAbsent()), so a domain is finished when the plan is
+ * satisfied rather than when the plan is satisfied and somebody also remembered
+ * to delete something by hand at the provider.
+ *
+ * @version 1.1 - a plan can require a record to be absent
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsRecord.php'));
@@ -42,7 +47,11 @@ class DnsRecordPlan implements IteratorAggregate, Countable {
 		foreach ($this->records as $existing) {
 			if ($existing->type === $record->type
 					&& $existing->name === $record->name
-					&& $existing->value === $record->value) {
+					&& $existing->value === $record->value
+					// Publish and remove are opposite instructions about the same
+					// slot, so they are never the same row. A plan holding both is
+					// contradictory rather than duplicated — see hasContradiction().
+					&& $existing->absent === $record->absent) {
 				return $this;
 			}
 		}
@@ -54,6 +63,41 @@ class DnsRecordPlan implements IteratorAggregate, Countable {
 	public function addRecord(string $type, string $name, string $value,
 			?int $ttl = null, ?int $priority = null, string $note = ''): DnsRecordPlan {
 		return $this->add(new DnsRecord($type, $name, $value, $ttl, $priority, $note));
+	}
+
+	/**
+	 * Require that nothing (or nothing with this value) is published at a name.
+	 *
+	 * @param string $value DnsRecord::ANY_VALUE removes whatever is there.
+	 */
+	public function addAbsent(string $type, string $name,
+			string $value = DnsRecord::ANY_VALUE, string $note = ''): DnsRecordPlan {
+		return $this->add(DnsRecord::mustBeAbsent($type, $name, $value, $note));
+	}
+
+	/** @return DnsRecord[] The records this plan wants gone. */
+	public function removals(): array {
+		return array_values(array_filter($this->records, function (DnsRecord $r) { return $r->absent; }));
+	}
+
+	/**
+	 * A record this plan both publishes and removes, if any.
+	 *
+	 * Only reachable by a plan author contradicting themselves, or by two
+	 * subsystems merging plans that disagree. Applying it would depend on record
+	 * order, so the caller building the plan is the one who has to resolve it.
+	 *
+	 * @return DnsRecord|null the removal that collides with a publication.
+	 */
+	public function hasContradiction(): ?DnsRecord {
+		foreach ($this->removals() as $removal) {
+			foreach ($this->records as $other) {
+				if (!$other->absent && $removal->targets($other)) {
+					return $removal;
+				}
+			}
+		}
+		return null;
 	}
 
 	/** @return DnsRecord[] */

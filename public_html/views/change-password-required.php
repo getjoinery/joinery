@@ -38,10 +38,12 @@
             'autocomplete' => 'new-password',
         ]);
         echo $formwriter->passwordinput('confirm_password', 'Confirm Password', [
-            'required'         => true,
-            'autocomplete'     => 'new-password',
-            'data-rule-equalTo' => '#new_password',
-            'data-msg-equalTo'  => 'Passwords do not match',
+            'required'     => true,
+            'autocomplete' => 'new-password',
+            'validation'   => [
+                'matches'  => 'new_password',
+                'messages' => ['matches' => 'Passwords do not match'],
+            ],
         ]);
         ?>
 

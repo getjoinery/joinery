@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.19.0
+ * @version 2.20.0
+ * @changelog 2.20.0 - An input option this class never reads is refused rather than dropped: the known set is derived from the source of the writer and its parents, so a misspelled option (help_text for helptext) stops the page in debug instead of silently rendering a field without it
  * @changelog 2.19.0 - validateVisibilityRules() throws InvalidArgumentException instead of trigger_error(E_USER_ERROR), which PHP 8.4 deprecates; the failure is a caller mistake, so it still halts, but it is now catchable and carries a trace to the bad call
  * @changelog 2.18.0 - Added the inputmode option on text inputs, so a code or numeric field can raise the numeric keypad on a phone without becoming type=number
  * @changelog 2.16.0 - min/max validation tests presence against ''/null instead of empty(), so a `min: 1` rule rejects 0 (empty('0') is true, so it had been accepting the one value it exists to reject)
@@ -2493,8 +2494,120 @@ abstract class FormWriterV2Base {
         error_log($message);
     }
 
+    /**
+     * An option this writer never reads is a mistake, not a no-op.
+     *
+     * Nothing used to happen when a field option was misspelled. The field
+     * rendered, the page looked finished, and the thing the option asked for was
+     * simply absent — `help_text` instead of `helptext` meant every explanation
+     * written to stop a silent failure was itself silently dropped, in five files,
+     * for as long as nobody read the rendered HTML closely.
+     *
+     * THE KNOWN SET IS DERIVED, NEVER HAND-MAINTAINED. It is every `$options['…']`
+     * the writer's own source and its parents' read, so implementing an option IS
+     * declaring it and a hand-written list cannot fall behind the code. This is
+     * the same rule `SystemMultiBase` applies to collection filters, and it exists
+     * for the same reason: a parameter that is quietly ignored is worse than one
+     * that is refused.
+     *
+     * WHAT IT CANNOT SEE: options are pooled across field types, so a key that is
+     * real for one input is accepted on another. It catches typos and inventions,
+     * which is the failure that has actually happened; it does not catch
+     * `cols` on a date field.
+     *
+     * Debug stops the page naming the field and the nearest real option.
+     * Production logs and renders — a live site refusing a page over a spelling
+     * mistake in a help string would be the worse failure.
+     */
+    private function refuseUnknownOption($name, $input_type, array $options) {
+        $known = static::knownOptionKeys();
+        if (empty($known)) {
+            return;   // source unreadable; never fabricate a vocabulary
+        }
+        foreach ($options as $key => $ignored) {
+            if (!is_string($key) || $key === '' || isset($known[$key])) {
+                continue;
+            }
+            $message = "FormWriter: '{$key}' is not an option of {$input_type} field '{$name}' — "
+                . static::class . " never reads it, so it was going to be ignored.";
+            $near = static::nearestOptionKey($key, $known);
+            if ($near !== '') {
+                $message .= " Did you mean '{$near}'?";
+            }
+            if (Globalvars::get_instance()->get_setting('debug', false, true)) {
+                throw new Exception($message);
+            }
+            error_log($message);
+        }
+    }
+
+    /**
+     * Every option key this writer reads, from its own source and its parents'.
+     *
+     * Read once per class per request. Keyed by class, so a theme's writer that
+     * adds options of its own gets them without registering anything.
+     *
+     * Public so a caller can ask what a writer supports rather than guess — the
+     * question this whole check exists because nobody could answer.
+     *
+     * @return array<string,true>
+     */
+    public static function knownOptionKeys() {
+        static $cache = array();
+        $class = static::class;
+        if (isset($cache[$class])) {
+            return $cache[$class];
+        }
+
+        $keys = array();
+        try {
+            $ref = new ReflectionClass($class);
+        } catch (Throwable $e) {
+            return array();
+        }
+        while ($ref !== false && $ref !== null) {
+            $file = $ref->getFileName();
+            if (is_string($file) && $file !== '' && is_readable($file)) {
+                $src = (string)file_get_contents($file);
+                if (preg_match_all('/\$options\[\s*[\'"]([a-zA-Z0-9_]+)[\'"]\s*\]/', $src, $m)) {
+                    foreach ($m[1] as $found) {
+                        $keys[$found] = true;
+                    }
+                }
+            }
+            $ref = $ref->getParentClass();
+        }
+
+        // Read by the caller's own code rather than by a $options[…] access here:
+        // sub-field schemas a repeater hands back, and the label a checkboxList
+        // option list carries. Refusing these would refuse working forms.
+        foreach (array('fields', 'schema', 'sub_fields') as $passthrough) {
+            $keys[$passthrough] = true;
+        }
+
+        $cache[$class] = $keys;
+        return $keys;
+    }
+
+    /** The known option closest to a misspelling, or '' when nothing is close. */
+    protected static function nearestOptionKey($key, array $known) {
+        $best = '';
+        $best_distance = PHP_INT_MAX;
+        foreach (array_keys($known) as $candidate) {
+            $distance = levenshtein(strtolower($key), strtolower($candidate));
+            if ($distance < $best_distance) {
+                $best_distance = $distance;
+                $best = $candidate;
+            }
+        }
+        // Past a third of the word, a suggestion is a guess. Naming the wrong
+        // option is worse than naming none.
+        return ($best_distance <= max(1, (int)floor(strlen($key) / 3))) ? $best : '';
+    }
+
     protected function registerField($name, $input_type, $label, &$options) {
         $this->refuseHandDrawnSetting($name);
+        $this->refuseUnknownOption($name, $input_type, is_array($options) ? $options : array());
 
         // Auto-fill value from values array if not explicitly provided
         if (!isset($options['value']) && isset($this->values[$name])) {

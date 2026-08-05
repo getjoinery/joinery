@@ -14,6 +14,8 @@
  * where it already is has no blast radius; moving a zone takes the website and
  * every other name with it, and is not something this platform offers.
  *
+ * @version 1.8 - renders removals: a record the plan requires gone reads as
+ *                Remove, carries its own confirmation, and copies its name
  * @version 1.7 - every action label is a verb, and colour grades by what is at
  *                stake: Change is amber because a live value goes away
  * @version 1.6 - a caller rendering the box inside another panel can say so, so
@@ -121,6 +123,7 @@ function dns_publish_box_headline(array $vars): string {
 		DnsReconciler::MISSING   => 'add',
 		DnsReconciler::DIFFERS   => 'change',
 		DnsReconciler::CONFLICTS => 'replace',
+		DnsReconciler::REMAINS   => 'remove',
 	) as $outcome => $verb) {
 		$n = (int)($counts[$outcome] ?? 0);
 		if ($n > 0) {
@@ -194,12 +197,13 @@ function dns_publish_box_primary($page, array $vars): void {
  * publishes nothing. That is now reported honestly rather than in green, but
  * being told afterwards is a poor second to not being able to do it.
  *
- * THE TEST IS PER RECORD, NOT A COUNT OF TICKS. A record can need both
- * confirmations — a conflicting MX is a cutover AND an overwrite — so ticking
- * one box for it still writes nothing. A record publishes when every gate that
- * applies to it is satisfied:
+ * THE TEST IS PER RECORD, NOT A COUNT OF TICKS. A record can need several
+ * confirmations — a conflicting MX is a cutover AND an overwrite, a live MX
+ * being deleted is a cutover AND a removal — so ticking one box for it still
+ * writes nothing. A record publishes when every gate that applies to it is
+ * satisfied:
  *
- *   (not a cutover OR its cutover is ticked) AND (no conflict OR its adopt is ticked)
+ *   (not a cutover OR ticked) AND (no conflict OR adopted) AND (no removal OR confirmed)
  *
  * Records needing no confirmation satisfy this with nothing ticked, so a diff of
  * ordinary additions never disables the button.
@@ -213,7 +217,8 @@ function dns_publish_box_apply_gate(array $rows): void {
 	foreach ($rows as $row) {
 		$needs_cutover = !empty($row['cutover']);
 		$needs_adopt   = ($row['outcome'] === DnsReconciler::CONFLICTS);
-		if (!$needs_cutover && !$needs_adopt) {
+		$needs_remove  = ($row['outcome'] === DnsReconciler::REMAINS);
+		if (!$needs_cutover && !$needs_adopt && !$needs_remove) {
 			// Unchanged records are not writes either — only a record that would
 			// actually change anything counts towards enabling the button.
 			if ($row['outcome'] === DnsReconciler::MISSING || $row['outcome'] === DnsReconciler::DIFFERS) {
@@ -221,7 +226,8 @@ function dns_publish_box_apply_gate(array $rows): void {
 			}
 			continue;
 		}
-		$gated[] = array('key' => (string)$row['key'], 'cutover' => $needs_cutover, 'adopt' => $needs_adopt);
+		$gated[] = array('key' => (string)$row['key'], 'cutover' => $needs_cutover,
+			'adopt' => $needs_adopt, 'remove' => $needs_remove);
 	}
 	if ($free > 0 || empty($gated)) {
 		return;   // something publishes whatever is ticked; no gate needed
@@ -242,9 +248,9 @@ function dns_publish_box_apply_gate(array $rows): void {
 		. 'form.querySelectorAll("input[name=\'"+name+"[]\']:checked").forEach(function(el){out[el.value]=true;});'
 		. 'return out;}'
 		. 'function sync(){'
-		. 'var c=ticked("dns_cutover"),a=ticked("dns_adopt");'
+		. 'var c=ticked("dns_cutover"),a=ticked("dns_adopt"),r=ticked("dns_remove");'
 		. 'var any=gated.some(function(g){'
-		. 'return (!g.cutover||c[g.key])&&(!g.adopt||a[g.key]);});'
+		. 'return (!g.cutover||c[g.key])&&(!g.adopt||a[g.key])&&(!g.remove||r[g.key]);});'
 		. 'btn.disabled=!any;note.style.display=any?"none":"";}'
 		. 'form.addEventListener("change",function(e){'
 		. 'if(e.target&&e.target.type==="checkbox")sync();});'
@@ -285,6 +291,7 @@ function dns_publish_box_diff($page, array $vars): void {
 
 	$conflicts = array();
 	$cutovers  = array();
+	$removals  = array();
 
 	// A DKIM value is longer than any column: the diff scrolls inside its own
 	// container rather than pushing the page sideways.
@@ -304,7 +311,15 @@ function dns_publish_box_diff($page, array $vars): void {
 		if ($record->type === DnsRecord::TYPE_MX && $record->priority !== null) {
 			echo ' <span class="text-muted small">priority ' . (int)$record->priority . '</span>';
 		}
-		echo '<div class="mt-1">' . PublicPageBase::copy_field($record->value) . '</div>';
+		// A removal has no value to publish, so the copy field carries the NAME —
+		// the thing you paste into a provider's search box to find the record you
+		// are about to delete. Copying a value there would be copying the very key
+		// this row exists to get rid of.
+		if ($record->absent) {
+			echo '<div class="mt-1">' . PublicPageBase::copy_field($record->name) . '</div>';
+		} else {
+			echo '<div class="mt-1">' . PublicPageBase::copy_field($record->value) . '</div>';
+		}
 		if ($record->note !== '') {
 			echo '<div class="text-muted small">' . htmlspecialchars($record->note) . '</div>';
 		}
@@ -329,6 +344,17 @@ function dns_publish_box_diff($page, array $vars): void {
 		if ($row['outcome'] === DnsReconciler::CONFLICTS) {
 			$conflicts[$row['key']] = $record->describe() . ' — replaces what is there now';
 		}
+		if ($row['outcome'] === DnsReconciler::REMAINS) {
+			// The live value, not the plan's — a removal's plan value is usually
+			// "anything published here", and what the operator needs to see before
+			// ticking is the record that will actually be destroyed.
+			$live = array();
+			foreach ($row['live'] as $existing) {
+				$live[] = $existing->value;
+			}
+			$removals[$row['key']] = $record->type . ' ' . $record->name . ' — deleted'
+				. (!empty($live) ? ', currently ' . dns_publish_box_abbreviate(implode(' · ', $live)) : '');
+		}
 		if (!empty($row['cutover'])) {
 			$cutovers[$row['key']] = $row['cutover_note'];
 		}
@@ -348,15 +374,26 @@ function dns_publish_box_diff($page, array $vars): void {
 	if (!empty($conflicts)) {
 		$form->checkboxList('dns_adopt', 'Records to adopt and overwrite', array(
 			'options'   => $conflicts,
-			'help_text' => 'A record the platform does not own is never overwritten without this choice. '
+			'helptext' => 'A record the platform does not own is never overwritten without this choice. '
 				. 'Leave one unticked and it is skipped, not silently changed.',
 		));
 	}
 	if (!empty($cutovers)) {
 		$form->checkboxList('dns_cutover', 'Cutovers to confirm', array(
 			'options'   => $cutovers,
-			'help_text' => 'These changes redirect traffic that already flows. Leave one unticked and it is '
+			'helptext' => 'These changes redirect traffic that already flows. Leave one unticked and it is '
 				. 'skipped — nothing moves, and the record stays as it is.',
+		));
+	}
+	// Its own list, never folded into adopt. Overwriting a record leaves a working
+	// value behind; deleting one leaves the name answering with nothing, and is
+	// the one thing here that pressing the button again does not undo.
+	if (!empty($removals)) {
+		$form->checkboxList('dns_remove', 'Records to delete', array(
+			'options'   => $removals,
+			'helptext' => 'These records must not exist for this domain to be what it claims to be. '
+				. 'Deleting is the one thing here that cannot be undone by publishing again — keep a copy '
+				. 'of anything you might want back. Leave one unticked and it stays exactly as it is.',
 		));
 	}
 
@@ -369,7 +406,7 @@ function dns_publish_box_diff($page, array $vars): void {
 	$guide = $vars['credential_guide'];
 	foreach ($vars['credential_fields'] as $field => $spec) {
 		$options = array(
-			'help_text'    => $spec['help'] ?? '',
+			'helptext'    => $spec['help'] ?? '',
 			'autocomplete' => 'off',
 			'help_modal'   => $guide,
 		);
@@ -393,7 +430,7 @@ function dns_publish_box_diff($page, array $vars): void {
 		$oauth_guide = $vars['oauth_config_guide'];
 		foreach ($vars['oauth_config_fields'] as $setting => $spec) {
 			$options = array(
-				'help_text'    => $spec['help'] ?? '',
+				'helptext'    => $spec['help'] ?? '',
 				'autocomplete' => 'off',
 				'help_modal'   => $oauth_guide,
 			);
@@ -472,10 +509,32 @@ function dns_publish_box_chooser($page, array $vars): void {
 	echo $form->end_form();
 }
 
+/**
+ * A value short enough to sit in a checkbox label.
+ *
+ * A DKIM key is 400-odd characters and would push the confirmation the operator
+ * has to read off the bottom of the box. The head and tail are kept because they
+ * are what identifies one key from another at a glance; the full value is in the
+ * table row directly above.
+ */
+function dns_publish_box_abbreviate(string $value, int $keep = 24): string {
+	$value = trim($value);
+	if (strlen($value) <= ($keep * 2) + 3) {
+		return $value;
+	}
+	return substr($value, 0, $keep) . '…' . substr($value, -$keep);
+}
+
 /** What applying does to this record, said once and in plain terms. */
 function dns_publish_box_consequence(array $row): string {
+	$absent = !empty($row['record']) && !empty($row['record']->absent);
 	switch ($row['outcome']) {
 		case DnsReconciler::MATCHES:
+			if ($absent) {
+				// Never "applying records it as managed here" — the platform does
+				// not become responsible for a record whose whole point is absence.
+				return 'Already gone — nothing to do.';
+			}
 			return $row['owned']
 				? 'Already correct — nothing to do.'
 				: 'Already correct. Applying just records it as managed here, with no DNS write.';
@@ -487,6 +546,8 @@ function dns_publish_box_consequence(array $row): string {
 			return 'Its current value is overwritten. This record is managed here and has drifted.';
 		case DnsReconciler::CONFLICTS:
 			return 'Left alone unless you tick it below — this record was not created here.';
+		case DnsReconciler::REMAINS:
+			return 'Deleted, and nothing takes its place. Left alone unless you tick it below.';
 		default:
 			return 'Not checked. The resolver did not answer, so nothing is claimed either way.';
 	}
@@ -509,8 +570,12 @@ function dns_publish_box_consequence(array $row): string {
  *   Change  — a record is live and its current value goes away. Amber, softly:
  *             this is ordinary work, but it is not free, and blue reads as
  *             optional detail.
- *   Replace — destroys something the platform did not create. Full amber; it
- *             stays the strongest, and is the only one that needs a tick.
+ *   Replace — destroys something the platform did not create, but puts a known
+ *             value in its place. Full amber, and needs a tick.
+ *   Remove  — destroys something and puts nothing in its place. The only
+ *             irreversible thing this box does: republishing converges every
+ *             other outcome, and cannot bring back a key nobody kept a copy of.
+ *             Red, and it is the only red in the column.
  */
 function dns_publish_box_badge(string $outcome): string {
 	switch ($outcome) {
@@ -518,6 +583,7 @@ function dns_publish_box_badge(string $outcome): string {
 		case DnsReconciler::MISSING:   return '<span class="badge badge-subtle-primary">Add</span>';
 		case DnsReconciler::DIFFERS:   return '<span class="badge badge-subtle-warning">Change</span>';
 		case DnsReconciler::CONFLICTS: return '<span class="badge badge-warning">Replace</span>';
+		case DnsReconciler::REMAINS:   return '<span class="badge badge-danger">Remove</span>';
 		case DnsReconciler::PENDING:   return '<span class="badge badge-subtle-success">Written</span>';
 		default:                       return '<span class="badge badge-subtle-secondary">Skipped</span>';
 	}

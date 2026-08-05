@@ -187,7 +187,7 @@ $settings = Globalvars::get_instance();
 						'maxlength' => 32,
 						'required' => true,
 						'minlength' => 1,
-						'data-msg-required' => 'Please enter your first name.',
+						'validation' => ['messages' => ['required' => 'Please enter your first name.']],
 					]);
 
 					$formwriter->textinput('usr_last_name', 'Last Name', [

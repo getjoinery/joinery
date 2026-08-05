@@ -147,7 +147,7 @@ foreach ($subscription_tiers as $tier) {
 }
 $formwriter->dropinput('pro_sbt_subscription_tier_id', 'Activates Subscription', [
 	'options' => $tier_options,
-	'help_text' => 'Select a tier this product grants when purchased',
+	'helptext' => 'Select a tier this product grants when purchased',
 	'empty_option' => '-- Select --'
 ]);
 

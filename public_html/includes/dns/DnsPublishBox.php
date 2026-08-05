@@ -24,7 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - Carries the removal confirmations through to the reconciler, and counts a deletion as a write
  * @changelog 1.2 - Publish banners carry a severity: success only when the whole plan is in place, warning when partial, error when nothing reached the provider
  * @changelog 1.1 - Collects an OAuth app registration in place when the chosen provider has none, gated at permission 10, then continues to consent in the same request; carries credentialGuide() through to the box
  */
@@ -116,6 +117,7 @@ class DnsPublishBox {
 		$decisions = array(
 			'adopt'   => array_values((array)($input['dns_adopt'] ?? array())),
 			'cutover' => array_values((array)($input['dns_cutover'] ?? array())),
+			'remove'  => array_values((array)($input['dns_remove'] ?? array())),
 		);
 		$account_id = trim((string)($input['dns_account'] ?? ''));
 
@@ -481,7 +483,7 @@ class DnsPublishBox {
 			}
 		}
 		$parts = array();
-		foreach (array('created', 'updated', 'adopted', 'unchanged', 'skipped', 'failed') as $action) {
+		foreach (array('created', 'updated', 'deleted', 'adopted', 'unchanged', 'skipped', 'failed') as $action) {
 			if (!empty($counts[$action])) {
 				$parts[] = $counts[$action] . ' ' . $action;
 			}
@@ -491,7 +493,8 @@ class DnsPublishBox {
 		// Lead with the fact that matters when nothing landed. A summary opening
 		// "6 skipped." is read as a tally; an operator scanning it can finish the
 		// sentence believing the publish worked.
-		$wrote = ($counts['created'] ?? 0) + ($counts['updated'] ?? 0) + ($counts['adopted'] ?? 0);
+		$wrote = ($counts['created'] ?? 0) + ($counts['updated'] ?? 0)
+			+ ($counts['adopted'] ?? 0) + ($counts['deleted'] ?? 0);
 		if ($wrote === 0 && !empty($counts['skipped'])) {
 			$summary = 'Nothing was published — every record needing your confirmation was skipped. ' . $summary;
 		}
@@ -554,7 +557,7 @@ class DnsPublishBox {
 		foreach ($publish['results'] as $result) {
 			if (empty($result['ok'])) {
 				$failed = true;
-			} elseif (in_array($result['action'], array('created', 'updated', 'adopted'), true)) {
+			} elseif (in_array($result['action'], array('created', 'updated', 'adopted', 'deleted'), true)) {
 				$wrote = true;
 			} elseif ($result['action'] === 'skipped') {
 				// A SKIP IS NOT A SUCCESS. The reconciler marks a skipped record

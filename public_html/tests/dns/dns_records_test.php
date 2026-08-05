@@ -15,6 +15,8 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.4 - records that must be absent: the diff, the gates on deleting,
+ *                and that nothing else in the rail learned to delete
  * @version 1.3 - the action column's vocabulary and colour grading
  * @version 1.2 - a skipped record is never green, and Apply is gated while the
  *                selection would publish nothing
@@ -764,5 +766,268 @@ check($headline(array(DnsReconciler::MISSING => 2, DnsReconciler::DIFFERS => 1))
 $consequence = dns_publish_box_consequence(array('outcome' => DnsReconciler::DIFFERS, 'owned' => true));
 check(stripos($consequence, 'overwrit') !== false,
 	'and the row explains that the existing value is overwritten', $consequence);
+
+// ===================================================================
+section('A plan can require a record to be absent');
+// ===================================================================
+//
+// A plan of only-things-that-should-exist cannot express a capability that has
+// to go away. The Cloudflare publish wrote every record it was asked for,
+// reported nothing left to change, and left a foreign DKIM key published — with
+// a check card beside it saying that key must be deleted. Two things on one page
+// disagreeing about whether a domain is finished is the failure this subsystem
+// exists to end.
+
+$absent = DnsRecord::mustBeAbsent('TXT', 'Mailo._domainkey.Example.com.');
+check($absent->absent === true, 'a record can be marked as one that must not exist');
+check($absent->name === 'mailo._domainkey.example.com',
+	'and normalizes its name exactly like any other record', $absent->name);
+check($absent->value === DnsRecord::ANY_VALUE,
+	'with no value, it means whatever is published at that name');
+
+// Publish and remove are opposite instructions about one slot, and the key is
+// what a confirmation is recorded against. Sharing one would let a tick meaning
+// "yes, overwrite it" authorize "yes, destroy it".
+$present = new DnsRecord('TXT', 'mailo._domainkey.example.com', DnsRecord::ANY_VALUE);
+check($present->key() !== $absent->key(),
+	'a removal and a publication of the same slot never share a confirmation key');
+
+// Targeting is by type and name, and by value only when one was named.
+$live_key = new DnsRecord('TXT', 'mailo._domainkey.example.com', 'v=DKIM1; p=AAAB3Nz');
+check($absent->targets($live_key), 'an any-value removal targets whatever is published there');
+$specific = DnsRecord::mustBeAbsent('TXT', 'mailo._domainkey.example.com', 'v=DKIM1; p=AAAB3Nz');
+check($specific->targets($live_key), 'a valued removal targets that exact value');
+check(!$specific->targets(new DnsRecord('TXT', 'mailo._domainkey.example.com', 'v=DKIM1; p=DIFFERENT')),
+	'and leaves any other value at the same name alone');
+check(!$absent->targets(new DnsRecord('CNAME', 'mailo._domainkey.example.com', 'x.mailgun.org')),
+	'the type is part of the requirement — a TXT removal never deletes a CNAME');
+
+// TTL is not part of it. A record with the wrong TTL is still the record that
+// must not be there, and treating it as a different record would leave it live.
+$ttl_live = new DnsRecord('TXT', 'mailo._domainkey.example.com', 'v=DKIM1; p=AAAB3Nz', 900);
+check($specific->targets($ttl_live), 'a TTL difference never rescues a record from removal');
+
+$plan = new DnsRecordPlan('example.com', 'mailbox');
+$plan->addRecord('TXT', 'example.com', 'v=spf1 -all');
+$plan->addAbsent('TXT', 'mailo._domainkey.example.com', DnsRecord::ANY_VALUE, 'not your key');
+check(count($plan) === 2, 'a plan carries publications and removals together');
+check(count($plan->removals()) === 1, 'and can be asked which of them are removals');
+
+// A payload round-trip must not quietly turn a removal into a publication: the
+// plan travels through an OAuth state parameter between the diff and the write.
+$round = DnsRecordPlan::fromArray($plan->toArray());
+check(count($round->removals()) === 1, 'a removal survives the OAuth round-trip');
+check($round->removals()[0]->absent === true, 'and is still a removal on the other side');
+
+// Contradiction is the plan author's to resolve, not the reconciler's — applying
+// it would depend on which record came first.
+check($plan->hasContradiction() === null, 'an ordinary plan contradicts nothing');
+$bad = new DnsRecordPlan('example.com', 'mailbox');
+$bad->addRecord('TXT', 'k._domainkey.example.com', 'v=DKIM1; p=OURS');
+$bad->addAbsent('TXT', 'k._domainkey.example.com');
+check($bad->hasContradiction() !== null,
+	'a plan that both publishes and removes a record is caught, not applied by luck');
+
+// ===================================================================
+section('Removing is gated harder than any other write');
+// ===================================================================
+//
+// Every other outcome converges by publishing again. A deleted key does not come
+// back, so each of these gates exists because pressing the button twice is not
+// the recovery path.
+
+class RemovalProbeDriver extends DnsDriverBase {
+	public $zone_records = array();
+	public $deleted = array();
+	public $created = array();
+	public static function getKey(): string { return 'removalprobe'; }
+	public static function getLabel(): string { return 'ProbeDNS'; }
+	public static function credentialType(): string { return DnsProvider::CREDENTIAL_API; }
+	public static function credentialFields(): array { return array(); }
+	public function accounts(): array { return array(); }
+	public function zoneFor(string $domain): ?string { return $domain; }
+	public function listRecords(string $zone): array { return $this->zone_records; }
+	public function createRecord(string $zone, DnsRecord $record): void { $this->created[] = $record->describe(); }
+	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {}
+	public function deleteRecord(string $zone, DnsRecord $live): void { $this->deleted[] = $live->describe(); }
+}
+
+require_once(PathHelper::getIncludePath('includes/dns/DnsOwnershipStore.php'));
+
+$foreign = new DnsRecord('TXT', 'mailo._domainkey.example.com', 'v=DKIM1; p=THEIRS');
+$make_apply = function (array $live, array $decisions, string $mode = DnsReconciler::APPLY_CONFIRMED) {
+	$driver = new RemovalProbeDriver(array(), null);
+	$driver->zone_records = $live;
+	$plan = new DnsRecordPlan('example.com', 'mailbox');
+	$plan->addAbsent('TXT', 'mailo._domainkey.example.com');
+	$store = new MemoryDnsOwnershipStore();
+	$results = (new DnsReconciler($store))->apply($driver, 'example.com', $plan, $decisions, $mode);
+	return array($driver, $results, $store);
+};
+
+$removal_key = DnsRecord::mustBeAbsent('TXT', 'mailo._domainkey.example.com')->key();
+
+// No tick: nothing is deleted, and the operator is told so rather than shown green.
+list($driver, $results) = $make_apply(array($foreign), array());
+check(empty($driver->deleted), 'with no confirmation, nothing is deleted');
+check($results[0]['action'] === 'skipped', 'and the record reports as skipped', $results[0]['action']);
+check(stripos($results[0]['reason'], 'still published') !== false,
+	'saying it is still there, not merely that it was skipped', $results[0]['reason']);
+
+// The adopt tick does not cover a removal. Adopting replaces a value with a
+// known one; this leaves the name answering with nothing.
+list($driver) = $make_apply(array($foreign), array('adopt' => array($removal_key)));
+check(empty($driver->deleted), 'an adopt confirmation never authorizes a delete');
+
+// Additive mode deletes nothing, whatever is ticked. Adding a domain and
+// provisioning a node both publish without anyone reading a diff.
+list($driver, $results) = $make_apply(array($foreign),
+	array('remove' => array($removal_key)), DnsReconciler::APPLY_ADDITIVE);
+check(empty($driver->deleted), 'an additive publish never deletes, even with the tick');
+check(stripos($results[0]['reason'], 'without someone reading it') !== false,
+	'and says why', $results[0]['reason']);
+
+// Confirmed and ticked: it goes.
+list($driver, $results, $store) = $make_apply(array($foreign), array('remove' => array($removal_key)));
+check(count($driver->deleted) === 1, 'a confirmed removal deletes the record');
+check($results[0]['action'] === 'deleted', 'and reports the deletion', $results[0]['action']);
+check(empty($store->ownedFor('example.com')),
+	'the platform never claims ownership of a record it deleted');
+
+// Nothing there: done, and still not an ownership claim. Remembering a record
+// that does not exist would make the next withdraw() try to delete it.
+list($driver, $results, $store) = $make_apply(array(), array('remove' => array($removal_key)));
+check(empty($driver->deleted), 'a removal with nothing to remove touches nothing');
+check($results[0]['action'] === 'unchanged', 'and is simply done', $results[0]['action']);
+check(empty($store->ownedFor('example.com')),
+	'an absent record is never adopted into the ownership table');
+
+// Only what it targets. A name holding the foreign key and one of ours must not
+// lose both — an any-value removal is scoped by type and name, not by slot.
+$ours = new DnsRecord('CNAME', 'mailo._domainkey.example.com', 'ours.example.net');
+list($driver) = $make_apply(array($ours), array('remove' => array($removal_key)));
+check(empty($driver->deleted), 'a TXT removal leaves a CNAME at the same name alone');
+
+// A removal is not settled while the record is still there — this is what stops
+// the box reporting nothing to change beside a check that says otherwise.
+$rows = array(array('outcome' => DnsReconciler::REMAINS, 'written' => '', 'cutover' => false));
+check(!DnsReconciler::settled($rows), 'a live record that must be gone is never settled');
+check(!DnsReconciler::allGreen($rows), 'and never all-green');
+$counts = DnsReconciler::summarize($rows);
+check(($counts[DnsReconciler::REMAINS] ?? 0) === 1, 'the summary counts it');
+
+// ---------------------------------------------------------------------------
+section('A removal reads as destructive, and carries its own confirmation');
+// ---------------------------------------------------------------------------
+
+check(strpos(dns_publish_box_badge(DnsReconciler::REMAINS), '>Remove<') !== false,
+	'the action column says Remove');
+check(strpos(dns_publish_box_badge(DnsReconciler::REMAINS), 'badge-danger') !== false,
+	'in the only red in the column — it is the one thing here that publishing again cannot undo');
+foreach (array(DnsReconciler::MISSING, DnsReconciler::DIFFERS, DnsReconciler::CONFLICTS) as $outcome) {
+	check(strpos(dns_publish_box_badge($outcome), 'badge-danger') === false,
+		$outcome . ' stays below Remove in the colour grading');
+}
+check($headline(array(DnsReconciler::MISSING => 2, DnsReconciler::REMAINS => 1)) ===
+	'Add 2 and remove 1 DNS records at Cloudflare',
+	'the headline counts removals in the same sentence as the rest',
+	$headline(array(DnsReconciler::MISSING => 2, DnsReconciler::REMAINS => 1)));
+
+$absent_row = array('outcome' => DnsReconciler::REMAINS, 'owned' => false, 'record' => $absent);
+check(stripos(dns_publish_box_consequence($absent_row), 'nothing takes its place') !== false,
+	'the row says nothing replaces what is deleted',
+	dns_publish_box_consequence($absent_row));
+$gone_row = array('outcome' => DnsReconciler::MATCHES, 'owned' => true, 'record' => $absent);
+check(stripos(dns_publish_box_consequence($gone_row), 'managed here') === false,
+	'and a removal already satisfied is never described as adopted',
+	dns_publish_box_consequence($gone_row));
+
+// The gate: a removal always needs its own tick, so a diff of only removals
+// starts with Apply disabled.
+$removal_gate = $gate_html(array(array('key' => 'r1', 'outcome' => DnsReconciler::REMAINS,
+	'cutover' => false, 'record' => $absent, 'live' => array($foreign))));
+check($removal_gate !== '', 'a diff of only removals gates the Apply button');
+check(strpos($removal_gate, '"remove":true') !== false, 'the removal carries its own gate');
+check(strpos($removal_gate, '(!g.remove||r[g.key])') !== false,
+	'and the rule requires the removal tick, not any box anywhere', $removal_gate);
+
+// Deleting a live MX stops mail with nothing taking over, so it is a cutover
+// too — and the note must not read as a repoint.
+$reconciler = new DnsReconciler(new MemoryDnsOwnershipStore());
+$mx_driver = new RemovalProbeDriver(array(), null);
+$mx_driver->zone_records = array(new DnsRecord('MX', 'example.com', 'old.mail.test', null, 10));
+$mx_plan = new DnsRecordPlan('example.com', 'mailbox');
+$mx_plan->addAbsent('MX', 'example.com');
+$mx_rows = $reconciler->diffAgainstProvider($mx_driver, 'example.com', $mx_plan);
+check($mx_rows[0]['outcome'] === DnsReconciler::REMAINS, 'a live MX the plan wants gone reads as remains');
+check(!empty($mx_rows[0]['cutover']), 'and deleting it is a cutover — mail flows through it today');
+check(stripos($mx_rows[0]['cutover_note'], 'nothing takes its place') !== false,
+	'the cutover note says nothing takes over, rather than describing a repoint',
+	$mx_rows[0]['cutover_note']);
+
+// A deletion is a write: it must not be graded as a publish where nothing
+// happened, and must not be lost from the summary.
+$deleted_publish = $publish(array($result_row('deleted', true)));
+check(DnsPublishBox::resultSeverity($deleted_publish) === DisplayMessage::MESSAGE_ANNOUNCEMENT,
+	'a publish that only deleted is still a success');
+check(stripos(DnsPublishBox::summarizeResults($deleted_publish), 'deleted') !== false,
+	'and the summary says so', DnsPublishBox::summarizeResults($deleted_publish));
+$mixed = $publish(array($result_row('deleted', true), $result_row('skipped', true, 'needs confirmation')));
+check(stripos(DnsPublishBox::summarizeResults($mixed), 'nothing was published') === false,
+	'a run that deleted something is never described as having published nothing');
+
+// The whole box, rendered. The pieces above are each right on their own; this is
+// the one that fails if a removal row reaches the page without the confirmation
+// that authorizes it, which would be a Remove badge over a button that skips it.
+// The renderer's copy field is a PublicPageBase static. A web request has it
+// preloaded; a CLI test does not.
+require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
+
+class DnsRemovalPage extends DnsBoxProbe {
+	public function getFormWriter($id, $o = array()) {
+		require_once(PathHelper::getIncludePath('includes/FormWriterV2HTML5.php'));
+		return new FormWriterV2HTML5($id, $o);
+	}
+}
+
+$long_key = 'v=DKIM1; k=rsa; p=' . str_repeat('MIIBIjANBgkqh', 30);
+$removal_vars = array_merge($unknown, array(
+	'state' => DnsPublishBox::STATE_DIFF,
+	'provider_key' => 'cloudflare', 'provider_label' => 'Cloudflare', 'provider_class' => null,
+	'counts' => array(DnsReconciler::REMAINS => 1),
+	'credential_guide' => null, 'oauth_needs_config' => false, 'oauth_can_config' => false,
+	'rows' => array(array(
+		'key' => 'rk1', 'record' => $absent, 'outcome' => DnsReconciler::REMAINS,
+		'live' => array(new DnsRecord('TXT', 'mailo._domainkey.example.com', $long_key)),
+		'owned' => false, 'written' => '', 'cutover' => false, 'cutover_note' => '',
+		'note' => 'A signing key that is not yours',
+	)),
+));
+ob_start();
+dns_publish_box_render(new DnsRemovalPage(), $removal_vars);
+$removal_html = ob_get_clean();
+
+check(strpos($removal_html, '>Remove<') !== false, 'the rendered box shows the Remove action');
+check(strpos($removal_html, 'dns_remove') !== false,
+	'and carries the confirmation that authorizes it — without it, Apply would skip the row');
+check(stripos($removal_html, 'cannot be undone') !== false,
+	'the confirmation says deleting is the one thing publishing again does not fix');
+check(substr_count($removal_html, $long_key) === 1,
+	'the key is shown once, in the row — a removal copies its NAME, not the key it is deleting',
+	substr_count($removal_html, $long_key) . ' occurrences');
+check(strpos($removal_html, 'mailo._domainkey.example.com') !== false,
+	'and the name is on the page to paste into a provider search box');
+check(stripos($removal_html, 'nothing takes its place') !== false,
+	'the consequence column says nothing replaces it');
+
+// FormWriter reads 'helptext'. Every confirmation in this box passed 'help_text',
+// which is not an option — so the sentences written to stop a silent failure were
+// dropped before they reached the page. Nothing errors when a field option is
+// misspelled, which is exactly why this needs an assertion rather than a reading.
+check(strpos((string)file_get_contents(PathHelper::getIncludePath('includes/dns/dns_publish_box.php')),
+	"'help_text'") === false,
+	'no confirmation in the box carries help text under a key FormWriter never reads');
+check(stripos($removal_html, 'stays exactly as it is') !== false,
+	'so the help under the removal list actually reaches the page');
 
 harness_finish();
