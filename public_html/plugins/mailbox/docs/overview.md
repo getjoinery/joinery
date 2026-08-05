@@ -1395,17 +1395,31 @@ forwarding subdomain included — is published. One assembly
 (`InboundEmailSetupCheck::protectedShapeResults()`) feeds both the Setup tab and
 the ceremony's pre-activation verify, so they can never disagree.
 
-**Send protection is a deliberate opt-in, and an advanced one.** It appears in
-no wizard, guide or checklist. Raising a domain to Fortress turns on *arrival
-sealing* — mail is sealed at the relay and unreadable while locked — and seals a
-DKIM key (`mailbox_protect_seal_new_key()`), defaulting
-`ied_forwarding_subdomain` to `fwd.<domain>`. **A Fortress domain resting with
-send protection off is a finished domain**: arriving mail is sealed, sending
-works normally, and nothing prescribes a protected DNS record. Locking outbound
-sending to the owner's key is a separate choice with a real cost — every
-interactive send needs an unlock, and automated mail must move to a Standard
-subdomain — so it is offered where that cost can be stated, not as step four of
-a list.
+**Fortress is a two-sided promise, and send protection is the second side.**
+Nobody can read your mail (*arrival sealing*), and nobody can send as you (*send
+protection*). Raising a domain to Fortress delivers the first half immediately
+and seals a DKIM key (`mailbox_protect_seal_new_key()`), defaulting
+`ied_forwarding_subdomain` to `fwd.<domain>`. **A Fortress domain without send
+protection is not finished** — it is one anyone can still impersonate — and both
+the raise receipt (*one step left*) and the `domain.send_protection` check row
+say so. That row is REQUIRED, so an unfinished domain reads `attention`.
+
+Unfinished is a **transit** state, never a resting one. It cannot be made
+simultaneous with the raise — the switch needs published DNS and a vault unlock —
+so the interface declares the domain in progress rather than pretending either
+that it is done or that the remaining step is optional.
+
+The step is not in the general setup path. It is the completion of the Fortress
+raise, and the raise is already the advanced, gated ceremony. The guided box
+carries a single *Finish Fortress* entry, gated on the relay being live and the
+domain's MX cut over — offering the sending half before mail arrives through the
+relay would ask an operator to finish what has not started — and it disappears
+the moment protection is on.
+
+The cost is real and is stated where the offer is made: every interactive send
+needs an unlock, and automated mail must move to a Standard subdomain. Those are
+reasons not to choose Fortress for a domain, not reasons to run Fortress
+half-on.
 
 **Send protection has no page of its own — the Setup tab's Advanced section is
 its whole surface.** `includes/protect_identity.php` owns the state transitions
@@ -1417,13 +1431,41 @@ publish step, the pre-flight verification, the switch, and afterwards the
 lifecycle (replace the key, switch over, cancel, turn off, and the return address
 behind a disclosure).
 
-The ceremony opens on an explicit gesture (`?protect_setup=1`), never on the mere
-presence of a sealed key — every Fortress domain has one from the moment of the
-raise, so "has a key, not enforcing" is the resting state of a working domain
-rather than a job half done. Only inside that gesture does `dnsPlan($domain,
-true)` prescribe the protected shape; the DNS records and the verification are
-not re-rendered anywhere else, and `protectedShapeResults()` remains the single
-assembly.
+The ceremony opens on an explicit gesture (`?protect_setup=1`). Only inside it
+does `dnsPlan($domain, true)` prescribe the protected shape; the DNS records and
+the verification are not re-rendered anywhere else, and `protectedShapeResults()`
+remains the single assembly.
+
+**Ordering is load-bearing: no step may cause silent rejection.** Publishing the
+strict records first tells the world to reject anything the sealed key did not
+sign, while the sealed key is signing nothing — so mail leaves, the provider
+accepts it, and the recipient discards it with no bounce anyone sees. The order
+is therefore:
+
+1. **Publish the DKIM record.** Changes nothing; asks nobody to reject anything.
+2. **Start signing** — `protect_activate`, gated by `signingReadinessChecks()`
+   (the sealed key's record plus the forwarding subdomain) and a vault unlock.
+   DNS is still ambient, so mail passes on either signature. The cost lands here
+   as a *visible* refusal: a locked vault stops the send with a message.
+3. **Publish the strict SPF and DMARC.** The signature they demand is already on
+   every message.
+
+This is why `protectedShapeApplies()` branches on the enforcement flag: the flag
+means *signing*, and the strict shape is prescribed exactly once signing is live.
+
+**`domain.send_protection` reports the whole state in one row** — finished
+(PASS); not signing (FAIL, Fortress unfinished); signing without the strict
+records (WARN, forgeries not rejected yet); and strict records without signing
+(FAIL), which is not a gap but an outage: the domain is rejecting its own mail.
+
+**Lifting protection does not strand the DNS.** `protect_disable` clears the
+flag and then computes the ambient shape, because leaving the strict records up
+drops the domain into that fourth state. DNS credentials are ephemeral, so
+nothing writes them in the background: the operator — who has just pressed the
+button — is told exactly which records must change and is landed on the publish
+diff, and the check row holds at FAIL until they do. The confirm states every
+consequence first, including that this server, and anyone who breaks into it,
+can send as the domain again.
 
 **The old on-disk signing key is a checked state, not a remembered command.**
 Send protection means only the domain's sealed key should be able to sign as it —
@@ -1461,10 +1503,10 @@ stranding the operator. Callers that omit `$acting_user_id` omit the fact, and
 the row is skipped rather than failed.
 
 The **Setup tab is that ceremony's parent surface**. Its *Still to set up* box
-lists what a Private or Fortress domain genuinely cannot work without — the
-vault, and at Fortress the relay — and the ceremony page's breadcrumb and footer
-link return there. The box carries outstanding work only and does not render at
-all when there is none; send protection is not among its steps. Saving a domain at Fortress lands on
+lists what a Private or Fortress domain cannot be complete without — the vault,
+at Fortress the relay, and once those are in place the *Finish Fortress* step —
+and the ceremony page's breadcrumb and footer link return there. The box carries
+outstanding work only and does not render at all when there is none. Saving a domain at Fortress lands on
 Setup focused on that domain, not on the ceremony. The ceremony keeps its own
 page rather than becoming a Setup card because it holds destructive actions
 (rotate, disable, re-generate) that do not belong on a diagnostics surface.

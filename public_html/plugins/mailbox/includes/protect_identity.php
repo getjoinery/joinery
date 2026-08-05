@@ -194,10 +194,10 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 
-	$say = function ($msg, $title) use ($session, $return_url) {
+	$say = function ($msg, $title, $url = null) use ($session, $return_url) {
 		$session->save_message(new DisplayMessage($msg, $title, '~/plugins/mailbox/admin/~',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-		return LogicResult::redirect($return_url);
+		return LogicResult::redirect($url ?? $return_url);
 	};
 
 	$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
@@ -251,8 +251,20 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 			return $say('Unlock your vault before turning protection on — from here on, only your key can send as '
 				. 'this domain, so we need to know you are really here.', 'Unlock first');
 		}
+		// SIGNING STARTS BEFORE THE STRICT RECORDS, DELIBERATELY
+		// (specs/mailbox_fortress_send_protection_completion.md). Gating this on
+		// the finished shape meant the operator had to publish "reject anything
+		// this key did not sign" while the key was signing nothing — so every run
+		// had a window, as long as DNS propagation, in which the domain's own mail
+		// was accepted by the provider and silently discarded by recipients.
+		//
+		// So this needs only the records that ask nothing of anyone: the sealed
+		// key's own DKIM record, and the forwarding subdomain so bounces land.
+		// DNS is still ambient here, mail passes on either signature, and the
+		// strict records come afterwards — by which time the signature they demand
+		// is already on every message.
 		$checker = new InboundEmailSetupCheck();
-		$results = $checker->protectedDomainChecks($domain);
+		$results = $checker->signingReadinessChecks($domain);
 		$blockers = array();
 		foreach ($results as $r) {
 			if ($r['severity'] === InboundEmailSetupCheck::REQUIRED
@@ -261,22 +273,22 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 			}
 		}
 		if (!empty($blockers)) {
-			return $say('Some DNS is missing or does not match, so nothing was turned on and your mail is '
-				. 'unaffected. Publish the records below and check again. Still to fix: '
-				. implode(' | ', $blockers), 'Not yet');
+			return $say('Nothing was turned on and your mail is unaffected. These have to be published and '
+				. 'visible first: ' . implode(' | ', $blockers), 'Not yet');
 		}
 
 		$domain->set('ied_is_protected_identity', true);
 		$domain->save();
 
-		// The old on-disk key is NOT named here as a command to remember. It is a
-		// checked state now (domain.local_signing_key), so it keeps asking from
-		// the Setup tab until it is actually gone — which is what a one-shot
-		// flash message could never do.
-		return $say('Send protection is on. From now on nothing can send as ' . $domain->get('ied_domain')
-			. ' that your key did not sign. One step is left, and the Setup tab is holding it: the ordinary '
-			. 'signing key still on this server has to be destroyed.',
-			'Send protection is on');
+		// Neither remaining step is named as a command to remember: both are
+		// checked states now (domain.send_protection, domain.local_signing_key),
+		// so the Setup tab keeps asking until each is actually done — which is what
+		// a one-shot flash message could never do.
+		return $say('Your mail is now signed with your sealed key, and nothing else on this server can produce '
+			. 'that signature. Sending as ' . $domain->get('ied_domain') . ' needs your vault unlocked from now '
+			. 'on. Two steps are left and the Setup tab is holding both: publish the records that make other '
+			. 'servers reject forgeries, and destroy the ordinary signing key still on this machine.',
+			'Signing with your key');
 	}
 
 	// ── rotate: stage a replacement; the live key keeps signing ──────────────
@@ -354,16 +366,107 @@ function mailbox_protect_handle_action(array $input, $session, string $return_ur
 	}
 
 	// ── turn protection off ──────────────────────────────────────────────────
+	//
+	// LIFTING MUST NOT STRAND THE DNS. Flipping the flag alone drops the domain
+	// into the one genuinely broken state: records that say reject anything the
+	// sealed key did not sign, and nothing signing with that key. That is an
+	// outage, not a downgrade, and it is silent — the provider accepts the mail
+	// and the recipient discards it.
+	//
+	// So the strict records come down in the same action wherever this
+	// deployment can reach the DNS, and where it cannot the operator is told
+	// exactly what must change and the send-protection row holds at FAIL until it
+	// does (specs/mailbox_fortress_send_protection_completion.md).
 	if ($action === 'protect_disable') {
+		$name = strtolower(trim((string)$domain->get('ied_domain')));
 		$domain->set('ied_is_protected_identity', false);
 		$domain->save();
-		return $say('Send protection is off. This server can send as this domain again without you signed in, and '
-			. 'arriving mail is still sealed — this only affected sending. If mail stops being accepted, re-run '
-			. 'provision_dkim.sh to put an ordinary signing key back on disk.',
-			'Send protection is off');
+
+		// Recomputed AFTER the flag is cleared, so dnsPlan() yields the ordinary
+		// shape — the records this domain now needs, not the ones it is leaving.
+		$reverted = mailbox_protect_restore_ambient_dns($domain);
+
+		// ok means nothing was STRANDED, not that anything was written — this
+		// deployment cannot write DNS in the background. Saying records were put
+		// back would be a claim about work nobody did.
+		$tail = $reverted['ok']
+			? ' Your DNS never demanded the sealed signature, so there is nothing to undo there and mail from '
+				. 'this domain keeps flowing the ordinary way.'
+			: ' ' . $reverted['message'];
+
+		// Land on the DNS difference when records are stranded: the operator is
+		// standing right here, and the records rejecting their mail are one press
+		// away rather than a thing to go and find.
+		$land = $return_url;
+		if (!$reverted['ok']) {
+			require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+			$land = DnsPublishBox::urlWith($return_url, array('dns_show' => '1'));
+		}
+
+		return $say('Send protection is off. This server can send as ' . $name . ' again without you signed in — '
+			. 'and so can anyone who breaks into it. Arriving mail is still sealed and still needs your vault; '
+			. 'this only affected sending.' . $tail
+			. ' Nothing on this server is signing for ' . $name . ' until you re-run provision_dkim.sh to put an '
+			. 'ordinary signing key back on disk.',
+			'Send protection is off', $land);
 	}
 
 	return $say('Unknown protection action.', 'Not done');
+}
+
+/**
+ * After lifting send protection, say what has to happen to the DNS.
+ *
+ * The strict records — SPF authorizing nothing, DMARC rejecting on strict
+ * alignment — are correct only while the sealed key is signing. The moment it
+ * stops, they reject the domain's own mail, silently: the provider accepts the
+ * message and the recipient discards it, usually with no bounce anyone sees.
+ *
+ * This deployment cannot quietly put them back. DNS credentials here are
+ * EPHEMERAL by design (specs/dns_record_management.md) — nothing is stored that
+ * could authenticate a background write — so the honest move is to name the
+ * records precisely and hand the operator, who is standing right here having
+ * just pressed a button, straight to the publish box. The send-protection check
+ * row holds at FAIL until the records actually change, so this is not something
+ * they have to remember.
+ *
+ * @return array{ok:bool,message:string} ok when there is nothing stranded.
+ */
+function mailbox_protect_restore_ambient_dns(InboundEmailDomain $domain): array {
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+	$name = strtolower(trim((string)$domain->get('ied_domain')));
+	$checker = new InboundEmailSetupCheck();
+
+	if (!$checker->strictRecordsPublished($domain)) {
+		return array('ok' => true, 'message' => '');
+	}
+
+	// The plan is built with the flag already cleared, so this is the ordinary
+	// shape — what the domain needs now, not what it is leaving behind.
+	$wanted = array();
+	try {
+		foreach ($checker->dnsPlan($name)->getRecords() as $rec) {
+			if ($rec->type !== DnsRecord::TYPE_TXT) { continue; }
+			if ($rec->name === $name || $rec->name === '_dmarc.' . $name) {
+				$wanted[] = $rec->describe();
+			}
+		}
+	} catch (\Throwable $e) {
+		error_log('mailbox protect: ambient plan failed for ' . $name . ': ' . $e->getMessage());
+	}
+
+	$msg = 'Your DNS still tells other servers to reject anything ' . $name . ' sends that the sealed key '
+		. 'signed — and nothing is signing with it now, so mail from this domain will be thrown away until '
+		. 'the records change.';
+	if (!empty($wanted)) {
+		$msg .= ' Publish these: ' . implode('  |  ', $wanted) . '.';
+	} else {
+		$msg .= ' Replace the SPF and DMARC records on ' . $name . ' with ones that authorize your sending '
+			. 'provider.';
+	}
+	$msg .= ' The publish box below is open on the difference.';
+	return array('ok' => false, 'message' => $msg);
 }
 
 /**

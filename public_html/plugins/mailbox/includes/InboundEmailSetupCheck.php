@@ -1257,6 +1257,10 @@ class InboundEmailSetupCheck {
 			// ever says it is there.
 			$out[] = $this->localSigningKeyResult($domain);
 		} else {
+			// A Fortress domain reaching the ambient branch is one that has not
+			// started signing. Its DNS is prescribed the ordinary way — its mail
+			// must keep working while it finishes — but it is NOT finished, and
+			// sendProtectionResult() below is where that is said.
 			$plan = $this->spfPlan($domain);
 			if (!$txtOk) {
 				$out[] = $this->r('domain.spf', $domain, 'domain', 'SPF record', self::REQUIRED, self::UNKNOWN,
@@ -1336,6 +1340,13 @@ class InboundEmailSetupCheck {
 						'DMARC is optional but recommended once SPF and DKIM pass.',
 						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
 			}
+		}
+
+		// Is Fortress actually finished? Emitted for every Fortress domain in both
+		// branches above, because the question is the same either way and the
+		// answer is what makes the level mean what it says.
+		if ($model && $model->security_level() === InboundEmailDomain::LEVEL_FORTRESS) {
+			$out[] = $this->sendProtectionResult($domain, $model);
 		}
 
 		// Unsealed mail on a protected domain (specs/mailbox_protection_ceremony.md
@@ -2188,6 +2199,66 @@ class InboundEmailSetupCheck {
 	// Protected sending identity (specs/mailbox_outbound_send_protection.md)
 	// ===================================================================
 
+	/**
+	 * Is this Fortress domain finished?
+	 *
+	 * Fortress is a two-sided promise — nobody can read your mail, and nobody can
+	 * send as you. Arrival sealing delivers the first half at the moment of the
+	 * raise; send protection delivers the second, and until it does the domain is
+	 * one anybody can still impersonate. The raise ceremony has always said so
+	 * ("one step still remains"); this row is the same fact on the Setup tab
+	 * (specs/mailbox_fortress_send_protection_completion.md).
+	 *
+	 * Four states, because they have four different fixes — and one of them is
+	 * not merely unfinished but actively breaking mail.
+	 */
+	private function sendProtectionResult($domain, $model) {
+		$label = 'Send protection';
+		$signing = (bool)$model->is_protected_identity();
+		$strict  = $this->strictRecordsPublished($model);
+
+		// THE DANGEROUS ONE. The records say reject anything the sealed key did
+		// not sign, and the sealed key is signing nothing — so the domain's own
+		// mail is being rejected, accepted by the provider and discarded
+		// downstream where nobody sees a bounce. Every other state here is a gap;
+		// this one is an outage.
+		if (!$signing && $strict) {
+			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+				'Your DNS is rejecting your own mail from ' . $domain . '.',
+				'The published records tell every mail server to reject anything ' . $domain . ' sends that its '
+				. 'sealed key did not sign — but send protection is off, so nothing is signing with that key. '
+				. 'Mail leaving this domain is being accepted by your provider and then discarded by the '
+				. 'recipient, usually with no bounce you would see.',
+				array('text' => 'Two ways out, and either is fine: finish turning send protection on (Sending '
+					. 'identity, under Advanced), which makes the published records correct — or restore the '
+					. 'ordinary records so mail flows the normal way. Do one of them now; this state sends nothing.'));
+		}
+
+		if (!$signing) {
+			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::FAIL,
+				'Fortress is not finished for ' . $domain . ' — anyone can still send as this domain.',
+				'Arriving mail is sealed and unreadable without your vault, which is half of what Fortress '
+				. 'promises. The other half is that nobody can send mail claiming to be you — including someone '
+				. 'who has broken into this server. That is send protection, and it is not on yet.',
+				array('text' => 'Finish it under Sending identity in Advanced. Nothing changes for your mail '
+					. 'until the last step, and you can stop at any point.'));
+		}
+
+		if (!$strict) {
+			return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::WARN,
+				'Mail from ' . $domain . ' is signed with your sealed key, but forgeries are not rejected yet.',
+				'Only you can sign as this domain now. What is missing is the other side: the DNS records that '
+				. 'tell every other mail server to reject anything carrying this domain\'s name without that '
+				. 'signature. Until they are published, someone else can still send mail as ' . $domain . '.',
+				array('text' => 'Publish the SPF and DMARC records shown on this page. They are safe to publish '
+					. 'now — the signature they demand is already on every message you send.'));
+		}
+
+		return $this->r('domain.send_protection', $domain, 'domain', $label, self::REQUIRED, self::PASS,
+			'Only your sealed key can send as ' . $domain . ', and every other mail server is told to reject '
+			. 'anything else.');
+	}
+
 	/** Where opendkim keeps a domain's ordinary on-disk signing key. */
 	public static function localSigningKeyPath(string $domain): string {
 		return '/etc/opendkim/keys/' . strtolower(trim($domain)) . '/mail.txt';
@@ -2249,6 +2320,82 @@ class InboundEmailSetupCheck {
 		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
 		$spf = $txtOk ? $this->extractSpf($txt) : '';
 		return $this->protectedShapeResults($model, $domain, $txtOk, $spf);
+	}
+
+	/**
+	 * The rows that gate STARTING TO SIGN, which is a strictly smaller set than
+	 * the finished shape (specs/mailbox_fortress_send_protection_completion.md).
+	 *
+	 * ORDERING IS THE WHOLE POINT. Publishing the strict records first tells the
+	 * world to reject anything the sealed key did not sign, while the sealed key
+	 * is still signing nothing — so every ceremony run had a window, as long as
+	 * DNS propagation, in which the domain's own mail was accepted by the
+	 * provider and silently discarded downstream. That window was the design,
+	 * not an operator error.
+	 *
+	 * So signing starts first, needing only:
+	 *   - the sealed key's own DKIM record, which asks nobody to reject anything,
+	 *   - the forwarding subdomain, so bounces have somewhere to land.
+	 * DNS is still ambient at that moment, so mail passes on either signature.
+	 * The strict SPF and DMARC come afterwards, by which time the signature they
+	 * demand is already on every message.
+	 *
+	 * The cost of protection lands here as a visible refusal — a locked vault
+	 * stops the send with a message — rather than as mail that leaves and dies
+	 * somewhere the operator never sees.
+	 */
+	public function signingReadinessChecks(InboundEmailDomain $model): array {
+		$domain = strtolower(trim((string)$model->get('ied_domain')));
+		return array(
+			$this->protectedDkimResult($domain, $model),
+			$this->forwardingSubdomainSpfResult($model),
+			$this->forwardingSubdomainMxResult($model),
+		);
+	}
+
+	/**
+	 * Does the domain's published DNS already demand the sealed key's signature?
+	 *
+	 * True when SPF authorizes nothing and DMARC is strict-and-rejecting. This is
+	 * what makes "not signing" dangerous rather than merely unfinished: those
+	 * records reject the domain's own mail whenever nothing is signing it.
+	 */
+	public function strictRecordsPublished(InboundEmailDomain $model): bool {
+		$domain = strtolower(trim((string)$model->get('ied_domain')));
+		list($txt, $txtOk) = $this->dns(function () use ($domain) { return DnsResolver::getTxt($domain); });
+		if (!$txtOk) {
+			return false;   // an absence of information is never a reason to alarm
+		}
+		$spf = $this->extractSpf($txt);
+		$spf_rejects = ($spf !== '' && $this->spfAuthorizesNothing($spf));
+
+		list($dmarcTxt, $dmarcOk) = $this->dns(function () use ($domain) {
+			return DnsResolver::getTxt('_dmarc.' . $domain);
+		});
+		$dmarc_rejects = false;
+		if ($dmarcOk) {
+			foreach ($dmarcTxt as $t) {
+				if (stripos($t, 'v=DMARC1') !== 0) { continue; }
+				if (preg_match('/\bp\s*=\s*reject\b/i', $t)) { $dmarc_rejects = true; }
+			}
+		}
+		return $spf_rejects && $dmarc_rejects;
+	}
+
+	/**
+	 * True when an SPF record authorizes no sender at all — a bare `-all`.
+	 *
+	 * Named for what it answers, not for what it inspects: an earlier
+	 * `spfResultOf()` invited its one caller to compare against the wrong
+	 * polarity, which silently reported every stranded domain as healthy.
+	 *
+	 * Only the unambiguous case counts. Anything carrying an include, ip4, a, mx
+	 * or a soft `~all` may authorize somebody, and guessing wrong here would
+	 * raise a false alarm about a domain that is sending perfectly well.
+	 */
+	private function spfAuthorizesNothing(string $spf): bool {
+		$body = trim(preg_replace('/^v=spf1\s*/i', '', $spf));
+		return (strcasecmp($body, '-all') === 0);
 	}
 
 	/** The first v=spf1 record in a TXT record set, or ''. */
