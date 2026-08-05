@@ -207,6 +207,35 @@ problem, because the two need opposite fixes. Cloudflare mishandles /48 and /64
 ranges in that filter; list an IPv6 address on its own. Namecheap's allowlist has
 the same shape.
 
+**A 429 is the account being rate-limited, not this server.** Every vendor here
+counts requests per user or per token, and that quota is shared with the vendor's
+own dashboard — which is API-driven and spends it quickly while an operator
+clicks around. So a first publish attempt can be refused, and the vendor's own
+wording ("please wait and consider throttling your request speed") is a machine
+talking to a machine.
+
+`DnsDriverBase` handles it once for every driver, raising
+`DnsRateLimitedException` with the vendor's `Retry-After` (both the delta-seconds
+and HTTP-date forms) and a message written for a person: what is limited, whether
+anything changed, how long to wait, and that the vendor's website spends the same
+quota.
+
+**Reads are retried; writes never are.** Every driver reads before it writes, so
+a rate-limited read means the records were not touched and repeating costs only
+the wait — bounded by `RATE_LIMIT_MAX_RETRIES` and `RATE_LIMIT_MAX_WAIT_SECONDS`,
+deliberately small because this runs inside a page request. A rate-limited *write*
+may have been applied before the vendor decided to refuse the response, so
+repeating a create could leave a duplicate record; those are reported for a human,
+who is told to look at the diff before publishing again.
+
+**Every vendor failure is logged**, whatever its status: the driver key, method,
+URL path, status, and whichever trace and rate-limit headers the vendor sent
+(`CF-RAY`, `X-Request-Id`, `Retry-After`, `X-RateLimit-*`), plus a truncated body.
+A publish failure used to reach the operator as one flashed sentence and leave
+nothing behind, so it could not be investigated afterwards. **The credential is
+never part of that line** — only the response is logged, and the URL is reduced to
+its path because a query string can carry a token.
+
 ## Ownership
 
 The platform manages only records it created or adopted, and `dnr_dns_records`
