@@ -50,21 +50,21 @@ echo $formwriter->begin_form();
 $formwriter->textinput('agf_name', 'Name', array(
 	'maxlength'  => 255,
 	'validation' => array('required' => true),
-	'help'       => 'Human-readable label, e.g. "Internal CLAUDE.md" or "Customer baseline".',
+	'helptext'   => 'Human-readable label, e.g. "Internal CLAUDE.md" or "Customer baseline".',
 ));
 
 $formwriter->textbox('agf_target_filenames', 'Target filenames (one per line)', array(
-	'rows'    => 4,
-	'cols'    => 60,
+	'rows'     => 4,
+	'cols'     => 60,
 	'htmlmode' => 'no',
-	'help'    => 'Filenames written to project root, one per line. Examples: CLAUDE.md, GEMINI.md, AGENTS.md. No directory separators.',
+	'helptext' => 'Filenames written to project root, one per line. Examples: CLAUDE.md, GEMINI.md, AGENTS.md. No directory separators.',
 ));
 
 $formwriter->textbox('agf_content', 'Content', array(
-	'rows'    => 30,
-	'cols'    => 100,
+	'rows'     => 30,
+	'cols'     => 100,
 	'htmlmode' => 'no',
-	'help'    => 'Full file body. Markdown is typical but any text content works.',
+	'helptext' => 'Full file body. Markdown is typical but any text content works.',
 ));
 
 $formwriter->submitbutton('btn_submit', 'Save');

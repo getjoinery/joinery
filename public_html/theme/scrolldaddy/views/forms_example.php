@@ -36,7 +36,7 @@
 	$formwriter->textinput('website', '', [
 		'maxlength' => 255,
 		'placeholder' => 'Website',
-		'prefix' => 'www.text.com/'
+		'prepend' => 'www.text.com/'
 	]);
 
 
@@ -49,7 +49,7 @@
 
 	$formwriter->checkboxinput("single_checkbox", "Single checkbox", [
 		'value' => 1,
-		'hint' => "Check to filter out disabled users"
+		'helptext' => "Check to filter out disabled users"
 	]);
 
 	// Note: toggleinput() does not exist in FormWriter v2
@@ -62,13 +62,13 @@
 	$formwriter->textbox('cmt_body', 'Comment', [
 		'rows' => 5,
 		'cols' => 80,
-		'use_editor' => false
+		'htmlmode' => 'no'
 	]);
 
 	$formwriter->textbox('cmt_body2', 'Comment', [
 		'rows' => 5,
 		'cols' => 80,
-		'use_editor' => true
+		'htmlmode' => 'yes'
 	]);
 
 	$formwriter->dateinput("startdate", "Date only", [
@@ -80,7 +80,7 @@
 	$readonlyvals = array();
 	$formwriter->radioinput("interval", "Group by:", [
 		'options' => $optionvals,
-		'hint' => 'hint'
+		'helptext' => 'hint'
 	]);
 
 	$formwriter->textinput('city', 'City', [

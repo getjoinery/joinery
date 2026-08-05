@@ -15,7 +15,6 @@ class UserPriceRequirement extends AbstractProductRequirement {
 
     public function render_fields($formwriter, $product, $existing_data = []) {
         $formwriter->textinput('user_price', 'Optional donation amount ($)', [
-            'size' => 20,
             'maxlength' => 255,
         ]);
     }

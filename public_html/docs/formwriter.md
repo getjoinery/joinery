@@ -246,6 +246,32 @@ $formwriter->textinput('usr_email', 'Email');
 
 ## 3. Field Types
 
+### Options are a closed set
+
+**An option FormWriter does not read is refused, not ignored.** Pass a key no
+writer in the class chain reads and the page stops on a development box, naming
+the field, the bad key and the nearest real option; in production it is logged
+and the field renders.
+
+```php
+$formwriter->textinput('agf_name', 'Name', ['help_text' => 'Human-readable label']);
+// FormWriter: 'help_text' is not an option of text field 'agf_name' —
+// FormWriterV2HTML5 never reads it, so it was going to be ignored.
+// Did you mean 'helptext'?
+```
+
+The known set is **derived from the source** of the writer and its parents, so
+implementing an option is the same act as declaring one and no list can fall
+behind the code. `FormWriterV2HTML5::knownOptionKeys()` returns it, which is the
+answer to "what can this field take?" without reading the class. A theme writer
+that adds options of its own gets them counted with no registration step.
+
+Two things it deliberately does not do. Options are pooled across field types, so
+a key that is real for one input is accepted on another — it catches misspellings
+and inventions, not `cols` on a date field. And it never guesses at a suggestion
+past a third of the word, because naming the wrong option is worse than naming
+none.
+
 ### Text Inputs
 
 ```php

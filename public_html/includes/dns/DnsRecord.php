@@ -16,7 +16,14 @@
  *    stripped, hostnames lose their trailing dot and case, MX priority lives in
  *    its own field rather than baked into the value.
  *
- * @version 1.0
+ * A record can also be required to be ABSENT (see mustBeAbsent()). A plan of
+ * only-things-that-should-exist cannot express a capability that has to go away,
+ * and a page that publishes such a plan says "nothing to change" while a check
+ * beside it names a record to delete. The two disagreeing about whether a domain
+ * is finished is the failure this subsystem exists to end, so absence is part of
+ * desired state rather than a hand-edit at the provider.
+ *
+ * @version 1.1 - a record can be required to be absent
  */
 
 class DnsRecordException extends Exception {}
@@ -33,6 +40,17 @@ class DnsRecord {
 	/** The whole vocabulary. Anything else — NS, SOA, SRV — is refused. */
 	const TYPES = array(self::TYPE_A, self::TYPE_AAAA, self::TYPE_CNAME,
 		self::TYPE_MX, self::TYPE_TXT, self::TYPE_CAA);
+
+	/**
+	 * Absent-record value meaning "whatever is published at this name".
+	 *
+	 * The usual case for a removal: the platform knows a foreign DKIM selector
+	 * answers and that it must not, without knowing — or needing to know — the
+	 * key it holds. Naming an exact value instead narrows the removal to that
+	 * one value, which is what you want when a specific stale record has to go
+	 * and anything else at the name is legitimate.
+	 */
+	const ANY_VALUE = '*';
 
 	/** @var string One of TYPES. */
 	public $type;
@@ -54,6 +72,12 @@ class DnsRecord {
 	public $cutover = false;
 	/** @var string Provider-side record id. Only ever set on live records. */
 	public $provider_id = '';
+	/**
+	 * @var bool True when the plan requires this record NOT to exist. Set only
+	 * by mustBeAbsent(); a record is present-by-default, because a plan that
+	 * could delete by accident is worse than one that cannot delete at all.
+	 */
+	public $absent = false;
 
 	public function __construct(string $type, string $name, string $value,
 			?int $ttl = null, ?int $priority = null, string $note = '') {
@@ -76,6 +100,39 @@ class DnsRecord {
 		if ($this->value === '') {
 			throw new DnsRecordException('A ' . $type . ' record for ' . $this->name . ' has no value.');
 		}
+	}
+
+	/**
+	 * A record that must NOT exist.
+	 *
+	 * The type is part of the requirement, not decoration: a delegated DKIM
+	 * selector is a CNAME and a held one is a TXT, and asking for both when only
+	 * one is live would put a permanently-green row on the page. Whoever builds
+	 * the plan is expected to know which one answers, because they had to look to
+	 * know there was anything to remove.
+	 *
+	 * @param string $value ANY_VALUE (the default) removes whatever is published
+	 *                      at the name; a concrete value removes only that one.
+	 */
+	public static function mustBeAbsent(string $type, string $name,
+			string $value = self::ANY_VALUE, string $note = ''): DnsRecord {
+		$record = new DnsRecord($type, $name, trim($value) !== '' ? $value : self::ANY_VALUE,
+			null, null, $note);
+		$record->absent = true;
+		return $record;
+	}
+
+	/**
+	 * Does this live record fall under an absent record's requirement?
+	 *
+	 * Deliberately not isSatisfiedBy() inverted: TTL and priority have no part in
+	 * it. A record with the wrong TTL is still the record that must not be there.
+	 */
+	public function targets(DnsRecord $live): bool {
+		if ($this->type !== $live->type || $this->name !== $live->name) {
+			return false;
+		}
+		return ($this->value === self::ANY_VALUE) || ($this->value === $live->value);
 	}
 
 	/** Lowercase, trailing-dot-free, whitespace-free record name. */
@@ -146,13 +203,23 @@ class DnsRecord {
 		return $this->type . '|' . $this->name;
 	}
 
-	/** Stable identity for a specific record, used to key UI decisions. */
+	/**
+	 * Stable identity for a specific record, used to key UI decisions.
+	 *
+	 * Presence is part of it. Publish and remove are opposite instructions, and a
+	 * shared key would let a tick confirming one authorize the other.
+	 */
 	public function key(): string {
-		return substr(sha1($this->type . '|' . $this->name . '|' . $this->value), 0, 16);
+		return substr(sha1(($this->absent ? 'absent|' : '') . $this->type . '|'
+			. $this->name . '|' . $this->value), 0, 16);
 	}
 
 	/** Human-readable one-liner: "MX example.com → 10 mail.example.com". */
 	public function describe(): string {
+		if ($this->absent) {
+			return $this->type . ' ' . $this->name
+				. ($this->value === self::ANY_VALUE ? ' — removed' : ' → ' . $this->value . ' — removed');
+		}
 		$value = $this->value;
 		if ($this->type === self::TYPE_MX && $this->priority !== null) {
 			$value = $this->priority . ' ' . $value;
@@ -169,12 +236,13 @@ class DnsRecord {
 			'ttl'      => $this->ttl,
 			'priority' => $this->priority,
 			'note'     => $this->note,
+			'absent'   => $this->absent,
 		);
 	}
 
 	/** Rebuild from toArray(). */
 	public static function fromArray(array $a): DnsRecord {
-		return new DnsRecord(
+		$record = new DnsRecord(
 			(string)($a['type'] ?? ''),
 			(string)($a['name'] ?? ''),
 			(string)($a['value'] ?? ''),
@@ -182,5 +250,7 @@ class DnsRecord {
 			isset($a['priority']) && $a['priority'] !== null ? (int)$a['priority'] : null,
 			(string)($a['note'] ?? '')
 		);
+		$record->absent = !empty($a['absent']);
+		return $record;
 	}
 }

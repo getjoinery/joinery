@@ -340,7 +340,7 @@ class ProtectOptinTest {
 
 		$engine = (string)file_get_contents(PathHelper::getIncludePath(
 			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
-		$fn = substr($engine, strpos($engine, 'private function foreignDkimSigner'));
+		$fn = substr($engine, strpos($engine, 'private function findForeignDkimSigner'));
 		$fn = substr($fn, 0, strpos($fn, "\n\t}"));
 
 		check(strpos($fn, 'ied_dkim_selector') !== false
@@ -351,23 +351,35 @@ class ProtectOptinTest {
 		check(strpos($fn, "'registered'") !== false,
 			'and only a domain the provider still holds counts');
 
+		// The probe is sixteen selectors of two lookups each, and both the check row
+		// and the DNS plan ask for it on one page render.
+		$memo = substr($engine, strpos($engine, 'private function foreignDkimSigner'));
+		$memo = substr($memo, 0, strpos($memo, "\n\t}"));
+		check(strpos($memo, 'foreign_dkim_cache') !== false,
+			'the probe is memoized, so asking twice on one page costs one lookup set');
+
 		// A revoked key (empty p=) is not a capability, and neither is a name that
 		// does not answer. Both would be false alarms on a domain that is fine.
-		$res = substr($engine, strpos($engine, 'private function dkimSelectorResolves'));
+		$res = substr($engine, strpos($engine, 'private function dkimSelectorType'));
 		$res = substr($res, 0, strpos($res, "\n\t}"));
 		check(strpos($res, 'p\s*=\s*[A-Za-z0-9+\/]') !== false,
 			'a key is identified by a non-empty public key, so a revoked one reads as gone');
 		check(strpos($res, 'getCname') !== false,
 			'a delegated selector counts too — handing the key out is still handing out the capability');
-		check(strpos($res, 'if (!$txtOk) {') !== false && strpos($res, 'return false;') !== false,
+		check(strpos($res, 'if (!$txtOk) {') !== false && strpos($res, "return '';") !== false,
 			'a failed lookup is not evidence of a key');
+		// WHICH record type answers is part of the answer, because the plan has to
+		// name it to remove it. Asking for both a TXT and a CNAME removal at one
+		// name would leave a permanently-satisfied row on the page.
+		check(strpos($res, "return 'CNAME';") !== false && strpos($res, "return 'TXT';") !== false,
+			'and the type that answers is reported, not just that something did');
 
 		// The fix has to name the record to delete. "De-verify at your provider"
 		// is not something an operator can check they have done.
 		$check_fn = substr($engine, strpos($engine, 'private function providerVerificationResult'));
 		$check_fn = substr($check_fn, 0, strpos($check_fn, "\n\t}"));
-		check(strpos($check_fn, "'dns_record' => array('type' => 'TXT'") !== false,
-			'the fix names the exact record to delete');
+		check(strpos($check_fn, "'dns_record' => array('type' => \$signer['type']") !== false,
+			'the fix names the exact record to delete, at the type it is published as');
 		check(strpos($check_fn, 'foreignDkimSigner') !== false
 				&& strpos($check_fn, 'foreignDkimSigner') < strpos($check_fn, 'provider_hosts'),
 			'and the DKIM half is reported first, being the half that still passes DMARC');
@@ -375,6 +387,37 @@ class ProtectOptinTest {
 		// The PASS wording must claim what was actually established.
 		check(strpos($check_fn, 'no signing key ') !== false,
 			'a passing row says no key but yours is published, not merely that SPF is clean');
+
+		// THE PAGE HAS TO BE ABLE TO FINISH THE JOB IT NAMES. The publish box could
+		// only add and change, so a Cloudflare run wrote every record it was asked
+		// for, reported nothing left to change, and left the foreign key published
+		// under a red card saying it had to go. The plan carries the removal now, so
+		// the same button that closes the domain closes all of it.
+		$engine_plan = substr($engine, strpos($engine, 'public function dnsPlan'));
+		$engine_plan = substr($engine_plan, 0, strpos($engine_plan, "\n\t}"));
+		check(strpos($engine_plan, 'planRemove(') !== false
+				&& strpos($engine_plan, 'foreignDkimSigner') !== false,
+			'the protected plan requires the foreign signing key to be absent');
+
+		$plan_fn = substr($engine, strpos($engine, 'private function signingStageRecords'));
+		$plan_fn = substr($plan_fn, 0, strpos($plan_fn, "\n\t}"));
+		check(strpos($plan_fn, 'planRemove') === false,
+			'and step one of the ceremony deletes nothing — starting to sign asks nothing of anyone');
+
+		// A removal aimed outside the domain's own zone would ask a credential to
+		// delete somebody else's record.
+		$remove_fn = substr($engine, strpos($engine, 'private function planRemove'));
+		$remove_fn = substr($remove_fn, 0, strpos($remove_fn, "\n\t}"));
+		check(strpos($remove_fn, 'inZone') !== false,
+			'a removal outside the domain zone is refused, not trimmed');
+
+		// The ambient shape has no removals, and the stranded-DNS message lists what
+		// to publish — a removal in that list would be an instruction to delete the
+		// records it is asking for.
+		$protect = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/protect_identity.php'));
+		check(strpos($protect, 'if ($rec->absent) { continue; }') !== false,
+			'the records-to-publish list never quotes a removal as something to set');
 	}
 
 	private function assertLiftingDoesNotStrandDns() {

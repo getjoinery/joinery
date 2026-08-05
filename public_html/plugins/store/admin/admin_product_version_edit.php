@@ -79,7 +79,7 @@ else{
 if($settings->get_setting('pricing_page')){
 	$formwriter->textinput('prv_display_priority', 'Display Order (0 for private)', [
 		'value' => $product_version->get('prv_display_priority'),
-		'help_text' => 'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
+		'helptext' => 'Set to 0 to hide from public /pricing page. Higher values show first when multiple versions exist.'
 	]);
 }
 

@@ -75,7 +75,7 @@
 
 	$formwriter->textinput('emt_subject', 'Subject Line', [
 		'validation' => ['required' => true, 'maxlength' => 255],
-		'help_text' => 'Email subject line (required)'
+		'helptext' => 'Email subject line (required)'
 	]);
 
 	$optionvals = array(EmailTemplateStore::TEMPLATE_TYPE_OUTER=>"Outer", EmailTemplateStore::TEMPLATE_TYPE_INNER=>"Inner", EmailTemplateStore::TEMPLATE_TYPE_FOOTER=>"Footer");

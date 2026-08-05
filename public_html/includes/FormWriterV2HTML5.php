@@ -793,11 +793,23 @@ class FormWriterV2HTML5 extends FormWriterV2Base {
      * @param array $options Field options (including 'htmlmode' => 'yes' for rich text)
      */
     public function textbox($name, $label = '', $options = []) {
+        // THIS OVERRIDE USED TO SKIP REGISTRATION ENTIRELY, and it was the only
+        // field method that did. A textbox therefore never reached validation:
+        // `'validation' => ['required' => true]` on a long-text survey answer was
+        // accepted, stored nowhere, and enforced neither in the browser nor on the
+        // server. Registering here also puts the field under the unknown-option
+        // check, which is how the gap was found.
+        $this->registerField($name, 'textbox', $label, $options);
+
         $rows = $options['rows'] ?? 5;
         $cols = $options['cols'] ?? 80;
         $value = $options['value'] ?? ($this->values[$name] ?? '');
         $placeholder = $options['placeholder'] ?? '';
+        // Both spellings mean the same thing. The base class reads this option as
+        // a boolean and this one compared it to a string, so `htmlmode => true`
+        // gave a rich editor in one writer and a plain textarea in the other.
         $htmlmode = $options['htmlmode'] ?? 'no';
+        $htmlmode = ($htmlmode === true || $htmlmode === 'yes') ? 'yes' : 'no';
         $class = $options['class'] ?? 'form-control';
         $id = $options['id'] ?? $name;
 

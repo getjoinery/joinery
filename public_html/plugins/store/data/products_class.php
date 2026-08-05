@@ -660,7 +660,7 @@ public function get_requirement_info($output='text') {
 
 			if($version->get('prv_price_type') == 'user'){
 				$prefill_price = ($prefill_data && isset($prefill_data['user_price_override'])) ? $prefill_data['user_price_override'] : '';
-				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['size' => 100, 'maxlength' => 5, 'value' => $prefill_price]);
+				$formwriter->textinput('user_price_override', 'Amount to pay ('.$currency_symbol.')', ['maxlength' => 5, 'value' => $prefill_price]);
 			}
 			else{
 				$formwriter->hiddeninput('product_version', '', ['value' => $version->get('prv_product_version_id')]);
@@ -682,7 +682,6 @@ public function get_requirement_info($output='text') {
 			$formwriter->dropinput('product_version', 'Product', [
 				'options' => $version_dropdown,
 				'value' => $selected,
-				'showdefault' => false,
 			]);
 		}
 

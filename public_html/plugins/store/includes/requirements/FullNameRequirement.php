@@ -18,13 +18,11 @@ class FullNameRequirement extends AbstractProductRequirement {
         $last_name = isset($existing_data['usr_last_name']) ? $existing_data['usr_last_name'] : '';
 
         $formwriter->textinput('full_name_first', 'First Name', [
-            'size' => 20,
             'value' => $first_name,
             'maxlength' => 255,
             'validation' => ['required' => true],
         ]);
         $formwriter->textinput('full_name_last', 'Last Name', [
-            'size' => 20,
             'value' => $last_name,
             'maxlength' => 255,
             'validation' => ['required' => true],

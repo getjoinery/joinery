@@ -204,7 +204,6 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 
 		if ($this->get('qst_type') == Question::TYPE_SHORT_TEXT){
 			$formwriter->textinput($field_name, $question_text, [
-				'size' => 100,
 				'value' => $value,
 				'maxlength' => $field_max_length,
 				'validation' => $validation
@@ -231,7 +230,7 @@ class Question extends SystemBase {	public static $prefix = 'qst';
 			$formwriter->dropinput($field_name, $question_text, [
 				'options' => $optionvals,
 				'value' => $value,
-				'showdefault' => true,
+				'empty_option' => true,
 				'validation' => $validation
 			]);
 		}

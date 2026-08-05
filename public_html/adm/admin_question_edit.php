@@ -114,7 +114,6 @@
 	$formwriter->dropinput('qst_type', 'Type', [
 		'options' => $optionvals,
 		'value' => $question->get('qst_type'),
-		'showdefault' => false,
 		'validation' => ['required' => true]
 	]);
 

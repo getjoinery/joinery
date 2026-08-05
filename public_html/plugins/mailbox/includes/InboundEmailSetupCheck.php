@@ -23,6 +23,9 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.36 - the protected plan carries the foreign signing key as a record
+ *                 that must be absent, so the publish box removes it instead of
+ *                 reporting nothing to change beside a check that says otherwise
  * @version 1.35 - the no-provider-authorized row measures the signing capability
  *                 itself: a published provider DKIM key passes DMARC under a
  *                 protected domain's -all SPF, so the include was the wrong half
@@ -396,6 +399,21 @@ class InboundEmailSetupCheck {
 				'DMARC — strict alignment, so only the sealed key can send as this domain.');
 
 			$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
+
+			// A DKIM key that is not ours is a live send capability, not a leftover:
+			// under this shape SPF authorizes nobody and DMARC passes on alignment
+			// alone, so whoever holds that key can be this domain. Naming it here
+			// puts it in the same diff as everything else — a page that publishes
+			// three records, reports nothing left to change, and leaves a second
+			// signing key in place has told the operator the domain is protected
+			// when it is not.
+			$signer = $this->foreignDkimSigner($domain, $model);
+			if ($signer !== null) {
+				$this->planRemove($plan, $signer['type'], $signer['name'],
+					'A signing key that is not yours' . ($signer['label'] !== ''
+						? ' (' . $signer['label'] . ')' : '')
+					. ' — it can send as ' . $domain . ' and pass DMARC.');
+			}
 		} else {
 			$spf = $this->spfPlan($domain);
 			if ($spf['prescribe'] === 'record') {
@@ -536,6 +554,26 @@ class InboundEmailSetupCheck {
 			// A type outside the platform's vocabulary is never published; the
 			// check row still renders it as copy-paste instructions.
 			error_log('InboundEmailSetupCheck::dnsPlan skipped a record for '
+				. $plan->getDomain() . ': ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Require that a record does NOT exist.
+	 *
+	 * The zone check matters more here than anywhere else in this class: a
+	 * removal aimed outside the domain's own zone would be asking a credential to
+	 * delete somebody else's record. The plan refuses rather than trims.
+	 */
+	private function planRemove(DnsRecordPlan $plan, $type, $name, $note) {
+		$name = strtolower(rtrim(trim((string)$name), '.'));
+		if ($name === '' || !$this->inZone($name, $plan->getDomain())) {
+			return;
+		}
+		try {
+			$plan->addAbsent((string)$type, $name, DnsRecord::ANY_VALUE, (string)$note);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailSetupCheck::dnsPlan skipped a removal for '
 				. $plan->getDomain() . ': ' . $e->getMessage());
 		}
 	}
@@ -2564,10 +2602,12 @@ class InboundEmailSetupCheck {
 				. 'domain in From is accepted exactly as if your sealed key had signed it. SPF does not enter '
 				. 'into it: a protected domain authorizes no sender in SPF, so DMARC rests on the signature '
 				. 'alone. This key is a second way to be you.',
-				array('text' => 'Delete the TXT record at ' . $signer['name'] . ', and remove ' . $domain
-					. ' as a sending domain at that provider so it cannot be republished. Automated mail '
-					. 'belongs on a separate sending subdomain.',
-					'dns_record' => array('type' => 'TXT', 'name' => $signer['name'], 'value' => '(delete this record)')));
+				array('text' => 'Delete the ' . $signer['type'] . ' record at ' . $signer['name']
+					. ' — the publish box above offers it as a Remove, or do it by hand at your DNS host — '
+					. 'and remove ' . $domain . ' as a sending domain at that provider so it cannot be '
+					. 'republished. Automated mail belongs on a separate sending subdomain.',
+					'dns_record' => array('type' => $signer['type'], 'name' => $signer['name'],
+						'value' => '(delete this record)')));
 		}
 		$provider_hosts = array('mailgun.org', 'sendgrid.net', 'amazonses.com', 'spf.protection.outlook.com',
 			'_spf.google.com', 'sparkpostmail.com', 'mailchimp.com', 'servers.mcsv.net', 'sendinblue.com', 'postmarkapp.com');
@@ -2613,9 +2653,24 @@ class InboundEmailSetupCheck {
 	 * The sealed key and its staged rotation are excluded — those are the keys
 	 * that are supposed to be there.
 	 *
-	 * @return array|null ['selector' => .., 'name' => .., 'label' => ..]
+	 * Memoized per domain: the check row and the DNS plan both ask, in the same
+	 * request, and the probe is up to sixteen selectors of two lookups each.
+	 *
+	 * @return array|null ['selector' => .., 'name' => .., 'type' => .., 'label' => ..]
 	 */
 	private function foreignDkimSigner(string $domain, ?InboundEmailDomain $model): ?array {
+		if (array_key_exists($domain, $this->foreign_dkim_cache)) {
+			return $this->foreign_dkim_cache[$domain];
+		}
+		$found = $this->findForeignDkimSigner($domain, $model);
+		$this->foreign_dkim_cache[$domain] = $found;
+		return $found;
+	}
+
+	/** @var array<string,array|null> */
+	private $foreign_dkim_cache = array();
+
+	private function findForeignDkimSigner(string $domain, ?InboundEmailDomain $model): ?array {
 		$ours = array();
 		if ($model !== null) {
 			foreach (array('ied_dkim_selector', 'ied_dkim_pending_selector') as $field) {
@@ -2634,8 +2689,9 @@ class InboundEmailSetupCheck {
 					if ($name === '' || strpos($name, '._domainkey.') === false) { continue; }
 					$selector = substr($name, 0, strpos($name, '.'));
 					if (isset($ours[$selector])) { continue; }
-					if ($this->dkimSelectorResolves($name)) {
-						return array('selector' => $selector, 'name' => $name,
+					$type = $this->dkimSelectorType($name);
+					if ($type !== '') {
+						return array('selector' => $selector, 'name' => $name, 'type' => $type,
 							'label' => (string)$class::getLabel());
 					}
 				}
@@ -2649,35 +2705,45 @@ class InboundEmailSetupCheck {
 		foreach ($known as $selector) {
 			if (isset($ours[$selector])) { continue; }
 			$name = $selector . '._domainkey.' . $domain;
-			if ($this->dkimSelectorResolves($name)) {
-				return array('selector' => $selector, 'name' => $name, 'label' => '');
+			$type = $this->dkimSelectorType($name);
+			if ($type !== '') {
+				return array('selector' => $selector, 'name' => $name, 'type' => $type, 'label' => '');
 			}
 		}
 
 		return null;
 	}
 
-	/** Does a `_domainkey` name answer with something that looks like a signing key? */
-	private function dkimSelectorResolves(string $name): bool {
+	/**
+	 * Does a `_domainkey` name answer with something that looks like a signing key,
+	 * and as what?
+	 *
+	 * The record type is part of the answer because a plan that removes the key has
+	 * to name it: asking for both a TXT and a CNAME removal at one name would leave
+	 * a permanently-satisfied row on the page for whichever one is not there.
+	 *
+	 * @return string '' when no key answers, otherwise 'CNAME' or 'TXT'.
+	 */
+	private function dkimSelectorType(string $name): string {
 		// A CNAME'd selector (SES, and Mailgun's newer setup) delegates the key
 		// rather than holding it, and delegating it is just as much a capability.
 		list($cname, $cnameOk) = $this->dns(function () use ($name) { return DnsResolver::getCname($name); });
 		if ($cnameOk && trim((string)$cname) !== '') {
-			return true;
+			return 'CNAME';
 		}
 		list($txt, $txtOk) = $this->dns(function () use ($name) { return DnsResolver::getTxt($name); });
 		if (!$txtOk) {
-			return false;   // an absence of information is not evidence of a key
+			return '';   // an absence of information is not evidence of a key
 		}
 		foreach ((array)$txt as $t) {
 			// `v=DKIM1` is optional in the wild — Mailgun omits it — so the public
 			// key term is what identifies a key, and an empty p= is a REVOKED key
 			// and therefore no capability at all.
 			if (preg_match('/(^|;)\s*p\s*=\s*[A-Za-z0-9+\/]/', (string)$t)) {
-				return true;
+				return 'TXT';
 			}
 		}
-		return false;
+		return '';
 	}
 
 	/**
