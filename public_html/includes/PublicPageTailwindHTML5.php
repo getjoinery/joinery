@@ -171,13 +171,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
         <meta name="keywords" content="">
 
 		<title><?php echo $options['title']; ?></title>
-				<?php $this->global_includes_top($options); 
-				
-				//IF WE ARE IN DEBUG MODE LOAD TAILWIND DIRECTLY
-		if ($this->debug_css == 1) {
-			echo '<script src="https://cdn.tailwindcss.com?plugins=forms,typography,aspect-ratio"></script>';
-		}		
-				?>
+				<?php $this->global_includes_top($options); ?>
 				
 		
 
@@ -195,13 +189,7 @@ class PublicPageTailwindHTML5 extends PublicPageBase {
 		
 		<!-- CSS -->
 
-		<?php
-		if (!$this->debug_css) {
-			?>
-			<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
-			<?php
-		}
-		?>
+		<link rel="stylesheet" type="text/css" href="<?php echo PathHelper::getThemeFilePath('output.css', 'assets/css', 'web'); ?>">
 		<?php
 		if($settings->get_setting('custom_css')){
 			echo '<style>'.$settings->get_setting('custom_css').'</style>';

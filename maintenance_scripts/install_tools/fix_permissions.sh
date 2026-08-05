@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.6 - Pin config/backup_site_key to 640 www-data:www-data so the deploy account
+#              can run a backup from a shell; 600 locked out every caller but the web user
 #VERSION 2.5 - Pin config/backup_site_key alongside the relay SSH key (the dev-mode 777
 #              sweep would otherwise expose the key that opens this site's backups)
 #VERSION 2.4 - Re-pin config/admin_credentials.txt to 600 root:root after the sweep, alongside the SSH key
@@ -98,17 +100,25 @@ fi
 # SSH private keys demand 0600 and caller-only ownership — the blanket sweep
 # above would make ssh refuse them, silently breaking the relay mail pull on
 # every deploy. Re-pin them last, in both modes.
-#
-# config/backup_site_key rides along for a different reason: it opens this
-# site's own backups, so the dev-mode 777 sweep above would hand every backup
-# this site ever made to anyone with a shell on the box.
-for keyfile in "$SITE_ROOT/config/relay_pull_key" "$SITE_ROOT/config/backup_site_key"; do
+for keyfile in "$SITE_ROOT/config/relay_pull_key"; do
     if [ -f "$keyfile" ]; then
         echo "  Pinning key $keyfile to 600 www-data:www-data..."
         chown www-data:www-data "$keyfile"
         chmod 600 "$keyfile"
     fi
 done
+
+# config/backup_site_key needs the sweep undone for a different reason: it opens
+# this site's own backups, so the dev-mode 777 above would hand every backup this
+# site ever made to anyone with a shell on the box. It stops at 640 rather than
+# 600 because backups run under more than one account — the web user on the
+# scheduled run, the deploy account from a shell — and both live in www-data.
+BACKUP_KEY="$SITE_ROOT/config/backup_site_key"
+if [ -f "$BACKUP_KEY" ]; then
+    echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
+    chown www-data:www-data "$BACKUP_KEY"
+    chmod 640 "$BACKUP_KEY"
+fi
 
 # The install-time admin password, for whoever can already reach the server as
 # root. The sweep above would hand it to the web server user and, in dev mode,

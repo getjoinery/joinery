@@ -616,18 +616,6 @@
       "helptext": "Site-wide, not payments-only: it drives component render tracing, FormWriter debug output, and the Stripe and Google Play helpers' test behaviour. Leave off in production."
     },
     {
-      "name": "debug_css",
-      "default": "0",
-      "group": "diagnostics",
-      "label": "CSS debug mode",
-      "type": "select",
-      "options": {
-        "1": "Yes",
-        "0": "No"
-      },
-      "helptext": "Tailwind themes only."
-    },
-    {
       "name": "email_debug_mode",
       "default": "0",
       "group": "email_testing",

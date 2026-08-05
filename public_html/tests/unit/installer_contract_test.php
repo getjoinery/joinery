@@ -130,6 +130,17 @@ check(strpos($fix_perms_src, 'admin_credentials.txt') !== false,
 	'the permissions sweep re-pins the credentials file',
 	'the blanket chmod would otherwise hand it to the web server user');
 
+// The backup key is re-pinned for the same reason, but it stops at 640 rather
+// than 600. Backups run under more than one account here — the web user on the
+// scheduled run, the deploy account from a shell — so an owner-only key locks
+// every caller but one out of its own backups.
+check(strpos($fix_perms_src, 'backup_site_key') !== false,
+	'the permissions sweep re-pins the backup key',
+	'the dev-mode 777 would otherwise expose every backup this site has made');
+check(strpos($fix_perms_src, 'chmod 640 "$BACKUP_KEY"') !== false,
+	'the backup key is left group-readable, not owner-only',
+	'600 locks the deploy account out of a backup it is running');
+
 // It lives outside public_html on purpose: /utils/<name> is web-routable and
 // the router applies no permission check of its own.
 check(strpos($reset_tool, '/maintenance_scripts/sysadmin_tools/') !== false,

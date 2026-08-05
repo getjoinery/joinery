@@ -839,7 +839,6 @@ Note: ControlD admin pages (admin_ctld_account, admin_ctld_accounts) were remove
 - [ ] Method existence validator (`validate_php_file.php`)
 - [ ] Error log monitoring
 - [ ] Debug mode (`debug` setting)
-- [ ] Debug CSS mode (`debug_css` setting)
 
 ### 20.2 Deployment
 - [ ] Installation scripts (`install_tools/`)
