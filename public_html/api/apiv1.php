@@ -634,6 +634,11 @@ if (in_array($operation, $classes)) {
 		$objects->load();
 	} catch (UnknownMultiOptionException $e) {
 		api_error('Unknown filter parameter (' . $e->getMessage() . ')', 'TransactionError', 400);
+	} catch (UnsortableColumnException $e) {
+		// A bad sort is a caller error too. The model layer refuses it — a sort
+		// column is interpolated, not bound, so it is validated there rather
+		// than trusted from here.
+		api_error($e->getMessage(), 'TransactionError', 400);
 	}
 
 	$response_array = array();
