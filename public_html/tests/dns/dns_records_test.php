@@ -15,6 +15,7 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.3 - the action column's vocabulary and colour grading
  * @version 1.2 - a skipped record is never green, and Apply is gated while the
  *                selection would publish nothing
  * @version 1.1 - rate-limit handling: retry budget, write safety, the operator
@@ -712,5 +713,56 @@ check(strpos($both, '(!g.cutover||c[g.key])&&(!g.adopt||a[g.key])') !== false,
 $matches_only = $gate_html(array($row(DnsReconciler::MATCHES, false, 'm'),
 	$row(DnsReconciler::CONFLICTS, false, 'b')));
 check($matches_only !== '', 'an already-correct record does not count as a pending write');
+
+// ---------------------------------------------------------------------------
+section('The action column says what applying does, in verbs, coloured by stakes');
+// ---------------------------------------------------------------------------
+
+// A BADGE IS READ AS AN ADJECTIVE. Sitting alone in a column, "Correct" said
+// this record IS correct — the opposite of why it was listed — and wore the
+// same blue as Add, which reads as optional detail. Every label here has to be
+// a word that can only be a verb.
+$badge = function ($outcome) { return dns_publish_box_badge($outcome); };
+
+foreach (array(
+	DnsReconciler::MISSING   => 'Add',
+	DnsReconciler::DIFFERS   => 'Change',
+	DnsReconciler::CONFLICTS => 'Replace',
+) as $outcome => $verb) {
+	check(strpos($badge($outcome), '>' . $verb . '<') !== false,
+		$outcome . ' reads as the verb "' . $verb . '"', $badge($outcome));
+}
+foreach (array(DnsReconciler::MISSING, DnsReconciler::DIFFERS, DnsReconciler::CONFLICTS) as $outcome) {
+	check(stripos($badge($outcome), 'correct') === false,
+		$outcome . ' never uses a word that can be read as "this is fine"');
+}
+
+// Colour grades by what is at stake. Overwriting a live value is not the same
+// as filling an empty name, and must not wear the same colour as it.
+check(strpos($badge(DnsReconciler::MISSING), 'badge-subtle-primary') !== false,
+	'Add carries no alarm colour — nothing is there to lose');
+check(strpos($badge(DnsReconciler::DIFFERS), 'warning') !== false,
+	'Change is amber: a live value goes away');
+check(strpos($badge(DnsReconciler::DIFFERS), 'badge-subtle-primary') === false,
+	'and is no longer blue, which reads as optional detail');
+check($badge(DnsReconciler::DIFFERS) !== $badge(DnsReconciler::CONFLICTS),
+	'Replace stays stronger than Change — it destroys a record we did not create');
+
+// The headline uses the same verbs, so the summary and the rows agree.
+$headline = function (array $counts) {
+	return dns_publish_box_headline(array('counts' => $counts, 'provider_label' => 'Cloudflare'));
+};
+check($headline(array(DnsReconciler::DIFFERS => 2)) === 'Change 2 DNS records at Cloudflare',
+	'the headline verb matches the badge', $headline(array(DnsReconciler::DIFFERS => 2)));
+check($headline(array(DnsReconciler::MISSING => 2, DnsReconciler::DIFFERS => 1)) ===
+	'Add 2 and change 1 DNS records at Cloudflare',
+	'and reads as one sentence when several kinds are pending',
+	$headline(array(DnsReconciler::MISSING => 2, DnsReconciler::DIFFERS => 1)));
+
+// The consequence line has to say the current value goes away — that is the
+// part an operator needs before pressing Apply on a record that already works.
+$consequence = dns_publish_box_consequence(array('outcome' => DnsReconciler::DIFFERS, 'owned' => true));
+check(stripos($consequence, 'overwrit') !== false,
+	'and the row explains that the existing value is overwritten', $consequence);
 
 harness_finish();

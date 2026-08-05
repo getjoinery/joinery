@@ -350,6 +350,39 @@ $formwriter->end_form();
 $page->end_box();
 ```
 
+### Box variants — saying what a panel is
+
+Boxes on a page are siblings by default: same header bar, same width, same flat
+surface, read top to bottom. That is right for a page whose sections are peers.
+It is wrong for two cases, and `begin_box()` takes a `variant` for each.
+
+| `variant` | Use it for | How it looks |
+|---|---|---|
+| `nested` | A panel that belongs to the one containing it — a step of it, not the next thing after it. | Indented, tinted, a spine down the left edge, and a small quiet title. |
+| `focus` | The task at hand: a separate undertaking with its own consequences, sitting in the middle of a page about something else. | Lifted onto its own surface inside a recessed stage — a modal that stayed in the flow of the page, so what surrounds it is still readable. |
+
+```php
+$page->begin_box(array('title' => 'Sending identity', 'variant' => 'focus'));
+
+// A step of the panel above, not another offer beside it.
+$page->begin_box(array('title' => 'Publish these records', 'variant' => 'nested'));
+$page->end_box();
+
+$page->end_box();
+```
+
+Reach for `focus` sparingly — a page with two of them has none. If every panel
+is the task at hand, none of them is.
+
+The wrapper is added around whatever the theme already renders, so a variant box
+still carries its normal header and body and any existing styling continues to
+apply. An unrecognised value renders a plain box, so a typo cannot half-apply.
+Presentation lives in the shared kit stylesheet (`assets/css/joinery-styles.css`)
+and works in every theme that links it.
+
+`end_box()` needs no arguments — what a box was opened as is remembered for it,
+including nesting.
+
 ### Delete Confirmation
 
 ```php

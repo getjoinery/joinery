@@ -25,6 +25,10 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.14 - the ceremony's publish box renders only while a readiness row
+ *                 is unmet; a settled step is stated, not offered
+ * @version 2.13 - the send-protection ceremony shows the checks and offers the
+ *                 records that actually gate the press, not the finished shape
  * @version 2.12
  */
 function admin_mailbox_setup_logic(array $input): LogicResult {
@@ -126,10 +130,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id,
 			$protect_setup) {
-		// Inside the ceremony the records to publish are the protected ones, and
-		// the operator asked for them. Nowhere else may publish that shape: it
-		// tells the world to reject anything the sealed key did not sign, and
-		// nothing signs with that key until send protection is actually on.
+		// Inside the ceremony the records to publish are the SIGNING-STAGE ones —
+		// the same set its publish box rendered. Apply resolves the plan again
+		// rather than trusting the POST, so this branch has to agree with what was
+		// on screen; resolving the finished shape here would write `v=spf1 -all`
+		// and `p=reject` on a domain whose sealed key is still signing nothing,
+		// rejecting its own mail, from a button that showed neither record.
+		//
+		// Those two come afterwards, from the ordinary plan below, once the flag
+		// is on and protectedShapeApplies() prescribes them.
 		if ($protect_setup && $selected_domain_id) {
 			return _setup_dns_plan_for_domain($selected_domain_id, true);
 		}
@@ -442,17 +451,47 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// is told nothing.
 	$protect_preflight     = array();
 	$protect_dns_box       = null;
+	$protect_signing_ready = false;
 	$protect_vault_unlocked = false;
 	if ($protect_setup && $protect !== null && $focus_domain_model !== null
 			&& !$focus_is_protected && !empty($protect['has_key'])) {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 		$protect_vault_unlocked = VaultUnlock::isOpen((int)$session->get_user_id());
-		$protect_preflight = (new InboundEmailSetupCheck())->protectedDomainChecks($focus_domain_model);
-		$protect_dns_box = DnsPublishBox::build(
-			$checker->dnsPlan($focus_domain, true),
-			$input,
-			$state_qs()
-		);
+		// THE PAGE SHOWS WHAT THE BUTTON CHECKS, and nothing more. Rendering the
+		// finished shape here told the operator to strip the provider from SPF
+		// and publish `v=spf1 -all` while the sealed key was still signing
+		// nothing — recreating, by instruction, the outage the ordering exists to
+		// prevent (specs/mailbox_fortress_send_protection_completion.md). The
+		// activate guard has always used the smaller set; only the page around it
+		// disagreed, and a red card next to a button that would have passed reads
+		// as a blocker either way.
+		//
+		// The strict SPF and DMARC are not skipped, only deferred: once the flag
+		// is on, the page's ordinary publish box prescribes them, and
+		// domain.send_protection keeps asking until they are live.
+		$protect_preflight = $checker->signingReadinessChecks($focus_domain_model);
+
+		// AN OFFER TO CONFIGURE DNS THAT HAS NOTHING TO CONFIGURE IS NOISE, and
+		// worse than noise here: the publish box does not read live DNS until the
+		// operator presses its button, so on a domain whose records are already
+		// live it renders a promise ("shows exactly what would change") above
+		// nothing at all, and the only way to learn there is nothing to do is to
+		// press it. The answer is already on this page — the readiness checks
+		// immediately below were just computed — so it is used instead of asking
+		// the operator to go and find it.
+		//
+		// This mirrors what the page already does with its own publish box, which
+		// moves to Advanced once no check carries a record to fix: a finished
+		// domain is not led with an offer to configure it. A record that later
+		// drifts fails its check again and brings the box straight back.
+		$protect_signing_ready = _setup_rows_all_pass($protect_preflight);
+		if (!$protect_signing_ready) {
+			$protect_dns_box = DnsPublishBox::build(
+				$checker->signingReadinessPlan($focus_domain),
+				$input,
+				$state_qs()
+			);
+		}
 	}
 
 	return LogicResult::render(array(
@@ -490,6 +529,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'protect_setup'              => $protect_setup,
 		'protect_preflight'          => $protect_preflight,
 		'protect_dns_box'            => $protect_dns_box,
+		'protect_signing_ready'      => $protect_signing_ready,
 		'protect_vault_unlocked'     => $protect_vault_unlocked,
 		'domain_rows'                => $domain_rows,
 		// Advanced
@@ -512,6 +552,25 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
  *
  * @param array[] ...$groups Row lists.
  */
+/**
+ * Is every REQUIRED row in this set passing?
+ *
+ * UNKNOWN IS NOT PASS. A row that could not be resolved — a DNS lookup that
+ * failed, an API that did not answer — is an open question, and treating it as
+ * settled would hide the one control that could close it.
+ */
+function _setup_rows_all_pass(array $rows): bool {
+	foreach ($rows as $r) {
+		if (($r['severity'] ?? '') !== InboundEmailSetupCheck::REQUIRED) {
+			continue;
+		}
+		if (($r['status'] ?? '') !== InboundEmailSetupCheck::PASS) {
+			return false;
+		}
+	}
+	return true;
+}
+
 function _setup_has_dns_work(array ...$groups): bool {
 	foreach ($groups as $rows) {
 		foreach ($rows as $r) {
@@ -549,10 +608,14 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
  * _setup_dns_plan_for_alias(), for a domain that has no mailbox to reach it
  * through.
  *
- * $protected asks for the send-protection shape on a domain that has not
- * enforced it yet; only the ceremony passes it.
+ * $signing_stage asks for the records that let the sealed key START signing —
+ * the sealed DKIM record and the forwarding subdomain, and nothing that rejects
+ * anything. Only the ceremony passes it, and it must resolve the SAME plan the
+ * ceremony's publish box rendered: the box is the operator's consent, so a
+ * handler that rebuilt a different plan would write records nobody had seen,
+ * which is precisely what the publish rail exists to prevent.
  */
-function _setup_dns_plan_for_domain(int $domain_id, bool $protected = false): ?DnsRecordPlan {
+function _setup_dns_plan_for_domain(int $domain_id, bool $signing_stage = false): ?DnsRecordPlan {
 	if ($domain_id <= 0) {
 		return null;
 	}
@@ -561,7 +624,8 @@ function _setup_dns_plan_for_domain(int $domain_id, bool $protected = false): ?D
 	if (!$domain->key || $name === '' || $domain->get('ied_is_imap_source')) {
 		return null;
 	}
-	return (new InboundEmailSetupCheck())->dnsPlan($name, $protected);
+	$checker = new InboundEmailSetupCheck();
+	return $signing_stage ? $checker->signingReadinessPlan($name) : $checker->dnsPlan($name);
 }
 
 /**

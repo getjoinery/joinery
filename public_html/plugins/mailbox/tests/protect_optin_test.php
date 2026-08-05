@@ -68,6 +68,7 @@ class ProtectOptinTest {
 		$this->assertShapeFollowsTheFlag();
 		$this->assertFortressCompletionCard();
 		$this->assertSigningStartsBeforeStrictRecords();
+		$this->assertProviderCapabilityIsMeasured();
 		$this->assertLiftingDoesNotStrandDns();
 		$this->assertCeremonyCanStillPrescribe();
 		$this->assertOnDiskKeyRow();
@@ -237,6 +238,143 @@ class ProtectOptinTest {
 			'readiness excludes the strict SPF and DMARC — those are the last step, not the first');
 		check(strpos($fn, 'protectedDkimResult') !== false,
 			'and includes the sealed key record, which asks nobody to reject anything');
+
+		// THE PAGE HAS TO AGREE WITH THE BUTTON. Guarding activation correctly
+		// while the ceremony still rendered the finished shape produced the worst
+		// of both: a red card telling the operator to strip the provider from SPF
+		// and publish `v=spf1 -all` — by hand or by one click of the publish box —
+		// while the sealed key was signing nothing. The button would have passed;
+		// following the page would have taken the domain's mail down.
+		check(method_exists('InboundEmailSetupCheck', 'signingReadinessPlan'),
+			'there is a publish plan matching the readiness set, not just checks');
+
+		$plan_fn = substr($engine, strpos($engine, 'private function signingStageRecords'));
+		$plan_fn = substr($plan_fn, 0, strpos($plan_fn, "\n\t}"));
+		check(strpos($plan_fn, 'v=spf1 -all') === false,
+			'the signing-stage records carry no reject-everything SPF');
+		check(strpos($plan_fn, 'p=reject') === false,
+			'and no rejecting DMARC — nothing here asks anyone to reject anything');
+		check(strpos($plan_fn, '_domainkey') !== false,
+			'they do carry the sealed key record, which is what starts signing');
+		check(substr_count($plan_fn, 'forwarding_subdomain') === 1,
+			'and the forwarding subdomain, so bounces have somewhere to land');
+
+		// The finished shape still has to contain everything the ceremony
+		// published, or the next reconcile would revert step one's records.
+		$engine_plan = substr($engine, strpos($engine, 'public function dnsPlan'));
+		$engine_plan = substr($engine_plan, 0, strpos($engine_plan, "\n\t}"));
+		check(strpos($engine_plan, 'signingStageRecords') !== false,
+			'the finished shape is built from the same records, so the two cannot drift');
+		check(strpos($engine_plan, 'v=spf1 -all') !== false && strpos($engine_plan, 'p=reject') !== false,
+			'and it is still the shape that carries the rejection instruction');
+
+		// The ceremony wiring itself.
+		$setup_logic = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/logic/admin_mailbox_setup_logic.php'));
+		check(strpos($setup_logic, '$protect_preflight = $checker->signingReadinessChecks(') !== false,
+			'the ceremony shows the checks the button actually gates on');
+		check(strpos($setup_logic, 'protectedDomainChecks($focus_domain_model)') === false,
+			'and no longer shows the finished shape as though it blocked the press');
+		check(strpos($setup_logic, '$checker->signingReadinessPlan($focus_domain)') !== false,
+			'the ceremony publish box offers the signing-stage records');
+		check(strpos($setup_logic, 'dnsPlan($focus_domain, true)') === false,
+			'and never offers Apply on the strict shape before the key is signing');
+
+		// APPLY RESOLVES THE PLAN AGAIN rather than trusting the POST, so the
+		// handler and the box have to agree. A box showing three harmless records
+		// over a handler that wrote the rejection instruction would be a one-click
+		// outage with nothing on screen naming it.
+		$resolver = substr($setup_logic, strpos($setup_logic, 'function _setup_dns_plan_for_domain'));
+		$resolver = substr($resolver, 0, strpos($resolver, "\n}"));
+		check(strpos($resolver, 'signingReadinessPlan($name)') !== false,
+			'the ceremony Apply handler resolves the same signing-stage plan the box showed');
+		check(strpos($resolver, 'dnsPlan($name, $protected)') === false
+				&& strpos($resolver, 'dnsPlan($name, true)') === false,
+			'and can no longer resolve the strict shape for a domain that is not signing');
+
+		// The heading has to say which step it is, or two publish boxes across
+		// the ceremony read as the same offer repeated.
+		$view = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/admin/admin_mailbox_setup.php'));
+		check(strpos($view, 'Step 1 — publish the records that let your key sign') !== false,
+			'the ceremony publish box says which step it is');
+
+		// NOTHING TO CONFIGURE MEANS NO CONFIGURE BOX. The publish box does not
+		// read live DNS until its button is pressed, so on a domain whose records
+		// are already live it renders a promise above an empty space and the only
+		// way to learn there is nothing to do is to press it. The readiness rows
+		// beside it already answer that, so they decide whether it renders.
+		check(strpos($setup_logic, '$protect_signing_ready = _setup_rows_all_pass($protect_preflight)') !== false,
+			'the ceremony asks whether step one has any work left');
+		check(strpos($setup_logic, "if (!\$protect_signing_ready) {\n\t\t\t\$protect_dns_box = DnsPublishBox::build(") !== false,
+			'and builds the publish box only when it does');
+		check(strpos($view, 'Step 1 is already done.') !== false,
+			'a step with nothing to do says so rather than rendering an empty gap');
+
+		// UNKNOWN is not PASS: a row whose lookup failed is an open question, and
+		// counting it as settled would hide the control that could close it.
+		$all_pass = substr($setup_logic, strpos($setup_logic, 'function _setup_rows_all_pass'));
+		$all_pass = substr($all_pass, 0, strpos($all_pass, "\n}"));
+		check(strpos($all_pass, 'InboundEmailSetupCheck::PASS') !== false
+				&& strpos($all_pass, '!==') !== false,
+			'readiness is measured against PASS itself, so UNKNOWN keeps the box on screen');
+	}
+
+	private function assertProviderCapabilityIsMeasured() {
+		section('No relay provider authorized means no provider CAN send, not no include');
+
+		// THE HOLE THIS CLOSES. A protected domain publishes `v=spf1 -all`, so SPF
+		// authorizes nobody and fails for everybody — and DMARC passes on DKIM
+		// alignment alone. Inspecting only the SPF include therefore measured the
+		// harmless half: an operator who removed the include got a green row while
+		// the provider's DKIM key stayed published and its API key kept sending
+		// mail that aligned strictly and passed DMARC. The row asserted the exact
+		// capability it had stopped looking for.
+		$m = new ReflectionMethod('InboundEmailSetupCheck', 'providerVerificationResult');
+		check($m->getNumberOfParameters() === 4,
+			'the check is given the domain model, so it knows which key is legitimately ours',
+			'got ' . $m->getNumberOfParameters() . ' parameters');
+
+		check(method_exists('InboundEmailSetupCheck', 'foreignDkimSigner'),
+			'a published key that is not ours is something the engine can find');
+
+		$engine = (string)file_get_contents(PathHelper::getIncludePath(
+			'plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+		$fn = substr($engine, strpos($engine, 'private function foreignDkimSigner'));
+		$fn = substr($fn, 0, strpos($fn, "\n\t}"));
+
+		check(strpos($fn, 'ied_dkim_selector') !== false
+				&& strpos($fn, 'ied_dkim_pending_selector') !== false,
+			'the sealed key and its staged rotation are excluded — those belong there');
+		check(strpos($fn, 'providerDkimStatus') !== false,
+			'the configured provider is asked which records it issues, rather than guessed at');
+		check(strpos($fn, "'registered'") !== false,
+			'and only a domain the provider still holds counts');
+
+		// A revoked key (empty p=) is not a capability, and neither is a name that
+		// does not answer. Both would be false alarms on a domain that is fine.
+		$res = substr($engine, strpos($engine, 'private function dkimSelectorResolves'));
+		$res = substr($res, 0, strpos($res, "\n\t}"));
+		check(strpos($res, 'p\s*=\s*[A-Za-z0-9+\/]') !== false,
+			'a key is identified by a non-empty public key, so a revoked one reads as gone');
+		check(strpos($res, 'getCname') !== false,
+			'a delegated selector counts too — handing the key out is still handing out the capability');
+		check(strpos($res, 'if (!$txtOk) {') !== false && strpos($res, 'return false;') !== false,
+			'a failed lookup is not evidence of a key');
+
+		// The fix has to name the record to delete. "De-verify at your provider"
+		// is not something an operator can check they have done.
+		$check_fn = substr($engine, strpos($engine, 'private function providerVerificationResult'));
+		$check_fn = substr($check_fn, 0, strpos($check_fn, "\n\t}"));
+		check(strpos($check_fn, "'dns_record' => array('type' => 'TXT'") !== false,
+			'the fix names the exact record to delete');
+		check(strpos($check_fn, 'foreignDkimSigner') !== false
+				&& strpos($check_fn, 'foreignDkimSigner') < strpos($check_fn, 'provider_hosts'),
+			'and the DKIM half is reported first, being the half that still passes DMARC');
+
+		// The PASS wording must claim what was actually established.
+		check(strpos($check_fn, 'no signing key ') !== false,
+			'a passing row says no key but yours is published, not merely that SPF is clean');
 	}
 
 	private function assertLiftingDoesNotStrandDns() {
@@ -441,14 +579,14 @@ class ProtectOptinTest {
 			'and under Advanced when it is not');
 
 		// ONE PUBLISH BOX AT A TIME. The ceremony renders its own, for the
-		// protected shape; the page's own renders the ordinary shape. Both on
-		// screen meant two panels with the same heading showing contradictory
-		// records — the failure the provider-supplied table was removed for,
-		// reintroduced by a different route.
+		// signing-stage records; the page's own renders the shape for whatever
+		// state the domain is actually in. Both on screen meant two panels with
+		// the same heading showing contradictory records — the failure the
+		// provider-supplied table was removed for, reintroduced by another route.
 		check(substr_count($view, 'if (!$setup_open && ') >= 2,
 			'the page suppresses its own publish box while the ceremony is open');
-		check(strpos($view, "'Publish the send-protection records for '") !== false,
-			'and the ceremony box says which records it is for');
+		check(strpos($view, "'Step 1 — publish the records that let your key sign'") !== false,
+			'and the ceremony box names its step rather than repeating a generic heading');
 		$box = (string)file_get_contents(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
 		check(strpos($box, 'string $title = \'\'') !== false,
 			'the renderer takes a heading override so two boxes can never read alike');

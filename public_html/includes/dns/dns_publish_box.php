@@ -14,8 +14,11 @@
  * where it already is has no blast radius; moving a zone takes the website and
  * every other name with it, and is not something this platform offers.
  *
- * @version 1.5 - the box heading can be overridden, so a page rendering two of
- *                them says which records each is for
+ * @version 1.7 - every action label is a verb, and colour grades by what is at
+ *                stake: Change is amber because a live value goes away
+ * @version 1.6 - a caller rendering the box inside another panel can say so, so
+ *                it reads as part of that panel rather than the next section
+ * @changelog 1.5 - the box heading can be overridden, so a page rendering two of them says which records each is for
  * @changelog 1.4 - Apply is gated while the current ticks would publish nothing
  * @changelog 1.3 - The diff renders each record value in a copy field, so a value stays hand-publishable when an automatic publish is blocked
  * @changelog 1.2 - Renders the credential guide on the first credential field, and the OAuth app registration form when one is missing
@@ -32,8 +35,12 @@ require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
  *                      publish box must say which records each one is for —
  *                      two identical headings over different record sets is a
  *                      page that cannot be read.
+ * @param string $variant begin_box variant. Pass 'nested' when the box renders
+ *                      INSIDE another panel: publishing records is a step of the
+ *                      thing that asked for them, and a box that looks like the
+ *                      next section of the page is read as one.
  */
-function dns_publish_box_render($page, array $vars, string $title = ''): void {
+function dns_publish_box_render($page, array $vars, string $title = '', string $variant = ''): void {
 	// Nothing to offer, so nothing is shown. A domain whose DNS lives somewhere
 	// this platform has no driver for gets the page it has always had: the
 	// checks below, each carrying the record to publish. An empty box explaining
@@ -47,7 +54,10 @@ function dns_publish_box_render($page, array $vars, string $title = ''): void {
 	$domain = $vars['domain'];
 	$label  = $vars['provider_label'];
 
-	$page->begin_box(array('title' => $title !== '' ? $title : 'Automatically configure DNS for ' . $domain));
+	$page->begin_box(array(
+		'title'   => $title !== '' ? $title : 'Automatically configure DNS for ' . $domain,
+		'variant' => $variant,
+	));
 
 	// Where the DNS lives, stated before the action that will write to it.
 	dns_publish_box_host_line($vars);
@@ -109,7 +119,7 @@ function dns_publish_box_headline(array $vars): string {
 	$total = 0;
 	foreach (array(
 		DnsReconciler::MISSING   => 'add',
-		DnsReconciler::DIFFERS   => 'correct',
+		DnsReconciler::DIFFERS   => 'change',
 		DnsReconciler::CONFLICTS => 'replace',
 	) as $outcome => $verb) {
 		$n = (int)($counts[$outcome] ?? 0);
@@ -121,7 +131,7 @@ function dns_publish_box_headline(array $vars): string {
 	if (empty($parts)) {
 		return '';
 	}
-	// "Add 2, correct 1 and replace 3 DNS records" — one sentence, one verb per
+	// "Add 2, change 1 and replace 3 DNS records" — one sentence, one verb per
 	// kind of change, so the count never needs a legend to read.
 	$last = array_pop($parts);
 	$phrase = $parts ? implode(', ', $parts) . ' and ' . $last : $last;
@@ -474,7 +484,7 @@ function dns_publish_box_consequence(array $row): string {
 		case DnsReconciler::PENDING:
 			return 'Written here already. Waiting for public DNS to catch up.';
 		case DnsReconciler::DIFFERS:
-			return 'Corrected. This record is managed here and its value has drifted.';
+			return 'Its current value is overwritten. This record is managed here and has drifted.';
 		case DnsReconciler::CONFLICTS:
 			return 'Left alone unless you tick it below — this record was not created here.';
 		default:
@@ -485,16 +495,28 @@ function dns_publish_box_consequence(array $row): string {
 /**
  * The action column reads as work, not as fault.
  *
- * Publishing records into an empty zone is the normal path, so it gets no alarm
- * colour — a warning badge on the thing the page exists to do told the operator
- * something was wrong when nothing was. Only Replace keeps a real colour: it is
- * the one action that destroys something the platform did not create.
+ * EVERY LABEL IS A VERB, because the column says what applying does. "Correct"
+ * was not: read as an adjective — which is how a badge is read, sitting alone in
+ * a column — it says this record IS correct, the exact opposite of why it is
+ * listed. A word that can be either is the wrong word here.
+ *
+ * Colour grades by what is at stake, and losing a live value is not the same as
+ * filling an empty one:
+ *
+ *   Add     — nothing is there, so nothing can be lost. No alarm colour: a
+ *             warning badge on the thing the page exists to do told the operator
+ *             something was wrong when nothing was.
+ *   Change  — a record is live and its current value goes away. Amber, softly:
+ *             this is ordinary work, but it is not free, and blue reads as
+ *             optional detail.
+ *   Replace — destroys something the platform did not create. Full amber; it
+ *             stays the strongest, and is the only one that needs a tick.
  */
 function dns_publish_box_badge(string $outcome): string {
 	switch ($outcome) {
 		case DnsReconciler::MATCHES:   return '<span class="badge badge-subtle-success">Done</span>';
 		case DnsReconciler::MISSING:   return '<span class="badge badge-subtle-primary">Add</span>';
-		case DnsReconciler::DIFFERS:   return '<span class="badge badge-subtle-primary">Correct</span>';
+		case DnsReconciler::DIFFERS:   return '<span class="badge badge-subtle-warning">Change</span>';
 		case DnsReconciler::CONFLICTS: return '<span class="badge badge-warning">Replace</span>';
 		case DnsReconciler::PENDING:   return '<span class="badge badge-subtle-success">Written</span>';
 		default:                       return '<span class="badge badge-subtle-secondary">Skipped</span>';
