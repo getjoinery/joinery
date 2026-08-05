@@ -11,9 +11,10 @@
  * utils/list_dependencies.php --orphans can report packages no plugin
  * declares anymore.
  *
- * @version 1.2 - Installed-package truth source is vendor/composer/installed.json
- *                (what composer actually put on disk), never composer.lock
- *                (which ships with the source and only states intent).
+ * @version 1.3 - Presence is not enough: an installed package whose version
+ *                differs from composer.lock is reported and is install-fixable.
+ *                The truth source for what IS installed stays
+ *                vendor/composer/installed.json; the lock states what SHOULD be.
  */
 class ComposerValidator {
 
@@ -200,8 +201,13 @@ class ComposerValidator {
             return false;
         }
         
+        // What the lock says SHOULD be installed, to catch a vendor tree that
+        // carries the right package names at the wrong versions.
+        $lockedPackages = $this->getLockedPackages($composerLockPath);
+
         // Check each required package
         $missingPackages = [];
+        $mismatchedPackages = [];
         foreach ($composerJson['require'] as $packageName => $version) {
             // Skip the PHP version requirement itself.
             if ($packageName === 'php') {
@@ -222,11 +228,25 @@ class ComposerValidator {
                 continue;
             }
 
-            if (!isset($installedPackages[strtolower($packageName)])) {
+            $key = strtolower($packageName);
+            if (!isset($installedPackages[$key])) {
                 $missingPackages[] = $packageName;
+                continue;
+            }
+
+            // Presence alone says nothing about whether the deployed code can
+            // run against what is on disk: a package can sit at a major version
+            // whose whole namespace the source no longer matches. Compare against
+            // the lock rather than the composer.json constraint — the lock ships
+            // with the source, states an exact version, and needs no semver
+            // evaluation to check.
+            if (isset($lockedPackages[$key]) && $lockedPackages[$key] !== $installedPackages[$key]) {
+                $mismatchedPackages[] = $packageName
+                    . ' (installed ' . $installedPackages[$key]
+                    . ', lock ' . $lockedPackages[$key] . ')';
             }
         }
-        
+
         if (!empty($missingPackages)) {
             $this->errors[] = "Missing required packages: " . implode(', ', $missingPackages);
             $this->errors[] = "Checked composer.json: $composerJsonPath";
@@ -234,7 +254,14 @@ class ComposerValidator {
             $this->errors[] = "Run 'composer install' to install missing packages";
             return false;
         }
-        
+
+        if (!empty($mismatchedPackages)) {
+            $this->errors[] = "Package version mismatch: " . implode(', ', $mismatchedPackages);
+            $this->errors[] = "Checked composer.lock: $composerLockPath";
+            $this->errors[] = "Run 'composer install' to match the lock file";
+            return false;
+        }
+
         // Check specific critical packages that the system needs
         $criticalPackages = [
             'phpmailer/phpmailer' => 'PHPMailer (for email functionality)',
@@ -360,8 +387,34 @@ class ComposerValidator {
     }
 
     /**
-     * Installed vendor packages from composer.lock, or null when the lock is
-     * missing or unparseable.
+     * Exact versions composer.lock pins, so a vendor tree can be compared
+     * against what the shipped source expects. Empty when the lock is missing
+     * or unparseable, which leaves the version comparison silent rather than
+     * failing an upgrade on an unreadable file.
+     * @return array package name => version
+     */
+    private function getLockedPackages($lockPath) {
+        if (!file_exists($lockPath)) {
+            return [];
+        }
+        $data = json_decode(file_get_contents($lockPath), true);
+        if (!is_array($data) || !isset($data['packages']) || !is_array($data['packages'])) {
+            return [];
+        }
+        // packages-dev is deliberately excluded: deploys install with --no-dev,
+        // so a dev package is expected to be absent rather than mismatched.
+        $locked = [];
+        foreach ($data['packages'] as $package) {
+            if (isset($package['name'])) {
+                $locked[strtolower($package['name'])] = $package['version'] ?? '';
+            }
+        }
+        return $locked;
+    }
+
+    /**
+     * Vendor packages actually present on disk, or null when the vendor tree
+     * was never composer-installed.
      * @return array|null package name => version
      */
     private function getInstalledPackages() {
@@ -625,7 +678,7 @@ class ComposerValidator {
 
         // Check if the errors are composer-install-fixable
         // Note: 'autoload.php not found' handles fresh installs where vendor directory doesn't exist
-        $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Vendor directory mismatch', 'autoload.php not found', 'Missing plugin-declared packages'];
+        $installFixableErrors = ['composer.lock not found', 'Missing required packages', 'Package version mismatch', 'Vendor directory mismatch', 'autoload.php not found', 'Missing plugin-declared packages'];
         $canFix = false;
 
         foreach ($this->errors as $error) {

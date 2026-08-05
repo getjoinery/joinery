@@ -3,7 +3,7 @@
     "description": "Joinery membership and event management platform",
     "type": "project",
     "require": {
-        "php": ">=7.4",
+        "php": ">=8.3",
         "ext-sodium": "*",
         "ext-apcu": "*",
         "ext-sqlite3": "*",
@@ -19,7 +19,7 @@
         "chillerlan/php-qrcode": "^5.0",
         "sendgrid/sendgrid": "^8.1",
         "wildbit/postmark-php": "^4.0",
-        "getbrevo/brevo-php": "^2.0",
+        "getbrevo/brevo-php": "^5.0",
         "resend/resend-php": "^0.10",
         "mailjet/mailjet-apiv3-php": "^1.5",
         "bytestream/horde-imap-client": "^2.34",
@@ -29,6 +29,9 @@
     "config": {
         "allow-plugins": {
             "php-http/discovery": true
+        },
+        "platform": {
+            "php": "8.3.0"
         },
         "vendor-dir": "../vendor"
     }

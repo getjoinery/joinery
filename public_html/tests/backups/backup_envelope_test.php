@@ -153,8 +153,14 @@ check(is_file($site_path), 'site key is persisted to config/');
 $kp2 = BackupEnvelope::site_keypair();
 check($kp1 === $kp2, 'a second call returns the same key, never a fresh one');
 
+// 640, not 600. Backups run under more than one account — the web user on the
+// scheduled run, the deploy account from a shell — and both are in the file's
+// group, so an owner-only key locks every caller but one out of its own backups.
+// What has to hold is that nothing outside the group can read it: this key opens
+// every backup the site has ever made.
 $perms = substr(sprintf('%o', fileperms($site_path)), -3);
-check($perms === '600', 'site key is owner-only', "perms {$perms}");
+check($perms === '640', 'site key is readable by its group and no wider', "perms {$perms}");
+check((fileperms($site_path) & 0007) === 0, 'site key is not world-readable', "perms {$perms}");
 
 $site_env = BackupEnvelope::build($data_key, 'x.tar.gz.enc',
 	[['kind' => 'site', 'pub' => BackupEnvelope::site_public_key()]]);

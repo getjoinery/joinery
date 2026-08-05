@@ -229,7 +229,7 @@ $ssh = JobCommandBuilder::ssh_prefix($host, $ssh_user, $ssh_key_path, $ssh_port)
 // No command — print exec prefix and exit
 if ($command === null) {
     if ($container) {
-        echo $ssh . ' ' . escapeshellarg("docker exec {$container} <cmd>") . "\n";
+        echo $ssh . ' ' . escapeshellarg("docker exec {$container} bash -c <cmd>") . "\n";
     } else {
         echo $ssh . " <cmd>\n";
     }
@@ -252,8 +252,13 @@ if ($use_stdin) {
 }
 
 if ($container) {
-    $remote = "docker exec {$container} " . $command;
+    // Wrap in bash -c for the same reason the --stdin path does: docker exec
+    // runs no shell, so without it the remote shell parses the metacharacters
+    // and only the first word lands in the container — the rest of a compound
+    // command runs on the host, silently and with plausible-looking output.
+    $remote = "docker exec {$container} bash -c " . escapeshellarg($command);
 } else {
+    // Bare metal needs no wrapper: ssh already runs the command through a shell.
     $remote = $command;
 }
 
