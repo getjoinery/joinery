@@ -155,6 +155,13 @@ Advanced with the rest of the lifecycle.
   without one leaves the row at FAIL.
 - A Fortress domain without send protection produces an `attention` verdict.
 
+**Built and live 2026-08-05.** Activation ran end to end on jeremytunnell.com:
+the ordering holds, the sealed key signs, and the card tracks the states above.
+Item 5 — disable without stranding the DNS — is built and asserted over its
+source, but has never executed against a real domain and a connected DNS
+provider. It is queued as a live gate rather than left implied; a recovery path
+nobody has run is not a recovery path.
+
 ## Out of scope
 
 - The relay, its upgrade path, and the vocabulary sweep — all landed.

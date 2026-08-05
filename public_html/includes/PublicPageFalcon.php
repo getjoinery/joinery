@@ -762,6 +762,7 @@ class PublicPageFalcon extends PublicPageBase {
 
 	protected function renderBoxOpen($options) {
 		$use_card = isset($options['card']) && $options['card'] === true;
+		$this->renderBoxVariantOpen($this->pushBoxVariant($options));
 
 		if ($use_card) {
 			echo '<div class="card mb-3">';
@@ -777,7 +778,7 @@ class PublicPageFalcon extends PublicPageBase {
 	}
 
 	protected function renderBoxClose($options) {
-		$use_card = isset($options['card']) && $options['card'] === true;
+		$use_card = $this->boxClosesCard($options);
 
 		if ($use_card) {
 			echo '</div>'; // Close card-body
@@ -785,6 +786,8 @@ class PublicPageFalcon extends PublicPageBase {
 		} else {
 			echo '</div>';
 		}
+
+		$this->renderBoxVariantClose($this->popBoxVariant());
 	}
 
 	protected function renderDropdown($label, $links) {

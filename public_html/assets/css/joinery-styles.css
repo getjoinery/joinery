@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.7.1
+   Joinery Default UI Kit  ·  custom.css  ·  v2.8.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -2395,3 +2395,118 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-copyfield { display: flex; gap: 0.25rem; align-items: center; }
 .jy-copyfield input[readonly] { flex: 1; min-width: 10rem; cursor: text; background: #fff; }
 .jy-copyfield button { white-space: nowrap; }
+
+/* ============================================
+   Box variants (begin_box 'variant' option)
+   Unscoped: boxes are chrome, not kit components,
+   and these are how a page says what a panel IS.
+
+   Left alone, every box on a page looks the same:
+   one header bar, one body, edge to edge. A panel
+   that belongs to the one above it and a panel
+   that is the task at hand both read as just the
+   next section. Two shapes fix that.
+
+     .jy-box-nested — belongs to its container.
+       Indented, tinted, and tied to the panel
+       above by a spine down its left edge.
+
+     .jy-box-focus  — the task at hand. Lifted
+       onto its own surface inside a recessed
+       stage: a modal that stayed in the flow of
+       the page, so what surrounds it is still
+       readable and reachable.
+
+   Both header shapes are matched (.card-header
+   from the admin theme, .content-box-header from
+   the base one) so a variant looks the same
+   wherever it is used.
+   ============================================ */
+
+/* --- nested: a child panel --- */
+.jy-box-nested {
+    margin: 1.25rem 0 1.5rem 1rem;
+    border: 1px solid var(--jy-color-border);
+    border-left: 3px solid var(--jy-color-primary);
+    border-radius: 0 var(--jy-radius, 0.375rem) var(--jy-radius, 0.375rem) 0;
+    background: var(--jy-color-surface);
+    overflow: hidden;
+}
+.jy-box-nested > .card-header,
+.jy-box-nested > .content-box-header {
+    padding: 0.5rem 1rem;
+    background: transparent;
+    border-bottom: 1px solid var(--jy-color-border);
+}
+/* Smaller and quieter than its parent's title: a child panel that shouts as
+   loud as the panel containing it is the problem this variant exists to fix. */
+.jy-box-nested > .card-header h5,
+.jy-box-nested > .card-header h6,
+.jy-box-nested > .content-box-header h6 {
+    margin: 0;
+    font-size: 0.75rem;
+    font-weight: 700;
+    letter-spacing: 0.06em;
+    text-transform: uppercase;
+    color: var(--jy-color-text-muted);
+}
+.jy-box-nested > .card-body,
+.jy-box-nested > .content-box-body { padding: 1rem; }
+.jy-box-nested > .card-body > :last-child,
+.jy-box-nested > .content-box-body > :last-child { margin-bottom: 0; }
+
+/* --- focus: the almost-modal --- */
+/* The stage is the cutout. A recessed well in the page — inset shadow, no
+   border — reads as a hole rather than another card, which is what stops the
+   panel inside it being mistaken for one more section. */
+.jy-box-stage {
+    margin: 1.5rem 0;
+    padding: 1.5rem;
+    border-radius: 0.75rem;
+    background: var(--jy-box-stage-bg, rgba(20, 32, 48, 0.09));
+    box-shadow: inset 0 2px 6px rgba(0, 0, 0, 0.09);
+}
+.jy-box-focus {
+    background: var(--jy-color-bg);
+    border: 1px solid var(--jy-color-border);
+    border-radius: var(--jy-radius-lg, 0.5rem);
+    /* Two shadows: a broad soft one for the height off the stage, a tight one
+       under the edge so the panel keeps its shape against a light background. */
+    box-shadow: 0 0.75rem 2rem rgba(0, 0, 0, 0.18), 0 0.125rem 0.25rem rgba(0, 0, 0, 0.08);
+    overflow: hidden;
+}
+/* A modal's title bar is part of the panel, not a band across it. */
+.jy-box-focus > .card-header,
+.jy-box-focus > .content-box-header {
+    padding: 1rem 1.5rem 0.75rem;
+    background: var(--jy-color-bg);
+    border-bottom: 1px solid var(--jy-color-border);
+}
+.jy-box-focus > .card-header h5,
+.jy-box-focus > .card-header h6,
+.jy-box-focus > .content-box-header h6 {
+    margin: 0;
+    font-size: 1.0625rem;
+    font-weight: 600;
+    color: var(--jy-color-text);
+}
+.jy-box-focus > .card-body,
+.jy-box-focus > .content-box-body { padding: 1.25rem 1.5rem 1.5rem; }
+.jy-box-focus > .card-body > :last-child,
+.jy-box-focus > .content-box-body > :last-child { margin-bottom: 0; }
+
+/* A nested panel inside a focus panel sits on the panel's own surface, so it
+   tints the other way — otherwise it would be invisible against it. */
+.jy-box-focus .jy-box-nested { background: var(--jy-color-surface-alt); }
+
+@media (max-width: 600px) {
+    /* Horizontal inset is the first thing to go on a narrow screen: elevation
+       and the tinted stage still separate the panel, and the content needs the
+       width more than the margin needs to prove containment. */
+    .jy-box-stage { padding: 0.75rem; border-radius: 0.5rem; }
+    .jy-box-nested { margin-left: 0; }
+    .jy-box-focus > .card-header,
+    .jy-box-focus > .content-box-header { padding: 0.875rem 1rem 0.625rem; }
+    .jy-box-focus > .card-body,
+    .jy-box-focus > .content-box-body { padding: 1rem; }
+}

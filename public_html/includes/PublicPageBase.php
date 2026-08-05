@@ -1423,12 +1423,97 @@ abstract class PublicPageBase {
 		}
 	}
 
+	// =====================================================================
+	// Box variants — saying what a panel IS
+	// =====================================================================
+	// A box rendered inside another box is, by default, indistinguishable from
+	// its siblings: same header bar, same width, same flat surface. Nothing in
+	// the markup says "this one belongs to the panel above" or "this one is the
+	// thing you are doing". Pass 'variant' to begin_box() to say so:
+	//
+	//   'nested' — a panel that belongs to the one containing it. Indented and
+	//              tied to its parent by a spine down its left edge.
+	//   'focus'  — the task at hand, lifted off the page onto its own surface
+	//              on a recessed stage. A modal that stayed in the flow of the
+	//              page, so what surrounds it is still readable.
+	//
+	// Presentation lives in the shared kit stylesheet (assets/css/joinery-styles.css),
+	// so every theme that links it gets the same two shapes for free.
+
+	/** The boxes currently open, innermost last. */
+	protected $_box_open_stack = array();
+
+	/**
+	 * Note a box being opened, and hand back its variant for rendering.
+	 *
+	 * A STACK, NOT A FIELD, because end_box() is called with no arguments almost
+	 * everywhere: what a box was opened as cannot be read back from what closes
+	 * it, and boxes nest — which is the entire point of the variant option.
+	 */
+	protected function pushBoxVariant($options) {
+		$variant = isset($options['variant']) ? (string)$options['variant'] : '';
+		if ($variant !== 'nested' && $variant !== 'focus') {
+			$variant = '';
+		}
+		$this->_box_open_stack[] = array(
+			'variant' => $variant,
+			'card'    => (isset($options['card']) && $options['card'] === true),
+		);
+		return $variant;
+	}
+
+	/** The variant of the innermost open box, removing it from the stack. */
+	protected function popBoxVariant() {
+		if (empty($this->_box_open_stack)) {
+			return '';
+		}
+		$open = array_pop($this->_box_open_stack);
+		return (string)$open['variant'];
+	}
+
+	/**
+	 * Whether the box being closed opened a card, WITHOUT popping it.
+	 *
+	 * A caller that hands end_box() the options it opened with decides for
+	 * itself — that is how every table box works, and it must keep working
+	 * exactly as it did. The stack answers for the rest: `card` opens three
+	 * elements and closes one, so a bare end_box() reading only its own empty
+	 * arguments would leave the card element open and swallow the remainder of
+	 * the page into it.
+	 */
+	protected function boxClosesCard($options) {
+		if (array_key_exists('card', $options)) {
+			return ($options['card'] === true);
+		}
+		$open = end($this->_box_open_stack);
+		return (is_array($open) && !empty($open['card']));
+	}
+
+	/** Opening wrapper for a variant box. A 'focus' box also gets its stage. */
+	protected function renderBoxVariantOpen($variant) {
+		if ($variant === 'focus') {
+			echo '<div class="jy-box-stage"><div class="jy-box jy-box-focus">';
+		} elseif ($variant === 'nested') {
+			echo '<div class="jy-box jy-box-nested">';
+		}
+	}
+
+	/** Closing wrapper, matching renderBoxVariantOpen. */
+	protected function renderBoxVariantClose($variant) {
+		if ($variant === 'focus') {
+			echo '</div></div>';
+		} elseif ($variant === 'nested') {
+			echo '</div>';
+		}
+	}
+
 	/**
 	 * Render the opening markup for a content box/card
 	 * Override in subclasses for framework-specific markup
 	 */
 	protected function renderBoxOpen($options) {
 		$use_card = isset($options['card']) && $options['card'] === true;
+		$this->renderBoxVariantOpen($this->pushBoxVariant($options));
 
 		if ($use_card) {
 			echo '<div class="content-box">';
@@ -1446,7 +1531,7 @@ abstract class PublicPageBase {
 	 * Override in subclasses for framework-specific markup
 	 */
 	protected function renderBoxClose($options) {
-		$use_card = isset($options['card']) && $options['card'] === true;
+		$use_card = $this->boxClosesCard($options);
 
 		if ($use_card) {
 			echo '</div>';
@@ -1454,6 +1539,8 @@ abstract class PublicPageBase {
 		} else {
 			echo '</div>';
 		}
+
+		$this->renderBoxVariantClose($this->popBoxVariant());
 	}
 
 	/**

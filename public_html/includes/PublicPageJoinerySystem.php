@@ -264,6 +264,10 @@ class PublicPageJoinerySystem extends PublicPageBase {
         $has_toolbar = !empty($options['sortoptions']) || !empty($options['filteroptions']) || !empty($options['search_on']);
         $this->_box_has_toolbar = $has_links || $has_toolbar;
 
+        // 'nested' / 'focus' wrappers — outermost, so they contain the card as
+        // well when one is asked for. See PublicPageBase::pushBoxVariant.
+        $this->renderBoxVariantOpen($this->pushBoxVariant($options));
+
         if ($use_card) {
             echo '<div class="card mb-3">';
         }
@@ -285,11 +289,12 @@ class PublicPageJoinerySystem extends PublicPageBase {
     }
 
     protected function renderBoxClose($options) {
-        $use_card = isset($options['card']) && $options['card'] === true;
+        $use_card = $this->boxClosesCard($options);
         echo '</div>'; // close card-body (opened in renderBoxOpen or renderToolbar)
         if ($use_card) {
             echo '</div>'; // close card
         }
+        $this->renderBoxVariantClose($this->popBoxVariant());
     }
 
     // =====================================================================

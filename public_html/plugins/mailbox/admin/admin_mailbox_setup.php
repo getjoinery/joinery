@@ -25,6 +25,12 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.11 - a ceremony step with nothing left to do says so instead of
+ *                 offering to configure DNS that is already live
+ * @version 3.10 - the ceremony states its two steps and publishes only step one:
+ *                 the strict records are offered after signing is on, not before
+ * @version 3.9 - the Sending identity panel is a cutout, not the next section:
+ *                it renders as a focus box, with its publish box nested in it
  * @version 3.8 - key ownership leaves this tab entirely; it is a property of
  *                the domain, decided on the domain editor
  * @version 3.7 - only one DNS publish box renders at a time: the page's own is
@@ -230,14 +236,24 @@ $leave_url   = $adv_base . ($adv_focus_qs !== '' ? '&' : '?') . 'advanced=1';
 
 $render_sending_identity = function () use ($page, $protect, $focus_domain, $focus_domain_id,
 		$self_url, $prot_hidden, $setup_open, $setup_url, $leave_url, $protect_dns_box,
-		$protect_preflight, $protect_vault_unlocked, $render_check) {
+		$protect_preflight, $protect_signing_ready, $protect_vault_unlocked, $render_check) {
 // --- Sending identity (Fortress) ---
 // THE WHOLE SEND-PROTECTION CEREMONY LIVES HERE, and nowhere else
 // (specs/mailbox_relay_surface_simplification.md). It is an advanced opt-in,
 // not a setup step: the guided box above never mentions it, so this is the
 // only place it is offered, explained, carried out, and later changed.
 if (!empty($protect) && $focus_domain !== '') {
-	$page->begin_box(array('title' => 'Sending identity — ' . $focus_domain));
+	// A CUTOUT, NOT THE NEXT SECTION. Everything else on this page is one
+	// deployment's setup, read top to bottom; this is a separate, optional
+	// undertaking with its own ceremony, its own consequences and its own way
+	// out. Rendered as another flat box it read as step five of the checklist.
+	// The focus variant lifts it onto its own surface inside a recessed stage —
+	// a modal that stayed in the flow of the page, so the checks it depends on
+	// are still visible below it.
+	$page->begin_box(array(
+		'title'   => 'Sending identity — ' . $focus_domain,
+		'variant' => 'focus',
+	));
 
 	if ($protect['is_protected']) {
 		echo '<p class="mb-2">Send protection is on. While you are signed out, nothing on this server can send '
@@ -272,18 +288,42 @@ if (!empty($protect) && $focus_domain !== '') {
 		echo '<p class="mb-2"><strong>Setting up send protection for ' . htmlspecialchars($focus_domain)
 			. '.</strong> Nothing is enforced and your mail is unaffected until the last step, and you can '
 			. 'stop at any point. <a href="' . htmlspecialchars($leave_url) . '">Leave this for now</a></p>';
-		echo '<p class="text-muted small mb-3">Publish the records below, wait for them to travel, then turn '
-			. 'protection on. The records and the switch have to match, so the switch checks them itself and '
-			. 'refuses rather than half-doing it.</p>';
+		// THE ORDER IS THE SAFETY, so it is stated rather than left to be inferred
+		// from whichever controls happen to be on screen. Publishing the records
+		// that reject unsigned mail before anything signs takes the domain's own
+		// mail down for as long as DNS takes to travel, and nothing else on the
+		// page would warn an operator who did the two halves the other way round.
+		echo '<p class="text-muted small mb-2">This happens in two steps, and taking them in this order is what '
+			. 'keeps your mail flowing the whole way through:</p>';
+		echo '<ol class="text-muted small mb-3">';
+		echo '<li><strong>Now:</strong> publish the records below, then turn signing on. None of them asks any '
+			. 'mail server to reject anything, so nothing changes for the mail you send today.</li>';
+		echo '<li><strong>After that:</strong> publish the SPF and DMARC records that make other servers reject '
+			. 'forgeries. This page offers them once signing is on — by which time the signature they demand '
+			. 'is already on every message you send.</li>';
+		echo '</ol>';
 
 		if (!empty($protect_dns_box)) {
 			require_once(PathHelper::getIncludePath('includes/dns/dns_publish_box.php'));
+			// Nested: these records are a step of the ceremony above them, not a
+			// second offer to configure the domain's DNS.
+			//
+			// THIS BOX CARRIES THE SIGNING-STAGE PLAN ONLY. It must never carry
+			// the strict SPF and DMARC: Apply is one click, and one click is all
+			// it would take to start rejecting the domain's own mail.
 			dns_publish_box_render($page, $protect_dns_box,
-				'Publish the send-protection records for ' . $focus_domain);
+				'Step 1 — publish the records that let your key sign', 'nested');
+		} elseif (!empty($protect_signing_ready)) {
+			// The box is absent because there is nothing for it to do. Say that,
+			// rather than leaving a gap where a step used to be — a numbered step
+			// that renders nothing reads as one that failed to load.
+			echo '<p class="mb-2"><strong>Step 1 is already done.</strong> Every record your key needs is '
+				. 'published and live, so there is nothing to configure here.</p>';
 		}
 
 		if (!empty($protect_preflight)) {
-			echo '<h5 class="mt-3 mb-2">The records this needs</h5>';
+			echo '<h5 class="mt-3 mb-2">' . (!empty($protect_signing_ready)
+					? 'Confirmed live' : 'What has to be live before signing starts') . '</h5>';
 			foreach ($protect_preflight as $r) { $render_check($r); }
 		}
 

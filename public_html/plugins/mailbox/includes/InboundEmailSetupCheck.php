@@ -23,6 +23,12 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.35 - the no-provider-authorized row measures the signing capability
+ *                 itself: a published provider DKIM key passes DMARC under a
+ *                 protected domain's -all SPF, so the include was the wrong half
+ * @version 1.34 - signingReadinessPlan(): the records that let the sealed key
+ *                 start signing, so the ceremony publishes what it verifies and
+ *                 never offers the rejection instruction before anything signs
  * @version 1.33 - the protected shape follows the enforcement flag, not the
  *                 security level (specs/mailbox_relay_surface_simplification.md)
  */
@@ -337,10 +343,11 @@ class InboundEmailSetupCheck {
 	 * business.
 	 *
 	 * $force_protected asks for the protected shape on a domain that has not
-	 * turned send protection on yet. That is the ceremony's own publish step —
-	 * publish, verify, then activate — and it is the only caller allowed to ask,
-	 * because publishing this shape anywhere else would reject the domain's
-	 * ordinary outgoing mail (see protectedShapeApplies()).
+	 * turned send protection on yet. NOTHING SHOULD PUBLISH THAT SHAPE BEFORE
+	 * THE SEALED KEY IS SIGNING — it tells the world to reject mail no key is
+	 * signing yet. The ceremony's own publish step wants signingReadinessPlan()
+	 * instead; this flag exists for surfaces that need to SHOW the finished shape
+	 * (what it will become), not to write it.
 	 */
 	public function dnsPlan($domain, bool $force_protected = false) {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
@@ -375,38 +382,20 @@ class InboundEmailSetupCheck {
 			// The protected shape is INVERTED: SPF must not authorize the box,
 			// DMARC must be strict, DKIM comes from the in-app sealed key, and
 			// forwarding moves to its own subdomain.
+			//
+			// THESE TWO ARE THE REJECTION INSTRUCTION, and they are the reason
+			// this shape is prescribed only once the sealed key is actually
+			// signing (protectedShapeApplies()). Published while it is not, they
+			// reject the domain's own mail. Everything else in this branch is
+			// safe at any time, so it lives in signingStageRecords() and the
+			// ceremony publishes it first.
 			$this->planAdd($plan, 'TXT', $domain, 'v=spf1 -all', null,
 				'SPF — a protected identity authorizes no ambient sender.');
 			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
 				'v=DMARC1; p=reject; aspf=s; adkim=s; rua=mailto:postmaster@' . $domain, null,
 				'DMARC — strict alignment, so only the sealed key can send as this domain.');
 
-			$selector = trim((string)$model->get('ied_dkim_selector'));
-			$public   = trim((string)$model->get('ied_dkim_public_dns'));
-			if ($selector !== '' && $public !== '') {
-				$this->planAdd($plan, 'TXT', $selector . '._domainkey.' . $domain, $public, null,
-					'DKIM — the in-app sealed key\'s public half.');
-			}
-			$pending_selector = trim((string)$model->get('ied_dkim_pending_selector'));
-			$pending_public   = trim((string)$model->get('ied_dkim_pending_public_dns'));
-			if ($pending_selector !== '' && $pending_public !== '') {
-				$this->planAdd($plan, 'TXT', $pending_selector . '._domainkey.' . $domain, $pending_public, null,
-					'DKIM — the staged rotation key, published before it takes over.');
-			}
-
-			$sub = $model->forwarding_subdomain();
-			if ($sub !== '' && strcasecmp($sub, $domain) !== 0) {
-				$sender_ip = $fronted ? $topology['public_ip'] : $this->publicIp;
-				$fwd_mech = $fronted ? ''
-					: $this->providerMechanism($this->relayInfo()['provider_class'], $domain);
-				if ($sender_ip !== '') {
-					$this->planAdd($plan, 'TXT', $sub,
-						'v=spf1 ip4:' . $sender_ip . ($fwd_mech !== '' ? ' ' . $fwd_mech : '') . ' -all', null,
-						'SPF for the forwarding subdomain — forwarded mail still has to pass.');
-				}
-				$this->planAdd($plan, 'MX', $sub, $mx_target, 10,
-					'MX for the forwarding subdomain — bounce notices have to come back.');
-			}
+			$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
 		} else {
 			$spf = $this->spfPlan($domain);
 			if ($spf['prescribe'] === 'record') {
@@ -447,6 +436,81 @@ class InboundEmailSetupCheck {
 		}
 
 		return $plan;
+	}
+
+	/**
+	 * The records that let the sealed key START SIGNING — and nothing else.
+	 *
+	 * THE PLAN THAT MATCHES THE GATE. signingReadinessChecks() verifies exactly
+	 * three things before the switch is allowed, so the ceremony's publish step
+	 * offers exactly those three: the sealed key's own DKIM record, and the
+	 * forwarding subdomain's SPF and MX so bounces have somewhere to land.
+	 *
+	 * NONE OF THEM ASKS ANYONE TO REJECT ANYTHING, which is what makes them safe
+	 * to publish while nothing is signing yet. The strict SPF and DMARC — the
+	 * rejection instruction — are deliberately absent: published here they would
+	 * reject the domain's own mail for as long as DNS propagation takes, which
+	 * is the outage this ordering exists to prevent
+	 * (specs/mailbox_fortress_send_protection_completion.md § The ordering
+	 * defect). They come from dnsPlan() afterwards, once the flag is on and the
+	 * signature they demand is already on every message.
+	 *
+	 * @return DnsRecordPlan
+	 */
+	public function signingReadinessPlan($domain) {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+		$domain = strtolower(trim((string)$domain));
+		$plan = new DnsRecordPlan($domain, 'mailbox');
+		if ($domain === '') {
+			return $plan;
+		}
+		$model = InboundEmailDomain::GetByDomain($domain);
+		if (!$model) {
+			return $plan;
+		}
+		$fronted   = $this->fronted();
+		$topology  = $this->topology();
+		$mx_target = $fronted ? $topology['mx_hostname'] : $this->mailHostname;
+		$this->signingStageRecords($plan, $domain, $model, $fronted, $topology, $mx_target);
+		return $plan;
+	}
+
+	/**
+	 * The half of the protected shape that is safe to publish at any time.
+	 *
+	 * Shared by dnsPlan()'s protected branch and signingReadinessPlan() so the
+	 * two can never drift: a record the ceremony publishes and the finished shape
+	 * omits would be reverted by the next reconcile, and one the finished shape
+	 * demands but the ceremony never offered would leave the operator stuck.
+	 */
+	private function signingStageRecords(DnsRecordPlan $plan, string $domain, $model,
+			bool $fronted, array $topology, string $mx_target): void {
+		$selector = trim((string)$model->get('ied_dkim_selector'));
+		$public   = trim((string)$model->get('ied_dkim_public_dns'));
+		if ($selector !== '' && $public !== '') {
+			$this->planAdd($plan, 'TXT', $selector . '._domainkey.' . $domain, $public, null,
+				'DKIM — the in-app sealed key\'s public half.');
+		}
+		$pending_selector = trim((string)$model->get('ied_dkim_pending_selector'));
+		$pending_public   = trim((string)$model->get('ied_dkim_pending_public_dns'));
+		if ($pending_selector !== '' && $pending_public !== '') {
+			$this->planAdd($plan, 'TXT', $pending_selector . '._domainkey.' . $domain, $pending_public, null,
+				'DKIM — the staged rotation key, published before it takes over.');
+		}
+
+		$sub = $model->forwarding_subdomain();
+		if ($sub !== '' && strcasecmp($sub, $domain) !== 0) {
+			$sender_ip = $fronted ? $topology['public_ip'] : $this->publicIp;
+			$fwd_mech = $fronted ? ''
+				: $this->providerMechanism($this->relayInfo()['provider_class'], $domain);
+			if ($sender_ip !== '') {
+				$this->planAdd($plan, 'TXT', $sub,
+					'v=spf1 ip4:' . $sender_ip . ($fwd_mech !== '' ? ' ' . $fwd_mech : '') . ' -all', null,
+					'SPF for the forwarding subdomain — forwarded mail still has to pass.');
+			}
+			$this->planAdd($plan, 'MX', $sub, $mx_target, 10,
+				'MX for the forwarding subdomain — bounce notices have to come back.');
+		}
 	}
 
 	/**
@@ -2418,7 +2482,7 @@ class InboundEmailSetupCheck {
 		});
 		return array(
 			$this->protectedSpfResult($domain, $txtOk, $spf),
-			$this->providerVerificationResult($domain, $txtOk, $spf),
+			$this->providerVerificationResult($domain, $txtOk, $spf, $model),
 			$this->forwardingSubdomainSpfResult($model),
 			$this->forwardingSubdomainMxResult($model),
 			$this->protectedDkimResult($domain, $model),
@@ -2463,14 +2527,47 @@ class InboundEmailSetupCheck {
 
 	/**
 	 * Closure 4: the protected domain must not be a relay-provider-verified
-	 * sending domain. The DNS-visible proxy is a provider include in the SPF —
-	 * a resting relay API key that could send for the domain is a resting send
-	 * capability, exactly like a resting DKIM key.
+	 * sending domain — a resting provider API key that can send for the domain
+	 * is a resting send capability, exactly like a resting DKIM key.
+	 *
+	 * TWO CAPABILITIES, NOT ONE, AND THE SECOND IS THE DANGEROUS ONE. This check
+	 * used to inspect only the SPF include, treating it as the DNS-visible proxy
+	 * for "verified at a provider". Under the shape this domain now publishes
+	 * that proxy is worthless: SPF is `-all`, so SPF authorizes nobody and fails
+	 * for everyone, and DMARC passes on DKIM ALIGNMENT ALONE. A provider holding
+	 * a live DKIM key for the domain therefore still sends mail that aligns
+	 * strictly and passes DMARC, no matter what SPF says — so removing the
+	 * include closed nothing and turned this row green while the hole it names
+	 * stayed open.
+	 *
+	 * The DKIM half is asked of the provider itself rather than guessed: it
+	 * reports the records it issues for the domain, and a record that resolves
+	 * is a key that can sign. A short probe of well-known selectors backs that
+	 * up for a provider this deployment no longer talks to but which still holds
+	 * the domain — the most likely version of this, since switching providers
+	 * leaves the old key published.
 	 */
-	private function providerVerificationResult($domain, $txtOk, $spf) {
+	private function providerVerificationResult($domain, $txtOk, $spf, InboundEmailDomain $model = null) {
 		if (!$txtOk) {
 			return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::UNKNOWN,
 				'DNS TXT lookup for ' . $domain . ' failed — try again.');
+		}
+
+		// The DKIM half first: it is the one that still passes DMARC.
+		$signer = $this->foreignDkimSigner($domain, $model);
+		if ($signer !== null) {
+			return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::FAIL,
+				'A DKIM key that is not yours is still published for ' . $domain . ' at selector '
+				. $signer['selector'] . ($signer['label'] !== '' ? ' (' . $signer['label'] . ')' : '')
+				. ' — whoever holds it can send mail as this domain that passes DMARC.',
+				'Your DMARC is strict on DKIM alignment, so a message signed with this key and carrying your '
+				. 'domain in From is accepted exactly as if your sealed key had signed it. SPF does not enter '
+				. 'into it: a protected domain authorizes no sender in SPF, so DMARC rests on the signature '
+				. 'alone. This key is a second way to be you.',
+				array('text' => 'Delete the TXT record at ' . $signer['name'] . ', and remove ' . $domain
+					. ' as a sending domain at that provider so it cannot be republished. Automated mail '
+					. 'belongs on a separate sending subdomain.',
+					'dns_record' => array('type' => 'TXT', 'name' => $signer['name'], 'value' => '(delete this record)')));
 		}
 		$provider_hosts = array('mailgun.org', 'sendgrid.net', 'amazonses.com', 'spf.protection.outlook.com',
 			'_spf.google.com', 'sparkpostmail.com', 'mailchimp.com', 'servers.mcsv.net', 'sendinblue.com', 'postmarkapp.com');
@@ -2494,7 +2591,93 @@ class InboundEmailSetupCheck {
 				array('text' => 'Remove the provider include from ' . $domain . '\'s SPF and de-verify the domain at the provider. Automated mail belongs on a separate sending subdomain.'));
 		}
 		return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::PASS,
-			'No relay provider is authorized in ' . $domain . '\'s SPF.');
+			'No provider can send as ' . $domain . ': nothing is authorized in its SPF, and no signing key '
+			. 'but yours is published.');
+	}
+
+	/**
+	 * A published DKIM key for this domain that is NOT the sealed key.
+	 *
+	 * Selectors cannot be enumerated from DNS — there is no way to ask a zone
+	 * which `_domainkey` names exist — so this asks the two sources that can
+	 * answer, in order of authority:
+	 *
+	 *   1. The configured outbound provider, which reports the records it issues
+	 *      for this domain. Exact, and covers the live case.
+	 *   2. A short probe of selectors well-known providers use, for a provider
+	 *      this deployment no longer talks to. NOT EXHAUSTIVE, and never claimed
+	 *      to be: a clean result here means nothing was found, not that nothing
+	 *      exists. It is a backstop, and the row it produces says what was found
+	 *      rather than what is absent.
+	 *
+	 * The sealed key and its staged rotation are excluded — those are the keys
+	 * that are supposed to be there.
+	 *
+	 * @return array|null ['selector' => .., 'name' => .., 'label' => ..]
+	 */
+	private function foreignDkimSigner(string $domain, ?InboundEmailDomain $model): ?array {
+		$ours = array();
+		if ($model !== null) {
+			foreach (array('ied_dkim_selector', 'ied_dkim_pending_selector') as $field) {
+				$sel = strtolower(trim((string)$model->get($field)));
+				if ($sel !== '') { $ours[$sel] = true; }
+			}
+		}
+
+		// 1. The provider's own answer.
+		$class = $this->activeProviderClass();
+		if ($class !== null && in_array('DkimRecordSource', class_implements($class) ?: array(), true)) {
+			$status = $this->providerDkimStatus($class, $domain);
+			if (($status['status'] ?? '') === 'registered') {
+				foreach ((array)($status['records'] ?? array()) as $rec) {
+					$name = strtolower(rtrim(trim((string)($rec['name'] ?? '')), '.'));
+					if ($name === '' || strpos($name, '._domainkey.') === false) { continue; }
+					$selector = substr($name, 0, strpos($name, '.'));
+					if (isset($ours[$selector])) { continue; }
+					if ($this->dkimSelectorResolves($name)) {
+						return array('selector' => $selector, 'name' => $name,
+							'label' => (string)$class::getLabel());
+					}
+				}
+			}
+		}
+
+		// 2. The backstop probe. Selectors, not providers: several are shared, and
+		// naming the wrong vendor in a security row is worse than naming none.
+		$known = array('mailo', 'smtp', 'k1', 'k2', 'pic', 's1', 's2', 'google',
+			'selector1', 'selector2', 'pm', 'mte1', 'mte2', 'sig1', 'dkim', 'mandrill');
+		foreach ($known as $selector) {
+			if (isset($ours[$selector])) { continue; }
+			$name = $selector . '._domainkey.' . $domain;
+			if ($this->dkimSelectorResolves($name)) {
+				return array('selector' => $selector, 'name' => $name, 'label' => '');
+			}
+		}
+
+		return null;
+	}
+
+	/** Does a `_domainkey` name answer with something that looks like a signing key? */
+	private function dkimSelectorResolves(string $name): bool {
+		// A CNAME'd selector (SES, and Mailgun's newer setup) delegates the key
+		// rather than holding it, and delegating it is just as much a capability.
+		list($cname, $cnameOk) = $this->dns(function () use ($name) { return DnsResolver::getCname($name); });
+		if ($cnameOk && trim((string)$cname) !== '') {
+			return true;
+		}
+		list($txt, $txtOk) = $this->dns(function () use ($name) { return DnsResolver::getTxt($name); });
+		if (!$txtOk) {
+			return false;   // an absence of information is not evidence of a key
+		}
+		foreach ((array)$txt as $t) {
+			// `v=DKIM1` is optional in the wild — Mailgun omits it — so the public
+			// key term is what identifies a key, and an empty p= is a REVOKED key
+			// and therefore no capability at all.
+			if (preg_match('/(^|;)\s*p\s*=\s*[A-Za-z0-9+\/]/', (string)$t)) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	/**
