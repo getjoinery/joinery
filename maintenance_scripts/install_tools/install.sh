@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 2.41 - The database password never enters the image. It was a
+#              --build-arg promoted to ENV, so docker inspect and docker
+#              history kept it; now it arrives at run time via --env-file.
+#VERSION 2.40 - The database password no longer has to travel in argv, where
+#              ps exposes it to every account on the box. It goes to
+#              _site_init.sh in the environment, and a positional one warns.
+#VERSION 2.39 - PostgreSQL config this script creates gets an explicit mode
+#              rather than the caller umask. A 0600 drop-in stops the server
+#              starting at all, and the install then fails somewhere else.
 #VERSION 2.38 - A package apt removed but did not purge no longer reads as
 #              installed. dpkg -s exits 0 for it; the Status field does not.
 #VERSION 2.37 - PostgreSQL logs connections and the address they came from, via
@@ -175,8 +184,16 @@
 #
 # Password Handling:
 #   If no password is provided, a secure 24-character password is auto-generated.
-#   For passwords with special characters (like !), use --password-file to avoid
-#   shell escaping issues.
+#   That is the recommended form: nothing has to be typed, so nothing is exposed.
+#
+#   To choose the password yourself, pass it in a file (--password-file) or in
+#   the environment (POSTGRES_PASSWORD=...). A password given as a positional
+#   argument is readable by every account on this machine through ps for as long
+#   as the install runs, and stays in the shell history of whoever ran it; the
+#   script warns when that happens. It is still accepted, so existing automation
+#   keeps working.
+#
+#   --password-file also avoids shell escaping issues with characters like !.
 #
 # SSL Behavior:
 #   SSL is automatically configured when a domain name is provided (not localhost/IP).
@@ -187,10 +204,10 @@
 #   # Auto-generate secure password (recommended)
 #   sudo ./install.sh site mysite mysite.com 8080
 #
-#   # Use password from file (for special characters)
-#   echo 'MyP@ss!word' > /tmp/dbpass.txt
+#   # Choose the password yourself, without putting it in ps or shell history
+#   (umask 077; echo 'MyP@ss!word' > /tmp/dbpass.txt)
 #   sudo ./install.sh site mysite --password-file=/tmp/dbpass.txt mysite.com 8080
-#   rm /tmp/dbpass.txt
+#   rm -f /tmp/dbpass.txt
 #
 #   # Skip SSL setup
 #   sudo ./install.sh site mysite mysite.com --no-ssl
@@ -1310,8 +1327,9 @@ create_test_site() {
                   "$site_root/maintenance_scripts/" > /dev/null
     fi
 
-    # Run initialization (creates separate database)
-    "$SCRIPT_DIR/_site_init.sh" "$test_site" "$password" "$test_domain"
+    # Run initialization (creates separate database). Password by environment,
+    # not argv — ps is readable by every account on the box.
+    JOINERY_DB_PASSWORD="$password" "$SCRIPT_DIR/_site_init.sh" "$test_site" "" "$test_domain"
 
     print_success "Test site created: $test_site"
 }
@@ -2080,6 +2098,17 @@ host    replication     all             127.0.0.1/32            ${PG_AUTH_METHOD
 host    replication     all             ::1/128                 ${PG_AUTH_METHOD}
 EOF
 
+    # Owner and mode stated, not inherited. This survives a restrictive umask
+    # today only because the package created the file first and `tee` keeps an
+    # existing file's mode — on any layout where it does not exist, tee creates
+    # it as root with the caller's umask, and a pg_hba.conf the postmaster cannot
+    # read stops PostgreSQL starting exactly as the drop-in below did. 640
+    # postgres:postgres is what the Debian and Ubuntu packages ship: readable by
+    # the server, not by the rest of the box, since it is the authentication
+    # policy.
+    chown postgres:postgres ${PG_CONFIG_DIR}/pg_hba.conf 2>/dev/null || true
+    chmod 640 ${PG_CONFIG_DIR}/pg_hba.conf
+
     # Configure PostgreSQL listening
     print_info "Configuring PostgreSQL to listen on port 5432 (${PG_LISTEN})..."
     sed -i "s/#listen_addresses = 'localhost'/listen_addresses = '${PG_LISTEN}'/" ${PG_CONFIG_DIR}/postgresql.conf
@@ -2113,6 +2142,18 @@ log_connections = on
 log_disconnections = off
 log_line_prefix = '%m [%p] %q%u@%d %h '
 EOF
+
+    # State the mode instead of inheriting it. This file is created here rather
+    # than by the package, so `tee` gives it whatever the operator's umask says —
+    # and the postmaster runs as postgres, not as the user running the installer.
+    # Under a restrictive umask (0077, common on hardened images) it lands 0600
+    # root:root, PostgreSQL cannot read it and REFUSES TO START, and the install
+    # then dies at the next psql with a socket error naming nothing about
+    # permissions. Reproduced 2026-08-06. The directory needs the same treatment:
+    # unreadable conf.d is the same failure one level up, and `mkdir -p` takes
+    # the umask too on any layout where the package did not ship it.
+    chmod 755 ${PG_CONFIG_DIR}/conf.d
+    chmod 644 ${PG_CONFIG_DIR}/conf.d/10-joinery-logging.conf
 
     # conf.d is included by the packaged postgresql.conf on Debian and Ubuntu,
     # but a file that is never read is worse than no file - it looks configured.
@@ -2413,7 +2454,8 @@ EOF
     echo ""
     print_warning "=== NEXT STEPS ==="
     print_info "1. Add your SSH public key to /home/user1/.ssh/authorized_keys"
-    print_info "2. Create sites using: ./install.sh site SITENAME PASSWORD DOMAIN"
+    print_info "2. Create sites using: ./install.sh site SITENAME DOMAIN"
+    print_info "   (the database password is generated for you; --password-file to choose one)"
     print_info "3. PostgreSQL postgres password is: ${POSTGRES_PASSWORD}"
     echo ""
     print_success "Server is ready for site deployment!"
@@ -2428,6 +2470,7 @@ do_site_create() {
     local SITENAME=""
     local POSTGRES_PASSWORD=""
     local PASSWORD_FILE=""
+    local PASSWORD_FROM_ARGV=0
     local DOMAIN_NAME=""
     local PORT=""
     local ACTIVATE_THEME=""
@@ -2529,7 +2572,8 @@ do_site_create() {
                 shift 2
                 ;;
             -h|--help)
-                echo "Usage: $0 site [OPTIONS] SITENAME PASSWORD [DOMAIN] [PORT]"
+                echo "Usage: $0 site [OPTIONS] SITENAME [DOMAIN] [PORT]"
+                echo "       password: generated by default; --password-file=FILE or POSTGRES_PASSWORD= to choose"
                 echo ""
                 echo "Mode Options:"
                 echo "  --docker      Force Docker mode (requires Docker installed)"
@@ -2588,6 +2632,10 @@ do_site_create() {
                         fi
                     else
                         POSTGRES_PASSWORD="$1"
+                        # Everything in argv is readable by every user on the box
+                        # via ps, for as long as the install runs. Recorded here
+                        # so the warning below can name the safe alternatives.
+                        PASSWORD_FROM_ARGV=1
                     fi
                 elif [ -z "$DOMAIN_NAME" ]; then
                     DOMAIN_NAME="$1"
@@ -2602,7 +2650,8 @@ do_site_create() {
     # Validate required parameters
     if [ -z "$SITENAME" ]; then
         print_error "SITENAME is required"
-        echo "Usage: $0 site [--docker|--bare-metal] SITENAME PASSWORD [DOMAIN] [PORT]"
+        echo "Usage: $0 site [--docker|--bare-metal] SITENAME [DOMAIN] [PORT]"
+        echo "       password: generated by default; --password-file=FILE or POSTGRES_PASSWORD= to choose"
         exit 1
     fi
 
@@ -2627,6 +2676,19 @@ do_site_create() {
         print_info "Auto-generated secure password: $POSTGRES_PASSWORD"
         print_warning "Save this password - you will need it for database access!"
         PASSWORD_WAS_GENERATED=1
+    fi
+
+    # A password given on the command line was readable by every account on this
+    # machine, via ps, from the moment the command started — and it is in the
+    # shell history of whoever ran it. Nothing here can undo that, so say so
+    # while the operator is still at the keyboard and can rotate it.
+    if [ "$PASSWORD_FROM_ARGV" -eq 1 ]; then
+        print_warning "The database password was passed as a command-line argument."
+        echo "  Anything in argv is visible to every user on this box (ps) while the"
+        echo "  install runs, and it is now in your shell history. Prefer either:"
+        echo "    ./install.sh site --password-file=/path/to/file SITENAME DOMAIN"
+        echo "    POSTGRES_PASSWORD=... ./install.sh site SITENAME DOMAIN"
+        echo "  Treat this one as exposed and rotate it if the box is shared."
     fi
 
     # Check if running as root
@@ -3284,14 +3346,12 @@ EOF
         docker build -q \
             --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
-            --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
             -t "joinery-$SITENAME" . > /dev/null
     else
         docker build \
             --build-arg BASE_IMAGE_VERSION="$BASE_IMAGE_VERSION" \
             --build-arg SITENAME="$SITENAME" \
-            --build-arg POSTGRES_PASSWORD="$POSTGRES_PASSWORD" \
             --build-arg DOMAIN_NAME="$DOMAIN_NAME" \
             -t "joinery-$SITENAME" .
     fi
@@ -3312,10 +3372,24 @@ EOF
         CLONE_ENV_OPTS="-e CLONE_FROM=${CLONE_FROM} -e CLONE_KEY=${CLONE_KEY}"
     fi
 
+    # The database password reaches the container here, at run time, and only
+    # here — not through --build-arg, which would bake it into the image where
+    # `docker inspect` and `docker history` keep it after the container is gone.
+    # A file rather than -e: anything in argv is readable by every account on
+    # this box through ps. Docker copies the values into the container's own
+    # config at create time, so restarts keep working and the file is needed
+    # only for the length of this command.
+    local ENV_FILE
+    ENV_FILE="$(mktemp /tmp/joinery-env-XXXXXX)"
+    chmod 600 "$ENV_FILE"
+    printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD" > "$ENV_FILE"
+    trap 'rm -f "$ENV_FILE"' RETURN
+
     if [ "$QUIET_MODE" -eq 1 ]; then
         docker run -d \
             --name "$SITENAME" \
             --restart unless-stopped \
+            --env-file "$ENV_FILE" \
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
@@ -3338,6 +3412,7 @@ EOF
         docker run -d \
             --name "$SITENAME" \
             --restart unless-stopped \
+            --env-file "$ENV_FILE" \
             -p "$PORT":80 \
             -p 127.0.0.1:"$DB_PORT":5432 \
             $CLONE_ENV_OPTS \
@@ -3545,16 +3620,27 @@ do_site_baremetal() {
         exit 1
     fi
 
-    # Build _site_init.sh arguments
-    local INIT_ARGS="$SITENAME $POSTGRES_PASSWORD $DOMAIN_NAME"
+    # Build _site_init.sh arguments.
+    #
+    # An array, not a string: word-splitting a string breaks the moment any value
+    # contains a space, and silently shifts every argument after it — a password
+    # with a space would have made the domain land in the password's slot. Glob
+    # characters in a password would have been pathname-expanded for the same
+    # reason.
+    #
+    # The password slot is deliberately empty. It travels in the environment
+    # instead (JOINERY_DB_PASSWORD), because argv is readable by every account on
+    # this machine through ps for as long as site init runs. The slot still has
+    # to exist: _site_init.sh consumes three leading positionals.
+    local INIT_ARGS=("$SITENAME" "" "$DOMAIN_NAME")
     if [ -n "$ACTIVATE_THEME" ]; then
-        INIT_ARGS="$INIT_ARGS --activate $ACTIVATE_THEME"
+        INIT_ARGS+=(--activate "$ACTIVATE_THEME")
     fi
     if [ "$QUIET_MODE" -eq 1 ]; then
-        INIT_ARGS="$INIT_ARGS -q"
+        INIT_ARGS+=(-q)
     fi
     if [ -n "$CLONE_FROM" ] && [ -n "$CLONE_KEY" ]; then
-        INIT_ARGS="$INIT_ARGS --clone-from=${CLONE_FROM} --clone-key=${CLONE_KEY}"
+        INIT_ARGS+=("--clone-from=${CLONE_FROM}" "--clone-key=${CLONE_KEY}")
     fi
 
     # Call _site_init.sh for shared setup
@@ -3564,7 +3650,7 @@ do_site_baremetal() {
     export PGPASSWORD="$POSTGRES_PASSWORD"
 
     # Run the initialization script
-    if ! "$SCRIPT_DIR/_site_init.sh" $INIT_ARGS; then
+    if ! JOINERY_DB_PASSWORD="$POSTGRES_PASSWORD" "$SCRIPT_DIR/_site_init.sh" "${INIT_ARGS[@]}"; then
         print_error "_site_init.sh failed"
         exit 1
     fi

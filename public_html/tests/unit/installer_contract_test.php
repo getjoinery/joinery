@@ -894,6 +894,108 @@ foreach ([
 }
 
 
+section('The database password never becomes a command line');
+
+// argv is readable by every account on the box through ps, for as long as the
+// process runs — and the host's ps lists container processes too, so a CMD that
+// builds a psql command line leaks just as surely as the installer does. Worse,
+// a --build-arg promoted to ENV puts the password in the IMAGE: docker inspect
+// prints it and docker history keeps it, after the container is gone and
+// wherever the image travels. Measured on a live image 2026-08-06: 7 layers.
+// install.sh with comment lines removed. A local copy: the shared $install_exec
+// is not built until further down this file, and reading it here would silently
+// match against an empty string — every negative check would pass vacuously.
+$install_nocomment = implode("\n", array_filter(
+    explode("\n", $install_src),
+    function ($line) { return strpos(ltrim($line), '#') !== 0; }
+));
+
+$dockerfile = $site_root . '/maintenance_scripts/install_tools/Dockerfile.template';
+$df_src     = is_file($dockerfile) ? file_get_contents($dockerfile) : '';
+check($df_src !== '', 'the Dockerfile template exists', $dockerfile);
+
+// Strip comments; the rationale above each fix names the thing it removed.
+$df_code = preg_replace('/^\s*#.*$/m', '', $df_src);
+check(preg_match('/^\s*ARG\s+POSTGRES_PASSWORD/m', $df_code) === 0,
+    'the password is not a build argument');
+check(preg_match('/^\s*ENV\s+POSTGRES_PASSWORD/m', $df_code) === 0,
+    'and is never baked into the image as an ENV');
+// The SQL still names the password — it has to. What matters is how it reaches
+// psql: on stdin through a shell builtin, never as a -c argument, which argv
+// would expose. So look for a psql invocation that carries it, not for the
+// password appearing at all.
+check(preg_match('/psql[^\n|]*-c[^\n]*POSTGRES_PASSWORD/', $df_code) === 0,
+    'the first-run ALTER USER does not put it in a psql command line');
+check(preg_match('/echo\s+"ALTER USER postgres PASSWORD[^\n]*\|\s*su -c "psql/', $df_code) === 1,
+    'it is piped to psql on stdin instead');
+check(strpos($df_code, 'JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh') !== false,
+    'and site init receives it in the environment, not as a positional');
+
+check(strpos($install_nocomment, '--build-arg POSTGRES_PASSWORD') === false,
+    'install.sh passes no password build argument');
+check(substr_count($install_nocomment, '--env-file "$ENV_FILE"') >= 2,
+    'every docker run supplies it from a file instead',
+    'found: ' . substr_count($install_nocomment, '--env-file "$ENV_FILE"'));
+check(preg_match('/chmod 600 "\$ENV_FILE"/', $install_nocomment) === 1,
+    'that file is owner-only');
+check(strpos($install_nocomment, 'JOINERY_DB_PASSWORD="$POSTGRES_PASSWORD" "$SCRIPT_DIR/_site_init.sh"') !== false,
+    'the bare-metal path passes it in the environment too');
+
+// The array matters beyond secrecy: the old string was word-split, so a password
+// containing a space shifted every argument after it and the domain landed in
+// the password's slot.
+check(preg_match('/local INIT_ARGS=\(/', $install_nocomment) === 1,
+    'site-init arguments are an array, so a space in a value cannot shift them');
+
+$init_sh  = $site_root . '/maintenance_scripts/install_tools/_site_init.sh';
+$init_src = is_file($init_sh) ? file_get_contents($init_sh) : '';
+check(strpos($init_src, 'JOINERY_DB_PASSWORD') !== false,
+    '_site_init.sh reads the password from the environment when given one');
+
+
+section('A site with no certificate is still reachable');
+
+// The :443 vhost exists only when an origin cert does. If the :80 redirect to
+// HTTPS is not gated on the SAME file, a site with no cert — --no-ssl, an IP,
+// localhost, or an issue that failed — answers every request with a permanent
+// redirect to a port serving nothing. install.sh states the opposite intent
+// ("a missing cert means the site serves HTTP"), so this pins config to promise.
+// Observed live 2026-08-06 on a --no-ssl install.
+foreach ([
+    'the bare-metal vhost' => $site_root . '/maintenance_scripts/install_tools/default_virtualhost.conf',
+    'the proxy vhost'      => $site_root . '/maintenance_scripts/install_tools/default_proxy_vhost.conf',
+] as $label => $path) {
+    $src = is_file($path) ? file_get_contents($path) : '';
+    check($src !== '', "{$label} exists", $path);
+
+    // The redirect to https and the :443 block must be guarded by the same file.
+    $guard = '<IfFile /etc/letsencrypt/live/{{DOMAIN_NAME}}/fullchain.pem>';
+    check(substr_count($src, $guard) >= 2,
+        "{$label} guards its redirect on the cert, not just its :443 block",
+        'IfFile guards found: ' . substr_count($src, $guard));
+
+    // Every unconditional redirect-to-https must sit inside such a guard. Walk
+    // the file rather than pattern-match, so a new one added outside is caught.
+    $depth = 0;
+    $ungated = [];
+    foreach (preg_split('/\R/', $src) as $n => $line) {
+        $t = trim($line);
+        if ($t === '' || $t[0] === '#') { continue; }
+        if (stripos($t, '<IfFile') === 0)  { $depth++; continue; }
+        if (stripos($t, '</IfFile') === 0) { $depth = max(0, $depth - 1); continue; }
+        if ($depth === 0 && preg_match('~RewriteRule.*https://~i', $t)) {
+            $ungated[] = ($n + 1) . ': ' . $t;
+        }
+    }
+    check(!$ungated, "{$label} has no redirect to https outside a cert guard",
+        implode(' | ', $ungated));
+
+    // The www alias has to land somewhere that answers, so it needs both halves.
+    check(strpos($src, '<IfFile !/etc/letsencrypt/live/{{DOMAIN_NAME}}/fullchain.pem>') !== false,
+        "{$label} sends www to http while there is no cert");
+}
+
+
 section('The installer asks for no extension the distro cannot supply');
 
 // ext/imap left the PHP distribution in 8.4, so from 8.5 on there is no
@@ -1103,6 +1205,25 @@ check(preg_match('/sed -i.*log_line_prefix/', $install_exec) === 0,
 check(strpos($install_exec, "include_dir = 'conf.d'") !== false
     && preg_match('/if ! grep -qE.*include_dir/', $install_exec) === 1,
     'and the include is added when the packaged config lacks it');
+
+// The postmaster runs as postgres, not as whoever ran the installer, and every
+// file created here takes its mode from that caller's umask. Under 0077 the
+// drop-in lands 0600 root:root and PostgreSQL REFUSES TO START — the install
+// then dies at the next psql with a socket error that names nothing about
+// permissions. Reproduced on a live container 2026-08-06: 0600 leaves the
+// cluster down, 0644 brings it up. So the modes are stated, never inherited.
+check(preg_match('~chmod 644 \$\{PG_CONFIG_DIR\}/conf\.d/10-joinery-logging\.conf~', $install_exec) === 1,
+    'the logging drop-in is given an explicit mode, not the caller umask');
+check(preg_match('~chmod 755 \$\{PG_CONFIG_DIR\}/conf\.d~', $install_exec) === 1,
+    'and so is conf.d, which mkdir -p would otherwise create from the umask too');
+
+// pg_hba.conf escapes this today only because the package created it first and
+// tee keeps an existing file's mode. That is luck, not design: on a layout where
+// it does not already exist the same 0600 root:root stops the server dead.
+check(preg_match('~chmod 640 \$\{PG_CONFIG_DIR\}/pg_hba\.conf~', $install_exec) === 1,
+    'pg_hba.conf states its mode rather than inheriting whatever tee left');
+check(preg_match('~chown postgres:postgres \$\{PG_CONFIG_DIR\}/pg_hba\.conf~', $install_exec) === 1,
+    'and its owner, since 640 is unreadable to the server if it stays root-owned');
 
 
 harness_finish();
