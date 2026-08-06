@@ -1284,8 +1284,18 @@
 			$installed_any = false;
 			foreach ($resolver_output as $apt_spec) {
 				[$apt_primary, $apt_fallback] = array_pad(explode('|', $apt_spec, 2), 2, '');
-				$check_cmd = 'dpkg -s ' . escapeshellarg($apt_primary) . ' >/dev/null 2>&1'
-					. ($apt_fallback ? ' || dpkg -s ' . escapeshellarg($apt_fallback) . ' >/dev/null 2>&1' : '');
+				// Status, not mere presence in the dpkg database. `dpkg -s` exits 0
+				// for a package apt removed without purging — it lingers as
+				// "deinstall ok config-files" with its files deleted. Reading that
+				// as installed strands the node: the extension is never reinstalled,
+				// ComposerValidator then fails on the missing ext-*, and the
+				// deployment rolls back on every subsequent attempt.
+				$status_test = function ($pkg) {
+					return 'dpkg-query -W -f=\'${Status}\' ' . escapeshellarg($pkg)
+						. ' 2>/dev/null | grep -q \'^install ok installed$\'';
+				};
+				$check_cmd = $status_test($apt_primary)
+					. ($apt_fallback ? ' || ' . $status_test($apt_fallback) : '');
 				exec($check_cmd, $unused_out, $pkg_missing);
 				if ($pkg_missing === 0) {
 					continue; // already installed under either name

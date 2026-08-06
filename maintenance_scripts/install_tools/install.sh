@@ -1,4 +1,6 @@
 #!/usr/bin/env bash
+#VERSION 2.38 - A package apt removed but did not purge no longer reads as
+#              installed. dpkg -s exits 0 for it; the Status field does not.
 #VERSION 2.37 - PostgreSQL logs connections and the address they came from, via
 #              a conf.d drop-in. Successful logins were not logged at all and
 #              failures carried no client address, so a box under attack could
@@ -811,7 +813,10 @@ provision_origin_cert() {
         local plugin="certbot-dns-${provider}"
         local cred="/etc/letsencrypt/${provider}.ini"
         if [ -r "$cred" ]; then
-            if ! dpkg -s "python3-${plugin}" >/dev/null 2>&1 && ! pip3 show "$plugin" >/dev/null 2>&1; then
+            # Status rather than `dpkg -s`, which exits 0 for a package apt
+            # removed without purging and would skip a reinstall it needs.
+            if ! dpkg-query -W -f='${Status}' "python3-${plugin}" 2>/dev/null | grep -q '^install ok installed$' \
+               && ! pip3 show "$plugin" >/dev/null 2>&1; then
                 print_info "Installing ${plugin}..."
                 apt-get install -y -qq "python3-${plugin}" 2>/dev/null \
                     || pip3 install --quiet "$plugin" 2>/dev/null \

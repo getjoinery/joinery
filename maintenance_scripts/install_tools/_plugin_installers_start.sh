@@ -52,6 +52,15 @@ fi
 # Covers plugins installed after the site image was built, whose
 # requires.extensions the image-build resolver never saw. Cheap when nothing
 # is missing: dpkg checks only, no apt update.
+#
+# The check is the package's Status, not whether dpkg has heard of it: `dpkg -s`
+# exits 0 for a removed-but-not-purged package whose files are gone, so a
+# name-only test silently skips reinstalling an extension that is not there.
+pkg_installed() {
+    [[ -n "${1:-}" ]] || return 1
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
 RESOLVER="${PUBLIC_HTML}/utils/list_dependencies.php"
 if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/null 2>&1; then
     APT_UPDATED=0
@@ -59,7 +68,7 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
         [[ -n "${SPEC}" ]] || continue
         PRIMARY="${SPEC%%|*}"
         FALLBACK="${SPEC##*|}"
-        if dpkg -s "${PRIMARY}" >/dev/null 2>&1 || dpkg -s "${FALLBACK}" >/dev/null 2>&1; then
+        if pkg_installed "${PRIMARY}" || pkg_installed "${FALLBACK}"; then
             continue
         fi
         if [[ "${APT_UPDATED}" == "0" ]]; then

@@ -870,6 +870,29 @@ $missing_at = strpos($deps_src, 'if [ -z "$MISSING" ]');
 check($missing_at !== false && $update_at !== false && $missing_at < $update_at,
     'nothing missing means apt is never called');
 
+// "Installed" means the Status field says so, not that dpkg has heard of the
+// name. `dpkg -s` exits 0 for a package apt removed without purging — it stays
+// in the database as "deinstall ok config-files" with its files gone. A node in
+// that state was permanently stuck: the extension was never reinstalled,
+// ComposerValidator then failed on the missing ext-*, and every upgrade rolled
+// back. Observed on a live 24.04 box 2026-08-06.
+$upgrade_php  = PathHelper::getIncludePath('utils/upgrade.php');
+$plugin_start = $site_root . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
+foreach ([
+    'the container/bare-metal extension installer' => $deps_sh,
+    'the plugin-start extension installer'         => $plugin_start,
+    'the upgrade path'                             => $upgrade_php,
+] as $label => $path) {
+    $src = is_file($path) ? file_get_contents($path) : '';
+    check($src !== '', "{$label} exists", $path);
+    // Strip comments so the rationale above each fix can keep naming `dpkg -s`.
+    $code = preg_replace('/^\s*(#|\/\/).*$/m', '', $src);
+    check(strpos($code, 'dpkg -s') === false,
+        "{$label} does not treat a known package name as installed");
+    check(strpos($code, 'install ok installed') !== false,
+        "{$label} tests the dpkg Status field instead");
+}
+
 
 section('The installer asks for no extension the distro cannot supply');
 
