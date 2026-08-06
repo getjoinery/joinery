@@ -23,7 +23,7 @@
                         <ol>
                             <li><a href="/">Home</a></li>
                             <li><a href="/profile">Dashboard</a></li>
-                            <li><a href="/profile/devices">Devices</a></li>
+                            <li><a href="/profile/security">Devices</a></li>
                             <li class="active">Link</li>
                         </ol>
                     </nav>

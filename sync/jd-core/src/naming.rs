@@ -125,6 +125,29 @@ pub fn apply_naming(
                 LocalName::Unsyncable(reason) => (entry.local_name.clone(), Some(reason)),
             };
 
+            // Encryption outranks every name verdict, and is checked first
+            // because it does not depend on the name at all. Reporting a case
+            // clash for a file whose bytes this build could not have written
+            // either way would send the user to rename something that was never
+            // the problem.
+            //
+            // Folders carry the flag too, which is what makes this safe in the
+            // other direction: an encrypted folder never materializes, so no
+            // local file can be created inside one and uploaded as plaintext
+            // into a folder the user believes is encrypted.
+            if entry.is_encrypted {
+                let reason = UnsyncableReason::EncryptedUnsupported;
+                let mut updated = entry.clone();
+                if entry.status != LocalStatus::Unsyncable(reason.clone()) {
+                    out.unsyncable.push((entry.id, reason.clone()));
+                }
+                updated.status = LocalStatus::Unsyncable(reason);
+                if updated != entry {
+                    env.store.put_entry(&updated)?;
+                }
+                continue;
+            }
+
             // Length is checked against the resolved name, because escaping
             // makes names longer — a colon becomes three characters — and a name
             // that only just fitted may not any more.

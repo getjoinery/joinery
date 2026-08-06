@@ -19,7 +19,6 @@
 
 function drive_device_link_approve_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('data/device_links_class.php'));
 	require_once(PathHelper::getIncludePath('data/sync_devices_class.php'));
 	require_once(PathHelper::getIncludePath('data/api_keys_class.php'));
@@ -35,9 +34,10 @@ function drive_device_link_approve_logic(array $input): LogicResult {
 
 	// Linking a device is a credential change — the same bar as adding a vault
 	// unlocker. A borrowed unlocked browser must not be able to mint a
-	// standing credential for a machine the owner has never seen.
-	$service = new PasskeyService();
-	if (!$service->hasRecentStepUp(300)) {
+	// standing credential for a machine the owner has never seen. Outstanding
+	// rather than "recent" because an account with no second factor has nothing
+	// to step up with, and would otherwise be refused forever.
+	if ($session->step_up_outstanding(null, 300)) {
 		return LogicResult::error('Confirm it is you before linking a new device.', array('requires_stepup' => true));
 	}
 

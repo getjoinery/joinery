@@ -390,6 +390,12 @@ fn stat_all(env: &ExecEnv, ids: &[EntityId]) -> Result<Vec<(EntityId, RemoteStat
                         content: None,
                         head_change_id: 0,
                         deleted: true,
+                        // A `missing` row says only "gone or no longer visible".
+                        // It carries no facts about the entity, and absorb
+                        // ignores everything but `deleted` for a deletion.
+                        is_encrypted: false,
+                        wrapped_file_key: None,
+                        encrypted_metadata: None,
                     },
                 ));
             }
@@ -438,6 +444,18 @@ fn state_of(item: &Value) -> Option<(EntityId, RemoteState)> {
                 .and_then(Value::as_i64)
                 .unwrap_or(0),
             deleted: item.get("deleted").and_then(Value::as_bool) == Some(true),
+            // Read, never inferred from the presence of a sibling field: the
+            // server states this outright, and every other field in this struct
+            // means something different when it is set.
+            is_encrypted: item.get("encrypted").and_then(Value::as_bool) == Some(true),
+            wrapped_file_key: item
+                .get("wrapped_file_key")
+                .and_then(Value::as_str)
+                .map(str::to_string),
+            encrypted_metadata: item
+                .get("encrypted_metadata")
+                .and_then(Value::as_str)
+                .map(str::to_string),
         },
     ))
 }
@@ -458,6 +476,14 @@ fn absorb_remote(env: &ExecEnv, id: EntityId, state: &RemoteState) -> Result<(),
                 entry.remote = state.placement.clone();
                 entry.remote_content = state.content.clone();
                 entry.head_change_id = state.head_change_id;
+                entry.is_encrypted = state.is_encrypted;
+                // A key that has ARRIVED is recorded; a key that is absent from
+                // this observation does not erase one already held. The grant
+                // travels on its own schedule, and a stat taken before it lands
+                // must not look like the grant being taken away.
+                if state.wrapped_file_key.is_some() {
+                    entry.wrapped_file_key = state.wrapped_file_key.clone();
+                }
             }
             env.store.put_entry(&entry)?;
         }
@@ -472,6 +498,8 @@ fn absorb_remote(env: &ExecEnv, id: EntityId, state: &RemoteState) -> Result<(),
             let mut entry = blank(id, &state.placement);
             entry.remote_content = state.content.clone();
             entry.head_change_id = state.head_change_id;
+            entry.is_encrypted = state.is_encrypted;
+            entry.wrapped_file_key = state.wrapped_file_key.clone();
             entry.status = match id.entity_type {
                 EntityType::Folder => LocalStatus::PendingDownload,
                 EntityType::File => LocalStatus::PendingDownload,
@@ -489,6 +517,12 @@ fn observed_remote(entry: &Entry) -> RemoteState {
         content: entry.remote_content.clone(),
         head_change_id: entry.head_change_id,
         deleted: entry.remote_deleted,
+        is_encrypted: entry.is_encrypted,
+        wrapped_file_key: entry.wrapped_file_key.clone(),
+        // Not persisted on the entry: the metadata blob is only ever needed at
+        // the moment it is opened, and keeping a stale copy would invite a
+        // decode of a name the server has since re-encrypted.
+        encrypted_metadata: None,
     }
 }
 

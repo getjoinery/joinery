@@ -241,6 +241,14 @@ fn unsyncable_summary(detail: &str) -> String {
     if detail.starts_with("ReservedPrefix") {
         return "The name starts with `.jd-`, which the sync client uses for its own temporary files. Rename it.".into();
     }
+    // Every other reason here is the disk refusing a NAME, and each ends by
+    // asking the user to change one. This one must not: the name is fine, the
+    // disk is willing, and there is nothing for them to fix. Falling through to
+    // the generic line would send someone off renaming a file that was never
+    // the problem.
+    if detail.starts_with("EncryptedUnsupported") {
+        return "This file is encrypted, and this version of the sync client cannot open encrypted files yet. It has been left on the server, untouched and unharmed.".into();
+    }
     "Cannot be saved on this disk under this name.".into()
 }
 
@@ -409,6 +417,35 @@ mod tests {
         assert!(issue.summary.contains("Report.txt"));
         assert!(issue.summary.contains("capitalization"));
         assert!(!issue.summary.contains("CaseClash"));
+    }
+
+    #[test]
+    fn an_encrypted_file_is_not_reported_as_a_naming_problem() {
+        // The trap this guards: every other unsyncable reason is the disk
+        // refusing a name, so the generic fallback tells the user to rename
+        // something. For an encrypted file the name is fine and there is
+        // nothing to fix — that advice would send them off editing a file that
+        // was never the problem, and leave them believing they had broken it.
+        let issue = describe(StoredIssue {
+            issue_id: 1,
+            entity: None,
+            kind: "unsyncable".into(),
+            detail: "EncryptedUnsupported".into(),
+            created_at: 0,
+            dismissed: false,
+        });
+        assert!(issue.summary.contains("encrypted"));
+        assert!(
+            !issue.summary.to_lowercase().contains("rename"),
+            "must not ask for a rename: {}",
+            issue.summary
+        );
+        assert!(
+            !issue.summary.contains("under this name"),
+            "must not fall through to the naming fallback: {}",
+            issue.summary
+        );
+        assert!(!issue.summary.contains("EncryptedUnsupported"));
     }
 
     #[test]

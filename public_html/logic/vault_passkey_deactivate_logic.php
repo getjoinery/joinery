@@ -3,7 +3,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 
 function vault_passkey_deactivate_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
@@ -24,8 +23,7 @@ function vault_passkey_deactivate_logic(array $input): LogicResult {
 		return LogicResult::error('Set up your vault first.');
 	}
 
-	$service = new PasskeyService();
-	if (!$service->hasRecentStepUp()) {
+	if ($session->step_up_outstanding($user)) {
 		return LogicResult::error('Please re-confirm with an existing passkey before deactivating one for your vault.');
 	}
 

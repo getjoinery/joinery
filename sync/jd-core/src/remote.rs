@@ -30,6 +30,24 @@ pub struct RemoteState {
     /// a trashed entry should stop being materialized, so it arrives here as a
     /// delete and is recoverable from the server's trash either way.
     pub deleted: bool,
+    /// The server holds this file's bytes encrypted and cannot read them.
+    ///
+    /// Everything else in this struct means something DIFFERENT when this is
+    /// set, which is why it is carried rather than inferred: `placement.name`
+    /// is a server-side placeholder rather than the file's name, `content` is
+    /// the hash of the CIPHERTEXT (so it changes on every re-encryption of
+    /// identical plaintext), and the real name, mime and size live inside
+    /// `encrypted_metadata`. An engine that does not look at this flag treats
+    /// all three as if they were the plaintext facts — which is how ciphertext
+    /// ends up written to disk under a placeholder name.
+    pub is_encrypted: bool,
+    /// This file's key, sealed to the caller's vault public key. Absent when the
+    /// owner has not granted this user a key yet — visible file, no way in. Not
+    /// an error: the grant may simply not have arrived.
+    pub wrapped_file_key: Option<String>,
+    /// The encrypted `{name, mime, size, cid, ...}` blob. Opening it needs the
+    /// file key, so the plaintext name is not knowable until that is unwrapped.
+    pub encrypted_metadata: Option<String>,
 }
 
 /// What the server did to an entry we already track, measured from the
@@ -178,6 +196,9 @@ mod tests {
             content: sha.map(content),
             head_change_id: 11,
             deleted: false,
+            is_encrypted: false,
+            wrapped_file_key: None,
+            encrypted_metadata: None,
         }
     }
 

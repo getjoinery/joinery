@@ -10,7 +10,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  */
 function vault_client_replace_recovery_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
 	require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
 
@@ -35,8 +34,7 @@ function vault_client_replace_recovery_logic(array $input): LogicResult {
 			return LogicResult::error('Your vault is not set up.');
 		}
 
-		$service = new PasskeyService();
-		if (!$service->hasRecentStepUp(300)) {
+		if ($session->step_up_outstanding(null, 300)) {
 			return LogicResult::error('Confirm with your passkey before regenerating recovery keys.', ['requires_stepup' => true]);
 		}
 

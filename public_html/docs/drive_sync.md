@@ -201,6 +201,26 @@ clashing pair in different orders keep different members of it. Both remain on
 the server and both devices report the clash. An entry recovers by itself, with
 no user action, as soon as the clash clears.
 
+### Encrypted files and folders
+
+The client does not yet sync encrypted Drive content. Encrypted files and
+encrypted folders are recorded `unsyncable`, left on the server untouched, and
+reported with a reason that says so — the name is fine and there is nothing for
+the user to rename.
+
+Refusing them is the correct behaviour rather than a gap papered over. For an
+encrypted file the server sends a placeholder name and the hash of the
+*ciphertext*, because it holds nothing else: the real name, mime and size live
+inside the encrypted metadata blob. Treated as ordinary values, those two fields
+would put unreadable bytes on the disk under a name the user never chose, and
+report it as synced. The refusal is per entry, so everything unencrypted in the
+same account keeps syncing normally.
+
+Encrypted folders are refused for the same reason and one more: a folder that
+materialized locally would look like any other, so anything dropped into it
+would upload as plaintext into a folder the user believes is encrypted. Keeping
+the folder off the disk makes that impossible rather than merely unlikely.
+
 ### Unicode normalization
 
 Names are composed at one boundary — `Vfs::read_dir` returns NFC, always —
