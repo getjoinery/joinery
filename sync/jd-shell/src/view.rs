@@ -124,11 +124,21 @@ pub fn present(status: Option<&Value>) -> Presentation {
     };
 
     let summary = field("summary");
+    // The total rather than the length of the list the answer carried. The
+    // daemon sends at most fifty, so a tray counting the array would say "50
+    // issues" to somebody who has three hundred — an understatement, which is
+    // the one direction this indicator must never err in.
     let issues = status
-        .get("issues")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
+        .get("issues_total")
+        .and_then(Value::as_u64)
+        .map(|n| n as usize)
+        .unwrap_or_else(|| {
+            status
+                .get("issues")
+                .and_then(Value::as_array)
+                .map(Vec::len)
+                .unwrap_or(0)
+        });
 
     let mut menu = vec![MenuItem::off("state", summary.to_string())];
 

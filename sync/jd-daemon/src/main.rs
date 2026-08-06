@@ -361,11 +361,19 @@ fn cmd_status() -> Result<(), String> {
     if let Some(blocker) = answer.get("blocker").and_then(Value::as_str) {
         println!("\n  {blocker}");
     }
+    // The total, not the length of the list — the answer carries at most fifty
+    // of them, and saying "50" when there are three hundred is the
+    // understatement the whole health model exists to prevent.
     let issues = answer
-        .get("issues")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
+        .get("issues_total")
+        .and_then(Value::as_u64)
+        .unwrap_or_else(|| {
+            answer
+                .get("issues")
+                .and_then(Value::as_array)
+                .map(|list| list.len() as u64)
+                .unwrap_or(0)
+        });
     if issues > 0 {
         println!("\n  {issues} issue(s) — see: joinery-drive issues");
     }
@@ -395,6 +403,18 @@ fn cmd_issues() -> Result<(), String> {
             "[{}] {}",
             issue.get("id").and_then(Value::as_i64).unwrap_or(0),
             issue.get("summary").and_then(Value::as_str).unwrap_or(""),
+        );
+    }
+    // Said out loud when the list is not all of them. Printing fifty lines and
+    // stopping would read as fifty being all there is.
+    let total = answer
+        .get("issues_total")
+        .and_then(Value::as_u64)
+        .unwrap_or(issues.len() as u64);
+    if total > issues.len() as u64 {
+        println!(
+            "\n…and {} more. Dealing with these will reveal the rest.",
+            total - issues.len() as u64
         );
     }
     println!("\nDismiss one with: joinery-drive dismiss <id>");

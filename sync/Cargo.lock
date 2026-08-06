@@ -1429,6 +1429,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "jd-soak"
+version = "0.1.0"
+dependencies = [
+ "jd-crypto",
+ "jd-daemon",
+ "jd-platform",
+ "jd-proto",
+ "jd-vfs",
+ "serde",
+ "serde_json",
+ "sha2",
+ "thiserror 1.0.69",
+]
+
+[[package]]
 name = "jd-vfs"
 version = "0.1.0"
 dependencies = [

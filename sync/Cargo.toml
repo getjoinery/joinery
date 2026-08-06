@@ -13,6 +13,7 @@ members = [
     "jd-daemon",
     "jd-shell",
     "jd-sim",
+    "jd-soak",
 ]
 
 [workspace.package]
