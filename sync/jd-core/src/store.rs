@@ -31,7 +31,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// Bumped when the schema changes in a way an older engine could misread.
-pub const SCHEMA_VERSION: i64 = 2;
+pub const SCHEMA_VERSION: i64 = 3;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -162,6 +162,9 @@ impl Store {
                 local_status           TEXT NOT NULL,
                 unsyncable_reason      TEXT,
                 wrapped_file_key       TEXT,
+                content_id             TEXT,
+                synced_remote_sha256   TEXT,
+                synced_remote_size     INTEGER,
                 PRIMARY KEY (entity_type, server_id)
             );
             CREATE INDEX IF NOT EXISTS entries_parent ON entries (parent_folder_id);
@@ -208,6 +211,18 @@ impl Store {
         )?;
 
         let store = Store { conn };
+        // Columns added after the table shipped. `CREATE TABLE IF NOT EXISTS`
+        // does nothing to a table that already exists, so an older store keeps
+        // its old shape and every query naming a new column fails. Adding them
+        // here is a one-line ALTER; the alternative is a client that will not
+        // start and cannot say why.
+        for (column, ddl) in [
+            ("content_id", "TEXT"),
+            ("synced_remote_sha256", "TEXT"),
+            ("synced_remote_size", "INTEGER"),
+        ] {
+            store.add_column_if_missing("entries", column, ddl)?;
+        }
         match store.get_meta("schema_version")? {
             None => store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?,
             Some(v) => {
@@ -224,7 +239,27 @@ impl Store {
                 }
             }
         }
+        // The version is written last, and only once the shape matches it: a
+        // store stamped 3 that a crash left with a version-2 shape would be
+        // refused help by every later start.
+        store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?;
         Ok(store)
+    }
+
+    /// Add a column an older store predates. Idempotent, and quiet about it.
+    fn add_column_if_missing(&self, table: &str, column: &str, ddl: &str) -> StoreResult<()> {
+        let existing: i64 = self.conn.query_row(
+            "SELECT COUNT(*) FROM pragma_table_info(?1) WHERE name = ?2",
+            params![table, column],
+            |r| r.get(0),
+        )?;
+        if existing == 0 {
+            self.conn.execute(
+                &format!("ALTER TABLE {table} ADD COLUMN {column} {ddl}"),
+                [],
+            )?;
+        }
+        Ok(())
     }
 
     // ---- meta --------------------------------------------------------------
@@ -275,8 +310,9 @@ impl Store {
                 is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
                 head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                 synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
-                local_status, unsyncable_reason, wrapped_file_key
-             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21)
+                local_status, unsyncable_reason, wrapped_file_key,
+                content_id, synced_remote_sha256, synced_remote_size
+             ) VALUES (?1,?2,?3,?4,?5,?6,?7,?8,?9,?10,?11,?12,?13,?14,?15,?16,?17,?18,?19,?20,?21,?22,?23,?24)
              ON CONFLICT(entity_type, server_id) DO UPDATE SET
                 parent_folder_id = excluded.parent_folder_id,
                 remote_name = excluded.remote_name,
@@ -296,7 +332,10 @@ impl Store {
                 synced_fp_file_id = excluded.synced_fp_file_id,
                 local_status = excluded.local_status,
                 unsyncable_reason = excluded.unsyncable_reason,
-                wrapped_file_key = excluded.wrapped_file_key",
+                wrapped_file_key = excluded.wrapped_file_key,
+                content_id = excluded.content_id,
+                synced_remote_sha256 = excluded.synced_remote_sha256,
+                synced_remote_size = excluded.synced_remote_size",
             params![
                 e.id.entity_type.to_string(),
                 e.id.server_id,
@@ -319,6 +358,9 @@ impl Store {
                 status,
                 reason,
                 e.wrapped_file_key,
+                e.content_id,
+                e.synced_remote_content.as_ref().map(|c| c.sha256.clone()),
+                e.synced_remote_content.as_ref().map(|c| c.size as i64),
             ],
         )?;
         Ok(())
@@ -332,7 +374,8 @@ impl Store {
                         is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
                         head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                         synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
-                        local_status, unsyncable_reason, wrapped_file_key
+                        local_status, unsyncable_reason, wrapped_file_key,
+                        content_id, synced_remote_sha256, synced_remote_size
                    FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                 params![id.entity_type.to_string(), id.server_id],
                 row_to_entry,
@@ -354,7 +397,8 @@ impl Store {
                           is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
                           head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
                           synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
-                          local_status, unsyncable_reason, wrapped_file_key
+                          local_status, unsyncable_reason, wrapped_file_key,
+                          content_id, synced_remote_sha256, synced_remote_size
                      FROM entries
                     WHERE parent_folder_id IS ?1
                     ORDER BY entity_type, server_id";
@@ -853,6 +897,8 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
     let fp_file_id: Option<i64> = r.get(17)?;
     let status: String = r.get(18)?;
     let reason: Option<String> = r.get(19)?;
+    let synced_remote_sha: Option<String> = r.get(22)?;
+    let synced_remote_size: Option<i64> = r.get(23)?;
 
     Ok(Entry {
         id: EntityId {
@@ -894,8 +940,16 @@ fn row_to_entry(r: &rusqlite::Row<'_>) -> rusqlite::Result<Entry> {
             }),
             _ => None,
         },
+        synced_remote_content: match (synced_remote_sha, synced_remote_size) {
+            (Some(sha256), Some(size)) => Some(ContentId {
+                sha256,
+                size: size as u64,
+            }),
+            _ => None,
+        },
         status: decode_status(&status, reason),
         wrapped_file_key: r.get(20)?,
+        content_id: r.get(21)?,
     })
 }
 
@@ -979,6 +1033,8 @@ mod tests {
             head_change_id: 42,
             remote_deleted: false,
             is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
             synced_content: Some(ContentId {
                 sha256: "agreed-sha".into(),
                 size: 10,

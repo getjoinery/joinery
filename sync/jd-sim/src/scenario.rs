@@ -34,7 +34,7 @@ use jd_core::reconcile::Context;
 use jd_core::round::DeletePolicy;
 
 use crate::clock::SimClock;
-use crate::engine::{env, Device};
+use crate::engine::{env, Device, SimVault};
 use crate::rng::SimRng;
 use crate::server::MockServer;
 use crate::vfs::MemFs;
@@ -50,6 +50,14 @@ pub struct World {
     pub server: MockServer,
     pub devices: Vec<Device>,
     pub rng: SimRng,
+    /// Every vault handed to a device in this world.
+    ///
+    /// Kept because the no-loss oracle needs it, not because any device does.
+    /// The server stores ciphertext and the oracle counts plaintext hashes, so
+    /// without a key the harness cannot tell "this version is safe on the
+    /// server" from "this version is gone" — and it would answer "safe" to
+    /// both, which is the failure mode that matters.
+    pub vaults: Vec<SimVault>,
 }
 
 /// Which operating system's filesystem a device has.
@@ -101,6 +109,28 @@ impl World {
             server,
             devices,
             rng: SimRng::new(seed),
+            vaults: Vec::new(),
+        }
+    }
+
+    /// Link one device with encrypted folders enabled.
+    ///
+    /// Per device, not per world, because that asymmetry is the interesting
+    /// case: one laptop can read the encrypted folder and another cannot, and
+    /// they have to sync everything else without either of them getting it
+    /// wrong.
+    pub fn give_vault(&mut self, device_name: &str, vault: &SimVault) {
+        self.devices
+            .iter_mut()
+            .find(|d| d.name == device_name)
+            .unwrap_or_else(|| panic!("no device called {device_name}"))
+            .set_vault(vault);
+        if !self
+            .vaults
+            .iter()
+            .any(|v| v.public_key_b64 == vault.public_key_b64)
+        {
+            self.vaults.push(vault.clone());
         }
     }
 
@@ -299,6 +329,29 @@ pub fn locate(world: &World, hash: &str) -> Option<FoundIn> {
     }
     if world.server.blob(hash).is_some() {
         return Some(FoundIn::LiveOnServer);
+    }
+    // The same two places again, for content the server cannot read. Its
+    // history is kept in ciphertext, so a plaintext hash is only findable in it
+    // by actually opening every version with a key from this world.
+    for vault in &world.vaults {
+        for held in world.server.encrypted_contents() {
+            let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
+                &held.wrapped_file_key,
+                &vault.secret_key_pkcs8,
+                &vault.public_key_b64,
+            ) else {
+                continue;
+            };
+            for ciphertext in &held.ciphertexts {
+                if let Ok(plain) =
+                    jd_crypto::drive::decrypt_content(ciphertext, &file_key, &held.content_id)
+                {
+                    if crate::sha256_hex(&plain) == hash {
+                        return Some(FoundIn::ServerHistory);
+                    }
+                }
+            }
+        }
     }
     for device in &world.devices {
         for path in device.fs.all_paths() {

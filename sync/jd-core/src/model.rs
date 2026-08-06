@@ -128,12 +128,33 @@ pub struct Entry {
     /// forever looking synced.
     pub remote_deleted: bool,
     pub is_encrypted: bool,
+    /// The crypto content id of an encrypted file: the string bound into every
+    /// chunk's authentication tag, and stable for the life of the file across
+    /// every version of its content. Learned from the decrypted metadata,
+    /// minted here when this device creates the file.
+    ///
+    /// Without it a downloaded chunk cannot be verified and a new version
+    /// cannot be encrypted so the other devices can read it.
+    pub content_id: Option<String>,
 
     // ---- the last state both sides agreed on ------------------------------
     /// The content both sides had at the last successful sync. This is the
     /// pivot every decision turns on: local differs from it → we edited;
     /// remote differs from it → they edited; both differ → conflict.
     pub synced_content: Option<ContentId>,
+    /// The same agreement, measured the way the *server* measures it.
+    ///
+    /// For a plaintext file this would be identical to `synced_content` and is
+    /// left `None`. For an encrypted one the two sides speak different hash
+    /// languages — the server only ever sees ciphertext, and encrypting the
+    /// same plaintext twice produces different bytes — so "did the server's
+    /// copy change?" can only be answered by comparing ciphertext to
+    /// ciphertext. This is the ciphertext side of the last agreement.
+    ///
+    /// The alternative, re-encrypting the local file to see whether it matches
+    /// what the server holds, does not work and cannot be made to: random IVs
+    /// mean equal plaintexts never produce equal ciphertexts.
+    pub synced_remote_content: Option<ContentId>,
     pub synced_placement: Option<Placement>,
     /// The cheap filter for "has the local file changed since we agreed".
     pub synced_fingerprint: Option<jd_vfs::Fingerprint>,

@@ -125,23 +125,14 @@ pub fn apply_naming(
                 LocalName::Unsyncable(reason) => (entry.local_name.clone(), Some(reason)),
             };
 
-            // Encryption outranks every name verdict, and is checked first
-            // because it does not depend on the name at all. Reporting a case
-            // clash for a file whose bytes this build could not have written
-            // either way would send the user to rename something that was never
-            // the problem.
-            //
-            // Folders carry the flag too, which is what makes this safe in the
-            // other direction: an encrypted folder never materializes, so no
-            // local file can be created inside one and uploaded as plaintext
-            // into a folder the user believes is encrypted.
-            if entry.is_encrypted {
-                let reason = UnsyncableReason::EncryptedUnsupported;
+            // Having no key for something outranks every name verdict, and is
+            // checked first because it does not depend on the name at all.
+            // Reporting a case clash for a file this device could not have
+            // written either way would send the user to rename something that
+            // was never the problem.
+            if let Some(status) = no_key_for(env, &entry) {
                 let mut updated = entry.clone();
-                if entry.status != LocalStatus::Unsyncable(reason.clone()) {
-                    out.unsyncable.push((entry.id, reason.clone()));
-                }
-                updated.status = LocalStatus::Unsyncable(reason);
+                updated.status = status;
                 if updated != entry {
                     env.store.put_entry(&updated)?;
                 }
@@ -165,7 +156,14 @@ pub fn apply_naming(
                 })
             });
 
-            let was_unsyncable = matches!(entry.status, LocalStatus::Unsyncable(_));
+            // Was this entry parked, for either of the two reasons an entry
+            // gets parked? A key that arrives has to release the file exactly
+            // as a cleared name clash does — a status nothing ever clears is a
+            // file that never syncs again, and nobody would know why.
+            let was_held = matches!(
+                entry.status,
+                LocalStatus::Unsyncable(_) | LocalStatus::PendingKey
+            );
             let mut updated = entry.clone();
             updated.local_name = local_name;
 
@@ -178,11 +176,12 @@ pub fn apply_naming(
                     }
                     updated.status = LocalStatus::Unsyncable(reason);
                 }
-                None if was_unsyncable => {
-                    // The clash cleared. Whether it can be synced now is not
-                    // this layer's call — it says only that the name is usable
-                    // again and hands the entry back to the ordinary path, which
-                    // will work out from the agreement what needs to happen.
+                None if was_held => {
+                    // Whatever was in the way has cleared. Whether it can be
+                    // synced now is not this layer's call — it says only that
+                    // the entry is usable again and hands it back to the
+                    // ordinary path, which works out from the agreement what
+                    // needs to happen.
                     updated.status = if entry.synced_placement.is_some() {
                         LocalStatus::Synced
                     } else {
@@ -200,6 +199,47 @@ pub fn apply_naming(
     }
 
     Ok(out)
+}
+
+/// Is this an encrypted entry this device has no key for?
+///
+/// `Some(PendingKey)` means it waits: not an error, not a defect, and not
+/// something the user does anything about *here* — the key arrives from
+/// somewhere else or it does not. `None` means carry on with the ordinary name
+/// resolution, which for an encrypted file runs against its **decrypted** name,
+/// because that is the name that has to fit on this disk and the name a case
+/// clash would be about.
+///
+/// A folder with no key is held back, and that is the load-bearing half. A
+/// folder is encrypted so that everything inside it is; materializing one on a
+/// device that cannot encrypt means the next file the user drops into it goes up
+/// in the clear, into a folder they were told was private.
+fn no_key_for(env: &ExecEnv, entry: &Entry) -> Option<LocalStatus> {
+    if !entry.is_encrypted {
+        return None;
+    }
+    if env.vault.is_none() {
+        return Some(LocalStatus::PendingKey);
+    }
+    if entry.id.entity_type == EntityType::Folder {
+        // A folder's own name is plaintext on the server; the vault key is what
+        // makes it safe to have, not what makes it readable.
+        return None;
+    }
+    if entry.id.is_provisional() {
+        // Created here, inside an encrypted folder, and not yet uploaded. There
+        // is no grant to hold because the file does not exist on the server —
+        // this device mints its key when it uploads.
+        return None;
+    }
+    // A grant, and a name that came out of it. The name is the proof that
+    // matters: a grant that will not open, or metadata this build could not
+    // read, leaves the entry holding the server's placeholder, and materializing
+    // *that* is the exact failure the whole design is avoiding.
+    match (entry.wrapped_file_key.is_some(), entry.content_id.is_some()) {
+        (true, true) => None,
+        _ => Some(LocalStatus::PendingKey),
+    }
 }
 
 /// Who gets first claim on a name.
@@ -259,6 +299,8 @@ mod tests {
             head_change_id: 1,
             remote_deleted: false,
             is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
             synced_content: None,
             synced_placement: None,
             synced_fingerprint: None,
@@ -315,7 +357,25 @@ mod tests {
             api: &NoNet,
             now_ms: &|| 0,
             conflict_name: &|n: &str| n.to_string(),
+            vault: None,
         }
+    }
+
+    /// The same, on a device that was linked with encrypted folders enabled.
+    fn env_with_vault<'a>(store: &'a Store, vault: &'a crate::vault::Vault) -> ExecEnv<'a> {
+        ExecEnv {
+            vault: Some(vault),
+            ..env(store)
+        }
+    }
+
+    fn a_vault() -> (crate::vault::Vault, String) {
+        let kp = jd_crypto::vault::generate_vault_keypair();
+        let public = kp.public_key_b64.clone();
+        (
+            crate::vault::Vault::from_secret_key(&kp.secret_key_pkcs8).unwrap(),
+            public,
+        )
     }
 
     struct NoFs;
@@ -348,6 +408,9 @@ mod tests {
             unreachable!("naming does not transfer bytes")
         }
         fn open_read(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Box<dyn jd_vfs::ReadSeek>> {
+            unreachable!("naming does not transfer bytes")
+        }
+        fn scratch(&self) -> jd_vfs::VfsResult<Box<dyn jd_vfs::ScratchFile>> {
             unreachable!("naming does not transfer bytes")
         }
     }
@@ -675,6 +738,205 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec![EntityId::file(2), EntityId::file(3)],
             "the lowest server id wins, whatever order they arrived in"
+        );
+    }
+
+    // ---- encrypted entries -------------------------------------------------
+
+    /// An encrypted file with `wrapped`, as the server would send it: a
+    /// placeholder name, because the real one is inside the metadata blob.
+    fn encrypted_file(id: i64, wrapped: Option<&str>) -> Entry {
+        let mut e = entry(EntityId::file(id), &format!("encrypted-file-{id}"));
+        e.is_encrypted = true;
+        e.wrapped_file_key = wrapped.map(str::to_string);
+        e
+    }
+
+    fn status_of(store: &Store, id: EntityId) -> LocalStatus {
+        store.get_entry(id).unwrap().unwrap().status
+    }
+
+    #[test]
+    fn an_encrypted_file_on_a_device_with_no_key_waits_for_one() {
+        // Not a naming problem and not a defect. This is what every device
+        // looks like before its user turns on encrypted folders, and the only
+        // thing that fixes it happens somewhere else.
+        let f = fixture("enc-nokey");
+        f.store.put_entry(&encrypted_file(1, None)).unwrap();
+        f.store
+            .put_entry(&encrypted_file(2, Some("a grant this device cannot use")))
+            .unwrap();
+
+        let out = apply_naming(&env(&f.store), &Personality::linux(), 10).unwrap();
+
+        assert_eq!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingKey
+        );
+        assert_eq!(
+            status_of(&f.store, EntityId::file(2)),
+            LocalStatus::PendingKey,
+            "a grant is worth nothing without the vault key it was sealed to"
+        );
+        assert!(
+            out.unsyncable.is_empty(),
+            "waiting for a key is not something to alert about, per file, forever"
+        );
+    }
+
+    #[test]
+    fn an_encrypted_file_whose_grant_has_not_arrived_waits_for_it() {
+        // The device can read encrypted folders; this particular file has not
+        // been granted to it yet. Common while somebody is still sharing.
+        let f = fixture("enc-nogrant");
+        let (vault, _) = a_vault();
+        f.store.put_entry(&encrypted_file(1, None)).unwrap();
+
+        apply_naming(&env_with_vault(&f.store, &vault), &Personality::linux(), 10).unwrap();
+
+        assert_eq!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingKey
+        );
+    }
+
+    #[test]
+    fn an_encrypted_file_this_device_can_open_gets_an_ordinary_name_verdict() {
+        // Once the grant is held and the metadata has been read, the file is a
+        // file: its DECRYPTED name is what has to fit on this disk and what a
+        // case clash would be about. Nothing about it is special any more.
+        let f = fixture("enc-grantable");
+        let (vault, public) = a_vault();
+        let grant =
+            jd_crypto::drive::wrap_file_key_to(&jd_crypto::drive::FileKey::generate(), &public)
+                .unwrap();
+        let mut e = encrypted_file(1, Some(&grant));
+        e.remote.name = "Quarterly plan.docx".into();
+        e.content_id = Some("cid-1".into());
+        f.store.put_entry(&e).unwrap();
+
+        let out =
+            apply_naming(&env_with_vault(&f.store, &vault), &Personality::linux(), 10).unwrap();
+
+        assert_eq!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingDownload,
+            "it is ready to be fetched, not waiting and not refused"
+        );
+        assert!(out.unsyncable.is_empty());
+    }
+
+    #[test]
+    fn a_grant_whose_metadata_never_opened_leaves_the_file_waiting() {
+        // A grant is not enough on its own. If the blob it unlocks could not be
+        // read, the entry is still holding the SERVER's placeholder name, and
+        // materializing that is the exact failure the design exists to avoid.
+        let f = fixture("enc-nometa");
+        let (vault, public) = a_vault();
+        let grant =
+            jd_crypto::drive::wrap_file_key_to(&jd_crypto::drive::FileKey::generate(), &public)
+                .unwrap();
+        let mut e = encrypted_file(1, Some(&grant));
+        e.content_id = None;
+        f.store.put_entry(&e).unwrap();
+
+        apply_naming(&env_with_vault(&f.store, &vault), &Personality::linux(), 10).unwrap();
+
+        assert_eq!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingKey
+        );
+    }
+
+    #[test]
+    fn an_encrypted_folder_materializes_only_where_its_contents_could_be_encrypted() {
+        // The half that leaks. A materialized encrypted folder is an ordinary
+        // directory to the user, so the next thing they drop into it goes
+        // straight up — and on a device that cannot encrypt, it goes up in the
+        // clear, into a folder they were told was private. Holding the folder
+        // off THAT disk is what makes it impossible rather than unlikely.
+        let (vault, _) = a_vault();
+        for with_key in [false, true] {
+            let f = fixture(if with_key { "enc-dir-key" } else { "enc-dir" });
+            let mut folder = entry(EntityId::folder(1), "Private");
+            folder.is_encrypted = true;
+            f.store.put_entry(&folder).unwrap();
+
+            let e = env(&f.store);
+            let with_vault = env_with_vault(&f.store, &vault);
+            apply_naming(
+                if with_key { &with_vault } else { &e },
+                &Personality::linux(),
+                10,
+            )
+            .unwrap();
+
+            let status = status_of(&f.store, EntityId::folder(1));
+            if with_key {
+                assert_ne!(
+                    status,
+                    LocalStatus::PendingKey,
+                    "a device that can encrypt may hold the folder"
+                );
+            } else {
+                assert_eq!(
+                    status,
+                    LocalStatus::PendingKey,
+                    "a device that cannot encrypt must not hold the folder"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn a_file_created_locally_inside_a_vault_is_not_kept_waiting_for_a_grant() {
+        // It has no grant because it does not exist on the server yet — this
+        // device mints its key when it uploads. Treating that as "waiting for a
+        // key" would mean a file dropped into a vault folder never leaves the
+        // computer.
+        let f = fixture("enc-local-new");
+        let (vault, _) = a_vault();
+        let mut e = entry(EntityId::file(-3), "notes.txt");
+        e.is_encrypted = true;
+        e.status = LocalStatus::PendingUpload;
+        f.store.put_entry(&e).unwrap();
+
+        apply_naming(&env_with_vault(&f.store, &vault), &Personality::linux(), 10).unwrap();
+
+        assert_eq!(
+            status_of(&f.store, EntityId::file(-3)),
+            LocalStatus::PendingUpload
+        );
+    }
+
+    #[test]
+    fn a_grant_arriving_moves_a_waiting_file_off_the_waiting_list() {
+        // The recovery direction. A file that waited for a key and then got one
+        // has to leave PendingKey by itself — a status nothing ever clears is a
+        // file that never syncs again.
+        let f = fixture("enc-grant-arrives");
+        let (vault, public) = a_vault();
+        f.store.put_entry(&encrypted_file(1, None)).unwrap();
+        let env = env_with_vault(&f.store, &vault);
+        apply_naming(&env, &Personality::linux(), 10).unwrap();
+        assert_eq!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingKey
+        );
+
+        let grant =
+            jd_crypto::drive::wrap_file_key_to(&jd_crypto::drive::FileKey::generate(), &public)
+                .unwrap();
+        let mut e = f.store.get_entry(EntityId::file(1)).unwrap().unwrap();
+        e.wrapped_file_key = Some(grant);
+        e.content_id = Some("cid-1".into());
+        f.store.put_entry(&e).unwrap();
+
+        apply_naming(&env, &Personality::linux(), 10).unwrap();
+        assert_ne!(
+            status_of(&f.store, EntityId::file(1)),
+            LocalStatus::PendingKey,
+            "the key arrived; it is not waiting for one any more"
         );
     }
 }

@@ -208,6 +208,11 @@ fn cmd_daemon() -> Result<(), String> {
         secret_key,
     };
 
+    // Read once, at startup, and held for the life of the process: on macOS
+    // every read of the keychain is a potential prompt, and one per file is not
+    // a thing to do to somebody.
+    let vault = load_vault(&secrets, config.vault_enabled);
+
     let store = Store::open(&paths.state_db()).map_err(|e| e.to_string())?;
     let vfs = OsVfs::new(config.sync_root.clone(), paths.spool()).map_err(|e| e.to_string())?;
 
@@ -241,8 +246,54 @@ fn cmd_daemon() -> Result<(), String> {
     });
 
     let custody = secrets.custody().describe().to_string();
-    Daemon::new(config, store, vfs, credentials, shared, rx, custody).run();
+    Daemon::new(config, store, vfs, credentials, shared, rx, custody, vault).run();
     Ok(())
+}
+
+/// Pick up the key for encrypted folders, if this device has one.
+///
+/// Never fatal, in any of its failure modes, and that is the whole design of
+/// this function. Everything outside encrypted folders syncs perfectly well
+/// without a vault key, so refusing to start over a missing or unreadable one
+/// would take an entire account offline over one feature. What it does instead
+/// is say which of the three situations it is in, because they need different
+/// things from the user: nothing at all, link again, or look at the keychain.
+fn load_vault(secrets: &SecretStore, expected: bool) -> Option<jd_core::vault::Vault> {
+    let stored = match secrets.get(Secret::VaultKey) {
+        Ok(s) => s,
+        Err(e) => {
+            // Silent when the config never claimed to have one: a user who has
+            // not turned on encrypted folders does not want to be told about
+            // them every time the daemon starts.
+            if expected {
+                eprintln!(
+                    "warning: encrypted folders are enabled for this device but its key could not \
+                     be read ({e}). Everything else will sync; link again to restore it."
+                );
+            }
+            return None;
+        }
+    };
+    let raw = match jd_crypto::b64::decode(&stored) {
+        Ok(r) => r,
+        Err(_) => {
+            eprintln!(
+                "warning: this device's stored vault key is not readable. Everything outside \
+                 encrypted folders will sync; link again to restore it."
+            );
+            return None;
+        }
+    };
+    match jd_core::vault::Vault::from_secret_key(&raw) {
+        Ok(v) => Some(v),
+        Err(e) => {
+            eprintln!(
+                "warning: {e}. Everything outside encrypted folders will sync; link again to \
+                 restore it."
+            );
+            None
+        }
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -290,6 +341,13 @@ fn cmd_status() -> Result<(), String> {
     println!("  device   : {}", get("device_name"));
     println!("  folder   : {}", get("sync_root"));
     println!("  keys     : {}", get("custody"));
+    println!(
+        "  encrypted: {}",
+        match answer.get("vault").and_then(Value::as_bool) {
+            Some(true) => "folders can be opened on this device".to_string(),
+            _ => "not enabled here — link again to turn on encrypted folders".to_string(),
+        }
+    );
     println!(
         "  items    : {} of {} settled",
         answer.get("settled").and_then(Value::as_u64).unwrap_or(0),
@@ -438,30 +496,13 @@ fn control_token() -> String {
     jd_daemon::control::new_token()
 }
 
+/// Secrets are stored base64 and read back base64, so the two halves have to be
+/// the same implementation. They are the shared one, rather than a local encoder
+/// paired with a local decoder: two hand-rolled halves agree until one of them
+/// is edited, and the symptom of disagreement is a key that stored fine and
+/// cannot be read back.
 fn encode_base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut out = String::new();
-    for chunk in bytes.chunks(3) {
-        let b = [
-            chunk[0],
-            *chunk.get(1).unwrap_or(&0),
-            *chunk.get(2).unwrap_or(&0),
-        ];
-        let n = ((b[0] as u32) << 16) | ((b[1] as u32) << 8) | b[2] as u32;
-        out.push(ALPHABET[(n >> 18) as usize & 63] as char);
-        out.push(ALPHABET[(n >> 12) as usize & 63] as char);
-        out.push(if chunk.len() > 1 {
-            ALPHABET[(n >> 6) as usize & 63] as char
-        } else {
-            '='
-        });
-        out.push(if chunk.len() > 2 {
-            ALPHABET[n as usize & 63] as char
-        } else {
-            '='
-        });
-    }
-    out
+    jd_crypto::b64::encode(bytes)
 }
 
 /// Positionals plus `--flag value` pairs.

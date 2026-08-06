@@ -12,7 +12,7 @@
 use jd_sim::scenario::{
     assert_converged, assert_invariants, assert_nothing_lost, disk_tree, Committed, World,
 };
-use jd_sim::{FailureKind, FsOp, NetFaults, SimRng};
+use jd_sim::{FailureKind, FsOp, NetFaults, SimRng, SimVault};
 
 // ---------------------------------------------------------------------------
 // One computer
@@ -728,5 +728,354 @@ fn plaintext_files_still_sync_beside_an_encrypted_one() {
         "the plaintext file should have arrived, found: {disk:?}"
     );
     assert_eq!(disk.len(), 1, "only the plaintext file, found: {disk:?}");
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The invariant that has to survive the decrypt path being built.
+///
+/// Once this device can open encrypted files it will start writing them, so
+/// "nothing on disk" stops being the right assertion. What must never become
+/// true, in any phase, is the specific wrong outcome: the server's bytes,
+/// written under the server's name. The server's name is a placeholder and its
+/// bytes are ciphertext — a disk holding that pair is a disk holding a file
+/// nobody can read, under a name nobody chose, reported as synced.
+#[test]
+fn an_encrypted_file_is_never_written_under_the_name_the_server_uses_for_it() {
+    let vault = SimVault::new(9_104);
+    let mut world = World::new(9_104, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    let committed = Committed::default();
+
+    let ciphertext = b"\x11ciphertext the server cannot read\x99";
+    let id = world
+        .server
+        .seed_encrypted_file(None, "encrypted-file-91", ciphertext);
+    // A real grant, sealed to this device's real vault key. A stub that always
+    // opened would test the one thing that must not be a stub.
+    world
+        .server
+        .grant_file_key(id, &vault.grant(&jd_crypto::drive::FileKey::generate()));
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        !disk.contains_key("encrypted-file-91"),
+        "the server's placeholder name must never appear on disk, found: {disk:?}"
+    );
+    let ciphertext_hash = jd_sim::sha256_hex(ciphertext);
+    assert!(
+        !disk
+            .values()
+            .any(|h| h.as_deref() == Some(&ciphertext_hash)),
+        "the ciphertext must never appear on disk under any name, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// One laptop can open the encrypted folder and another cannot.
+///
+/// The asymmetry is the point: a device that was linked without encrypted
+/// folders is not a broken device. Everything else on the account has to keep
+/// converging on both of them, or turning the feature on for one machine would
+/// quietly cost the user their sync on every other one.
+#[test]
+fn a_device_without_the_vault_key_still_syncs_everything_else() {
+    let vault = SimVault::new(9_105);
+    let mut world = World::new(9_105, &["with-key", "without-key"]);
+    world.give_vault("with-key", &vault);
+    let mut committed = Committed::default();
+
+    let id = world
+        .server
+        .seed_encrypted_file(None, "encrypted-file-92", b"\x42ciphertext\x24");
+    world
+        .server
+        .grant_file_key(id, &vault.grant(&jd_crypto::drive::FileKey::generate()));
+
+    let body = b"a plaintext file both of them should end up holding";
+    world.server.seed_file(None, "shared.txt", body);
+    committed.note("shared.txt", body);
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    for name in ["with-key", "without-key"] {
+        let disk = disk_tree(world.device(name));
+        assert!(
+            disk.contains_key("shared.txt"),
+            "{name} should hold the plaintext file, found: {disk:?}"
+        );
+        assert!(
+            !disk.contains_key("encrypted-file-92"),
+            "{name} must not hold the placeholder name, found: {disk:?}"
+        );
+    }
+    assert_nothing_lost(&world, &committed);
+}
+
+// ---------------------------------------------------------------------------
+// Encrypted content, end to end
+// ---------------------------------------------------------------------------
+
+/// A file in a vault arrives readable, under the name its owner gave it.
+///
+/// Everything the server holds for this file is wrong on purpose: the name is a
+/// placeholder, the bytes are ciphertext, the hash is of the ciphertext, and
+/// there is no modification time at all. The only place the truth exists is
+/// inside the encrypted metadata, and the only thing that can open it is the
+/// vault key on this device.
+#[test]
+fn a_file_in_a_vault_arrives_decrypted_under_its_real_name() {
+    let vault = SimVault::new(9_201);
+    let mut world = World::new(9_201, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"the contents of a file nobody else is meant to read";
+    world
+        .server
+        .seed_vault_file(Some(private), "secrets.txt", body, &vault.public_key_b64);
+    committed.note("Private/secrets.txt", body);
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert_eq!(
+        disk.get("Private/secrets.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the plaintext should be on disk under its real name, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A file dropped into a vault folder goes up encrypted, or it does not go up.
+///
+/// This is the leak the whole design is arranged around. The user sees an
+/// ordinary folder; what leaves the machine must not be an ordinary file.
+#[test]
+fn a_file_dropped_into_a_vault_folder_never_leaves_as_plaintext() {
+    let vault = SimVault::new(9_202);
+    let mut world = World::new(9_202, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the folder should arrive");
+
+    let body = b"a memo the server must never be able to read";
+    world
+        .device("laptop")
+        .fs
+        .user_write("Private/memo.txt", body);
+    committed.note("Private/memo.txt", body);
+
+    assert!(world.settle().is_some(), "the upload should settle");
+
+    // The plaintext must not exist anywhere the server can reach.
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+        "the plaintext bytes reached the server"
+    );
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.ends_with("memo.txt")),
+        "the real name reached the server: {names:?}"
+    );
+    // ...and the file is still the user's file, on disk, unchanged.
+    let disk = disk_tree(world.device("laptop"));
+    assert_eq!(
+        disk.get("Private/memo.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body))
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// Two computers, one vault: what one encrypts the other can read.
+///
+/// The round trip is the real test of the format. A client that encrypts and
+/// decrypts consistently with itself can still be wrong in a way that only
+/// shows up when the bytes take the long way round.
+#[test]
+fn what_one_computer_encrypts_another_can_read() {
+    let vault = SimVault::new(9_203);
+    let mut world = World::new(9_203, &["desktop", "laptop"]);
+    world.give_vault("desktop", &vault);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    let body = b"written on the desktop, opened on the laptop, never read in between";
+    world
+        .device("desktop")
+        .fs
+        .user_write("Private/plan.md", body);
+    committed.note("Private/plan.md", body);
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    for name in ["desktop", "laptop"] {
+        let disk = disk_tree(world.device(name));
+        assert_eq!(
+            disk.get("Private/plan.md").cloned().flatten(),
+            Some(jd_sim::sha256_hex(body)),
+            "{name} should hold the plaintext, found: {disk:?}"
+        );
+    }
+    assert_nothing_lost(&world, &committed);
+}
+
+/// An edit becomes a new version under the same key.
+///
+/// The server refuses a fresh key on a version, and it is right to: a new key
+/// would leave the new content readable only by whoever uploaded it, behind
+/// grants that every other device holds and that all wrap the old one. So this
+/// settling at all is the assertion.
+#[test]
+fn editing_a_file_in_a_vault_keeps_the_key_it_already_had() {
+    let vault = SimVault::new(9_204);
+    let mut world = World::new(9_204, &["desktop", "laptop"]);
+    world.give_vault("desktop", &vault);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let first = b"the first draft";
+    world
+        .device("desktop")
+        .fs
+        .user_write("Private/draft.txt", first);
+    committed.note("Private/draft.txt", first);
+    assert!(world.settle().is_some());
+
+    let second = b"the second draft, which says something quite different";
+    world
+        .device("desktop")
+        .fs
+        .user_write("Private/draft.txt", second);
+    committed.note("Private/draft.txt", second);
+    assert!(world.settle().is_some(), "the new version should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert_eq!(
+        disk.get("Private/draft.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(second)),
+        "the other computer should hold the newer draft, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// An untouched encrypted file does not re-sync itself forever.
+///
+/// The trap this guards: the server's hash is of ciphertext and the disk's is
+/// of plaintext, so an engine that compares the two across domains reports an
+/// edit on every pass for a file nobody has opened — downloading it again, and
+/// again, and never settling. `settle()` returning at all is the assertion; the
+/// pass count is what makes it a sharp one.
+#[test]
+fn an_untouched_encrypted_file_settles_and_stays_settled() {
+    let vault = SimVault::new(9_205);
+    let mut world = World::new(9_205, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(
+        Some(private),
+        "quiet.txt",
+        b"nothing about this file ever changes",
+        &vault.public_key_b64,
+    );
+
+    assert!(world.settle().is_some(), "it should settle");
+    // A second settle from a converged state must find nothing to do at all.
+    let passes = world.settle().expect("still settled");
+    assert!(
+        passes <= 2,
+        "a converged encrypted file kept the client working for {passes} passes"
+    );
+}
+
+/// A vault the device cannot open is not a vault it may write into.
+#[test]
+fn a_device_without_the_key_will_not_upload_into_a_vault_folder() {
+    let vault = SimVault::new(9_206);
+    let mut world = World::new(9_206, &["with-key", "without-key"]);
+    world.give_vault("with-key", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some());
+
+    // The vault folder exists on the device that can encrypt, and must not
+    // exist on the one that cannot — there is nowhere for it to put a file.
+    assert!(
+        disk_tree(world.device("with-key"))
+            .keys()
+            .any(|p| p.starts_with("Private"))
+            || world
+                .device("with-key")
+                .fs
+                .all_paths()
+                .iter()
+                .any(|p| p == "Private")
+    );
+    let blind = world.device("without-key").fs.all_paths();
+    assert!(
+        !blind.iter().any(|p| p == "Private"),
+        "a device that cannot encrypt must not hold the vault folder: {blind:?}"
+    );
+}
+
+/// Renaming a file in a vault never tells the server its new name.
+///
+/// The server refuses a plaintext name on an encrypted file, so getting this
+/// wrong is a rename that fails forever rather than a leak — but a rename that
+/// fails forever is a file that stops syncing, and the user is never told why.
+/// What actually has to happen: decrypt the metadata, change one field,
+/// encrypt it again under the same key, and hand over the blob.
+#[test]
+fn renaming_a_file_in_a_vault_re_encrypts_its_name_rather_than_sending_it() {
+    let vault = SimVault::new(9_207);
+    let mut world = World::new(9_207, &["desktop", "laptop"]);
+    world.give_vault("desktop", &vault);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let body = b"a file that is about to be called something else";
+    world
+        .server
+        .seed_vault_file(Some(private), "old name.txt", body, &vault.public_key_b64);
+    committed.note("Private/old name.txt", body);
+    assert!(world.settle().is_some(), "it should arrive first");
+
+    world
+        .device("desktop")
+        .fs
+        .user_rename("Private/old name.txt", "Private/new name.txt");
+
+    assert!(world.settle().is_some(), "the rename should settle");
+
+    // The new name must not be anywhere the server can read it.
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.contains("new name")),
+        "the new name reached the server in the clear: {names:?}"
+    );
+    // ...and the other computer must nevertheless know about it.
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        disk.contains_key("Private/new name.txt"),
+        "the other computer should have picked up the rename, found: {disk:?}"
+    );
+    assert!(!disk.contains_key("Private/old name.txt"));
     assert_nothing_lost(&world, &committed);
 }

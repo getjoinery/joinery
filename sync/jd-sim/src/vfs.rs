@@ -610,6 +610,58 @@ impl Vfs for MemFs {
             None => Err(VfsError::NotFound(path.to_path_buf())),
         }
     }
+
+    fn scratch(&self) -> VfsResult<Box<dyn jd_vfs::ScratchFile>> {
+        // Counted with the spools, so a scenario that leaks one fails the same
+        // "nothing invisible was left behind" check.
+        let mut st = self.state.lock().unwrap();
+        st.next_spool += 1;
+        let name = format!(".jd-scratch-{}", st.next_spool);
+        st.spools.insert(name.clone(), Vec::new());
+        drop(st);
+        Ok(Box::new(MemScratch {
+            fs: self.clone(),
+            name,
+            buf: Vec::new(),
+        }))
+    }
+}
+
+/// Bytes that exist only for the length of a transfer and never become a file.
+struct MemScratch {
+    fs: MemFs,
+    name: String,
+    buf: Vec<u8>,
+}
+
+impl Write for MemScratch {
+    fn write(&mut self, data: &[u8]) -> std::io::Result<usize> {
+        self.buf.extend_from_slice(data);
+        Ok(data.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        Ok(())
+    }
+}
+
+impl Drop for MemScratch {
+    fn drop(&mut self) {
+        // Dropped without finishing — an error path. The reader takes over the
+        // bookkeeping when there is one.
+        self.fs.state.lock().unwrap().spools.remove(&self.name);
+    }
+}
+
+impl jd_vfs::ScratchFile for MemScratch {
+    fn finish(mut self: Box<Self>) -> VfsResult<Box<dyn jd_vfs::ReadSeek>> {
+        let bytes = std::mem::take(&mut self.buf);
+        // Off the books here rather than when the reader is dropped: the
+        // scenario check this feeds is "was anything left half-written", and a
+        // finished scratch is not that. `Drop` then removes nothing, which is
+        // the correct amount of work to do twice.
+        self.fs.state.lock().unwrap().spools.remove(&self.name);
+        Ok(Box::new(std::io::Cursor::new(bytes)))
+    }
 }
 
 /// Bytes accumulating somewhere invisible until the commit makes them the file.

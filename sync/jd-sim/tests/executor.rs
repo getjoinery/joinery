@@ -38,6 +38,8 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         head_change_id: 0,
         remote_deleted: false,
         is_encrypted: false,
+        content_id: None,
+        synced_remote_content: None,
         synced_content: None,
         synced_placement: None,
         synced_fingerprint: None,

@@ -128,13 +128,29 @@ impl Health {
         self.entries.values().sum()
     }
 
+    /// Encrypted entries this device has no key for.
+    ///
+    /// Not counted as unfinished work, because nothing on this machine will
+    /// finish it — the key arrives from elsewhere or it does not. Counted and
+    /// said out loud all the same: "up to date" while a folder full of files is
+    /// sitting there unreadable would be true only in the narrowest sense.
+    pub fn waiting_for_keys(&self) -> usize {
+        self.entries.get("pending_key").copied().unwrap_or(0)
+    }
+
     /// One line for a tray tooltip or a CLI header.
     pub fn summary(&self) -> String {
         if let Some(blocker) = &self.blocker {
             return blocker.message();
         }
         match self.indicator {
-            Indicator::Green => format!("Up to date — {} items", self.tracked()),
+            Indicator::Green => match self.waiting_for_keys() {
+                0 => format!("Up to date — {} items", self.tracked()),
+                n => format!(
+                    "Up to date — {} items ({n} waiting for a key)",
+                    self.tracked()
+                ),
+            },
             Indicator::Working => format!("Syncing — {} to go", self.pending_ops),
             Indicator::Attention => {
                 let n = self.issues.len();
@@ -320,6 +336,35 @@ mod tests {
         let h = health(&[("synced", 1204)], 0, 0);
         assert_eq!(h.indicator, Indicator::Green);
         assert!(h.summary().contains("Up to date"));
+    }
+
+    #[test]
+    fn files_waiting_for_a_key_are_counted_and_said_out_loud() {
+        // Nothing on this machine will finish them, so they are not pending
+        // work and the spinner should not run. But "Up to date — 1300 items"
+        // with a hundred of them unreadable is true only in the narrowest
+        // sense, so the count goes in the sentence.
+        let h = health(&[("synced", 1200), ("pending_key", 100)], 0, 0);
+        assert_eq!(h.indicator, Indicator::Green);
+        assert_eq!(h.waiting_for_keys(), 100);
+        assert!(
+            h.summary().contains("100 waiting for a key"),
+            "{}",
+            h.summary()
+        );
+
+        let none = health(&[("synced", 1200)], 0, 0);
+        assert_eq!(none.summary(), "Up to date — 1200 items");
+    }
+
+    #[test]
+    fn waiting_for_a_key_is_not_treated_as_a_problem_to_alert_about() {
+        // A laptop linked without encrypted folders can be looking at a
+        // thousand of these. One alert per file would bury everything that
+        // does need a person.
+        let h = health(&[("synced", 3), ("pending_key", 1000)], 0, 0);
+        assert_ne!(h.indicator, Indicator::Attention);
+        assert!(h.issues.is_empty());
     }
 
     #[test]

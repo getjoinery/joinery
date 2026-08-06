@@ -256,6 +256,103 @@ fn read_exact_or_eof<I: Read>(input: &mut I, buf: &mut [u8]) -> Result<bool> {
     Ok(true)
 }
 
+/// Streaming decryptor for callers that receive ciphertext in pushed
+/// increments rather than pulling it from a reader — a download, where the
+/// bytes arrive from the network and the caller owns no `Read` to hand over.
+///
+/// Same guarantees as [`decrypt_content_stream`]: every chunk is AEAD-verified
+/// against `contentId:index` before any of its plaintext is written out, so a
+/// tampered or transplanted chunk produces an error rather than partially
+/// trusted bytes.
+///
+/// `finish()` is not optional. A container that ends mid-block is a truncated
+/// download, and the only place that can be noticed is at the end.
+pub struct ContentDecryptor<W: Write> {
+    out: W,
+    cipher: aes_gcm::Aes256Gcm,
+    content_id: String,
+    /// Ciphertext not yet forming a complete block.
+    buf: Vec<u8>,
+    index: u64,
+    plain_bytes: u64,
+}
+
+impl<W: Write> ContentDecryptor<W> {
+    pub fn new(out: W, fk: &FileKey, content_id: &str) -> Self {
+        ContentDecryptor {
+            out,
+            cipher: aes(&fk.0),
+            content_id: content_id.to_string(),
+            buf: Vec::with_capacity(CHUNK_BYTES + CHUNK_OVERHEAD + 4),
+            index: 0,
+            plain_bytes: 0,
+        }
+    }
+
+    /// Plaintext bytes written so far.
+    pub fn plain_bytes(&self) -> u64 {
+        self.plain_bytes
+    }
+
+    /// Decrypt every complete block currently buffered.
+    fn drain_blocks(&mut self) -> Result<()> {
+        loop {
+            if self.buf.len() < 4 {
+                return Ok(());
+            }
+            let block_len =
+                u32::from_be_bytes([self.buf[0], self.buf[1], self.buf[2], self.buf[3]]) as usize;
+            if !(CHUNK_OVERHEAD..=CHUNK_BYTES + CHUNK_OVERHEAD).contains(&block_len) {
+                // Checked before allocating: a corrupted length prefix would
+                // otherwise ask for an arbitrary amount of memory.
+                return Err(CryptoError::Malformed("implausible chunk block length"));
+            }
+            if self.buf.len() < 4 + block_len {
+                return Ok(());
+            }
+            let rest = self.buf.split_off(4 + block_len);
+            let block = std::mem::replace(&mut self.buf, rest);
+            let aad = chunk_aad(&self.content_id, self.index);
+            let pt = self
+                .cipher
+                .decrypt(
+                    Nonce::from_slice(&block[4..16]),
+                    Payload {
+                        msg: &block[16..],
+                        aad: &aad,
+                    },
+                )
+                .map_err(|_| CryptoError::DecryptFailed)?;
+            self.out
+                .write_all(&pt)
+                .map_err(|_| CryptoError::Malformed("plaintext sink write failed"))?;
+            self.plain_bytes += pt.len() as u64;
+            self.index += 1;
+        }
+    }
+
+    /// Push ciphertext. Errors the moment a complete block fails to verify.
+    pub fn push(&mut self, ciphertext: &[u8]) -> Result<()> {
+        self.buf.extend_from_slice(ciphertext);
+        self.drain_blocks()
+    }
+
+    /// Assert the container ended where a container may end, and return the
+    /// sink. A leftover partial block is a truncated transfer.
+    pub fn finish(mut self) -> Result<(W, u64)> {
+        if !self.buf.is_empty() {
+            return Err(CryptoError::Malformed("truncated ciphertext container"));
+        }
+        if self.index == 0 {
+            return Err(CryptoError::Malformed("empty ciphertext container"));
+        }
+        self.out
+            .flush()
+            .map_err(|_| CryptoError::Malformed("plaintext sink write failed"))?;
+        Ok((self.out, self.plain_bytes))
+    }
+}
+
 /// Whole-buffer convenience over the streaming encryptor.
 pub fn encrypt_content(plain: &[u8], fk: &FileKey, content_id: &str) -> Vec<u8> {
     encrypt_content_with_rng(plain, fk, content_id, OsRng)

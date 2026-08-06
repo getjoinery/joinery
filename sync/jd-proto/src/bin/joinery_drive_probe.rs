@@ -431,13 +431,8 @@ fn cmd_put(rest: &[String]) -> Result<(), String> {
     let outcome = client
         .upload_from_reader(
             &jd_proto::UploadParams {
-                name: name.clone(),
-                folder_id,
                 file_id,
-                size_bytes,
-                sha256,
-                mime_type: None,
-                idempotency_key: None,
+                ..jd_proto::UploadParams::plain(name.clone(), folder_id, size_bytes, sha256)
             },
             reader,
         )

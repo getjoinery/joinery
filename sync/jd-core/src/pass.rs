@@ -142,7 +142,9 @@ pub fn run_pass(
             continue;
         };
         let id = EntityId::folder(env.store.next_provisional_id()?);
-        env.store.put_entry(&blank(id, &placement))?;
+        let mut entry = blank(id, &placement);
+        entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
+        env.store.put_entry(&entry)?;
         folder_ids.insert(dir.clone(), id.server_id);
         out.local_creations += 1;
     }
@@ -153,7 +155,16 @@ pub fn run_pass(
             continue;
         };
         let id = EntityId::file(env.store.next_provisional_id()?);
-        env.store.put_entry(&blank(id, &placement))?;
+        let mut entry = blank(id, &placement);
+        // Encryption is a property of where a thing lives, not of the thing:
+        // the server decides an upload is encrypted by looking at the
+        // destination folder. Working that out HERE, when the file first gets
+        // an identity, is what makes the upload path encrypt it — a file that
+        // reached the uploader marked plaintext would be sent in the clear into
+        // a folder the user believes is private, and the server would store it
+        // exactly as sent.
+        entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
+        env.store.put_entry(&entry)?;
         out.local_creations += 1;
     }
 
@@ -175,6 +186,16 @@ pub fn run_pass(
         // is the server deleting it, which the ordinary path handles: no local
         // delta, a remote delete, and the entry is forgotten.
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
+            continue;
+        }
+        // An encrypted file with no key for it here. Same shape as above and for
+        // a sharper reason: falling through would decide about it in the
+        // plaintext domain — the server's name is a placeholder and its hash is
+        // of the ciphertext — and plan a download that writes bytes nobody can
+        // read to a path that is not the file's name. A remote delete still gets
+        // through, so a file that goes away while its key is outstanding does
+        // not sit here forever.
+        if entry.status == LocalStatus::PendingKey && !entry.remote_deleted {
             continue;
         }
 
@@ -484,6 +505,7 @@ fn absorb_remote(env: &ExecEnv, id: EntityId, state: &RemoteState) -> Result<(),
                 if state.wrapped_file_key.is_some() {
                     entry.wrapped_file_key = state.wrapped_file_key.clone();
                 }
+                open_metadata(env, &mut entry, state);
             }
             env.store.put_entry(&entry)?;
         }
@@ -504,10 +526,60 @@ fn absorb_remote(env: &ExecEnv, id: EntityId, state: &RemoteState) -> Result<(),
                 EntityType::Folder => LocalStatus::PendingDownload,
                 EntityType::File => LocalStatus::PendingDownload,
             };
+            open_metadata(env, &mut entry, state);
             env.store.put_entry(&entry)?;
         }
     }
     Ok(())
+}
+
+/// Learn an encrypted file's real name and content id from its metadata blob.
+///
+/// This is where an encrypted entry stops being an opaque row and becomes a
+/// file. Until the blob is opened, everything the server said about the file is
+/// a placeholder: the name is `enc-…`, the size is the ciphertext's, and the
+/// modification time is deliberately absent — a plaintext mtime would leak when
+/// somebody last worked on it. The real values are inside, under the file key.
+///
+/// Silent on failure, in every one of its arms, and that is deliberate. No
+/// vault, no grant yet, a grant issued to a vault the user has replaced, a blob
+/// this build cannot parse: none of them is something the *entry* is doing
+/// wrong, and none is fixed by refusing to record the rest of what the server
+/// said. The entry keeps its placeholder name, `apply_naming` reads that as
+/// having no key and marks it `PendingKey`, and the user is told once, at the
+/// device level, rather than once per file.
+fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteState) {
+    if !state.is_encrypted {
+        return;
+    }
+    let (Some(vault), Some(wrapped), Some(blob)) = (
+        env.vault,
+        entry.wrapped_file_key.as_deref(),
+        state.encrypted_metadata.as_deref(),
+    ) else {
+        return;
+    };
+    let Ok(file_key) = vault.open_file_key(wrapped) else {
+        return;
+    };
+    let Ok(meta) = jd_crypto::drive::decrypt_metadata(blob, &file_key) else {
+        return;
+    };
+    if !meta.name.is_empty() {
+        // The name the user chose, replacing the placeholder the server holds.
+        // Everything downstream — sibling resolution, case-clash detection,
+        // conflict-copy naming — then works in the plaintext domain, which is
+        // the only domain those questions have answers in.
+        entry.remote.name = meta.name;
+    }
+    if !meta.cid.is_empty() {
+        entry.content_id = Some(meta.cid);
+    }
+    // The mtime the uploading device recorded, which for an encrypted file the
+    // server is never told.
+    if meta.mtime.is_some() {
+        entry.remote_modified_time = meta.mtime;
+    }
 }
 
 /// The remote state as currently recorded for an entry.
@@ -822,6 +894,19 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
 // Tree arithmetic
 // ---------------------------------------------------------------------------
 
+/// Does this folder hold encrypted content? `None` is the drive root, which is
+/// never itself a vault.
+fn parent_is_encrypted(env: &ExecEnv, parent: Option<i64>) -> Result<bool, ExecError> {
+    let Some(id) = parent else {
+        return Ok(false);
+    };
+    Ok(env
+        .store
+        .get_entry(EntityId::folder(id))?
+        .map(|f| f.is_encrypted)
+        .unwrap_or(false))
+}
+
 fn blank(id: EntityId, placement: &Placement) -> Entry {
     Entry {
         id,
@@ -831,6 +916,8 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
         head_change_id: 0,
         remote_deleted: false,
         is_encrypted: false,
+        content_id: None,
+        synced_remote_content: None,
         synced_content: None,
         synced_placement: None,
         synced_fingerprint: None,
