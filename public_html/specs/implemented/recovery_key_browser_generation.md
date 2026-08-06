@@ -1,7 +1,24 @@
 # Recovery key: generate it in the browser
 
-**Status:** Spec, unbuilt
+**Status:** BUILT. `includes/RecoveryKeySetupPanel.php` renders the whole state
+machine; `assets/js/recovery-readiness.js` 1.1.0 adds `generateKeypair()` and
+`attachGenerator()` with the no-auto-proving guard intact; `docs/backups.md`
+§ Recovery key setup is browser-first with the CLI as fallback; the encoding
+contract is pinned by `tests/backups/recovery_key_encoding_test.php`. Setting up
+backup recovery needs no shell.
 **Date:** 2026-08-03
+
+**Deviation from § Scope, deliberate.** The spec named three surfaces and had all
+three draw the shared panel. Built instead as **one setup surface plus links**:
+`adm/admin_backups.php` draws the panel, `plugins/server_manager/views/admin/targets.php`
+shows a standing state line and links to it, and the Recovery Readiness item stays
+verify-only — when no key is configured it says to finish the setup rather than
+offering a second place to generate one. This reaches the same goal by a shorter
+route: the panel cannot drift across surfaces because only one surface renders it,
+and there is one answer to "where do I set this up". `targets.php` 2.5 dropped the
+three POST handlers left behind by its removed walkthrough form.
+
+Both live gates are outstanding — see § Gate.
 
 ## The problem
 

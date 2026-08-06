@@ -1,6 +1,21 @@
 # Server Manager pushes the recovery key to its nodes
 
-**Status:** Spec, unbuilt
+**Status:** SUPERSEDED by `specs/fleet_scheduled_backups.md`. The push half was
+built and then deliberately removed — the `push_recovery_key` job type, its
+builder, the install step, the automatic queueing and both admin buttons are all
+gone. What survives is the decision table below, as
+`maintenance_scripts/sysadmin_tools/set_recovery_key.php` (pinned by
+`tests/backups/recovery_key_push_test.php`) plus its `--report` mode, which feeds
+the fleet recovery-key table read-only.
+
+The premise no longer holds: a fleet backup mints a data key per run and seals it
+to the control plane's own recipients, so a node with an empty slot is a node
+taking no copies of *its own* — not a node left unprotected. And a control plane
+that writes into that slot would hold the private half of a key the site believes
+is solely its own, which is exactly the custody split the fleet design refuses.
+See `plugins/server_manager/tests/recovery_key_fleet_test.php`: reported, never
+written.
+
 **Date:** 2026-08-03
 
 ## The problem

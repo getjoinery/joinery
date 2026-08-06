@@ -1188,6 +1188,119 @@ check(strpos($ph_cmd, "'application_key'") === false && strpos($ph_cmd, '$creds 
 check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'),
 	'the inline-credentials fallback (and its heartbeat gate) is gone entirely');
 
+section('Fleet backup run: config on stdin, nothing secret at rest');
+
+// The manager-profile backup job. The node runs its own engine; what the
+// builder contributes is the three things the node must not hold — the bucket,
+// the credential and the recovery key — and they travel on stdin, not argv,
+// because argv is world-readable on the box for the life of the process.
+$run_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/runnode/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key));
+
+// Refusals: a job that cannot say where the backup goes, or which site to back
+// up, fails at build time with a message the operator sees — not part-way
+// through a backup on the node.
+$threw = false;
+try {
+	JobCommandBuilder::build_backup_run(jcb_node(array(
+		'mgn_web_root' => '/var/www/html/notarget/public_html')));
+} catch (Exception $e) { $threw = true; }
+check($threw, 'backup_run refuses a node with no enabled backup target');
+
+$threw = false;
+try {
+	JobCommandBuilder::build_backup_run(jcb_node(array(
+		'mgn_bkt_backup_target_id' => $bkt->key, 'mgn_web_root' => '')));
+} catch (Exception $e) { $threw = true; }
+check($threw, 'backup_run refuses a node with no web root');
+
+// The slug becomes a bucket path segment, so it is constrained to a shape
+// rather than escaped and hoped for. Set without saving: the builder is pure,
+// and the claim is about the builder's own gate, not the model's.
+foreach (array($PAYLOAD, $SUBSHELL, 'has space', '../../etc') as $bad_slug) {
+	$slug_node = jcb_node(array(
+		'mgn_web_root' => '/var/www/html/badslug/public_html',
+		'mgn_bkt_backup_target_id' => $bkt->key));
+	$slug_node->set('mgn_slug', $bad_slug);
+	$threw = false;
+	try { JobCommandBuilder::build_backup_run($slug_node); }
+	catch (Exception $e) { $threw = true; }
+	check($threw, 'backup_run refuses the slug ' . var_export(substr($bad_slug, 0, 20), true));
+}
+
+// The happy path: one labelled SSH step running the node's own engine under
+// the manager profile, config fed through a QUOTED heredoc so the shell
+// expands nothing in the body.
+$run_steps = JobCommandBuilder::build_backup_run($run_node);
+check(count($run_steps) === 1, 'backup_run emits exactly one step', 'steps: ' . count($run_steps));
+$run_step = $run_steps[0];
+check(($run_step['type'] ?? '') === 'ssh' && !empty($run_step['label']),
+	'the step is a labelled SSH step like every other job');
+check(($run_step['timeout'] ?? 0) > 3600,
+	'the timeout is transfer-sized, not the default', 'timeout: ' . ($run_step['timeout'] ?? 0));
+
+$run_cmd = $run_step['cmd'];
+check(strpos($run_cmd, "/utils/run_backup.php' --profile=manager") !== false,
+	'the node runs run_backup.php under the manager profile', $run_cmd);
+check(strpos($run_cmd, "<<'__JOINERY_BACKUP_CONFIG_EOF__'") !== false,
+	'the config heredoc is quoted, so nothing in the body reaches the shell', $run_cmd);
+$run_lines = explode("\n", $run_cmd);
+check(trim(end($run_lines)) === '__JOINERY_BACKUP_CONFIG_EOF__',
+	'the heredoc terminator is the entire final line — nothing chained after it', trim(end($run_lines)));
+
+$run_tmp = tempnam(sys_get_temp_dir(), 'jcbrun');
+file_put_contents($run_tmp, $run_cmd . "\n");
+$run_lint = array();
+exec('bash -n ' . escapeshellarg($run_tmp) . ' 2>&1', $run_lint, $run_rc);
+unlink($run_tmp);
+check($run_rc === 0, 'the emitted command parses as valid bash with a closed heredoc',
+	implode("\n", $run_lint));
+
+// The heredoc body is the config the node will run under; hold it to the
+// contract rather than to substrings of the command.
+$run_config = json_decode($run_lines[1] ?? '', true);
+check(is_array($run_config), 'the heredoc body is one line of valid JSON');
+check(($run_config['bucket'] ?? '') === 'harness-test-bucket',
+	'the config names the target bucket', $run_config['bucket'] ?? '?');
+check(($run_config['slug'] ?? '') === (string)$run_node->get('mgn_slug'),
+	'the config carries the node slug for the bucket path');
+check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') === 'chain',
+	'type and mode default to a chained project backup');
+check(($run_config['full_interval_days'] ?? 0) === 7,
+	'the full interval defaults to a weekly full');
+
+// The credential is the resolve-at-run-time placeholder the agent swaps in
+// memory — job rows persist forever, so credential DATA must never be inlined.
+$run_token = '__SM_CREDS_' . (int)$bkt->key . '__';
+check(($run_config['credentials_b64'] ?? '') === $run_token,
+	'the credential is the __SM_CREDS_<id>__ placeholder, resolved at run time');
+check(strpos($run_cmd, "'application_key'") === false && strpos($run_cmd, '"application_key"') === false,
+	'no credential data appears anywhere in the command');
+
+// The recovery key rides along per run as a PUBLIC key — never written into
+// the node's settings, so the node cannot start using it for its own runs.
+$run_pub = base64_decode((string)($run_config['recovery_public_key'] ?? ''), true);
+check($run_pub !== false && strlen($run_pub) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES,
+	'the recovery key travels in the config as a valid base64 box public key');
+
+// Policy fields reach the config; unrecognised values coerce to the closed set
+// rather than travelling to a node as text.
+$run_lines = explode("\n", JobCommandBuilder::build_backup_run($run_node, array(
+	'type' => 'database', 'mode' => 'full', 'full_interval_days' => 3))[0]['cmd']);
+$run_config = json_decode($run_lines[1] ?? '', true);
+check(($run_config['type'] ?? '') === 'database' && ($run_config['mode'] ?? '') === 'full'
+	&& ($run_config['full_interval_days'] ?? 0) === 3,
+	'policy type, mode and full interval reach the node config');
+$run_lines = explode("\n", JobCommandBuilder::build_backup_run($run_node, array(
+	'type' => $PAYLOAD, 'mode' => 'evil'))[0]['cmd']);
+$run_config = json_decode($run_lines[1] ?? '', true);
+check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') === 'chain',
+	'unrecognised type and mode coerce to the defaults rather than reaching a shell');
+
+check(in_array('backup_run', ManagementJob::filterTypes(), true),
+	'backup_run is a filterable job type, so fleet runs are findable on the jobs pages');
+
 section('Decommission: ship + run remove_account.sh, then verify gone');
 
 // A Docker node's teardown runs entirely on the host (docker + apache live there):
