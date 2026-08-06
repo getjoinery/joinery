@@ -16,7 +16,7 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
- * @version 1.0
+ * @version 1.1
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -178,26 +178,74 @@ echo "[5/10] Exporting database schema...\n";
 
 $schema_file = $temp_dir . '/schema.sql';
 
-// Get database credentials from settings
-$db_user = $settings->get_setting('database_user') ?: 'postgres';
-$db_name = $settings->get_setting('database_name') ?: 'joinerytest';
+// Get database credentials from settings. These are the keys Globalvars_site.php
+// actually defines; the password is never put on the command line, so it cannot
+// show up in `ps` or a shell history while a publish runs.
+$db_user     = $settings->get_setting('dbusername') ?: 'postgres';
+$db_name     = $settings->get_setting('dbname') ?: 'joinerytest';
+$db_password = $settings->get_setting('dbpassword');
 
-// Build pg_dump command for schema export
-$pg_dump_cmd = sprintf(
-    'pg_dump -U %s -d %s --schema-only --no-owner --no-privileges --no-tablespaces --no-security-labels --no-comments',
-    escapeshellarg($db_user),
-    escapeshellarg($db_name)
-);
+/**
+ * Run pg_dump and return its stdout, or die naming what went wrong.
+ *
+ * The exit code is the only trustworthy signal. pg_dump reports failure on
+ * stderr in lower case ("pg_dump: error: ..."), so scanning stdout for the word
+ * ERROR misses an authentication failure completely — and because the message
+ * is text, it lands in the .sql file and ships as though it were schema. A
+ * release built that way installs no tables at all.
+ *
+ * proc_open rather than exec(): stdout must survive byte for byte, including
+ * trailing whitespace that exec() strips, and stderr has to stay separate from
+ * it rather than being folded in with 2>&1.
+ */
+function pg_dump_or_die(array $args, ?string $password, string $what) {
+    $cmd = 'pg_dump';
+    foreach ($args as $arg) {
+        $cmd .= ' ' . (preg_match('/^--[a-z-]+$/', $arg) ? $arg : escapeshellarg($arg));
+    }
 
-// Use shell_exec to preserve exact output (exec() strips trailing whitespace)
-$schema_output = shell_exec($pg_dump_cmd . ' 2>&1');
+    $env = $_ENV + ['PATH' => getenv('PATH') ?: '/usr/bin:/bin'];
+    if ($password !== null && $password !== '') {
+        $env['PGPASSWORD'] = $password;
+    }
 
-if (strpos($schema_output, 'ERROR') !== false || strpos($schema_output, 'FATAL') !== false) {
-    die("ERROR: pg_dump schema export failed:\n$schema_output\n");
+    $descriptors = [0 => ['pipe', 'r'], 1 => ['pipe', 'w'], 2 => ['pipe', 'w']];
+    $proc = proc_open($cmd, $descriptors, $pipes, NULL, $env);
+    if (!is_resource($proc)) {
+        die("ERROR: could not run pg_dump for {$what}\n");
+    }
+
+    fclose($pipes[0]);
+    $stdout = stream_get_contents($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[1]);
+    fclose($pipes[2]);
+    $exit_code = proc_close($proc);
+
+    if ($exit_code !== 0) {
+        die("ERROR: pg_dump failed for {$what} (exit {$exit_code}):\n"
+            . trim($stderr) . "\n");
+    }
+
+    return $stdout;
 }
 
-if (empty($schema_output)) {
+$schema_output = pg_dump_or_die([
+    '-U', $db_user,
+    '-d', $db_name,
+    '--schema-only', '--no-owner', '--no-privileges',
+    '--no-tablespaces', '--no-security-labels', '--no-comments',
+], $db_password, 'schema export');
+
+if (trim($schema_output) === '') {
     die("ERROR: Schema export produced empty output\n");
+}
+
+// A schema dump with no CREATE TABLE in it is not a schema, whatever pg_dump
+// exited with. This is the assertion that would have stopped a corrupt install
+// file from being published.
+if (strpos($schema_output, 'CREATE TABLE') === false) {
+    die("ERROR: Schema export contains no CREATE TABLE statements\n");
 }
 
 file_put_contents($schema_file, $schema_output);
@@ -240,15 +288,12 @@ foreach ($essential_tables as $table) {
     // Export table data using pg_dump with COPY format
     $table_file = $temp_dir . '/' . $table . '.sql';
 
-    $pg_dump_cmd = sprintf(
-        'pg_dump -U %s -d %s --data-only --no-owner --no-privileges --table=%s',
-        escapeshellarg($db_user),
-        escapeshellarg($db_name),
-        escapeshellarg($table)
-    );
-
-    // Use shell_exec to preserve trailing whitespace (exec() strips it)
-    $table_output = shell_exec($pg_dump_cmd . ' 2>/dev/null');
+    $table_output = pg_dump_or_die([
+        '-U', $db_user,
+        '-d', $db_name,
+        '--data-only', '--no-owner', '--no-privileges',
+        '--table=' . $table,
+    ], $db_password, "data export of table '{$table}'");
 
     if ($table_output === null || $table_output === '') {
         echo "   Skipping table '$table' (no data or export failed)\n";

@@ -3,7 +3,9 @@
 # source declares (root composer.json ext-* plus plugin requires.extensions),
 # resolved by utils/list_dependencies.php.
 #
-# VERSION: 1.0
+# VERSION: 1.1 - presence is "install ok installed", not "dpkg knows the name":
+#                a removed-but-not-purged package read as present and never
+#                got reinstalled.
 #
 # Called by install.sh (bare metal, at install time) and by the Dockerfile CMD
 # (every container start).
@@ -57,13 +59,25 @@ if [ -z "$SPECS" ]; then
     exit 0
 fi
 
+# Is the package installed, as opposed to merely known to dpkg?
+#
+# `dpkg -s` exits 0 for a package that apt removed but did not purge — it stays
+# in the database as "deinstall ok config-files" with its files gone. Treating
+# that as present is how a node gets stuck: the extension is never reinstalled,
+# composer validation then fails on the missing ext-*, and the deployment rolls
+# back on every attempt while the one step that could fix it declines to act.
+pkg_installed() {
+    [ -n "${1:-}" ] || return 1
+    dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q '^install ok installed$'
+}
+
 # Work out what is missing before touching apt, so the common case (everything
 # already present) costs no network and no apt-get update.
 MISSING=""
 for spec in $SPECS; do
     primary="${spec%%|*}"
     fallback="${spec##*|}"
-    if dpkg -s "$primary" > /dev/null 2>&1 || dpkg -s "$fallback" > /dev/null 2>&1; then
+    if pkg_installed "$primary" || pkg_installed "$fallback"; then
         continue
     fi
     MISSING="${MISSING} ${spec}"

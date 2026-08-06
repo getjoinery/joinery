@@ -3,10 +3,19 @@
 **Status:** Phase 1 complete. 1.2's no-op deletions, 1.7 and 1.9 landed
 2026-08-03 (`c8c085b3`); 1.1 and the rest of 1.2 landed 2026-08-04 (`d72e6812`);
 1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`); 1.6 landed 2026-08-05
-(`a03aaa0f`); 1.8 landed 2026-08-05 (`16584d95`). **All of Phase 1 is built and
-committed.** What remains is a publish and a fleet upgrade — goal 1 is that
-Phase 1 reaches every node *before* the first one is migrated — plus the live
-gates listed under Verification. Phase 2 remains gated on the OS campaign.
+(`a03aaa0f`); 1.8 landed 2026-08-05 (`16584d95`). **All of Phase 1 is built,
+committed, and deployed to the whole fleet** — all eight Joinery nodes run
+0.8.237 or later, so goal 1 (Phase 1 on every node before any is migrated) is
+met.
+
+Phase 1 was then verified on a live scratch 24.04 box (45.33.72.32) on
+2026-08-06 against an installer byte-identical to the released one: 1.1 (FPM
+reload), 1.3 (no php-imap), 1.4 (version derivation and the six php.ini
+tunings, checked in the served SAPI) and 1.5 (pg_hba round trip) all pass. What
+is still unverified needs hardware that does not exist yet — a container host
+for the Docker paths, and a 26.04 box for everything in Phase 2.
+
+Phase 2 remains gated on the OS campaign.
 
 Bumping Brevo exposed a deploy gap that belongs to no item here and is now
 closed: `ComposerValidator` checked only that a required package was *present*
@@ -644,16 +653,32 @@ These are behaviour changes with no code fix — they need a run, not an edit.
   `php -l` and review by eye.
 - `tests/deploy/syntax_sweep_test.php` covers the parse level for every file the
   deployed site can load; it is the existing deploy gate and needs no change.
-- Phase 1.1 specifically: confirm on a current 24.04 node that an upgrade
-  installing a declared extension still reloads FPM. The bug being fixed is
-  silence, so the test has to assert the reload happened, not that the command
-  returned.
-- Phase 1.4 specifically: run `install.sh server` end to end on a scratch 24.04
-  box and confirm it produces the same configuration as before — PHP 8.3
-  installed, `php8.3-fpm` enabled and running, `/etc/php/8.3/fpm/php.ini`
-  carrying all six tunings, and a page served. The test assertions cover only
-  that no literal survives; nothing in them executes a package install, and the
-  derivation is the part that has to be right on a real box.
+- Phase 1.1 — **verified 2026-08-06.** On a live 24.04 box, `php8.3-apcu` (the
+  `ext-apcu` the root `composer.json` declares) was removed and
+  `utils/upgrade.php --verbose` run. It reinstalled the package and reloaded
+  `php8.3-fpm`. The assertion is the reload's *effect*, not its exit code: a
+  view served over HTTP reported `apcu=LOADED` where it had reported
+  `apcu=absent`, and the fpm workers respawned. The fpm master PID also changed,
+  which is apt's postinst restarting the service, not the graceful reload.
+- Phase 1.4 — **verified 2026-08-06** on a clean 24.04 box, using an installer
+  byte-identical to the one in the release archive. PHP 8.3 the only version
+  installed, `php8.3-fpm` enabled and active, `mpm_event` + `proxy_fcgi` with no
+  mod_php, `fastcgi_finish_request()` available, and all six tunings live *in
+  the served SAPI* rather than merely present in the file. The box carries no
+  Ondřej PPA, so `detect_php_version()` took the `apt-cache depends php-cli`
+  fallback and resolved `8.3` — the branch the dev box cannot exercise. The PPA
+  case is unchanged and remains an owner decision rather than a test.
+- Phase 1.3 and 1.5 — **verified in the same run.** The install asked apt for
+  exactly sixteen `php8.3-*` packages and no imap; afterwards `pg_hba_file_rules`
+  shows `local all postgres` on `scram-sha-256` with zero `md5` rules, the role
+  holds a SCRAM verifier, `listen_addresses` is `localhost`, and a real password
+  connection works. Consequence worth knowing: `sudo -u postgres psql` now
+  prompts for a password on a freshly installed box, because the local rule is
+  no longer `peer`.
+- Still unverified, for want of the hardware: the Dockerfile CMD globs, the
+  container pg_hba round trip, `migrate_site_to_code_volumes.sh`, and
+  `install_email.sh` all need a container host; the `config.platform.php` pin
+  needs a 26.04 / PHP 8.5 build box.
 
 ## Out of Scope
 
