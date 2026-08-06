@@ -1,6 +1,11 @@
 # Backups: Core Engine, Retention, and Incremental Chains
 
-**Status:** Phases 1-3 BUILT and live-verified 2026-08-02 (uncommitted). Phase 4 (later) untouched.
+**Status:** Phases 1-3 BUILT, live-verified 2026-08-02 and committed as
+`b0bd8e16`. Chains were then exercised end to end against a real bucket on
+2026-08-06 (full plus two genuinely incremental runs, restore replaying an added,
+a changed and a deleted file) — which closed two of the three verification risks
+the review brief raised. Phase 4 untouched; see § Phase 4 scope below for what it
+now carries.
 **Date:** 2026-08-01
 
 ## Phase 3 as built
@@ -277,6 +282,26 @@ Restore of a chain point = download full + incrementals 1..k + the k-th db dump,
 - Upload: multi-artifact per run (archive + db dump + manifest) — replaces the "newest file wins" `ls -t | head -1` resolution for chain runs.
 
 ---
+
+## Phase 4 scope
+
+Three gaps the Phase 1-3 build left open deliberately. None is a regression and
+none blocks anything shipped; each is a feature that was scoped out, and they are
+recorded here because a review otherwise re-discovers them one at a time.
+
+1. **Remote core-history display.** The fleet Backups tab cannot show a managed
+   node's own backup history — it needs a new management API endpoint to read it.
+   The v1 decision was observe-only, so this is the natural completion of open
+   decision 4 rather than a defect.
+2. **Install-from-backup cannot open an envelope minted by another site.** A
+   restore onto a *different* node has no recipient it holds a private half for.
+   Pre-existing, not introduced by the envelope model — the old per-node escrow
+   had the same wall. The clean fix is the source node re-sealing the data key to
+   the destination's site key at provisioning time, which is a provisioning
+   change, not a backup-format one.
+3. **Multipart upload** — see *Later / Out of Scope* below; it belongs to both
+   lists because the 5 GB single-PUT ceiling is the first thing a large full
+   backup hits.
 
 ## Later / Out of Scope
 
