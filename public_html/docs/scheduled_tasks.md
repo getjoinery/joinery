@@ -548,6 +548,25 @@ connections on port 25. `mgn_skip_joinery_checks` redirects `api` to
 `http_status`, and leaves an explicitly chosen `http_status` or `tcp_port`
 alone.
 
+### FleetBackupRun — the control plane's backups of its nodes
+
+The Server Manager's **FleetBackupRun** task (`every_run`) schedules the
+manager-profile backups — this control plane's own copies of the nodes it
+manages, under its own recovery key. The node does the backup; the task decides
+when, prunes the node's manager shelf first with the control plane's
+delete-capable credential, and dispatches one `backup_run` job per due node.
+
+Three rules keep a fleet of these from behaving like a thundering herd: each
+node's slot is derived from its slug and spread across the configured window,
+so a fleet does not start every upload at the same minute; a node whose
+previous run is still `pending` or `running` is skipped, so a slow node gets
+fewer backups rather than a queue; and a fleet-wide cap bounds how many run at
+once. A pass that dispatched nothing because nothing was due is a success —
+`error` is reserved for a pass where every node it tried failed. The task
+supports dry run. See the
+[Server Manager overview](/plugins/server_manager/docs/overview.md) for the
+policy model and the `backup_run` job type.
+
 ## Related Files
 
 | File | Purpose |
@@ -562,6 +581,7 @@ alone.
 | `tasks/WeeklyEventsDigest.php` | Example email digest task |
 | `plugins/store/tasks/ReconcileSubscriptions.php` | Subscription backstop across all providers |
 | `plugins/mailbox/tasks/MailboxRelayReconcile.php` | Example ordered-phase task |
+| `plugins/server_manager/tasks/FleetBackupRun.php` | Fleet backup dispatch (manager profile) |
 | `migrations/migration_scheduled_tasks_init.php` | Setup migration |
 
 ### Ordered-phase tasks
