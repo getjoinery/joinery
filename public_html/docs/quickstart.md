@@ -95,6 +95,17 @@ Put your own address in `--admin-email`. That becomes the login for the admin ac
 
 If you don't have a domain yet, substitute your server's IP address for `yourdomain.com`. The site will work, but you won't get SSL until you add a domain later.
 
+**Running it from a script** (cloud-init, CI, a provisioning tool — anywhere nobody is at a keyboard): put `-y` before the subcommand and supply the database password in the environment, since there is no terminal to prompt on:
+
+```bash
+sudo POSTGRES_PASSWORD='choose-one' ./install.sh -y server && \
+  sudo ./install.sh -y site mysite yourdomain.com --admin-email=you@example.com
+```
+
+With `-y`, every prompt takes its default; the destructive ones (overwriting an existing site, deleting data volumes) always refuse unless their own flags — `--wipe-data`, `--allow-downgrade` — say otherwise.
+
+**`--no-ssl`** on the `site` command skips certificate setup entirely. What you get is a site that answers on plain HTTP for its domain — nothing redirects to HTTPS until a certificate exists. Add one later with `setup_ssl.sh` (below).
+
 The install takes a few minutes. You'll see output scrolling past — that's normal. When it finishes, your site is live, with Drive, Calendar, mail and the AI assistant already installed.
 
 **If DNS hasn't propagated yet:** the SSL step is skipped automatically and the install continues. Your site is reachable over HTTP in the meantime, and a background timer watches for your domain — once it points at this server, a certificate is issued within a few minutes with nothing for you to do.

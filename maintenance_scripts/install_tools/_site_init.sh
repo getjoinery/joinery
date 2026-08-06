@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.7 - creates the cache directory the code actually reads
+#                ({site root}/cache/static_pages, not public_html/cache), and
+#                writes the scheduled-task cron file only on bare metal — in a
+#                container the start command owns it, since /etc/cron.d does
+#                not survive a rebuild and this script runs once.
 # VERSION: 2.6 - the database password may arrive in JOINERY_DB_PASSWORD instead
 #                of argv, which is world-readable through ps for the life of
 #                the process. The positional is still accepted.
@@ -169,7 +174,10 @@ mkdir -p "$SITE_ROOT/uploads/medium"
 mkdir -p "$SITE_ROOT/uploads/large"
 mkdir -p "$SITE_ROOT/uploads/thumbnail"
 mkdir -p "$SITE_ROOT/uploads/lthumbnail"
-mkdir -p "$SITE_ROOT/public_html/cache"
+# The page cache lives at {site root}/cache/static_pages — one level ABOVE
+# public_html (StaticPageCache uses PathHelper::getSiteRoot()). There is no
+# public_html/cache; creating one here would be a directory nothing reads.
+mkdir -p "$SITE_ROOT/cache/static_pages"
 mkdir -p "$SITE_ROOT/logs"
 mkdir -p "$SITE_ROOT/static_files"
 mkdir -p "$SITE_ROOT/backups"
@@ -707,7 +715,7 @@ else
     chmod -R 755 "$SITE_ROOT/public_html"
     chmod -R 775 "$SITE_ROOT/uploads"
     chmod -R 775 "$SITE_ROOT/storage"
-    chmod -R 775 "$SITE_ROOT/public_html/cache"
+    chmod -R 775 "$SITE_ROOT/cache"
     chmod -R 775 "$SITE_ROOT/logs"
 fi
 
@@ -735,25 +743,32 @@ fi
 
 log "Setting up cron jobs..."
 
-# Write to /etc/cron.d/ — more durable than user crontab (survives script re-runs,
-# works identically on bare metal and Docker as long as the cron service is running).
-# /etc/cron.d/ format requires the username in the line; file must not be world-writable.
-#
-# Every minute, not every five: the tick interval is the floor on latency for
-# every every_run task, and inbound mail is the one users feel — a relay-fronted
-# deployment cannot see a message until the next PullRelaySpool. A full pass
-# costs about a second, and the runner holds a per-task advisory lock, so a
-# slow task is skipped rather than run concurrently.
-CRON_FILE="/etc/cron.d/joinery-${SITENAME}"
-CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
-printf '%s\n' "$CRON_LINE" > "$CRON_FILE" && chmod 644 "$CRON_FILE" && {
-    log "Scheduled tasks cron entry installed: $CRON_FILE"
-} || {
-    log_error "Warning: Could not write $CRON_FILE (non-fatal)"
-}
-
-# In Docker, cron isn't started automatically — ensure it's running.
-if [ "$DOCKER_MODE" = true ]; then
+# One writer per artifact: on bare metal this script owns the cron file; in a
+# container the start command in Dockerfile.template owns it, because
+# /etc/cron.d does not survive a container rebuild and this script only runs
+# on first boot. Writing it here as well meant two files running the same
+# task runner, colliding on every shared tick.
+if [ "$DOCKER_MODE" = false ]; then
+    # Write to /etc/cron.d/ — more durable than user crontab (survives script
+    # re-runs). /etc/cron.d/ format requires the username in the line; file
+    # must not be world-writable.
+    #
+    # Every minute, not every five: the tick interval is the floor on latency
+    # for every every_run task, and inbound mail is the one users feel — a
+    # relay-fronted deployment cannot see a message until the next
+    # PullRelaySpool. A full pass costs about a second, and the runner holds a
+    # per-task advisory lock, so a slow task is skipped rather than run
+    # concurrently.
+    CRON_FILE="/etc/cron.d/joinery-${SITENAME}"
+    CRON_LINE="* * * * * www-data php ${SITE_ROOT}/public_html/utils/process_scheduled_tasks.php >> ${SITE_ROOT}/logs/cron_scheduled_tasks.log 2>&1"
+    printf '%s\n' "$CRON_LINE" > "$CRON_FILE" && chmod 644 "$CRON_FILE" && {
+        log "Scheduled tasks cron entry installed: $CRON_FILE"
+    } || {
+        log_error "Warning: Could not write $CRON_FILE (non-fatal)"
+    }
+else
+    log "Docker mode: cron entry is written by the container start command"
+    # In Docker, cron isn't started automatically — ensure it's running.
     service cron start 2>/dev/null || true
 fi
 

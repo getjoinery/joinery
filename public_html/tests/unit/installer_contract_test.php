@@ -1260,4 +1260,165 @@ check(strpos($help_text, 'Script vunknown') === false,
     'the fallback did not fire, so the header is still in the shape sed expects');
 
 
+section('No prompt can end the script by going unanswered');
+
+// install.sh runs under set -e, and read returns 1 at EOF. A bare read is
+// therefore a script that dies silently the moment stdin is not a terminal —
+// observed 2026-08-06: `install.sh docker` under cloud-init stopped dead after
+// "Docker is not installed", exit 1, nothing installed, nothing printed.
+// Every prompt carries `|| true`, so EOF takes the prompt's default instead:
+// [y/N] prompts refuse, [Y/n] prompts proceed. This is the class, not the
+// instance — the check walks every read in the file.
+$bare_reads = [];
+foreach (preg_split('/\R/', $install_src) as $n => $line) {
+    $t = ltrim($line);
+    if ($t === '' || $t[0] === '#') { continue; }
+    // Prompting reads only; `while read` loops consume pipelines, not the user.
+    if (preg_match('/\bread\s+-[ps]/', $t) && strpos($t, '|| true') === false) {
+        $bare_reads[] = ($n + 1) . ': ' . trim($t);
+    }
+}
+check(!$bare_reads, 'every prompting read in install.sh survives EOF (`|| true`)',
+    implode(' | ', $bare_reads));
+
+// The first command of every scripted install also states the non-tty decision
+// explicitly, so the transcript says what was decided and why.
+check(preg_match('/elif \[ ! -t 0 \]; then/', $install_exec) === 1,
+    'the Docker prompt has an explicit no-terminal branch');
+
+
+section('Global flags mean the same thing in either position');
+
+// The top-level parse loop breaks on the first non-flag argument, so
+// `install.sh docker -y` used to reach do_docker_install with -y as an unread
+// positional and ASSUME_YES=0 — compounding the bare-read defect into a silent
+// no-op. Each subcommand now routes stray arguments through one setter, and an
+// unknown flag is a stop, never a silent discard.
+check(strpos($install_exec, 'consume_global_flag()') !== false,
+    'one setter owns the global flags');
+foreach (['docker', 'host-harden', 'build-base', 'server', 'list'] as $sub) {
+    check(preg_match('/Unknown option for ' . preg_quote($sub, '/') . '/', $install_src) === 1,
+        "the {$sub} subcommand stops on a flag it does not know");
+}
+foreach (['do_docker_install', 'do_host_harden', 'do_build_base', 'do_server_setup', 'do_list'] as $fn) {
+    // -y after the subcommand reaches the same setter as -y before it.
+    $body = null;
+    if (preg_match('/^' . $fn . '\(\)\s*\{(.*?)^\}/ms', $install_src, $m)) {
+        $body = $m[1];
+    }
+    check($body !== null && strpos($body, 'consume_global_flag') !== false,
+        "{$fn} accepts trailing global flags");
+}
+// site has its own option loop; -y and -q are cases in it, and anything
+// flag-shaped that is not a known option stops (bare "-" stays positional:
+// it means auto-generate the password).
+check(preg_match('/-q\|--quiet\)\s*\n\s*QUIET_MODE=1/', $install_src) === 1,
+    'the site subcommand accepts trailing -q/--quiet');
+check(preg_match('/Unknown option for site/', $install_src) === 1,
+    'and stops on a flag its loop does not know');
+
+
+section('The health probe reports reachability, not liveness');
+
+// The old probe requested http://localhost:PORT/ with Host: localhost, which
+// the vhost's domain-gated redirect never matches. On a --no-ssl install whose
+// every real request 301ed into a :443 vhost that did not exist, the installer
+// printed "Site is responding with HTTP 200". The probe now carries the
+// configured domain, and a redirect to a scheme the install did not configure
+// is a failure, not a pass.
+$probe_lines = array_values(array_filter(
+    preg_split('/\R/', $install_exec),
+    function ($l) { return strpos($l, '%{http_code}') !== false && strpos($l, 'curl') !== false; }
+));
+check(count($probe_lines) >= 2, 'both install paths probe the site',
+    'probe lines found: ' . count($probe_lines));
+foreach ($probe_lines as $l) {
+    check(strpos($l, '-H "Host: $DOMAIN_NAME"') !== false,
+        'the probe asks for the site by its configured domain', trim($l));
+    // curl -w already prints 000 on failure; `|| echo "000"` printed a second
+    // one, reporting "HTTP response: 000000".
+    check(strpos($l, '|| echo "000"') === false,
+        'a failed probe reports 000 once, not twice', trim($l));
+}
+check(substr_count($install_exec, '"$REDIRECT_URL" == https://*') >= 2
+    && substr_count($install_exec, '[ "$NO_SSL" = true ]') >= 2,
+    'a redirect to https:// under --no-ssl is a recognized failure state');
+// And it is a stop: waiting cannot fix configuration.
+check(preg_match('/https:\/\/\* \]\] && \[ "\$NO_SSL" = true \]; then\n(.*\n){1,6}\s*exit 1/',
+        $install_exec) === 1,
+    'that state exits non-zero instead of retrying into a green summary');
+
+
+section('The page cache is owned by the process that writes it');
+
+// cache/ is a named volume, so nothing done at image build time can reach it;
+// and the container start command runs update_database as root AFTER its
+// ownership sweep, so root created cache/static_pages first and www-data could
+// never write it. StaticPageCache then logged "caching disabled" on every
+// request, for the life of the install. The mkdir+chown must come after the
+// last root-run PHP step in the start command.
+$mkdir_pos = strpos($df_code, 'mkdir -p "/var/www/html/${SITENAME}/cache/static_pages"');
+$updatedb_pos = strpos($df_code, 'update_database.php');
+$chown_cache_pos = strpos($df_code, 'chown -R www-data:www-data "/var/www/html/${SITENAME}/cache"');
+check($mkdir_pos !== false, 'the container start command creates cache/static_pages');
+check($chown_cache_pos !== false, 'and gives the cache tree to www-data');
+check($updatedb_pos !== false && $mkdir_pos !== false && $mkdir_pos > $updatedb_pos
+    && $chown_cache_pos > $updatedb_pos,
+    'both happen after the root-run PHP steps that used to steal the directory first');
+
+// The directory the code reads is {site root}/cache/static_pages —
+// public_html/cache was a different directory that nothing reads, created by
+// the step that looked like it covered this.
+check(strpos($site_init_src, 'mkdir -p "$SITE_ROOT/cache/static_pages"') !== false,
+    '_site_init.sh creates the cache directory the code actually uses');
+$init_code = preg_replace('/^\s*#.*$/m', '', $site_init_src);
+check(strpos($init_code, 'public_html/cache') === false,
+    'and no longer touches public_html/cache', 'a second cache directory is drift');
+
+$fix_perms     = $site_root . '/maintenance_scripts/install_tools/fix_permissions.sh';
+$fix_perms_src = is_file($fix_perms) ? file_get_contents($fix_perms) : '';
+check($fix_perms_src !== '', 'fix_permissions.sh exists', $fix_perms);
+$fp_mkdir = strpos($fix_perms_src, 'mkdir -p "$SITE_ROOT/cache/static_pages"');
+$fp_chown = strpos($fix_perms_src, 'chown -R www-data:user1 "$SITE_ROOT"');
+check($fp_mkdir !== false && $fp_chown !== false && $fp_mkdir < $fp_chown,
+    'the permissions sweep guarantees the cache directory exists before it sweeps');
+
+
+section('Exactly one writer per scheduled-task cron file');
+
+// Two cron.d files ran the same runner — _site_init.sh's per-site file every
+// minute and a generic Dockerfile one every five — colliding on every shared
+// tick, with the runner's already-running guard as the only thing keeping it
+// safe. One writer per environment: in a container the start command owns the
+// file, because /etc/cron.d does not survive a rebuild and _site_init.sh only
+// runs on first boot; on bare metal _site_init.sh owns it.
+check(substr_count($df_code, 'process_scheduled_tasks.php') === 1,
+    'the container start command writes exactly one scheduled-task cron entry',
+    'found: ' . substr_count($df_code, 'process_scheduled_tasks.php'));
+check(strpos($df_code, '/etc/cron.d/joinery-${SITENAME}') !== false,
+    'and it is the per-site file');
+check(strpos($df_code, '/etc/cron.d/scheduled-tasks') === false,
+    'the generic file is not written at all');
+check(preg_match('/if \[ "\$DOCKER_MODE" = false \]; then(?:(?!^fi$).)*CRON_FILE="\/etc\/cron\.d\/joinery-/ms',
+        $site_init_src) === 1,
+    '_site_init.sh writes its cron file only on bare metal');
+
+
+section('apt cannot ask a question mid-install');
+
+// iptables-persistent asked "Save current IPv4 rules?" through debconf's
+// readline fallback in the middle of a non-interactive run. The frontend is
+// exported once for the whole script, so a new apt line cannot reintroduce the
+// prompt — per-call prefixes protect exactly one line and rot.
+$dfe_pos = strpos($install_exec, 'export DEBIAN_FRONTEND=noninteractive');
+$first_apt = null;
+foreach (['apt-get install', 'apt install', 'apt-get update', 'apt update'] as $needle) {
+    $p = strpos($install_exec, $needle);
+    if ($p !== false && ($first_apt === null || $p < $first_apt)) { $first_apt = $p; }
+}
+check($dfe_pos !== false, 'install.sh exports DEBIAN_FRONTEND=noninteractive globally');
+check($first_apt !== null && $dfe_pos !== false && $dfe_pos < $first_apt,
+    'and does so before the first apt call');
+
+
 harness_finish();

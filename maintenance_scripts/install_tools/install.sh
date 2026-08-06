@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 2.43 - Every prompt has an answer when nobody is at the keyboard: EOF
+#              takes the prompt's default instead of killing the script under
+#              set -e, and destructive prompts default to refuse. -y/--yes and
+#              -q/--quiet work after the subcommand as well as before it; an
+#              unknown flag is a stop, never a silent discard. The post-start
+#              health probe asks for the site by its configured domain and
+#              treats a redirect to an https:// nobody set up as a failure.
+#              DEBIAN_FRONTEND is set once for the whole script.
 #VERSION 2.42 - The help text reads its version from the header above instead
 #              of a hand-kept copy, which had drifted to 2.7 and told anyone
 #              running --help they had a script 34 releases older than theirs.
@@ -220,6 +228,12 @@
 set -e  # Exit on error
 set +H  # Disable history expansion (prevents ! in passwords from being interpreted)
 
+# Every apt call this script makes must be answerable without a terminal.
+# Set once, globally, so a new apt line cannot reintroduce a debconf prompt
+# mid-install (iptables-persistent asked "Save current IPv4 rules?" on every
+# non-interactive run before this was global).
+export DEBIAN_FRONTEND=noninteractive
+
 # Get the directory where this script is located
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
@@ -250,6 +264,18 @@ CLOUDFLARE_PROXY=0  # Set to 1 if domain is behind Cloudflare proxy
 SSL_DEFERRED=0      # Set to 1 when DNS wasn't ready, so the closing summary can say so
 SSH_ROOT_LOGIN_SAFE=0    # Set by derive_ssh_access: 1 when disabling root SSH orphans nobody
 SSH_REACHABLE_ACCOUNT="" # Set by derive_ssh_access: the account that keeps access
+
+# Global flags are honoured wherever they appear: `install.sh docker -y` and
+# `install.sh -y docker` mean the same thing. Subcommands route stray
+# arguments through here; returns 1 for anything that is not a global flag so
+# the caller can stop with a message rather than silently discard it.
+consume_global_flag() {
+    case "$1" in
+        -y|--yes) ASSUME_YES=1 ;;
+        -q|--quiet) QUIET_MODE=1 ;;
+        *) return 1 ;;
+    esac
+}
 
 #==============================================================================
 # HELPER FUNCTIONS (from docker_install_master.sh)
@@ -1440,6 +1466,11 @@ service_reload() {
 #==============================================================================
 
 do_docker_install() {
+    local arg
+    for arg in "$@"; do
+        consume_global_flag "$arg" || { print_error "Unknown option for docker: $arg"; exit 1; }
+    done
+
     print_header "Docker Installation"
 
     # Check if running as root
@@ -1472,11 +1503,17 @@ do_docker_install() {
 
     print_info "Docker is not installed"
 
+    # A prompt that cannot be answered is a decision, not an error. With no
+    # terminal on stdin (CI, cloud-init, piped ssh) the prompt's default
+    # applies; a bare read here would return 1 at EOF and end the script
+    # under set -e with no message at all.
     if [ "$ASSUME_YES" -eq 1 ]; then
         print_info "Auto-accepting Docker installation (-y flag)"
+    elif [ ! -t 0 ]; then
+        print_info "Proceeding with Docker installation (no terminal to prompt on)"
     else
         echo ""
-        read -p "Would you like to install Docker now? [Y/n] " -n 1 -r
+        read -p "Would you like to install Docker now? [Y/n] " -n 1 -r || true
         echo ""
 
         if [[ $REPLY =~ ^[Nn]$ ]]; then
@@ -1555,6 +1592,11 @@ do_docker_install() {
 #==============================================================================
 
 do_host_harden() {
+    local arg
+    for arg in "$@"; do
+        consume_global_flag "$arg" || { print_error "Unknown option for host-harden: $arg"; exit 1; }
+    done
+
     print_header "Docker Host Security Hardening"
 
     if [ "$EUID" -ne 0 ]; then
@@ -1577,7 +1619,9 @@ do_host_harden() {
         echo ""
         print_warning "This will disable SSH password authentication on this server."
         print_warning "You will only be able to log in with the key(s) listed above."
-        read -p "Proceed? [y/N] " -n 1 -r
+        # EOF (no terminal) leaves REPLY empty, which refuses — hardening a
+        # host you cannot confirm is what -y is for.
+        read -p "Proceed? [y/N] " -n 1 -r || true
         echo ""
         if [[ ! $REPLY =~ ^[Yy]$ ]]; then
             print_info "Aborted"
@@ -1660,7 +1704,7 @@ EOF
         print_warning "Orphaned build directories found:"
         echo "$ORPHANS"
         if [ "$ASSUME_YES" -ne 1 ]; then
-            read -p "Delete them? [y/N] " -n 1 -r
+            read -p "Delete them? [y/N] " -n 1 -r || true
             echo ""
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 echo "$ORPHANS" | xargs rm -rf
@@ -1723,6 +1767,11 @@ compute_install_sh_hash() {
 }
 
 do_build_base() {
+    local arg
+    for arg in "$@"; do
+        consume_global_flag "$arg" || { print_error "Unknown option for build-base: $arg"; exit 1; }
+    done
+
     print_header "Building Joinery Base Image"
 
     if ! command -v docker >/dev/null 2>&1; then
@@ -1824,6 +1873,7 @@ do_server_setup() {
         case "$arg" in
             --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
             --allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1 ;;
+            *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac
     done
 
@@ -1869,7 +1919,7 @@ do_server_setup() {
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [[ -z "$POSTGRES_PASSWORD" ]]; then
         print_info "PostgreSQL password not set."
         echo -n "Please enter a password for PostgreSQL postgres user: "
-        read -s POSTGRES_PASSWORD
+        read -s POSTGRES_PASSWORD || true
         echo ""
 
         if [[ -z "$POSTGRES_PASSWORD" ]]; then
@@ -1878,7 +1928,7 @@ do_server_setup() {
         fi
 
         echo -n "Confirm password: "
-        read -s POSTGRES_PASSWORD_CONFIRM
+        read -s POSTGRES_PASSWORD_CONFIRM || true
         echo ""
 
         if [[ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]]; then
@@ -2024,11 +2074,11 @@ EOF
 
     # Install the inbound mail stack (Postfix + opendkim). Baked into the base
     # image so it survives container rebuilds; the Inbound Email plugin's
-    # install_email.sh only configures it. DEBIAN_FRONTEND keeps postfix's
-    # debconf prompt from blocking a bare-metal run. See spec
+    # install_email.sh only configures it. The global DEBIAN_FRONTEND export
+    # keeps postfix's debconf prompt from blocking a bare-metal run. See spec
     # mail_stack_container_persistence.
     print_step "Installing mail stack (Postfix, opendkim)..."
-    DEBIAN_FRONTEND=noninteractive apt install -y \
+    apt install -y \
         postfix \
         postfix-pgsql \
         opendkim \
@@ -2505,6 +2555,10 @@ do_site_create() {
                 ASSUME_YES=1
                 shift
                 ;;
+            -q|--quiet)
+                QUIET_MODE=1
+                shift
+                ;;
             --wipe-data)
                 WIPE_DATA=1
                 shift
@@ -2626,6 +2680,13 @@ do_site_create() {
                 exit 0
                 ;;
             *)
+                # A flag this loop does not know is a stop, never a silent
+                # discard — it would otherwise be consumed as a positional.
+                # Bare "-" stays positional: it means auto-generate password.
+                if [[ "$1" == -* && "$1" != "-" ]]; then
+                    print_error "Unknown option for site: $1"
+                    exit 1
+                fi
                 if [ -z "$SITENAME" ]; then
                     SITENAME="$1"
                 elif [ -z "$POSTGRES_PASSWORD" ] && [ -z "$PASSWORD_FILE" ]; then
@@ -2821,7 +2882,7 @@ do_site_create() {
 
         if [ "$ASSUME_YES" -eq 0 ]; then
             echo ""
-            read -p "Proceed with clone? [y/N] " confirm
+            read -p "Proceed with clone? [y/N] " confirm || true
             if [[ ! "$confirm" =~ ^[Yy]$ ]]; then
                 print_info "Clone cancelled"
                 exit 0
@@ -3107,7 +3168,7 @@ do_site_docker() {
                 echo ""
                 echo -e "Suggested available port: ${GREEN}$SUGGESTED_PORT${NC} (database: $((SUGGESTED_PORT + 1000)))"
                 echo ""
-                read -p "Would you like to use port $SUGGESTED_PORT instead? [Y/n] " -n 1 -r
+                read -p "Would you like to use port $SUGGESTED_PORT instead? [Y/n] " -n 1 -r || true
                 echo ""
 
                 if [[ ! $REPLY =~ ^[Nn]$ ]]; then
@@ -3205,7 +3266,7 @@ do_site_docker() {
             if [ "$WIPE_DATA" -eq 1 ]; then
                 print_warning "--wipe-data will DELETE this site's database, uploads, storage,"
                 print_warning "config (including its secret_box_key) and backups. Irreversible."
-                read -p "Remove the container AND every data volume? [y/N] " -n 1 -r
+                read -p "Remove the container AND every data volume? [y/N] " -n 1 -r || true
                 echo ""
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                     print_error "Aborted. Nothing was removed."
@@ -3219,7 +3280,7 @@ do_site_docker() {
             else
                 print_info "The container will be removed and rebuilt. Data volumes are kept:"
                 print_info "the database, uploads, storage, config and backups all survive."
-                read -p "Remove and rebuild it? [y/N] " -n 1 -r
+                read -p "Remove and rebuild it? [y/N] " -n 1 -r || true
                 echo ""
                 if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                     print_error "Aborted. Nothing was removed."
@@ -3244,7 +3305,7 @@ do_site_docker() {
             echo "$ORPHANED_BUILDS" | xargs rm -rf
             print_success "Orphaned build directories removed"
         else
-            read -p "Remove them now? [y/N] " -n 1 -r; echo ""
+            read -p "Remove them now? [y/N] " -n 1 -r || true; echo ""
             if [[ $REPLY =~ ^[Yy]$ ]]; then
                 echo "$ORPHANED_BUILDS" | xargs rm -rf
                 print_success "Orphaned build directories removed"
@@ -3462,11 +3523,27 @@ EOF
     while [ $ATTEMPT -le $MAX_ATTEMPTS ]; do
         print_info "Checking site availability (attempt $ATTEMPT/$MAX_ATTEMPTS)..."
 
-        HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost:$PORT/" 2>/dev/null || echo "000")
+        # Probe the site the way a user will reach it: same URL, but carrying
+        # the configured domain in the Host header. Apache answering on
+        # localhost proves liveness, not reachability — a vhost can 301 every
+        # request naming the real domain while localhost sails through.
+        PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://localhost:$PORT/" 2>/dev/null || true)
+        HTTP_CODE="${PROBE%% *}"
+        REDIRECT_URL="${PROBE#* }"
+        [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 
         if [ "$HTTP_CODE" = "200" ]; then
             print_success "Site is responding with HTTP 200"
             break
+        elif [[ "$HTTP_CODE" == 3* ]] && [[ "$REDIRECT_URL" == https://* ]] && [ "$NO_SSL" = true ]; then
+            # The state --no-ssl must never report green: every request naming
+            # the domain lands on an HTTPS vhost this install did not create.
+            # Waiting cannot fix configuration, so this is a stop, not a retry.
+            print_error "Requests for Host: $DOMAIN_NAME redirect to $REDIRECT_URL"
+            print_error "This install used --no-ssl, so no HTTPS vhost exists — nobody can load this site by its domain"
+            exit 1
+        elif [[ "$HTTP_CODE" == 3* ]]; then
+            print_warning "Site redirects to ${REDIRECT_URL:-an undisclosed location} (HTTP $HTTP_CODE)"
         elif [ "$HTTP_CODE" = "500" ]; then
             print_warning "Site returned HTTP 500 - may still be initializing..."
         else
@@ -3593,7 +3670,7 @@ do_site_baremetal() {
             print_warning "Site $SITENAME already exists. Overwriting..."
         else
             echo ""
-            read -p "Site $SITENAME already exists. Overwrite? [y/N] " -n 1 -r
+            read -p "Site $SITENAME already exists. Overwrite? [y/N] " -n 1 -r || true
             echo ""
             if [[ ! $REPLY =~ ^[Yy]$ ]]; then
                 print_error "Aborted."
@@ -3678,10 +3755,22 @@ do_site_baremetal() {
 
     sleep 2
 
-    HTTP_CODE=$(curl -s -o /dev/null -w "%{http_code}" "http://localhost/" 2>/dev/null || echo "000")
+    # Same probe contract as the Docker path: ask for the site by its
+    # configured domain, and refuse to call a redirect into a vhost that does
+    # not exist a healthy site.
+    PROBE=$(curl -s -o /dev/null -w "%{http_code} %{redirect_url}" -H "Host: $DOMAIN_NAME" "http://localhost/" 2>/dev/null || true)
+    HTTP_CODE="${PROBE%% *}"
+    REDIRECT_URL="${PROBE#* }"
+    [ -n "$HTTP_CODE" ] || HTTP_CODE="000"
 
     if [ "$HTTP_CODE" = "200" ]; then
         print_success "Site is responding with HTTP 200"
+    elif [[ "$HTTP_CODE" == 3* ]] && [[ "$REDIRECT_URL" == https://* ]] && [ "$NO_SSL" = true ]; then
+        print_error "Requests for Host: $DOMAIN_NAME redirect to $REDIRECT_URL"
+        print_error "This install used --no-ssl, so no HTTPS vhost exists — nobody can load this site by its domain"
+        exit 1
+    elif [[ "$HTTP_CODE" == 3* ]]; then
+        print_warning "Site redirects to ${REDIRECT_URL:-an undisclosed location} (HTTP $HTTP_CODE) - may need manual verification"
     else
         print_warning "Site returned HTTP $HTTP_CODE - may need manual verification"
     fi
@@ -3743,6 +3832,11 @@ do_site_baremetal() {
 #==============================================================================
 
 do_list() {
+    local arg
+    for arg in "$@"; do
+        consume_global_flag "$arg" || { print_error "Unknown option for list: $arg"; exit 1; }
+    done
+
     print_header "Existing Joinery Sites"
 
     # Check for Docker sites
