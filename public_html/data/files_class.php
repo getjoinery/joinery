@@ -13,10 +13,39 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 class FileException extends SystemBaseException {}
 
 /**
+ * What a streaming decrypt hook hands back (File::registerStreamingDecryptHook).
+ *
+ * Sealed content that can be opened a span at a time implements this, and gets
+ * honest Range support in return: the server reads and decrypts only the chunks
+ * covering what was asked for.
+ */
+interface FileStreamingDecryptor {
+	/**
+	 * Acquire whatever reading needs — typically the in-window key. Called
+	 * BEFORE any header is written, so a closed vault becomes a clean 423
+	 * instead of a truncated 200.
+	 *
+	 * @throws VaultLockedException when the owner's unlock window is closed
+	 */
+	public function prepare(string $path): void;
+
+	/** The plaintext length of the container at $path. */
+	public function plainSize(string $path): int;
+
+	/**
+	 * Decrypt [$offset, $offset+$length) of the plaintext, passing each piece to
+	 * $sink as it is produced. A null $length means "to the end".
+	 *
+	 * @return int bytes emitted
+	 */
+	public function stream(string $path, callable $sink, int $offset = 0, ?int $length = null): int;
+}
+
+/**
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.8.0
+ * @version 1.9.0
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -109,13 +138,36 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    // A file only carries this when it lives in a user's Drive; every other
 	    // creation site leaves it NULL.
 	    'fil_fol_folder_id' => array('type'=>'int8', 'is_nullable'=>true, 'index'=>true),
-	    // Client-side end-to-end encryption (docs/drive_encryption.md). When true
-	    // the stored bytes are ciphertext the server never interprets: no
-	    // thumbnails/previews/search/AI/office. fil_name/fil_title hold an opaque
-	    // identifier; the real name, MIME type, and thumbnail live in the
-	    // FK-encrypted metadata blob below. Set by the Drive upload path when the
-	    // destination folder is an encrypted vault folder.
-	    'fil_encrypted' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
+	    // How this file is protected — the destination folder's level at the
+	    // time it was stored (docs/drive.md). One of:
+	    //   standard  plaintext bytes; every content feature applies.
+	    //   private   server custody: the stored bytes are a SealedFileContainer
+	    //             sealed under a per-file key, itself wrapped to the owner's
+	    //             vault public key in fil_sealed_key below. The server opens
+	    //             them only inside the owner's unlock window. Names, sizes
+	    //             and types stay plaintext (see fil_plain_size_bytes).
+	    //   fortress  client custody (docs/drive_encryption.md): ciphertext the
+	    //             server never interprets — no thumbnails/previews/search/
+	    //             AI/office. fil_name/fil_title hold an opaque identifier;
+	    //             the real name, MIME type and thumbnail live in the
+	    //             FK-encrypted metadata blob below.
+	    'fil_protection_level' => array('type'=>'varchar(16)', 'is_nullable'=>false, 'default'=>'standard'),
+	    // Layer 0 sealed-columns wrapping (docs/sealed_vault.md), used at the
+	    // private level only. $sealed_fields is deliberately empty: no DB column
+	    // here holds ciphertext — the per-file key exists to seal the BLOB and
+	    // its thumbnail variant, the same shape mail uses where a message DEK
+	    // seals related Files. fil_key_generation is 0 on an unsealed row and
+	    // matches the vault generation the key is wrapped to on a sealed one, so
+	    // the rotation sweep can select exactly the old generation.
+	    'fil_content_sealed' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>'false'),
+	    'fil_sealed_key' => array('type'=>'text', 'is_nullable'=>true),
+	    'fil_sealed_owner_user_id' => array('type'=>'int8', 'is_nullable'=>true),
+	    'fil_key_generation' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
+	    // Plaintext byte count for a sealed file, recorded at seal time. The blob
+	    // carries the CIPHERTEXT size (what storage and quota are charged for —
+	    // the ima_size_bytes precedent); this is what the member is shown and
+	    // what the read path answers Content-Length and Range against.
+	    'fil_plain_size_bytes' => array('type'=>'int8', 'is_nullable'=>true),
 	    // Per-file metadata (name, mime, size, chunk size, content id, thumb flag)
 	    // JSON-encoded then encrypted under the file key, produced in the browser.
 	    // Opaque here.
@@ -354,12 +406,42 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @return bool whether the bytes were written
 	 */
 	function replace_bytes($new_bytes) {
+		return $this->_replace_bytes_with(function ($blob) use ($new_bytes) {
+			return $blob->overwriteBytes($new_bytes);
+		}, function ($path) use ($new_bytes) {
+			return @file_put_contents($path, $new_bytes) !== false;
+		});
+	}
+
+	/**
+	 * Replace this file's stored bytes from a file on disk, with the same
+	 * copy-on-write protection replace_bytes() gives — and without ever holding
+	 * the content in memory. A protection-level change rewrites entire files, so
+	 * the string form is not an option there.
+	 *
+	 * @param string $src_path replacement bytes; MOVED into place (gone on success)
+	 * @return bool
+	 */
+	function replace_bytes_from_path($src_path) {
+		return $this->_replace_bytes_with(function ($blob) use ($src_path) {
+			return $blob->overwriteBytesFromPath($src_path);
+		}, function ($path) use ($src_path) {
+			return @rename($src_path, $path);
+		});
+	}
+
+	/**
+	 * The shared half of the two replace_bytes forms: split a shared blob before
+	 * mutating it, then let the caller write. $write receives the now-exclusive
+	 * blob; $write_direct handles the legacy blob-less row that owns its bytes 1:1.
+	 */
+	private function _replace_bytes_with(callable $write, callable $write_direct) {
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 		$blob_id = (int)$this->get('fil_fbb_file_blob_id');
 		if (!$blob_id) {
 			// Legacy blob-less row owns its bytes 1:1 — write straight through.
 			$path = $this->get_filesystem_path('original');
-			return ($path !== '' && $path !== null && @file_put_contents($path, $new_bytes) !== false);
+			return ($path !== '' && $path !== null && $write_direct($path));
 		}
 		// Load fresh (not the memoized copy) so the reference count is current.
 		$blob = new FileBlob($blob_id, true);
@@ -379,7 +461,7 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 		$this->_blob_cache = $blob;
 		$this->_blob_cache_id = (int)$blob->key;
-		return $blob->overwriteBytes($new_bytes);
+		return $write($blob);
 	}
 
 	/** @var FileBlob|null Memoized blob for this file's physical bytes. */
@@ -450,21 +532,62 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * inline-safe-set ever need to diverge, split the constant then.
 	 */
 	function is_image(){
-		if ($this->is_encrypted()) {
-			return false; // ciphertext is never a server-decodable image
+		if ($this->is_encrypted() || $this->is_sealed()) {
+			// Ciphertext on disk is never a server-decodable image. A sealed file
+			// answers false for the same reason its bytes are sealed, even though
+			// fil_type names a real image type — the resize pipeline reads the
+			// stored bytes, and those are a container. Its thumbnail is made once
+			// at upload, from the plaintext, and stored sealed.
+			return false;
 		}
 		return self::is_inline_safe_type($this->get('fil_type'));
 	}
 
+	/** This file's protection level, normalized (see ProtectionLevel). */
+	function protection_level(){
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return ProtectionLevel::normalize($this->get('fil_protection_level'));
+	}
+
 	/**
-	 * Is this file client-side end-to-end encrypted (docs/drive_encryption.md)?
-	 * The stored bytes are ciphertext the server never interprets — the skip-list
-	 * gate for every content-understanding feature (thumbnails, previews, search,
-	 * AI, photo eligibility, office editing).
+	 * Is this file client-side end-to-end encrypted — the Fortress level
+	 * (docs/drive_encryption.md)? The stored bytes are ciphertext the server
+	 * never interprets, so this stays the skip-list gate for every
+	 * content-understanding feature (thumbnails, previews, search, AI, photo
+	 * eligibility, office editing).
+	 *
+	 * A Private file is NOT encrypted in this sense: the server holds its key
+	 * wrapping and can open the bytes inside the owner's window, which is what
+	 * lets those same features work there. Ask is_sealed() for that one.
 	 */
 	function is_encrypted(){
-		$v = $this->get('fil_encrypted');
-		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return $this->protection_level() === ProtectionLevel::FORTRESS;
+	}
+
+	/**
+	 * Is this file sealed under server custody — the Private level? The bytes on
+	 * disk are a SealedFileContainer; every read goes through the streaming
+	 * decrypt path and needs the owner's unlock window open.
+	 */
+	function is_sealed(){
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return $this->protection_level() === ProtectionLevel::PRIVATE_;
+	}
+
+	/**
+	 * The size the member is shown: plaintext bytes. Sealed files record it at
+	 * seal time because the blob measures ciphertext; everything else is its
+	 * blob size unchanged.
+	 */
+	function plain_size_bytes(): int {
+		if ($this->is_sealed()) {
+			$recorded = $this->get('fil_plain_size_bytes');
+			if ($recorded !== null && $recorded !== '') {
+				return (int)$recorded;
+			}
+		}
+		return $this->size_bytes();
 	}
 
 	/**
@@ -525,6 +648,44 @@ public static function get_by_name($name, $search_deleted = false) {
 
 	private static function resolve_decrypt_hook($source) {
 		return ($source !== null && isset(self::$decrypt_hooks[$source])) ? self::$decrypt_hooks[$source] : null;
+	}
+
+	/** @var array<string,callable> fil_source => opener(File): ?FileStreamingDecryptor */
+	private static $streaming_decrypt_hooks = array();
+
+	/**
+	 * Register a STREAMING decryptor for a fil_source tag — the shape for sealed
+	 * content that can be opened a piece at a time.
+	 *
+	 * The whole-bytes hook (registerDecryptHook) reads the entire ciphertext into
+	 * memory, so a file served through it can answer no range honestly and
+	 * advertises none. A streaming consumer hands back an object that can open an
+	 * arbitrary span, which is what lets a sealed video seek and a sealed download
+	 * resume. A source may register either shape; the streaming one wins when both
+	 * are present.
+	 *
+	 * The opener runs per request and may return null, meaning "this particular
+	 * file is not sealed — stream it unchanged". It must NOT need the vault: the
+	 * decryptor's prepare() is where the unlock window is required, so that a
+	 * locked vault becomes a 423 before any header is sent.
+	 *
+	 * The opener is handed the size key being served ('original' or an image
+	 * variant), because a consumer's integrity checks differ between the two: a
+	 * file's row records the plaintext size of its ORIGINAL and knows nothing
+	 * about a variant's. A caller that cannot say passes null, and a consumer
+	 * must treat that as "unknown", never as "original".
+	 */
+	public static function registerStreamingDecryptHook(string $source, callable $opener): void {
+		self::$streaming_decrypt_hooks[$source] = $opener;
+	}
+
+	private function resolve_streaming_decryptor($size_key = null) {
+		$source = $this->get('fil_source');
+		if ($source === null || !isset(self::$streaming_decrypt_hooks[$source])) {
+			return null;
+		}
+		$decryptor = call_user_func(self::$streaming_decrypt_hooks[$source], $this, $size_key);
+		return ($decryptor instanceof FileStreamingDecryptor) ? $decryptor : null;
 	}
 
 	/**
@@ -591,9 +752,20 @@ public static function get_by_name($name, $search_deleted = false) {
 	 *        object): ['start' => int, 'end' => int, 'total' => int]. Null means
 	 *        $path is the complete object and any Range header is resolved here.
 	 */
-	function serve_from_path($path, $cache_control, $range_info = null) {
+	function serve_from_path($path, $cache_control, $range_info = null, $size_key = null) {
 		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
 		VaultUnlock::loadConsumerBootstraps(); // a consumer's decrypt hook is registered lazily, at first use
+
+		// Sealed content that streams gets the whole serve path to itself: it can
+		// answer ranges, so it must own Content-Length, 206 and Accept-Ranges
+		// rather than have them decided for plaintext bytes it isn't. The size key
+		// travels with it so a consumer can tell the original from a variant.
+		$streamer = $this->resolve_streaming_decryptor($size_key);
+		if ($streamer !== null) {
+			$this->_serve_streaming_decrypt($streamer, $path, $cache_control);
+			return;
+		}
+
 		$bytes = null;
 		$decryptor = self::resolve_decrypt_hook($this->get('fil_source'));
 		if ($decryptor) {
@@ -681,6 +853,67 @@ public static function get_by_name($name, $search_deleted = false) {
 			$remaining -= strlen($chunk);
 		}
 		fclose($fh);
+	}
+
+	/**
+	 * Serve sealed bytes through a streaming decryptor, with real Range support.
+	 *
+	 * The order matters: everything that can fail — the unlock window, a corrupt
+	 * container, an unsatisfiable range — is resolved BEFORE the first header, so
+	 * a failure is a clean 423/416/404 rather than a half-written 200. Once
+	 * headers are out, the only remaining work is decrypt-and-echo.
+	 */
+	private function _serve_streaming_decrypt(FileStreamingDecryptor $streamer, $path, $cache_control) {
+		try {
+			$streamer->prepare($path);
+			$total = $streamer->plainSize($path);
+		} catch (VaultLockedException $e) {
+			http_response_code(423);
+			header('Content-Type: text/plain; charset=utf-8');
+			echo 'This file is locked. Unlock your vault to view it.';
+			return;
+		} catch (Exception $e) {
+			error_log('Sealed serve failed for fil=' . (int)$this->key . ': ' . $e->getMessage());
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			LibraryFunctions::display_404_page();
+			return;
+		}
+
+		$range = self::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
+		if ($range === false) {
+			http_response_code(416);
+			header('Accept-Ranges: bytes');
+			header('Content-Range: bytes */' . $total);
+			header('Content-Length: 0');
+			return;
+		}
+
+		$content_type = $this->get('fil_type') ?: 'application/octet-stream';
+		header('Content-Type: ' . $content_type);
+		header('X-Content-Type-Options: nosniff');
+		header('Cache-Control: ' . $cache_control);
+		if (!self::is_inline_safe_type($content_type)) {
+			header('Content-Disposition: attachment; filename="' . basename($this->get('fil_name')) . '"');
+		}
+		header('Accept-Ranges: bytes');
+
+		$offset = 0;
+		$length = $total;
+		if (is_array($range)) {
+			$offset = $range['start'];
+			$length = $range['end'] - $range['start'] + 1;
+			http_response_code(206);
+			header('Content-Range: bytes ' . $range['start'] . '-' . $range['end'] . '/' . $total);
+		}
+		header('Content-Length: ' . $length);
+
+		try {
+			$streamer->stream($path, function ($piece) { echo $piece; }, $offset, $length);
+		} catch (Exception $e) {
+			// Headers and probably bytes are already out; there is no status left
+			// to send. Log it and stop rather than append an error into the file.
+			error_log('Sealed stream aborted for fil=' . (int)$this->key . ': ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -953,7 +1186,14 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * sealing) are left untouched.
 	 */
 	function save($debug = false) {
-		if (!$this->key) {
+		// On a new row the blob's magic-byte detection wins over any
+		// client-supplied type — it describes the bytes actually stored.
+		//
+		// That reasoning inverts for a protected file: the stored bytes are a
+		// container, so sniffing them reports application/octet-stream no matter
+		// what is inside. The real type was detected from the plaintext before it
+		// was sealed and is already on the row, so leave it alone.
+		if (!$this->key && $this->protection_level() === ProtectionLevel::STANDARD) {
 			$blob = $this->_blob();
 			if ($blob && $blob->get('fbb_mime_type')) {
 				$this->set('fil_type', $blob->get('fbb_mime_type'));
@@ -1249,8 +1489,11 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * that references it.
 	 */
 	function resize($size_key='all'){
-		if ($this->is_encrypted()) {
-			return false; // skip-list: the server never decodes ciphertext to resize it
+		if ($this->is_encrypted() || $this->is_sealed()) {
+			// Skip-list: the stored bytes are a container either way, and resizing
+			// them would produce garbage variants. A sealed file's thumbnail is
+			// made from the plaintext at upload and stored sealed instead.
+			return false;
 		}
 		$blob = $this->_blob();
 		return $blob ? $blob->resize($size_key) : false;

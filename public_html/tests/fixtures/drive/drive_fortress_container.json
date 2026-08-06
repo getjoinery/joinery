@@ -1,0 +1,10 @@
+{
+  "note": "Produced by assets/js/drive-crypto.js under Node WebCrypto — regenerate with tests/tools/make_drive_container_fixture.mjs",
+  "file_key_b64": "D7JjMH2FT8YTflvOxvFGxH3wM0tMFjslMxmnZWLk1zg=",
+  "content_id": "fixedcontentid00000000000000abcd",
+  "chunk_bytes": 4194304,
+  "plain_size": 3000,
+  "cipher_size": 3032,
+  "plain_sha256": "8b5fc0e9b559acd86a49017943707c53e283f26bb629cb20bce913bac9975c21",
+  "plain_formula": "byte i = (i * 31 + 7) & 0xff"
+}

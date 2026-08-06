@@ -188,6 +188,8 @@ class DriveHelper {
 
 	/** Serialize a folder row for a listing payload. */
 	public static function folder_export($folder) {
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		$level = self::folder_level($folder);
 		return array(
 			'entity_type' => self::ENTITY_FOLDER,
 			'id'          => (int)$folder->key,
@@ -196,14 +198,82 @@ class DriveHelper {
 			'owner_id'    => (int)$folder->get('fol_usr_user_id'),
 			'create_time' => $folder->get('fol_create_time'),
 			'deleted'     => $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '',
-			'encrypted'   => self::folder_is_encrypted($folder),
+			// `encrypted` means Fortress — client custody, the browser holds the
+			// keys. Clients that only ever knew two modes keep reading it.
+			'encrypted'   => ($level === ProtectionLevel::FORTRESS),
+			'protection_level' => $level,
+			// Sync clients skip Private subtrees: a headless daemon holds no
+			// unlock window, so it could never open the bytes (docs/drive.md).
+			'syncable'    => ($level !== ProtectionLevel::PRIVATE_),
 		);
 	}
 
-	/** True when a loaded folder is an encrypted vault folder. */
+	/** A loaded folder's protection level, normalized (see ProtectionLevel). */
+	public static function folder_level($folder) {
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return ProtectionLevel::normalize($folder->get('fol_protection_level'));
+	}
+
+	/** True when a loaded folder is a Fortress (client-custody) vault folder. */
 	public static function folder_is_encrypted($folder) {
-		$v = $folder->get('fol_encrypted');
-		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return self::folder_level($folder) === ProtectionLevel::FORTRESS;
+	}
+
+	/**
+	 * Live public links and member grants pointing at one file.
+	 *
+	 * Private carries neither (v1), so anything that would make a file Private
+	 * has to answer for these first. A folder-wide level change reports them and
+	 * revokes on confirmation; a move refuses, because a drag has no room for a
+	 * consent step and quietly cutting someone's access off the back of a drop is
+	 * the wrong default.
+	 *
+	 * @return array{links:int, grants:int}
+	 */
+	public static function file_sharing_counts($file_id) {
+		$file_id = (int)$file_id;
+		$db = DbConnector::get_instance()->get_db_link();
+
+		$q = $db->prepare("SELECT COUNT(*) FROM fsl_file_share_links
+			WHERE fsl_revoked_time IS NULL AND fsl_entity_type = 'file' AND fsl_entity_id = ?");
+		$q->execute(array($file_id));
+		$links = (int)$q->fetchColumn();
+
+		$q = $db->prepare("SELECT COUNT(*) FROM fga_file_access_grants
+			WHERE fga_entity_type = 'file' AND fga_entity_id = ?");
+		$q->execute(array($file_id));
+		$grants = (int)$q->fetchColumn();
+
+		return array('links' => $links, 'grants' => $grants);
+	}
+
+	/**
+	 * What a file is PROMISED at: the stronger of its own level and the level of
+	 * the folder holding it.
+	 *
+	 * The two disagree on purpose, and for a while. A level change flips the
+	 * folder at once — from that moment the folder promises the new level to
+	 * everything inside it — and the files converge afterwards in bounded
+	 * batches, which on a large tree takes many passes. During that gap a file's
+	 * own column is the truth about its BYTES while the folder's is the truth
+	 * about its PROMISE.
+	 *
+	 * Every refusal reads this one, because a refusal is about the promise: a
+	 * public link minted on a file whose folder just went Private would be
+	 * revoked by the batch that reaches it a minute later, which is a worse
+	 * answer than refusing it now. Byte work (sealing, unsealing, quota) reads
+	 * the file's own level instead — that is the one describing what is on disk.
+	 */
+	public static function effective_file_level($file) {
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		$own = $file->protection_level();
+		$folder_id = (int)$file->get('fil_fol_folder_id');
+		if ($folder_id <= 0) {
+			return $own;
+		}
+		$folder = self::load_folder($folder_id);
+		return ($folder === null) ? $own : ProtectionLevel::max($own, self::folder_level($folder));
 	}
 
 	/**
@@ -242,9 +312,29 @@ class DriveHelper {
 			$starred = Reaction::has_reacted($uid, 'file', $file_id);
 		}
 
-		$encrypted = $file->is_encrypted();
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		$level     = $file->protection_level();
+		$encrypted = ($level === ProtectionLevel::FORTRESS);
+		$sealed    = ($level === ProtectionLevel::PRIVATE_);
 		$mime = $file->get('fil_type');
+		// A sealed file's fil_type is the real one (sniffed before sealing), so
+		// the UI can show it as an image and ask for its thumbnail — that thumb
+		// is sealed too and opens in-window. Only Fortress is opaque here.
 		$is_image = $encrypted ? false : File::is_inline_safe_type($mime);
+
+		// The member is shown plaintext bytes; the blob measures ciphertext.
+		if ($sealed) {
+			$size = $file->plain_size_bytes();
+		}
+
+		// A sealed file's bytes open only inside its owner's unlock window, and
+		// that window is keyed to the browser session (docs/sealed_vault.md). A
+		// caller holding an API key has no session cookie to present when it
+		// follows a link, so every URL minted for it would answer 423 — a listing
+		// of broken thumbnails and downloads that never start. Say what is true
+		// instead of handing over links that cannot work.
+		$window_capable = !class_exists('ApiAuth', false) || ApiAuth::isBrowserSessionPrincipal();
+		$serve_sealed_urls = ($with_urls && (!$sealed || $window_capable));
 
 		$sync = self::sync_meta_for($file_id);
 
@@ -260,7 +350,7 @@ class DriveHelper {
 			'owner_id'     => (int)$file->get('fil_usr_user_id'),
 			'create_time'  => $file->get('fil_create_time'),
 			'deleted'      => $file->get('fil_delete_time') !== null && $file->get('fil_delete_time') !== '',
-			'download_url' => $with_urls ? $file->mintSignedUrl('original', 3600) : null,
+			'download_url' => $serve_sealed_urls ? $file->mintSignedUrl('original', 3600) : null,
 			// Sync identity. content_sha256 is the head blob's hash — plaintext
 			// bytes for a plaintext file, ciphertext bytes for an encrypted one;
 			// either way it identifies the content a client holds. modified_time
@@ -271,8 +361,28 @@ class DriveHelper {
 			'content_sha256'  => $sync['content_sha256'],
 			'modified_time'   => $encrypted ? null : $file->get('fil_content_modified_time'),
 			'head_change_id'  => $sync['head_change_id'],
+			'protection_level' => $level,
+			// A sync client cannot open a sealed file — it holds no unlock
+			// window — so Private files are excluded from sync (docs/drive.md).
+			'syncable'        => !$sealed,
 		);
-		if ($encrypted) {
+		if ($sealed) {
+			// Server custody: the server holds the key wrapping and opens the
+			// bytes inside the owner's window. There is nothing for the client to
+			// unwrap, and the name/mime above are already the real ones. The
+			// thumbnail is a sealed variant served through the same in-window
+			// path as the content.
+			$out['encrypted'] = false;
+			// The content — bytes and thumbnail alike — needs the owner's window
+			// open on a session-bearing request. A client reads this to render
+			// "Open in Joinery to view" rather than a broken tile, and to know
+			// that a 423 here is a state to resolve, not an error to report.
+			$out['requires_window'] = true;
+			$thumb = $serve_sealed_urls ? self::thumb_size_key() : null;
+			if ($thumb !== null && File::is_inline_safe_type($mime)) {
+				$out['thumb_url'] = $file->mintSignedUrl($thumb, 3600);
+			}
+		} elseif ($encrypted) {
 			// The stored bytes and the thumbnail slot are ciphertext; the browser
 			// decrypts them with the file key it unwraps from wrapped_file_key.
 			// The real name / mime / thumb flag live in encrypted_metadata.

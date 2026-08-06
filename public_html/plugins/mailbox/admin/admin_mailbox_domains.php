@@ -258,69 +258,24 @@ if ($show_form) {
 
 	$page->end_box();
 
-	// Receipt sealing loop (specs/mailbox_raise_receipt.md): drive bounded
-	// mailbox/seal_batch passes and resolve the card's progress row in place —
-	// no page reloads. A pass that seals nothing while rows remain means an
-	// unsealable backlog (a holder lost their vault after the raise): stop and
-	// say so instead of spinning forever. Without JS the card's noscript form
-	// runs the same batches one page load at a time.
+	// Receipt sealing loop (specs/mailbox_raise_receipt.md): the card carries the
+	// shared batch driver's configuration (assets/js/ceremony-batch.js), which
+	// runs bounded mailbox/seal_batch passes and resolves the progress row in
+	// place — no page reloads. A pass that seals nothing while rows remain means
+	// an unsealable backlog (a holder lost their vault after the raise): the
+	// driver stops and says so instead of spinning forever. Without JS the card's
+	// noscript form runs the same batches one page load at a time.
 	if ($ceremony !== null && !empty($ceremony['sealing_active']) && $ceremony['backlog'] > 0) {
 		?>
+		<script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
 		<script>
-		(function () {
+		// The one thing beyond the shared loop: the card's heading states the
+		// finished fact once sealing is done.
+		document.addEventListener('ceremony:done', function () {
 			var card = document.getElementById('raise-receipt');
-			if (!card) return;
-			var remaining = parseInt(card.dataset.backlog, 10) || 0;
-			if (remaining <= 0) return;
-			var sealedTotal = parseInt(card.dataset.sealedTotal, 10) || 0;
-			var dot = document.querySelector('#receipt-seal-row .receipt-dot');
-			var text = document.getElementById('receipt-seal-text');
-			var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
-			var noscriptForm = document.getElementById('sealing-continue');
-			if (noscriptForm) noscriptForm.remove();
-			function setDot(color) { if (dot) dot.style.background = color; }
-			function finish() {
-				setDot('#28a745');
-				text.textContent = sealedTotal > 0
-					? sealedTotal + ' earlier message' + (sealedTotal === 1 ? '' : 's') + ' sealed'
-					: 'No earlier messages needed sealing';
-				var title = document.getElementById('receipt-title');
-				if (title && card.dataset.titleDone) title.textContent = card.dataset.titleDone;
-				var btn = document.getElementById('receipt-action');
-				if (btn) btn.classList.remove('d-none');
-			}
-			function stuck(n) {
-				setDot('#dc3545');
-				text.innerHTML = n + ' message' + (n === 1 ? '' : 's') + ' could not be sealed — see the '
-					+ '<a href="/plugins/mailbox/admin/admin_mailbox_setup">Setup tab</a>.';
-			}
-			function batch() {
-				fetch('/api/v1/action/mailbox/seal_batch', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-					body: JSON.stringify({ domain_id: parseInt(card.dataset.domainId, 10) })
-				}).then(async function (r) {
-					var j = await r.json();
-					if (!r.ok) throw new Error((j && j.error) || 'Request failed.');
-					return j.data;
-				}).then(function (d) {
-					var sealed = parseInt(d.sealed, 10) || 0;
-					remaining = parseInt(d.remaining, 10) || 0;
-					sealedTotal += sealed;
-					if (remaining > 0 && sealed === 0) { stuck(remaining); return; }
-					if (remaining > 0) {
-						text.textContent = 'Sealing earlier messages — ' + remaining + ' remaining…';
-						batch();
-					} else {
-						finish();
-					}
-				}).catch(function () {
-					setDot('#dc3545');
-					text.textContent = 'Sealing paused — reload this page to resume.';
-				});
-			}
-			batch();
-		})();
+			var title = document.getElementById('receipt-title');
+			if (card && title && card.dataset.titleDone) { title.textContent = card.dataset.titleDone; }
+		});
 		</script>
 		<?php
 	}

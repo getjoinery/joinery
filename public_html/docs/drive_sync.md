@@ -203,7 +203,14 @@ no user action, as soon as the clash clears.
 
 ### Encrypted files and folders
 
-Encrypted Drive content syncs like anything else, with one difference that runs
+This section is about **Fortress** folders — the client-custody level, where the
+device holds the keys. **Private** folders are excluded from sync entirely: their
+bytes are opened by the server inside the owner's unlock window, and a headless
+daemon has no window to open. Both exports carry `protection_level` and a
+`syncable` flag, and a client skips anything marked unsyncable; the Drive UI says
+so on the folder rather than leaving a member wondering why files never arrive.
+
+Fortress content syncs like anything else, with one difference that runs
 through everything: the engine works in the **plaintext** domain and the server
 only ever sees the **ciphertext** one. For an encrypted file the server holds a
 placeholder name (`enc-<content id>`), the hash and size of the ciphertext, and
@@ -599,11 +606,12 @@ Two invariants are asserted around **every pass**, not at the end of a run:
 | Gate | Tier / env | Covers |
 |---|---|---|
 | `tests/functional/sync/sync_engine_gate.sh` | safe, needs `[rust]` | The pure decision-making: naming, reconciliation, ordering, the mass-delete guard, secret custody, the health model, the tray's presentation. |
-| `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | The simulator itself — a harness with a bug in it reports a clean run rather than a problem. |
+| `tests/functional/sync/sync_sim_gate.sh` | safe, needs `[rust]` | Both harnesses themselves — a harness with a bug in it reports a clean run rather than a problem. |
 | `tests/functional/sync/sync_cross_build_gate.sh` | safe, needs `[rust]` | The per-OS code compiles for Windows and macOS. |
 | `tests/functional/drive/sync_crypto_parity_gate.sh` | safe, needs `[rust, node]` | Rust and the browser produce bytes each other can read. |
 | `tests/functional/drive/sync_contract_test.php` | db, dev-only | The server surface the client depends on. |
 | `tests/functional/sync/sync_macos_gate.sh` | live, needs `[macmini, rust]` | Built and green on a real Mac; the volume probe, NFD round trip, and Keychain persistence across processes. |
+| `tests/functional/sync/sync_soak_gate.sh` | live, dev-only, needs `[rust]` | One bounded storm-and-settle cycle on the soak rig: two real daemons, real persona actors, real kills, then the six settle assertions. |
 | `tests/functional/drive/ranged_download_gate.sh` | live, dev-only | Range semantics over HTTP. |
 
 The cross-build gate is what makes per-OS work verifiable from a Linux box at
@@ -613,3 +621,141 @@ they cannot compile stops compiling — found six weeks later by whoever tries t
 cut a release. Behavior is covered instead by the simulator's per-platform
 scenarios, which run the shipping engine over macOS and Windows filesystem
 personalities on Linux.
+
+## The soak environment
+
+The simulator proves the engine's *logic*. It cannot see a real kernel, a real
+server, or real time. The soak rig is the other half: the shipping daemon,
+unmodified, on real disks, against a real Joinery instance, driven by
+application write patterns that break sync clients, with real faults injected on
+a schedule, for weeks.
+
+It lives in `{repo root}/sync/jd-soak/` and stands up on a dedicated VPS —
+never the box people work against, because the rig needs liberty to restart
+services, purge feeds and wipe, and because weeks of synthetic load do not belong
+on a working instance. `{repo root}/sync/soak/README.md` is how to run one.
+
+### What the rig is made of
+
+Four roles, and the split between them is the design.
+
+**Actors** are the applications, reproduced faithfully enough to break things.
+Each is a small state machine emitting the *shape* of writes a particular real
+program makes, because the patterns that have historically broken every sync
+client are not random writes — they are storms with structure. `office` drops a
+`~$doc.docx` lock beside the file, writes `tmpNNNN.tmp`, renames it over the
+original and removes the lock. `photoshop` deletes the original *before* its
+replacement lands. `browser` grows a `.crdownload` for minutes and sometimes
+abandons it. `messy-human` renames a folder while files inside it are still being
+written. `remote-user` never touches a disk at all: it drives the API directly,
+so its changes arrive at every device as remote deltas.
+
+A persona is a pure function of its own state and its random draw — it emits
+operations and never touches a filesystem. Applying them, journaling them, and
+coping with the disk saying no is the executor's job. That split is what makes
+the personas testable without a disk.
+
+**The chaos agent** injects faults from outside the daemon — signals, firewall
+rules, unit restarts. Nothing needs a cooperating build, which is the point: a
+daemon compiled with soak hooks in it is a different program from the one that
+ships. Every fault is journaled, including the ones that could *not* be
+injected, because a campaign reporting a hundred kills it never performed is a
+green run over an adversary that was never there.
+
+**The verifier** settles the world and checks the invariants without asking the
+daemon whether it is well. It uses the daemon's status for exactly one thing —
+knowing when it has stopped working, so there is a stable world to look at — and
+then forms its own opinion by walking every disk and the server's index itself.
+
+**The conductor** alternates storm segments (45 minutes, actors and chaos
+together) with settle segments (15-minute deadline), rotates the persona mix, and
+freezes the world into a forensics bundle when an invariant breaks.
+
+### The oracle
+
+Three independent journals, written by parties that do not read each other: what
+the actors committed, what the chaos agent broke, and what the verifier
+concluded. An **intent** goes down before each filesystem operation and a
+**commit** only after it returned success; the oracle believes commits and
+nothing else, so an actor killed mid-write reads as an operation nobody can say
+happened rather than as data loss.
+
+### The six settle assertions
+
+1. **Convergence within the deadline.** A stall is a failure, not a wait — the
+   promise is "never silently stop", so a client quietly still working an hour
+   later is a first-class bug even with nothing lost. A surfaced issue is a
+   legitimate resting place; a spinner is not.
+2. **Green is independently audited.** Every device's disk against the server's
+   index, diffed by the verifier rather than by the thing under test. Names are
+   compared through each volume's own rules, so a device is never failed for
+   obeying its own disk.
+3. **No loss.** The last content committed at every live path must still be
+   findable on a device, in the server's head or version history, in a server or
+   local trash, or as a conflict copy. Separately, every content **the server was
+   observed to hold** must still be there — once it has taken a content it
+   promised to keep it, and this instance keeps every version on purpose.
+
+   What is deliberately *not* asserted: that every intermediate local save
+   survives. A file written and written over again seconds later, before any
+   client could upload it, is a file the user overwrote — no sync client captures
+   every keystroke of a save, and demanding it produced thousands of violations
+   that were the rig complaining about its own actors typing quickly.
+4. **Ciphertext never materializes.** No sync root holds bytes only the server
+   was meant to see, and every encrypted entity a device cannot open is
+   *visible* as such rather than silently absent. With no encrypted entities in
+   play this passes as **vacuous** and says so — a week-long campaign reporting
+   six green assertions with its encrypted lane switched off would otherwise look
+   identical to one that tested it.
+5. **Issues honesty.** Every entry that will never proceed on its own —
+   unsyncable, waiting for a key — has a surfaced reason with its name on it.
+   Work still in flight does not: a draining queue is what a working client looks
+   like, and demanding an explanation per file in it would mean an alert per file
+   in a healthy client.
+6. **Leak watch.** Memory, descriptors, spool residue and store size, sampled
+   every settle. Only a number that has never once come down over a day of
+   storms is worth reporting; a store that grows with the tree is doing its job.
+
+### Reading a report and a bundle
+
+`{base}/journal/report.txt` is rewritten every settle, and `jd-soak report`
+rebuilds the same document from the journals on demand. The first line is
+**INVARIANT VIOLATIONS**, which must read 0. Convergence is reported at p50, p95
+and max rather than as a mean, because a client that converges in four seconds
+ninety times and eleven minutes once has a problem a mean hides completely.
+
+On a violation the world is frozen into `{base}/bundles/violation-cycle-N-…/`:
+all three journals whole, every device's state store, config, daemon log and
+tree listing, the verdicts, and `timeline.txt` — every actor operation and fault
+on one line of time, with faults marked so the one in flight when a file was last
+seen can be found by eye.
+
+That correlation is what replaces seed replay, because there is none: no seed
+reproduces a real kernel and a real network. The next step after reading a
+timeline is always the same — **encode it as a frozen `jd-sim` scenario**, so the
+bug becomes a fast deterministic regression instead of something that might
+happen again in a fortnight. The soak rig finds bugs; the simulator owns them.
+
+### Running a drill by hand
+
+When something is wrong and a whole campaign is the wrong instrument:
+
+```bash
+jd-soak actor  /soak/fleet.json --device device-a --persona office --seconds 120
+jd-soak chaos  /soak/fleet.json --device device-a --fault partition --seconds 60
+jd-soak verify /soak/fleet.json     # one settle, six assertions, no storm
+```
+
+`verify` exits non-zero when an invariant is broken, so it stands alone as a
+gate.
+
+### Why the devices are host processes
+
+The daemon publishes its control channel on loopback, on a kernel-chosen port,
+which is right — binding it to every interface would put a client's sync controls
+on the network. It also means a daemon inside a container cannot be asked
+anything from outside it, and the verifier has to be able to ask. So each device
+is an ordinary process under **its own unix account**, supervised by systemd
+(`Restart=always` is what turns `kill -9` into reboot semantics). The account is
+what makes a per-device network fault possible: `iptables -m owner --uid-owner`
+cuts one daemon's traffic to the server and leaves its neighbours syncing.

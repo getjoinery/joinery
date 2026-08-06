@@ -15,6 +15,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/folders_class.php'));
 require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
 require_once(PathHelper::getIncludePath('data/file_key_grants_class.php'));
 require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 require_once(__DIR__ . '/../../lib/vault_fixtures.php'); // vault_fixture_client_vault()
@@ -42,7 +43,7 @@ section('encrypted folder + file model layer');
 $vault = new Folder(NULL);
 $vault->set('fol_usr_user_id', $owner->key);
 $vault->set('fol_name', 'Vault_' . bin2hex(random_bytes(3)));
-$vault->set('fol_encrypted', true);
+$vault->set('fol_protection_level', ProtectionLevel::FORTRESS);
 $vault->save(); $vault->load();
 $made_folders[] = $vault->key;
 check(DriveHelper::folder_is_encrypted($vault), 'folder_is_encrypted true for a vault folder');
@@ -59,7 +60,7 @@ $enc_meta = base64_encode(random_bytes(60)); // opaque metadata blob
 $efile = File::createFromBytes('ciphertext-' . bin2hex(random_bytes(8)), 'enc-opaqueid', 'application/octet-stream', $owner->key, array(
 	'fil_private' => true,
 	'fil_source'  => File::SOURCE_DRIVE,
-	'fil_encrypted' => true,
+	'fil_protection_level' => ProtectionLevel::FORTRESS,
 	'fil_encrypted_metadata' => $enc_meta,
 ));
 $efile->set('fil_fol_folder_id', $vault->key); $efile->save();
@@ -102,7 +103,7 @@ check(FileKeyGrant::wrapped_key_for($efile->key, $owner->key) === $wk_owner, 'ow
 
 // cascade: deleting the file removes its key grants
 $doomed = File::createFromBytes('cx-' . bin2hex(random_bytes(6)), 'enc-doomed', 'application/octet-stream', $owner->key, array(
-	'fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_encrypted' => true,
+	'fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_protection_level' => ProtectionLevel::FORTRESS,
 ));
 FileKeyGrant::put($doomed->key, $owner->key, base64_encode(random_bytes(40)));
 $doomed_id = $doomed->key;
@@ -301,7 +302,7 @@ if (!$grp_id) {
 	check(($new_file['wrapped_file_key'] ?? null) === $wrapped_up, 'wrapped file key returned in the file export');
 
 	$stored = new File($new_id, true);
-	check($stored->is_encrypted(), 'stored file has fil_encrypted set from the folder');
+	check($stored->is_encrypted(), 'stored file inherits the folder protection level');
 	check($stored->get('fil_encrypted_metadata') === $meta_blob, 'stored metadata matches');
 	check(FileKeyGrant::wrapped_key_for($new_id, $owner->key) === $wrapped_up, 'owner FileKeyGrant created at complete');
 

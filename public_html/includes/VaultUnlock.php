@@ -93,6 +93,14 @@ class VaultUnlock {
 	const CONSUMER_PLUGINS = array('mailbox', 'joinery_ai');
 
 	/**
+	 * Consumers that live in core rather than in a plugin, loaded the same way
+	 * and holding the same contract. Drive is the first: its Private files are
+	 * sealed by core code, so there is no plugin whose bootstrap could carry the
+	 * hooks. Paths are relative to public_html.
+	 */
+	const CONSUMER_CORE_FILES = array('includes/DriveSealed.php');
+
+	/**
 	 * Load each active consumer's bootstrap file — lazy, once per request, called
 	 * by every code path that needs a consumer's hooks live: the File decrypt-hook
 	 * resolution (File::serve_from_path()), the rotation ceremony (resealCallbacks()),
@@ -113,6 +121,14 @@ class VaultUnlock {
 				continue;
 			}
 			$path = PathHelper::getIncludePath('plugins/' . $plugin . '/includes/bootstrap.php');
+			if (file_exists($path)) {
+				require_once($path);
+			}
+		}
+		// Core consumers have no plugin to be active or inactive; they register
+		// unconditionally, and their own hooks decide whether there is work.
+		foreach (self::CONSUMER_CORE_FILES as $relative) {
+			$path = PathHelper::getIncludePath($relative);
 			if (file_exists($path)) {
 				require_once($path);
 			}

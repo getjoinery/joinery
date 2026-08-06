@@ -43,6 +43,23 @@ function drive_share_sync_logic(array $input): LogicResult {
 		return LogicResult::error('Only the owner can share this item.');
 	}
 
+	// Private content is owner-only in v1. The key is wrapped to ONE vault, so a
+	// grantee would hold access to a file that answers 423 forever — a clear
+	// refusal beats a share that looks granted and never opens. The shape to
+	// build later is already in place: fkg_file_key_grants models per-user
+	// wrapped keys, and server custody can re-wrap the key to each grantee inside
+	// the owner's window. That is a feature with its own spec, not a patch here.
+	// The EFFECTIVE level, so a file whose folder has just gone Private is
+	// refused from the moment of the promise rather than from the moment the
+	// converting batch reaches its bytes.
+	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+	$entity_level = ($entity_type === DriveHelper::ENTITY_FOLDER)
+		? DriveHelper::folder_level($entity)
+		: DriveHelper::effective_file_level($entity);
+	if ($entity_level === ProtectionLevel::PRIVATE_) {
+		return LogicResult::error('Private items can\'t be shared with other members yet — they open only with your own key.');
+	}
+
 	// Resolve grants: keys may be user ids or emails. Unresolvable entries are
 	// reported back as `skipped` — never silently dropped.
 	$raw = isset($input['grants']) && is_array($input['grants']) ? $input['grants'] : array();

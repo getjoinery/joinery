@@ -15,7 +15,7 @@ class FolderException extends SystemBaseException {}
  * move, depth cap, and soft-delete cascade/selective-restore — are enforced in
  * the drive logic layer (logic/drive_*), not here; this class stays CRUD.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 class Folder extends SystemBase {
 	public static $prefix = 'fol';
@@ -38,10 +38,13 @@ class Folder extends SystemBase {
 		'fol_usr_user_id'      => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fol_parent_folder_id' => array('type' => 'int8', 'is_nullable' => true, 'index' => true),
 		'fol_name'             => array('type' => 'varchar(255)', 'is_nullable' => false, 'required' => true),
-		// An encrypted vault folder (docs/drive_encryption.md): every file created
-		// inside is client-side end-to-end encrypted. Encryption is a property of
-		// the subtree — a folder created under an encrypted parent inherits it.
-		'fol_encrypted'        => array('type' => 'bool', 'is_nullable' => false, 'default' => 'false'),
+		// How this subtree is protected (docs/drive.md), one of the platform
+		// ladder's Drive rungs: standard (plaintext), private (server custody,
+		// sealed to the owner's vault, opened in-window), fortress (client
+		// custody, end-to-end encrypted — docs/drive_encryption.md). Protection
+		// is a property of the subtree: a folder's level is the floor for
+		// everything inside it, so a child never sits below its parent.
+		'fol_protection_level' => array('type' => 'varchar(16)', 'is_nullable' => false, 'default' => 'standard'),
 		'fol_create_time'      => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 		'fol_delete_time'      => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
@@ -64,6 +67,12 @@ class Folder extends SystemBase {
 	/** True when this folder belongs to $user_id. */
 	public function is_owned_by($user_id) {
 		return (int)$this->get('fol_usr_user_id') === (int)$user_id;
+	}
+
+	/** This folder's protection level, normalized (see ProtectionLevel). */
+	public function protection_level() {
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		return ProtectionLevel::normalize($this->get('fol_protection_level'));
 	}
 }
 

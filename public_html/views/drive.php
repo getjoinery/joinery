@@ -28,6 +28,7 @@ $config = array(
 $new_folder_fw = $page->getFormWriter('drive_new_folder', array('action' => '/drive', 'method' => 'POST'));
 $rename_fw     = $page->getFormWriter('drive_rename', array('action' => '/drive', 'method' => 'POST'));
 $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 'method' => 'POST'));
+$protection_fw = $page->getFormWriter('drive_protection', array('action' => '/drive', 'method' => 'POST'));
 ?>
 <div class="jy-ui">
 <section class="jy-content-section">
@@ -92,10 +93,22 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 	$new_folder_fw->begin_form();
 	$new_folder_fw->textinput('drv_new_folder_name', 'Folder name', array('id' => 'drvNewFolderName', 'required' => true, 'maxlength' => 255));
 	?>
-	<label class="drv-enc-opt" id="drvNewFolderEncWrap">
-		<input type="checkbox" id="drvNewFolderEnc">
-		<span>Encrypted vault folder — files inside are end-to-end encrypted in your browser. Lose every unlocker and they are unrecoverable.</span>
-	</label>
+	<div id="drvNewFolderLevelWrap">
+	<?php
+	// Protection is a property of the whole tree, so it is chosen once, when the
+	// top-level folder is made. Inside an existing folder the choice is inherited
+	// and this block is hidden by openNewFolder().
+	$new_folder_fw->radioinput('drv_new_folder_level', 'Protection', array(
+		'options' => array(
+			'standard' => 'Standard — the server manages these files for you. Previews, search and AI all work.',
+			'private'  => 'Private — encrypted on the server, opened only while you\'re signed in and unlocked. Previews and AI still work while you\'re here. No public links, no sharing, not synced to your devices.',
+			'fortress' => 'Fortress — encrypted by your browser; the server never sees the contents, and neither does anything server-side. Lose every unlocker and these files are unrecoverable.',
+		),
+		'value' => 'standard',
+		'id'    => 'drvNewFolderLevel',
+	));
+	?>
+	</div>
 	<div class="drv-dialog-actions">
 		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
 		<button type="submit" class="jy-btn jy-btn-primary">Create</button>
@@ -164,6 +177,31 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 		<button type="submit" class="jy-btn jy-btn-primary">Move</button>
 	</div>
 	<?php $move_fw->end_form(); ?>
+</dialog>
+
+<dialog id="drvProtectionDialog" class="drv-dialog">
+	<h3>Protection for <span id="drvProtectionFolder"></span></h3>
+	<?php
+	$protection_fw->begin_form();
+	$protection_fw->radioinput('drv_protection_level', 'Protection', array(
+		'options' => array(
+			'standard' => 'Standard — the server manages these files for you. Previews, search, sharing, public links and syncing all work.',
+			'private'  => 'Private — encrypted on the server, opened only while you\'re signed in and unlocked. Previews and AI still work while you\'re here. No public links, no sharing with members, not synced to your devices.',
+		),
+		'value' => 'standard',
+		'id'    => 'drvProtectionLevel',
+	));
+	?>
+	<p id="drvProtectionWarning" class="drv-protection-warning" hidden></p>
+	<div id="drvProtectionProgress" class="drv-protection-progress" hidden>
+		<span data-ceremony-dot class="drv-ceremony-dot"></span>
+		<span data-ceremony-text>Starting…</span>
+	</div>
+	<div class="drv-dialog-actions">
+		<button type="button" class="jy-btn jy-btn-secondary" data-close>Cancel</button>
+		<button type="submit" class="jy-btn jy-btn-primary" id="drvProtectionApply">Apply</button>
+	</div>
+	<?php $protection_fw->end_form(); ?>
 </dialog>
 
 <dialog id="drvConfirmDialog" class="drv-dialog">
@@ -294,6 +332,12 @@ $move_fw       = $page->getFormWriter('drive_move', array('action' => '/drive', 
 .drv-enc-opt{display:flex;gap:.5rem;align-items:flex-start;margin:.6rem 0;font-size:.82rem;opacity:.9;cursor:pointer}
 .drv-enc-opt input{margin-top:.15rem}
 .drv-item-lock{margin-left:.35rem;opacity:.6;font-size:.85em}
+.drv-protection-warning{margin:.6rem 0;font-size:.85rem;color:var(--jy-danger,#b3261e)}
+.drv-protection-progress{display:flex;gap:.5rem;align-items:center;margin:.8rem 0;font-size:.85rem}
+.drv-ceremony-dot{width:.6rem;height:.6rem;border-radius:50%;background:#9aa0a6;flex:0 0 auto}
+.drv-ceremony-dot[data-state=working]{background:#f9ab00}
+.drv-ceremony-dot[data-state=done]{background:#188038}
+.drv-ceremony-dot[data-state=error]{background:#b3261e}
 .drv-crumb-lock{opacity:.7}
 .jy-btn-block{display:block;width:100%}
 @media(max-width:720px){.drv-app{flex-direction:column}.drv-rail{position:static;width:100%;flex-basis:auto}.drv-nav{flex-direction:row;flex-wrap:wrap}}
@@ -307,6 +351,7 @@ window.DRIVE_CONFIG = <?php echo json_encode($config, JSON_UNESCAPED_SLASHES); ?
 <script defer src="/assets/js/vault-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-crypto.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/vault-keyring.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/vault-keyring.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/drive-crypto.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive-crypto.js')) ?: '1'; ?>"></script>
+<script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
 <script defer src="/assets/js/drive.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/drive.js')) ?: '1'; ?>"></script>
 
 <?php

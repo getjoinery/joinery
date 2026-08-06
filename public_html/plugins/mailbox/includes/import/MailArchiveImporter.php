@@ -115,8 +115,11 @@ class MailArchiveImporter {
 		if (!$file->key) {
 			throw new RuntimeException('The archive file is no longer available.');
 		}
-		if ($file->get('fil_encrypted')) {
+		if ($file->is_encrypted()) {
 			throw new RuntimeException(self::ENCRYPTED_FILE_REASON);
+		}
+		if ($file->is_sealed()) {
+			throw new RuntimeException(self::SEALED_FILE_REASON);
 		}
 
 		$path = $file->get_filesystem_path();
@@ -148,8 +151,14 @@ class MailArchiveImporter {
 		$this->path = $reader->prepare($path, $this->workDir());
 	}
 
-	const ENCRYPTED_FILE_REASON = 'That file is in an encrypted folder, so only your browser can read it — '
-		. 'the server cannot. Put a copy in an unencrypted folder and import that.';
+	const ENCRYPTED_FILE_REASON = 'That file is in a Fortress folder, so only your browser can read it — '
+		. 'the server cannot. Put a copy in a Standard folder and import that.';
+
+	// A Private file's bytes are sealed on disk and open only inside the owner's
+	// unlock window; an import runs as a background job, which by design has no
+	// window (docs/sealed_vault.md). Refused rather than half-worked.
+	const SEALED_FILE_REASON = 'That file is in a Private folder, so it can only be opened while you are '
+		. 'signed in and unlocked — an import runs in the background. Put a copy in a Standard folder and import that.';
 
 	/** The mailbox this run files into, and the domain that governs its protection. */
 	private function target(): array {

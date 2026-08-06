@@ -135,13 +135,20 @@ class MailImportService {
 			if (!$matches) {
 				continue;
 			}
-			$encrypted = (bool)$file->get('fil_encrypted');
+			// Either kind of protected file is unreadable to an import: Fortress
+			// because only the browser holds the key, Private because the job runs
+			// with no unlock window. Both are listed with the reason rather than
+			// hidden, so the picker explains itself.
+			$encrypted = $file->is_encrypted();
+			$sealed    = $file->is_sealed();
+			$reason = $encrypted ? MailArchiveImporter::ENCRYPTED_FILE_REASON
+				: ($sealed ? MailArchiveImporter::SEALED_FILE_REASON : '');
 			$out[] = array(
 				'id'        => intval($file->key),
 				'name'      => $name,
-				'size'      => $file->size_bytes(),
-				'encrypted' => $encrypted,
-				'reason'    => $encrypted ? MailArchiveImporter::ENCRYPTED_FILE_REASON : '',
+				'size'      => $file->plain_size_bytes(),
+				'encrypted' => ($encrypted || $sealed),
+				'reason'    => $reason,
 			);
 		}
 		return $out;
@@ -281,8 +288,11 @@ class MailImportService {
 		if (intval($file->get('fil_usr_user_id')) !== $this->viewer->getUserId() && !$this->isOperator()) {
 			throw new RuntimeException('That file is not yours.');
 		}
-		if ($file->get('fil_encrypted')) {
+		if ($file->is_encrypted()) {
 			throw new RuntimeException(MailArchiveImporter::ENCRYPTED_FILE_REASON);
+		}
+		if ($file->is_sealed()) {
+			throw new RuntimeException(MailArchiveImporter::SEALED_FILE_REASON);
 		}
 
 		$name = $sourceName !== '' ? $sourceName
