@@ -134,6 +134,70 @@ try { BackupEnvelope::decode(json_encode($future)); }
 catch (BackupEnvelopeException $e) { $threw = true; }
 check($threw, 'core refuses a newer envelope version too');
 
+// ── The shape a chain actually leaves behind ────────────────────────────────
+section('A chain manifest opens, not just a sidecar');
+
+// A chain writes one manifest.json and no separate sidecar, nesting the envelope
+// under "envelope". docs/backups.md sends the operator here for the chain data
+// key and restore_chain.sh --help names this tool, so a manifest it cannot read
+// means the documented recovery path does not exist. Found live 2026-08-06,
+// where it failed with "lists no recipients" against a manifest holding two.
+$manifest_file = $work . '/manifest.json';
+file_put_contents($manifest_file, json_encode([
+	'version'  => 1,
+	'chain_id' => 'chain-20260101_000000',
+	'slug'     => 'demo',
+	'envelope' => json_decode((string)file_get_contents($core_sidecar), true),
+	'runs'     => [],
+], JSON_PRETTY_PRINT));
+
+$out = [];
+$rc  = 0;
+$key_from_manifest = $work . '/from_manifest.key';
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($manifest_file)
+	. ' --private ' . escapeshellarg($rec_file)
+	. ' --key-out ' . escapeshellarg($key_from_manifest) . ' 2>&1', $out, $rc);
+check($rc === 0, 'CLI opens a chain manifest', implode(' | ', $out));
+check(is_file($key_from_manifest) && filesize($key_from_manifest) > 0,
+	'and writes the recovered data key');
+
+$key_from_sidecar = $work . '/from_sidecar.key';
+$out = [];
+$rc  = 0;
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($core_sidecar)
+	. ' --private ' . escapeshellarg($rec_file)
+	. ' --key-out ' . escapeshellarg($key_from_sidecar) . ' 2>&1', $out, $rc);
+check($rc === 0 && is_file($key_from_sidecar)
+	&& file_get_contents($key_from_manifest) === file_get_contents($key_from_sidecar),
+	'both shapes of the same envelope yield the same key');
+
+// The version compared must be the ENVELOPE's, not the manifest's. They are
+// separate formats free to diverge, and reading the wrong one would reject an
+// envelope this build can perfectly well open.
+$mixed = [
+	'version'  => 99,
+	'envelope' => json_decode((string)file_get_contents($core_sidecar), true),
+];
+$mixed_file = $work . '/mixed.json';
+file_put_contents($mixed_file, json_encode($mixed));
+$out = [];
+$rc  = 0;
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($mixed_file)
+	. ' --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
+check($rc === 0, 'a manifest version it does not know does not block a readable envelope',
+	implode(' | ', $out));
+
+// A nested envelope that is itself from the future is still refused.
+$future_nested = json_decode((string)file_get_contents($core_sidecar), true);
+$future_nested['version'] = 99;
+$fn_file = $work . '/future_nested.json';
+file_put_contents($fn_file, json_encode(['version' => 1, 'envelope' => $future_nested]));
+$out = [];
+$rc  = 0;
+exec('php ' . escapeshellarg($cli) . ' open --sidecar ' . escapeshellarg($fn_file)
+	. ' --private ' . escapeshellarg($rec_file) . ' 2>&1', $out, $rc);
+check($rc !== 0, 'but a nested envelope from the future is still refused');
+
 // ── Site key stability ──────────────────────────────────────────────────────
 section('Site key is minted once');
 

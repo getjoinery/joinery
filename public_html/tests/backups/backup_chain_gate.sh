@@ -192,6 +192,37 @@ chk "a dry run writes nothing" \
     "$(cd "$W/out/site" && find . -type f | sort | tr '\n' ' ')" "./PREEXISTING.txt "
 chk "and needs no key" "$(echo "$OUT" | grep -ci 'key-file is required')" "0"
 
+# ── A target the archive cannot land in is refused ──────────────────────────
+#
+# tar recreates the directory the archive carries, so extraction goes to
+# dirname(target) plus THAT name — the last segment of --target-dir is not free.
+# Unenforced, a restore aimed at a scratch directory wrote to the sibling named
+# after the project and still reported success. On a real box that sibling is the
+# live site, and extraction runs with tar --incremental, which DELETES files the
+# archive does not list. Observed live 2026-08-06.
+echo "== A mismatched target is refused =="
+rm -rf "$W/out"; mkdir -p "$W/out/wrongname"
+OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/wrongname" --artifacts "$W/arts" \
+        --key-file "$W/chain.key" --force --skip-database 2>&1) && RC=0 || RC=$?
+chk "a target whose last segment is not the archive's directory fails" "$RC" "1"
+chk "and the error names the path that would work" \
+    "$(echo "$OUT" | grep -c -- "--target-dir $W/out/site")" "1"
+chk "nothing is written to the requested target" \
+    "$(find "$W/out/wrongname" -mindepth 1 | wc -l | tr -d ' ')" "0"
+chk "and nothing is written to the sibling it used to pick silently" \
+    "$([ -e "$W/out/site" ] && echo present || echo absent)" "absent"
+
+# A key that cannot open the archive is caught before anything is applied,
+# rather than extracting nothing and reporting success.
+echo "== A key that does not open the chain is caught up front =="
+rm -rf "$W/out"; mkdir -p "$W/out"
+head -c 32 /dev/urandom | base64 > "$W/badkey"
+OUT=$(bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
+        --key-file "$W/badkey" --force --skip-database 2>&1) && RC=0 || RC=$?
+chk "a wrong key fails the restore" "$RC" "1"
+chk "and says so, rather than leaving an empty tree behind" \
+    "$(echo "$OUT" | grep -ci "could not read the archive")" "1"
+
 echo
 echo "RESULT: $([ $failed -eq 0 ] && echo PASS || echo FAIL) $passed $failed"
 [ $failed -eq 0 ]

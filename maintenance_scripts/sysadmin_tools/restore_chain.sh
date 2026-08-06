@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.1.0 - a target whose last segment is not the directory the archive
+#                  carries is refused. It used to restore to dirname(target) plus
+#                  the archive's own name and still report success, so a restore
+#                  aimed at a scratch directory could land on the live site --
+#                  and extraction deletes files, so that is destructive, not
+#                  merely surprising. --help no longer truncates its own options.
 # Version: 1.0.1 - a failed verification prints its reason (the verifier's stderr was
 #                  not captured, so the error line came out empty)
 # Version: 1.0.0
@@ -25,6 +31,10 @@
 #   --target-dir DIR  Restore into THIS directory instead. Same reason as
 #                     backup_files.sh --project-dir: the deletion-replay
 #                     behaviour has to be testable without a live site.
+#                     Its LAST SEGMENT must be the directory name the archive
+#                     carries (the one backup_files.sh archived), because tar
+#                     recreates that directory itself. A mismatch is refused,
+#                     naming the path to use.
 #   --artifacts DIR   Directory holding manifest.json and the downloaded artifacts
 #   --key-file PATH   The chain data key (recover it with backup_envelope.php open)
 #   --seq N           Restore as at run N. Default: the newest run in the chain.
@@ -35,7 +45,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.0.1"
+SCRIPT_VERSION="1.1.0"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -62,7 +72,9 @@ while [[ $# -gt 0 ]]; do
         --skip-database) SKIP_DATABASE=true; shift ;;
         --dry-run|-n)    DRY_RUN=true; shift ;;
         --force|-f)      FORCE=true; shift ;;
-        --help|-h)       sed -n '3,32p' "$0" | sed 's/^# \{0,1\}//'; exit 0 ;;
+        # Print the header block to its end rather than a fixed line range, which
+        # silently dropped the last options as the header grew.
+        --help|-h)       awk 'NR<3 {next} /^#/ {sub(/^# ?/,""); print; next} {exit}' "$0"; exit 0 ;;
         -*)              print_error "Unknown option: $1"; exit 1 ;;
         *)
             if [ -z "$PROJECT_NAME" ]; then PROJECT_NAME="$1"; else
@@ -177,6 +189,37 @@ fi
 PROJECT_DIR="${TARGET_DIR_OVERRIDE:-/var/www/html/${PROJECT_NAME}}"
 PROJECT_DIR="${PROJECT_DIR%/}"
 PARENT="$(dirname "$PROJECT_DIR")"
+
+# The archive carries its own top-level directory — backup_files.sh tars
+# `basename` of what it archived, from that directory's parent — so extraction
+# necessarily lands at PARENT/<that name>, and the last segment of the target is
+# not free. Left unchecked, --target-dir silently restored somewhere else and
+# still reported success: pointing it at /var/www/html/scratch would extract over
+# /var/www/html/<project>, the live site, and extraction runs with
+# `tar --incremental`, which DELETES local files the archive's listing does not
+# mention. So read the name out of the archive and refuse a target that does not
+# match, rather than writing to a directory nobody asked for.
+ARCHIVE_ROOT=""
+if [ "${#FILES_ARCHIVES[@]}" -gt 0 ]; then
+    ARCHIVE_ROOT="$( { ( openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 \
+                            -in "${FILES_ARCHIVES[0]}" 2>/dev/null \
+                          | tar tzf - 2>/dev/null ) 3< "$KEY_FILE" || true; } \
+                     | head -n 1 | cut -d/ -f1 || true )"
+fi
+
+if [ -z "$ARCHIVE_ROOT" ]; then
+    print_error "Could not read the archive's contents with this key."
+    print_error "Check --key-file: it must be the chain data key, recovered with"
+    print_error "  backup_envelope.php open --sidecar <manifest.json> --private <recovery key>"
+    exit 1
+fi
+
+if [ "$ARCHIVE_ROOT" != "$(basename "$PROJECT_DIR")" ]; then
+    print_error "This chain restores a directory named '${ARCHIVE_ROOT}', so it can only be written to a path ending in that name."
+    print_error "Requested: ${PROJECT_DIR}"
+    print_error "Use:       --target-dir ${PARENT}/${ARCHIVE_ROOT}"
+    exit 1
+fi
 
 if [ "$FORCE" != true ]; then
     echo "About to restore ${PROJECT_DIR} from chain ${CHAIN_ID} at run ${RESTORE_SEQ}." >&2

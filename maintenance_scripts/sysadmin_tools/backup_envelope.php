@@ -32,8 +32,11 @@
  *              Prints nothing secret.
  *
  *   open:      php backup_envelope.php open --sidecar PATH [--private PATH] [--key-out PATH]
- *              Recovers the data key. --private takes the recovery private key
- *              or the site key file; with neither, the key is read from stdin.
+ *              Recovers the data key. --sidecar takes either a standalone
+ *              envelope or a chain's manifest.json, which nests one -- a chain
+ *              writes no separate sidecar, so the manifest is the only envelope
+ *              it has. --private takes the recovery private key or the site key
+ *              file; with neither, the key is read from stdin.
  *              Writes to --key-out (0600) or prints to stdout.
  *
  *   relabel:   php backup_envelope.php relabel --sidecar PATH --artifact NAME [--out PATH]
@@ -46,6 +49,9 @@
  * The envelope format written here is the same one includes/BackupEnvelope.php
  * reads; backup_envelope_cli_test.php holds both to that contract.
  *
+ * @version 1.1 - open accepts a chain manifest, not only a standalone sidecar.
+ *                A chain produces no sidecar, so recovering its data key -- the
+ *                documented restore path -- was impossible with this tool.
  * @version 1.0
  */
 
@@ -60,7 +66,7 @@ const BE_CIPHER  = 'aes-256-cbc-pbkdf2';
 function be_usage($stream = STDERR) {
     fwrite($stream, "Usage:\n");
     fwrite($stream, "  php backup_envelope.php mint --recovery-pub B64 --artifact NAME --key-out PATH --sidecar-out PATH [--site-key PATH]\n");
-    fwrite($stream, "  php backup_envelope.php open --sidecar PATH [--private PATH] [--key-out PATH]\n");
+    fwrite($stream, "  php backup_envelope.php open --sidecar PATH|MANIFEST [--private PATH] [--key-out PATH]\n");
     fwrite($stream, "  php backup_envelope.php relabel --sidecar PATH --artifact NAME [--out PATH]\n");
     fwrite($stream, "  php backup_envelope.php site-key --site-key PATH\n");
 }
@@ -270,6 +276,18 @@ if ($mode === 'open') {
     if (!is_array($envelope)) {
         be_fail('this backup envelope is not readable JSON.');
     }
+
+    // A chain writes one manifest.json and no separate sidecar, and carries its
+    // envelope nested under "envelope". Accept either shape: this is the tool the
+    // restore instructions send people to for a chain's data key, and at disaster
+    // time nobody should have to know which of the two files they are holding.
+    // Unwrap BEFORE the version check, so the version compared is the envelope's
+    // own rather than the manifest's — they are separate formats that are free to
+    // diverge, and comparing the wrong one would reject a readable envelope.
+    if (isset($envelope['envelope']) && is_array($envelope['envelope'])) {
+        $envelope = $envelope['envelope'];
+    }
+
     if ((int)($envelope['version'] ?? 0) !== BE_VERSION) {
         be_fail('unsupported backup envelope version ' . (int)($envelope['version'] ?? 0)
             . '; this build reads version ' . BE_VERSION . '.');

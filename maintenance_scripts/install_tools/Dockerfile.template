@@ -1,4 +1,15 @@
 # Joinery Docker Template
+# VERSION 4.7 - POSTGRES_PASSWORD is no longer a build arg baked into ENV. It
+#               put the database superuser password in the image, where
+#               docker inspect and docker history keep it after the container
+#               is gone. install.sh supplies it at run time via --env-file.
+#               The first-run block also stopped putting it in argv twice: the
+#               host's ps lists container processes, so `psql -c "ALTER USER
+#               ... PASSWORD '...'"` and the _site_init.sh positional were
+#               readable by every account on the machine for as long as they
+#               ran. The SQL now arrives on psql's stdin (echo is a shell
+#               builtin, so it never becomes a command line) and _site_init.sh
+#               takes JOINERY_DB_PASSWORD from the environment.
 # VERSION 4.6 - The first-run password dance reads the auth method out of
 #               pg_hba.conf and puts that back, instead of naming md5 in a
 #               whitespace-exact match of a line install.sh writes. The two
@@ -68,19 +79,25 @@
 #
 # Usage:
 #   docker build \
-#     --build-arg BASE_IMAGE_VERSION=1.1 \
+#     --build-arg BASE_IMAGE_VERSION=1.2 \
 #     --build-arg SITENAME=clientsite \
-#     --build-arg POSTGRES_PASSWORD=secure_password \
 #     --build-arg DOMAIN_NAME=client.example.com \
 #     -t joinery-clientsite .
+#
+#   printf 'POSTGRES_PASSWORD=%s\n' "$pw" > "$envfile"   # mode 600
+#   docker run -d --name clientsite --env-file "$envfile" ... joinery-clientsite
 #
 # Build Arguments:
 #   BASE_IMAGE_VERSION - joinery-base image tag to build from (required)
 #   SITENAME          - Site directory name (default: dockertest)
-#   POSTGRES_PASSWORD - Database password (required)
 #   DOMAIN_NAME       - Domain for VirtualHost (default: localhost)
 #
-# Runtime Environment Variables (for cloning):
+# Runtime Environment Variables:
+#   POSTGRES_PASSWORD - Database password (required). Supplied at `docker run`
+#                       via --env-file, never as a build argument: a build arg
+#                       promoted to ENV stays in the image, readable through
+#                       docker inspect and docker history long after the
+#                       container is gone.
 #   CLONE_FROM        - URL to clone database and uploads from (optional)
 #   CLONE_KEY         - Authentication key for clone source (optional)
 
@@ -92,14 +109,21 @@ FROM joinery-base:${BASE_IMAGE_VERSION}
 
 # Build arguments (customizable per deployment)
 ARG SITENAME=dockertest
-ARG POSTGRES_PASSWORD
 ARG DOMAIN_NAME=localhost
 
 # Set as environment variables for runtime
 ENV DEBIAN_FRONTEND=noninteractive
 ENV SITENAME=${SITENAME}
-ENV POSTGRES_PASSWORD=${POSTGRES_PASSWORD}
 ENV DOMAIN_NAME=${DOMAIN_NAME}
+
+# POSTGRES_PASSWORD is deliberately NOT a build argument and NOT baked in here.
+# A build arg promoted to ENV puts the database superuser password in the image:
+# `docker inspect` prints it, `docker history` keeps it in the layers, and it
+# survives `docker rm` and travels with the image if it is ever exported or
+# pushed. It was also visible in `ps` for the whole build, since --build-arg is
+# argv. The CMD needs it only at first run, so install.sh supplies it at
+# `docker run` time with --env-file — a file, not -e, which would put it back in
+# argv. Measured on a live image 2026-08-06: 7 history layers carried it.
 
 # Copy source files
 # System dependencies (Apache, PHP, PostgreSQL, Composer, cron) come from joinery-base.
@@ -188,7 +212,7 @@ CMD set +H && \
         fi && \
         sed -i -E 's/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1trust/' "$PG_CONF" && \
         service postgresql reload && \
-        su -c "psql -c \"ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';\"" postgres && \
+        echo "ALTER USER postgres PASSWORD '${POSTGRES_PASSWORD}';" | su -c "psql -q" postgres && \
         sed -i -E "s/^(local[[:space:]]+all[[:space:]]+postgres[[:space:]]+)[A-Za-z0-9-]+/\1${PG_LOCAL_METHOD}/" "$PG_CONF" && \
         if grep -qE '^local[[:space:]]+all[[:space:]]+postgres[[:space:]]+trust' "$PG_CONF"; then \
             echo "FATAL: local postgres left on trust in ${PG_CONF}"; exit 1; \
@@ -201,7 +225,7 @@ CMD set +H && \
     fi && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
-        ./_site_init.sh "${SITENAME}" "${POSTGRES_PASSWORD}" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
+        JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
     chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" "/var/www/html/${SITENAME}/cache" && \
     ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R www-data:www-data "/var/www/html/${SITENAME}/vendor" || true) && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \

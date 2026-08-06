@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.6 - the database password may arrive in JOINERY_DB_PASSWORD instead
+#                of argv, which is world-readable through ps for the life of
+#                the process. The positional is still accepted.
 # VERSION: 2.5 - create_config_file refuses to overwrite an existing
 #                Globalvars_site.php. It generates a fresh secret_box_key, so a
 #                re-run over a live site orphaned every secret encrypted at rest
@@ -21,6 +24,12 @@
 #
 # Usage (internal):
 #   ./_site_init.sh SITENAME PASSWORD DOMAIN [OPTIONS]
+#   JOINERY_DB_PASSWORD=... ./_site_init.sh SITENAME "" DOMAIN [OPTIONS]
+#
+# Prefer the second form. argv is readable by every account on the box through
+# ps for as long as this runs; the environment is not. The positional stays
+# supported for the Dockerfile CMD and any existing caller. Either way the third
+# positional must be present, since three are consumed before the option loop.
 #
 # Options:
 #   --activate THEME       Set active theme
@@ -44,6 +53,18 @@ SITENAME="$1"
 PASSWORD="$2"
 DOMAIN="$3"
 shift 3 || true
+
+# The password may arrive in the environment instead of argv, and that is the
+# preferred way in: argv is world-readable through ps for the life of the
+# process, and this script runs for minutes. The positional is still accepted so
+# the Dockerfile CMD and any existing caller keep working — inside a container
+# the only accounts that can read its ps are already root there.
+#
+# The slot still has to be occupied when the env var is used, because the three
+# leading positionals are consumed by `shift 3`; callers pass an empty string.
+if [ -z "$PASSWORD" ] && [ -n "${JOINERY_DB_PASSWORD:-}" ]; then
+    PASSWORD="$JOINERY_DB_PASSWORD"
+fi
 
 # Defaults
 DOCKER_MODE=false
