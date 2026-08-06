@@ -69,6 +69,11 @@ pub enum ExecError {
     /// client's kind, or a corrupted row.
     #[error("unrecognized operation: {0}")]
     UnknownOp(String),
+    /// A disk that would not take the bytes: the scratch file an encrypted
+    /// upload is written to, most of the time. Retried, because a full or busy
+    /// disk is a thing that stops being full or busy.
+    #[error("could not write a working file: {0}")]
+    Io(#[from] std::io::Error),
 }
 
 /// How one operation ended.
@@ -118,6 +123,15 @@ pub struct ExecEnv<'a> {
     /// nothing is tracking. It is never overwritten; it is moved aside under a
     /// name that says what it is, and picked up as a new file next pass.
     pub conflict_name: &'a dyn Fn(&str) -> String,
+    /// The key for encrypted folders, if this device was given one.
+    ///
+    /// `None` is an ordinary state, not a degraded one: an account with no
+    /// encrypted folders never needs it, and a laptop linked without them syncs
+    /// everything else exactly as it would have. What it must never be is
+    /// silently absent — a device that had a vault and lost it would otherwise
+    /// look identical to one that never had it, and the two need opposite
+    /// advice.
+    pub vault: Option<&'a crate::vault::Vault>,
 }
 
 // ---------------------------------------------------------------------------
@@ -293,6 +307,7 @@ fn classify(e: &ExecError) -> OpOutcome {
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
         // A failing state store is not something the next attempt escapes.
         ExecError::Store(m) => OpOutcome::Retry(m.to_string()),
+        ExecError::Io(m) => OpOutcome::Retry(m.to_string()),
     }
 }
 
@@ -395,6 +410,8 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Option<PathBuf>, ExecError> 
         head_change_id: 0,
         remote_deleted: false,
         is_encrypted: false,
+        content_id: None,
+        synced_remote_content: None,
         synced_content: None,
         synced_placement: None,
         synced_fingerprint: None,
@@ -438,6 +455,127 @@ impl<'a> Write for Landing<'a> {
     }
     fn flush(&mut self) -> std::io::Result<()> {
         self.inner.flush()
+    }
+}
+
+/// What a download writes into: the bytes the server sent, on their way to
+/// becoming the file the user has.
+///
+/// For a plaintext file those are the same bytes and this is a pass-through.
+/// For an encrypted one they are not, and the difference has to be accounted
+/// for on both sides at once:
+///
+/// - **The ciphertext side** is what the server measured and what a resumed
+///   request has to count from. Its hash is the only thing the server's answer
+///   can be checked against.
+/// - **The plaintext side** is what lands on disk and what the agreement is
+///   recorded in.
+///
+/// Every chunk is authenticated before any of its plaintext is written, so a
+/// tampered or transplanted chunk stops the transfer instead of reaching the
+/// spool. Nothing that failed to verify is ever committed.
+struct Arrival<'a> {
+    cipher_hasher: Sha256,
+    cipher_written: u64,
+    sink: ArrivalSink<'a>,
+    /// A decrypt failure, kept because `Write` can only report io errors and
+    /// "the tag did not match" must not be reported as a disk problem.
+    fault: Option<String>,
+}
+
+enum ArrivalSink<'a> {
+    Plain(Landing<'a>),
+    Encrypted(Box<jd_crypto::drive::ContentDecryptor<Landing<'a>>>),
+}
+
+/// What a completed download turned out to be, in both domains.
+struct Arrived {
+    cipher: ContentId,
+    plain: ContentId,
+}
+
+impl<'a> Arrival<'a> {
+    fn plain(spool: &'a mut dyn Write) -> Arrival<'a> {
+        Arrival {
+            cipher_hasher: Sha256::new(),
+            cipher_written: 0,
+            sink: ArrivalSink::Plain(Landing {
+                inner: spool,
+                hasher: Sha256::new(),
+                written: 0,
+            }),
+            fault: None,
+        }
+    }
+
+    fn encrypted(
+        spool: &'a mut dyn Write,
+        file_key: &jd_crypto::drive::FileKey,
+        content_id: &str,
+    ) -> Arrival<'a> {
+        Arrival {
+            cipher_hasher: Sha256::new(),
+            cipher_written: 0,
+            sink: ArrivalSink::Encrypted(Box::new(jd_crypto::drive::ContentDecryptor::new(
+                Landing {
+                    inner: spool,
+                    hasher: Sha256::new(),
+                    written: 0,
+                },
+                file_key,
+                content_id,
+            ))),
+            fault: None,
+        }
+    }
+
+    /// Close the container and report both identities.
+    fn finish(self) -> Result<Arrived, String> {
+        if let Some(fault) = self.fault {
+            return Err(fault);
+        }
+        let cipher_sha = hex(&self.cipher_hasher.finalize());
+        let landing = match self.sink {
+            ArrivalSink::Plain(landing) => landing,
+            // Errors here are the ones only the end can see: a container that
+            // stopped mid-block, or no chunks at all where an empty file would
+            // still have one.
+            ArrivalSink::Encrypted(dec) => dec.finish().map_err(|e| e.to_string())?.0,
+        };
+        Ok(Arrived {
+            cipher: ContentId {
+                sha256: cipher_sha,
+                size: self.cipher_written,
+            },
+            plain: ContentId {
+                sha256: hex(&landing.hasher.finalize()),
+                size: landing.written,
+            },
+        })
+    }
+}
+
+impl<'a> Write for Arrival<'a> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.cipher_hasher.update(buf);
+        self.cipher_written += buf.len() as u64;
+        match &mut self.sink {
+            ArrivalSink::Plain(landing) => landing.write_all(buf)?,
+            ArrivalSink::Encrypted(dec) => {
+                if let Err(e) = dec.push(buf) {
+                    let text = e.to_string();
+                    self.fault = Some(text.clone());
+                    return Err(std::io::Error::other(text));
+                }
+            }
+        }
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match &mut self.sink {
+            ArrivalSink::Plain(landing) => landing.flush(),
+            ArrivalSink::Encrypted(_) => Ok(()),
+        }
     }
 }
 
@@ -554,16 +692,40 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         .ok_or_else(|| ExecError::Contract("file export has no download link".into()))?
         .to_string();
 
+    // An encrypted file needs its key before a single byte is worth fetching.
+    // Asked for here rather than at the top: an entry can lose its grant between
+    // the round that planned this and the moment it runs.
+    let file_key = if entry.is_encrypted {
+        let (Some(vault), Some(wrapped)) = (env.vault, entry.wrapped_file_key.as_deref()) else {
+            return Ok(OpOutcome::Retry(
+                "waiting for a key for this encrypted file".into(),
+            ));
+        };
+        match vault.open_file_key(wrapped) {
+            Ok(k) => Some(k),
+            Err(e) => return Ok(OpOutcome::Retry(e.to_string())),
+        }
+    } else {
+        None
+    };
+    let content_id = entry.content_id.clone();
+    if entry.is_encrypted && content_id.is_none() {
+        // Without it no chunk can be authenticated, and downloading anyway
+        // would mean writing bytes nothing has checked.
+        return Ok(OpOutcome::Retry(
+            "this encrypted file's details have not been read yet".into(),
+        ));
+    }
+
     let mut spool = env.vfs.spool(&path)?;
-    let mut landing = Landing {
-        inner: &mut *spool,
-        hasher: Sha256::new(),
-        written: 0,
+    let mut landing = match (&file_key, &content_id) {
+        (Some(key), Some(cid)) => Arrival::encrypted(&mut *spool, key, cid),
+        _ => Arrival::plain(&mut *spool),
     };
 
     let mut remints = 0u32;
-    while landing.written < want_size {
-        let from = landing.written;
+    while landing.cipher_written < want_size {
+        let from = landing.cipher_written;
         match env.api.download(&url, from, &mut landing) {
             Ok(0) => {
                 // The server had nothing more to give at an offset it accepted.
@@ -588,7 +750,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             Err(e) => {
                 // Whatever landed stays in the spool; the spool is discarded
                 // with it, because a partial file must never become visible.
-                let written = landing.written;
+                let written = landing.cipher_written;
                 spool.discard();
                 return Ok(match classify(&ExecError::Proto(e)) {
                     OpOutcome::Done => OpOutcome::Retry(format!("stopped after {written} bytes")),
@@ -598,16 +760,32 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
     }
 
-    let got_sha = hex(&landing.hasher.finalize());
-    let written = landing.written;
+    let arrived = match landing.finish() {
+        Ok(a) => a,
+        Err(why) => {
+            // Ciphertext that did not authenticate. Never committed, and worth
+            // saying out loud rather than retrying quietly forever: bytes that
+            // fail their tag are either corrupt in storage or altered in
+            // transit, and both are things a person should hear about.
+            spool.discard();
+            env.store
+                .raise_issue(Some(op.entity), "ciphertext", &why, (env.now_ms)() as i64)?;
+            return Ok(OpOutcome::Retry(why));
+        }
+    };
 
-    if written != want_size || got_sha != want_sha {
+    if arrived.cipher.size != want_size || arrived.cipher.sha256 != want_sha {
         // Nothing is ever adopted on a fingerprint's word, and nothing is ever
         // committed on a byte count's word either. A truncated or corrupted
         // transfer dies here rather than becoming the file the user opens.
+        //
+        // Measured against the CIPHERTEXT for an encrypted file, because that is
+        // the only thing the server ever saw and therefore the only thing its
+        // answer can be checked against.
         spool.discard();
+        let got = arrived.cipher.size;
         return Ok(OpOutcome::Retry(format!(
-            "what arrived does not match what was asked for ({written} of {want_size} bytes)"
+            "what arrived does not match what was asked for ({got} of {want_size} bytes)"
         )));
     }
 
@@ -615,7 +793,10 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // already at this path is something the engine has never seen. It is not
     // overwritten.
     if entry.synced_fingerprint.is_none() {
-        make_room(env, &path, Some(&want_sha))?;
+        // Compared in the plaintext domain: the question is whether the file
+        // already sitting there is this same file, and what is on disk is
+        // plaintext whatever the server holds.
+        make_room(env, &path, Some(&arrived.plain.sha256))?;
     }
 
     // The guard: if the local file changed while this was in flight, the
@@ -631,20 +812,22 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Err(e) => return Err(e.into()),
     };
 
-    let content = ContentId {
-        sha256: want_sha,
-        size: want_size,
-    };
     env.store
-        .cache_hash(fingerprint, &content.sha256, Some(op.entity))?;
+        .cache_hash(fingerprint, &arrived.plain.sha256, Some(op.entity))?;
 
     let mut entry = entry;
-    entry.remote_content = Some(content.clone());
+    entry.remote_content = Some(arrived.cipher.clone());
     entry.head_change_id = item
         .get("head_change_id")
         .and_then(Value::as_i64)
         .unwrap_or(entry.head_change_id);
-    agree(&mut entry, Some(content), Some(fingerprint));
+    // Both sides of the agreement, in the domain each side speaks. For a
+    // plaintext file they are the same thing and the second is left unset; for
+    // an encrypted one, recording only the plaintext half would mean every
+    // later pass compared the server's ciphertext hash against a plaintext one
+    // and reported an edit that never happened.
+    entry.synced_remote_content = entry.is_encrypted.then(|| arrived.cipher.clone());
+    agree(&mut entry, Some(arrived.plain), Some(fingerprint));
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
 }
@@ -689,29 +872,76 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             "the folder it belongs in is not on the server yet".into(),
         ));
     }
-    let params = UploadParams {
+    // A new entry, or a new version of the one we already have. The old id is
+    // only usable when the server still has it — which is exactly what
+    // `UploadAsNew` exists to say it does not.
+    let file_id = if as_new.is_some() || op.entity.is_provisional() {
+        None
+    } else {
+        Some(op.entity.server_id)
+    };
+
+    let mut params = UploadParams {
         name: placement.name.clone(),
         folder_id: placement.parent,
-        // A new entry, or a new version of the one we already have. The old id
-        // is only usable when the server still has it — which is exactly what
-        // `UploadAsNew` exists to say it does not.
-        file_id: if as_new.is_some() || op.entity.is_provisional() {
-            None
-        } else {
-            Some(op.entity.server_id)
-        },
+        file_id,
         size_bytes: fingerprint.size,
         sha256: sha.clone(),
         mime_type: None,
         // Journaled before the first byte went out. This is what stops a lost
         // completion answer from producing a second copy of the file.
         idempotency_key: Some(op.idempotency_key.clone()),
+        encrypted_metadata: None,
+        wrapped_file_keys: Vec::new(),
+        modified_time: None,
     };
 
-    let mut reader = env.vfs.open_read(&path)?;
-    let mut source = Source(&mut *reader);
-    let outcome = env.api.upload(&params, &mut source)?;
-    drop(reader);
+    // Encrypted uploads send ciphertext from a scratch file rather than the
+    // file itself. Everything the server is told changes with it: the name
+    // becomes a placeholder, the size becomes the ciphertext's, and the hash
+    // goes away entirely — a plaintext hash would let the server's dedup
+    // short-circuit match this file against somebody else's, and it never
+    // matches anyway.
+    let mut ciphertext = None;
+    if entry.is_encrypted {
+        match encrypt_for_upload(
+            env,
+            &entry,
+            &path,
+            &placement.name,
+            fingerprint.size,
+            file_id,
+        )? {
+            Ok(packed) => {
+                params.name = format!("enc-{}", packed.content_id);
+                params.size_bytes = packed.cipher_size;
+                params.sha256 = String::new();
+                params.mime_type = Some("application/octet-stream".into());
+                params.encrypted_metadata = Some(packed.metadata);
+                params.wrapped_file_keys = packed.wrapped_file_keys;
+                ciphertext = Some(packed.bytes);
+                // Carried forward whatever happens next: a re-keyed entry that
+                // forgot its content id could not encrypt its own next version.
+                let mut with_id = entry.clone();
+                with_id.content_id = Some(packed.content_id.clone());
+                env.store.put_entry(&with_id)?;
+            }
+            Err(why) => return Ok(why),
+        }
+    }
+
+    let outcome = match &mut ciphertext {
+        Some(reader) => {
+            let mut source = Source(&mut **reader);
+            env.api.upload(&params, &mut source)?
+        }
+        None => {
+            let mut reader = env.vfs.open_read(&path)?;
+            let mut source = Source(&mut *reader);
+            env.api.upload(&params, &mut source)?
+        }
+    };
+    drop(ciphertext);
 
     let file = outcome.file;
     let new_id = file
@@ -733,7 +963,18 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         env.store.rekey_entry(entry.id, target)?;
         entry.id = target;
     }
+    let was_encrypted = entry.is_encrypted;
+    let content_id = entry.content_id.clone();
     apply_export(&mut entry, &file);
+    // `apply_export` speaks the server's language, and for an encrypted file
+    // that language says the name is `enc-…`. The name this device just sent up
+    // inside the metadata blob is the real one, and it is the one every later
+    // pass has to resolve against.
+    if was_encrypted {
+        entry.remote.name = placement.name.clone();
+        entry.content_id = entry.content_id.clone().or(content_id);
+        entry.synced_remote_content = entry.remote_content.clone();
+    }
     let content = ContentId {
         sha256: sha,
         size: fingerprint.size,
@@ -746,6 +987,196 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     }
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
+}
+
+/// Re-encrypt an encrypted file's metadata under a new name.
+///
+/// The current blob is fetched rather than reconstructed, and that is the whole
+/// care in this function. It carries the mime type, the size, the thumbnail flag
+/// and the modification time as well as the name — and another device may have
+/// changed any of them since this one last looked. Building a fresh blob from
+/// what this device happens to remember would silently discard whatever it did
+/// not know about, which is a data loss that looks exactly like a rename.
+fn reseal_metadata(
+    env: &ExecEnv,
+    entry: &Entry,
+    new_name: &str,
+) -> Result<Result<String, OpOutcome>, ExecError> {
+    let (Some(vault), Some(wrapped)) = (env.vault, entry.wrapped_file_key.as_deref()) else {
+        return Ok(Err(OpOutcome::Retry(
+            "waiting for a key for this encrypted file".into(),
+        )));
+    };
+    let file_key = match vault.open_file_key(wrapped) {
+        Ok(k) => k,
+        Err(e) => return Ok(Err(OpOutcome::Retry(e.to_string()))),
+    };
+    let Some(item) = stat(env, entry.id, false)? else {
+        return Ok(Err(OpOutcome::Withdrawn(
+            "the server no longer has it".into(),
+        )));
+    };
+    let Some(blob) = item.get("encrypted_metadata").and_then(Value::as_str) else {
+        return Ok(Err(OpOutcome::Retry(
+            "the server did not send this file's details".into(),
+        )));
+    };
+    let mut meta = match jd_crypto::drive::decrypt_metadata(blob, &file_key) {
+        Ok(m) => m,
+        Err(e) => return Ok(Err(OpOutcome::Retry(e.to_string()))),
+    };
+    meta.name = new_name.to_string();
+    Ok(Ok(jd_crypto::drive::encrypt_metadata(&meta, &file_key)
+        .map_err(|e| {
+            ExecError::Contract(format!("sealing file metadata: {e}"))
+        })?))
+}
+
+/// An encrypted upload, ready to send.
+struct Packed {
+    bytes: Box<dyn jd_vfs::ReadSeek>,
+    cipher_size: u64,
+    content_id: String,
+    metadata: String,
+    wrapped_file_keys: Vec<(i64, String)>,
+}
+
+/// Turn a local file into what an encrypted upload actually sends.
+///
+/// Three things are produced here and none of them can be produced later.
+///
+/// **The ciphertext**, written to a scratch file rather than encrypted on the
+/// fly. A chunked upload that has to resume must re-send bytes identical to the
+/// ones it sent before, and encryption cannot reproduce them: every IV is fresh,
+/// so re-encrypting the same file yields a different stream. Encrypting into a
+/// file the transfer can seek within is what makes resume possible at all.
+///
+/// **The metadata blob**, carrying the name, the size and the modification time
+/// the server is never told. Everything in it is under the file key.
+///
+/// **The wrapped keys** — but only for a file the server does not have yet. A
+/// new *version* reuses the existing key and content id, and the server refuses
+/// a key payload on that path: minting a fresh key would leave the new content
+/// readable only by this device, behind grants that all wrap the old one.
+fn encrypt_for_upload(
+    env: &ExecEnv,
+    entry: &Entry,
+    path: &std::path::Path,
+    name: &str,
+    plain_size: u64,
+    file_id: Option<i64>,
+) -> Result<Result<Packed, OpOutcome>, ExecError> {
+    let Some(vault) = env.vault else {
+        return Ok(Err(OpOutcome::Retry(
+            "this device has no key for encrypted folders".into(),
+        )));
+    };
+
+    // A new version reuses the file's existing key; a new file mints one. The
+    // grant is the only proof this device may reuse the key, and the server
+    // checks it too.
+    let (file_key, content_id, is_new_file) = match (file_id, entry.wrapped_file_key.as_deref()) {
+        (Some(_), Some(wrapped)) => {
+            let Some(cid) = entry.content_id.clone() else {
+                return Ok(Err(OpOutcome::Retry(
+                    "this encrypted file's details have not been read yet".into(),
+                )));
+            };
+            match vault.open_file_key(wrapped) {
+                Ok(k) => (k, cid, false),
+                Err(e) => return Ok(Err(OpOutcome::Retry(e.to_string()))),
+            }
+        }
+        (Some(_), None) => {
+            return Ok(Err(OpOutcome::Retry(
+                "waiting for a key for this encrypted file".into(),
+            )))
+        }
+        (None, _) => (
+            jd_crypto::drive::FileKey::generate(),
+            jd_crypto::drive::new_content_id(),
+            true,
+        ),
+    };
+
+    // Seal the key to the destination's FULL reader set, not just to this user.
+    // A file in somebody's vault that its owner cannot open would be a file they
+    // can see, are billed for, and have permanently lost — so the server
+    // requires the owner's entry and refuses the upload without it.
+    let mut wrapped_file_keys = Vec::new();
+    if is_new_file {
+        let readers = env.api.action(
+            "drive_public_keys",
+            json!({ "folder_id": entry.remote.parent }),
+        )?;
+        let list = readers
+            .get("keys")
+            .and_then(Value::as_array)
+            .ok_or_else(|| ExecError::Contract("drive_public_keys returned no keys".into()))?;
+        let mut without_vault = 0usize;
+        for reader in list {
+            let Some(user_id) = reader.get("user_id").and_then(Value::as_i64) else {
+                continue;
+            };
+            match reader.get("public_key").and_then(Value::as_str) {
+                Some(public_key) if !public_key.is_empty() => {
+                    let sealed = jd_crypto::drive::wrap_file_key_to(&file_key, public_key)
+                        .map_err(|e| ExecError::Contract(format!("sealing a file key: {e}")))?;
+                    wrapped_file_keys.push((user_id, sealed));
+                }
+                // A member with no Drive vault cannot be given a key. Counted
+                // and reported once rather than failing the upload: the file is
+                // still readable by everyone who can read it, and refusing would
+                // mean one member without a vault blocks the folder for the rest.
+                _ => without_vault += 1,
+            }
+        }
+        if wrapped_file_keys.is_empty() {
+            return Ok(Err(OpOutcome::Retry(
+                "nobody who can reach this folder has a Drive vault to unlock it with".into(),
+            )));
+        }
+        if without_vault > 0 {
+            env.store.raise_issue(
+                Some(entry.id),
+                "no_vault",
+                &format!(
+                    "{without_vault} member(s) of this folder have no Drive vault yet and cannot open {name}"
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        }
+    }
+
+    let mut meta = jd_crypto::drive::FileMetadata::new(
+        name,
+        "application/octet-stream",
+        plain_size,
+        &content_id,
+    );
+    meta.mtime = entry.remote_modified_time.clone();
+    let metadata = jd_crypto::drive::encrypt_metadata(&meta, &file_key)
+        .map_err(|e| ExecError::Contract(format!("sealing file metadata: {e}")))?;
+
+    let mut scratch = env.vfs.scratch()?;
+    let mut reader = env.vfs.open_read(path)?;
+    let mut encryptor =
+        jd_crypto::drive::ContentEncryptor::new(&mut *scratch, &file_key, &content_id);
+    std::io::copy(&mut *reader, &mut encryptor)?;
+    encryptor.finish()?;
+    drop(reader);
+
+    Ok(Ok(Packed {
+        bytes: scratch.finish()?,
+        // Computed rather than measured: the container's size is an exact
+        // function of the plaintext's, and the server's own size ceiling uses
+        // the same function. A measured size that disagreed with it would be a
+        // bug worth failing on, not a number to send.
+        cipher_size: jd_crypto::drive::encrypted_size(plain_size),
+        content_id,
+        metadata,
+        wrapped_file_keys,
+    }))
 }
 
 /// The losing side of a content conflict, kept beside the winner.
@@ -796,7 +1227,12 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         head_change_id: 0,
         remote_deleted: false,
         is_encrypted: entry.is_encrypted,
+        // A rescued copy is a NEW file with its own key: the content id and the
+        // grant belong to the file it was copied away from, and carrying them
+        // here would claim this file's bytes are that file's bytes.
+        content_id: None,
         synced_content: None,
+        synced_remote_content: None,
         synced_placement: None,
         synced_fingerprint: None,
         local_name: None,
@@ -929,11 +1365,31 @@ fn move_remote(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, ExecE
             .action_idempotent("drive_move", body, &format!("{}-move", op.idempotency_key))?;
     }
     if entry.remote.name != to.name {
-        let body = json!({
-            "entity_type": t,
-            "entity_id": op.entity.server_id,
-            "name": to.name,
-        });
+        // An encrypted FILE has no plaintext name to send. Its name lives inside
+        // the metadata blob, so renaming it means decrypting that blob, changing
+        // one field, and encrypting it again under the same file key — the
+        // server stores the result without ever learning either name. Sending
+        // the name itself would hand over the one thing the whole arrangement
+        // exists to keep, and the server refuses it outright.
+        //
+        // Folders are not encrypted this way: a vault folder's own name is
+        // plaintext on the server, and only its contents are private.
+        let body = if entry.is_encrypted && op.entity.entity_type == EntityType::File {
+            match reseal_metadata(env, &entry, &to.name)? {
+                Ok(blob) => json!({
+                    "entity_type": t,
+                    "entity_id": op.entity.server_id,
+                    "encrypted_metadata": blob,
+                }),
+                Err(why) => return Ok(why),
+            }
+        } else {
+            json!({
+                "entity_type": t,
+                "entity_id": op.entity.server_id,
+                "name": to.name,
+            })
+        };
         env.api.action_idempotent(
             "drive_rename",
             body,

@@ -142,6 +142,26 @@ pub trait SpoolFile: std::io::Write {
     fn discard(self: Box<Self>);
 }
 
+/// A temporary file that is written once, read back, and never made visible.
+///
+/// Distinct from a [`SpoolFile`], which exists to become a file the user has;
+/// this exists to hold bytes the user will never see. The case it is for:
+/// uploading an encrypted file means sending ciphertext, and a resumed chunk
+/// upload has to re-send the *same* ciphertext it sent before. Encryption
+/// cannot be repeated to produce it — every IV is fresh, so re-encrypting the
+/// same plaintext yields different bytes — so the ciphertext has to exist
+/// somewhere seekable for the length of the transfer.
+///
+/// It costs one file's worth of transient disk, and it is removed whether the
+/// upload succeeds, fails, or the process dies (the spool sweep at startup).
+pub trait ScratchFile: std::io::Write {
+    /// Stop writing and hand back a reader positioned at the start.
+    ///
+    /// The returned reader owns the file and removes it when dropped, so a
+    /// caller cannot leak one by returning early.
+    fn finish(self: Box<Self>) -> VfsResult<Box<dyn ReadSeek>>;
+}
+
 /// A byte source that can be rewound. `?Sized` on the blanket implementation so
 /// that a `dyn ReadSeek` handed back by [`Vfs::open_read`] still satisfies it,
 /// and can therefore be passed straight to the upload protocol.
@@ -185,6 +205,10 @@ pub trait Vfs: Send + Sync {
     /// the same volume as the root where possible, so the commit is a rename
     /// rather than a copy.
     fn spool(&self, target: &Path) -> VfsResult<Box<dyn SpoolFile>>;
+
+    /// Open a scratch file: written, read back, never visible. See
+    /// [`ScratchFile`] for what it is for.
+    fn scratch(&self) -> VfsResult<Box<dyn ScratchFile>>;
 
     /// Open a file for reading.
     ///

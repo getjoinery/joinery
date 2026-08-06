@@ -463,6 +463,24 @@ fn verify(path: &str) -> ExitCode {
         })()
         .unwrap_or(false);
         t.check(ok, &format!("content:{}", c.label));
+
+        // The same browser-produced bytes again, through the decryptor the
+        // DOWNLOAD path actually uses. Checking only the pull-side one would
+        // leave the shipping path unproven against the browser: the two could
+        // drift and this gate would stay green while every encrypted download
+        // was wrong. Fed in awkward increments, because the network decides
+        // where the boundaries land and they never line up with chunks.
+        let ok = (|| {
+            let fk = fk_of(&c.fk_b64)?;
+            let cipher = b64::decode(&c.cipher_b64).ok()?;
+            let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, &c.content_id);
+            for piece in cipher.chunks(1021) {
+                dec.push(piece).ok()?;
+            }
+            Some(dec.finish().ok()?.0 == c.pattern.bytes())
+        })()
+        .unwrap_or(false);
+        t.check(ok, &format!("content-streamed:{}", c.label));
     }
 
     for m in &v.metadata {
@@ -497,6 +515,20 @@ fn verify(path: &str) -> ExitCode {
         })()
         .unwrap_or(false);
         t.check(ok, &format!("sealed:{}", s.label));
+
+        // The vector already carries a keypair the other implementation
+        // generated, so it can answer a question the daemon's whole key handling
+        // rests on: does deriving the public half from the secret half give the
+        // SAME address the other side would seal to? The daemon stores only the
+        // secret and recomputes the rest — if that derivation disagreed, every
+        // grant would be sealed somewhere this device cannot open, and the only
+        // symptom would be a decryption error naming nothing.
+        let ok = (|| {
+            let secret = b64::decode(&s.recipient_secret_pkcs8_b64).ok()?;
+            Some(vault::public_key_from_secret_key(&secret).ok()? == s.recipient_public_key_b64)
+        })()
+        .unwrap_or(false);
+        t.check(ok, &format!("derived-public-key:{}", s.label));
     }
 
     for w in &v.wrapped_keys {
@@ -514,7 +546,17 @@ fn verify(path: &str) -> ExitCode {
             "content" => (|| {
                 let fk = fk_of(r.fk_b64.as_ref()?)?;
                 let cipher = b64::decode(r.cipher_b64.as_ref()?).ok()?;
-                Some(drive::decrypt_content(&cipher, &fk, r.content_id.as_ref()?).is_err())
+                let content_id = r.content_id.as_ref()?;
+                // Both decryptors must refuse it. The streamed one is where it
+                // matters most: that is the path with a disk on the other end,
+                // so anything it fails to refuse gets written down.
+                let pull = drive::decrypt_content(&cipher, &fk, content_id).is_err();
+                let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, content_id);
+                let pushed = cipher
+                    .chunks(1021)
+                    .try_for_each(|piece| dec.push(piece))
+                    .and_then(|_| dec.finish().map(|_| ()));
+                Some(pull && pushed.is_err())
             })()
             .unwrap_or(false),
             "sealed" => (|| {

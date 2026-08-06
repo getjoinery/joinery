@@ -15,6 +15,7 @@ use std::cell::RefCell;
 
 use jd_core::execute::ExecEnv;
 use jd_core::store::Store;
+use jd_core::vault::Vault;
 
 use crate::clock::SimClock;
 use crate::net::SimNet;
@@ -34,6 +35,47 @@ pub struct Device {
     keys: RefCell<SimRng>,
     /// How this device names a copy it had to keep out of the way.
     namer: Box<dyn Fn(&str) -> String + Send + Sync>,
+    /// The key for encrypted folders, if this device was linked with them. A
+    /// device without one is the ordinary case and gets simulated as such.
+    vault: Option<Vault>,
+}
+
+/// A vault identity for a scenario: the secret half a device is given, and the
+/// public half grants are sealed to.
+///
+/// Deterministic from a seed like everything else here, so a run that finds a
+/// key-handling bug can be replayed. Real key material and real sealing — the
+/// engine must not be able to tell it is in a simulation, and a stub that
+/// always opened would test the one thing that cannot be allowed to be a stub.
+#[derive(Debug, Clone)]
+pub struct SimVault {
+    pub secret_key_pkcs8: Vec<u8>,
+    pub public_key_b64: String,
+}
+
+impl SimVault {
+    pub fn new(seed: u64) -> SimVault {
+        let mut rng = SimRng::new(seed);
+        let mut scalar = [0u8; 32];
+        for slot in scalar.chunks_mut(8) {
+            let word = rng.next_u64().to_le_bytes();
+            slot.copy_from_slice(&word[..slot.len()]);
+        }
+        let secret_key_pkcs8 = jd_crypto::pkcs8::encode(&scalar);
+        let public_key_b64 = jd_crypto::vault::public_key_from_secret_key(&secret_key_pkcs8)
+            .expect("a key just built in the PKCS8 shape");
+        SimVault {
+            secret_key_pkcs8,
+            public_key_b64,
+        }
+    }
+
+    /// Seal a fresh content key to this vault — one file's grant, exactly as the
+    /// browser produces it when it shares an encrypted file.
+    pub fn grant(&self, file_key: &jd_crypto::drive::FileKey) -> String {
+        jd_crypto::drive::wrap_file_key_to(file_key, &self.public_key_b64)
+            .expect("a public key this type derived itself")
+    }
 }
 
 impl Device {
@@ -49,7 +91,30 @@ impl Device {
                 let device = name.to_string();
                 Box::new(move |n: &str| jd_vfs::conflict_copy_name(n, "2026-07-31", &device, 1))
             },
+            vault: None,
         }
+    }
+
+    /// Link this device with encrypted folders enabled.
+    ///
+    /// A builder rather than a constructor argument, because most scenarios have
+    /// nothing to do with encryption and a device without a vault is the state
+    /// worth having as the default — it is what every device is until somebody
+    /// turns the feature on.
+    pub fn with_vault(mut self, vault: &SimVault) -> Device {
+        self.set_vault(vault);
+        self
+    }
+
+    /// The same thing, on a device a scenario is already holding.
+    pub fn set_vault(&mut self, vault: &SimVault) {
+        self.vault = Some(
+            Vault::from_secret_key(&vault.secret_key_pkcs8).expect("a well-formed simulated vault"),
+        );
+    }
+
+    pub fn vault(&self) -> Option<&Vault> {
+        self.vault.as_ref()
     }
 
     /// A device with a filesystem of a chosen personality — the Windows naming
@@ -89,5 +154,6 @@ pub fn env<'a>(device: &'a Device, now: &'a dyn Fn() -> u64) -> ExecEnv<'a> {
         api: &device.net,
         now_ms: now,
         conflict_name: &device.namer,
+        vault: device.vault.as_ref(),
     }
 }

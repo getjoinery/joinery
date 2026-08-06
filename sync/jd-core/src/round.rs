@@ -240,6 +240,8 @@ mod tests {
             head_change_id: 1,
             remote_deleted: false,
             is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
             synced_content: Some(content("sha")),
             synced_placement: Some(placement(name)),
             synced_fingerprint: None,

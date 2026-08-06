@@ -24,7 +24,7 @@ use std::io::Write;
 use std::sync::{Arc, Mutex};
 
 use jd_proto::{DriveApi, ProtoError, ReadSeek, UploadOutcome, UploadParams};
-use serde_json::{json, Value};
+use serde_json::Value;
 
 use crate::clock::SimClock;
 use crate::rng::SimRng;
@@ -240,18 +240,12 @@ impl DriveApi for SimNet {
     ) -> jd_proto::Result<UploadOutcome> {
         use std::io::SeekFrom;
 
-        let mut init_body = json!({
-            "name": params.name,
-            "size_bytes": params.size_bytes,
-            "sha256": params.sha256,
-        });
-        if let Some(folder_id) = params.folder_id {
-            init_body["folder_id"] = json!(folder_id);
-        }
-        if let Some(file_id) = params.file_id {
-            init_body["file_id"] = json!(file_id);
-        }
-        let init = self.run("drive_upload_init", &init_body, None)?;
+        // The bodies come from `UploadParams` itself, not from here. Two
+        // hand-written copies of one wire format diverge the first time either
+        // is edited, and the copy that diverges silently is this one — the
+        // simulator would go on passing while testing a protocol the server
+        // does not speak.
+        let init = self.run("drive_upload_init", &params.init_body(), None)?;
 
         if init.get("deduped").and_then(Value::as_bool) == Some(true) {
             let file = init
@@ -335,7 +329,7 @@ impl DriveApi for SimNet {
             .unwrap_or_else(|| format!("complete-{token}"));
         let complete = self.run(
             "drive_upload_complete",
-            &json!({ "upload_token": token }),
+            &params.complete_body(&token),
             Some(&complete_key),
         )?;
         let file = complete
@@ -370,6 +364,7 @@ impl DriveApi for SimNet {
 mod tests {
     use super::*;
     use crate::server::sha256_hex;
+    use serde_json::json;
 
     fn net(faults: NetFaults) -> SimNet {
         let clock = SimClock::new();
@@ -488,15 +483,7 @@ mod tests {
     fn an_upload_over_a_clean_network_lands() {
         let n = net(NetFaults::none());
         let body = b"a body longer than one chunk";
-        let params = UploadParams {
-            name: "a.txt".into(),
-            folder_id: None,
-            file_id: None,
-            size_bytes: body.len() as u64,
-            sha256: sha256_hex(body),
-            mime_type: None,
-            idempotency_key: None,
-        };
+        let params = UploadParams::plain("a.txt".into(), None, body.len() as u64, sha256_hex(body));
         let out = n
             .upload(&params, &mut std::io::Cursor::new(body.to_vec()))
             .unwrap();
@@ -513,15 +500,7 @@ mod tests {
             ..NetFaults::none()
         });
         let body = b"exactly six";
-        let params = UploadParams {
-            name: "a.txt".into(),
-            folder_id: None,
-            file_id: None,
-            size_bytes: body.len() as u64,
-            sha256: sha256_hex(body),
-            mime_type: None,
-            idempotency_key: None,
-        };
+        let params = UploadParams::plain("a.txt".into(), None, body.len() as u64, sha256_hex(body));
         let out = n.upload(&params, &mut std::io::Cursor::new(body.to_vec()));
         assert!(out.is_err(), "corrupt bytes must be refused at completion");
         assert!(n.server().blob(&sha256_hex(body)).is_none());

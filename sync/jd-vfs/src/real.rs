@@ -14,7 +14,7 @@
 //! whether the user can get the file back.
 
 use std::fs::{self, File};
-use std::io::{BufReader, Read, Write};
+use std::io::{BufReader, Read, Seek, SeekFrom, Write};
 use std::path::{Path, PathBuf};
 
 use sha2::{Digest, Sha256};
@@ -328,6 +328,97 @@ impl Vfs for OsVfs {
     fn open_read(&self, path: &Path) -> VfsResult<Box<dyn crate::ReadSeek>> {
         let f = File::open(path).map_err(|e| io_err(path, e))?;
         Ok(Box::new(BufReader::new(f)))
+    }
+
+    fn scratch(&self) -> VfsResult<Box<dyn crate::ScratchFile>> {
+        // Same directory and the same name prefix as spool files, so the
+        // startup sweep that clears interrupted spools clears these too. A
+        // scratch file left behind by a killed process is exactly the same
+        // problem and deserves exactly the same broom.
+        let name = format!(".jd-tmp-{}", (self.next_token)());
+        let path = self.spool_dir.join(name);
+        let file = File::create(&path).map_err(|e| io_err(&path, e))?;
+        Ok(Box::new(OsScratchFile {
+            file: Some(file),
+            path,
+        }))
+    }
+}
+
+struct OsScratchFile {
+    file: Option<File>,
+    path: PathBuf,
+}
+
+/// Owns the scratch file for as long as anyone is reading it, and removes it on
+/// drop. Deleting at `finish()` instead would work on Unix and leave the file
+/// behind on Windows, where an open file cannot be unlinked.
+struct OsScratchReader {
+    file: File,
+    path: PathBuf,
+}
+
+impl Write for OsScratchFile {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        match self.file.as_mut() {
+            Some(f) => f.write(buf),
+            None => Err(std::io::Error::other("scratch file already finished")),
+        }
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        match self.file.as_mut() {
+            Some(f) => f.flush(),
+            None => Ok(()),
+        }
+    }
+}
+
+impl Drop for OsScratchFile {
+    fn drop(&mut self) {
+        // Only fires when the writer is dropped without finishing — an error
+        // path. The reader owns the file afterwards.
+        if self.file.is_some() {
+            let _ = fs::remove_file(&self.path);
+        }
+    }
+}
+
+impl crate::ScratchFile for OsScratchFile {
+    fn finish(mut self: Box<Self>) -> VfsResult<Box<dyn crate::ReadSeek>> {
+        let mut file = self.file.take().ok_or_else(|| {
+            io_err(
+                &self.path,
+                std::io::Error::other("scratch already finished"),
+            )
+        })?;
+        file.flush().map_err(|e| io_err(&self.path, e))?;
+        // No fsync: these bytes are never adopted as anybody's file. If the
+        // machine dies mid-upload the whole transfer starts again, so paying
+        // for durability here would buy nothing.
+        file.seek(SeekFrom::Start(0))
+            .map_err(|e| io_err(&self.path, e))?;
+        Ok(Box::new(OsScratchReader {
+            file,
+            path: self.path.clone(),
+        }))
+    }
+}
+
+impl Read for OsScratchReader {
+    fn read(&mut self, buf: &mut [u8]) -> std::io::Result<usize> {
+        self.file.read(buf)
+    }
+}
+
+impl Seek for OsScratchReader {
+    fn seek(&mut self, pos: SeekFrom) -> std::io::Result<u64> {
+        self.file.seek(pos)
+    }
+}
+
+impl Drop for OsScratchReader {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
     }
 }
 

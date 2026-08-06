@@ -63,6 +63,21 @@ pub fn generate_vault_keypair_with_rng<R: RngCore + CryptoRng>(rng: R) -> VaultK
     }
 }
 
+/// The public half of a vault secret key, recomputed from the secret itself.
+///
+/// A holder of the secret key needs the public one too, because the sealing
+/// scheme mixes the recipient's public key into its key derivation — nothing
+/// opens without it. Derived rather than stored alongside: a pair carried as
+/// two fields can be got out of step by a bad write or a stale config, and the
+/// symptom is every unwrap failing with an opaque decryption error that names
+/// nothing. Scalar multiplication cannot be out of step with its own scalar.
+pub fn public_key_from_secret_key(secret_key_pkcs8: &[u8]) -> Result<String> {
+    let mut scalar = pkcs8::decode(secret_key_pkcs8)?;
+    let secret = StaticSecret::from(scalar);
+    scalar.zeroize();
+    Ok(b64::encode(PublicKey::from(&secret).as_bytes()))
+}
+
 // ---- KEK derivation (one per unlocker type) --------------------------------
 
 /// Recovery-code KEK: SHA-256(salt || normalized code). Codes carry >=128 bits

@@ -29,6 +29,7 @@ use jd_core::pass::run_pass;
 use jd_core::reconcile::Context;
 use jd_core::round::DeletePolicy;
 use jd_core::store::Store;
+use jd_core::vault::Vault;
 use jd_proto::{Client, Credentials};
 use jd_vfs::{watch, DirtySet, OsVfs, Vfs};
 
@@ -59,6 +60,13 @@ pub struct Snapshot {
     pub base_url: String,
     pub sync_root: String,
     pub custody: String,
+    /// Whether this device holds the key for encrypted folders.
+    ///
+    /// Reported as a device fact rather than raised once per file. A laptop
+    /// linked without encrypted folders can be looking at a thousand encrypted
+    /// files, and a thousand identical alerts saying so would bury everything
+    /// that actually needs attention, to say one thing that is true once.
+    pub vault: bool,
 }
 
 /// The shared surface between the two threads.
@@ -100,6 +108,10 @@ pub struct Daemon {
     last_poll_ms: u64,
     blocker: Option<Blocker>,
     custody: String,
+    /// The key for encrypted folders. Read back from the credential store once,
+    /// at startup, and held for the life of the process — the alternative is
+    /// touching the keychain once per file, which on macOS is a prompt.
+    vault: Option<Vault>,
 }
 
 impl Daemon {
@@ -112,6 +124,7 @@ impl Daemon {
         shared: Arc<Shared>,
         commands: Receiver<Command>,
         custody: String,
+        vault: Option<Vault>,
     ) -> Daemon {
         let client = Client::with_credentials(&config.base_url, credentials);
         let dirty = Arc::new(Mutex::new(DirtySet::with_default_quiet_period()));
@@ -143,6 +156,7 @@ impl Daemon {
             last_poll_ms: 0,
             blocker: None,
             custody,
+            vault,
         }
     }
 
@@ -235,6 +249,7 @@ impl Daemon {
             api: &self.client,
             now_ms: &now,
             conflict_name: &namer,
+            vault: self.vault.as_ref(),
         };
         let mut keys = jd_proto::Client::new_idempotency_key;
         let mut tokens = |id: jd_core::EntityId| format!("{}", id.server_id.abs());
@@ -270,6 +285,7 @@ impl Daemon {
             api: &self.client,
             now_ms: &now,
             conflict_name: &namer,
+            vault: self.vault.as_ref(),
         };
         if let Err(e) = jd_core::recover(&env) {
             self.blocker = Some(blocker_for(&e));
@@ -289,6 +305,7 @@ impl Daemon {
             base_url: self.config.base_url.clone(),
             sync_root: self.config.sync_root.display().to_string(),
             custody: self.custody.clone(),
+            vault: self.vault.is_some(),
         };
         if let Ok(mut slot) = self.shared.snapshot.lock() {
             *slot = Some(snapshot);
@@ -390,6 +407,8 @@ pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         "base_url": s.base_url,
         "sync_root": s.sync_root,
         "custody": s.custody,
+        "vault": s.vault,
+        "waiting_for_keys": s.health.waiting_for_keys(),
         "tracked": s.health.tracked(),
         "settled": s.health.settled(),
         "pending_ops": s.health.pending_ops,

@@ -52,7 +52,7 @@ pub mod server;
 pub mod vfs;
 
 pub use clock::SimClock;
-pub use engine::Device;
+pub use engine::{Device, SimVault};
 pub use net::{NetFaults, NetStats, SimNet};
 pub use rng::SimRng;
 pub use scenario::{assert_invariants, Committed, Platform, World};

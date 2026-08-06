@@ -328,21 +328,7 @@ impl Client {
         params: &UploadParams,
         mut reader: R,
     ) -> Result<UploadOutcome> {
-        let mut init_body = json!({
-            "name": params.name,
-            "size_bytes": params.size_bytes,
-            "sha256": params.sha256,
-        });
-        if let Some(folder_id) = params.folder_id {
-            init_body["folder_id"] = json!(folder_id);
-        }
-        if let Some(file_id) = params.file_id {
-            init_body["file_id"] = json!(file_id);
-        }
-        if let Some(mime) = &params.mime_type {
-            init_body["mime_type"] = json!(mime);
-        }
-        let init = self.action("drive_upload_init", init_body)?;
+        let init = self.action("drive_upload_init", params.init_body())?;
 
         if init.get("deduped").and_then(Value::as_bool) == Some(true) {
             let file = init
@@ -403,7 +389,7 @@ impl Client {
 
         let complete = self.action_idempotent(
             "drive_upload_complete",
-            json!({ "upload_token": token }),
+            params.complete_body(&token),
             params
                 .idempotency_key
                 .clone()
@@ -495,6 +481,89 @@ pub struct UploadParams {
     /// is the one upload failure the user actually notices. `None` generates a
     /// fresh key, which is only safe for a one-shot caller that will not retry.
     pub idempotency_key: Option<String>,
+    /// For an encrypted upload: the `{name, mime, size, cid, …}` blob under the
+    /// file key. The server stores it and never opens it — this is the only
+    /// place the file's real name exists once it leaves the device.
+    pub encrypted_metadata: Option<String>,
+    /// For a NEW encrypted file: the file key sealed to each reader's vault
+    /// public key, by user id. The destination's owner must be present, or the
+    /// server refuses — a vault file its own owner can never read must not be
+    /// creatable.
+    ///
+    /// Left empty for a new **version**, where the server refuses a key payload
+    /// outright: versions reuse the existing key, so a fresh one would strand
+    /// the new content behind grants that wrap the old one.
+    pub wrapped_file_keys: Vec<(i64, String)>,
+    /// The content's modification time, ISO-8601 UTC.
+    ///
+    /// Never sent for an encrypted upload — a plaintext timestamp on an
+    /// encrypted file would tell the server when somebody last worked on it,
+    /// and the server refuses one. It rides inside the metadata blob instead.
+    pub modified_time: Option<String>,
+}
+
+impl UploadParams {
+    /// The `drive_upload_init` body these params describe.
+    ///
+    /// Built here rather than at each call site because there are two callers —
+    /// the real client and the simulator's network — and a wire format with two
+    /// authors has two versions of itself the moment one of them is edited. The
+    /// simulator would then be testing a protocol nothing speaks.
+    pub fn init_body(&self) -> Value {
+        let mut body = json!({
+            "name": self.name,
+            "size_bytes": self.size_bytes,
+            "sha256": self.sha256,
+        });
+        if let Some(folder_id) = self.folder_id {
+            body["folder_id"] = json!(folder_id);
+        }
+        if let Some(file_id) = self.file_id {
+            body["file_id"] = json!(file_id);
+        }
+        if let Some(mime) = &self.mime_type {
+            body["mime_type"] = json!(mime);
+        }
+        if let Some(modified) = &self.modified_time {
+            body["modified_time"] = json!(modified);
+        }
+        body
+    }
+
+    /// The `drive_upload_complete` body, carrying whatever encryption payloads
+    /// this upload has. Absent fields mean absent, not empty: a plaintext upload
+    /// sends neither, and the server refuses either one on that path.
+    pub fn complete_body(&self, upload_token: &str) -> Value {
+        let mut body = json!({ "upload_token": upload_token });
+        if let Some(blob) = &self.encrypted_metadata {
+            body["encrypted_metadata"] = json!(blob);
+        }
+        if !self.wrapped_file_keys.is_empty() {
+            // A JSON object keyed by user id, which is what the server reads.
+            let mut keys = serde_json::Map::new();
+            for (user_id, wrapped) in &self.wrapped_file_keys {
+                keys.insert(user_id.to_string(), json!(wrapped));
+            }
+            body["wrapped_file_keys"] = Value::Object(keys);
+        }
+        body
+    }
+
+    /// A plaintext upload with nothing encryption-related set.
+    pub fn plain(name: String, folder_id: Option<i64>, size_bytes: u64, sha256: String) -> Self {
+        UploadParams {
+            name,
+            folder_id,
+            file_id: None,
+            size_bytes,
+            sha256,
+            mime_type: None,
+            idempotency_key: None,
+            encrypted_metadata: None,
+            wrapped_file_keys: Vec::new(),
+            modified_time: None,
+        }
+    }
 }
 
 #[derive(Debug)]

@@ -32,6 +32,9 @@
 //!   recoverable rather than a guess.
 //! - [`store`] — the last-agreed state, kept transactionally so a crash at any
 //!   instruction is recoverable.
+//! - [`vault`] — the key this device holds for encrypted folders. Optional, and
+//!   its absence is an ordinary state rather than a failure: an account without
+//!   encrypted folders, or a laptop linked without them, syncs everything else.
 //!
 //! The filesystem arrives as a `jd-vfs` trait and the network as a `jd-proto`
 //! trait, both injected. That is not architectural decoration: it is what lets
@@ -48,6 +51,7 @@ pub mod remote;
 pub mod round;
 pub mod scan;
 pub mod store;
+pub mod vault;
 
 pub use execute::{
     journal, recover, run_one, run_queued, ExecEnv, ExecError, ExecReport, OpOutcome,
@@ -60,3 +64,4 @@ pub use remote::{local_delta, remote_delta, RemoteState};
 pub use round::{run_round, DeletePolicy, MassDeletePause, RoundInput, RoundOutcome};
 pub use scan::{pair, KnownLocal, LocalChange, ObservedFile, ScanOutcome};
 pub use store::{Op, OpState, Store, StoreError, StoredIssue};
+pub use vault::{key_state, KeyState, Vault, VaultError};

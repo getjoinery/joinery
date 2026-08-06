@@ -164,6 +164,33 @@ fn sealed_box_round_trips_and_refuses_other_keypairs() {
 }
 
 #[test]
+fn a_public_key_derived_from_a_secret_key_is_the_one_it_was_generated_with() {
+    // What a device that stored only the secret half relies on: the derived
+    // public key has to be byte-identical, because it is mixed into the KDF and
+    // a near-miss fails every unwrap with an error that names nothing.
+    let kp = vault::generate_vault_keypair();
+    let derived = vault::public_key_from_secret_key(&kp.secret_key_pkcs8).unwrap();
+    assert_eq!(derived, kp.public_key_b64);
+
+    let fk = FileKey::generate();
+    let wrapped = drive::wrap_file_key_to(&fk, &kp.public_key_b64).unwrap();
+    assert_eq!(
+        drive::open_wrapped_file_key(&wrapped, &kp.secret_key_pkcs8, &derived)
+            .unwrap()
+            .0,
+        fk.0
+    );
+}
+
+#[test]
+fn deriving_a_public_key_from_something_that_is_not_a_secret_key_fails() {
+    assert!(vault::public_key_from_secret_key(b"not pkcs8").is_err());
+    // The raw 32-byte scalar is the near-miss worth refusing by name: it is
+    // what a caller reaches for when they forget the PKCS8 envelope.
+    assert!(vault::public_key_from_secret_key(&[7u8; 32]).is_err());
+}
+
+#[test]
 fn wrapped_secret_key_binds_its_ad() {
     let kp = vault::generate_vault_keypair();
     let kek = vault::kek_from_recovery_code("ABCD-2345-EFGH-6789", "c2FsdHNhbHQ=").unwrap();
@@ -233,4 +260,110 @@ fn content_id_is_32_lowercase_hex() {
     assert!(cid
         .chars()
         .all(|c| c.is_ascii_hexdigit() && !c.is_ascii_uppercase()));
+}
+
+// ---- the push-side decryptor (what a download uses) -------------------------
+
+/// Feed a container to `ContentDecryptor` in increments of `step` bytes.
+fn push_decrypt(cipher: &[u8], fk: &FileKey, cid: &str, step: usize) -> Vec<u8> {
+    let mut dec = drive::ContentDecryptor::new(Vec::new(), fk, cid);
+    for piece in cipher.chunks(step) {
+        dec.push(piece).unwrap();
+    }
+    dec.finish().unwrap().0
+}
+
+#[test]
+fn pushed_ciphertext_decrypts_the_same_however_it_is_split() {
+    // The network decides where the boundaries land, and they will not line up
+    // with chunk boundaries. Any split has to produce the same plaintext.
+    let fk = FileKey::generate();
+    let cid = drive::new_content_id();
+    for size in [0usize, 1, 5000, drive::CHUNK_BYTES, drive::CHUNK_BYTES + 7] {
+        let plain: Vec<u8> = (0..size).map(|i| (i % 251) as u8).collect();
+        let cipher = drive::encrypt_content(&plain, &fk, &cid);
+        for step in [1usize, 3, 4, 16, 4096, cipher.len().max(1)] {
+            assert_eq!(
+                push_decrypt(&cipher, &fk, &cid, step),
+                plain,
+                "size {size}, step {step}"
+            );
+        }
+    }
+}
+
+#[test]
+fn a_truncated_container_is_refused_at_the_end_rather_than_passed_off_as_short() {
+    // The download that stopped early. Nothing in the bytes themselves says so
+    // — only the fact that the container did not end on a block boundary.
+    let fk = FileKey::generate();
+    let cid = drive::new_content_id();
+    let cipher = drive::encrypt_content(b"a file that was cut off in transit", &fk, &cid);
+
+    let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, &cid);
+    dec.push(&cipher[..cipher.len() - 3]).unwrap();
+    assert!(dec.finish().is_err());
+
+    // And nothing at all is not an empty file: an empty file is one empty chunk.
+    let dec = drive::ContentDecryptor::new(Vec::new(), &fk, &cid);
+    assert!(dec.finish().is_err());
+}
+
+#[test]
+fn a_tampered_chunk_fails_before_any_of_its_plaintext_is_written() {
+    let fk = FileKey::generate();
+    let cid = drive::new_content_id();
+    let plain: Vec<u8> = (0..(drive::CHUNK_BYTES + 100))
+        .map(|i| (i % 97) as u8)
+        .collect();
+    let mut cipher = drive::encrypt_content(&plain, &fk, &cid);
+    let last = cipher.len() - 1;
+    cipher[last] ^= 0x01;
+
+    let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, &cid);
+    let mut failed = false;
+    for piece in cipher.chunks(1024) {
+        if dec.push(piece).is_err() {
+            failed = true;
+            break;
+        }
+    }
+    assert!(failed, "the tampered chunk must be refused");
+    // The first chunk verified and was written; the tampered second one was
+    // not — nothing unverified reaches the sink.
+    assert_eq!(dec.plain_bytes(), drive::CHUNK_BYTES as u64);
+}
+
+#[test]
+fn a_container_from_another_file_does_not_decrypt_under_this_ones_id() {
+    // The AAD binds every chunk to its content id, so a whole file transplanted
+    // from elsewhere fails at the first block rather than producing garbage.
+    let fk = FileKey::generate();
+    let cipher = drive::encrypt_content(b"belongs to another file", &fk, &drive::new_content_id());
+    let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, &drive::new_content_id());
+    assert!(dec.push(&cipher).is_err());
+}
+
+#[test]
+fn a_corrupt_length_prefix_is_refused_without_allocating_on_its_word() {
+    let fk = FileKey::generate();
+    let cid = drive::new_content_id();
+    let mut dec = drive::ContentDecryptor::new(Vec::new(), &fk, &cid);
+    assert!(dec.push(&[0xff, 0xff, 0xff, 0xff]).is_err());
+}
+
+#[test]
+fn the_push_decryptor_and_the_pull_decryptor_agree() {
+    // Two implementations of one format is a divergence waiting to happen, so
+    // they are held to each other.
+    let fk = FileKey::generate();
+    let cid = drive::new_content_id();
+    for size in [0usize, 1, drive::CHUNK_BYTES * 2 + 11] {
+        let plain: Vec<u8> = (0..size).map(|i| (i % 13) as u8).collect();
+        let cipher = drive::encrypt_content(&plain, &fk, &cid);
+        assert_eq!(
+            push_decrypt(&cipher, &fk, &cid, 777),
+            drive::decrypt_content(&cipher, &fk, &cid).unwrap()
+        );
+    }
 }

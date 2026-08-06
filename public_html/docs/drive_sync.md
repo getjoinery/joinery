@@ -203,23 +203,105 @@ no user action, as soon as the clash clears.
 
 ### Encrypted files and folders
 
-The client does not yet sync encrypted Drive content. Encrypted files and
-encrypted folders are recorded `unsyncable`, left on the server untouched, and
-reported with a reason that says so — the name is fine and there is nothing for
-the user to rename.
+Encrypted Drive content syncs like anything else, with one difference that runs
+through everything: the engine works in the **plaintext** domain and the server
+only ever sees the **ciphertext** one. For an encrypted file the server holds a
+placeholder name (`enc-<content id>`), the hash and size of the ciphertext, and
+no modification time at all — a plaintext timestamp would tell it when somebody
+last worked on the file. The real name, mime, size and mtime live inside the
+encrypted metadata blob, under the file's own key.
 
-Refusing them is the correct behaviour rather than a gap papered over. For an
-encrypted file the server sends a placeholder name and the hash of the
-*ciphertext*, because it holds nothing else: the real name, mime and size live
-inside the encrypted metadata blob. Treated as ordinary values, those two fields
-would put unreadable bytes on the disk under a name the user never chose, and
-report it as synced. The refusal is per entry, so everything unencrypted in the
-same account keeps syncing normally.
+**Downloading.** The file's key is unsealed from its grant, then the ciphertext
+is streamed through a decryptor into the spool. Every chunk is authenticated
+against `contentId:index` *before* any of its plaintext is written, so a chunk
+that was tampered with, reordered, or transplanted from another file stops the
+transfer instead of reaching the disk. The transfer is still checked against the
+server's own size and hash, in the ciphertext domain, because that is the only
+thing the server ever measured. Nothing that failed to verify is committed;
+failures raise a `ciphertext` issue rather than retrying silently.
 
-Encrypted folders are refused for the same reason and one more: a folder that
-materialized locally would look like any other, so anything dropped into it
-would upload as plaintext into a folder the user believes is encrypted. Keeping
-the folder off the disk makes that impossible rather than merely unlikely.
+**Uploading.** Encryption is a property of the **destination**, not of the file:
+the server decides an upload is encrypted by looking at the folder it lands in,
+so the client works it out the same way, when a new local file first gets an
+identity. The plaintext is encrypted into a scratch file and sent from there —
+a resumed chunk upload has to re-send bytes identical to the ones it already
+sent, and re-encrypting cannot produce them, because every IV is fresh. What
+goes to the server is the placeholder name, the ciphertext size, no content
+hash, the metadata blob, and the file key sealed to every reader of the
+destination folder (resolved through `drive_public_keys`). The owner's key is
+mandatory: a vault file its owner can never open would be a file they can see,
+are billed for, and have permanently lost.
+
+**Editing** an encrypted file uploads a new version under the *same* file key
+and content id, with no key payload at all. A fresh key would leave the new
+content readable only by the device that sent it, behind grants that every other
+device holds and that all wrap the old key. The server refuses one.
+
+**Change detection runs in two domains at once**, and this is the part that has
+no shortcut. Local edits are found by comparing the disk against the plaintext
+hash from the last sync; remote edits are found by comparing the server's answer
+against the *ciphertext* hash from the last sync. The client never re-encrypts
+to compare — encrypting the same bytes twice produces different bytes, so equal
+plaintexts do not imply equal ciphertexts and never will. An engine that mixed
+the two domains would report an edit on every pass, forever, for a file nobody
+had touched.
+
+One visible consequence: when both sides have edited an encrypted file, the
+engine cannot tell "both arrived at identical bytes" from a genuine conflict, so
+it keeps a conflict copy. That costs a file nobody needed; the alternative does
+not exist.
+
+**Without a key**, an entry waits rather than failing. Encrypted files and
+folders are marked `pending_key` when this device has no vault key, when no
+grant has arrived for that file, or when the grant is held but its metadata
+could not be read — the last case matters because the entry is then still
+holding the server's placeholder name, and materializing *that* is the failure
+everything here is arranged to avoid. An encrypted folder is held back on a
+device with no vault key for a sharper reason: it would look like an ordinary
+directory, so the next file dropped into it would go up in the clear, into a
+folder the user was told was private.
+
+`pending_key` raises no per-entry alert. A laptop linked without encrypted
+folders can be looking at a thousand of them, and a thousand identical alerts
+would bury everything that does need a person. It is counted instead: the tray
+and `joinery-drive status` say how many items are waiting for a key, and
+`status` states plainly whether encrypted folders can be opened on this device.
+An entry leaves `pending_key` by itself the moment the key arrives.
+
+**Renaming** an encrypted file is a metadata re-encrypt, not a rename. The
+current blob is fetched, decrypted, its name field changed, and the result
+encrypted again under the same file key — the server stores it without learning
+either name, and refuses a plaintext one outright. The blob is fetched rather
+than rebuilt from what this device remembers, because another device may have
+changed the mime type, the size or the thumbnail flag since, and rebuilding
+would discard whatever this one did not know about. Moving a file *within* a
+vault is an ordinary `drive_move` on ids: nothing re-encrypts. A vault folder's
+own name is plaintext on the server and renames normally.
+
+Not yet built: encrypted thumbnails, and converting a file across the
+plaintext/vault boundary by moving it (the server refuses an in-place crossing;
+the client has to re-upload and trash the source).
+
+### The vault key
+
+The key that opens encrypted content is the Drive vault's X25519 secret key. It
+reaches the device once, during the browser link ceremony, sealed to a keypair
+the device generated for that purpose, and goes straight into the operating
+system's credential store. The daemon reads it back once at startup and holds it
+for the life of the process — reading it per file would mean a keychain prompt
+per file on macOS.
+
+Only the secret half is stored. The public half — which is what file-key grants
+are sealed to, because the sealing scheme mixes it into its key derivation — is
+recomputed from the secret on every start. A pair carried as two stored fields
+can be got out of step by one bad write, and the symptom is every unwrap failing
+with an error that names nothing.
+
+A device with no vault key is an ordinary, supported state, not a degraded one:
+an account with no encrypted folders never needs one. So none of its failure
+modes are fatal. A key that is missing, unreadable, or not a vault key at all
+produces a warning naming which of the three it is, and the daemon starts and
+syncs everything else.
 
 ### Unicode normalization
 
@@ -314,16 +396,18 @@ one indicator:
 
 | Indicator | Meaning |
 |---|---|
-| **Green** | Converged: everything is in agreement or deliberately not synced here. |
+| **Green** | Converged: everything is in agreement, deliberately not synced here, or waiting on a key that only arrives from elsewhere. |
 | **Working** | Transfers in flight or queued. |
-| **Attention** | *n* things need a person: name clashes, conflicts, a full Drive, a key not yet granted. |
+| **Attention** | *n* things need a person: name clashes, conflicts, a full Drive, ciphertext that failed to authenticate. |
 | **Stopped** | Cannot sync at all: no server, dead credentials, the folder is missing, or paused. |
 
-Two rules decide between them, and both are about refusing to look better than
-things are. **Attention outranks working** — a cheerful spinner running while
-three files cannot sync has hidden the three files. And **work waiting on a
-backoff is work** — a queue held for fifteen minutes after a failure is not an
-idle client.
+Three rules decide between them, and all of them are about refusing to look
+better than things are. **Attention outranks working** — a cheerful spinner
+running while three files cannot sync has hidden the three files. **Work waiting
+on a backoff is work** — a queue held for fifteen minutes after a failure is not
+an idle client. And **green still has to say what it is not doing**: files
+waiting for a key are green, because nothing on this machine will finish them,
+but the count rides in the summary rather than being rounded away.
 
 The indicator is computed from the store on every request, not accumulated as
 passes run. An incremented counter drifts, and one missed decrement means a tray

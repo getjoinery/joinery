@@ -213,6 +213,13 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
                 // same download, or the same edit applied twice. Not a conflict;
                 // there is nothing to reconcile. Record the agreement and move
                 // nothing.
+                //
+                // This can never fire for an encrypted file, and deliberately
+                // so: the two hashes are of plaintext and of ciphertext, and
+                // encrypting the same bytes twice produces different ciphertext,
+                // so there is no honest way to notice that both sides agree. The
+                // cost is a conflict copy nobody needed; the alternative — re-
+                // encrypting to compare — cannot work at all.
                 res.actions.push(Action::Adopt);
             } else {
                 // A real conflict. Nothing is overwritten: the remote head keeps
@@ -310,7 +317,17 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
 /// returns false, so the delete does *not* proceed. Uncertainty resolves toward
 /// keeping the file.
 fn content_matches_last_agreement(entry: &Entry) -> bool {
-    match (&entry.synced_content, &entry.remote_content) {
+    // Both sides of this comparison have to be in the same domain. The server's
+    // answer for an encrypted file is a ciphertext hash, so it is held against
+    // the ciphertext hash from the last sync — comparing it with the plaintext
+    // one would answer "no" for every encrypted file that ever existed, and
+    // silently turn this guard into a blanket refusal.
+    let agreed = if entry.is_encrypted {
+        entry.synced_remote_content.as_ref()
+    } else {
+        entry.synced_content.as_ref()
+    };
+    match (agreed, &entry.remote_content) {
         (Some(synced), Some(remote)) => synced.sha256 == remote.sha256,
         _ => false,
     }
@@ -370,6 +387,8 @@ mod tests {
             head_change_id: 5,
             remote_deleted: false,
             is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
             synced_content: Some(content(sha, 10)),
             synced_placement: Some(placement(None, name)),
             synced_fingerprint: None,

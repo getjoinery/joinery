@@ -65,7 +65,22 @@ pub fn remote_delta(entry: &Entry, now: &RemoteState) -> Delta {
         };
     }
 
-    let content_changed = match (&entry.synced_content, &now.content) {
+    // Which side of the agreement to hold the server's answer against.
+    //
+    // For a plaintext file there is only one hash and this is the agreement.
+    // For an encrypted one the server has never seen the plaintext, so its
+    // answer can only be compared with the ciphertext hash recorded at the last
+    // sync. Comparing it against the plaintext hash would report an edit on
+    // every single pass, forever, for a file nobody has touched — and the
+    // download it queued would then land identical bytes and report the edit
+    // again next time.
+    let agreed_remote = if entry.is_encrypted {
+        entry.synced_remote_content.as_ref()
+    } else {
+        entry.synced_content.as_ref()
+    };
+
+    let content_changed = match (agreed_remote, &now.content) {
         (Some(agreed), Some(fresh)) => agreed.sha256 != fresh.sha256,
         (None, Some(_)) => true,
         // Content that has gone from the server without the entry being deleted
@@ -181,7 +196,9 @@ mod tests {
             head_change_id: 10,
             remote_deleted: false,
             is_encrypted: false,
+            content_id: None,
             synced_content: Some(content(sha)),
+            synced_remote_content: None,
             synced_placement: Some(placement(None, name)),
             synced_fingerprint: None,
             local_name: None,

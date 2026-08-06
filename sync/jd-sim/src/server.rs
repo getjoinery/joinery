@@ -36,6 +36,11 @@ pub const CHUNK_BYTES: u64 = 3;
 /// How long a minted download URL is good for.
 pub const SIGNED_URL_TTL_MS: u64 = 3_600_000;
 
+/// Everything in this mock belongs to one user. Encrypted uploads must seal a
+/// key to them or be refused — a vault file whose owner can never open it is a
+/// file they can see, are billed for, and have permanently lost.
+pub const OWNER_USER_ID: i64 = 1;
+
 #[derive(Debug, Clone)]
 struct FolderRow {
     id: i64,
@@ -59,6 +64,14 @@ struct FileRow {
     /// knows: the name and sha here are then the placeholder and the ciphertext
     /// hash, exactly as the real export sends them.
     encrypted: bool,
+    /// This caller's content key, sealed to their vault. A separate row in the
+    /// real schema, and separate here for the same reason: it is issued on its
+    /// own schedule, so a file can legitimately be visible for a while before
+    /// the key to it is.
+    wrapped_file_key: Option<String>,
+    /// The `{name, mime, size, cid, …}` blob. Opaque to the server, exactly as
+    /// it is to the real one — it is stored and handed back, never inspected.
+    encrypted_metadata: Option<String>,
 }
 
 #[derive(Debug, Clone)]
@@ -71,6 +84,14 @@ struct ChangeRow {
     /// this would have to guess, and guessing wrong means either a loop or a
     /// missed update.
     actor: Option<String>,
+}
+
+/// One encrypted file's every stored version, with what it takes to read them.
+#[derive(Debug, Clone)]
+pub struct EncryptedContent {
+    pub content_id: String,
+    pub wrapped_file_key: String,
+    pub ciphertexts: Vec<Vec<u8>>,
 }
 
 /// One committed content for a file. Never removed — this is the oracle.
@@ -93,6 +114,9 @@ struct UploadSession {
     sha256: String,
     received: Vec<u8>,
     created_ms: u64,
+    /// The destination is a vault, so the bytes arriving are ciphertext and the
+    /// completion call must carry metadata and keys.
+    encrypted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -126,6 +150,10 @@ struct ServerState {
     next_token: u64,
     /// Who is calling. Set by the network layer per device.
     actor: Option<String>,
+    /// Drive vault public keys by user id — what an encrypted upload seals its
+    /// file key to. A user absent from here has no vault, which is a state the
+    /// upload path has to handle rather than a state that cannot happen.
+    vault_public_keys: BTreeMap<i64, String>,
 }
 
 /// The server. Cloning shares it — two simulated devices hold the same one.
@@ -182,9 +210,24 @@ impl MockServer {
                 quota_bytes: None,
                 next_token: 0,
                 actor: None,
+                vault_public_keys: BTreeMap::new(),
             })),
             clock,
         }
+    }
+
+    /// Register a user's Drive vault public key.
+    ///
+    /// Everything in this mock belongs to one owner, [`OWNER_USER_ID`], because
+    /// the sharing model is not what these scenarios are about — what matters is
+    /// that an encrypted upload has to ASK who the readers are and seal to every
+    /// one of them, and that a reader without a vault is a case it survives.
+    pub fn set_vault_public_key(&self, user_id: i64, public_key: &str) {
+        self.state
+            .lock()
+            .unwrap()
+            .vault_public_keys
+            .insert(user_id, public_key.to_string());
     }
 
     /// Who subsequent calls are attributed to.
@@ -297,6 +340,8 @@ impl MockServer {
                 head_change_id: change_id,
                 modified_time: None,
                 encrypted: false,
+                wrapped_file_key: None,
+                encrypted_metadata: None,
             },
         );
         st.versions.push(VersionRow {
@@ -322,6 +367,88 @@ impl MockServer {
             f.encrypted = true;
         }
         id
+    }
+
+    /// Seed a file into a vault the way the browser would have put it there:
+    /// real ciphertext, real metadata, a real grant sealed to `vault`.
+    ///
+    /// `name` and `plaintext` are the user's — everything the server ends up
+    /// holding is derived here, exactly as a real client derives it, so a client
+    /// tested against this has to do the whole job to read the file back.
+    /// Returns the file id.
+    pub fn seed_vault_file(
+        &self,
+        folder: Option<i64>,
+        name: &str,
+        plaintext: &[u8],
+        vault_public_key_b64: &str,
+    ) -> i64 {
+        let file_key = jd_crypto::drive::FileKey::generate();
+        let content_id = jd_crypto::drive::new_content_id();
+        let ciphertext = jd_crypto::drive::encrypt_content(plaintext, &file_key, &content_id);
+        let meta = jd_crypto::drive::FileMetadata::new(
+            name,
+            "application/octet-stream",
+            plaintext.len() as u64,
+            &content_id,
+        );
+        let blob = jd_crypto::drive::encrypt_metadata(&meta, &file_key).expect("metadata seals");
+        let grant = jd_crypto::drive::wrap_file_key_to(&file_key, vault_public_key_b64)
+            .expect("a vault public key");
+
+        let id = self.seed_file(folder, &format!("enc-{content_id}"), &ciphertext);
+        let mut st = self.state.lock().unwrap();
+        if let Some(f) = st.files.get_mut(&id) {
+            f.encrypted = true;
+            f.encrypted_metadata = Some(blob);
+            f.wrapped_file_key = Some(grant);
+            // The real export sends no plaintext modification time for an
+            // encrypted file; the true one lives inside the blob.
+            f.modified_time = None;
+        }
+        id
+    }
+
+    /// Everything the server holds encrypted, in a shape the harness can open.
+    ///
+    /// The no-loss oracle works in plaintext hashes and the server stores
+    /// ciphertext, so without this every encrypted file is invisible to it —
+    /// and an invariant that cannot see the thing it protects is worse than no
+    /// invariant, because it still passes. The content id rides in the
+    /// placeholder name, which is where both the browser and this client put
+    /// it, so the harness needs nothing the server does not really hold.
+    pub fn encrypted_contents(&self) -> Vec<EncryptedContent> {
+        let st = self.state.lock().unwrap();
+        st.files
+            .values()
+            .filter(|f| f.encrypted)
+            .filter_map(|f| {
+                Some(EncryptedContent {
+                    content_id: f.name.strip_prefix("enc-")?.to_string(),
+                    wrapped_file_key: f.wrapped_file_key.clone()?,
+                    ciphertexts: st
+                        .versions
+                        .iter()
+                        .filter(|v| v.file_id == f.id)
+                        .filter_map(|v| st.blobs.get(&v.sha256).cloned())
+                        .collect(),
+                })
+            })
+            .collect()
+    }
+
+    /// Issue this caller their key to an encrypted file.
+    ///
+    /// Separate from seeding the file, because that is how it works: the file
+    /// row and the grant are different records with different lifetimes, and the
+    /// gap between them is a state the client has to handle rather than a state
+    /// that cannot happen. A scenario that always seeded both together would
+    /// never produce a file whose key has not arrived yet.
+    pub fn grant_file_key(&self, file_id: i64, wrapped_file_key: &str) {
+        let mut st = self.state.lock().unwrap();
+        if let Some(f) = st.files.get_mut(&file_id) {
+            f.wrapped_file_key = Some(wrapped_file_key.to_string());
+        }
     }
 
     /// Seed an encrypted vault folder.
@@ -367,6 +494,7 @@ impl MockServer {
             "drive_restore" => self.drive_restore(body),
             "drive_versions" => self.drive_versions(body),
             "drive_upload_init" => self.drive_upload_init(body),
+            "drive_public_keys" => self.drive_public_keys(body),
             "drive_upload_complete" => self.drive_upload_complete(body),
             other => Err(refuse(404, "NotFound", format!("no such action: {other}"))),
         }
@@ -593,9 +721,13 @@ impl MockServer {
             parent,
             name,
             trashed: false,
-            // A folder the CLIENT creates is plaintext. Making an encrypted
-            // folder is a browser ceremony this surface does not offer.
-            encrypted: false,
+            // Encryption is inherited, never asked for: a folder created inside
+            // a vault is part of that vault. Creating a vault at the ROOT is a
+            // browser ceremony this surface does not offer.
+            encrypted: parent
+                .and_then(|p| st.folders.get(&p))
+                .map(|f| f.encrypted)
+                .unwrap_or(false),
         };
         st.folders.insert(id, row.clone());
         Ok(json!({ "ok": true, "folder": Self::folder_export(&row) }))
@@ -608,16 +740,48 @@ impl MockServer {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        if name.is_empty() {
+        let enc_metadata = body
+            .get("encrypted_metadata")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+        let mut st = self.state.lock().unwrap();
+
+        // An encrypted file's display name lives INSIDE its metadata blob and
+        // its stored title stays the opaque placeholder forever. A plaintext
+        // name here would hand the server the one thing it is not supposed to
+        // have, so it is refused rather than quietly accepted.
+        let encrypted_file = t == "file" && st.files.get(&id).map(|f| f.encrypted).unwrap_or(false);
+        if encrypted_file {
+            if !name.is_empty() {
+                return Err(refuse(
+                    400,
+                    "ValidationError",
+                    "Encrypted files are renamed via their encrypted metadata, not a plaintext name.",
+                ));
+            }
+            if enc_metadata.is_empty() {
+                return Err(refuse(
+                    400,
+                    "ValidationError",
+                    "Encrypted rename is missing its metadata.",
+                ));
+            }
+        } else if name.is_empty() {
             return Err(refuse(400, "ValidationError", "A name is required."));
         }
-        let mut st = self.state.lock().unwrap();
+
         if t == "folder" {
             match st.folders.get_mut(&id) {
                 Some(f) => f.name = name,
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
             }
             Self::record(&mut st, "folder", id, "renamed");
+        } else if encrypted_file {
+            if let Some(f) = st.files.get_mut(&id) {
+                f.encrypted_metadata = Some(enc_metadata);
+            }
+            Self::record(&mut st, "file", id, "renamed");
         } else {
             match st.files.get_mut(&id) {
                 Some(f) => f.name = name,
@@ -731,6 +895,30 @@ impl MockServer {
 
     // ---- upload ------------------------------------------------------------
 
+    /// `drive_public_keys` in folder mode: who can read this folder, and what to
+    /// seal a file key to for each of them.
+    ///
+    /// A reader with no Drive vault comes back with a null key rather than being
+    /// left out. That distinction is the whole reason this returns rows instead
+    /// of a map: the uploader has to be able to tell "this person cannot be given
+    /// a key" from "this person is not a reader", and only the first is worth
+    /// telling anybody about.
+    fn drive_public_keys(&self, body: &Value) -> ServerResult {
+        let folder = body.get("folder_id").and_then(Value::as_i64);
+        let st = self.state.lock().unwrap();
+        if let Some(id) = folder {
+            if !st.folders.contains_key(&id) {
+                return Err(refuse(404, "NotFound", "That folder does not exist."));
+            }
+        }
+        let keys = vec![json!({
+            "identifier": OWNER_USER_ID.to_string(),
+            "user_id": OWNER_USER_ID,
+            "public_key": st.vault_public_keys.get(&OWNER_USER_ID),
+        })];
+        Ok(json!({ "ok": true, "keys": keys }))
+    }
+
     fn drive_upload_init(&self, body: &Value) -> ServerResult {
         let name = body
             .get("name")
@@ -746,13 +934,6 @@ impl MockServer {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
-        if name.is_empty() || sha.is_empty() || size == u64::MAX {
-            return Err(refuse(
-                400,
-                "ValidationError",
-                "name, size_bytes and sha256 are required.",
-            ));
-        }
         let folder = body.get("folder_id").and_then(Value::as_i64);
         let file_id = body.get("file_id").and_then(Value::as_i64);
 
@@ -762,13 +943,55 @@ impl MockServer {
                 return Err(refuse(404, "NotFound", "That folder does not exist."));
             }
         }
+        // Whether this upload is encrypted is the DESTINATION's property, never
+        // a client's claim. A file goes into a vault encrypted or it does not go
+        // in at all.
+        let encrypted = match file_id {
+            Some(id) => st.files.get(&id).map(|f| f.encrypted).unwrap_or(false),
+            None => folder
+                .and_then(|f| st.folders.get(&f))
+                .map(|f| f.encrypted)
+                .unwrap_or(false),
+        };
+
+        if name.is_empty() || size == u64::MAX {
+            return Err(refuse(
+                400,
+                "ValidationError",
+                "name and size_bytes are required.",
+            ));
+        }
+        // A plaintext upload declares its hash so the dedup short-circuit can
+        // fire. An encrypted one must not: its ciphertext is unique per file, so
+        // a hash could only ever match somebody else's bytes by accident, and
+        // the short-circuit path carries neither metadata nor keys.
+        if encrypted {
+            if !sha.is_empty() {
+                return Err(refuse(
+                    400,
+                    "ValidationError",
+                    "An encrypted upload does not declare a content hash.",
+                ));
+            }
+            if body.get("modified_time").is_some() {
+                return Err(refuse(
+                    400,
+                    "ValidationError",
+                    "An encrypted upload carries its modification time inside its encrypted metadata, not as a parameter.",
+                ));
+            }
+        } else if sha.is_empty() {
+            return Err(refuse(400, "ValidationError", "sha256 is required."));
+        }
 
         // Dedup: the server already holds these exact bytes, so there is
         // nothing to send. The engine has to handle a completed upload that
         // moved no bytes at all, which is a different code path from the one
         // it usually takes and therefore one worth exercising constantly.
-        if st.blobs.contains_key(&sha) {
-            let file = Self::commit_content(&mut st, file_id, folder, &name, &sha, size)?;
+        if !encrypted && st.blobs.contains_key(&sha) {
+            let file = Self::commit_content(
+                &mut st, file_id, folder, &name, &sha, size, false, None, None,
+            )?;
             return Ok(json!({ "ok": true, "deduped": true, "file": file }));
         }
 
@@ -786,6 +1009,7 @@ impl MockServer {
                 sha256: sha,
                 received: Vec::new(),
                 created_ms: now,
+                encrypted,
             },
         );
         Ok(json!({
@@ -867,7 +1091,16 @@ impl MockServer {
         // wrong file is exactly what this catches, and it is the last place it
         // can be caught before it becomes the user's data.
         let actual = sha256_hex(&session.received);
-        if actual != session.sha256 {
+        if session.encrypted {
+            // Nothing was declared, so nothing can be checked against a claim.
+            // The hash still has to exist — it is how the blob is addressed —
+            // so it is taken from the bytes that actually arrived.
+            if let Some(s) = st.uploads.get_mut(&token) {
+                s.sha256 = actual.clone();
+            }
+        }
+        let session = st.uploads.get(&token).cloned().expect("still present");
+        if !session.encrypted && actual != session.sha256 {
             st.uploads.remove(&token);
             return Err(refuse(
                 400,
@@ -889,8 +1122,71 @@ impl MockServer {
             }
         }
 
+        // Client-custody payloads. Opaque here, exactly as they are to the real
+        // server: produced on a device, stored, handed back, never inspected.
+        let enc_metadata = body
+            .get("encrypted_metadata")
+            .and_then(Value::as_str)
+            .map(str::to_string);
+        let wrapped_keys: BTreeMap<i64, String> = body
+            .get("wrapped_file_keys")
+            .and_then(Value::as_object)
+            .map(|m| {
+                m.iter()
+                    .filter_map(|(k, v)| Some((k.parse::<i64>().ok()?, v.as_str()?.to_string())))
+                    .collect()
+            })
+            .unwrap_or_default();
+
+        if session.encrypted {
+            if session.file_id.is_some() {
+                // A new version reuses the file's existing key and content id,
+                // so every prior version stays decryptable and every grant stays
+                // valid. A fresh key here would strand the new content behind
+                // grants that all wrap the old one.
+                if !wrapped_keys.is_empty() {
+                    st.uploads.remove(&token);
+                    return Err(refuse(
+                        400,
+                        "ValidationError",
+                        "A new version of an encrypted file must reuse its existing file key; do not send a new wrapped key.",
+                    ));
+                }
+            } else {
+                // Without metadata the file has no name, and without a key for
+                // the owner it is a file in their own vault they can never open.
+                if enc_metadata.as_deref().unwrap_or("").is_empty() || wrapped_keys.is_empty() {
+                    st.uploads.remove(&token);
+                    return Err(refuse(
+                        400,
+                        "ValidationError",
+                        "Encrypted upload is missing its metadata or keys.",
+                    ));
+                }
+                if !wrapped_keys.contains_key(&OWNER_USER_ID) {
+                    st.uploads.remove(&token);
+                    return Err(refuse(
+                        400,
+                        "ValidationError",
+                        "Encrypted upload is missing the folder owner's wrapped key.",
+                    ));
+                }
+            }
+        } else if enc_metadata.is_some() || !wrapped_keys.is_empty() {
+            st.uploads.remove(&token);
+            return Err(refuse(
+                400,
+                "ValidationError",
+                "A plaintext upload cannot carry encryption payloads.",
+            ));
+        }
+
         st.blobs
             .insert(session.sha256.clone(), session.received.clone());
+        // The caller gets back their own grant, which is the one the export
+        // carries. Everyone else's is stored against the file in the real
+        // schema; this mock keeps only the owner's, since it has one user.
+        let mine = wrapped_keys.get(&OWNER_USER_ID).cloned();
         let file = Self::commit_content(
             &mut st,
             session.file_id,
@@ -898,6 +1194,9 @@ impl MockServer {
             &session.name,
             &session.sha256,
             session.expected,
+            session.encrypted,
+            enc_metadata,
+            mine,
         )?;
         st.uploads.remove(&session.token);
         Ok(json!({ "ok": true, "file": file }))
@@ -994,6 +1293,7 @@ impl MockServer {
     }
 
     /// Land content on a file — new file, or a new version of an existing one.
+    #[allow(clippy::too_many_arguments)]
     fn commit_content(
         st: &mut ServerState,
         file_id: Option<i64>,
@@ -1001,6 +1301,9 @@ impl MockServer {
         name: &str,
         sha: &str,
         size: u64,
+        encrypted: bool,
+        enc_metadata: Option<String>,
+        wrapped_key: Option<String>,
     ) -> ServerResult {
         let id = match file_id {
             Some(id) => {
@@ -1026,6 +1329,14 @@ impl MockServer {
                 f.size = size;
                 f.head_change_id = change_id;
                 f.trashed = false;
+                // A new version's metadata follows its content — the size
+                // inside the blob changed with the bytes. The file key, the
+                // content id and every existing grant do not.
+                if f.encrypted {
+                    if let Some(blob) = enc_metadata {
+                        f.encrypted_metadata = Some(blob);
+                    }
+                }
             }
             None => {
                 st.files.insert(
@@ -1039,10 +1350,9 @@ impl MockServer {
                         trashed: false,
                         head_change_id: change_id,
                         modified_time: None,
-                        // Uploaded through the plaintext path. The encrypted
-                        // upload path carries its own key payload and does not
-                        // land here.
-                        encrypted: false,
+                        encrypted,
+                        wrapped_file_key: wrapped_key,
+                        encrypted_metadata: enc_metadata,
                     },
                 );
             }
@@ -1082,6 +1392,14 @@ impl MockServer {
         out.insert("folder_id".into(), json!(f.folder));
         out.insert("deleted".into(), json!(f.trashed));
         out.insert("encrypted".into(), json!(f.encrypted));
+        if f.encrypted {
+            // Only on encrypted files, and null until a grant exists — the real
+            // export omits all of these for plaintext, so a client that read a
+            // grant off an ordinary file would be reading something the server
+            // never sends.
+            out.insert("wrapped_file_key".into(), json!(f.wrapped_file_key));
+            out.insert("encrypted_metadata".into(), json!(f.encrypted_metadata));
+        }
         out.insert("content_sha256".into(), json!(f.sha256));
         out.insert("modified_time".into(), json!(f.modified_time));
         out.insert("head_change_id".into(), json!(f.head_change_id));
