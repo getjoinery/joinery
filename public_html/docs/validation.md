@@ -194,6 +194,45 @@ per-form with the `errorClass` / `validClass` / `errorLabelClass` init options.
 <input type="text" id="username" class="is-valid">
 ```
 
+### The Error Summary
+
+A submit attempt that fails validation reveals a summary block —
+`.jy-error-summary` — immediately above the form's first submit button: a
+title ("N fields need attention:") and one linked item per invalid field.
+Activating an item scrolls to the field (honouring `prefers-reduced-motion`),
+opens any collapsed `<details>` or `hidden` ancestor in the way, and focuses
+the field — without adding a history entry, so Back still leaves the page.
+Focus moves to the summary itself on the failed submit (`role="alert"`,
+`tabindex="-1"`), so a screen reader announces the explanation instead of a
+button that did nothing.
+
+The summary appears only in response to a submit attempt. Blur- and
+change-time errors while typing update a *visible* summary's items but never
+reveal it. Fixing a listed field removes its item; fixing the last one hides
+the block.
+
+Each item reads `Label — message`, where the message is the same string shown
+inline next to the field. The label resolves in order: the `label[for=]` text
+for the field (trailing `*`/`:` markers stripped; a radio/checkbox group reads
+its container's `.form-label` heading), the field's `aria-label`, its
+`placeholder`, then the field name humanised (`joinery_ai_local_model` →
+"Joinery ai local model"). The link target resolves in order: the field's own
+`id`, the `{name}_container` element FormWriter emits, or an id the validator
+assigns so the link always has somewhere to point. Radio and checkbox groups
+always link their container, since no single input represents the group.
+
+Only reachable fields can be listed: validation skips disabled fields and
+fields that fail `checkVisibility()` (collapsed panels, `visibility_rules`
+sections), so the summary never links to something that cannot be seen or
+fixed. That invariant is load-bearing — do not weaken it.
+
+FormWriter emits the container server-side (see
+[FormWriter § Validation Integration](formwriter.md#7-validation-integration));
+on a form without one (hand-rolled markup), the validator creates it before
+the first submit button, falling back to the end of the form. Opt out per
+form with `errorSummary: false` in the init options; `errorSummaryTitle`
+overrides the title text (`{n}` is replaced with the count).
+
 ### Array Fields (Checkboxes, Multi-select)
 
 For fields with array notation `[]`, use the base name without brackets in `field_specifications`:
@@ -221,6 +260,11 @@ For server-side validation like checking username uniqueness, add a `remote` rul
 ```
 
 The AJAX endpoint receives the field value as `value` parameter.
+
+A failing remote rule blocks submission like any other rule, and names itself
+in the error summary — so a field whose server-side check rejects it (a stale
+file path, a taken username) is called out next to the submit button even
+when the field is scrolled off screen.
 
 ### Debug Mode
 

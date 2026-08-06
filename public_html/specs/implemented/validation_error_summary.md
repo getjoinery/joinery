@@ -136,6 +136,29 @@ Both describe the end state only — no "previously", no migration narrative.
 - a `visibility_rules`-hidden invalid field is neither validated nor listed
 - the summary reads correctly in the admin theme and one public theme
 
+### Browser verification results (2026-08-06, dev.getjoinery.com)
+
+All five checks passed:
+
+- **The jeremytunnell case:** on `/admin/admin_settings`, a bogus `logo_link`
+  value blocked the submit and the summary appeared naming "Link to logo —
+  Must start with / and the file must exist" (the `remote` rule's own
+  message), with focus moved to the summary. Clicking the item scrolled
+  ~10,000px to the field's section and focused the field. Nothing was saved
+  (the field was empty before and was restored after).
+- **No history entry:** `history.length` unchanged across item clicks, and
+  `location.hash` stays clean (the move is programmatic).
+- **Live updates:** on `/login` (public theme, PublicPageFalcon chain) an
+  empty submit showed "2 fields need attention:"; filling Email removed only
+  its bullet and the title flipped to the singular; filling Password hid the
+  block entirely.
+- **Hidden fields:** on `/admin/admin_public_menu_edit`, a required rule on
+  `pmu_link` while its `visibility_rules` section was hidden produced no
+  bullet and no validation; its stale bullet from an earlier visible-state
+  submit was removed on the next attempt.
+- **Themes:** rendered and styled in the admin theme (screenshot taken:
+  danger-bordered box directly above Submit) and the public login page.
+
 ## Open decisions
 
 1. **Placement with multiple submit buttons.** The container is emitted before the *first* submit button, which is deterministic and server-renderable, but on a form whose actions are far apart (Save at top, Delete at bottom) the summary may not be adjacent to the button that was actually clicked. The alternative — JS moves the container next to `e.submitter` on each failed attempt — is more contextual but makes placement unpredictable for authors and unstylable from PHP. **Recommendation: first submit button.** Revisit only if a real form is awkward.

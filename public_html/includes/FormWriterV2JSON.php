@@ -19,7 +19,8 @@
  * browsers never attach cross-origin, and the CSRF token is bound to a
  * web session that API clients do not have.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Opts out of the error summary container: a definition has no markup, and the API error envelope already carries per-field messages for native renderers
  */
 
 require_once(PathHelper::getIncludePath('includes/FormWriterV2Base.php'));
@@ -345,6 +346,15 @@ class FormWriterV2JSON extends FormWriterV2Base {
     }
 
     // ── Output suppression (a definition has no markup or scripts) ───────────
+
+    /**
+     * No error summary container in JSON mode: a definition has no markup,
+     * and the API error envelope already carries per-field messages, which
+     * is what a native form renderer needs.
+     */
+    protected function errorSummaryEnabled() {
+        return false;
+    }
 
     public function begin_form() {
         // No output in JSON mode
