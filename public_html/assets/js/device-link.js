@@ -10,7 +10,9 @@
  * a wrapping only the user's own unlocker opens, VaultCrypto seals it to the
  * device's public key, and the server stores a blob it has no way to read.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - The approval takes the FormWriter validator's submitHandler
+ *   instead of adding a second submit listener, which ran it twice per click.
  */
 (function () {
 	'use strict';
@@ -194,6 +196,39 @@
 
 	// ---- wiring --------------------------------------------------------------
 
+	/**
+	 * Hand this form's one submission to `handler`.
+	 *
+	 * A FormWriter form answers a valid submit by re-submitting NATIVELY, which
+	 * fires `submit` a second time on purpose (so listeners see the validated
+	 * submission). A plain listener therefore runs twice per click — and here
+	 * that means two approvals: the first mints the credential, the second finds
+	 * the code already claimed and tells the user their code was invalid, at the
+	 * exact moment the device finished linking. Taking the validator's
+	 * submitHandler is how an API-driven form gets one submission (same idiom as
+	 * drive.js). The listener is the fallback for a form with no validator.
+	 */
+	function interceptSubmit(form, handler) {
+		if (!form) { return; }
+		var wrapped = function (e) {
+			if (e && e.preventDefault) { e.preventDefault(); }
+			handler(e || null);
+		};
+		var attach = function () {
+			if (form.joineryValidator) {
+				form.joineryValidator.submitHandler = function () { wrapped(null); };
+			} else {
+				form.addEventListener('submit', wrapped);
+			}
+		};
+		// This script is deferred, so it runs before the FormWriter inline
+		// scripts' DOMContentLoaded handlers create the validators — wait for
+		// them, or the takeover lands on a form whose validator then
+		// native-submits straight past it.
+		if (form.joineryValidator || document.readyState === 'complete') { attach(); }
+		else { document.addEventListener('DOMContentLoaded', attach); }
+	}
+
 	function init() {
 		var field = codeField();
 		if (field) {
@@ -201,7 +236,7 @@
 			field.addEventListener('blur', resolveCode);
 		}
 		var form = field ? field.closest('form') : null;
-		if (form) { form.addEventListener('submit', approve); }
+		interceptSubmit(form, approve);
 		if ($('dlkDeny')) { $('dlkDeny').onclick = deny; }
 		if ($('dlkUnlockPasskey')) { $('dlkUnlockPasskey').onclick = function () { unlock('passkey'); }; }
 		if ($('dlkUnlockPp')) { $('dlkUnlockPp').onclick = function () { unlock('passphrase'); }; }

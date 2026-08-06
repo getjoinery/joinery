@@ -58,6 +58,18 @@ pub enum UnsyncableReason {
     Empty,
     /// Collides with the engine's own reserved prefix.
     ReservedPrefix,
+    /// The server holds this file encrypted and this build cannot open it.
+    ///
+    /// Unlike every reason above, the name is fine and the filesystem is
+    /// willing — what is missing is the ability to turn ciphertext into the
+    /// file's real bytes and real name. Recorded rather than ignored because
+    /// the alternative is worse than waiting: treated as an ordinary file, the
+    /// server's placeholder name and ciphertext hash read as plaintext facts,
+    /// and raw ciphertext lands on disk under a name the user never chose.
+    ///
+    /// Transitional. This variant disappears when the encrypted engine path
+    /// lands, and its removal is a compile error at every site that names it.
+    EncryptedUnsupported,
 }
 
 /// The comparison key for a name: NFC, and case-folded when the filesystem

@@ -42,6 +42,7 @@ struct FolderRow {
     parent: Option<i64>,
     name: String,
     trashed: bool,
+    encrypted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -54,6 +55,10 @@ struct FileRow {
     trashed: bool,
     head_change_id: i64,
     modified_time: Option<String>,
+    /// The server holds these bytes encrypted. It models only what the SERVER
+    /// knows: the name and sha here are then the placeholder and the ciphertext
+    /// hash, exactly as the real export sends them.
+    encrypted: bool,
 }
 
 #[derive(Debug, Clone)]
@@ -291,6 +296,7 @@ impl MockServer {
                 trashed: false,
                 head_change_id: change_id,
                 modified_time: None,
+                encrypted: false,
             },
         );
         st.versions.push(VersionRow {
@@ -299,6 +305,32 @@ impl MockServer {
             size: bytes.len() as u64,
             change_id,
         });
+        id
+    }
+
+    /// Seed a file the server holds ENCRYPTED.
+    ///
+    /// `name` and `bytes` are what the server sees, which for an encrypted file
+    /// is the placeholder name and the ciphertext — never the user's name or
+    /// their plaintext. Handing this the real name would model a server that
+    /// can read what it stores, and a client tested against it would look
+    /// correct while doing the wrong thing against the real one.
+    pub fn seed_encrypted_file(&self, folder: Option<i64>, name: &str, ciphertext: &[u8]) -> i64 {
+        let id = self.seed_file(folder, name, ciphertext);
+        let mut st = self.state.lock().unwrap();
+        if let Some(f) = st.files.get_mut(&id) {
+            f.encrypted = true;
+        }
+        id
+    }
+
+    /// Seed an encrypted vault folder.
+    pub fn seed_encrypted_folder(&self, parent: Option<i64>, name: &str) -> i64 {
+        let id = self.seed_folder(parent, name);
+        let mut st = self.state.lock().unwrap();
+        if let Some(f) = st.folders.get_mut(&id) {
+            f.encrypted = true;
+        }
         id
     }
 
@@ -314,6 +346,7 @@ impl MockServer {
                 parent,
                 name: name.to_string(),
                 trashed: false,
+                encrypted: false,
             },
         );
         id
@@ -560,6 +593,9 @@ impl MockServer {
             parent,
             name,
             trashed: false,
+            // A folder the CLIENT creates is plaintext. Making an encrypted
+            // folder is a browser ceremony this surface does not offer.
+            encrypted: false,
         };
         st.folders.insert(id, row.clone());
         Ok(json!({ "ok": true, "folder": Self::folder_export(&row) }))
@@ -1003,6 +1039,10 @@ impl MockServer {
                         trashed: false,
                         head_change_id: change_id,
                         modified_time: None,
+                        // Uploaded through the plaintext path. The encrypted
+                        // upload path carries its own key payload and does not
+                        // land here.
+                        encrypted: false,
                     },
                 );
             }
@@ -1027,7 +1067,7 @@ impl MockServer {
             "name": f.name,
             "parent_id": f.parent,
             "deleted": f.trashed,
-            "encrypted": false,
+            "encrypted": f.encrypted,
         })
     }
 
@@ -1041,7 +1081,7 @@ impl MockServer {
         out.insert("size".into(), json!(f.size));
         out.insert("folder_id".into(), json!(f.folder));
         out.insert("deleted".into(), json!(f.trashed));
-        out.insert("encrypted".into(), json!(false));
+        out.insert("encrypted".into(), json!(f.encrypted));
         out.insert("content_sha256".into(), json!(f.sha256));
         out.insert("modified_time".into(), json!(f.modified_time));
         out.insert("head_change_id".into(), json!(f.head_change_id));

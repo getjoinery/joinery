@@ -644,3 +644,89 @@ fn frozen_regression_seeds() {
         random_scenario(*seed, *steps, &names, *chaos);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Encrypted entries this build cannot open
+// ---------------------------------------------------------------------------
+
+/// The server holds a file encrypted; this build has no decryption path.
+///
+/// The failure this guards is not a crash — it is the engine quietly succeeding
+/// at the wrong thing. For an encrypted file the server sends a PLACEHOLDER
+/// name and the hash of the CIPHERTEXT. An engine that reads those as ordinary
+/// facts downloads happily and leaves the user a file of unreadable bytes under
+/// a name they never chose, reported as synced.
+#[test]
+fn an_encrypted_file_is_never_materialized_as_ciphertext() {
+    let world = World::new(9_101, &["laptop"]);
+    let committed = Committed::default();
+
+    // What the SERVER sees: a placeholder name, and bytes it cannot read.
+    world.server.seed_encrypted_file(
+        None,
+        "encrypted-file-88",
+        b"\x91\x02ciphertext-not-text\xff",
+    );
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        disk.is_empty(),
+        "nothing should have been written for an encrypted file, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same protection in the other direction, which is the one that leaks.
+///
+/// An encrypted FOLDER that materialized locally would be an ordinary directory
+/// to the user — so anything they dropped in it would be uploaded as plaintext
+/// into a folder they believe is encrypted. Keeping the folder off the disk is
+/// what makes that impossible rather than merely unlikely.
+#[test]
+fn an_encrypted_folder_never_becomes_a_plaintext_drop_box() {
+    let world = World::new(9_102, &["laptop"]);
+    let committed = Committed::default();
+
+    let vault = world.server.seed_encrypted_folder(None, "Private");
+    world
+        .server
+        .seed_encrypted_file(Some(vault), "encrypted-file-89", b"\x00ciphertext\x7f");
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        disk.is_empty(),
+        "an encrypted folder must not materialize, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A plaintext file alongside an encrypted one still syncs.
+///
+/// Refusing the encrypted entry must not become refusing the account: the whole
+/// point of a per-entry verdict is that everything else carries on.
+#[test]
+fn plaintext_files_still_sync_beside_an_encrypted_one() {
+    let world = World::new(9_103, &["laptop"]);
+    let mut committed = Committed::default();
+
+    world
+        .server
+        .seed_encrypted_file(None, "encrypted-file-90", b"\xc3ciphertext\x01");
+    let body = b"an ordinary file, readable by everyone who should read it";
+    world.server.seed_file(None, "notes.txt", body);
+    committed.note("notes.txt", body);
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        disk.contains_key("notes.txt"),
+        "the plaintext file should have arrived, found: {disk:?}"
+    );
+    assert_eq!(disk.len(), 1, "only the plaintext file, found: {disk:?}");
+    assert_nothing_lost(&world, &committed);
+}

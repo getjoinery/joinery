@@ -260,5 +260,39 @@ foreach ($safe as $url) {
 		'return was: ' . var_export($returned, true));
 }
 
+// ---------------------------------------------------------------------------
+section('Outstanding vs recent');
+
+// The gate an API action calls. It differs from "was there a recent step-up?"
+// in exactly one case, and that case is the whole reason it exists: an account
+// with no second factor has nothing to step up WITH, so /verify-stepup returns
+// immediately and a gate keyed on the bare question refuses such an account
+// forever. Both halves are checked here — a version that always answered
+// "nothing outstanding" would pass the first check and fail the second.
+$db2 = DbConnector::get_instance()->get_db_link();
+$clear = $db2->prepare("DELETE FROM pks_passkey_ceremonies WHERE pks_session_id = ?");
+$clear->execute(array($sid));
+
+check(!$session->step_up_outstanding($plain, 300),
+	'an account with no second factor owes no step-up (nothing to step up with)');
+
+check($session->step_up_outstanding($totp_user, 300),
+	'an account holding a factor, with no recent confirmation, owes a step-up');
+
+$session->stamp_second_factor();
+check(!$session->step_up_outstanding($totp_user, 300),
+	'a factor-holding account that just confirmed owes nothing');
+
+su_age_markers($sid, 400);
+check($session->step_up_outstanding($totp_user, 300),
+	'the debt returns once the confirmation goes stale');
+
+// The no-factor account is unaffected by marker state either way — there is
+// nothing for a marker to prove.
+check(!$session->step_up_outstanding($plain, 300),
+	'a stale marker still leaves a factorless account owing nothing');
+
+$clear->execute(array($sid));
+
 $_SESSION = array();
 harness_finish();

@@ -1120,6 +1120,38 @@ class SessionControl{
 		return false;
 	}
 
+	/**
+	 * True when $user still OWES a step-up before a sensitive action.
+	 *
+	 * This is the question a gate means to ask, and it differs from
+	 * has_recent_second_factor() in exactly one case — the case that makes it
+	 * necessary. An account with no second factor has nothing to step up WITH:
+	 * `/verify-stepup` knows that and returns immediately, so an action gated on
+	 * the bare "was there a recent confirmation?" refuses such an account
+	 * forever. The client bounces to the ceremony, the ceremony bounces
+	 * straight back, and the action never becomes possible — usually while
+	 * naming a passkey the user does not own.
+	 *
+	 * require_recent_second_factor() applies this rule for actions that can
+	 * answer with a redirect. This is the same rule for actions that must
+	 * answer an API caller instead, and it is the whole of the gate: a caller
+	 * needs nothing from PasskeyService (and so does not drag the WebAuthn
+	 * library into contexts that never do a ceremony).
+	 *
+	 * @param User|null $user the account to judge; loaded from this session
+	 *   when omitted.
+	 */
+	function step_up_outstanding($user = null, int $ttl = 300): bool {
+		if ($user === null) {
+			require_once(PathHelper::getIncludePath('data/users_class.php'));
+			$user = new User($this->get_user_id(), TRUE);
+		}
+		if (!$this->user_has_second_factor($user)) {
+			return false;
+		}
+		return !$this->has_recent_second_factor($ttl);
+	}
+
 	/** Stamp a fresh second-factor confirmation for this session (the TOTP path;
 	 *  the passkey path stamps its own via PasskeyService::verifyStepUp). */
 	function stamp_second_factor(string $purpose = 'stepup_verified'): void {

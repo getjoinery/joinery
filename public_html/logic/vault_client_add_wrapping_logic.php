@@ -9,7 +9,6 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
  */
 function vault_client_add_wrapping_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
-	require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultClientCustody.php'));
 
 	$session = SessionControl::get_instance();
@@ -29,8 +28,7 @@ function vault_client_add_wrapping_logic(array $input): LogicResult {
 			return LogicResult::error('Your vault is not set up.');
 		}
 
-		$service = new PasskeyService();
-		if (!$service->hasRecentStepUp(300)) {
+		if ($session->step_up_outstanding(null, 300)) {
 			return LogicResult::error('Confirm with your passkey before changing your vault unlockers.', ['requires_stepup' => true]);
 		}
 

@@ -812,6 +812,7 @@ fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
         R::PathTooLong { bytes, limit } => format!("path_too_long:{bytes}:{limit}"),
         R::Empty => "empty".into(),
         R::ReservedPrefix => "reserved_prefix".into(),
+        R::EncryptedUnsupported => "encrypted_unsupported".into(),
     }
 }
 
@@ -834,6 +835,7 @@ fn decode_reason(raw: &str) -> Option<jd_vfs::UnsyncableReason> {
         }
         "empty" => Some(R::Empty),
         "reserved_prefix" => Some(R::ReservedPrefix),
+        "encrypted_unsupported" => Some(R::EncryptedUnsupported),
         _ => None,
     }
 }

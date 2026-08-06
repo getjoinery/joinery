@@ -61,8 +61,18 @@ present at *this* keyboard *now*; a stolen session cookie cannot mint one.
 sensitive **administration** action calls: it returns a redirect to the
 `/verify-stepup` ceremony (which confirms with a passkey or a TOTP/backup code,
 stamps the marker, and returns to `$return_url`) when no recent confirmation
-exists, or proceeds otherwise. It is a no-op for an account with no second
-factor enrolled — there is nothing to step up with. The line the gate draws:
+exists, or proceeds otherwise. An API action, which must answer a caller rather
+than redirect, asks `SessionControl::step_up_outstanding($user, $ttl)` and
+replies `requires_stepup` in the error envelope's `data` so the page can run the
+ceremony and retry.
+
+Both are a no-op for an account with no second factor enrolled — there is
+nothing to step up with, and `/verify-stepup` returns immediately for exactly
+that reason. A gate built on the bare "was there a recent confirmation?"
+question instead of the outstanding-debt question refuses such an account
+**forever**: the page sends the user to the ceremony, the ceremony sends them
+straight back, and no amount of confirming will satisfy it. Ask
+`step_up_outstanding()`, never `hasRecentStepUp()` alone. The line the gate draws:
 **the vault gates plaintext redirection; the second factor gates
 administration.** Domain security-level changes are gated this way today; the
 same helper is how the remaining sensitive-administration actions adopt the gate.
