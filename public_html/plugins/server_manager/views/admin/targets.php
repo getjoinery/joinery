@@ -5,6 +5,9 @@
  *
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
+ * @version 2.6 - node credential (write-only): a target can hold a second key handed to nodes
+ *                during a backup run, so the delete-capable key never leaves the control plane.
+ *                B2 and S3 only; Linode cannot express write-without-delete and says so.
  * @version 2.5 - recovery key setup is drawn once, on the core Backups page; this page keeps the
  *                standing state line and links there. The three POST handlers that served the
  *                walkthrough here are gone with the form that posted to them.
@@ -206,6 +209,67 @@ if ($_POST && isset($_POST['bkt_name'])) {
 	}
 	$target->set('bkt_credentials', json_encode($creds));
 
+	// Node (write-only) credential — an optional second key handed to nodes
+	// during a backup run in place of the delete-capable one above. Same
+	// leave-blank-to-keep semantics; empty means "not configured" and nodes
+	// receive the main credential.
+	try {
+		$existing_node = ($target->key ? $target->get_node_credentials() : []);
+	} catch (BackupTargetException $e) {
+		$existing_node = [];
+	}
+	if (isset($_POST['node_creds_remove'])) {
+		$target->set('bkt_node_credentials', null);
+	} elseif ($provider === 'b2') {
+		$nk_id  = trim($_POST['node_cred_key_id'] ?? '');
+		$nk_key = trim($_POST['node_cred_app_key'] ?? '');
+		if ($nk_key === '' && !empty($existing_node['secret_key'])) {
+			$node_creds = $existing_node;
+			if ($nk_id !== '') { $node_creds['access_key'] = $nk_id; }
+			$target->set('bkt_node_credentials', json_encode($node_creds));
+		} elseif ($nk_id !== '' && $nk_key !== '') {
+			// Same bucket, so the endpoint detection matches the main key's.
+			$nb_region = '';
+			$nb_endpoint = '';
+			$ch = curl_init('https://api.backblazeb2.com/b2api/v3/b2_authorize_account');
+			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
+			curl_setopt($ch, CURLOPT_HTTPHEADER, ['Authorization: Basic ' . base64_encode($nk_id . ':' . $nk_key)]);
+			curl_setopt($ch, CURLOPT_TIMEOUT, 10);
+			$body = curl_exec($ch);
+			$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+			if ($status === 200 && ($data = json_decode($body, true))) {
+				$s3_url = $data['apiInfo']['storageApi']['s3ApiUrl'] ?? '';
+				if (preg_match('#^https?://s3\.([^.]+)\.backblazeb2\.com#', $s3_url, $m)) {
+					$nb_region = $m[1];
+					$nb_endpoint = $s3_url;
+				}
+			}
+			$target->set('bkt_node_credentials', json_encode([
+				'access_key' => $nk_id,
+				'secret_key' => $nk_key,
+				'region'     => $nb_region,
+				'endpoint'   => $nb_endpoint,
+			]));
+		}
+	} elseif ($provider === 's3') {
+		$ns_access = trim($_POST['node_cred_s3_access_key'] ?? '');
+		$ns_secret = trim($_POST['node_cred_s3_secret_key'] ?? '');
+		if ($ns_secret === '' && !empty($existing_node['secret_key'])) {
+			$node_creds = $existing_node;
+			if ($ns_access !== '') { $node_creds['access_key'] = $ns_access; }
+			$target->set('bkt_node_credentials', json_encode($node_creds));
+		} elseif ($ns_access !== '' && $ns_secret !== '') {
+			$ns_region = trim($_POST['cred_s3_region'] ?? 'us-east-1');
+			$target->set('bkt_node_credentials', json_encode([
+				'access_key' => $ns_access,
+				'secret_key' => $ns_secret,
+				'region'     => $ns_region,
+				'endpoint'   => 'https://s3.' . $ns_region . '.amazonaws.com',
+			]));
+		}
+	}
+	// Linode: no node credential — its keys cannot express write-without-delete.
+
 	if (!isset($_POST['bkt_enabled'])) {
 		$target->set('bkt_enabled', false);
 	}
@@ -384,6 +448,13 @@ if ($target !== null) {
 	}
 	$current_provider = $target->get('bkt_provider') ?: 'b2';
 
+	$has_node_creds = $is_edit && $target->has_node_credentials();
+	try {
+		$node_creds = $has_node_creds ? $target->get_node_credentials() : [];
+	} catch (BackupTargetException $e) {
+		$node_creds = [];
+	}
+
 	$form_title = $is_edit ? 'Edit Target: ' . htmlspecialchars($target->get('bkt_name')) : 'Add Target';
 	$pageoptions = ['title' => $form_title];
 	$page->begin_box($pageoptions);
@@ -402,6 +473,10 @@ if ($target !== null) {
 			'cred_linode_access_key' => $current_provider === 'linode' ? ($creds['access_key'] ?? '') : '',
 			'cred_linode_region'     => $current_provider === 'linode' ? ($creds['region'] ?? '') : '',
 			'cred_linode_endpoint'   => $current_provider === 'linode' ? ($creds['endpoint'] ?? '') : '',
+			'node_cred_key_id'        => $current_provider === 'b2' ? ($node_creds['access_key'] ?? '') : '',
+			// Node secret fields are never prefilled either — leave blank to keep.
+			'node_cred_app_key'       => '',
+			'node_cred_s3_access_key' => $current_provider === 's3' ? ($node_creds['access_key'] ?? '') : '',
 		],
 	]);
 
@@ -419,9 +494,12 @@ if ($target !== null) {
 		'options'       => $provider_labels,
 		'custom_script' => "
 			var p = this.value;
-			document.getElementById('b2Fields').hidden     = p !== 'b2';
-			document.getElementById('s3Fields').hidden     = p !== 's3';
-			document.getElementById('linodeFields').hidden = p !== 'linode';
+			document.getElementById('b2Fields').hidden       = p !== 'b2';
+			document.getElementById('s3Fields').hidden       = p !== 's3';
+			document.getElementById('linodeFields').hidden   = p !== 'linode';
+			document.getElementById('nodeCredB2').hidden     = p !== 'b2';
+			document.getElementById('nodeCredS3').hidden     = p !== 's3';
+			document.getElementById('nodeCredLinode').hidden = p !== 'linode';
 		",
 	]);
 	$formwriter->textinput('bkt_bucket', 'Bucket Name', [
@@ -459,6 +537,39 @@ if ($target !== null) {
 	$formwriter->textinput('cred_linode_region', 'Region', ['placeholder' => 'us-east-1']);
 	$formwriter->textinput('cred_linode_endpoint', 'Endpoint URL', ['placeholder' => 'https://us-east-1.linodeobjects.com']);
 	echo '</div>';
+
+	// ── Node credential (write-only) ──
+	echo '<div id="nodeCredB2"' . ($current_provider === 'b2' ? '' : ' hidden') . '>';
+	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
+		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
+	$formwriter->textinput('node_cred_key_id', 'Node Application Key ID', [
+		'helptext' => 'Optional second B2 key, created with write but not delete capability on this bucket. Nodes are handed this key during a backup run, so a compromised node cannot erase the shelf; the main key above never leaves this control plane.',
+	]);
+	$formwriter->passwordinput('node_cred_app_key', 'Node Application Key', [
+		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
+	]);
+	echo '</div>';
+
+	echo '<div id="nodeCredS3"' . ($current_provider === 's3' ? '' : ' hidden') . '>';
+	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
+		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
+	$formwriter->textinput('node_cred_s3_access_key', 'Node Access Key', [
+		'helptext' => 'Optional second key from an IAM user allowed s3:PutObject but not s3:DeleteObject on this bucket. Nodes are handed this key during a backup run; the main key above never leaves this control plane.',
+	]);
+	$formwriter->passwordinput('node_cred_s3_secret_key', 'Node Secret Key', [
+		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
+	]);
+	echo '</div>';
+
+	echo '<div id="nodeCredLinode"' . ($current_provider === 'linode' ? '' : ' hidden') . '>';
+	echo '<p class="text-muted mt-2 mb-1">Linode Object Storage keys are read-only or read-write per bucket — write-without-delete is not expressible, so nodes are handed the main key during a run. B2 and S3 targets can hold a separate write-only node credential.</p>';
+	echo '</div>';
+
+	if ($has_node_creds) {
+		$formwriter->checkboxinput('node_creds_remove', 'Remove node credential', [
+			'helptext' => 'Nodes go back to being handed the main key during a run.',
+		]);
+	}
 
 	$formwriter->checkboxinput('bkt_enabled', 'Enabled', [
 		'checked' => (bool)($target->key ? $target->get('bkt_enabled') : true),

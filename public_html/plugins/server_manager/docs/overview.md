@@ -463,13 +463,17 @@ Example: `joinery-backups/empoweredhealthtn/empoweredhealthtn-04_11_2026.sql.gz.
 
 ### Credential Storage
 
-Credentials are stored in the `bkt_credentials` JSON column on the `bkt_backup_targets` table using a unified shape for every provider:
+Credentials are stored on the `bkt_backup_targets` table using a unified shape for every provider:
 
 ```json
 {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
 ```
 
-For node-side operations (upload, delete, download), the credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
+Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the control plane itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to the shelf but never erase it*). Both are SecretBox-sealed at rest.
+
+A persisted job command never contains a credential — it carries a placeholder token that the agent resolves in memory immediately before the step runs: `__SM_CREDS_<target_id>__` for the main slot, `__SM_NODE_CREDS_<target_id>__` for the node slot. The builder decides at build time which token a step gets: node-side **uploads** carry the node token whenever the node slot is filled, while node-side **downloads and cloud deletes** always carry the main token, because those need the read and delete capability a write-only key deliberately lacks. The agent resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
+
+For node-side operations (upload, delete, download), the resolved credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
 
 Because the script is composed from the control plane's own copy of those two files, changes to the signer or the uploader reach every node on its next job — there is no agent release or node upgrade in the loop.
 
@@ -645,15 +649,20 @@ takes nothing with it.
 
 #### The node may write to the shelf but never erase it
 
-The credential a node is handed is **write-only** — `writeFiles` on B2,
-`s3:PutObject` without `s3:DeleteObject` on S3. A node can add its archives and
-remove nothing.
+A backup target holds two credential slots. The main credential
+(`bkt_credentials`) is the control plane's own — it lists, prunes and downloads.
+The **node credential** (`bkt_node_credentials`, on the target edit form) is an
+optional second key created **write-only** — `writeFiles` without `deleteFiles`
+on B2, `s3:PutObject` without `s3:DeleteObject` on S3. When it is set, that is
+the key nodes are handed during a run: a node can add its archives and remove
+nothing. When no node credential is configured, nodes receive the main key —
+functional, but a compromised node then briefly holds a key that could erase
+the shelf, so a fleet target wants the node slot filled.
 
-This is why `FleetBackupRetention` prunes from here instead, with a
-delete-capable credential that never leaves this machine. A credential that can
-delete is a credential that can erase the fleet's backups, which is the first
-move of any ransomware worth the name and the exact thing these copies exist to
-survive.
+`FleetBackupRetention` prunes from here, with the delete-capable main
+credential that never leaves this machine. A credential that can delete is a
+credential that can erase the fleet's backups, which is the first move of any
+ransomware worth the name and the exact thing these copies exist to survive.
 
 Pruning is driven by a bucket **listing**, which is the opposite of what a site
 does for its own backups, and correct only here: this control plane defined the
@@ -994,6 +1003,7 @@ Configured storage target for backups. Key fields:
 - `bkt_bucket` -- Bucket name (required)
 - `bkt_path_prefix` -- Path prefix within the bucket (default: `joinery-backups`)
 - `bkt_credentials` -- JSON with the unified shape `{access_key, secret_key, region, endpoint}` for every provider; B2's region/endpoint are auto-detected at save time
+- `bkt_node_credentials` -- optional write-only key handed to nodes during a backup run in place of the main one; same shape, same sealing; B2/S3 only
 - `bkt_delete_local` -- Whether to delete local backup after successful upload
 - `bkt_enabled` -- Whether this target is active
 

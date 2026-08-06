@@ -15,6 +15,9 @@
  * seals; get_credentials() unseals. A legacy plaintext credential object reads
  * back unchanged, so existing rows migrate the next time they are saved.
  *
+ * @version 2.3 - bkt_node_credentials: a second, write-only credential handed to nodes during
+ *                a backup run in place of the main (delete-capable) key. Optional — when empty,
+ *                node-bound jobs carry the main credential as before. Sealed the same way.
  * @version 2.2 - sealed credentials that cannot be decrypted FAIL LOUD (a rotated/missing
  *                secret_box_key must not read as "no credentials"); seal_credentials only
  *                tolerates the no-key zero-config case, never an encryption failure
@@ -31,7 +34,7 @@ class BackupTarget extends SystemBase {
 	public static $tablename = 'bkt_backup_targets';
 	public static $pkey_column = 'bkt_id';
 
-	public static $json_vars = array('bkt_credentials');
+	public static $json_vars = array('bkt_credentials', 'bkt_node_credentials');
 
 	public static $field_specifications = array(
 		'bkt_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
@@ -39,7 +42,8 @@ class BackupTarget extends SystemBase {
 		'bkt_provider'        => array('type'=>'varchar(30)', 'required'=>true, 'is_nullable'=>false, 'allowed_values'=>array('b2', 's3', 'linode')),
 		'bkt_bucket'          => array('type'=>'varchar(255)'),
 		'bkt_path_prefix'     => array('type'=>'varchar(255)', 'default'=>'joinery-backups'),
-		'bkt_credentials'     => array('type'=>'jsonb'),
+		'bkt_credentials'      => array('type'=>'jsonb'),
+		'bkt_node_credentials' => array('type'=>'jsonb'),
 		'bkt_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'bkt_create_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkt_update_time'     => array('type'=>'timestamp(6)'),
@@ -71,7 +75,8 @@ class BackupTarget extends SystemBase {
 	 * before save()).
 	 */
 	function save($debug = false) {
-		$this->seal_credentials();
+		$this->seal_credentials('bkt_credentials');
+		$this->seal_credentials('bkt_node_credentials');
 		return parent::save($debug);
 	}
 
@@ -85,7 +90,27 @@ class BackupTarget extends SystemBase {
 	 * restored to a machine without it) stays invisible.
 	 */
 	function get_credentials() {
-		$arr = self::creds_to_array($this->get('bkt_credentials'));
+		return $this->unseal_column('bkt_credentials');
+	}
+
+	/**
+	 * The write-only credential handed to nodes during a backup run, or [] when
+	 * none is configured (nodes then receive the main credential).
+	 */
+	function get_node_credentials() {
+		return $this->unseal_column('bkt_node_credentials');
+	}
+
+	/**
+	 * Whether a node-facing credential is configured, without decrypting it.
+	 * This is what decides which placeholder token a node-bound job carries.
+	 */
+	function has_node_credentials() {
+		return !empty(self::creds_to_array($this->get('bkt_node_credentials')));
+	}
+
+	private function unseal_column($column) {
+		$arr = self::creds_to_array($this->get($column));
 		if (self::looks_sealed($arr)) {
 			try {
 				$plain = (new SecretBox())->decrypt($arr['enc']);
@@ -103,13 +128,13 @@ class BackupTarget extends SystemBase {
 	}
 
 	/**
-	 * Encrypt the stored credential object in place as {"enc": "<blob>"}.
+	 * Encrypt a stored credential column in place as {"enc": "<blob>"}.
 	 * Idempotent (an already-sealed value is left alone) and a no-op when there
 	 * are no credentials or no SecretBox key is configured — the latter keeps a
 	 * zero-config install writing readable plaintext rather than failing.
 	 */
-	private function seal_credentials() {
-		$arr = self::creds_to_array($this->get('bkt_credentials'));
+	private function seal_credentials($column) {
+		$arr = self::creds_to_array($this->get($column));
 		if (empty($arr) || self::looks_sealed($arr)) {
 			return;
 		}
@@ -122,7 +147,7 @@ class BackupTarget extends SystemBase {
 		}
 		// An actual encryption failure propagates: silently persisting plaintext
 		// when encryption was expected would defeat at-rest protection unnoticed.
-		$this->set('bkt_credentials', array('enc' => $box->encrypt(json_encode($arr))));
+		$this->set($column, array('enc' => $box->encrypt(json_encode($arr))));
 	}
 
 	/** Normalise the stored credential value (array or JSON string) to an array. */
