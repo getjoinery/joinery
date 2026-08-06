@@ -56,12 +56,50 @@ class BackupEnvelope {
 	 * The data key is base64 text rather than raw bytes because openssl consumes
 	 * it as a PBKDF2 passphrase on a pipe; 32 random bytes of entropy either way.
 	 */
-	public static function mint($artifact_name) {
+	public static function mint($artifact_name, ?array $recipients = null) {
 		$data_key = base64_encode(random_bytes(32));
 		return [
 			'data_key' => $data_key,
-			'envelope' => self::build($data_key, $artifact_name, self::recipients()),
+			'envelope' => self::build($data_key, $artifact_name, $recipients ?? self::recipients()),
 		];
+	}
+
+	/**
+	 * The recipient set for a run sealed to a recovery key that is NOT this
+	 * site's own — a control plane backing this site up carries its key with the
+	 * run rather than storing it here, so the site never holds, and can never
+	 * drift into using, somebody else's key for its own backups.
+	 *
+	 * The site recipient is kept: unattended self-restore is exactly what it
+	 * exists for, and the archive is sitting on this machine anyway.
+	 */
+	public static function recipients_for_foreign_recovery($recovery_pub): array {
+		$pub = self::normalize_public_key($recovery_pub);
+		return [
+			['kind' => 'recovery', 'pub' => $pub],
+			['kind' => 'site',     'pub' => self::site_public_key()],
+		];
+	}
+
+	/**
+	 * Accept a recovery public key as raw bytes or base64 and return raw bytes.
+	 *
+	 * Validated rather than trusted: sealing to a malformed key fails loudly
+	 * here, whereas sealing to a well-formed key nobody holds the private half
+	 * of appears to succeed and produces archives that can never be opened.
+	 */
+	public static function normalize_public_key($pub) {
+		$raw = (string)$pub;
+		if (strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			$decoded = base64_decode(trim($raw), true);
+			if ($decoded === false || strlen($decoded) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+				throw new BackupEnvelopeException(
+					'The supplied recovery public key is not a valid box public key '
+					. '(expected ' . SODIUM_CRYPTO_BOX_PUBLICKEYBYTES . ' raw bytes, or that base64-encoded).');
+			}
+			$raw = $decoded;
+		}
+		return $raw;
 	}
 
 	/**

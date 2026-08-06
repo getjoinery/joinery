@@ -5,11 +5,15 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.24 - build_backup_run(): this control plane's own backup of a node, run by the node's
+ *                 own engine with the bucket, a write-only credential and the recovery key supplied
+ *                 per run and never stored there. Writing a node's own recovery key is retired —
+ *                 that slot's custodian is whoever administers the site. Backup jobs now resolve
+ *                 their archive against a before-list rather than `ls -t`, and mint their envelope
+ *                 at a per-job scratch path, so a concurrent run cannot be sealed or uploaded by
+ *                 mistake; a From-Backup install no longer clones the source's site key
  * @version 1.23 - build_run_command(): one ad-hoc command from the node detail Console tab, bounded by
  *                 a closed timeout set rather than by inspecting the command
- * @version 1.22 - build_push_recovery_key(): hand a node the control plane's proven backup recovery
- *                 key so it can encrypt its own scheduled backups; also pushed during install and
- *                 reported by the status check
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
@@ -556,16 +560,18 @@ class JobCommandBuilder {
 		}
 
 		$steps = [];
+		$scratch = self::new_scratch_id();
 
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
 			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
+		$steps[] = self::step_snapshot_before($scratch);
 
 		// The key is minted before the engine runs, because the engine encrypts
 		// with it. Directory first, since that is where the key lands.
 		if (!empty($params['encryption'])) {
-			$steps[] = self::step_mint_envelope($node);
-			$flags .= ' --key-file ' . escapeshellarg(self::ENVELOPE_KEY_PATH);
+			$steps[] = self::step_mint_envelope($node, $scratch);
+			$flags .= ' --key-file ' . escapeshellarg(self::envelope_key_path($scratch));
 		}
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
@@ -573,15 +579,17 @@ class JobCommandBuilder {
 			'timeout' => 3600];
 
 		if (!empty($params['encryption'])) {
-			$steps[] = self::step_finalize_envelope($node);
+			$steps[] = self::step_finalize_envelope($node, $scratch);
 		}
 
 		// Append upload step if node has a cloud target
-		self::append_upload_steps($steps, $node, !empty($params['encryption']));
+		self::append_upload_steps($steps, $node, !empty($params['encryption']), $scratch);
 
 		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
 			'cmd' => 'ls -lht ' . self::backup_glob() . ' 2>/dev/null | head -5',
 			'continue_on_error' => true];
+
+		$steps[] = self::step_clean_before($scratch);
 
 		return $steps;
 	}
@@ -610,16 +618,18 @@ class JobCommandBuilder {
 		}
 
 		$steps = [];
+		$scratch = self::new_scratch_id();
 
 		$sudo = self::sudo_prefix($node);
 		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
 			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
+		$steps[] = self::step_snapshot_before($scratch);
 
 		// The key is minted before the engine runs, because the engine encrypts
 		// the archive with it as tar streams out.
 		if (!empty($params['encryption'])) {
-			$steps[] = self::step_mint_envelope($node);
-			$flags .= ' --key-file ' . escapeshellarg(self::ENVELOPE_KEY_PATH);
+			$steps[] = self::step_mint_envelope($node, $scratch);
+			$flags .= ' --key-file ' . escapeshellarg(self::envelope_key_path($scratch));
 		}
 
 		// Emit the credentials preamble so the script inherits DB_NAME/DB_USER/
@@ -631,16 +641,102 @@ class JobCommandBuilder {
 			'timeout' => 3600];
 
 		if (!empty($params['encryption'])) {
-			$steps[] = self::step_finalize_envelope($node);
+			$steps[] = self::step_finalize_envelope($node, $scratch);
 		}
 
-		self::append_upload_steps($steps, $node, !empty($params['encryption']));
+		self::append_upload_steps($steps, $node, !empty($params['encryption']), $scratch);
 
 		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
 			'cmd' => "ls -lht /backups/ 2>/dev/null | head -5",
 			'continue_on_error' => true];
 
+		$steps[] = self::step_clean_before($scratch);
+
 		return $steps;
+	}
+
+	/**
+	 * A control plane's own backup of a node — the manager profile.
+	 *
+	 * The node does the work. It builds the archive, extends the chain, seals the
+	 * envelope, uploads and sweeps its own local copies, all through the same
+	 * BackupRunner that takes its own backups. Routing any of that through the
+	 * control plane would drag whole archives down and push them back up for no
+	 * reason, and would put the control plane in the path of every restore.
+	 *
+	 * What the control plane contributes is the three things the node must not
+	 * hold: the bucket, the credential, and the recovery key to seal to. All
+	 * three arrive with the run and leave with it.
+	 *
+	 * The credential is a WRITE-ONLY one. The node can add objects to the shelf
+	 * and cannot remove any, so a compromised node cannot erase the fleet's
+	 * backups — which is why manager retention runs on the control plane instead
+	 * (see FleetBackupRetention) and why this job never asks the node to prune.
+	 *
+	 * Config travels on stdin, not argv: argv is world-readable on the box for
+	 * the life of the process and one of these fields is a credential.
+	 */
+	public static function build_backup_run($node, $params = []) {
+		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' has no enabled backup target, so there is nowhere to put "
+				. 'a backup this control plane takes.');
+		}
+
+		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
+		if ($web_root === '') {
+			throw new Exception("Node '{$node->get('mgn_slug')}' hosts no Joinery site to back up.");
+		}
+
+		$slug = trim((string)$node->get('mgn_slug'));
+		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
+			throw new Exception(
+				"Node slug '{$slug}' cannot be used as a bucket path segment; it may only contain "
+				. 'letters, numbers, hyphens and underscores.');
+		}
+
+		// Reading the recovery key here means a control plane that has not
+		// finished its own setup fails when the job is BUILT, with a message the
+		// operator sees, rather than part-way through a backup nobody could open.
+		$recovery_pub = base64_encode(BackupRecoveryKey::public_key());
+
+		$config = [
+			'target_name'               => (string)$target->get('bkt_name'),
+			'provider'                  => (string)$target->get('bkt_provider'),
+			'bucket'                    => (string)$target->get('bkt_bucket'),
+			'path_prefix'               => (string)($target->get('bkt_path_prefix') ?: 'joinery-backups'),
+			'credentials_b64'           => '__SM_CREDS_' . (int)$target->key . '__',
+			'recovery_public_key'       => $recovery_pub,
+			'slug'                      => $slug,
+			'type'                      => (($params['type'] ?? 'project') === 'database') ? 'database' : 'project',
+			'mode'                      => (($params['mode'] ?? 'chain') === 'full') ? 'full' : 'chain',
+			'full_interval_days'        => (int)($params['full_interval_days'] ?? 7),
+			'keep_local_days'           => (int)($params['keep_local_days'] ?? 7),
+			'delete_local_after_upload' => (bool)($params['delete_local_after_upload']
+				?? $node->get('mgn_delete_local_after_upload')),
+		];
+
+		// JSON_UNESCAPED_SLASHES only for readability in the job log; the value is
+		// consumed by json_decode either way. The heredoc is quoted, so nothing in
+		// the body is expanded by the shell.
+		$json = json_encode($config, JSON_UNESCAPED_SLASHES);
+		$eof  = '__JOINERY_BACKUP_CONFIG_EOF__';
+
+		$cmd = 'php ' . escapeshellarg($web_root . '/utils/run_backup.php') . ' --profile=manager'
+			. " <<'{$eof}'\n{$json}\n{$eof}";
+
+		return [[
+			'type'    => 'ssh',
+			'label'   => 'Run backup to ' . $target->get('bkt_name'),
+			'cmd'     => $cmd,
+			// The engine ceiling plus the uploader's own retry budget: the agent
+			// must not kill a transfer part-way through a retry.
+			'timeout' => S3Signer::transfer_budget_seconds() + 10800,
+		]];
 	}
 
 	/**
@@ -1142,9 +1238,89 @@ class JobCommandBuilder {
 
 	// ── Backup target helpers ──
 
-	/** Working paths for the envelope, before the archive's real name is known. */
-	const ENVELOPE_KEY_PATH     = '/backups/.jy_envelope.key';
-	const ENVELOPE_SIDECAR_PATH = '/backups/.jy_envelope.keys.json';
+	/**
+	 * Scratch paths for a backup job, before the archive's real name is known.
+	 *
+	 * Per job, not fixed. Two backups running on one node at the same time — two
+	 * jobs, or a job alongside the node's own scheduled run — used to mint over
+	 * each other's envelope at one shared path, and the loser ended up with an
+	 * archive whose envelope named a different archive. That is unrecoverable and
+	 * silent: the archive looks encrypted and complete right up until someone
+	 * needs it.
+	 *
+	 * The id is baked into the stored command, so a teardown replayed against a
+	 * stale job still addresses that job's own scratch and nobody else's.
+	 */
+	const ENVELOPE_SCRATCH_PREFIX = '/backups/.jy_envelope_';
+	const BEFORE_LIST_PREFIX      = '/backups/.jy_before_';
+
+	private static function new_scratch_id() {
+		return bin2hex(random_bytes(6));
+	}
+
+	private static function envelope_key_path($scratch) {
+		return self::ENVELOPE_SCRATCH_PREFIX . $scratch . '.key';
+	}
+
+	private static function envelope_sidecar_path($scratch) {
+		return self::ENVELOPE_SCRATCH_PREFIX . $scratch . '.keys.json';
+	}
+
+	private static function before_list_path($scratch) {
+		return self::BEFORE_LIST_PREFIX . $scratch . '.list';
+	}
+
+	/**
+	 * Record what is in the backup directory BEFORE this job writes anything.
+	 *
+	 * Every later step that has to name "the archive this job just produced"
+	 * resolves it by being new, not by being newest. Newest is wrong whenever
+	 * anything else writes to the same directory in the same window — the node's
+	 * own scheduled backup, most obviously — and the failure mode is that the job
+	 * seals, uploads or deletes a file belonging to somebody else's run.
+	 */
+	private static function step_snapshot_before($scratch) {
+		$before = escapeshellarg(self::before_list_path($scratch));
+		return ['type' => 'ssh', 'label' => 'Note existing backup files',
+			'cmd' => 'ls -1d /backups/* 2>/dev/null > ' . $before . ' || true',
+			'continue_on_error' => true, 'timeout' => 60];
+	}
+
+	/** Remove the before-list. Scratch at a per-job path: teardown-safe. */
+	private static function step_clean_before($scratch) {
+		return ['type' => 'ssh', 'label' => 'Clean up backup scratch',
+			'cmd' => 'rm -f ' . escapeshellarg(self::before_list_path($scratch)),
+			'teardown' => true, 'continue_on_error' => true, 'timeout' => 60];
+	}
+
+	/**
+	 * Shell that puts the path of the file this job produced in $ARCHIVE — the
+	 * newest backup artifact that was NOT there when the job started.
+	 *
+	 * Falls back to plain newest only when the before-list is missing, which
+	 * means the snapshot step could not run at all.
+	 */
+	private static function resolve_new_archive($scratch) {
+		return 'ARCHIVE=$(' . self::new_file_pipeline(self::backup_glob(), $scratch, true) . ')';
+	}
+
+	/** The same, for the envelope this job's finalize step wrote. */
+	private static function resolve_new_sidecar($scratch) {
+		return 'UPLOAD_FILE=$(' . self::new_file_pipeline('/backups/*.keys.json', $scratch, false) . ')';
+	}
+
+	private static function new_file_pipeline($glob, $scratch, $drop_sidecars) {
+		$before = escapeshellarg(self::before_list_path($scratch));
+		$pipe = 'ls -1t ' . $glob . ' 2>/dev/null';
+		if ($drop_sidecars) {
+			// A sidecar is a backup artifact by glob but never the archive, and
+			// it is also new — so it would win a newest-first race with the file
+			// it describes.
+			$pipe .= " | grep -v '\\.keys\\.json\$'";
+		}
+		$pipe .= ' | { if [ -f ' . $before . ' ]; then grep -vxF -f ' . $before . '; else cat; fi; }';
+		return $pipe . ' | head -1';
+	}
 
 	/**
 	 * Mint the encryption key for this backup, on the node.
@@ -1164,7 +1340,7 @@ class JobCommandBuilder {
 	 * when the job is BUILT, with a message the operator sees immediately,
 	 * rather than part-way through a backup that then cannot be encrypted.
 	 */
-	private static function step_mint_envelope($node) {
+	private static function step_mint_envelope($node, $scratch) {
 		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 		$recovery_pub = base64_encode(BackupRecoveryKey::public_key());
@@ -1175,65 +1351,29 @@ class JobCommandBuilder {
 		$cmd = 'php ' . escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php') . ' mint'
 			. ' --recovery-pub ' . escapeshellarg($recovery_pub)
 			. ' --artifact pending'
-			. ' --key-out ' . escapeshellarg(self::ENVELOPE_KEY_PATH)
-			. ' --sidecar-out ' . escapeshellarg(self::ENVELOPE_SIDECAR_PATH)
+			. ' --key-out ' . escapeshellarg(self::envelope_key_path($scratch))
+			. ' --sidecar-out ' . escapeshellarg(self::envelope_sidecar_path($scratch))
 			. ' --site-key ' . escapeshellarg($site_key);
 
 		return ['type' => 'ssh', 'label' => 'Mint backup encryption key', 'cmd' => $cmd, 'timeout' => 120];
 	}
 
 	/**
-	 * Give a node the control plane's recovery key, so it can encrypt its own
-	 * scheduled backups without the operator repeating the setup ceremony on it.
+	 * There is deliberately no way to write a node's own recovery key from here.
 	 *
-	 * A manager-driven backup job ships the recovery public key in the step
-	 * command and works on a node that has never heard of it. A backup the node
-	 * runs on its own schedule cannot: it reads its own setting, and refuses
-	 * outright when that is empty. So a node nobody has visited is a node making
-	 * no encrypted backups, and it stays that way silently.
+	 * That setting holds the key for the SITE's backups, and its custodian is
+	 * whoever administers the site. A control plane writing into it would make
+	 * itself the holder of the private half of a key the site believes is its
+	 * own — and would mean archives on that site's shelf open with a key its
+	 * operator does not have.
 	 *
-	 * The public key and its proof marker both travel in the command. A public
-	 * key seals but cannot open, and a fingerprint is a hash — a job row that
-	 * persists forever holds nothing worth stealing.
-	 *
-	 * The node decides what to do with it: set_recovery_key.php fills an empty
-	 * slot and never overwrites one, so this is safe to run against any node at
-	 * any time, including one that already has a key of its own.
+	 * Nothing here needs it. A backup this control plane takes carries its own
+	 * recovery public key with the run (see build_backup_run), so it works
+	 * against a node that has never heard of this control plane and leaves
+	 * nothing behind. `set_recovery_key.php --report` is still asked during
+	 * check_status, because which key a site holds is worth knowing; it is
+	 * reported and never written.
 	 */
-	public static function build_push_recovery_key($node) {
-		return [self::step_push_recovery_key(self::get_scripts_path($node))];
-	}
-
-	/**
-	 * The push as a single step, so a fresh install can carry it and a node is
-	 * never born without a recovery key.
-	 *
-	 * Reading the key here means a manager whose own key is unconfigured or
-	 * unproven fails when the job is BUILT, with a message the operator sees,
-	 * rather than pushing something no backup could ever be opened with.
-	 */
-	private static function step_push_recovery_key($scripts_path) {
-		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
-
-		$pub = base64_encode(BackupRecoveryKey::public_key());   // throws unless proven
-		$fpr = hash('sha256', BackupRecoveryKey::public_key());
-
-		$cmd = 'php ' . escapeshellarg($scripts_path . '/sysadmin_tools/set_recovery_key.php')
-			. ' --public ' . escapeshellarg($pub)
-			. ' --proven-fpr ' . escapeshellarg($fpr);
-
-		return ['type' => 'ssh', 'label' => 'Push backup recovery key', 'cmd' => $cmd, 'timeout' => 120];
-	}
-
-	/**
-	 * Whether the control plane has a recovery key worth pushing. Callers that
-	 * add the push to a bigger job ask first: a manager that has not finished
-	 * its own setup should not fail an install over it.
-	 */
-	public static function can_push_recovery_key(): bool {
-		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
-		return BackupRecoveryKey::is_ready();
-	}
 
 	/**
 	 * Point the envelope at the archive that was just written, and destroy the
@@ -1245,13 +1385,13 @@ class JobCommandBuilder {
 	 * still fails the step, so the operator sees an archive whose envelope needs
 	 * attention rather than one silently missing its key.
 	 */
-	private static function step_finalize_envelope($node) {
+	private static function step_finalize_envelope($node, $scratch) {
 		$scripts = self::get_scripts_path($node);
 		$tool    = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
-		$key     = escapeshellarg(self::ENVELOPE_KEY_PATH);
-		$sidecar = escapeshellarg(self::ENVELOPE_SIDECAR_PATH);
+		$key     = escapeshellarg(self::envelope_key_path($scratch));
+		$sidecar = escapeshellarg(self::envelope_sidecar_path($scratch));
 
-		$resolve = 'ARCHIVE=$(ls -t ' . self::backup_glob() . ' 2>/dev/null | head -1)';
+		$resolve = self::resolve_new_archive($scratch);
 		$shred   = '{ shred -u ' . $key . ' 2>/dev/null || rm -f ' . $key . '; }';
 
 		$cmd = $resolve
@@ -1324,13 +1464,13 @@ class JobCommandBuilder {
 	 * node has a cloud backup target configured. Picks the newest backup file,
 	 * which is the one the preceding backup step just wrote.
 	 */
-	private static function append_upload_steps(&$steps, $node, $encrypted = false) {
+	private static function append_upload_steps(&$steps, $node, $encrypted, $scratch) {
 		$target = self::get_target($node);
 		if (!$target) return;
 
 		$delete_local = (bool) $node->get('mgn_delete_local_after_upload');
 
-		$resolve = 'UPLOAD_FILE=$(ls -t ' . self::backup_glob() . ' 2>/dev/null | head -1)';
+		$resolve = self::resolve_new_archive($scratch) . ' && UPLOAD_FILE="$ARCHIVE"';
 		$steps[] = self::upload_step($node, $target, $resolve, $delete_local);
 
 		// The envelope is what makes the archive readable again, so it has to
@@ -1338,10 +1478,10 @@ class JobCommandBuilder {
 		// indistinguishable from noise. It is resolved separately rather than
 		// carried over from the previous step because each step is its own SSH
 		// session; the archive upload may also have just deleted its own file,
-		// which is why this globs the sidecar rather than deriving it.
+		// which is why this finds the sidecar directly rather than deriving it
+		// from a path that no longer exists.
 		if ($encrypted) {
-			$sidecar_resolve = 'UPLOAD_FILE=$(ls -t /backups/*.keys.json 2>/dev/null | head -1)';
-			$steps[] = self::upload_step($node, $target, $sidecar_resolve, $delete_local);
+			$steps[] = self::upload_step($node, $target, self::resolve_new_sidecar($scratch), $delete_local);
 		}
 	}
 
@@ -2235,22 +2375,33 @@ class JobCommandBuilder {
 			// is silent: every uploaded file is simply absent from where the database
 			// says it is. The extract must also be allowed to fail the job, since a
 			// clone that lost its files is not a usable clone.
+			//
+			// config/backup_site_key is excluded for a different reason than
+			// Globalvars_site.php. It is the keypair that identifies THIS machine
+			// as a recipient of its own backups, and it is supposed to be per-site
+			// and disposable. A clone that inherits its source's key makes two
+			// sites share one identity: the envelope's site recipient stops saying
+			// which machine made a backup, and one machine's key opens the other's
+			// archives. backup_envelope.php mints a fresh one on first use, so
+			// leaving it absent is the correct state, not a gap.
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Extract project files',
-				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=2 --wildcards --exclude='config/Globalvars_site.php' '*/project_files/*'",
+				'cmd' => "tar xzf {$remote_project_tar} -C /var/www/html/{$sitename} --strip-components=2 --wildcards"
+					. " --exclude='config/Globalvars_site.php' --exclude='config/backup_site_key' '*/project_files/*'",
 				'timeout' => 3600]);
 
 			// Prove the files actually landed. Every regular file the archive carries
-			// must now exist at the site root; the target keeps its own
-			// Globalvars_site.php, so that one is excluded on both sides. A leftover
-			// project_files/ directory is checked by name because it is the exact
-			// signature of an extract at the wrong depth.
+			// must now exist at the site root; the two files the target keeps or
+			// mints for itself are excluded on both sides. A leftover project_files/
+			// directory is checked by name because it is the exact signature of an
+			// extract at the wrong depth.
 			$site_dir_esc = escapeshellarg("/var/www/html/{$sitename}");
 			$tar_esc      = escapeshellarg($remote_project_tar);
 			$verify_cmd =
 				  "SITE={$site_dir_esc}; TAR={$tar_esc}; "
 				. "if [ -d \"\$SITE/project_files\" ]; then "
 				.   "echo 'VERIFY FAILED: project_files/ present in the site root - archive extracted at the wrong depth'; exit 1; fi; "
-				. "LIST=\$(tar tzf \"\$TAR\" | sed -n 's|^[^/]*/project_files/||p' | grep -v '/\$' | grep -v '^config/Globalvars_site\\.php\$'); "
+				. "LIST=\$(tar tzf \"\$TAR\" | sed -n 's|^[^/]*/project_files/||p' | grep -v '/\$' "
+				.   "| grep -v '^config/Globalvars_site\\.php\$' | grep -v '^config/backup_site_key\$'); "
 				. "TOTAL=\$(printf '%s\\n' \"\$LIST\" | grep -c . || true); "
 				. "MISSING=\$(printf '%s\\n' \"\$LIST\" | while IFS= read -r f; do "
 				.   "if [ -n \"\$f\" ] && [ ! -e \"\$SITE/\$f\" ]; then printf '%s\\n' \"\$f\"; fi; done); "
@@ -2349,19 +2500,12 @@ class JobCommandBuilder {
 			'on_host' => true,
 			'cmd' => $verify_cmd];
 
-		// Hand the new site the recovery key before anyone leaves the install
-		// screen, so it can encrypt its own scheduled backups from day one
-		// rather than waiting for someone to remember to visit its admin. A
-		// manager that has not finished its own recovery setup simply has
-		// nothing to give — that is a gap to fix at the manager, not a reason
-		// to fail an install that otherwise worked.
-		if (self::can_push_recovery_key()) {
-			$steps[] = array_merge(
-				self::step_push_recovery_key("/var/www/html/{$sitename}/maintenance_scripts"),
-				['continue_on_error' => true]
-			);
-		}
-
+		// A new site is NOT given a recovery key here. It is covered from birth by
+		// this control plane's own backups, which carry their key with each run;
+		// the site's own key is its operator's to set up, on its own Backups page,
+		// with the possession ceremony that makes it trustworthy. Handing one over
+		// at install time would put this control plane's key in a slot whose
+		// custodian is somebody else.
 		return array_merge($steps, $teardown);
 	}
 

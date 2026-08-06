@@ -1081,8 +1081,27 @@ foreach (['build_backup_database', 'build_backup_project'] as $builder) {
 	// The engine has to be told which key to use, or it would silently fall
 	// back to whatever happens to be in $HOME and the envelope would describe
 	// a key the archive was not encrypted with.
-	check(strpos($all_cmd, '--key-file') !== false && strpos($all_cmd, JobCommandBuilder::ENVELOPE_KEY_PATH) !== false,
+	check(strpos($all_cmd, '--key-file') !== false
+		&& strpos($all_cmd, JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX) !== false,
 		$builder . ': the engine is pointed at the minted key');
+
+	// Scratch paths are per job. A fixed path means two backups running on one
+	// node at the same time mint over each other's envelope, and the loser gets
+	// an archive whose envelope names a different archive — silent, and only
+	// discovered when someone tries to restore.
+	$second = JobCommandBuilder::$builder($enc_node);
+	$second_cmd = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $second));
+	preg_match('/' . preg_quote(JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX, '/') . '([0-9a-f]+)\./', $all_cmd, $m1);
+	preg_match('/' . preg_quote(JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX, '/') . '([0-9a-f]+)\./', $second_cmd, $m2);
+	check(!empty($m1[1]) && !empty($m2[1]) && $m1[1] !== $m2[1],
+		$builder . ': two jobs get different envelope scratch paths',
+		($m1[1] ?? '?') . ' vs ' . ($m2[1] ?? '?'));
+
+	// The archive is identified by being NEW, not by being newest. Newest picks
+	// up whatever the node's own scheduled run wrote in the same window.
+	check(strpos($all_cmd, JobCommandBuilder::BEFORE_LIST_PREFIX) !== false
+		&& strpos($all_cmd, 'grep -vxF -f') !== false,
+		$builder . ': resolves its own archive against a before-list, not ls -t');
 
 	// The plaintext key must not outlive the run: leaving it on disk puts a
 	// working decryption key next to the thing it decrypts.

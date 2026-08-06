@@ -172,15 +172,34 @@ class JobResultProcessor {
 			if (isset($result['backup_recovery_state'])) {
 				$node->set('mgn_backup_recovery_fpr', (string)($result['backup_recovery_fpr'] ?? ''));
 			}
+
+			// What the node says about MY backups of it. The node's history is the
+			// authority — it is the only record that includes runs which failed —
+			// so a status check refreshes the fleet's copy from it rather than
+			// trusting what the last job happened to stamp. The site's own profile
+			// travels in the same payload and is kept as information, never
+			// promoted into a fleet problem.
+			if (isset($result['backups']['manager'])) {
+				$mgr = $result['backups']['manager'];
+				// A run still in flight reports 'running' — neither success nor
+				// failure yet. It keeps the previous stamp: writing it as failed
+				// would raise a dashboard alarm for every backup a status check
+				// happens to land in the middle of, and manager runs take long
+				// enough that one usually does.
+				if (!empty($mgr['last_run']) && ($mgr['last_outcome'] ?? '') !== 'running') {
+					$node->set('mgn_last_backup_time', $mgr['last_run']);
+					$node->set('mgn_last_backup_outcome',
+						(($mgr['last_outcome'] ?? '') === 'success') ? 'success' : 'failed');
+				}
+			}
 			$node->save();
 
-			// An empty slot is filled here rather than waiting for someone to
-			// notice it. This is the path that brings nodes installed before the
-			// push existed into line, and that repairs a node whose key was
-			// cleared — without it, "every managed site is covered" would only
-			// ever be true of sites installed after today.
-			self::push_recovery_key_if_empty($node, $result);
-
+			// An empty slot is REPORTED and nothing else. That slot holds the key
+			// for the site's own backups, and its custodian is whoever
+			// administers the site — filling it from here would make this control
+			// plane the holder of the private half of a key the site believes is
+			// its own. A control plane's own backups of this node need nothing in
+			// it: the manager profile carries its key with each run.
 			// The first confirmation of an active cert doubles as the
 			// reverse-DNS moment for cloud-born nodes: the domain has just
 			// proven it resolves to this box, which is the provider's
@@ -231,65 +250,6 @@ class JobResultProcessor {
 			'backup_recovery_state' => $proven ? 'proven' : 'unproven',
 			'backup_recovery_fpr'   => $fpr,
 		];
-	}
-
-	/**
-	 * Record what a push did. The push reports the node's resulting state, so
-	 * the fleet view is right immediately rather than after the next status
-	 * check — including the case where the node turned out to be holding
-	 * somebody else's key and the push walked away.
-	 */
-	private static function process_push_recovery_key($job) {
-		$recovery = self::parse_recovery_key_token($job->get('mjb_output') ?: '');
-		$node_id  = $job->get('mjb_mgn_node_id');
-		if ($recovery === null || !$node_id) return;
-
-		try {
-			$node = new ManagedNode($node_id, TRUE);
-			$node->set('mgn_backup_recovery_fpr', (string)$recovery['backup_recovery_fpr']);
-			$node->save();
-		} catch (Exception $e) {
-			error_log('JobResultProcessor: could not record a recovery key push for node '
-				. $node_id . ': ' . $e->getMessage());
-		}
-
-		$job->set('mjb_result', json_encode($recovery));
-		$job->save();
-	}
-
-	/**
-	 * Queue a recovery-key push for a node the status check just found with an
-	 * empty slot.
-	 *
-	 * Deliberately not an operator action. The chore this replaces scaled with
-	 * the fleet, so the natural response was to skip it, and the site that got
-	 * skipped was the one with no backups. Filling an empty slot cannot destroy
-	 * anything — a node with no key is a node making no encrypted backups — so
-	 * there is nothing here worth asking permission for.
-	 *
-	 * Every other case is left alone: a node already holding a key (ours or
-	 * anyone's), a node that hosts no Joinery site, a node whose Joinery checks
-	 * are switched off, and a control plane that has not finished its own
-	 * recovery setup and so has nothing to give.
-	 */
-	private static function push_recovery_key_if_empty($node, array $result): void {
-		$state = $result['backup_recovery_state'] ?? '';
-		if ($state !== 'unconfigured' && $state !== 'invalid') return;
-		if (!$node->get('mgn_web_root')) return;          // DNS box, relay: not applicable
-		if ($node->get('mgn_skip_joinery_checks')) return;
-
-		try {
-			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-			if (!JobCommandBuilder::can_push_recovery_key()) return;
-
-			$steps = JobCommandBuilder::build_push_recovery_key($node);
-			ManagementJob::createJob($node->key, 'push_recovery_key', $steps, null, null);
-		} catch (Throwable $e) {
-			// A status check that could not queue a follow-up is still a good
-			// status check. The next one tries again.
-			error_log('JobResultProcessor: could not queue a recovery key push for node '
-				. $node->key . ': ' . $e->getMessage());
-		}
 	}
 
 	/**
@@ -432,6 +392,61 @@ class JobResultProcessor {
 	 */
 	private static function process_backup_project($job) {
 		self::process_backup_database($job);
+	}
+
+	/**
+	 * Record what a manager-profile run did, and stamp it on the node.
+	 *
+	 * The verdict comes from the machine-readable BACKUP_RESULT line rather than
+	 * the exit status, because the runner deliberately exits 0 for a run it
+	 * SKIPPED — another backup was already in progress on that machine. A skip
+	 * is neither a success nor a failure: nothing was backed up, so it must not
+	 * refresh "last successful backup", and nothing is wrong, so it must not
+	 * raise an alarm.
+	 *
+	 * The time comes from the node's BACKUP_TIME line for the same reason: it is
+	 * when the run STARTED, as the node's own history records it — the identical
+	 * value a status check would later copy — so the stamp means one thing
+	 * whichever path wrote it. Falling back to now() only covers a node whose
+	 * runner predates the line.
+	 */
+	private static function process_backup_run($job) {
+		$output = $job->get('mjb_output') ?: '';
+
+		$status = 'unknown';
+		if (preg_match('/^BACKUP_RESULT=(\w+)$/m', $output, $m)) {
+			$status = $m[1];
+		} elseif ($job->get('mjb_status') === 'failed') {
+			// The step never got far enough to say anything — a failed job with
+			// no verdict is a failed backup, not an unknown one.
+			$status = 'error';
+		}
+
+		$time = '';
+		if (preg_match('/^BACKUP_TIME=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$/m', $output, $m)) {
+			$time = $m[1];
+		}
+
+		$result = ['backup_status' => $status];
+		if (preg_match('/^\[[^\]]+\] manager \w+: (.+)$/m', $output, $m)) {
+			$result['message'] = trim($m[1]);
+		}
+
+		$node_id = $job->get('mjb_mgn_node_id');
+		if ($node_id && $status !== 'skipped') {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				$node->set('mgn_last_backup_time', $time !== '' ? $time : gmdate('Y-m-d H:i:s'));
+				$node->set('mgn_last_backup_outcome', ($status === 'success') ? 'success' : 'failed');
+				$node->save();
+			} catch (Exception $e) {
+				error_log('JobResultProcessor: could not stamp the backup outcome for node '
+					. $node_id . ': ' . $e->getMessage());
+			}
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
 	}
 
 	/**

@@ -254,7 +254,7 @@ Health dot colors reflect actual server health, not check recency:
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
-| `push_recovery_key` | Give a node the control plane's proven backup recovery key, so it can encrypt the backups it runs on its own schedule. Fills an empty slot only — never overwrites | No |
+| `backup_run` | This control plane's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket, a write-only credential and the recovery key supplied for that run and never stored there | No |
 | `run_command` | One ad-hoc command from the node detail Console tab (or `node_exec.php`). Bounded by a chosen timeout; the command itself is never inspected | Depends entirely on the command |
 | `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
@@ -619,49 +619,139 @@ encrypting backup checks the recovery key when the job is built, so an unconfigu
 or unproven key fails while the operator is looking at the button rather than
 part-way through a backup.
 
-### Backup recovery key across the fleet
+### Backups across the fleet
 
-A backup this control plane runs seals to the recovery key held here, and works
-against a node that has never heard of it. A backup a node runs on its **own**
-schedule cannot: it reads that node's own `backup_recovery_public_key`, and
-refuses outright when it is empty. So the control plane gives each managed site
-the key it has already proven.
+This control plane takes its own backups of the nodes it manages. They are a
+separate party's copies of each site, under this control plane's recovery key, on
+this control plane's shelf — the `manager` profile described in
+[Backups](../../../docs/backups.md#two-parties-two-profiles). A site's own
+backups are the `site` profile: its own key, its own schedule, its own business.
 
-**The rule is that a push fills an empty slot and never overwrites one.** A site
-with no key is a site making no encrypted backups, so writing one there cannot
-destroy anything. A site already holding a different key is left exactly as it
-is and reported — archives on its shelf may open only with the private half of
-that key, and replacing it is a rotation, which is a separate operation nothing
-here performs.
+Neither owns the other. A site that takes no copies of its own is still backed up
+from here; a site that takes plenty is still backed up from here. Nothing on
+either side needs the other to be absent.
 
-Pushing the proof marker along with the key is deliberate. The possession
-ceremony exists to catch a transcription mistake — a mistyped public key seals
-happily and produces archives nobody can open — and a key copied
-machine-to-machine from a control plane that has already run the ceremony has no
-transcription step to go wrong. `BackupRecoveryKey::accept_proven_fingerprint()`
-still requires the fingerprint to match the key the site is holding, so it can
-only ever complete that key.
+**The node does the work.** `backup_run` hands it the bucket, a credential and a
+recovery public key on stdin, and its own `BackupRunner` builds the archive,
+extends the chain, seals the envelope, uploads and sweeps its local copies.
+Routing archives through the control plane would drag every byte down and push it
+back up, and would put this machine in the path of every restore.
 
-Where it happens:
+**Nothing is left on the node.** The credential is substituted into the step by
+the agent at run time and never written to a job row or a node's database. The
+recovery key travels as a *public* key, which seals but cannot open. So a node
+holds no key to anyone's backups but its own, and a node that leaves this fleet
+takes nothing with it.
 
-- **At install.** `build_install_node()` carries the push, so a node is never
-  born without a recovery key. A control plane that has not finished its own
-  setup simply has nothing to give; the install is not failed over it.
-- **When the status check finds an empty slot.** The check asks every node which
-  key it holds (`set_recovery_key.php --report` over SSH, or
-  `backup_recovery_state` / `backup_recovery_fpr` from the management API), and
-  `JobResultProcessor` queues a push for any node reporting nothing. This is
-  what brings nodes installed before the push existed into line.
-- **By hand**, from the node's Backups tab or the fleet table on Backup Targets.
-  Nothing depends on anyone pressing it.
+#### The node may write to the shelf but never erase it
 
-The node decides what to do with what it is handed:
-`maintenance_scripts/sysadmin_tools/set_recovery_key.php` boots the platform and
-goes through `BackupRecoveryKey`, so there is one code path that decides whether
-a recovery key may be written. It prints one machine-readable line —
-`RECOVERY_KEY=written|proof_write|already|different|none|invalid` — which
-`JobResultProcessor` records onto `mgn_backup_recovery_fpr`. The fleet table
-reads that column, so it never reaches out to every node on page load.
+The credential a node is handed is **write-only** — `writeFiles` on B2,
+`s3:PutObject` without `s3:DeleteObject` on S3. A node can add its archives and
+remove nothing.
+
+This is why `FleetBackupRetention` prunes from here instead, with a
+delete-capable credential that never leaves this machine. A credential that can
+delete is a credential that can erase the fleet's backups, which is the first
+move of any ransomware worth the name and the exact thing these copies exist to
+survive.
+
+Pruning is driven by a bucket **listing**, which is the opposite of what a site
+does for its own backups, and correct only here: this control plane defined the
+whole `{prefix}/{slug}/manager/` path, knows every slug under it, and is the only
+party that can delete from it. It is also stricter — it keeps the newest N sets
+of objects that actually exist, so a run that failed part-way can never be
+counted as a restore point. Chains are grouped by their directory, so they are
+kept or deleted whole by construction.
+
+Two provider notes:
+
+- Linode Object Storage keys are read-only or read-write per bucket with no
+  separate delete capability, so write-without-delete cannot be expressed there.
+  B2 and S3 both express it cleanly.
+- A chain rewrites `manifest.json` every run. That is a PUT over an existing key,
+  which write-only permits, but on B2 it leaves superseded versions the node
+  cannot remove. Give the fleet bucket a lifecycle rule keeping only the current
+  version.
+
+#### Scheduling
+
+The **Fleet Backups** task (`plugins/server_manager/tasks/FleetBackupRun.php`)
+runs every cron tick, finds due nodes, prunes each one's shelf, and dispatches
+one `backup_run` per node.
+
+`FleetBackupPolicy` resolves each node's schedule: the declared fleet settings,
+then that node's own `mgn_backup_policy` overrides. **The fleet default is
+enabled.** That default is what stops a newly managed node being forgotten —
+there is deliberately no detector for "nobody has decided about this node",
+because a node nobody decided about is backed up anyway.
+
+The node detail Backups tab edits the policy, as one of three positions:
+
+- **Fleet default** stores nothing, so the node follows the fleet settings —
+  including future changes to them.
+- **A schedule of its own** stores the full field set (frequency, window, mode,
+  retention, full interval), frozen against the fleet default: a value the
+  operator saw and saved is a value they chose.
+- **Off** stores exactly that decision, which is what lets the dashboard treat
+  a node without fleet backups as somebody's choice rather than a gap.
+
+The tab's **Run backup now** dispatches the same `backup_run` the schedule
+dispatches, with mode and full-interval taken from the node's policy, so a
+manual run extends the same family of restore points the schedule builds.
+
+Three rules keep a fleet from behaving like a thundering herd:
+
+- each node's minute is derived from its slug and spread across a window
+  (default 03:00 UTC, 120 minutes wide), so forty nodes do not all begin a
+  multi-hundred-megabyte upload at once;
+- a node whose previous run is still pending or running is skipped, so a slow
+  node gets fewer backups rather than a queue;
+- no more than `server_manager_fleet_backup_max_concurrent` run at once.
+
+Due is keyed on when the last run was *started*, not on whether it succeeded.
+Retrying a failing node every fifteen minutes until its next slot would hammer a
+machine that is already unwell.
+
+#### What is reported, and what raises an alarm
+
+`check_status` asks each node's management API for both profiles: whether each is
+scheduled, when it last ran, how it went, whether it reached the bucket, and
+which recovery key it sealed to. The manager profile's answer is denormalised
+onto `mgn_last_backup_time` and `mgn_last_backup_outcome` so the dashboard reads
+columns instead of visiting nodes.
+
+**The dashboard alarms only on this control plane's own runs** —
+`NodeMonitorHealth::fleet_backup_problems()` raises a node whose last backup from
+here failed, or whose backups have stopped arriving within its schedule's window.
+The alarm is "my backups of this node are broken", not "this node is
+unprotected", which is not this control plane's call to make.
+
+**The node's word is cross-checked against the bucket.** The retention pass
+lists each node's shelf with this control plane's own credential before every
+run, and the scheduler stamps what it saw — when the shelf was listed and the
+newest object write on it — onto `mgn_backup_shelf_checked_time` and
+`mgn_backup_shelf_newest_time`. The health check compares that against the
+node's claimed last run: a shelf listed after a claimed success that holds
+nothing written since raises **"Backups are not landing"**. The shelf is the
+one witness a compromised or misconfigured node cannot talk into its story —
+everything else in the health picture is the node reporting on itself.
+
+A site's own profile is shown alongside as information and never alarms. A node
+with fleet backups switched off produces nothing either — that was somebody's
+decision.
+
+#### Which key each site holds for itself
+
+`set_recovery_key.php --report` is asked during `check_status`, and the answer
+lands on `mgn_backup_recovery_fpr`. It prints one machine-readable line,
+`RECOVERY_KEY=written|proof_write|already|different|none|invalid`, and the fleet
+table reads the column rather than reaching out to every node on page load.
+
+It is **reported and never written**. That slot holds the key for the site's own
+backups; writing it from here would make this control plane the holder of the
+private half of a key the site believes is its own. There is no job type that can
+write it. A site whose operator wants a key of their own sets it up on that
+site's Backups page, with the possession ceremony that makes it trustworthy.
 
 ### Disaster recovery
 

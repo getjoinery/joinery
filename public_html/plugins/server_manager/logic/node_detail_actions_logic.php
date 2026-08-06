@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.8 - save_backup_policy action (fleet default / custom schedule / off), and backup_run
+ *                takes mode and full-interval from the node's policy so a manual run extends the
+ *                same family of restore points the schedule builds
  * @version 1.7 - run_command action (node console): superadmin + per-node flag + step-up, and a
  *                refusal re-renders in place so the typed command survives
  * @version 1.6 - backup key escrow runs as a job step on the control plane (the web user cannot read
@@ -52,7 +55,8 @@ class NodeDetailActions {
 		'copy_database_local'      => 'database',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
-		'push_recovery_key'        => 'backups',
+		'backup_run'               => 'backups',
+		'save_backup_policy'       => 'backups',
 		'apply_update'             => 'updates',
 		'apply_update_all_on_host' => 'updates',
 		'retry_install'            => 'overview',
@@ -160,20 +164,58 @@ class NodeDetailActions {
 				return self::jobUrl($job);
 			}
 
-			case 'push_recovery_key': {
-				// "Do it now", for an operator who does not want to wait for the
-				// next status check. Nothing depends on anyone pressing it: the
-				// status check fills an empty slot on its own. The node decides
-				// what to do with the key, and it never overwrites one, so this
-				// is safe to press against any node at any time.
+			case 'backup_run': {
+				// This control plane's own backup of the node, run now instead of
+				// waiting for its schedule. Same engine, same chain, same shelf
+				// and same retention as the scheduled one — an on-demand backup
+				// that landed somewhere else would be a restore point nobody's
+				// retention was counting. Mode and full-interval come from the
+				// node's policy for the same reason: a full-mode node handed a
+				// chain run (or vice versa) would file under the other family
+				// and skew what retention keeps.
 				if (!$node->get('mgn_web_root')) {
 					self::fail($session, $page_regex,
-						'This node does not host a Joinery site, so it has no recovery key to set.');
+						'This node does not host a Joinery site, so there is nothing to back up.');
 					return $base_url . '&tab=backups';
 				}
-				$steps = JobCommandBuilder::build_push_recovery_key($node);
-				$job = ManagementJob::createJob($node->key, 'push_recovery_key', $steps, null, $uid);
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
+				$policy = FleetBackupPolicy::for_node($node);
+				$params = [
+					'type'               => (($_POST['backup_scope'] ?? 'project') === 'database') ? 'database' : 'project',
+					'mode'               => $policy['mode'],
+					'full_interval_days' => $policy['full_interval_days'],
+				];
+				try {
+					$steps = JobCommandBuilder::build_backup_run($node, $params);
+				} catch (Exception $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=backups';
+				}
+				$job = ManagementJob::createJob($node->key, 'backup_run', $steps, $params, $uid);
 				return self::jobUrl($job);
+			}
+
+			case 'save_backup_policy': {
+				// Three positions, stored three ways. "Fleet default" stores
+				// nothing, so the node follows future changes to the fleet
+				// settings; "off" stores exactly that decision; "custom" stores
+				// the full field set, frozen against the fleet default — a value
+				// the operator saw and saved is a value they chose.
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
+				$source = (string)($_POST['backup_policy_source'] ?? 'default');
+				if ($source === 'off') {
+					$node->set('mgn_backup_policy', ['enabled' => false]);
+				} elseif ($source === 'custom') {
+					$node->set('mgn_backup_policy', FleetBackupPolicy::from_form($_POST));
+				} else {
+					$node->set('mgn_backup_policy', null);
+				}
+				$node->save();
+				$session->save_message(new DisplayMessage(
+					'Backup schedule saved.', 'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=backups';
 			}
 
 			case 'backup_database': {

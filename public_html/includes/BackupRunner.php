@@ -24,6 +24,16 @@
  * deletes backups. A run that failed to upload must not be the run that decides
  * an older backup is now surplus.
  *
+ * A site can be backed up by more than one party — see BackupProfile. Every run
+ * belongs to exactly one, and the profile decides the working directory, the
+ * lock, the snapshot, the bucket path, the recipient and which history rows the
+ * run may look at. The manager profile does NOT prune the bucket: the credential
+ * it is handed cannot delete, and pruning that shelf belongs to the party that
+ * owns it.
+ *
+ * @version 1.2 - profiles: a run is one party's backup end to end (paths, lock, snapshot,
+ *                bucket segment, recipient, history), plus a machine-wide mutex so two
+ *                parties never archive the same tree at once
  * @version 1.1 - a failed chain run clears the snapshot so the next run starts a fresh
  *                chain (the snapshot advances DURING the files engine, so carrying it
  *                past a failure silently corrupts the chain); a lost site key degrades
@@ -38,12 +48,44 @@
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
+require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 
 class BackupRunnerException extends Exception {}
+
+/**
+ * A backup destination that exists only for the length of one run.
+ *
+ * The manager profile is handed its bucket and credentials by whoever triggered
+ * the run; they are never stored here. That a node holds no credential which
+ * could reach another site's shelf is a security property, so this is
+ * deliberately NOT a BackupTarget model: there is no save(), no table and no
+ * persistence path to forget to avoid. It carries only the surface a run reads.
+ */
+class EphemeralBackupDestination {
+
+	/** No database row, so no id. History rows record the name instead. */
+	public $key = null;
+
+	private $fields;
+	private $credentials;
+
+	public function __construct(array $fields, array $credentials) {
+		$this->fields = $fields;
+		$this->credentials = $credentials;
+	}
+
+	public function get($field) {
+		return $this->fields[$field] ?? null;
+	}
+
+	public function get_credentials() {
+		return $this->credentials;
+	}
+}
 
 class BackupRunner {
 
@@ -82,33 +124,48 @@ class BackupRunner {
 			return array('status' => 'skipped', 'message' => $e->getMessage());
 		}
 
-		// One run at a time. The scheduled task and the admin page's "run now"
-		// can overlap, and two runs share the snapshot file, the chain manifest
-		// and the dump diff-and-rename — none of which survive a race. Best
-		// effort: if the directory cannot be created yet, the run proceeds and
-		// fails further down with a recorded history row, which is worth more
-		// than an unrecorded refusal here.
-		$lock = null;
-		if (is_dir($plan['output_dir']) || @mkdir($plan['output_dir'], 0700, true)) {
-			$lock_path = $plan['output_dir'] . '/.jy_backup.lock';
-			$lock = @fopen($lock_path, 'c');
-			if ($lock) {
-				@chmod($lock_path, 0600);
-				if (!flock($lock, LOCK_EX | LOCK_NB)) {
-					fclose($lock);
-					return array('status' => 'skipped',
-						'message' => 'Another backup run is already in progress; not starting a second.');
-				}
-			}
+		// Two locks, for two different problems.
+		//
+		// The machine lock is about the box: two profiles archiving the same tree
+		// at once is twice the I/O for no extra safety, and on a shared host it is
+		// somebody else's I/O too. Whoever gets there second waits for its next
+		// tick rather than competing.
+		//
+		// The profile lock is about correctness: two runs of ONE profile share the
+		// snapshot file, the chain manifest and the dump diff-and-rename, none of
+		// which survive a race. The scheduled task and the admin page's "run now"
+		// can overlap this way.
+		//
+		// Both are best effort in the same sense: if the directory cannot be
+		// created yet, the run proceeds and fails further down with a recorded
+		// history row, which is worth more than an unrecorded refusal here.
+		$machine_lock = self::acquire_lock(BackupProfile::machine_lock_path($plan['base_dir']), $plan['base_dir']);
+		if ($machine_lock === false) {
+			return array('status' => 'skipped',
+				'message' => 'Another backup is already running on this machine; not starting a second.');
+		}
+
+		$lock = self::acquire_lock($plan['output_dir'] . '/.jy_backup.lock', $plan['output_dir']);
+		if ($lock === false) {
+			self::release_lock($machine_lock);
+			return array('status' => 'skipped',
+				'message' => 'Another ' . $plan['profile'] . '-profile backup run is already in progress; '
+					. 'not starting a second.');
 		}
 
 		$history = new BackupHistory(NULL);
 		$history->set('bkh_type', $plan['type']);
 		$history->set('bkh_outcome', 'running');
 		$history->set('bkh_slug', $plan['slug']);
+		$history->set('bkh_profile', $plan['profile']);
+		$history->set('bkh_recovery_fpr', $plan['recovery_fpr']);
 		$history->set('bkh_encrypted', $plan['encrypt']);
 		if ($plan['target']) {
-			$history->set('bkh_bkt_target_id', $plan['target']->key);
+			// An ephemeral target has no id. The name is denormalised onto the row
+			// either way, which is what the history has to be able to say.
+			if ($plan['target']->key) {
+				$history->set('bkh_bkt_target_id', $plan['target']->key);
+			}
 			$history->set('bkh_target_name', $plan['target']->get('bkt_name'));
 		}
 		$history->save();
@@ -119,13 +176,39 @@ class BackupRunner {
 			self::fail($history, $e->getMessage());
 			return array('status' => 'error', 'message' => 'Backup failed: ' . $e->getMessage());
 		} finally {
-			if ($lock) {
-				flock($lock, LOCK_UN);
-				fclose($lock);
-			}
+			self::release_lock($lock);
+			self::release_lock($machine_lock);
 		}
 
 		return $result;
+	}
+
+	/**
+	 * Take an exclusive non-blocking lock. Returns the handle, null if the lock
+	 * could not be created at all (best effort — proceed), or FALSE if somebody
+	 * else holds it (do not proceed).
+	 */
+	private static function acquire_lock($path, $dir) {
+		if (!is_dir($dir) && !@mkdir($dir, 0700, true)) {
+			return null;
+		}
+		$handle = @fopen($path, 'c');
+		if (!$handle) {
+			return null;
+		}
+		@chmod($path, 0600);
+		if (!flock($handle, LOCK_EX | LOCK_NB)) {
+			fclose($handle);
+			return false;
+		}
+		return $handle;
+	}
+
+	private static function release_lock($handle) {
+		if ($handle) {
+			flock($handle, LOCK_UN);
+			fclose($handle);
+		}
 	}
 
 	// ------------------------------------------------------------------ plan
@@ -135,6 +218,17 @@ class BackupRunner {
 	 * front so a misconfiguration is reported before an archive is built.
 	 */
 	public static function plan(array $config = array()) {
+		$profile = BackupProfile::normalize($config['profile'] ?? BackupProfile::SITE);
+		return ($profile === BackupProfile::MANAGER)
+			? self::plan_manager($config)
+			: self::plan_site($config);
+	}
+
+	/**
+	 * The site's own backup, resolved entirely from its own settings. Depends on
+	 * nothing outside this machine, which is the whole point of it.
+	 */
+	private static function plan_site(array $config) {
 		$type = (string)($config['backup_type'] ?? self::setting('backup_type'));
 		if ($type !== 'database') { $type = 'project'; }
 
@@ -172,19 +266,98 @@ class BackupRunner {
 		// is rewritten in full every time either way.
 		if ($type === 'database') { $mode = 'full'; }
 
+		$base = self::output_dir();
+
 		return array(
+			'profile'      => BackupProfile::SITE,
 			'type'         => $type,
 			'mode'         => $mode,
 			'full_days'    => max(0, (int)self::setting('backup_full_interval_days')),
 			'max_inc'      => self::MAX_INCREMENTALS,
 			'target'       => $target,
 			'encrypt'      => $encrypt,
+			'recipients'   => BackupEnvelope::recipients(),
+			'recovery_fpr' => BackupRecoveryKey::fingerprint(BackupRecoveryKey::public_key()),
 			'slug'         => self::slug(),
 			'project'      => basename(PathHelper::getSiteRoot()),
-			'output_dir'   => self::output_dir(),
+			'base_dir'     => $base,
+			'output_dir'   => BackupProfile::output_dir(BackupProfile::SITE, $base),
 			'keep_cloud'   => max(1, (int)self::setting('backup_retention_count')),
 			'keep_local'   => max(0, (int)self::setting('backup_local_retention_days')),
 			'delete_local' => (string)self::setting('backup_delete_local_after_upload') === '1',
+			// This site prunes its own shelf. It holds the credentials, and the
+			// backups being counted are its own.
+			'prunes_cloud' => true,
+		);
+	}
+
+	/**
+	 * A control plane's backup of this site, resolved entirely from what the run
+	 * was handed. Nothing here is read from this site's settings and nothing is
+	 * written to them: the bucket, the credentials and the recovery key arrive
+	 * with the run and leave with it.
+	 *
+	 * The site's own recovery key is deliberately NOT consulted. A site that has
+	 * never set one up still gets backed up by its control plane, and a site that
+	 * has one never has it used for somebody else's copies.
+	 */
+	private static function plan_manager(array $config) {
+		$m = isset($config['manager']) && is_array($config['manager']) ? $config['manager'] : array();
+
+		$missing = array();
+		foreach (array('bucket', 'credentials', 'recovery_public_key') as $required) {
+			if (empty($m[$required])) { $missing[] = $required; }
+		}
+		if ($missing) {
+			throw new BackupRunnerException(
+				'A manager-profile backup needs ' . implode(', ', $missing) . ' supplied with the run.');
+		}
+
+		$type = ((string)($m['type'] ?? 'project') === 'database') ? 'database' : 'project';
+		$mode = ((string)($m['mode'] ?? 'chain') === 'full') ? 'full' : 'chain';
+		if ($type === 'database') { $mode = 'full'; }
+
+		$credentials = is_array($m['credentials'])
+			? $m['credentials']
+			: (json_decode((string)$m['credentials'], true) ?: array());
+		if (!$credentials) {
+			throw new BackupRunnerException('The credentials supplied with this run could not be read.');
+		}
+
+		$target = new EphemeralBackupDestination(array(
+			'bkt_name'        => (string)($m['target_name'] ?? 'control plane storage'),
+			'bkt_provider'    => (string)($m['provider'] ?? 's3'),
+			'bkt_bucket'      => (string)$m['bucket'],
+			'bkt_path_prefix' => (string)($m['path_prefix'] ?? 'joinery-backups'),
+			'bkt_enabled'     => true,
+		), $credentials);
+
+		$recipients = BackupEnvelope::recipients_for_foreign_recovery($m['recovery_public_key']);
+		$base = self::output_dir();
+
+		return array(
+			'profile'      => BackupProfile::MANAGER,
+			'type'         => $type,
+			'mode'         => $mode,
+			'full_days'    => max(0, (int)($m['full_interval_days'] ?? 7)),
+			'max_inc'      => self::MAX_INCREMENTALS,
+			'target'       => $target,
+			'encrypt'      => true,
+			'recipients'   => $recipients,
+			'recovery_fpr' => BackupRecoveryKey::fingerprint($recipients[0]['pub']),
+			'slug'         => self::validate_slug($m['slug'] ?? self::slug()),
+			'project'      => basename(PathHelper::getSiteRoot()),
+			'base_dir'     => $base,
+			'output_dir'   => BackupProfile::output_dir(BackupProfile::MANAGER, $base),
+			'keep_local'   => max(0, (int)($m['keep_local_days'] ?? 7)),
+			'delete_local' => !empty($m['delete_local_after_upload']),
+			// Cloud pruning is not this machine's decision. The credential it
+			// was handed cannot delete, and the shelf being counted belongs to
+			// whoever triggered the run — retention runs there, with a
+			// delete-capable credential that never comes here. This plan carries
+			// no keep count at all: the flag is the whole answer, and there is
+			// no second number for it to disagree with.
+			'prunes_cloud' => false,
 		);
 	}
 
@@ -255,9 +428,17 @@ class BackupRunner {
 
 	public static function slug() {
 		$configured = trim((string)self::setting('backup_path_slug'));
-		$slug = $configured !== '' ? $configured : basename(PathHelper::getSiteRoot());
-		// The slug becomes an object key segment and a delete prefix. Anything
-		// outside this set could widen a retention delete beyond this site.
+		return self::validate_slug($configured !== '' ? $configured : basename(PathHelper::getSiteRoot()));
+	}
+
+	/**
+	 * The slug becomes an object key segment and a delete prefix, so it is
+	 * checked wherever it comes from — a setting on this site, or a value handed
+	 * over with a manager-profile run. Anything outside this set could widen a
+	 * retention delete beyond the site it belongs to.
+	 */
+	public static function validate_slug($slug) {
+		$slug = trim((string)$slug);
 		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
 			throw new BackupRunnerException(
 				'The backup path name may only contain letters, numbers, hyphens and underscores.');
@@ -292,7 +473,8 @@ class BackupRunner {
 	 */
 	private static function current_chain(array $plan) {
 		$rows = new MultiBackupHistory(
-			array('outcome' => 'success', 'deleted' => false, 'slug' => $plan['slug'], 'type' => 'project'),
+			array('outcome' => 'success', 'deleted' => false, 'slug' => $plan['slug'], 'type' => 'project',
+			      'profile' => $plan['profile']),
 			array('bkh_start_time' => 'DESC'), 1, 0);
 		$rows->load();
 
@@ -355,7 +537,7 @@ class BackupRunner {
 			// and reusing its snapshot would produce an "incremental" whose
 			// full lives in a chain retention may already have deleted.
 			$chain_id = BackupChain::new_chain_id();
-			$mint     = BackupEnvelope::mint($chain_id);
+			$mint     = BackupEnvelope::mint($chain_id, $plan['recipients']);
 			$data_key = $mint['data_key'];
 			$manifest = BackupChain::start($chain_id, $plan['slug'], $mint['envelope']);
 			@unlink($snar);
@@ -596,9 +778,12 @@ class BackupRunner {
 	 * until someone needed it.
 	 */
 	public static function enforce_chain_retention(array $plan) {
+		if (empty($plan['prunes_cloud'])) {
+			return 0;
+		}
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
-			      'chained' => true),
+			      'chained' => true, 'profile' => $plan['profile']),
 			array('bkh_start_time' => 'DESC'), 1000, 0);
 		$rows->load();
 
@@ -665,7 +850,7 @@ class BackupRunner {
 		// the run upload someone else's archive under its own envelope.
 		$before = array_flip(BackupNaming::list_dir($dir));
 
-		$mint     = BackupEnvelope::mint('pending');
+		$mint     = BackupEnvelope::mint('pending', $plan['recipients']);
 		$key_file = $dir . '/.jy_selfbackup_' . getmypid() . '.key';
 		$sidecar  = $dir . '/.jy_selfbackup_' . getmypid() . '.keys.json';
 
@@ -780,9 +965,15 @@ class BackupRunner {
 		}
 		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
 
+		// The profile segment is what stops two parties' backups landing in one
+		// pile: without it a listing cannot tell whose backup is whose, and
+		// neither party's retention can reason about the shelf it is responsible
+		// for.
+		$base_key = $prefix . '/' . $plan['slug'] . '/' . BackupProfile::path_segment($plan['profile']) . '/';
+
 		$out = array();
 		foreach ($artifacts as $a) {
-			$key = $prefix . '/' . $plan['slug'] . '/' . $sub . $a['name'];
+			$key = $base_key . $sub . $a['name'];
 			$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($key, '/'), $a['path']);
 			$status = (int)($resp['status'] ?? 0);
 			if ($status < 200 || $status >= 300) {
@@ -813,11 +1004,14 @@ class BackupRunner {
 	 * nothing. Chains are pruned whole by enforce_chain_retention.
 	 */
 	public static function enforce_cloud_retention(array $plan) {
+		if (empty($plan['prunes_cloud'])) {
+			return 0;
+		}
 		$keep = $plan['keep_cloud'];
 
 		$rows = new MultiBackupHistory(
 			array('outcome' => 'success', 'offsite' => true, 'deleted' => false, 'slug' => $plan['slug'],
-			      'chained' => false),
+			      'chained' => false, 'profile' => $plan['profile']),
 			array('bkh_start_time' => 'DESC'), 500, 0);
 		$rows->load();
 

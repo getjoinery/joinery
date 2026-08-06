@@ -13,6 +13,9 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.7 - fleet_backup_health cross-checks the node's claimed success against the bucket:
+ *                a shelf listed after the claimed run that holds nothing new is a node whose
+ *                backups are not landing, however healthy its own reports look
  * @version 1.6 - surfaces a fleet trust root whose only offsite copy (this site's own whole-site
  *                backup) does not exist yet — the implicit guarantee that replaced the signing-key
  *                escrow record is made checkable
@@ -239,8 +242,12 @@ class NodeMonitorHealth {
 	private static function has_offsite_project_backup(): bool {
 		try {
 			require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+			// This site's OWN backups. A copy some other control plane took of
+			// this machine is sealed to that party's key and lives on its shelf,
+			// so it is not evidence that the trust root here is recoverable.
 			$rows = new MultiBackupHistory(
-				array('type' => 'project', 'outcome' => 'success', 'offsite' => true, 'deleted' => false),
+				array('type' => 'project', 'outcome' => 'success', 'offsite' => true, 'deleted' => false,
+				      'profile' => BackupProfile::SITE),
 				array('bkh_start_time' => 'DESC'), 1, 0);
 			$rows->load();
 			foreach ($rows as $r) { return true; }
@@ -250,6 +257,106 @@ class NodeMonitorHealth {
 			return true;
 		}
 		return false;
+	}
+
+	/**
+	 * Nodes whose backups THIS control plane takes are not working.
+	 *
+	 * The alarm is "my backups of this node are broken", not "this node is
+	 * unprotected". Whether a site also backs itself up is that site's business,
+	 * under its own key, and this control plane is not in a position to judge it:
+	 * a site taking no copies of its own is exercising a choice, and one taking
+	 * plenty is no reason to stop taking mine.
+	 *
+	 * A node with fleet backups switched off produces nothing here either. What
+	 * stops a node falling through unnoticed is the DEFAULT — fleet backups are
+	 * on for a node nobody has decided about — not a detector for indecision.
+	 */
+	public static function fleet_backup_problems(): array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
+
+		$problems = [];
+		// The same eligibility list the scheduler dispatches from — shared so a
+		// node this monitor watches is always a node that scheduler could reach.
+		foreach (FleetBackupPolicy::eligible_nodes() as $node) {
+			$policy = FleetBackupPolicy::for_node($node);
+			if (empty($policy['enabled'])) continue;   // somebody's decision
+
+			$health = self::fleet_backup_health($node, $policy);
+			if (!$health['is_problem']) continue;
+
+			$problems[] = [
+				'node'   => $node,
+				'slug'   => $node->get('mgn_slug'),
+				'name'   => $node->get('mgn_name'),
+				'id'     => $node->key,
+				'link'   => '/admin/server_manager/node_detail?mgn_id=' . (int)$node->key . '&tab=backups',
+				'health' => $health,
+			];
+		}
+		return $problems;
+	}
+
+	/** Where one node's fleet backups stand. */
+	public static function fleet_backup_health($node, array $policy): array {
+		$last    = $node->get('mgn_last_backup_time');
+		$outcome = (string)$node->get('mgn_last_backup_outcome');
+
+		if (!$last) {
+			// Never yet, which is normal for the first few hours of a node's life
+			// and a real problem after that. The slot is at most a day away, so a
+			// grace of two intervals distinguishes the two without a flag.
+			$age = strtotime((string)$node->get('mgn_create_time') . ' UTC');
+			if ($age !== false && (time() - $age) < (2 * 86400)) {
+				return self::result('backups', 'No backup yet',
+					'This node has not been backed up from here yet. Its first run is scheduled for '
+					. FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')) . '.', false);
+			}
+			return self::result('backups', 'Never backed up',
+				'This node has been managed for more than two days and no backup taken from here has '
+				. 'ever completed.', true);
+		}
+
+		$age = time() - strtotime($last . ' UTC');
+		$window = ($policy['frequency'] === 'weekly') ? (9 * 86400) : (2 * 86400);
+
+		if ($outcome !== 'success') {
+			return self::result('backups', 'Last backup failed',
+				'The most recent backup taken from here failed (' . self::humanize($age) . ' ago). '
+				. 'A node whose backups have been failing for a month looks identical to a healthy one '
+				. 'unless somebody is told.', true);
+		}
+
+		// The node's report and the bucket disagree. The report says the last
+		// run succeeded; the shelf — listed from here with this control plane's
+		// own credential, after that run — holds nothing written since. The
+		// shelf is the one witness a compromised or misconfigured node cannot
+		// talk into its story, so this is the only check that catches a node
+		// lying by omission. An hour of slack absorbs clock skew between the
+		// node and the storage provider.
+		// Empty columns stay false: strtotime(' UTC') on a bare timezone reads
+		// as "now", which would make an empty shelf look freshly written to.
+		$checked_raw = trim((string)$node->get('mgn_backup_shelf_checked_time'));
+		$newest_raw  = trim((string)$node->get('mgn_backup_shelf_newest_time'));
+		$checked = ($checked_raw !== '') ? strtotime($checked_raw . ' UTC') : false;
+		$newest  = ($newest_raw !== '')  ? strtotime($newest_raw . ' UTC')  : false;
+		$claimed = strtotime($last . ' UTC');
+		if ($checked !== false && $claimed !== false && $checked > $claimed
+			&& ($newest === false || $newest < $claimed - 3600)) {
+			return self::result('backups', 'Backups are not landing',
+				'This node reports its backups succeeding, but its shelf was listed '
+				. self::humanize(time() - $checked) . ' ago and nothing has actually arrived since the '
+				. 'run it reported. The archive either never uploaded or went somewhere else.', true);
+		}
+
+		if ($age > $window) {
+			return self::result('backups', 'Backups have stopped',
+				'The last successful backup from here was ' . self::humanize($age) . ' ago, which is longer '
+				. 'than this node\'s schedule allows for.', true);
+		}
+
+		return self::result('backups', 'Backed up',
+			'Last backup ' . self::humanize($age) . ' ago.', false);
 	}
 
 	private static function result($state, $label, $detail, $is_problem): array {

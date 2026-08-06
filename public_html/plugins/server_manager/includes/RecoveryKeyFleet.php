@@ -1,19 +1,23 @@
 <?php
 /**
- * RecoveryKeyFleet — which of the managed sites are holding the control plane's
- * backup recovery key.
+ * RecoveryKeyFleet — which recovery key each managed site holds for its OWN
+ * backups.
  *
- * A site that backs itself up on a schedule reads its OWN recovery key setting,
- * so a site that has never been given one makes no encrypted backups at all.
- * The control plane fills those empty slots automatically, but the operator
- * still has to be able to see the answer — in particular for the one case the
- * push deliberately walks away from: a site already holding a key the control
- * plane did not put there, which is left exactly as it is because archives
- * already on its shelf open only with the private half of THAT key.
+ * A site that backs itself up reads its own recovery key setting, so a site that
+ * has never set one up runs no backups of its own. That is reported here and
+ * nothing else: the slot's custodian is whoever administers the site, and a
+ * control plane writing into it would hold the private half of a key the site
+ * believes is its own.
+ *
+ * It is also not a gap in coverage. A control plane's backups of a site are the
+ * manager profile, which carries its recovery key with each run — so a site with
+ * an empty slot is still backed up here, under this control plane's key, and the
+ * empty slot means only that the site takes no copies of its own.
  *
  * The answer comes from what the last status check recorded, not from reaching
  * out to every node when someone opens a page.
  *
+ * @version 1.1 - reports only; the push is retired
  * @version 1.0
  */
 
@@ -71,10 +75,18 @@ class RecoveryKeyFleet {
 		return $fpr;
 	}
 
-	/** Whether this node can be pushed to at all (the button is offered or not). */
-	public static function is_pushable(array $state): bool {
-		return self::manager_fingerprint() !== ''
-			&& ($state['state'] === 'missing' || $state['state'] === 'unknown');
+	/**
+	 * Whether this node's own backups are covered by a key SOMEBODY holds.
+	 *
+	 * Reported, never acted on. The key in that slot is for the site's own
+	 * backups and its custodian is whoever administers the site; a control plane
+	 * writing into it would hold the private half of a key the site believes is
+	 * its own. A site with no key of its own is exercising a choice, and it is
+	 * still covered by this control plane's backups either way — those carry
+	 * their key with each run.
+	 */
+	public static function has_own_key(array $state): bool {
+		return $state['state'] === 'has' || $state['state'] === 'different';
 	}
 
 	/** The short fingerprint every surface shows, matching the Backups page. */

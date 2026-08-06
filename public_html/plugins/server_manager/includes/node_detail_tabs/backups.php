@@ -73,94 +73,170 @@
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
 	$rk_node = RecoveryKeyFleet::node_state($node);
 	if ($rk_node['state'] !== 'n/a') {
-		$rk_class = ($rk_node['state'] === 'has') ? 'alert-light' : 'alert-warning';
-		echo '<div class="alert ' . $rk_class . ' border mb-3 py-2">';
-		echo '<strong>Recovery key on this site:</strong> ' . htmlspecialchars($rk_node['summary']);
+		// Information, not a problem. This site having no key of its own does not
+		// mean it is unprotected — the backups taken from here carry their own —
+		// it means the site takes no copies of its own, which is its operator's
+		// call to make and not something to nag about from here.
+		echo '<div class="alert alert-light border mb-3 py-2">';
+		echo '<strong>This site\'s own backups:</strong> ' . htmlspecialchars($rk_node['summary']);
 		if ($rk_node['fingerprint'] !== '') {
 			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip;)';
 		}
-		if (RecoveryKeyFleet::is_pushable($rk_node)) {
-			$fw_rk = $page->getFormWriter('push_recovery_key_form');
-			$fw_rk->begin_form();
-			$fw_rk->hiddeninput('action', '', ['value' => 'push_recovery_key']);
-			$fw_rk->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-			$fw_rk->submitbutton('btn_push_recovery_key', 'Send the recovery key',
-				['class' => 'btn btn-sm btn-primary mt-2']);
-			$fw_rk->end_form();
+		if (!RecoveryKeyFleet::has_own_key($rk_node)) {
+			echo '<div class="small text-muted mt-1">Its operator sets this up on the site\'s own Backups '
+			   . 'page. Backups taken from here are unaffected &mdash; they seal to this control plane\'s '
+			   . 'key, which travels with each run.</div>';
 		}
 		echo '</div>';
 	}
 
-	// A backup nobody can decrypt is not a backup, so an encrypting backup is
-	// refused server-side until recovery is set up. Don't offer the button that
-	// is going to be refused: a cloud-target node (encryption forced) gets the
-	// explanation in place of the form, and a local-only node keeps its forms
-	// with encryption switched off and explained.
-	if ($require_encryption && !$recovery_ready) {
-		$pageoptions = ['title' => 'Run Backup'];
-		$page->begin_box($pageoptions);
+	// ── Run a backup now ──
+	//
+	// One button, running the same thing the schedule runs: same engine on the
+	// node, same chain, same shelf, same retention. An on-demand backup that
+	// landed anywhere else would be a restore point nobody's retention was
+	// counting, and a chain nobody was extending.
+	$pageoptions = ['title' => 'Backups taken from here'];
+	$page->begin_box($pageoptions);
+
+	if (!$cloud_target) {
+		// No shelf, so there is nothing for this control plane to take a copy
+		// onto. Not a fault of the node's — say what would change it.
+		echo '<div class="alert alert-light border mb-0">';
+		echo '<strong>No backups are taken of this node from here.</strong> ';
+		echo 'Backups this control plane takes go to its own cloud storage, and this node has no '
+		   . 'backup target set. ';
+		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Choose one</a> '
+		   . 'to start backing it up.';
+		echo '</div>';
+	} elseif (!$recovery_ready) {
+		// A backup nobody can decrypt is not a backup, so the run is refused
+		// server-side until recovery is set up. Don't offer a button that is
+		// going to be refused — explain instead.
 		echo '<div class="alert alert-warning mb-0">';
 		echo '<strong>Backups are paused until backup key recovery is set up.</strong> ';
-		echo 'This node backs up to cloud storage, so its backups are encrypted &mdash; and an encrypted backup '
+		echo 'These backups leave the node, so they are encrypted &mdash; and an encrypted backup '
 		   . 'nobody can open is not a backup. ';
 		echo htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery_setup));
 		echo ' <a href="' . BackupRecoveryKey::SETUP_URL . '" class="alert-link">Set up backup key recovery</a>.';
 		echo '</div>';
-		$page->end_box();
-		$skip_backup_forms = true;
+	} else {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
+		$policy = FleetBackupPolicy::for_node($node);
+
+		// The schedule and the last run, together. Either alone is misleading:
+		// a schedule that has never fired reads as coverage, and a last run with
+		// no schedule reads as ongoing.
+		echo '<p class="mb-1">';
+		if (!empty($policy['enabled'])) {
+			echo '<strong>Scheduled:</strong> ' . htmlspecialchars($policy['frequency'])
+			   . ' at ' . htmlspecialchars(FleetBackupPolicy::slot_time($policy, (string)$node->get('mgn_slug')))
+			   . ', keeping ' . (int)$policy['keep'] . ' restore point' . ($policy['keep'] === 1 ? '' : 's')
+			   . ($policy['mode'] === 'chain' ? ', as incremental chains' : ', a full backup every time');
+		} else {
+			echo '<strong>Not scheduled.</strong> This control plane takes no backups of this node '
+			   . 'except when someone runs one.';
+		}
+		echo '</p>';
+
+		$health = NodeMonitorHealth::fleet_backup_health($node, $policy);
+		echo '<p class="' . ($health['is_problem'] ? 'text-danger' : 'text-muted') . '">'
+		   . '<strong>' . htmlspecialchars($health['label']) . ':</strong> '
+		   . htmlspecialchars($health['detail']) . '</p>';
+
+		echo '<p class="text-muted">Encrypted on the node, sealed to recovery key '
+		   . htmlspecialchars(RecoveryKeyFleet::short($recovery_setup['fingerprint'])) . '&hellip; and to the '
+		   . 'node itself, then uploaded to ' . $target_name . '.</p>';
+
+		$fw_run = $page->getFormWriter('backup_run_form');
+		$fw_run->begin_form();
+		$fw_run->hiddeninput('action', '', ['value' => 'backup_run']);
+		$fw_run->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+		// Not 'backup_type': that is a declared core setting name, and a page may
+		// not draw its own field for one. This is a job parameter for one run,
+		// not a setting anybody is storing.
+		$fw_run->dropinput('backup_scope', 'What to back up', [
+			'options' => ['project' => 'The whole site (files and database)', 'database' => 'Database only'],
+			'value'   => 'project',
+		]);
+		$fw_run->submitbutton('btn_backup_run', 'Run backup now', ['class' => 'btn btn-sm btn-primary']);
+		$fw_run->end_form();
+
+		// ── The schedule itself ──
+		//
+		// Three positions. "Fleet default" stores nothing, so the node follows
+		// the fleet settings including future changes; "custom" freezes a full
+		// field set of this node's own; "off" is a decision, stored as one —
+		// which is what lets the dashboard treat a node without backups as
+		// somebody's choice rather than a gap.
+		$fleet = FleetBackupPolicy::fleet_defaults();
+		$default_label = 'Fleet default — '
+			. (!empty($fleet['enabled'])
+				? $fleet['frequency'] . ' backups, keeping ' . (int)$fleet['keep']
+				: 'no scheduled backups');
+
+		echo '<hr>';
+		$fw_pol = $page->getFormWriter('backup_policy_form');
+		$fw_pol->begin_form();
+		$fw_pol->hiddeninput('action', '', ['value' => 'save_backup_policy']);
+		$fw_pol->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+
+		$custom_fields = ['policy_schedule', 'policy_window_start', 'policy_window_minutes',
+			'policy_mode', 'policy_keep', 'policy_full_interval_days'];
+		$fw_pol->dropinput('backup_policy_source', 'Schedule for this node', [
+			'options' => [
+				'default' => $default_label,
+				'custom'  => 'A schedule of this node\'s own',
+				'off'     => 'Off — no scheduled backups of this node from here',
+			],
+			'value' => FleetBackupPolicy::stored_mode($node),
+			'visibility_rules' => [
+				'default' => ['hide' => $custom_fields],
+				'custom'  => ['show' => $custom_fields],
+				'off'     => ['hide' => $custom_fields],
+			],
+		]);
+
+		// Prefilled from the effective policy, so choosing "custom" starts from
+		// what the node is doing today rather than from blanks.
+		$fw_pol->dropinput('policy_schedule', 'How often', [
+			'options' => [
+				'daily' => 'Every day',
+				'0' => 'Weekly, on Sunday',    '1' => 'Weekly, on Monday',
+				'2' => 'Weekly, on Tuesday',   '3' => 'Weekly, on Wednesday',
+				'4' => 'Weekly, on Thursday',  '5' => 'Weekly, on Friday',
+				'6' => 'Weekly, on Saturday',
+			],
+			'value' => ($policy['frequency'] === 'weekly') ? (string)$policy['day_of_week'] : 'daily',
+		]);
+		$fw_pol->textinput('policy_window_start', 'Window starts (UTC, HH:MM)', [
+			'value' => $policy['window_start'],
+		]);
+		$fw_pol->numberinput('policy_window_minutes', 'Window length (minutes)', [
+			'value'    => $policy['window_minutes'],
+			'min'      => 1,
+			'helptext' => 'The node gets its own start minute inside the window, so a fleet does not upload all at once.',
+		]);
+		$fw_pol->dropinput('policy_mode', 'How backups are taken', [
+			'options' => ['chain' => 'Incremental chains', 'full' => 'A full backup every time'],
+			'value'   => $policy['mode'],
+		]);
+		$fw_pol->numberinput('policy_keep', 'Restore points kept', [
+			'value'    => $policy['keep'],
+			'min'      => 1,
+			'helptext' => 'Chains are kept or deleted whole, never partly.',
+		]);
+		$fw_pol->numberinput('policy_full_interval_days', 'Days before a chain starts a fresh full', [
+			'value' => $policy['full_interval_days'],
+			'min'   => 0,
+		]);
+
+		$fw_pol->submitbutton('btn_save_backup_policy', 'Save schedule', ['class' => 'btn btn-sm btn-secondary']);
+		$fw_pol->end_form();
 	}
 
-	if (empty($skip_backup_forms)):
-	$pageoptions = ['title' => 'Run Backup'];
-	$page->begin_box($pageoptions);
-	?>
-	<div class="row">
-		<div class="col-md-6">
-			<h6>Database Backup</h6>
-			<?php
-			$fw_db = $page->getFormWriter('backup_db_form');
-			$fw_db->begin_form();
-			$fw_db->hiddeninput('action', '', ['id' => 'db_backup_action', 'value' => 'backup_database']);
-			$fw_db->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-			if ($require_encryption) {
-				$fw_db->hiddeninput('encryption', '', ['value' => '1']);
-				echo '<p class="text-muted small">Encrypted because this backup is uploaded off the node</p>';
-			} elseif (!$recovery_ready) {
-				$fw_db->checkboxinput('encryption', 'Encrypt backup', ['checked' => false, 'disabled' => true, 'id' => 'db_encrypt']);
-				echo '<p class="text-muted small">Encryption needs a recovery key so the backup can be opened again. '
-				   . '<a href="' . BackupRecoveryKey::SETUP_URL . '">Set it up</a>.</p>';
-			} else {
-				$fw_db->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'db_encrypt']);
-			}
-			$fw_db->submitbutton('btn_db_backup', 'Run Database Backup', ['class' => 'btn btn-sm btn-primary']);
-			$fw_db->end_form();
-			?>
-		</div>
-		<div class="col-md-6">
-			<h6>Full Project Backup</h6>
-			<?php
-			$fw_proj = $page->getFormWriter('backup_proj_form');
-			$fw_proj->begin_form();
-			$fw_proj->hiddeninput('action', '', ['id' => 'proj_backup_action', 'value' => 'backup_project']);
-			$fw_proj->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-			if ($require_encryption) {
-				$fw_proj->hiddeninput('encryption', '', ['value' => '1']);
-				echo '<p class="text-muted small">Encrypted because this backup is uploaded off the node</p>';
-			} elseif (!$recovery_ready) {
-				$fw_proj->checkboxinput('encryption', 'Encrypt backup', ['checked' => false, 'disabled' => true, 'id' => 'proj_encrypt']);
-				echo '<p class="text-muted small">Encryption needs a recovery key so the backup can be opened again. '
-				   . '<a href="' . BackupRecoveryKey::SETUP_URL . '">Set it up</a>.</p>';
-			} else {
-				$fw_proj->checkboxinput('encryption', 'Encrypt backup', ['checked' => true, 'id' => 'proj_encrypt']);
-			}
-			$fw_proj->submitbutton('btn_proj_backup', 'Run Project Backup', ['class' => 'btn btn-sm btn-primary']);
-			$fw_proj->end_form();
-			?>
-		</div>
-	</div>
-<?php
 	$page->end_box();
-	endif; // $skip_backup_forms
 
 	// ── Backup File Browser ──
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupListHelper.php'));

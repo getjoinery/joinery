@@ -6,25 +6,29 @@
  * needs: []
  */
 /**
- * Which managed sites the control plane will push its backup recovery key to.
+ * Which recovery key each managed site holds for its OWN backups.
  *
- * The push exists because a site that runs its own scheduled backups reads its
- * OWN recovery key setting, so a site nobody has visited makes no encrypted
- * backups at all — silently. Filling those slots automatically is only safe
- * because of what it refuses to do, and this is where the refusals are pinned:
+ * Reported, never written. That slot is the key for the site's own backups and
+ * its custodian is whoever administers the site; a control plane writing into it
+ * would hold the private half of a key the site believes is its own. Backups
+ * this control plane takes need nothing in it — they carry their key with each
+ * run — so an empty slot is a site taking no copies of its own, not a site left
+ * unprotected.
  *
- *   - a site holding a DIFFERENT key is never a push target, however that key
- *     got there, because archives on its shelf may open only with the private
- *     half of that one;
+ * What is pinned here:
+ *
+ *   - the state each report maps to, including that somebody else's key reads as
+ *     "different" rather than as something to correct;
  *   - a node that hosts no Joinery site (a DNS box, a relay) is not applicable
  *     rather than outstanding, so it never shows up as a gap someone should
  *     chase;
- *   - a node nothing has looked at yet is "unknown", not "missing" — reporting
- *     absence from an absence of evidence would push at a site that may already
- *     be holding a key.
+ *   - a node nothing has looked at yet is "unknown", not "missing" — claiming
+ *     absence from an absence of evidence would misreport a site that may
+ *     already hold a key;
+ *   - and that no code path exists to write the slot at all.
  *
  * Nothing here is saved: the nodes are in-memory model objects, so the whole
- * eligibility table can be exercised without standing up sites in each state.
+ * table can be exercised without standing up sites in each state.
  *
  * Run: php plugins/server_manager/tests/recovery_key_fleet_test.php
  */
@@ -68,8 +72,8 @@ if ($ours === '') {
 		'the eligibility table needs one to compare against');
 
 	$node = rkf_node([], ['unconfigured', '']);
-	check(!RecoveryKeyFleet::is_pushable(RecoveryKeyFleet::node_state($node)),
-		'with no key of its own, the control plane offers no push anywhere');
+	check(!RecoveryKeyFleet::has_own_key(RecoveryKeyFleet::node_state($node)),
+		'a site with an empty slot holds no key of its own');
 	harness_finish();
 }
 
@@ -78,51 +82,58 @@ section('Nodes that host no Joinery site are not a gap');
 
 $state = RecoveryKeyFleet::node_state(rkf_node(['mgn_web_root' => '']));
 check($state['state'] === 'n/a', 'a node with no web root is not applicable', $state['state']);
-check(!RecoveryKeyFleet::is_pushable($state), 'and is never offered a push');
 
 $state = RecoveryKeyFleet::node_state(rkf_node(['mgn_skip_joinery_checks' => true]));
 check($state['state'] === 'n/a', 'a node with Joinery checks switched off is not applicable', $state['state']);
-check(!RecoveryKeyFleet::is_pushable($state), 'and is never offered a push');
 
 // ── Nothing known yet ───────────────────────────────────────────────────────
 section('A node nothing has looked at is unknown, not missing');
 
 $state = RecoveryKeyFleet::node_state(rkf_node());
 check($state['state'] === 'unknown', 'no status check yet reads as unknown', $state['state']);
-check(RecoveryKeyFleet::is_pushable($state),
-	'and is still offered the push — the node itself decides, and it never overwrites');
+check(!RecoveryKeyFleet::has_own_key($state),
+	'and nothing is claimed about it either way until a check has looked');
 
 // ── Empty slots ─────────────────────────────────────────────────────────────
-section('Empty slots are the push targets');
+section('An empty slot is reported, never filled');
 
+// The slot holds the key for the SITE's own backups, and its custodian is
+// whoever administers the site. Nothing here writes to it: doing so would make
+// this control plane the holder of the private half of a key the site believes
+// is its own. It is also not a coverage gap — backups taken from here carry
+// their own key.
 foreach (array('unconfigured', 'invalid') as $reported) {
 	$state = RecoveryKeyFleet::node_state(rkf_node([], array($reported, '')));
 	check($state['state'] === 'missing', "a node reporting '{$reported}' is missing a key", $state['state']);
-	check(RecoveryKeyFleet::is_pushable($state), "and '{$reported}' is offered the push");
+	check(!RecoveryKeyFleet::has_own_key($state), "and '{$reported}' holds no key of its own");
 }
+
+check(!method_exists('JobCommandBuilder', 'build_push_recovery_key'),
+	'there is no way to build a job that writes a site\'s own recovery key');
 
 // ── Ours ────────────────────────────────────────────────────────────────────
 section('A node already holding our key is left alone');
 
 $state = RecoveryKeyFleet::node_state(rkf_node([], array('proven', $ours)));
 check($state['state'] === 'has', 'our key, proven there: nothing outstanding', $state['state']);
-check(!RecoveryKeyFleet::is_pushable($state), 'and no push is offered');
+check(RecoveryKeyFleet::has_own_key($state), 'and it holds a key of its own');
 
 // Our key that never got proven on the node is not finished: the node's own
 // backups still refuse to run, so the push has something left to do.
 $state = RecoveryKeyFleet::node_state(rkf_node([], array('unproven', $ours)));
 check($state['state'] === 'missing', 'our key that is unproven there is still outstanding', $state['state']);
-check(RecoveryKeyFleet::is_pushable($state), 'and the push is offered so the proof can be completed');
+check(!RecoveryKeyFleet::has_own_key($state),
+	'and an unproven key is not a usable one, so the site still takes no backups of its own');
 
 // ── Somebody else's ─────────────────────────────────────────────────────────
-section("A node holding somebody else's key is never a push target");
+section("A node holding somebody else's key is reported as such");
 
 foreach (array('proven', 'unproven') as $reported) {
 	$state = RecoveryKeyFleet::node_state(rkf_node([], array($reported, $theirs)));
 	check($state['state'] === 'different',
 		"a different key reported '{$reported}' is flagged as different", $state['state']);
-	check(!RecoveryKeyFleet::is_pushable($state),
-		"and '{$reported}' is never offered the push");
+	check(RecoveryKeyFleet::has_own_key($state),
+		"and '{$reported}' counts as holding a key of its own");
 	check(strpos($state['summary'], 'Left alone') !== false,
 		'and the operator is told it was left alone rather than fixed', $state['summary']);
 }

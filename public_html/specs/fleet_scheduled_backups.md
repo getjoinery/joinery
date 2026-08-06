@@ -1,7 +1,74 @@
 # Fleet Scheduled Backups: Two Profiles, Two Keys
 
-**Status:** Spec — unbuilt. All six decisions resolved 2026-08-05; ready to build.
+**Status:** All five phases BUILT 2026-08-06, uncommitted. safe + db tiers green
+(235 tests, 7556 checks). Full code review 2026-08-06: five findings, all fixed
+same day — a status check no longer stamps an in-flight run as failed, fleet
+retention orders restore points by their timestamp rather than their name (a
+name sort ordered mixed shelves by family after a mode switch), the per-node
+policy is editable on the node Backups tab (fleet default / custom / off), a
+manual run takes mode and full-interval from the node's policy, and the
+scheduler pass reports error only when it could do nothing at all. Live gates
+outstanding — see *As built* below.
 **Date:** 2026-08-05
+
+## As built
+
+All six decisions implemented as written. New: `includes/BackupProfile.php`,
+`plugins/server_manager/includes/FleetBackupPolicy.php`,
+`FleetBackupRetention.php`, `tasks/FleetBackupRun.php`, the `backup_run` job
+type, `bkh_profile` / `bkh_recovery_fpr`, and `mgn_backup_policy` /
+`mgn_last_backup_time` / `mgn_last_backup_outcome`. `push_recovery_key` is gone
+in every form — job type, builder, install step, automatic queueing and both
+buttons — while `set_recovery_key.php --report` still feeds the fleet table.
+
+**Deviations, deliberate.**
+
+1. **Manager retention lists the bucket instead of replaying history.** The spec
+   said control-plane retention would be "driven by recorded history", but that
+   history lives on the node, and shipping it to the control plane to decide a
+   delete adds a whole synchronisation path for no gain. Listing is safe here for
+   the reason it is unsafe for a site: this control plane defined the entire
+   `{slug}/manager/` path and is the only party that can delete from it. It is
+   also stricter — it counts only objects that actually exist, so a run that
+   failed part-way can never be mistaken for a restore point. Chains group by
+   directory, so chain-atomicity falls out of the grouping rather than being a
+   rule to remember.
+2. **Retention runs immediately before each node's next run**, not after the
+   previous one completes. Same cadence, one fewer moving part, and it never
+   prunes on the strength of a run whose outcome it has not seen.
+3. **`backup_project` / `backup_database` job types remain** for the ad-hoc
+   single self-contained archive. The Backups tab dispatches `backup_run` as
+   specified; the older builders are still exercised by tests and are the shape
+   From-Backup installs need.
+
+**Found while building, fixed:** the node Backups tab's field was named
+`backup_type`, which collides with a declared core setting — FormWriter refuses
+to let a page draw its own field for a declared setting, and the guard fired.
+Renamed to `backup_scope`, which is what it is: a per-run job parameter, not a
+setting anyone stores.
+
+**Outstanding — all need a real node or a real bucket:**
+
+- No manager-profile run has executed end to end. Everything up to job creation
+  is asserted; the node-side execution has never happened.
+- Write-only credential enforcement is unproven against a live provider. Nothing
+  in the fleet's B2 keys has been narrowed yet — that is a bucket-side change,
+  not a code change, and until it is made a node still holds a delete-capable
+  credential during a run.
+- The B2 lifecycle rule keeping only the current manifest version has not been
+  created.
+- `FleetBackupRun` is not activated on Scheduled Tasks.
+- Both profiles have never run on one machine, so the machine-wide mutex and the
+  chain isolation are asserted structurally but not observed.
+- The dev box's own site-profile backups fail on `config/relay_pull_key`
+  permissions, which predates this work and is unrelated to it.
+- The phase-4 **bucket cross-check** is BUILT 2026-08-06, riding the retention
+  pass's existing listing rather than `FleetBackups::list_grouped()`: the
+  scheduler stamps when the shelf was listed and its newest object write onto
+  the node (`mgn_backup_shelf_checked_time` / `mgn_backup_shelf_newest_time`),
+  and the health check raises "Backups are not landing" for a claimed success
+  with nothing written since. `update_database` run 2026-08-06 — both columns
+  exist; its live observation rides the same gates as the scheduler itself.
 
 ## The problem in one paragraph
 

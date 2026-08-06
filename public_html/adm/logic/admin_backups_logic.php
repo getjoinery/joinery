@@ -32,7 +32,10 @@ function admin_backups_logic($input = array()) {
 	$targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
 	$targets->load();
 
-	$history = new MultiBackupHistory(array('deleted' => false),
+	// This site's own runs. A control plane's copies of this site are a separate
+	// party's backups under a separate key, and mixing them into this list would
+	// make it read as though this site had backups it cannot open.
+	$history = new MultiBackupHistory(array('deleted' => false, 'profile' => BackupProfile::SITE),
 		array('bkh_start_time' => 'DESC'), 25, 0);
 	$history->load();
 
@@ -46,11 +49,21 @@ function admin_backups_logic($input = array()) {
 		$plan_problem = $e->getMessage();
 	}
 
+	// Backups somebody else takes of this site. A site admin should never have to
+	// discover from a directory listing that another party is also archiving
+	// their site — nor be told their own backups are therefore redundant, which
+	// they are not: these open with a key the site does not hold.
+	$manager_history = new MultiBackupHistory(
+		array('deleted' => false, 'profile' => BackupProfile::MANAGER),
+		array('bkh_start_time' => 'DESC'), 5, 0);
+	$manager_history->load();
+
 	return LogicResult::render(array(
 		'session'       => $session,
 		'settings'      => Globalvars::get_instance(),
 		'targets'       => $targets,
 		'history'       => $history,
+		'manager_history' => $manager_history,
 		'recovery'      => BackupRecoveryKey::setup_state(),
 		'plan'          => $plan,
 		'plan_problem'  => $plan_problem,
