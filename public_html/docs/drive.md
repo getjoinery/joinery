@@ -144,6 +144,65 @@ Access and tree logic lives in `includes/DriveHelper.php`; the verbs are `drive_
 API actions (`logic/drive_*_logic.php`, each with a `_logic_descriptor()`), which
 page JavaScript (`assets/js/drive.js`) calls with the browser-session credential.
 
+## Protection levels
+
+Every folder carries a protection level (`fol_protection_level`), and every file
+records the level it was stored at (`fil_protection_level`). Drive shows three
+rungs of the platform ladder (`includes/ProtectionLevel.php`):
+
+| | **Standard** | **Private** | **Fortress** |
+|---|---|---|---|
+| Promise | The server manages these files for you | Encrypted at rest — opened only while you're present | Plaintext never exists on the server |
+| Custody | none | server (sealed to your vault, opened in-window) | client (your browser holds the keys) |
+| Bytes on disk | plaintext | `SealedFileContainer` | browser-made ciphertext |
+| Previews, thumbnails, AI | always | while your unlock window is open | never, server-side |
+| Names, sizes, types | plaintext | plaintext | encrypted (in `fil_encrypted_metadata`) |
+| Public links | yes | no | files only, key in the URL fragment |
+| Member grants | yes | no | yes (per-user wrapped keys) |
+| Sync clients | yes | no — a daemon holds no unlock window | yes, under device custody |
+| Survives a stolen database or backup | ✗ | ✓ | ✓ |
+
+`File::is_encrypted()` means Fortress, exactly and only; `File::is_sealed()`
+means Private. Both exports carry `protection_level` and a `syncable` flag, and
+`encrypted` on an export means Fortress so a client that only ever knew two
+modes keeps reading it.
+
+A Private file's export also carries **`requires_window: true`** — its bytes and
+its thumbnail open only inside the owner's unlock window, and that window is
+keyed to the browser session (see [Sealed Vault](sealed_vault.md)). A caller
+holding an API key has no session cookie to present when it follows a link, so
+for that caller `download_url` and `thumb_url` are omitted rather than minted:
+every one of them would answer `423`, and a listing of broken tiles is a worse
+answer than a stated reason. A browser-session caller gets the URLs as normal.
+
+**A protected tree is a top-level tree.** A folder's level is the floor for
+everything inside it, and subtrees are uniform: a level is chosen when a
+top-level folder is created, a subfolder inherits its parent's, and the
+create/move/link triad refuses anything else. That uniformity is what lets a
+public link on a Standard folder trust its whole subtree.
+
+**A refusal reads a file's effective level** — the stronger of its own and its
+folder's (`DriveHelper::effective_file_level()`). The two disagree on purpose
+while a level change converges: the folder's column is the truth about what is
+*promised*, the file's about what its *bytes* are. Public links and member grants
+are refused on the promise, so nothing is minted in that gap only to be revoked
+when the batch arrives. Byte work — sealing, unsealing, quota — reads the file's
+own level, which is the one describing what is on disk. A move that would seal a
+file carrying a live link or grant is refused outright, naming what is in the
+way.
+
+**Changing a level** (`drive_level_change`) is Standard ↔ Private only — the two
+the server holds a key wrapping for. The folder changes at once, so everything
+uploaded from that moment lands at the new level; the files already inside are
+converted afterwards by repeated `drive_level_batch` calls, each bounded by a
+byte budget rather than a row count. Raising needs only the owner's vault public
+key and so runs locked; lowering decrypts and needs the window. Going Private
+ends any public links and member grants in the subtree — the first call reports
+them and does nothing until the caller confirms.
+
+Private is described in full in [Drive Encryption](drive_encryption.md), which
+covers both custody models.
+
 ## Access and grant semantics
 
 A Drive file is private, so `File::is_viewable()` returns true for the owner or an

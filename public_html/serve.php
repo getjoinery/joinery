@@ -335,8 +335,15 @@ $routes = [
                         // Only the original variant qualifies: its size is known
                         // from the blob without a round trip, and nobody
                         // range-requests a thumbnail.
+                        // A sealed file's stored bytes are a container, so a
+                        // bucket range over them would be a range of ciphertext
+                        // at the wrong offsets. The whole object comes down and
+                        // the container answers the range honestly against
+                        // PLAINTEXT offsets (File::serve_from_path's streaming
+                        // branch). Local blobs — every blob until a site turns on
+                        // offload — never take this path at all.
                         $range = null;
-                        if ($size_key === 'original') {
+                        if ($size_key === 'original' && !$file_obj->is_sealed()) {
                             $total = (int)$file_obj->size_bytes();
                             $parsed = File::parse_range_header($_SERVER['HTTP_RANGE'] ?? null, $total);
                             if ($parsed === false) {
@@ -365,7 +372,7 @@ $routes = [
                             }
                         }
                         if ($got) {
-                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store', $range);
+                            $file_obj->serve_from_path($tmp, 'private, max-age=0, no-store', $range, $size_key);
                             @unlink($tmp);
                             return true;
                         }
@@ -407,14 +414,14 @@ $routes = [
                         // Signed grant: the response must not outlive it, so
                         // stream with no-store instead of a cacheable posture
                         // (same as the private-cloud branch).
-                        $file_obj->serve_from_path($file, 'private, no-store');
+                        $file_obj->serve_from_path($file, 'private, no-store', null, $size_key);
                         return true;
                     }
                     // Gated (or not-yet-offloaded) local file: File owns the
                     // serve-back headers; permission-restricted bytes must not
                     // land in shared caches.
                     $cache_control = $file_obj->is_public() ? 'public, max-age=43200' : 'private, max-age=43200';
-                    $file_obj->serve_from_path($file, $cache_control);
+                    $file_obj->serve_from_path($file, $cache_control, null, $size_key);
                     return true;
                 } else {
                     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));

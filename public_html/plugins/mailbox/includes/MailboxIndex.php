@@ -149,7 +149,14 @@ class MailboxIndex {
 
 	/** Delete only the /dev/shm working copy — window-close, the sweep task. */
 	public function wipe(int $user_id): void {
-		@unlink($this->shmPath($user_id));
+		// Closing a window that never built an index is the common case, not an
+		// error. Check before unlinking rather than leaning on @: a strict error
+		// handler (the test harness installs one) still sees a suppressed warning
+		// and turns it into a failure.
+		$path = $this->shmPath($user_id);
+		if (is_file($path)) {
+			@unlink($path);
+		}
 	}
 
 	/**

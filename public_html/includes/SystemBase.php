@@ -437,11 +437,15 @@ abstract class SystemBase {
 	 * would recurse into decryption. PDO hands back a Postgres boolean as 't'/'f'
 	 * for some drivers and a real bool for others, and the string 'f' is truthy
 	 * in PHP — hence the explicit comparison rather than a bare truth test.
+	 *
+	 * The sealing COLUMNS decide this, not $sealed_fields: a blob-only consumer
+	 * (File) declares no sealed columns because no DB column of its holds
+	 * ciphertext — the row's DEK exists to seal the file's bytes on disk. Such a
+	 * row is still sealed, and its key wrapping still has to survive save().
 	 */
 	public function rowIsSealed() {
-		if (empty(static::$sealed_fields)) return false;
 		$flag = static::sealFlagColumn();
-		if (!array_key_exists($flag, static::$field_specifications)) return false;
+		if ($flag === '' || !array_key_exists($flag, static::$field_specifications)) return false;
 		return self::sealFlagIsSet($this->data->$flag ?? null);
 	}
 
@@ -655,6 +659,12 @@ abstract class SystemBase {
 	 * whose already-sealed attachments hang off that key) and leaves the key
 	 * wrapping columns untouched. Returns the DEK raw bytes so the caller can
 	 * seal related blobs — attachments, raw messages — under the same key.
+	 *
+	 * An EMPTY $values is the blob-only shape and is fully supported: mint a DEK,
+	 * record its wrapping, mark the row sealed, hand the key back. A model whose
+	 * ciphertext lives entirely outside the database (Drive's Private files —
+	 * the bytes on disk and their thumbnail variant) declares no $sealed_fields
+	 * and calls this for the key management alone.
 	 */
 	public static function sealColumns($row_id, $vault, array $values, $reuse_dek = null) {
 		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -685,19 +695,9 @@ abstract class SystemBase {
 		// Only a freshly-minted DEK writes the wrapping; a reused one leaves the
 		// existing key/generation/owner in place so the old ciphertext still opens.
 		if ($mint) {
-			$sets[] = static::sealedKeyColumn() . ' = ?';
-			$params[] = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
-
-			$generation = static::sealedGenerationColumn();
-			if ($generation !== '' && array_key_exists($generation, static::$field_specifications)) {
-				$sets[] = $generation . ' = ?';
-				$params[] = intval($vault->get('uev_key_generation'));
-			}
-			$owner = static::sealedOwnerColumn();
-			if ($owner !== '' && array_key_exists($owner, static::$field_specifications)) {
-				$sets[] = $owner . ' = ?';
-				$params[] = intval($vault->get('uev_usr_user_id'));
-			}
+			$wrap = static::sealWrappingAssignments($crypto, $vault, $dek);
+			$sets = array_merge($sets, $wrap['sets']);
+			$params = array_merge($params, $wrap['params']);
 		}
 		$sets[] = static::sealFlagColumn() . ' = true';
 		$params[] = $row_id;
@@ -707,6 +707,80 @@ abstract class SystemBase {
 			. ' WHERE ' . static::$pkey_column . ' = ?');
 		$stmt->execute($params);
 		return $dek;
+	}
+
+	/**
+	 * Record a key wrapping on a row whose ciphertext lives entirely OUTSIDE the
+	 * database — the blob-only consumer shape (Drive's Private files: the bytes
+	 * on disk and their thumbnail variant are the sealed things, no column here
+	 * holds ciphertext).
+	 *
+	 * The difference from sealColumns() is which key gets wrapped. sealColumns()
+	 * mints its own DEK because it must seal column values in the same statement;
+	 * a blob consumer has to seal its bytes BEFORE the row exists (the container
+	 * is what the row's blob is made from), so it mints the key first and hands
+	 * it here to be wrapped. Pass null to mint one anyway.
+	 *
+	 * Like sealColumns(), this needs only the owner's PUBLIC key: sealing never
+	 * waits for an unlock window.
+	 *
+	 * @param int|string $row_id a persisted row
+	 * @param object     $vault  the owner's UserEncryptionVault
+	 * @param string|null $dek   raw key bytes to wrap; null mints one
+	 * @return string the raw DEK now wrapped onto the row
+	 */
+	public static function recordSealedKey($row_id, $vault, $dek = null) {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+		$row_id = intval($row_id);
+		if ($row_id <= 0) {
+			throw new RuntimeException(get_called_class() . '::recordSealedKey() needs a persisted row id.');
+		}
+		foreach (array(static::sealFlagColumn(), static::sealedKeyColumn()) as $col) {
+			if ($col === '' || !array_key_exists($col, static::$field_specifications)) {
+				throw new RuntimeException(get_called_class()
+					. '::recordSealedKey() needs {prefix}_content_sealed and {prefix}_sealed_key columns.');
+			}
+		}
+
+		$crypto = new VaultCrypto();
+		$dek = ($dek === null) ? $crypto->newItemDek() : $dek;
+
+		$wrap = static::sealWrappingAssignments($crypto, $vault, $dek);
+		$sets = $wrap['sets'];
+		$params = $wrap['params'];
+		$sets[] = static::sealFlagColumn() . ' = true';
+		$params[] = $row_id;
+
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute($params);
+		return $dek;
+	}
+
+	/**
+	 * The SET assignments that record a DEK's wrapping: the sealed key itself,
+	 * plus the generation and owner a rotation sweep reads. One place knows this
+	 * shape, so the two writers cannot drift.
+	 */
+	protected static function sealWrappingAssignments($crypto, $vault, $dek) {
+		$sets = array();
+		$params = array();
+
+		$sets[] = static::sealedKeyColumn() . ' = ?';
+		$params[] = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
+
+		$generation = static::sealedGenerationColumn();
+		if ($generation !== '' && array_key_exists($generation, static::$field_specifications)) {
+			$sets[] = $generation . ' = ?';
+			$params[] = intval($vault->get('uev_key_generation'));
+		}
+		$owner = static::sealedOwnerColumn();
+		if ($owner !== '' && array_key_exists($owner, static::$field_specifications)) {
+			$sets[] = $owner . ' = ?';
+			$params[] = intval($vault->get('uev_usr_user_id'));
+		}
+		return array('sets' => $sets, 'params' => $params);
 	}
 
 	/**

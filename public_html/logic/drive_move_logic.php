@@ -3,6 +3,7 @@
 function drive_move_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
 	require_once(PathHelper::getIncludePath('data/file_changes_class.php'));
 
 	$settings = Globalvars::get_instance();
@@ -49,24 +50,69 @@ function drive_move_logic(array $input): LogicResult {
 		}
 	}
 
-	// Encryption-boundary guard. The server never transforms bytes, so a move that
-	// would cross the plaintext/encrypted line — a plaintext file into a vault, or
-	// an encrypted file out of one — is refused (the client re-uploads to convert,
-	// per docs/drive_encryption.md). An encrypted vault folder may still move to
-	// the root (a top-level vault); only plaintext-into-vault and vault-into-plain
-	// are broken states.
-	$dest_encrypted = ($parent_id > 0) ? DriveHelper::folder_is_encrypted($target) : false;
+	// Protection-boundary guard. A folder's level is the floor for everything
+	// inside it, so an item may not land in a folder of a different level — but
+	// what "may not" means depends on which boundary is crossed:
+	//
+	//   Fortress: refused outright. The server holds no key and never transforms
+	//   those bytes, so converting is a client-side act (re-upload) —
+	//   docs/drive_encryption.md.
+	//
+	//   Standard <-> Private: the server holds the key wrapping, so it CAN
+	//   convert. A single file is converted in place here; a whole subtree, or a
+	//   file too large to convert inside one request, goes through the folder's
+	//   level change, which runs in bounded batches with a receipt.
+	//
+	// A protected folder may still move to the root (a protected tree is a
+	// top-level tree).
+	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+	$dest_level = ($parent_id > 0) ? DriveHelper::folder_level($target) : ProtectionLevel::STANDARD;
+	$convert_file_to = null;
+
 	if ($entity_type === DriveHelper::ENTITY_FILE) {
-		if ($entity->is_encrypted() !== $dest_encrypted) {
-			return LogicResult::error('Move an encrypted file by re-uploading it; it can\'t cross an encryption boundary in place.');
+		$item_level = $entity->protection_level();
+		if ($item_level !== $dest_level) {
+			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
+				return LogicResult::error('Move a Fortress file by re-uploading it; only your browser can convert it.');
+			}
+			$plain_bytes = $entity->plain_size_bytes();
+			if ($plain_bytes > DriveSealed::TRANSITION_BYTE_BUDGET) {
+				return LogicResult::error('That file is too large to convert during a move. Move it with its folder, or change the folder\'s protection level.');
+			}
+			// Private carries no public link and no member grant. A folder-wide
+			// level change reports those and revokes them once the owner confirms;
+			// a move has no such step, so it refuses and names what is in the way
+			// rather than cutting someone's access off the back of a drag.
+			if ($dest_level === ProtectionLevel::PRIVATE_) {
+				$shared = DriveHelper::file_sharing_counts($entity_id);
+				if ($shared['links'] > 0 || $shared['grants'] > 0) {
+					$parts = array();
+					if ($shared['links'] > 0) {
+						$parts[] = $shared['links'] . ' public link' . ($shared['links'] === 1 ? '' : 's');
+					}
+					if ($shared['grants'] > 0) {
+						$parts[] = $shared['grants'] . ' member' . ($shared['grants'] === 1 ? '' : 's') . ' with access';
+					}
+					return LogicResult::error('That file has ' . implode(' and ', $parts)
+						. ', and a Private file can have neither. Remove the sharing first, then move it.');
+				}
+			}
+			$convert_file_to = $dest_level;
 		}
 	} else {
-		$item_encrypted = DriveHelper::folder_is_encrypted($entity);
-		if ($dest_encrypted && !$item_encrypted) {
-			return LogicResult::error('A plaintext folder can\'t move into an encrypted vault.');
-		}
-		if (!$dest_encrypted && $item_encrypted && $parent_id > 0) {
-			return LogicResult::error('An encrypted vault folder can only sit at the Drive root or inside another vault.');
+		$item_level = DriveHelper::folder_level($entity);
+		if ($item_level !== $dest_level) {
+			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
+				return LogicResult::error($parent_id > 0
+					? 'A Fortress folder can only sit at the Drive root or inside another Fortress folder.'
+					: 'That folder can\'t move here.');
+			}
+			// Standard <-> Private for a whole subtree is the level change, not a
+			// move: it is byte work with a receipt, and silently starting it from
+			// a drag would be a surprise.
+			return LogicResult::error('That folder is ' . ProtectionLevel::label($item_level)
+				. ' and the destination is ' . ProtectionLevel::label($dest_level)
+				. '. Change the folder\'s protection level first, then move it.');
 		}
 	}
 
@@ -86,6 +132,23 @@ function drive_move_logic(array $input): LogicResult {
 		$entity->save();
 		$owner = $owner_id;
 	} else {
+		// Convert before the move lands, so a failure leaves the file where it was
+		// at the level it was, rather than in a folder whose promise it breaks.
+		if ($convert_file_to !== null) {
+			try {
+				if ($convert_file_to === ProtectionLevel::PRIVATE_) {
+					DriveSealed::sealExistingFile($entity);   // public key only
+				} else {
+					DriveSealed::unsealExistingFile($entity); // needs the window
+				}
+			} catch (VaultLockedException $e) {
+				return LogicResult::error('Unlock your vault to move a Private file out of its folder.');
+			} catch (Exception $e) {
+				error_log('Drive move conversion failed for file ' . $entity_id . ': ' . $e->getMessage());
+				return LogicResult::error('That file could not be converted for its new folder.');
+			}
+			$entity = DriveHelper::load_file($entity_id);
+		}
 		$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
 		$entity->save();
 		$owner = (int)$entity->get('fil_usr_user_id');

@@ -76,9 +76,17 @@ try {
 	check(strpos($html, 'This domain is now Private') !== false, 'working state already states the event');
 	check(strpos($html, 'Sealing earlier messages — 340 remaining') !== false,
 		'the sealing row is live with the backlog count');
-	check(strpos($html, 'data-backlog="340"') !== false && strpos($html, 'data-sealed-total="12"') !== false
-		&& strpos($html, 'data-domain-id="' . intval($dom->key) . '"') !== false,
-		'the JS loop contract rides as data attributes');
+	// The batch loop is the shared one (assets/js/ceremony-batch.js), configured
+	// from a data attribute: the action to call, the payload it needs, where the
+	// countdown starts, and which response key counts as progress.
+	check(strpos($html, 'data-ceremony-batch=') !== false, 'the card carries the shared batch driver config');
+	check(strpos($html, '&quot;remaining&quot;:340') !== false && strpos($html, '&quot;doneTotal&quot;:12') !== false,
+		'the config states the backlog and the running total');
+	check(strpos($html, '&quot;action&quot;:&quot;mailbox\/seal_batch&quot;') !== false
+		&& strpos($html, '&quot;domain_id&quot;:' . intval($dom->key)) !== false,
+		'the config names the batch action and its domain');
+	check(strpos($html, 'data-ceremony-dot') !== false && strpos($html, 'data-ceremony-text') !== false,
+		'the progress row marks the pieces the driver updates');
 	check(strpos($html, 'd-none') !== false, 'the action button hides until the sealing resolves');
 	check(strpos($html, 'ceremony_seal_batch') !== false && strpos($html, '<noscript>') !== false,
 		'the noscript batch form is present while a backlog remains');

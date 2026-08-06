@@ -1227,3 +1227,15 @@
 	$migration['migration_file'] = 'backfill_passkey_vault_capability.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Drive folders and files carry a protection level instead of an encrypted
+	// yes/no, so the middle rung — server custody, opened in your unlock window —
+	// has somewhere to live. Every row that was encrypted is a Fortress row. Must
+	// run while the booleans still exist; the column-drop step is deferred until
+	// after migrations for exactly this reason.
+	$migration = array();
+	$migration['database_version'] = '167';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'backfill_drive_protection_level.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

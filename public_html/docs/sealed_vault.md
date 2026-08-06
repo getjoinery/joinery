@@ -3,11 +3,16 @@
 A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
 passkey, a recovery code, or an optional bypass phrase), one bounded unlock
-window, and any number of consumers behind it — mail and chat seal server-custody
-content; the [password manager](../plugins/vault/docs/overview.md) and
-[Drive encryption](drive_encryption.md) are client-custody consumers (their keys
-are unwrapped only in the browser). The vault owns the identity and the lock; each
-consumer owns what it seals and how it presents locked state.
+window, and any number of consumers behind it — mail, chat, and
+[Drive's Private files](drive_encryption.md#private-files--server-custody) seal
+server-custody content; the [password manager](../plugins/vault/docs/overview.md)
+and [Drive's Fortress folders](drive_encryption.md) are client-custody consumers
+(their keys are unwrapped only in the browser). The vault owns the identity and
+the lock; each consumer owns what it seals and how it presents locked state.
+
+Consumers register their hooks from a bootstrap file the vault loads lazily:
+plugins through `VaultUnlock::CONSUMER_PLUGINS`, and core consumers — Drive is
+one, since it has no plugin — through `VaultUnlock::CONSUMER_CORE_FILES`.
 
 ## The shape of it
 
@@ -274,10 +279,10 @@ Consuming a recovery code to unlock is exempt from the floor, but drops the
 vault into `regenerate_recommended` (surfaced by `vault_status` and the unlock
 response) once fewer than 3 remain unused.
 
-## The two generic consumer hooks
+## The generic consumer hooks
 
 A server-custody consumer never builds its own decrypt plumbing — it declares
-into one of two generic hooks and the vault (or the reader that already
+into one of the generic hooks and the vault (or the reader that already
 exists) does the rest.
 
 **Sealed-`File` decrypt hook** — a consumer with sealed attachments registers
@@ -294,6 +299,38 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 `File::serve_from_path()` calls the registered decryptor between reading the
 stored bytes and writing the response; a `VaultLockedException` becomes a
 generic `423 Locked` response, never a raw error or ciphertext.
+
+**Streaming `File` decrypt hook** — the shape for sealed content too large to
+hold in memory, and the one that can answer a Range request honestly. A consumer
+registers an opener that returns a `FileStreamingDecryptor`:
+
+```php
+File::registerStreamingDecryptHook('drive', function (File $file, $size_key = null) {
+    return $file->is_sealed() ? new DriveSealedStream($file, $size_key) : null;  // null = stream unchanged
+});
+```
+
+The opener is handed the size key being served — `'original'` or an image
+variant — because a consumer's integrity checks differ between the two: a file's
+row records the plaintext size of its original and knows nothing about a
+variant's. A caller that cannot say passes `null`, which means *unknown*, never
+*original*.
+
+The decryptor answers three questions: `prepare($path)` acquires the in-window
+key (and throws `VaultLockedException` if there is none), `plainSize($path)`
+reports the plaintext length, and `stream($path, $sink, $offset, $length)`
+decrypts a span. `serve_from_path()` resolves the key **before** writing any
+header — so a locked vault is a clean 423 — then advertises `Accept-Ranges:
+bytes` and serves 206 against plaintext offsets. Whole-file content should use
+this shape; the whole-bytes hook above suits small sealed attachments.
+
+**Blob-only sealing** — a consumer whose ciphertext lives entirely outside the
+database declares no `$sealed_fields` at all. It still needs the four sealing
+columns, and records its key with `SystemBase::recordSealedKey($row_id, $vault,
+$dek)`, which wraps a key the consumer already minted (a file's bytes have to be
+sealed before the row that will point at them exists) rather than minting its
+own the way `sealColumns()` must. Such a row is still sealed: `save()` protects
+its key wrapping exactly as it does for a column-sealing model.
 
 **Sealed-field model hook** — a model declares which columns hold protected
 content and adds four columns. That is the whole integration: no crypto code,

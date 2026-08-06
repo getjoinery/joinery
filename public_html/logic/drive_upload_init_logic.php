@@ -76,7 +76,8 @@ function drive_upload_init_logic(array $input): LogicResult {
 	// belongs to the folder's owner, whoever uploads it).
 	$target_file = null;
 	$owner_id = $user_id;
-	$encrypted = false; // whether the created file will be an encrypted vault file
+	$encrypted = false; // Fortress: client custody, ciphertext arrives from the browser
+	$sealed    = false; // Private: server custody, plaintext arrives and is sealed here
 	if ($file_id) {
 		$target_file = DriveHelper::load_file($file_id);
 		if (!$target_file) {
@@ -88,6 +89,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 		$folder_id = (int)$target_file->get('fil_fol_folder_id');
 		$owner_id  = (int)$target_file->get('fil_usr_user_id');
 		$encrypted = $target_file->is_encrypted();
+		$sealed    = $target_file->is_sealed();
 	} elseif ($folder_id) {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder) {
@@ -97,7 +99,10 @@ function drive_upload_init_logic(array $input): LogicResult {
 			return LogicResult::error('You do not have access to that folder.');
 		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
-		$encrypted = DriveHelper::folder_is_encrypted($folder);
+		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+		$level = DriveHelper::folder_level($folder);
+		$encrypted = ($level === ProtectionLevel::FORTRESS);
+		$sealed    = ($level === ProtectionLevel::PRIVATE_);
 	}
 
 	// A plaintext modification time on an encrypted file would leak when the
@@ -132,7 +137,13 @@ function drive_upload_init_logic(array $input): LogicResult {
 	// Encrypted uploads are excluded: their ciphertext is unique per file (random
 	// file key + IVs, so it never matches), and the short-circuit path does not
 	// carry the encrypted metadata / key-grant a vault file needs.
-	if ($sha256 !== '' && !$encrypted) {
+	//
+	// Sealed destinations are excluded for a different reason, and it matters: the
+	// hash the client sends is of the PLAINTEXT, which really can match a
+	// plaintext twin the actor holds in a Standard folder. Linking to it would
+	// quietly place unsealed bytes inside a Private folder — the promise on the
+	// card broken by an optimization. The upload runs, and the bytes are sealed.
+	if ($sha256 !== '' && !$encrypted && !$sealed) {
 		$cand = FileBlob::find_dedup($sha256, $size_bytes, true, $user_id);
 		if ($cand) {
 			if ($target_file) {

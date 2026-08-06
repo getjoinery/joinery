@@ -14,6 +14,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/UploadPurposeRegistry.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
 	require_once(PathHelper::getIncludePath('data/files_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_uploads_class.php'));
@@ -85,9 +86,11 @@ function drive_upload_complete_logic(array $input): LogicResult {
 
 	// Re-resolve the target and its OWNER (billed; single-owner-tree rule) —
 	// access may have been revoked between init and complete.
+	// The protection level is authoritative from the DESTINATION, never from the
+	// client: a file lands at whatever level the folder it lands in promises.
 	$target_file = null;
 	$owner_id = $user_id;
-	$encrypted = false; // authoritative: derived from the destination, not the client
+	$level = ProtectionLevel::STANDARD;
 	if ($file_id) {
 		$target_file = DriveHelper::load_file($file_id);
 		if (!$target_file || !DriveHelper::can_write(DriveHelper::ENTITY_FILE, $target_file, $user_id, $session->get_permission())) {
@@ -95,7 +98,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			return LogicResult::error('You can no longer update that file.');
 		}
 		$owner_id = (int)$target_file->get('fil_usr_user_id');
-		$encrypted = $target_file->is_encrypted();
+		$level = $target_file->protection_level();
 	} elseif ($folder_id) {
 		$folder = DriveHelper::load_folder($folder_id);
 		if (!$folder || !DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
@@ -103,8 +106,10 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			return LogicResult::error('You can no longer upload into that folder.');
 		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
-		$encrypted = DriveHelper::folder_is_encrypted($folder);
+		$level = DriveHelper::folder_level($folder);
 	}
+	$encrypted = ($level === ProtectionLevel::FORTRESS); // client custody
+	$sealed    = ($level === ProtectionLevel::PRIVATE_);  // server custody
 
 	// Client-custody encryption payloads (docs/drive_encryption.md). Opaque here —
 	// produced in the browser, the server never inspects them. Passed through the
@@ -173,6 +178,14 @@ function drive_upload_complete_logic(array $input): LogicResult {
 	// under quota cannot all land past it. The pending row is kept on rejection
 	// (the user can free space and retry; the stale-upload task cleans up).
 	$expected = (int)$up->get('fup_expected_bytes');
+	if ($sealed) {
+		// Quota is charged on what lands in storage, and sealing adds a fixed
+		// per-chunk overhead. The client uploaded plaintext, so the admitted size
+		// has to be the container's size or the check would admit bytes the
+		// recompute afterwards counts as over quota.
+		require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
+		$expected = SealedFileContainer::cipherSizeFor($expected);
+	}
 	DriveHelper::quota_lock($owner_id);
 	try {
 		require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
@@ -184,6 +197,47 @@ function drive_upload_complete_logic(array $input): LogicResult {
 
 		if ($target_file) {
 			// New version of an existing file.
+			if ($sealed) {
+				// A version reuses the file's OWN key — the same rule Fortress
+				// versions follow, for the same reason: prior versions must stay
+				// openable and the row's single wrapping has to cover them all.
+				// Sealing needs no window, so uploading into a Private folder
+				// works locked; only reading does not.
+				require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+				require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
+				try {
+					$fk = DriveSealed::versionKeyFor($target_file);
+				} catch (VaultLockedException $e) {
+					// The one upload that genuinely needs the window: a new version
+					// must be sealed under the file's EXISTING key, and reading that
+					// key is what the window is for. The pending upload is kept, so
+					// unlocking and retrying costs no bytes.
+					return LogicResult::error('Unlock your vault to replace the contents of a Private file.');
+				} catch (Exception $e) {
+					$up->discard();
+					return LogicResult::error('That file\'s key could not be read, so a new version cannot be stored.');
+				}
+				$sealed_tmp = $part . '.sealed';
+				try {
+					$info = SealedFileContainer::sealStream($part, $sealed_tmp, $fk);
+					$blob = FileBlob::createFromPath($sealed_tmp, 'application/octet-stream', true);
+					FileVersion::save_new_content($target_file, $blob, $user_id);
+					$fresh_target = DriveHelper::load_file($target_file->key);
+					if ($fresh_target) {
+						$fresh_target->set('fil_plain_size_bytes', (int)$info['plain_size']);
+						$fresh_target->save();
+						DriveSealed::storeSealedThumbnail($fresh_target, $part, $fk);
+					}
+				} finally {
+					if (is_file($sealed_tmp)) { @unlink($sealed_tmp); }
+				}
+				$up->discard();
+				DriveUsage::recompute($owner_id);
+				FileChange::record(FileChange::KIND_CONTENT, DriveHelper::ENTITY_FILE, $target_file->key, $owner_id, $user_id);
+				DriveHelper::forget_sync_meta($target_file->key);
+				$fresh = DriveHelper::load_file($target_file->key);
+				return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh)));
+			}
 			$blob = FileBlob::createFromPath($part, $mime, true);
 			FileVersion::save_new_content($target_file, $blob, $user_id);
 			// For an encrypted file the head metadata (and thumbnail) follow the
@@ -221,12 +275,27 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		$restrictions = array(
 			'fil_private' => true,
 			'fil_source'  => File::SOURCE_DRIVE,
+			'fil_protection_level' => $level,
 		);
 		if ($encrypted) {
-			$restrictions['fil_encrypted'] = true;
 			$restrictions['fil_encrypted_metadata'] = $enc_metadata;
 		}
-		$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
+		if ($sealed) {
+			// Server custody: the bytes are sealed on the way into the blob, so
+			// the plaintext never lands in the file store at all. The type is
+			// sniffed from the plaintext first (sniffing a container would read
+			// application/octet-stream forever), and the thumbnail is rendered
+			// while the plaintext is still on disk.
+			require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+			try {
+				$file = DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
+			} catch (DriveSealedException $e) {
+				$up->discard();
+				return LogicResult::error($e->getMessage());
+			}
+		} else {
+			$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
+		}
 		if (!$file || !$file->key) {
 			$up->discard();
 			return LogicResult::error('The file could not be stored.');

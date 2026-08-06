@@ -196,6 +196,7 @@
 		state.items = data.items || [];
 		state.breadcrumb = data.breadcrumb || [];
 		state.folderEncrypted = !!(data.folder && data.folder.encrypted);
+		state.folderLevel = (data.folder && data.folder.protection_level) || 'standard';
 		if (data.usage) state.usage = data.usage;
 		if (typeof data.folder_id !== 'undefined') state.folderId = data.folder_id || 0;
 		renderBreadcrumb();
@@ -314,10 +315,18 @@
 			? (it._name || 'Encrypted file')
 			: it.name;
 		var name = el('div', 'drv-item-name', displayName);
+		// One badge, one meaning. Fortress says "only your browser can read this";
+		// Private says "the server can, but only while you're here".
 		if (it.encrypted) {
 			var lk = el('span', 'drv-item-lock', '🔒');
-			lk.title = 'Encrypted';
+			lk.title = 'Fortress — encrypted by your browser';
 			name.appendChild(lk);
+		} else if (it.protection_level === 'private') {
+			var pv = el('span', 'drv-item-lock', '🔑');
+			pv.title = it.entity_type === 'folder'
+				? 'Private — opened only while you\'re signed in and unlocked. Not synced to your devices.'
+				: 'Private — opened only while you\'re signed in and unlocked';
+			name.appendChild(pv);
 		}
 		row.appendChild(name);
 
@@ -386,9 +395,38 @@
 			openFolder(it.id);
 		} else if (it.encrypted) {
 			downloadEncrypted(it);
+		} else if (it.protection_level === 'private') {
+			openSealed(it);
 		} else {
 			if (it.download_url) window.open(it.download_url, '_blank');
 		}
+	}
+
+	// A Private file's bytes are opened by the SERVER, inside the owner's unlock
+	// window — so there is nothing to decrypt here. The only thing this has to
+	// get right is the locked case: ask for the window, then re-run the original
+	// request. Same contract as the mail reader; the shared ceremony
+	// (assets/js/vault-lock.js) keeps the header chip and the presence beacon in
+	// step with an unlock started from here.
+	function openSealed(it) {
+		if (!it.download_url) return;
+		fetch(it.download_url, { method: 'HEAD' }).then(function (r) {
+			if (r.status !== 423) {
+				window.open(it.download_url, '_blank');
+				return;
+			}
+			if (!window.JoineryVaultLock) {
+				toast('Unlock your vault to open this file.');
+				return;
+			}
+			return JoineryVaultLock.unlock().then(function (ok) {
+				if (ok) window.open(it.download_url, '_blank');
+			});
+		}).catch(function () {
+			// A HEAD that cannot be made is not a reason to refuse the download;
+			// let the browser follow the link and show whatever comes back.
+			window.open(it.download_url, '_blank');
+		});
 	}
 
 	// Fetch ciphertext, decrypt in the browser, and hand the plaintext to the user
@@ -429,10 +467,17 @@
 			opts.push(['Restore', function () { doRestore(it); }]);
 			opts.push(['Delete forever', function () { confirmDelete(it); }, true]);
 		} else {
-			if (it.entity_type === 'file') opts.push(['Download', function () { if (it.encrypted) { downloadEncrypted(it); } else if (it.download_url) { window.open(it.download_url, '_blank'); } }]);
+			if (it.entity_type === 'file') opts.push(['Download', function () { if (it.encrypted) { downloadEncrypted(it); } else if (it.protection_level === 'private') { openSealed(it); } else if (it.download_url) { window.open(it.download_url, '_blank'); } }]);
 			opts.push(['Rename', function () { openRename(it); }]);
 			opts.push(['Move to…', function () { openMove(it); }]);
 			if (it.entity_type === 'file') opts.push([it.starred ? 'Unstar' : 'Star', function () { toggleStar(it, {classList:{toggle:function(){}}}); }]);
+			// Protection belongs to a whole tree, so it is offered on top-level
+			// folders only — and only between the two levels the server can
+			// convert (a Fortress tree is the browser's to make, at creation).
+			if (it.entity_type === 'folder' && it.owner_id === CFG.userId
+				&& !it.parent_id && it.protection_level !== 'fortress') {
+				opts.push(['Protection…', function () { openProtection(it); }]);
+			}
 			if (it.owner_id === CFG.userId) opts.push(['Share', function () { openShare(it); }]);
 			if (it.entity_type === 'file') opts.push(['Version history', function () { openVersions(it); }]);
 			opts.push(['Delete', function () { doTrash(it); }, true]);
@@ -508,34 +553,127 @@
 	function openNewFolder() {
 		var dlg = $('drvNewFolderDialog');
 		$('drvNewFolderName').value = '';
-		// A vault is a top-level tree: inside an encrypted folder a new subfolder
-		// is always encrypted (inherited — force the box on, hide the choice);
-		// the opt-in checkbox is offered only at the root; inside a plaintext
-		// folder there is no choice to make (the server refuses encrypted there).
-		var enc = $('drvNewFolderEnc');
-		var wrap = $('drvNewFolderEncWrap');
-		if (state.folderEncrypted) { enc.checked = true; enc.disabled = true; wrap.hidden = true; }
-		else if (state.view === 'mine' && state.folderId) { enc.checked = false; enc.disabled = true; wrap.hidden = true; }
-		else { enc.checked = false; enc.disabled = false; wrap.hidden = false; }
+		// A protected tree is a top-level tree, so the level is chosen once, at
+		// the root. Inside any folder the new subfolder inherits its parent's
+		// level and there is nothing to ask (the server refuses anything else).
+		var wrap = $('drvNewFolderLevelWrap');
+		var atRoot = (state.view === 'mine' && !state.folderId);
+		if (wrap) wrap.hidden = !atRoot;
+		if (atRoot) {
+			var std = document.querySelector('input[name="drv_new_folder_level"][value="standard"]');
+			if (std) std.checked = true;
+		}
 		dlg.showModal();
 		setTimeout(function () { $('drvNewFolderName').focus(); }, 30);
+	}
+	function newFolderLevel() {
+		var picked = document.querySelector('input[name="drv_new_folder_level"]:checked');
+		return picked ? picked.value : 'standard';
 	}
 	function submitNewFolder(e) {
 		e.preventDefault();
 		var name = $('drvNewFolderName').value.trim();
 		if (!name) return;
 		var body = { name: name };
-		if (state.view === 'mine' && state.folderId) body.parent_id = state.folderId;
-		if ($('drvNewFolderEnc').checked || state.folderEncrypted) body.encrypted = true;
+		var inFolder = (state.view === 'mine' && state.folderId);
+		if (inFolder) body.parent_id = state.folderId;
+		// Only the root offers a choice; elsewhere the server inherits it.
+		body.protection_level = inFolder ? (state.folderLevel || 'standard') : newFolderLevel();
 		var proceed = function () {
 			api.post('drive_folder_create', body)
 				.then(function () { $('drvNewFolderDialog').close(); load(); })
 				.catch(function (e) { toast(e.message || 'Could not create folder.'); });
 		};
-		// Creating an encrypted folder requires the vault to exist (enroll on first
-		// use), so the owner has a key to seal files to.
-		if (body.encrypted) { ensureUnlocked().then(proceed).catch(function (e) { toast(e.message || 'Vault unlock needed.'); }); }
-		else proceed();
+		// Either protected level needs the owner's vault to exist first — Fortress
+		// so the browser has a key, Private so the server has one to seal to.
+		if (body.protection_level !== 'standard') {
+			ensureUnlocked().then(proceed).catch(function (e) { toast(e.message || 'Vault unlock needed.'); });
+		} else {
+			proceed();
+		}
+	}
+
+	// ---- protection level --------------------------------------------------
+	// Changing a folder's level is two steps on purpose: the promise changes at
+	// once (everything uploaded from here on lands at the new level), and the
+	// files already inside are converted afterwards, in bounded batches, with a
+	// progress row that says where it is. The batch loop is the shared one every
+	// converge-afterwards change uses (assets/js/ceremony-batch.js).
+	var protectionTarget = null;
+	// Whether the owner has already been shown, and accepted, what going Private
+	// will end. It lives with the DIALOG, not with a request body: the server
+	// answers `needs_confirmation` to the first Apply and the owner's answer is
+	// the SECOND Apply, which builds a fresh request. Anything recorded on the
+	// first request's body is gone by then.
+	var protectionConfirmed = false;
+	function openProtection(it) {
+		protectionTarget = it;
+		protectionConfirmed = false;
+		var dlg = $('drvProtectionDialog');
+		if (!dlg) return;
+		$('drvProtectionFolder').textContent = it.name;
+		var current = it.protection_level || 'standard';
+		var picked = document.querySelector('input[name="drv_protection_level"][value="' + current + '"]');
+		if (picked) picked.checked = true;
+		$('drvProtectionProgress').hidden = true;
+		$('drvProtectionWarning').hidden = true;
+		$('drvProtectionApply').disabled = false;
+		dlg.showModal();
+	}
+
+	function submitProtection(e) {
+		e.preventDefault();
+		if (!protectionTarget) return;
+		var picked = document.querySelector('input[name="drv_protection_level"]:checked');
+		var target = picked ? picked.value : 'standard';
+		if (target === (protectionTarget.protection_level || 'standard')) { $('drvProtectionDialog').close(); return; }
+
+		var body = { folder_id: protectionTarget.id, protection_level: target };
+		if (protectionConfirmed) body.confirm_revoke_sharing = true;
+
+		$('drvProtectionApply').disabled = true;
+		api.post('drive_level_change', body).then(function (d) {
+			// The server reports what going Private will end before it ends it.
+			if (d && d.needs_confirmation) {
+				var warn = $('drvProtectionWarning');
+				warn.textContent = (d.blockers || []).map(function (b) { return b.label; }).join(' · ')
+					+ ' — apply again to continue.';
+				warn.hidden = false;
+				$('drvProtectionApply').disabled = false;
+				protectionConfirmed = true;
+				return;
+			}
+			startProtectionBatch(protectionTarget.id, d && d.remaining ? d.remaining : 0, target);
+		}).catch(function (err) {
+			var warn = $('drvProtectionWarning');
+			warn.textContent = err.message || 'Could not change the protection level.';
+			warn.hidden = false;
+			$('drvProtectionApply').disabled = false;
+		});
+	}
+
+	function startProtectionBatch(folderId, remaining, target) {
+		var box = $('drvProtectionProgress');
+		box.hidden = false;
+		var verb = (target === 'private') ? 'Sealing' : 'Opening';
+		box.setAttribute('data-ceremony-batch', JSON.stringify({
+			action: 'drive/level_batch',
+			payload: { folder_id: folderId },
+			remaining: remaining,
+			doneKey: 'converted',
+			labels: {
+				working: verb + ' files — {remaining} to go…',
+				done: '{total} file{s:total} converted',
+				none: 'No files needed converting',
+				stuck: '{remaining} file{s:remaining} could not be converted — they keep their old protection.',
+				paused: 'Paused — reopen this folder to resume.'
+			}
+		}));
+		delete box.dataset.ceremonyStarted;
+		box.addEventListener('ceremony:done', function () {
+			setTimeout(function () { $('drvProtectionDialog').close(); load(); }, 1200);
+		}, { once: true });
+		if (window.JoineryCeremonyBatch) JoineryCeremonyBatch.run(box);
 	}
 
 	var renameTarget = null;
@@ -988,6 +1126,7 @@
 		interceptSubmit(dialogForm($('drvNewFolderDialog')), submitNewFolder);
 		interceptSubmit(dialogForm($('drvRenameDialog')), submitRename);
 		interceptSubmit(dialogForm($('drvMoveDialog')), submitMove);
+		interceptSubmit(dialogForm($('drvProtectionDialog')), submitProtection);
 		interceptSubmit($('drvShareEmail').closest('form'), submitAddPerson);
 		interceptSubmit($('drvLinkExpires').closest('form'), submitCreateLink);
 		document.querySelectorAll('.drv-dialog [data-close]').forEach(function (b) {

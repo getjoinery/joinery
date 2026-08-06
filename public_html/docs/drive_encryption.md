@@ -1,18 +1,33 @@
-# Drive Encryption — Client-Custody End-to-End Encryption
+# Drive Encryption — the two encrypted levels
 
-Drive files inside an **encrypted vault folder** are end-to-end encrypted in the
-browser: the server stores and streams ciphertext and never holds a key or sees
-plaintext. This is the Proton-Drive-shaped feature — client-side, zero-knowledge.
-It layers on [Drive](drive.md) (folders, quotas, versioning, sharing, the
-resumable upload API) and, through it, the [file blob layer](drive.md): ciphertext
-flows through the upload pipeline, blobs, offload, signed URLs, and quotas
-untouched.
+Drive encrypts files at two of its three [protection levels](drive.md#protection-levels),
+and they differ in exactly one thing: **who holds the key.**
 
-Encryption is a client-custody consumer of the [Sealed Vault](sealed_vault.md).
-The per-user encryption identity — one X25519 keypair, its passkey / recovery-key
-/ passphrase unlockers, and the enrollment and recovery ceremonies — comes from
-the vault's `drive` scope. Drive adds only the file-content encryption and the
-multi-user key sharing on top of that identity.
+- **Fortress** is client custody. Files inside a Fortress folder are end-to-end
+  encrypted in the browser: the server stores and streams ciphertext and never
+  holds a key or sees plaintext. This is the Proton-Drive-shaped feature —
+  zero-knowledge, and therefore opaque to every server-side capability.
+- **Private** is server custody. Files are sealed at rest under a per-file key
+  wrapped to the owner's vault, and the server opens them only inside the
+  owner's unlock window. A stolen database or backup yields ciphertext; a live
+  server during the owner's window does not — and that is precisely why
+  previews, thumbnails and AI still work there.
+
+Both layer on [Drive](drive.md) (folders, quotas, versioning, sharing, the
+resumable upload API) and, through it, the [file blob layer](drive.md):
+ciphertext flows through the upload pipeline, blobs, offload, signed URLs, and
+quotas untouched.
+
+Both are consumers of the [Sealed Vault](sealed_vault.md), each using the scope
+that matches its custody: Fortress uses the `drive` scope (client custody — the
+secret key is unwrapped only in the browser), Private uses the server-custody
+`user` scope, the same vault mail and chat seal to. The per-user encryption
+identity — one X25519 keypair per scope, its passkey / recovery-key / passphrase
+unlockers, and the enrollment and recovery ceremonies — comes from the vault.
+Drive adds only the file-content encryption on top.
+
+Sections below marked **Fortress** describe the client-custody path; the
+[Private files](#private-files--server-custody) section covers server custody.
 
 ## Threat model
 
@@ -274,6 +289,101 @@ file was last worked on. The true mtime is a field inside the encrypted metadata
 blob, and `drive_upload_init` refuses a `modified_time` parameter when the
 destination is a vault folder rather than silently dropping it.
 
+## Private files — server custody
+
+A Private file's bytes on disk are a **`SealedFileContainer`**
+(`includes/SealedFileContainer.php`), sealed under a random 32-byte per-file key
+that is wrapped to the owner's server-custody vault public key and stored on the
+file row (`fil_sealed_key`, with `fil_sealed_owner_user_id` and
+`fil_key_generation`). No database column holds ciphertext — the row's key exists
+to seal the blob and its thumbnail variant — so `File` declares no
+`$sealed_fields` and records its wrapping through
+`SystemBase::recordSealedKey()`.
+
+**The container is the browser's chunk scheme, in PHP.** A header (magic,
+version, content id, plaintext chunk size) is followed by the same framing
+`DriveCrypto` produces: `uint32be blockLen || IV[12] || AES-256-GCM(ct||tag)` per
+4 MiB plaintext chunk, with `AAD = "{content_id}:{chunk_index}"`. One format
+means one set of overhead math (`DriveHelper::encrypted_size_ceiling()`, 32 bytes
+per chunk) across both custody models, and a chunk can be neither reordered
+within its file nor transplanted into another. Every block but the last is a full
+chunk, so the ciphertext offset of chunk *i* is arithmetic rather than a scan — a
+Range request for the tail of a large file reads two chunks, not the whole file.
+
+**Writing needs no unlock window.** Sealing uses only the owner's public key, so
+an upload into a Private folder succeeds with the vault locked, from any session
+with write access. `DriveSealed::createSealedFile()` runs the order that matters:
+sniff the type from the plaintext (a container always sniffs as
+`application/octet-stream`), mint the key and seal into a container in a temp
+file, create the `File` from that container — so plaintext never lands in the
+blob store at all — record the wrapping, then render the thumbnail from the
+still-present plaintext and store it sealed in the encrypted variant slot. The
+blob measures ciphertext, which is what quota is charged on; the plaintext size
+is recorded in `fil_plain_size_bytes` for display and Range arithmetic. A new
+version reuses the file's existing key, which is the one write that needs the
+window.
+
+**Reading needs the window.** `DriveSealed` registers a streaming decrypt hook
+(`File::registerStreamingDecryptHook`), so `File::serve_from_path()` advertises
+`Accept-Ranges: bytes` and answers 206 against plaintext offsets — video seek and
+resumable downloads work. The key is resolved before the first header is written,
+so a closed window is a clean 423 rather than a truncated body. Unwrapping the
+key calls `SealedEgressGuard::markHot()` with `fil:{id}:content`, which is why an
+AI turn that reads a Private file falls under the hot-turn rule with no
+Drive-specific egress code.
+
+The window is bound to the browser session that opened it (the APCu key is
+`vault:{session_id}:{user_id}:{scope}`), so **a request carrying no session can
+never open a Private file** — it answers 423 whatever windows the owner holds
+elsewhere. Signed URLs authorize the *fetch*, not the *unsealing*; see
+[File Signed URLs](file_signed_urls.md#sealed-content).
+
+**Truncation is caught by the row, not by the cipher.** The per-chunk AEAD binds
+a chunk to its file and to its index, so chunks cannot be reordered or
+transplanted — but nothing in the framing states how many chunks a container
+should have, and a container truncated on a block boundary still authenticates
+every chunk it has left. `fil_plain_size_bytes` is the second witness:
+`DriveSealed::assertContainerIsWhole()` compares it against the length the
+container derives from its own size before the first header goes out, and a
+disagreement is a 404. It applies to the original only — a variant's plaintext
+size is known to nothing but its own container.
+
+**Level changes** stream through a temp file and are copy-on-write aware
+(`File::replace_bytes_from_path()`), so a deduped blob is split before it is
+rewritten and a plaintext twin elsewhere is never turned into ciphertext behind
+its owner's back.
+
+**A conversion resumes from the bytes, never from the row alone.** A raise writes
+the key wrapping *before* it swaps the bytes, so the worst a killed pass can
+leave behind is a plaintext file carrying a spare wrapping, which the next pass
+mints over. On entry both directions check what is actually on disk
+(`SealedFileContainer::looksSealed()`): a Standard row over a container is a
+raise that got as far as the swap and is finished in place (the plaintext size
+comes from the container's length, so this stays locked-safe); a Private row over
+plaintext is a lower in the same position. A container with no wrapping on its
+row is refused rather than sealed again — a second layer over an inner key that
+no longer exists would end the file — and the batch leaves it in the backlog with
+a log line. A resumed raise has no plaintext left to render a thumbnail from, so
+the file keeps its type icon.
+
+**A blob's stored type describes its bytes.** Sealing sets `fbb_mime_type` to
+`application/octet-stream`, because that is what a container sniffs as and
+because the blob layer's resize, variant-cleanup and offload paths all branch on
+it. The file's own `fil_type` keeps the real type — that is what the member, the
+listings and the serve path read. Unsealing restores the blob's type from
+`fil_type`, after dropping the sealed thumbnail through
+`FileBlob::delete_encrypted_variant()`: the generic `delete_resized()` skips a
+non-image blob, so the sealed slot has to be removed by the one remover that does
+not ask.
+
+**Rotation** re-wraps keys and never touches bytes: `DriveSealed`'s `onReseal`
+callback selects exactly `fil_key_generation = $old_generation` for that owner,
+re-wraps each `fil_sealed_key` to the new public key, attempts every file, and
+throws if any failed. Drive is a **core** consumer — it has no plugin whose
+bootstrap could carry the hooks — so `VaultUnlock::CONSUMER_CORE_FILES` loads
+`includes/DriveSealed.php` alongside the plugin bootstraps. There is no wipe
+callback: a Private read streams from the container and caches no plaintext.
+
 ## Client modules
 
 - `assets/js/drive-crypto.js` (`DriveCrypto`) — the content layer on top of
@@ -310,3 +420,18 @@ destination is a vault folder rather than silently dropping it.
   `wrapped_file_keys` validation, a grantee upload into a shared vault, the
   version key-reuse gates, the ciphertext size ceiling, and the blob variant
   inventory.
+- `tests/vault/sealed_file_container_test.php` — the container: round trips at
+  every chunk boundary (empty, one byte under / exactly / one byte over a chunk,
+  multi-chunk), derived plaintext sizes, ranges across seams, per-chunk tamper
+  detection, chunk reordering and cross-file transplant defenses, truncation, and
+  a **format cross-check against a container the browser actually produced** —
+  the fixture is generated by running `assets/js/drive-crypto.js` itself under
+  Node (`tests/tools/make_drive_container_fixture.mjs`), so a drift in either
+  implementation fails here rather than in a member's Drive.
+- `tests/functional/drive/private_tier_test.php` — the server-custody level:
+  sealing with the vault locked, ciphertext on disk with the type sniffed from
+  the plaintext, in-window reads and ranges, a locked signed-URL fetch answering
+  423, the raise and lower conversions and their window rules, copy-on-write on a
+  deduped blob, the rotation sweep touching exactly one generation, the
+  public-link and member-grant refusals, the folder lattice, and the
+  move-boundary rules.

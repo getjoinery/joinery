@@ -42,13 +42,33 @@ function drive_link_create_logic(array $input): LogicResult {
 		return LogicResult::error('Only the owner can create a share link.');
 	}
 
-	// Anonymous encrypted links carry the file key in the URL fragment (never sent
-	// to the server) — a single-file mechanism. An encrypted folder holds a
-	// distinct key per file, which one fragment can't carry, so folder links are
-	// offered only for plaintext folders. (Share encrypted folders to members,
-	// who unwrap per-file keys with their own vault.)
-	if ($entity_type === DriveHelper::ENTITY_FOLDER && DriveHelper::folder_is_encrypted($entity)) {
-		return LogicResult::error('Encrypted folders can\'t use public links. Share them with members instead.');
+	// A public link is an anonymous URL, and only Standard content can honestly
+	// sit behind one.
+	//
+	// Private says "opened only while YOU are present" — a link anyone can follow
+	// is the exact opposite, and there is no window on an anonymous request to
+	// open the bytes with anyway.
+	//
+	// Fortress FILES can be linked: the key rides in the URL fragment, which the
+	// browser never sends to the server. A Fortress FOLDER holds a distinct key
+	// per file and one fragment cannot carry them all, so folder links stop
+	// there. (Share those with members, who unwrap per-file keys with their own
+	// vault.)
+	// A file is judged on its EFFECTIVE level — the stronger of its own and its
+	// folder's. A file inside a folder that has just gone Private has not been
+	// sealed yet, but the folder already promises it will be, and a link minted
+	// in that gap would be dead by the time the converting batch reaches it.
+	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
+	$entity_level = ($entity_type === DriveHelper::ENTITY_FOLDER)
+		? DriveHelper::folder_level($entity)
+		: DriveHelper::effective_file_level($entity);
+
+	if ($entity_level === ProtectionLevel::PRIVATE_) {
+		return LogicResult::error('Private ' . ($entity_type === DriveHelper::ENTITY_FOLDER ? 'folders' : 'files')
+			. ' can\'t use public links — they open only while you\'re signed in and unlocked.');
+	}
+	if ($entity_type === DriveHelper::ENTITY_FOLDER && $entity_level === ProtectionLevel::FORTRESS) {
+		return LogicResult::error('Fortress folders can\'t use public links. Share them with members instead.');
 	}
 
 	$expires_time = null;

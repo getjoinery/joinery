@@ -5,6 +5,11 @@
 Unbuilt. Written for maximum reuse of the machinery that already exists;
 each section names the code it rides on and the refactors it needs.**
 
+**Defects found in review of the build are tracked in
+`specs/implemented/drive_private_tier_defects.md` (D1–D7). D7 carries the answer to this
+spec's build-time verification flag: the unlock window is bound to the browser
+session, so a cookie-less signed-URL fetch can never open a Private file.**
+
 ## Intent
 
 A Drive folder can be **Private**: its files are ciphertext at rest, sealed to

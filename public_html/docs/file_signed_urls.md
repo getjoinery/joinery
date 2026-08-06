@@ -78,10 +78,34 @@ so a resume moves the requested bytes and no more. This applies to the
 image variants are small enough that ranging them is pointless and they are
 served whole.
 
-Files served through a registered decrypt hook (server-custody sealed
-sources — not Drive) are the exception: their plaintext is produced in memory
-from the entire ciphertext, so there is nothing to seek into. They advertise
-no `Accept-Ranges` and ignore a `Range` header rather than half-honoring it.
+## Sealed content
+
+A signature authorizes the **fetch**. It does not authorize the **unsealing**:
+server-custody content still needs its owner's unlock window, and that window is
+bound to the browser session that opened it. A signed URL followed by a client
+carrying no session cookie therefore answers `423` for a sealed file however
+recently its owner unlocked — the signature says who may ask, the window says
+whether the server may answer. Native-app transport reaches sealed content
+through the web-session bridge (`docs/mobile_apps.md`), not through a bare signed
+URL.
+
+Sealed content answers ranges according to which decrypt hook its source
+registered (see [Sealed Vault](sealed_vault.md#the-generic-consumer-hooks)):
+
+- A **streaming** hook — Drive's Private files — reads and decrypts only the
+  chunks covering the requested span, so `Accept-Ranges: bytes` is advertised
+  and a `206` is answered against **plaintext** offsets. Seeking in a sealed
+  video and resuming a sealed download both work. A range on a sealed file whose
+  owner has no open unlock window is a `423`, decided before any header is
+  written.
+- A **whole-bytes** hook — small sealed attachments — produces its plaintext in
+  memory from the entire ciphertext, so there is nothing to seek into. Those
+  advertise no `Accept-Ranges` and ignore a `Range` header rather than
+  half-honoring it.
+
+A sealed cloud-offloaded blob is fetched whole rather than by bucket range: the
+stored bytes are a container, so a range over them would be a span of ciphertext
+at the wrong offsets. The container answers the range once the object is local.
 
 ## The signing key
 

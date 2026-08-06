@@ -75,6 +75,35 @@ class ApiAuth {
 	 * @param string $source_ip Client IP for the apk_ip_restriction check.
 	 * @return array ['api_entry' => ApiKey, 'api_user' => User, 'auth_data' => array]
 	 */
+	/**
+	 * @var ApiKey|null The key row this request authenticated with, or null for
+	 * the browser-session credential. Set by authenticate(); stays null on a
+	 * request that never reached the API at all (an ordinary page render), which
+	 * is the same answer for the same reason — no key was presented.
+	 */
+	private static $current_api_key = null;
+
+	/** The key this request authenticated with, or null for a browser session. */
+	public static function currentApiKey() {
+		return self::$current_api_key;
+	}
+
+	/**
+	 * Does this request carry a browser session rather than an API key?
+	 *
+	 * The question worth asking of it: **can this caller's later fetches present
+	 * a session cookie?** A browser can, so anything keyed to session state — a
+	 * Sealed Vault unlock window above all (`docs/sealed_vault.md`) — is reachable
+	 * for it. An API-key caller cannot, so handing it a URL whose bytes need a
+	 * window produces a guaranteed 423.
+	 *
+	 * True for an ordinary page render too: no key was presented there either,
+	 * and a page render is the browser-session case by definition.
+	 */
+	public static function isBrowserSessionPrincipal(): bool {
+		return self::$current_api_key === null;
+	}
+
 	public static function authenticate(array $headers, $source_ip) {
 		$public_key = isset($headers['public_key']) ? $headers['public_key'] : null;
 		$secret_key = isset($headers['secret_key']) ? $headers['secret_key'] : null;
@@ -150,6 +179,7 @@ class ApiAuth {
 		// row and record key usage (written at most once per hour).
 		RequestLogger::set_api_key_type($api_entry->get('apk_type'));
 		$api_entry->touch_last_used();
+		self::$current_api_key = $api_entry;
 
 		return array(
 			'api_entry' => $api_entry,

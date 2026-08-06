@@ -45,7 +45,14 @@ public_html/*.md.old
 # Kept out of the repo until the eval process settles (corpus contains real
 # phishing samples; the scripts are eval harnesses, not product code). The
 # spec itself IS tracked, like every other spec.
-public_html/tests/tools/
+#
+# Listed file by file rather than by directory: tests/tools/ also holds
+# generators for committed test fixtures, which have to travel with the tests
+# that assert against them.
+public_html/tests/tools/fetch_phishing_pot.php
+public_html/tests/tools/fetch_spamassassin_ham.php
+public_html/tests/tools/load_email_corpus.php
+public_html/tests/tools/score_email_corpus.php
 public_html/tests/fixtures/email_security_corpus/
 
 # Relay SSH identities (deployment-generated, never committed)

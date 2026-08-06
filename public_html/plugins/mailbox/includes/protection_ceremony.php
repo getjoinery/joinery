@@ -666,9 +666,12 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 	$level = $domain->security_level();
 	$handoff = ($level === InboundEmailDomain::LEVEL_FORTRESS && !$domain->is_protected_identity());
 
-	$dot = function ($status) {
+	// $live marks the one dot the shared batch loop recolors as it works
+	// (data-ceremony-dot); the rest are static facts.
+	$dot = function ($status, $live = false) {
 		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
-		return '<span class="receipt-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
+		return '<span class="receipt-dot"' . ($live ? ' data-ceremony-dot' : '')
+			. ' style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
 			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
 	};
 
@@ -718,27 +721,48 @@ function mailbox_protection_receipt_render(InboundEmailDomain $domain, array $fa
 		$button_url = '/plugins/mailbox/admin/admin_mailbox_reader';
 	}
 
+	// The progress row is driven by the shared batch loop
+	// (assets/js/ceremony-batch.js): it calls mailbox/seal_batch until the
+	// backlog is empty, resolves this row in place, and stops with a plain
+	// statement if a pass seals nothing while rows remain.
+	$ceremony_config = json_encode(array(
+		'action'    => 'mailbox/seal_batch',
+		'payload'   => array('domain_id' => intval($domain->key)),
+		'remaining' => $backlog,
+		'doneTotal' => $sealed_total,
+		'doneKey'   => 'sealed',
+		'labels'    => array(
+			'working' => 'Sealing earlier messages — {remaining} remaining…',
+			'done'    => '{total} earlier message{s:total} sealed',
+			'none'    => 'No earlier messages needed sealing',
+			'stuck'   => '{remaining} message{s:remaining} could not be sealed — see the Setup tab.',
+			'paused'  => 'Sealing paused — reload this page to resume.',
+		),
+	));
+
 	$html = '<div id="raise-receipt" style="border:1px solid #d8dee4;border-radius:8px;padding:1rem 1.25rem;margin-bottom:1rem;"'
 		. ' data-domain-id="' . intval($domain->key) . '"'
-		. ' data-backlog="' . $backlog . '"'
-		. ' data-sealed-total="' . $sealed_total . '"'
-		. ' data-title-done="' . htmlspecialchars($title_done) . '">';
+		. ' data-title-done="' . htmlspecialchars($title_done) . '"'
+		. ($backlog > 0 ? ' data-ceremony-batch="' . htmlspecialchars($ceremony_config, ENT_QUOTES) . '"' : '')
+		. '>';
 	$html .= '<h3 id="receipt-title" style="margin-top:0;">' . htmlspecialchars($title) . '</h3>';
 	$html .= '<ul style="list-style:none;padding:0;margin:0;">';
 	$html .= '<li id="receipt-seal-row" style="display:flex;align-items:baseline;margin:.5rem 0;">'
-		. $dot($seal_dot) . '<div id="receipt-seal-text">' . $seal_fact . '</div></li>';
+		. $dot($seal_dot, true) . '<div id="receipt-seal-text" data-ceremony-text>' . $seal_fact . '</div></li>';
 	$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;">'
 		. $dot('pass') . '<div>New mail seals on arrival</div></li>';
 	$html .= '<li style="display:flex;align-items:baseline;margin:.5rem 0;">'
 		. $dot('pass') . '<div>' . htmlspecialchars($unlock_fact) . '</div></li>';
 	$html .= '</ul>';
 	$html .= '<div style="margin-top:.75rem;"><a id="receipt-action" class="btn btn-primary'
-		. ($backlog > 0 ? ' d-none' : '') . '" href="' . htmlspecialchars($button_url) . '">'
+		. ($backlog > 0 ? ' d-none' : '') . '"' . ($backlog > 0 ? ' data-ceremony-when-done hidden' : '')
+		. ' href="' . htmlspecialchars($button_url) . '">'
 		. htmlspecialchars($button_label) . '</a></div>';
 	if ($backlog > 0) {
 		// No-JS fallback: the bounded server-side batch loop, one page load per
-		// pass. The JS loop removes this form once it takes over.
-		$html .= '<form method="post" action="' . htmlspecialchars($state['editor_url'] ?? '') . '" id="sealing-continue">'
+		// pass. The shared loop removes this form once it takes over.
+		$html .= '<form method="post" action="' . htmlspecialchars($state['editor_url'] ?? '') . '"'
+			. ' id="sealing-continue" data-ceremony-noscript>'
 			. '<input type="hidden" name="action" value="ceremony_seal_batch">'
 			. '<input type="hidden" name="ied_inbound_email_domain_id" value="' . intval($domain->key) . '">'
 			. '<noscript><button type="submit" class="btn btn-primary">Continue sealing</button></noscript>'
@@ -785,9 +809,12 @@ function mailbox_lowering_receipt_render(InboundEmailDomain $domain, array $stat
 	$others = intval($state['others_backlog'] ?? 0);
 	$window_open = !empty($state['window_open']);
 
-	$dot = function ($status) {
+	// $live marks the one dot the shared batch loop recolors as it works
+	// (data-ceremony-dot); the rest are static facts.
+	$dot = function ($status, $live = false) {
 		$color = array('pass' => '#28a745', 'fail' => '#dc3545', 'warn' => '#ffc107', 'info' => '#6c757d');
-		return '<span class="receipt-dot" style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
+		return '<span class="receipt-dot"' . ($live ? ' data-ceremony-dot' : '')
+			. ' style="display:inline-block;width:10px;height:10px;border-radius:50%;background:'
 			. ($color[$status] ?? '#6c757d') . ';margin-right:8px;flex:none;"></span>';
 	};
 

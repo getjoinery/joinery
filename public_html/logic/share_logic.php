@@ -62,6 +62,18 @@ function share_logic(array $input): LogicResult {
 			$q->execute(array($blob_id));
 			$size = (int)$q->fetchColumn();
 		}
+		// A Private file cannot be served to an anonymous visitor at all: opening
+		// it needs the owner's unlock window, and there is no owner present on a
+		// link fetch. Link creation refuses these, so reaching here means the
+		// file's level changed after a link was made — the link stops working,
+		// which is the honest outcome.
+		if ($file->is_sealed()) {
+			return LogicResult::render(array(
+				'title'       => 'File unavailable',
+				'share_error' => 'This file is now Private, so it can only be opened by its owner.',
+			));
+		}
+
 		// An encrypted file is decrypted in the browser with the key carried in the
 		// URL fragment (never sent here). Serve ciphertext + the encrypted metadata
 		// blob and let the page do the rest — no server preview, opaque name.

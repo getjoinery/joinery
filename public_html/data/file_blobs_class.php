@@ -652,6 +652,55 @@ class FileBlob extends SystemBase {
 	 *
 	 * @return bool whether the bytes were written
 	 */
+	/**
+	 * Replace this blob's bytes with the contents of a file on disk, by moving
+	 * that file into place — the streaming twin of overwriteBytes().
+	 *
+	 * A protection-level change rewrites whole files (a 2 GB video sealed on the
+	 * way up, opened on the way down). overwriteBytes() takes the replacement as
+	 * a string, which is fine for a mail attachment and impossible here, so the
+	 * caller writes its replacement to a temp file and hands over the path.
+	 *
+	 * @param string $src_path replacement bytes; MOVED (gone afterwards on success)
+	 * @return bool
+	 */
+	public function overwriteBytesFromPath($src_path) {
+		if (!is_file($src_path)) {
+			return false;
+		}
+		if ($this->get('fbb_storage_driver') === 'cloud') {
+			// Bring the bytes local (same visibility class) so an in-place rewrite works.
+			$this->flipVisibility($this->is_private_bool());
+		}
+		$path = $this->filesystem_path('original');
+		if ($path === '' || $path === null) {
+			return false;
+		}
+		$dir = dirname($path);
+		if (!is_dir($dir)) {
+			@mkdir($dir, 0777, true);
+		}
+		$size = filesize($src_path);
+		if (!@rename($src_path, $path)) {
+			// A cross-filesystem temp dir cannot be renamed into place; copy, then
+			// drop the source so the caller's contract still holds.
+			if (!@copy($src_path, $path)) {
+				return false;
+			}
+			@unlink($src_path);
+		}
+		@chmod($path, 0666);
+		// The rewritten bytes invalidate every derived variant and the dedup hash.
+		$this->delete_resized('all');
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare(
+			"UPDATE fbb_file_blobs SET fbb_sha256 = NULL, fbb_size_bytes = ? WHERE fbb_file_blob_id = ?");
+		$q->execute([(int)$size, $this->key]);
+		$this->set('fbb_sha256', null, false);
+		$this->set('fbb_size_bytes', (int)$size, false);
+		return true;
+	}
+
 	public function overwriteBytes($new_bytes) {
 		if ($this->get('fbb_storage_driver') === 'cloud') {
 			// Bring the bytes local (same visibility class) so an in-place rewrite works.
@@ -901,6 +950,46 @@ class FileBlob extends SystemBase {
 		return true;
 	}
 
+	/**
+	 * Drop the encrypted variant slot — the exact inverse of
+	 * store_encrypted_variant(), and the only variant remover that does NOT
+	 * consult is_image().
+	 *
+	 * It cannot: a blob holding a container stores `application/octet-stream`,
+	 * because that is what its bytes sniff as, so delete_resized() skips it
+	 * entirely. Anything that stops a blob being sealed — opening a Private file
+	 * back to Standard, deleting a Fortress file — has to remove the slot through
+	 * this door or leave ciphertext behind in a size key that nothing tracks
+	 * afterwards (fbb_encrypted_variant_key is what every lifecycle path
+	 * enumerates from, and it is cleared here).
+	 *
+	 * @return bool whether a slot was recorded to remove
+	 */
+	public function delete_encrypted_variant() {
+		$size_key = (string)$this->get('fbb_encrypted_variant_key');
+		if ($size_key === '') {
+			return false;
+		}
+		if ($this->get('fbb_storage_driver') === 'cloud') {
+			$driver = $this->_cloud_driver();
+			if ($driver) {
+				try {
+					$driver->delete($this->remote_key_for($size_key));
+				} catch (Exception $e) {
+					error_log('delete_encrypted_variant cloud: ' . $e->getMessage());
+				}
+			}
+		} else {
+			$path = $this->filesystem_path($size_key);
+			if (file_exists($path)) {
+				@unlink($path);
+			}
+		}
+		$this->set('fbb_encrypted_variant_key', null);
+		$this->save();
+		return true;
+	}
+
 	public function resize($size_key = 'all') {
 		if (!$this->is_image()) {
 			return false;
@@ -1027,6 +1116,33 @@ class FileBlob extends SystemBase {
 	 * decoder set keeps malformed uploads off the native-RCE surface). Verbatim
 	 * geometry from File's original generate_resized().
 	 */
+	/**
+	 * Render one configured size variant from an arbitrary plaintext image on
+	 * disk into an arbitrary destination, without touching this blob's stored
+	 * bytes or its variant layout.
+	 *
+	 * The sealed levels need exactly this: a Private file's thumbnail is made
+	 * once, from the plaintext, at the moment it is still in hand — and then
+	 * sealed and stored through store_encrypted_variant() rather than left in the
+	 * plaintext variant tree the resize pipeline owns.
+	 *
+	 * @param string $src_path  a readable plaintext image
+	 * @param string $dest_path where to write the rendered variant
+	 * @param string $size_key  a key from ImageSizeRegistry::get_sizes()
+	 * @return bool true when a file was produced
+	 */
+	public function render_variant_to($src_path, $dest_path, $size_key) {
+		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		$sizes = ImageSizeRegistry::get_sizes();
+		if (!isset($sizes[$size_key])) {
+			return false;
+		}
+		$cfg = $sizes[$size_key];
+		$this->_generate_resized($src_path, $dest_path, $cfg['width'], $cfg['height'], $cfg['crop'],
+			isset($cfg['quality']) ? $cfg['quality'] : 85);
+		return is_file($dest_path);
+	}
+
 	private function _generate_resized($old_path, $new_path, $width, $height, $crop, $quality = 85) {
 		try {
 			$info = @getimagesize($old_path);
