@@ -27,18 +27,20 @@ This guide covers deploying Joinery on both Docker containers and bare-metal ser
 
 ```bash
 # Docker - download and install latest version (auto-generates secure password)
+# -y answers every prompt with its default, so the one-liner also works where
+# no terminal is attached (cloud-init, CI, piped ssh)
 mkdir -p /tmp/joinery && \
   curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
-  sudo ./install.sh docker && \
-  sudo ./install.sh site mysite example.com 8080
+  sudo ./install.sh -y docker && \
+  sudo ./install.sh -y site mysite example.com 8080
 
 # Bare-metal - download and install latest version (auto-generates secure password)
 mkdir -p /tmp/joinery && \
   curl -sL https://dev.getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
   cd /tmp/joinery/maintenance_scripts/install_tools && \
-  sudo ./install.sh server && \
-  sudo ./install.sh site mysite example.com
+  sudo ./install.sh -y server && \
+  sudo ./install.sh -y site mysite example.com
 ```
 
 ### Docker Deployment (Manual Transfer)
@@ -154,7 +156,7 @@ Hello!There     # Contains exclamation mark
 
 ### Non-Interactive / Scripted Deployment
 
-For CI/CD pipelines or automated deployments, use the `-y` and `-q` flags:
+For CI/CD pipelines or automated deployments, use the `-y` and `-q` flags. One rule for every subcommand: **global flags go first**, before the subcommand (they are also accepted after it, but write them first so every command reads the same way). An unrecognised flag stops the install with a message rather than being silently ignored.
 
 ```bash
 # -y: Auto-accept all prompts (non-interactive)
@@ -168,6 +170,8 @@ sudo ./install.sh -y -q site mysite SecurePass@123 mysite.com 8080
 # Installation Complete!
 # Site: mysite | URL: http://mysite.com:8080/
 ```
+
+Without `-y`, a run with no terminal still completes: each prompt takes its default. Proposals (install Docker, use the suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes) refuse unless their explicit flags say otherwise.
 
 ---
 

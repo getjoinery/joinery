@@ -162,7 +162,9 @@ sudo ./install.sh -y docker
 sudo ./install.sh -y -q site mysite mysite.com 8080
 ```
 
-`-y` accepts all prompts; `-q` suppresses progress output.
+`-y` accepts all prompts; `-q` suppresses progress output. Both flags work before or after the subcommand — write them first, as above, so every example reads the same way. An unknown flag stops the install with a message.
+
+Without `-y`, a run with no terminal on stdin (cloud-init, CI, piped ssh) still completes: every prompt takes its default. Defaults are conservative — proposals (install Docker, use a suggested port) proceed; destructive choices (overwrite an existing site, delete data volumes, downgrade code) refuse, and only their explicit flags (`--wipe-data`, `--allow-downgrade`) can say otherwise. The one hard requirement is the bare-metal server setup's database password, which must arrive via `POSTGRES_PASSWORD` in the environment when nobody can type it.
 
 ## Docker Deployment
 
@@ -193,7 +195,7 @@ The installer:
 3. Prepares an isolated build context.
 4. Builds the Docker image.
 5. Starts the container with persistent volumes.
-6. Verifies the site responds.
+6. Verifies the site responds — the probe carries the configured domain in its `Host:` header, so a green check means a visitor can load the site, not merely that Apache is up. A redirect to an HTTPS vhost the install did not create fails the check.
 7. Optionally downloads stock themes/plugins (with `--themes`).
 8. Displays access info and the list of running containers.
 
@@ -368,6 +370,8 @@ sudo ./install.sh site mysite mysite.example.com 8080
 ```bash
 sudo ./install.sh site mysite mysite.example.com --no-ssl
 ```
+
+What `--no-ssl` gives you: a site that answers on plain HTTP for its domain. No HTTP→HTTPS redirect exists until a certificate does — the vhost's redirect is gated on the certificate file, so requests carrying the real domain load over HTTP rather than bouncing into a `:443` vhost that isn't there.
 
 ### Manual SSL later
 

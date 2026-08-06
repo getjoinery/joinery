@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.7 - Guarantee cache/static_pages exists before the sweep, so page
+#              caching is on after every permissions run. It sits under a
+#              Docker named volume, is created at run time, and a root-run PHP
+#              process getting there first left it unwritable by www-data —
+#              StaticPageCache then logged "caching disabled" on every request.
 #VERSION 2.6 - Pin config/backup_site_key to 640 www-data:www-data so the deploy account
 #              can run a backup from a shell; 600 locked out every caller but the web user
 #VERSION 2.5 - Pin config/backup_site_key alongside the relay SSH key (the dev-mode 777
@@ -69,6 +74,11 @@ if [ ! -d "$SITE_ROOT" ]; then
 fi
 
 echo -e "${GREEN}Fixing permissions for $SITE_NAME (mode: $MODE)${NC}"
+
+# The page cache the code reads is {site root}/cache/static_pages. Create it
+# before the sweep so the ownership and mode fixes below always cover it —
+# a missing or root-owned cache dir silently disables page caching.
+mkdir -p "$SITE_ROOT/cache/static_pages"
 
 # Set ownership: www-data (web server) as owner, user1 (developer) as group
 echo "  Setting ownership to www-data:user1..."

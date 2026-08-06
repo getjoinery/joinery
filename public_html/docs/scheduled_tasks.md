@@ -4,14 +4,14 @@ Developer documentation for the scheduled task system.
 
 ## Overview
 
-The scheduled tasks system provides a general-purpose framework for running tasks on a schedule. Tasks are PHP classes paired with JSON config files. A single cron entry runs every 15 minutes and executes any tasks that are due.
+The scheduled tasks system provides a general-purpose framework for running tasks on a schedule. Tasks are PHP classes paired with JSON config files. A single cron entry runs every minute and executes any tasks that are due.
 
 **A scheduled task can never read sealed content.** The Sealed Vault keeps a user's secret key in APCu keyed to their browser session, and the cron runner is a separate CLI process with its own APCu segment, so `VaultUnlock::secretKey()` returns null there by design. Work that needs a user's vault open belongs to `VaultDeferredWork` instead, which runs it in slices inside that user's own request — see [Sealed Vault § Deferred work in the window](sealed_vault.md#deferred-work-in-the-window). A task that queues or selects such work is fine; a task that tries to decrypt it will find nothing.
 
 ## Architecture
 
 ```
-Cron (every 15 min)
+Cron (every minute)
   → utils/process_scheduled_tasks.php
     → Reconcile rows against the filesystem (retire what has no code)
     → Load active ScheduledTask records from DB
@@ -327,7 +327,7 @@ means another task, another schedule, or another row in the admin list.
 
 Behavior depends on `sct_frequency`:
 
-- **`every_run`** — Always due (runs every cron invocation, ~15 min)
+- **`every_run`** — Always due (runs every cron invocation, ~1 min)
 - **`hourly`** — Due if not already run in the current clock hour
 - **`daily`** — Due if past `sct_schedule_time` today (site timezone) and not already run today
 - **`weekly`** — Due if correct `sct_schedule_day_of_week`, past `sct_schedule_time`, and not already run today
@@ -436,25 +436,25 @@ PHP connection closes, so a crashed process self-recovers on the next tick.
 
 This is transparent to task implementations — no `run()` code needs to
 know about the lock — but it means tasks that legitimately want to run
-in parallel across ticks would be serialized. In practice the cron tick
-interval (15 min) is long compared to almost every task's runtime, so
-the serialization is rarely visible.
+in parallel across ticks would be serialized. The cron tick is every
+minute, so the lock is what keeps a task slower than the tick from
+piling up: later ticks skip it rather than stack behind it.
 
 ### Setup
 
-**Standard server** — Add to the `www-data` user's crontab (`sudo crontab -e -u www-data`):
+The runner is driven by exactly one cron entry per site: `/etc/cron.d/joinery-{sitename}`, firing every minute.
+
+- **Bare metal** — `_site_init.sh` writes the file at install time.
+- **Docker** — the container start command (in `Dockerfile.template`) writes the file and starts the cron daemon on every container start, so it survives container rebuilds.
+
+The entry:
 ```
-*/15 * * * * php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
+* * * * * www-data php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
 ```
 
-**Docker container** — Ensure `cron` is installed and running, then create `/etc/cron.d/scheduled-tasks`:
-```
-*/15 * * * * www-data php /var/www/html/{sitename}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/{sitename}/logs/cron_scheduled_tasks.log 2>&1
-```
+Every minute, not a longer interval: the tick is the floor on latency for `every_run` tasks, and inbound mail delivery is the one users feel. A full pass costs about a second, and the per-task advisory lock means a slow task is skipped rather than run concurrently.
 
-Note: Docker containers may not have `cron` installed by default. Install with `apt-get install -y cron` and start the daemon with `cron`. The cron daemon must also be started after container restart (add to entrypoint if needed).
-
-**New installs** get the crontab entry automatically via `_site_init.sh`. **Existing sites** see a warning on the admin page with setup instructions if cron hasn't run in 30+ minutes.
+**Existing sites** see a warning on the admin page with setup instructions if cron hasn't run in 30+ minutes.
 
 ## Admin Page
 

@@ -1,4 +1,18 @@
 # Joinery Docker Template
+# VERSION 4.8 - The container start command is the single owner of the cache
+#               directory and the scheduled-task cron file, because it is the
+#               only step that runs every start with the volumes mounted.
+#               cache/static_pages is created and owned www-data AFTER the
+#               root-run PHP steps (update_database et al.), which used to
+#               create it root-owned and silently disable page caching for
+#               the life of the install. The cron entry is the per-site
+#               /etc/cron.d/joinery-<site> file, written here rather than by
+#               _site_init.sh: /etc/cron.d does not survive a container
+#               rebuild, and _site_init.sh only runs on first boot — a second
+#               generic file alongside it meant two runners colliding every
+#               five minutes. Every minute, not every five: the tick interval
+#               is the floor on latency for every_run tasks, and inbound mail
+#               is the one users feel.
 # VERSION 4.7 - POSTGRES_PASSWORD is no longer a build arg baked into ENV. It
 #               put the database superuser password in the image, where
 #               docker inspect and docker history keep it after the container
@@ -226,16 +240,18 @@ CMD set +H && \
     ([ -f "/var/www/html/${SITENAME}/config/Globalvars_site.php" ] || \
         (cd "/var/www/html/${SITENAME}/maintenance_scripts/install_tools" && \
         JOINERY_DB_PASSWORD="${POSTGRES_PASSWORD}" ./_site_init.sh "${SITENAME}" "" "${DOMAIN_NAME}" --docker-mode ${CLONE_OPTS})) && \
-    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" "/var/www/html/${SITENAME}/cache" && \
+    chown -R www-data:www-data "/var/www/html/${SITENAME}/public_html" "/var/www/html/${SITENAME}/maintenance_scripts" && \
     ([ -d "/var/www/html/${SITENAME}/vendor" ] && chown -R www-data:www-data "/var/www/html/${SITENAME}/vendor" || true) && \
     find "/var/www/html/${SITENAME}/public_html" -type d -exec chmod 755 {} + && \
     find "/var/www/html/${SITENAME}/public_html" -type f -exec chmod 644 {} + && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_install_declared_dependencies.sh" "/var/www/html/${SITENAME}/public_html" || true && \
     php "/var/www/html/${SITENAME}/public_html/utils/update_database.php" 2>/dev/null || true && \
     bash "/var/www/html/${SITENAME}/maintenance_scripts/install_tools/_reconcile_upgradable_assets.sh" || true && \
-    echo "*/5 * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > /etc/cron.d/scheduled-tasks && \
-    chmod 644 /etc/cron.d/scheduled-tasks && \
-    echo "" >> /etc/cron.d/scheduled-tasks && \
+    mkdir -p "/var/www/html/${SITENAME}/cache/static_pages" && \
+    chown -R www-data:www-data "/var/www/html/${SITENAME}/cache" && \
+    echo "* * * * * www-data php /var/www/html/${SITENAME}/public_html/utils/process_scheduled_tasks.php >> /var/www/html/${SITENAME}/logs/cron_scheduled_tasks.log 2>&1" > "/etc/cron.d/joinery-${SITENAME}" && \
+    chmod 644 "/etc/cron.d/joinery-${SITENAME}" && \
+    echo "" >> "/etc/cron.d/joinery-${SITENAME}" && \
     echo "0 2 * * * root /usr/sbin/logrotate /etc/logrotate.d/joinery-${SITENAME} > /dev/null 2>&1" > /etc/cron.d/logrotate-joinery && \
     chmod 644 /etc/cron.d/logrotate-joinery && \
     echo "" >> /etc/cron.d/logrotate-joinery && \
