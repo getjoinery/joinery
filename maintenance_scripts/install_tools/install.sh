@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 2.42 - The help text reads its version from the header above instead
+#              of a hand-kept copy, which had drifted to 2.7 and told anyone
+#              running --help they had a script 34 releases older than theirs.
 #VERSION 2.41 - The database password never enters the image. It was a
 #              --build-arg promoted to ENV, so docker inspect and docker
 #              history kept it; now it arrives at run time via --env-file.
@@ -228,6 +231,12 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # (Ubuntu version, PHP version, new apt packages, new system config, etc.).
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
 BASE_IMAGE_VERSION="1.2"
+
+# This script's own version, read from the newest #VERSION header above rather
+# than restated here, so the number the help text prints is the number the file
+# actually carries. A second copy drifts the moment someone bumps the header.
+INSTALLER_VERSION="$(sed -n 's/^#VERSION \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
+[ -n "$INSTALLER_VERSION" ] || INSTALLER_VERSION="unknown"
 
 #==============================================================================
 # GLOBAL FLAGS (parsed before command dispatch)
@@ -3808,7 +3817,7 @@ do_list() {
 
 show_help() {
     echo ""
-    echo "Joinery Installation Script v2.7"
+    echo "Joinery Installation Script v${INSTALLER_VERSION}"
     echo ""
     echo "Usage:"
     echo "  ./install.sh [global-options] <command> [options]"

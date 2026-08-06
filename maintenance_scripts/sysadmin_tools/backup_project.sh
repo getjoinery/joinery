@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.4.1 - SCRIPT_VERSION is read from this header rather than restated
+#                  further down, where a second copy drifts unnoticed
 # Version: 2.4.0
 #
 # Description:
@@ -45,8 +47,9 @@
 
 set -euo pipefail
 
-# Version information
-SCRIPT_VERSION="2.4.0"
+# Version information, taken from the header above so there is only one copy.
+SCRIPT_VERSION="$(sed -n 's/^# Version: \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
+[ -n "$SCRIPT_VERSION" ] || SCRIPT_VERSION="unknown"
 
 # Deployment environment (Docker or bare metal) — read from the project's
 # Globalvars_site.php once PROJECT_DIR is known (spec deployment_environment_flag).
