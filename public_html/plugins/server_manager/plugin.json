@@ -223,6 +223,66 @@
       "group": "publishing",
       "label": "Agent source path",
       "type": "text"
+    },
+    {
+      "name": "server_manager_fleet_backup_enabled",
+      "default": "1",
+      "group": "backups",
+      "label": "Back up newly managed nodes by default",
+      "type": "checkbox",
+      "helptext": "Whether a node this control plane manages gets backed up here unless someone says otherwise. On by default, and that default is what stops a new node being forgotten. A site's own backups are separate and unaffected either way."
+    },
+    {
+      "name": "server_manager_fleet_backup_window_start",
+      "default": "03:00",
+      "group": "backups",
+      "label": "Backup window starts (UTC)",
+      "type": "text",
+      "helptext": "The earliest a fleet backup begins. Each node gets its own minute inside the window, derived from its name, so they do not all start at once."
+    },
+    {
+      "name": "server_manager_fleet_backup_window_minutes",
+      "default": "120",
+      "group": "backups",
+      "label": "Backup window length (minutes)",
+      "type": "number",
+      "helptext": "How wide to spread node start times. Wider means fewer simultaneous uploads and a longer tail; 120 suits a few dozen nodes."
+    },
+    {
+      "name": "server_manager_fleet_backup_mode",
+      "default": "chain",
+      "group": "backups",
+      "label": "How fleet backups are taken",
+      "type": "select",
+      "options": {
+        "chain": "Incremental chains",
+        "full": "A full backup every time"
+      },
+      "helptext": "Incremental chains send only what changed after the first run \u2014 measured at 193 MB then 37 kB \u2014 which across a fleet is most of the bandwidth. A full every time makes each restore point self-contained at much greater cost."
+    },
+    {
+      "name": "server_manager_fleet_backup_keep",
+      "default": "4",
+      "group": "backups",
+      "label": "Restore points kept per node",
+      "type": "number",
+      "helptext": "How many backups to keep on this control plane's shelf for each node. Chains are kept or deleted whole, never partly."
+    },
+    {
+      "name": "server_manager_fleet_backup_full_interval_days",
+      "default": "7",
+      "group": "backups",
+      "label": "Days before a chain starts a fresh full",
+      "type": "number",
+      "helptext": "How long one chain runs before the next backup starts over with a full. Shorter means more storage and shorter restore chains."
+    },
+    {
+      "name": "server_manager_fleet_backup_max_concurrent",
+      "default": "2",
+      "group": "backups",
+      "label": "Backups running at once across the fleet",
+      "type": "number",
+      "helptext": "A ceiling on simultaneous fleet backups. Nodes over the limit wait for the next tick rather than queueing."
     }
   ]
 }

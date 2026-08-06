@@ -14,12 +14,16 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.2 - bkh_profile and bkh_recovery_fpr: a site can be backed up by more than one
+ *                party, and every query that decides what to extend or delete has to be
+ *                asking about one party's runs
  * @version 1.1 - 'chained' collection filter, so retention can address chain runs and
  *                standalone backups as separate families
  * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
+require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 
 class BackupHistoryException extends SystemBaseException {}
 
@@ -74,6 +78,21 @@ class BackupHistory extends SystemBase {
 		'bkh_encrypted'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'bkh_message'       => array('type'=>'text'),
 
+		// Whose backup this was: 'site' (this site's own) or 'manager' (a control
+		// plane's copy of it). Load-bearing rather than descriptive — chain
+		// extension, chain retention and cloud retention all ask history what
+		// exists, and a query that spanned both profiles would extend one party's
+		// chain with another party's run, or count somebody else's copies towards
+		// this party's retention.
+		'bkh_profile'       => array('type'=>'varchar(20)', 'default'=>'site',
+		                             'allowed_values'=>array('site', 'manager')),
+
+		// Fingerprint of the recovery key this run sealed to. Recorded per run
+		// rather than inferred from settings, because settings say what would
+		// happen today and a restore needs to know what happened then — which
+		// private key opens THIS backup.
+		'bkh_recovery_fpr'  => array('type'=>'varchar(64)'),
+
 		'bkh_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'bkh_update_time'   => array('type'=>'timestamp(6)'),
 		'bkh_delete_time'   => array('type'=>'timestamp(6)'),
@@ -95,6 +114,18 @@ class BackupHistory extends SystemBase {
 		if (!in_array($this->get('bkh_type'), array('project', 'database'), true)) {
 			throw new BackupHistoryException('A backup history row needs a type of project or database.');
 		}
+		// A row with no profile is a site-profile row. Defaulting here as well as
+		// in the column keeps rows written by an older code path readable by the
+		// queries that now filter on it.
+		if (trim((string)$this->get('bkh_profile')) === '') {
+			$this->set('bkh_profile', BackupProfile::SITE);
+		}
+	}
+
+	/** Whose backup this was. Rows predating profiles are the site's own. */
+	public function profile() {
+		$p = trim((string)$this->get('bkh_profile'));
+		return ($p === '') ? BackupProfile::SITE : $p;
 	}
 
 	/** Artifacts as an array, whatever shape the column came back in. */
@@ -158,6 +189,20 @@ class MultiBackupHistory extends SystemMultiBase {
 
 		if (isset($this->options['slug'])) {
 			$filters['bkh_slug'] = [$this->options['slug'], PDO::PARAM_STR];
+		}
+
+		// Whose runs. Every caller that decides what to extend or what to delete
+		// must pass this — the alternative is one party's retention counting the
+		// other's copies, or a chain extended with a run sealed to a different
+		// key. Rows written before the column existed are the site's own, so the
+		// site filter has to accept a null as well as the literal.
+		if (isset($this->options['profile'])) {
+			$profile = BackupProfile::normalize($this->options['profile']);
+			if ($profile === BackupProfile::SITE) {
+				$filters['(bkh_profile'] = "= 'site' OR bkh_profile IS NULL)";
+			} else {
+				$filters['bkh_profile'] = [$profile, PDO::PARAM_STR];
+			}
 		}
 
 		if (isset($this->options['chain_id'])) {

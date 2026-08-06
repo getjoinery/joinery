@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.5 - mgn_backup_shelf_checked_time / mgn_backup_shelf_newest_time: the bucket's own
+ *                testimony about the fleet-backup shelf, so a node claiming success while nothing
+ *                lands is catchable
  * @version 1.4 - mgn_allow_console: per-node opt-in for the node detail Console tab
  * @version 1.3.4
  */
@@ -15,7 +18,7 @@ class ManagedNode extends SystemBase {
 	public static $tablename = 'mgn_managed_nodes';
 	public static $pkey_column = 'mgn_id';
 
-	public static $json_vars = array('mgn_last_status_data');
+	public static $json_vars = array('mgn_last_status_data', 'mgn_backup_policy');
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_host_id' => ['action' => 'null'],
@@ -48,6 +51,32 @@ class ManagedNode extends SystemBase {
 		// on page load — and so a node holding a key the control plane did not
 		// put there is visible rather than silently left behind.
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
+
+		// This control plane's backup policy for this node — the manager profile.
+		// A blob rather than a column each because it is read whole, written
+		// whole, and every field of it is a preference: enabled, frequency, time
+		// window, mode, retention count, full interval, target override.
+		//
+		// A node with no policy inherits the fleet default, which is ENABLED.
+		// That default is what stops a node falling through unnoticed; there is
+		// deliberately no detector for "nobody decided about this node", because
+		// a node nobody decided about does not exist.
+		'mgn_backup_policy'       => array('type'=>'jsonb'),
+
+		// The last manager-profile run, denormalised for sorting and alerting.
+		// The authoritative history lives on the node; this is the fleet's copy
+		// of the one question a dashboard has to answer without visiting anyone.
+		'mgn_last_backup_time'    => array('type'=>'timestamp(6)'),
+		'mgn_last_backup_outcome' => array('type'=>'varchar(20)'),
+
+		// The bucket's own testimony about this node's shelf: when this control
+		// plane last listed it, and the newest object write it saw. Stamped by
+		// the scheduler from the retention pass's listing — taken with this
+		// control plane's credential, never the node's word. Comparing these
+		// against the claimed last run is the only check that catches a node
+		// reporting success while nothing actually lands.
+		'mgn_backup_shelf_checked_time' => array('type'=>'timestamp(6)'),
+		'mgn_backup_shelf_newest_time'  => array('type'=>'timestamp(6)'),
 		// Compared against the newest escrow row to detect a manually regenerated
 		// (un-escrowed) node key.
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),

@@ -340,12 +340,13 @@ if ($rk_state['is_ready']) {
 echo ' <a href="' . BackupRecoveryKey::SETUP_URL . '" class="alert-link">Open backup settings</a>.';
 echo '</div>';
 
-// ── Recovery key across the fleet ──
-// A backup this control plane runs seals to the key above. A backup a node runs
-// on its OWN schedule reads that node's own setting, so each managed site needs
-// the key too — which it gets automatically, into an empty slot only. This table
-// is how the operator sees the exception: a site holding a key nobody here put
-// there, which is left alone on purpose.
+// ── Which key each site holds for its own backups ──
+// A backup this control plane runs seals to the key above and carries it with
+// the run, so it works against a site that has never heard of this control
+// plane. A backup a SITE runs reads that site's own setting — a different key,
+// with a different custodian. This table reports which one each site holds and
+// does nothing about it: writing into that slot from here would make this
+// control plane the holder of a key the site believes is its own.
 $rk_nodes = new MultiManagedNode(['deleted' => false, 'enabled' => true], ['mgn_name' => 'ASC']);
 $rk_nodes->load();
 
@@ -357,12 +358,13 @@ foreach ($rk_nodes as $rk_node) {
 }
 
 if ($rk_rows) {
-	$page->begin_box(['title' => 'Recovery key on managed sites']);
-	echo '<p class="text-muted">Each site needs the recovery key to encrypt the backups it runs on its '
-	   . 'own schedule. An empty slot is filled automatically; a site already holding a different key is '
-	   . 'left exactly as it is.</p>';
+	$page->begin_box(['title' => 'What each site holds for its own backups']);
+	echo '<p class="text-muted">A site needs a recovery key of its own only for the backups it takes '
+	   . 'itself, and its operator sets that up on the site\'s own Backups page. Sites with no key of '
+	   . 'their own simply take no copies of their own &mdash; the backups taken from here cover them '
+	   . 'either way, under the key above.</p>';
 	echo '<table class="table table-sm"><thead><tr>'
-	   . '<th>Site</th><th>Recovery key</th><th></th>'
+	   . '<th>Site</th><th>Its own recovery key</th>'
 	   . '</tr></thead><tbody>';
 	$rk_badges = ['has' => 'success', 'missing' => 'warning', 'different' => 'secondary', 'unknown' => 'secondary'];
 	foreach ($rk_rows as $row) {
@@ -378,16 +380,7 @@ if ($rk_rows) {
 			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk['fingerprint'])) . '&hellip;)';
 		}
 		echo '</span></td>';
-		echo '<td class="text-end">';
-		if (RecoveryKeyFleet::is_pushable($rk)) {
-			echo '<form method="post" action="/admin/server_manager/node_detail?mgn_id=' . (int)$n->key
-			   . '" style="display:inline;">';
-			echo '<input type="hidden" name="action" value="push_recovery_key">';
-			echo SmAdminCsrf::field();
-			echo '<button type="submit" class="btn btn-sm btn-outline-primary">Send the key</button>';
-			echo '</form>';
-		}
-		echo '</td></tr>';
+		echo '</tr>';
 	}
 	echo '</tbody></table>';
 	$page->end_box();

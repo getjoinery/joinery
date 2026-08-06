@@ -94,6 +94,13 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMon
 $monitor_problems = NodeMonitorHealth::problems();
 $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 
+// Nodes whose backups THIS control plane takes are failing or have stopped.
+// Deliberately not "nodes without backups": whether a site backs itself up is
+// that site's business under its own key, and a node with fleet backups
+// switched off was switched off on purpose. What stops a node falling through
+// unnoticed is that fleet backups default to on, not a detector for indecision.
+$fleet_backup_problems = NodeMonitorHealth::fleet_backup_problems();
+
 // Recovery readiness: must-save secrets never verified or verified too long
 // ago. One line; the details live on the readiness page.
 require_once(PathHelper::getIncludePath('includes/RecoveryReadiness.php'));
@@ -231,6 +238,23 @@ if ($agent_online) {
 				<?php if (!empty($p['link'])): ?>
 					<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link">Set it up</a>.
 				<?php endif; ?>
+			</li>
+		<?php endforeach; ?>
+	</ul>
+</div>
+<?php endif; ?>
+
+<?php // Backups this control plane takes are not landing. Its own runs, its own
+      // shelf, its own responsibility — which is why this is an alarm and a
+      // site's own backup arrangements are not. ?>
+<?php if (!empty($fleet_backup_problems)): ?>
+<div class="alert alert-warning" role="alert">
+	<strong>Backups taken from here are not working.</strong>
+	<ul class="mb-0 mt-2">
+		<?php foreach ($fleet_backup_problems as $p): ?>
+			<li>
+				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
+				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>

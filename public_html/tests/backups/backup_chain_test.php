@@ -165,9 +165,14 @@ try { BackupChain::decode(json_encode($bad)); }
 catch (BackupChainException $e) { $threw = true; }
 check($threw, 'a manifest from a newer format is refused, not half-read');
 
-$keys = BackupChain::object_keys($chain, 'joinery-backups', 'site');
-check(in_array('joinery-backups/site/chain-20260801_000000/manifest.json', $keys, true),
+$keys = BackupChain::object_keys($chain, 'joinery-backups', 'mysite', BackupProfile::SITE);
+check(in_array('joinery-backups/mysite/site/chain-20260801_000000/manifest.json', $keys, true),
 	'the manifest is among the chain objects');
+$mgr_keys = BackupChain::object_keys($chain, 'joinery-backups', 'mysite', BackupProfile::MANAGER);
+check(in_array('joinery-backups/mysite/manager/chain-20260801_000000/manifest.json', $mgr_keys, true),
+	'the same chain under the manager profile addresses a different shelf');
+check(count(array_intersect($keys, $mgr_keys)) === 0,
+	'and the two profiles share no object key at all');
 check(count($keys) === 1 + (4 * 2), 'every artifact of every run is listed for deletion', (string)count($keys));
 check(BackupChain::bytes($chain) === (10 + 11 + 12 + 13) + (5 * 4),
 	'chain size totals every artifact', (string)BackupChain::bytes($chain));

@@ -13,6 +13,7 @@ $session      = $page_vars['session'];
 $settings     = $page_vars['settings'];
 $targets      = $page_vars['targets'];
 $history      = $page_vars['history'];
+$manager_history = $page_vars['manager_history'];
 $recovery     = $page_vars['recovery'];
 $plan         = $page_vars['plan'];
 $plan_problem = $page_vars['plan_problem'];
@@ -293,5 +294,43 @@ if (!$hrows) {
 	echo '</tbody></table>';
 }
 $page->end_box();
+
+// ── Backups somebody else takes of this site ────────────────────────────────
+//
+// Shown whenever they exist, and read-only. This site cannot schedule, run or
+// delete them — they belong to whoever runs them, on their storage, under their
+// key. Saying so plainly is the point: the alternative is a site admin finding
+// unexplained archives in a directory listing, or assuming a copy they cannot
+// open is a copy they can restore from.
+$mrows = array();
+foreach ($manager_history as $m) { $mrows[] = $m; }
+
+if ($mrows) {
+	$page->begin_box(array('title' => 'Backups taken by a control plane'));
+	echo '<p class="text-muted">Another party manages this site and takes its own backups of it. They '
+	   . 'are encrypted to that party\'s recovery key, stored on their storage, and kept to their '
+	   . 'schedule &mdash; this page cannot change or delete them. They do not replace this site\'s own '
+	   . 'backups above, which are the ones you hold the key to.</p>';
+	echo '<table class="table"><thead><tr>'
+	   . '<th>When</th><th>What</th><th>Result</th><th>Size</th><th>Opens with</th>'
+	   . '</tr></thead><tbody>';
+	foreach ($mrows as $m) {
+		$outcome = (string)$m->get('bkh_outcome');
+		echo '<tr>';
+		echo '<td>' . htmlspecialchars($when($m->get('bkh_start_time'))) . '</td>';
+		echo '<td>' . htmlspecialchars($m->get('bkh_type')) . '</td>';
+		echo '<td>' . ($outcome === 'failed' ? '<strong>failed</strong>' : htmlspecialchars($outcome)) . '</td>';
+		echo '<td>' . htmlspecialchars(BackupRunner::human($m->get('bkh_bytes'))) . '</td>';
+		// The site key is a recipient too, so this machine can restore itself from
+		// one of these unattended. Worth stating: it is the difference between a
+		// copy that is merely present and one this site can actually use.
+		echo '<td><span class="small text-muted">their recovery key '
+		   . htmlspecialchars(substr((string)$m->get('bkh_recovery_fpr'), 0, 16)) . '&hellip;, '
+		   . 'and this site\'s own key</span></td>';
+		echo '</tr>';
+	}
+	echo '</tbody></table>';
+	$page->end_box();
+}
 
 $page->admin_footer();

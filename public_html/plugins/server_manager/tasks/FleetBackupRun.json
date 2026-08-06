@@ -1,0 +1,6 @@
+{
+    "name": "Fleet Backups",
+    "description": "Backs up the nodes this control plane manages, on their own schedules. Each node does the work through its own backup engine — chain, envelope, upload, local sweep — while this decides when, prunes the shelf beforehand, and dispatches one job per due node. These are this control plane's copies, under its own recovery key; a site's own backups are separate and unaffected. Node slots are spread across a window so a fleet does not upload all at once.",
+    "default_frequency": "every_run",
+    "activate_on_install": false
+}

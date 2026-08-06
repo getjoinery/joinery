@@ -35,6 +35,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
+require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 
 class BackupChainException extends Exception {}
 
@@ -291,9 +292,16 @@ class BackupChain {
 		return $total;
 	}
 
-	/** Every object key a chain owns, for a chain-atomic delete. */
-	public static function object_keys(array $manifest, $prefix, $slug) {
-		$dir = rtrim($prefix, '/') . '/' . $slug . '/' . self::dir_for($manifest['chain_id'] ?? '') . '/';
+	/**
+	 * Every object key a chain owns, for a chain-atomic delete.
+	 *
+	 * The profile segment is required rather than defaulted: this list is handed
+	 * to a delete, and guessing the wrong segment would either delete nothing
+	 * (harmless but silent) or address another party's shelf.
+	 */
+	public static function object_keys(array $manifest, $prefix, $slug, $profile) {
+		$dir = rtrim($prefix, '/') . '/' . $slug . '/' . BackupProfile::path_segment($profile)
+		     . '/' . self::dir_for($manifest['chain_id'] ?? '') . '/';
 		$keys = array($dir . self::MANIFEST_NAME);
 		foreach ($manifest['runs'] ?? array() as $run) {
 			foreach ($run['artifacts'] ?? array() as $a) {

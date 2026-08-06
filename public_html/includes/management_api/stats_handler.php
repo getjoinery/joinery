@@ -95,6 +95,27 @@ function stats_handler($request) {
 		// A site too old to have the class answers the rest of the call normally.
 	}
 
+	// What each party's backups of this site are doing.
+	//
+	// Both are REPORTED. The site profile is this site's own business — a site
+	// that takes no copies of its own is exercising a choice, not failing — and
+	// reporting it here lets a control plane show why a box is busy at 3am
+	// without treating it as a problem to chase. The manager profile is reported
+	// so whoever runs it can see their own runs landing without reading a bucket.
+	try {
+		require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
+		require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
+		require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+
+		$profiles = array();
+		foreach (BackupProfile::names() as $profile) {
+			$profiles[$profile] = _mgmt_stats_backup_profile($profile);
+		}
+		$result['backups'] = $profiles;
+	} catch (Throwable $e) {
+		// A site too old to have profiles answers the rest of the call normally.
+	}
+
 	// Cron health — last time process_scheduled_tasks.php fired
 	$settings = Globalvars::get_instance();
 	$cron_last_run = $settings->get_setting('scheduled_tasks_last_cron_run');
@@ -139,6 +160,63 @@ function _mgmt_stats_format_size($bytes) {
 	if ($bytes >= 1048576)    return round($bytes / 1048576, 1) . 'M';
 	if ($bytes >= 1024)       return round($bytes / 1024, 1) . 'K';
 	return $bytes . 'B';
+}
+
+/**
+ * What one party's backups of this site are doing.
+ *
+ * Read from this site's own history rows, which is the only place that knows
+ * about runs that FAILED — a bucket listing shows successes and says nothing
+ * about the month of failures that preceded them.
+ *
+ * The schedule half only applies to the site's own profile: a control plane's
+ * backups are scheduled where they are run from, not here.
+ */
+function _mgmt_stats_backup_profile($profile) {
+	$out = array('profile' => $profile);
+
+	if ($profile === BackupProfile::SITE) {
+		$out['scheduled'] = false;
+		try {
+			$tasks = new MultiScheduledTask(array('task_class' => 'BackupRun', 'deleted' => false),
+				array('sct_id' => 'DESC'), 1, 0);
+			$tasks->load();
+			foreach ($tasks as $task) {
+				$out['scheduled'] = (bool)$task->get('sct_is_active');
+				$out['frequency'] = (string)$task->get('sct_frequency');
+				$out['time']      = (string)$task->get('sct_schedule_time');
+			}
+		} catch (Throwable $e) {
+			// Reported as unscheduled rather than failing the whole call.
+		}
+	}
+
+	try {
+		$rows = new MultiBackupHistory(array('profile' => $profile, 'deleted' => false),
+			array('bkh_start_time' => 'DESC'), 1, 0);
+		$rows->load();
+		foreach ($rows as $row) {
+			$out['last_run']      = (string)$row->get('bkh_start_time');
+			$out['last_outcome']  = (string)$row->get('bkh_outcome');
+			$out['last_offsite']  = (bool)$row->is_offsite();
+			$out['recovery_fpr']  = (string)$row->get('bkh_recovery_fpr');
+		}
+
+		// The last one that actually reached the bucket. Distinct from the last
+		// run on purpose: "when did this last work" is the question, and the
+		// newest row answers "when was this last attempted".
+		$ok = new MultiBackupHistory(
+			array('profile' => $profile, 'outcome' => 'success', 'offsite' => true, 'deleted' => false),
+			array('bkh_start_time' => 'DESC'), 1, 0);
+		$ok->load();
+		foreach ($ok as $row) {
+			$out['last_success'] = (string)$row->get('bkh_start_time');
+		}
+	} catch (Throwable $e) {
+		$out['error'] = 'history unreadable';
+	}
+
+	return $out;
 }
 
 function _mgmt_stats_format_uptime($secs) {
