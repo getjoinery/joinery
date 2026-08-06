@@ -1,6 +1,6 @@
 # Fleet Scheduled Backups: Two Profiles, Two Keys
 
-**Status:** Spec — unbuilt. Decisions 1 and 2 resolved 2026-08-05.
+**Status:** Spec — unbuilt. All six decisions resolved 2026-08-05; ready to build.
 **Date:** 2026-08-05
 
 ## The problem in one paragraph
@@ -38,6 +38,15 @@ The asymmetry in the last row is deliberate and is the whole safety argument:
 or hostile costs a site nothing it was relying on. The manager profile is the
 fleet owner's own second copy, held under the fleet owner's own key.
 
+**Neither profile owns the node's backups.** They are peers. Each party runs the
+copies it initiated, under its own key, on its own schedule, and neither needs
+the other's permission or absence to make sense. A site admin who wants their own
+copies as well as the fleet owner's just sets their profile up; a fleet owner who
+wants copies of a site that already backs itself up just leaves the manager
+profile on. Two backups a night of the same box is a legitimate configuration,
+not a misconfiguration to be detected — which is what the machine-wide mutex and
+the spread window exist to absorb.
+
 ## Why two keys, concretely
 
 A recovery key is a custody statement, not a config value. The private half of
@@ -58,8 +67,18 @@ So:
   the node cannot accidentally start using it for its own runs.
 - Both additionally seal to `config/backup_site_key`, unchanged, so the node can
   restore itself unattended. State this plainly in the docs: a manager-profile
-  archive **sitting on the node** opens with the node's own site key. Manager key
-  custody protects the bucket copy, not the on-disk copy.
+  archive opens with the node's own site key. Manager key custody protects the
+  archive against everyone except the machine it came from.
+
+  This is not a cross-site exposure — the site key is per node, and a node holds
+  a write-only bucket credential, so it can neither open another site's archives
+  nor fetch them to try. Within one site it means whoever administers the node
+  can read that node's manager backups. Mostly that grants nothing: they can read
+  the live tree those archives were made from. The part that is genuinely extra
+  is **history** — an archive from six weeks ago carries secrets since rotated
+  and data since deleted. Accepted deliberately, because dropping the site
+  recipient defends only against someone who already holds the node's disk, and
+  costs unattended restore for every manager-profile backup.
 
 Every history row records which recovery key its run sealed to
 (`bkh_recovery_fpr`), so "which private key opens this backup" has a durable
@@ -119,7 +138,13 @@ being pruned is the fleet owner's.
 Site-profile retention is unchanged and stays node-side. A site's own shelf is
 its own business, and its credential is its own to scope.
 
-Two consequences to carry into the build:
+Three consequences to carry into the build:
+
+- **A chain's manifest is rewritten every run**, which is a PUT over an existing
+  key — allowed under write-only, since `PutObject` overwrites on S3 and B2
+  writes a new version. On B2 those superseded manifest versions accumulate,
+  because the node cannot delete them. The fleet bucket wants a lifecycle rule
+  keeping only the current version.
 
 - **Provider caveat.** Linode Object Storage keys are read-only or read-write per
   bucket with no separate delete capability, so write-without-delete is not
@@ -178,6 +203,16 @@ phase 1 rather than a nicety:
 4. Both write to `{prefix}/{slug}/` in the bucket, so a listing cannot tell whose
    backup is whose, and neither profile's retention can reason about the shelf it
    is responsible for.
+5. **A From-Backup install clones the source's site key.** The extract step
+   (`JobCommandBuilder.php:2239`) excludes exactly one file,
+   `config/Globalvars_site.php`, so `config/backup_site_key` comes across with
+   the rest of `config/`. Two sites then share what the whole key model calls a
+   per-site disposable identity, and the envelope's site recipient stops
+   identifying which machine made a backup. Nothing cross-site follows today —
+   the clone has no read credential to fetch the source's objects with — but it
+   is the one path by which a site key could ever become cross-site. Fix: exclude
+   it on extract and let `backup_envelope.php site-key` mint a fresh one on first
+   use, which it already does for an absent key.
 
 ## Isolation in time
 
@@ -213,7 +248,9 @@ way; the `manager` profile is not reachable yet.
 - `bkh_profile` (`site|manager`) and `bkh_recovery_fpr` on `bkh_backup_history`.
 - Per-profile working dir, lock, snapshot, manifest, envelope scratch.
 - Machine-wide backup mutex.
-- The four defects above cease to be reachable.
+- From-Backup installs exclude `config/backup_site_key` on extract, so a clone
+  mints its own rather than inheriting its source's identity (defect 5).
+- The defects above cease to be reachable.
 
 ### Phase 2 — the manager profile executes
 
@@ -246,7 +283,8 @@ node except non-secret chain state (snapshot, manifest) and history rows.
   control plane prunes that node's manager shelf with its own delete-capable
   credential, chain-atomically and driven by recorded history, exactly as
   `BackupRunner` does for the site profile. A run that failed never prunes.
-- A node with no policy inherits the fleet default. Bare nodes
+- A node with no policy inherits the fleet default, which is **enabled**: a newly
+  managed node gets manager backups without anyone remembering to ask. Bare nodes
   (`mgn_skip_joinery_checks`) are out of scope entirely.
 
 ### Phase 4 — see it and be told about it
@@ -258,10 +296,20 @@ node except non-secret chain state (snapshot, manifest) and history rows.
   written.
 - `check_status` records it; the fleet table and the node Backups tab read
   columns rather than polling nodes on page load.
-- `NodeMonitorHealth` gains manager-profile problems: schedule off, last run
-  failed, nothing successful within N intervals, no offsite copy confirmed. These
-  join the existing dashboard problem list and notification path. Site-profile
-  state is reported alongside but does not alarm by default — see Decision 6.
+- `NodeMonitorHealth` gains **manager-profile** problems: last run failed,
+  nothing successful within N intervals, no offsite copy confirmed. These join
+  the existing dashboard problem list and notification path. The alarm is "my
+  backups of this node are broken" — not "this node is unprotected", which is
+  not the control plane's call to make.
+- **Site-profile state is reported, never alarmed.** It appears on the node row
+  as information — schedule, last run, which key opens it — because knowing a box
+  runs two backups a night explains a lot about its 3am I/O. A site that runs no
+  backups of its own is a site exercising a choice, and it alarms on the node's
+  own Backups page, to the person whose choice it is.
+- A node whose manager backups are switched off produces no fleet alarm either;
+  that is also somebody exercising a choice. What prevents a node falling through
+  unnoticed is the **default**, not a detector: manager backups are on for new
+  nodes unless someone turns them off.
 - **Cross-check against the bucket.** `FleetBackups::list_grouped()` already
   knows what is actually in the target, per slug. Comparing "the node says it
   succeeded" with "the object is there" is nearly free and is the only signal
@@ -271,10 +319,13 @@ node except non-secret chain state (snapshot, manifest) and history rows.
 ### Phase 5 — the node's own page tells the truth
 
 `/admin/admin_backups` grows a second, read-only panel: *Backups taken by
-{control plane}* — schedule, last run, where they go, which key opens them, and
-a plain statement that the site operator cannot open the bucket copies. The
-site's own panel is unchanged. A site admin should never have to discover from
-a directory listing that someone else is also backing their site up.
+{control plane}* — schedule, last run, where they go, and which key opens them. A
+site admin should never have to discover from a directory listing that someone
+else is also backing their site up.
+
+The site's own panel is unchanged, and in particular is not reframed as optional
+or redundant: a site admin who wants their own copies, under their own key, on
+their own schedule, is doing a supported thing and the page should read that way.
 
 ## Non-goals
 
@@ -337,16 +388,19 @@ a directory listing that someone else is also backing their site up.
    plane can delete, and manager retention moves there with it. Per-node prefix
    scoping stays available as the next rung and is required before any node the
    fleet owner does not administer joins.
-4. **Does a manager run seal to the node's site key?** Recommended yes —
-   unattended self-restore is precisely what the site recipient exists for, and
-   the archive is on the node's disk anyway. The case against applies only with
-   *delete local after upload* on, where declining would make the bucket copy
-   openable by the fleet owner alone.
-5. **Manager profile default mode.** Chains are dramatically cheaper across a
-   fleet (193 MB → 37 kB measured). Full-every-time is easier to reason about
-   during restore. **Recommend chains,** matching the site default.
-6. **What the fleet does when a site profile is unconfigured.** Report it as a
-   fact, or treat it as a problem needing attention? A site whose operator has
-   deliberately delegated backups to the fleet owner is not broken.
-   **Recommend: report, do not alarm** — alarm only when the *manager* profile
-   is failing, since that is the copy the fleet owner is responsible for.
+4. ~~**Does a manager run seal to the node's site key?**~~ **RESOLVED
+   2026-08-05 — yes.** Unattended self-restore is what the site recipient exists
+   for. Not a cross-site exposure (per-node key, write-only credential); within a
+   site it grants read access to backup *history*, which is accepted. Turned up
+   defect 5, fixed in phase 1.
+5. ~~**Manager profile default mode.**~~ **RESOLVED 2026-08-05 — chains,**
+   matching the site default. 193 MB → 37 kB measured; across a fleet that is
+   most of the backup bandwidth. The cost is one extra full whenever a chain
+   breaks, and control-plane retention must therefore be chain-atomic. Restores
+   replay in order and are hash-checked before anything is written.
+6. ~~**What the fleet does when a site profile is unconfigured.**~~ **RESOLVED
+   2026-08-05 — nothing; the profiles are peers.** Nobody owns a node's backups;
+   each party owns the copies it initiated. The fleet alarms on its own runs
+   failing, the node alarms on its own, and neither reads the other's absence as
+   a fault. A node cannot fall through unnoticed because manager backups default
+   to on for new nodes — a default, not a detector.
