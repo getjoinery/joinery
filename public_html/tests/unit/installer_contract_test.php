@@ -15,11 +15,13 @@
  * the value. None of them fail loudly at install time — they fail for a stranger
  * on a server we cannot see. So they are pinned here instead.
  *
- * These are text assertions over scripts, not executions of them. install.sh
- * provisions a server; running it in a test suite is not an option. That
- * limits what can be claimed: a check passing means the guard is still written
- * down, not that a live install behaves. The three-branch SSH behavior is
- * verified by hand on a real box — see the spec's Testing section.
+ * These are almost all text assertions over scripts rather than executions of
+ * them. install.sh provisions a server; running it in a test suite is not an
+ * option, and --help is the sole exception, being the one subcommand whose
+ * whole job is to print and exit. That limits what can be claimed: a check
+ * passing means the guard is still written down, not that a live install
+ * behaves. The three-branch SSH behavior is verified by hand on a real box —
+ * see the spec's Testing section.
  *
  * Runs offline, no DB.
  * Run: php tests/unit/installer_contract_test.php
@@ -1224,6 +1226,38 @@ check(preg_match('~chmod 640 \$\{PG_CONFIG_DIR\}/pg_hba\.conf~', $install_exec) 
     'pg_hba.conf states its mode rather than inheriting whatever tee left');
 check(preg_match('~chown postgres:postgres \$\{PG_CONFIG_DIR\}/pg_hba\.conf~', $install_exec) === 1,
     'and its owner, since 640 is unreadable to the server if it stays root-owned');
+
+
+section('The script reports the version it actually is');
+
+// The help banner carried its own copy of the version and had drifted to 2.7
+// while the file said 2.41. Nobody was lying; a second copy of a number just
+// stops being updated. An operator diagnosing an install reads --help, believes
+// they are running a script from many releases ago, and goes looking for a
+// missing feature that is right there. So the banner is derived, and the way it
+// is derived is pinned here.
+check(preg_match('/echo "Joinery Installation Script v\d/', $install_src) === 0,
+    'the help banner states no literal version of its own');
+check(preg_match('/echo "Joinery Installation Script v\$\{INSTALLER_VERSION\}"/', $install_exec) === 1,
+    'it prints the derived one instead');
+check(preg_match('/^INSTALLER_VERSION="\$\(sed .*#VERSION .*BASH_SOURCE\[0\]\}".*\)"$/m', $install_exec) === 1,
+    'which is read from the newest #VERSION header in the file itself');
+
+// The derivation is a sed over the running file, so a header reformat breaks it
+// silently and the fallback prints the word unknown. Run it and compare: this
+// is the one install.sh subcommand whose entire job is to print and exit.
+$help_out  = array();
+$help_code = 1;
+exec('timeout 20 bash ' . escapeshellarg($install_sh) . ' --help 2>&1', $help_out, $help_code);
+$help_text = implode("\n", $help_out);
+preg_match('/^#VERSION ([0-9][0-9.]*)/m', $install_src, $header_version);
+check($help_code === 0 && $help_text !== '',
+    'install.sh --help runs and prints without provisioning anything');
+check(!empty($header_version[1])
+    && strpos($help_text, 'Joinery Installation Script v' . $header_version[1]) !== false,
+    'and the version it prints is the one at the top of the file (' . ($header_version[1] ?? '?') . ')');
+check(strpos($help_text, 'Script vunknown') === false,
+    'the fallback did not fire, so the header is still in the shape sed expects');
 
 
 harness_finish();

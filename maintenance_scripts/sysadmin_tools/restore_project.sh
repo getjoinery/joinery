@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.3.1 - SCRIPT_VERSION is read from this header rather than restated
+#                  further down, where a second copy drifts unnoticed
 # Version: 1.3.0 - Encrypted archives (.tar.gz.enc) are opened by reading the openssl
 #                  magic, not the filename; the key comes from --key-file, the envelope
 #                  sidecar beside the archive, or ~/.joinery_backup_key, and whatever
@@ -48,8 +50,9 @@
 
 set -euo pipefail
 
-# Version information
-SCRIPT_VERSION="1.3.0"
+# Version information, taken from the header above so there is only one copy.
+SCRIPT_VERSION="$(sed -n 's/^# Version: \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
+[ -n "$SCRIPT_VERSION" ] || SCRIPT_VERSION="unknown"
 
 # Colors for output
 RED='\033[0;31m'

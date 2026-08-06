@@ -1,11 +1,14 @@
 #!/bin/bash
 
 # Script to create Apache site configuration from template
-# Version: 2.0.0
+# Version: 2.2.1 - VERSION is read from this header rather than restated below,
+#                 where the two had disagreed: the header said 2.0.0 while the
+#                 script printed 2.2.0
 # Usage: ./virtualhost_update_script.sh <filename> [site_name] [domain_name] [server_ip]
 
-# Version info
-VERSION="2.2.0"
+# This script's version, taken from the header above so there is only one copy.
+VERSION="$(sed -n 's/^# Version: \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
+[ -n "$VERSION" ] || VERSION="unknown"
 echo "Virtual Host Template Script v${VERSION}"
 echo "=========================================="
 

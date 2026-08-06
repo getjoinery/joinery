@@ -1,8 +1,15 @@
 #!/usr/bin/env bash
+#Version 3.5 - Help reads its version from the header rather than restating it; the
+#              restated copy had drifted to 3.0 while the file carried 3.4
 #Version 3.4 - --key-file names the key to use; envelope runs mint one per backup
 #Version 3.3 - Stale-staging sweep at startup; jy_backup_ temp prefix
 #Version 3.2 - Encryption key passed via fd (never in argv/ps); pipefail on the encrypted pipeline
 #Version 3.1 - Full-timestamp filenames; plaintext path writes .sql.gz
+
+# This script's own version, read from the newest #Version header above rather
+# than restated in the help text, where a second copy stops being updated.
+BACKUP_SCRIPT_VERSION="$(sed -n 's/^#Version \([0-9][0-9.]*\).*/\1/p' "${BASH_SOURCE[0]}" | head -1)"
+[ -n "$BACKUP_SCRIPT_VERSION" ] || BACKUP_SCRIPT_VERSION="unknown"
 
 # Global flags
 ENCRYPT_BACKUPS=true
@@ -298,7 +305,7 @@ get_encryption_key() {
 
 # Function to show help
 show_help() {
-    echo "PostgreSQL Database Backup Script v3.0"
+    echo "PostgreSQL Database Backup Script v${BACKUP_SCRIPT_VERSION}"
     echo ""
     echo "Usage:"
     echo "  $0                             # Backup all databases (encrypted, interactive)"
