@@ -4,8 +4,10 @@
 `install.sh` 2.43 / `Dockerfile.template` 4.8 / `_site_init.sh` 2.7 /
 `fix_permissions.sh` 2.7, contract-test assertions added (274 checks green),
 live gate written at `tests/functional/install/install_container_gate.sh`
-(never yet run on a real box). § 7 still needs its publish — nothing here
-reaches an installing user until a release carries it.
+(never yet run on a real box). § 7 still needs its publish — nothing there
+reaches an installing user until a release carries it. **§ 8 is unbuilt**: it
+was found after the others, provisioning SSL on the same box, and is the reason
+that box has no certificate the installer issued.
 
 Found by running the published install path end to end on a bare Ubuntu
 24.04.4 Linode (45.33.72.32, 1 vCPU / 961 MB) to provision the soak host of
@@ -29,10 +31,11 @@ None of these are Drive-related. They are what a stranger following
 | 6 | `iptables-persistent` installed without `DEBIAN_FRONTEND` | low | **no** — fixed, unpublished |
 | — | `--no-ssl` site 301s into a `:443` vhost that does not exist | high | **no** — fixed, unpublished |
 | — | Database password baked into the image as ARG + ENV | high | **no** — fixed, unpublished |
+| 8 | Automatic SSL never runs on a dual-stack host | high | **yes** — found later, unbuilt |
 
-Every row is now fixed in the tree and still broken for everyone installing
-from a release, because nothing has been published. § 7 — the publish — is
-the remaining work.
+§§ 1–7 are fixed in the tree and still broken for everyone installing from a
+release, because nothing has been published; the publish is § 7. **§ 8 was
+found afterwards, setting SSL up on the same box, and is not built.**
 
 ---
 
@@ -241,6 +244,74 @@ Both are high severity and both are invisible to every user until a release
 carries them. **Publishing is the fix for these two**, and the same publish
 should carry §§ 1–6.
 
+## 8 — Automatic SSL never runs on a dual-stack host
+
+**Severity: high.** Found afterwards, reinstalling the same box as
+`drivetest.getjoinery.com` with SSL enabled. Unlike §§ 1–7 this one is **still
+live in the tree** (`install.sh` 2.43, line 844).
+
+`provision_origin_cert` decides whether to attempt the HTTP-01 challenge by
+comparing this machine's address to the domain's:
+
+```bash
+server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
+dns_ip=$(dig +short "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+if [ -n "$server_ip" ] && [ -n "$dns_ip" ] && [ "$server_ip" = "$dns_ip" ]; then
+```
+
+`curl` prefers IPv6, so on a dual-stack host `ifconfig.me` answers with the
+box's **IPv6** address — while `dns_ip` is filtered to IPv4 by that
+`grep -E '^[0-9.]+$'`. The two can never be equal. Measured on the box:
+
+```
+server_ip: 2600:3c03::2000:d9ff:fe81:41a2
+dns_ip:    45.33.72.32
+```
+
+So the HTTP-01 branch was skipped, DNS-01 detected Cloudflare but found no
+credentials file, and the install finished with **no certificate at all**.
+Issuing one by hand immediately afterwards took a single
+`certbot certonly --apache` and succeeded on the first attempt: the challenge
+was always going to work, the installer just never tried it.
+
+Every Linode, DigitalOcean and Vultr box has IPv6 on by default and an A
+record. This is the ordinary case, not an edge one — automatic SSL has
+effectively never worked on a fresh VPS.
+
+**Fix.** Pin the lookup to the family being compared: `curl -4 -s ifconfig.me`.
+Better, compare *sets* rather than single values — every A record against every
+local IPv4 — so a multi-homed box or a round-robin record still matches. If
+AAAA is supported later, compare families pairwise; never across.
+
+Two further faults sit on the same path:
+
+- **The failure is reported as success.** With no cert issued,
+  `setup_ssl_docker_proxy` still prints `[OK] Reverse proxy + SSL configured
+  for <domain>`. The `:443` vhost is inside `<IfFile>`, so it silently does not
+  load, and the operator is told SSL is configured for a site that answers only
+  on `:80` — which then 301s them to an HTTPS port with nothing behind it. The
+  success line must be conditional on a cert existing at the path the vhost
+  names.
+- **The self-signed fallback does not exist.** Four comments promise it:
+  `install.sh:537` ("falls back to a self-signed certificate rather than
+  failing"), `:718`, `:740`, and `:923` ("never fails the install; falls back to
+  self-signed if neither HTTP-01 nor DNS-01 work"). `setup_ssl.sh`'s header goes
+  further and names a `write_self_signed_cert` helper, promising the script
+  "always leaves a working cert at /etc/letsencrypt/live/<domain>/". **No such
+  function is defined anywhere in the tree**, and `provision_origin_cert` simply
+  `return 0`s when both challenges fail. Either write it or delete the promise —
+  a comment describing behaviour the script does not have is exactly how § 3
+  shipped.
+
+**Ordering trap for whoever builds this.** The proxy vhost's `:80` block
+redirects everything to HTTPS, so a webroot challenge cannot be served before
+the first cert exists. Use the apache authenticator (`certbot certonly
+--apache`), which inserts its own temporary challenge config, and leave
+`installer = None` in the renewal config so certbot never rewrites the
+template-owned vhost. A deploy hook that reloads Apache is what lets `<IfFile>`
+pick the renewed cert up. That combination is what now runs on the box, with
+`certbot renew --dry-run` green.
+
 ---
 
 # Testing
@@ -258,6 +329,9 @@ should carry §§ 1–6.
 | `install.sh` sets `DEBIAN_FRONTEND` globally, and no `apt-get install` line lacks it | § 6 |
 | The vhost template's HTTPS redirect is inside an `<IfFile>` naming the cert | § 7 |
 | `Dockerfile.template` names `POSTGRES_PASSWORD` in neither `ARG` nor `ENV` | § 7 |
+| The origin-IP lookup is family-pinned (`curl -4`), so it is comparable to an A record | § 8 |
+| The SSL success line is reachable only when a cert exists at the vhost's path | § 8 |
+| No comment promises a self-signed fallback unless the helper is defined | § 8 |
 
 The permission and cron defects (§§ 4, 5) can only be *proved* on a real
 install, so they also belong in the live gate:
@@ -269,6 +343,11 @@ requests; `cache/static_pages` is `www-data`-writable and contains a rendered
 entry; exactly one cron.d entry runs the task runner; `docker inspect` and
 `docker history` contain no database password. That gate is the one that fails
 today on every item in this spec.
+
+§ 8 needs the same gate run against a **resolving domain on a dual-stack host**
+— the only shape that exposes it. Assert that the install issues a certificate
+unattended, that `https://<domain>/` returns 200 with a chain that verifies,
+and that no success line is printed on a run where no cert was issued.
 
 # Docs to update
 
@@ -300,6 +379,14 @@ no reference to how it used to behave.
 - **D4 — Build time cannot fix run time.** Anything under a named volume must
   be created and owned at container start. The § 4 mitigation was written at
   build time and has never had any effect.
+- **D5 — Never compare addresses across families.** An IPv6 answer and an A
+  record are not unequal, they are incomparable; the check in § 8 read the
+  difference as "this domain does not point here" and silently withheld a
+  certificate. Any address comparison pins its family first.
+- **D6 — A green line requires the thing it claims.** §§ 3 and 8 both end with
+  the installer reporting success for something that did not happen. Success
+  messages assert state — a cert on disk, a page fetched by its real domain —
+  never that a step was reached.
 
 # Related
 

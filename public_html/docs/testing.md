@@ -172,6 +172,27 @@ need makes the test a reported **SKIP** with its reason — never a silent pass 
 never a hard failure — so a box without the dependency stays green honestly. An
 unrecognized need name is treated as met (it never blindly skips).
 
+### Live gates that need a rig, and why they fail rather than skip
+
+A `live` gate never runs unless it is named, so it is entitled to assume that
+somebody who named it meant to run it. Several therefore need configuration —
+credentials, a host, a rig — and the rule for all of them is the same: **a
+missing rig is a failure that names what to set, not a skip.** A gate that passed
+because it was never configured is the silent success these gates exist to catch.
+
+`needs:` is different, and is enforced by the runner rather than the gate: an
+absent toolchain or an unreachable machine is a reported SKIP with its reason.
+The distinction is between "this box cannot run it" (skip) and "this box could
+run it and nobody said against what" (fail).
+
+`tests/functional/sync/sync_soak_gate.sh` is the current example. It wants
+`JD_SOAK_SERVER`, `JD_SOAK_ACCOUNT` and `JD_SOAK_PASSWORD`, refuses a server that
+looks like dev, builds the workspace, links two devices, runs a real
+storm-and-settle cycle against two real daemons, and checks that the actors
+actually worked and that a daemon was actually killed before it believes the six
+assertions that follow. See
+[Drive Sync § The soak environment](drive_sync.md#the-soak-environment).
+
 Any single test also runs on its own and prints a human summary, or emits the
 contract with `--json`:
 

@@ -31,7 +31,35 @@ use serde_json::Value;
 ///
 /// Everything it accepts is a short JSON object. Reading an unbounded body from
 /// a socket any local process can open is a way to be shut down by a stranger.
-const MAX_BODY: usize = 64 * 1024;
+const MAX_REQUEST_BODY: usize = 64 * 1024;
+
+/// The largest answer a client will read back.
+///
+/// **Deliberately not the same number as the request cap**, and this is the one
+/// comment in the file worth reading. Those two limits protect against opposite
+/// things: the request cap defends the daemon from a local process that will not
+/// stop typing, while this one only stops a client waiting forever on an answer
+/// that is never going to end. Sharing one constant between them meant a status
+/// answer that grew past 64 KiB was silently cut in half by the *client*, failed
+/// to parse, and came back as `None` — which every caller reports as **"the sync
+/// daemon did not answer"**.
+///
+/// That is the worst possible shape for this bug. The answer grows with the
+/// number of things needing attention, so the client went dark exactly when the
+/// user had most to look at, while sync carried on perfectly well behind it —
+/// and the user could not even dismiss the issues, because the id list comes
+/// from the call that had stopped working. Found on the soak rig at 306 open
+/// issues, where the status answer was 70 KB.
+///
+/// The daemon also caps what it puts in an answer (`snapshot_json`), so this is
+/// a backstop rather than the first line of defence. It is generous because a
+/// client refusing to read a large answer is not protecting anybody.
+const MAX_RESPONSE_BODY: usize = 4 * 1024 * 1024;
+
+/// Collapsing the two caps back into one number is precisely how the bug above
+/// happened, so it will not compile. A client has to be able to read an answer
+/// larger than the request it sent.
+const _: () = assert!(MAX_RESPONSE_BODY > MAX_REQUEST_BODY);
 
 /// How long one connection may take to say what it wants and hear the answer.
 ///
@@ -253,7 +281,7 @@ fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Reques
             content_length,
         ));
     }
-    if content_length > MAX_BODY {
+    if content_length > MAX_REQUEST_BODY {
         return Err(refusal(413, "request body too large", content_length));
     }
 
@@ -283,7 +311,7 @@ fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Reques
 /// reads as "the daemon is not running": exactly the distinction this channel
 /// exists to keep. Linux is more forgiving and never showed it.
 ///
-/// Bounded twice over: by [`MAX_BODY`], so a caller claiming four gigabytes gets
+/// Bounded twice over: by [`MAX_REQUEST_BODY`], so a caller claiming four gigabytes gets
 /// no more of the daemon's attention than one claiming four bytes, and by the
 /// socket's [`DRAIN_TIMEOUT`], so one claiming four gigabytes and sending two
 /// bytes gets none of its patience either. A read that times out ends the drain,
@@ -291,7 +319,7 @@ fn read_request(reader: &mut BufReader<TcpStream>, token: &str) -> Result<Reques
 /// reset this exists to prevent.
 fn discard_body(reader: &mut BufReader<TcpStream>, declared: usize) {
     let mut scratch = [0u8; 4096];
-    let mut left = declared.min(MAX_BODY);
+    let mut left = declared.min(MAX_REQUEST_BODY);
     while left > 0 {
         let want = left.min(scratch.len());
         match reader.read(&mut scratch[..want]) {
@@ -407,10 +435,21 @@ pub fn ask(endpoint: &Endpoint, method: &str, path: &str, body: Value) -> Option
     stream.flush().ok()?;
 
     // The daemon closes the connection after answering, so reading to the end is
-    // both the simplest framing and the correct one — and the response is a
-    // short JSON object either way.
+    // both the simplest framing and the correct one.
+    //
+    // Read one byte past the cap on purpose: getting exactly the cap back is
+    // ambiguous — it could be a whole answer that happens to be that long, or the
+    // front of one that was cut off. The extra byte tells them apart, so a
+    // truncated answer can be refused as what it is instead of failing to parse
+    // and arriving at the caller as silence.
     let mut raw = String::new();
-    stream.take(MAX_BODY as u64).read_to_string(&mut raw).ok()?;
+    stream
+        .take(MAX_RESPONSE_BODY as u64 + 1)
+        .read_to_string(&mut raw)
+        .ok()?;
+    if raw.len() > MAX_RESPONSE_BODY {
+        return None;
+    }
     let (_, answer) = raw.split_once("\r\n\r\n")?;
     serde_json::from_str(answer).ok()
 }
@@ -453,6 +492,37 @@ mod tests {
         let answer = ask(&endpoint, "POST", "/status", json!({"hello": true})).unwrap();
         assert_eq!(answer["path"], "/status");
         assert_eq!(answer["echo"]["hello"], true);
+
+        handle.join().unwrap();
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn an_answer_larger_than_the_request_cap_still_reaches_the_caller() {
+        // The regression this exists for, found on the soak rig. The request cap
+        // and the response cap were one constant, so a status answer that grew
+        // past 64 KiB was cut in half by the CLIENT, failed to parse, and came
+        // back as None — which every caller reports as "the sync daemon did not
+        // answer".
+        //
+        // The shape of that failure is what makes it serious: the answer grows
+        // with the number of things needing attention, so the client went dark
+        // exactly when the user had most to look at, while sync carried on
+        // perfectly well behind it. Sixty-five kilobytes here, just over the old
+        // limit and nowhere near the real one.
+        let dir = temp("biganswer");
+        let path = dir.join("control.json");
+        let server = ControlServer::bind(&path, new_token()).unwrap();
+        let endpoint = Endpoint::load(&path).unwrap();
+        let big = "x".repeat(65 * 1024);
+        let expected = big.clone();
+        let handle = std::thread::spawn(move || {
+            let _ = server.serve_one(&mut |_| (200, json!({ "issues": big })));
+        });
+
+        let answer = ask(&endpoint, "GET", "/status", Value::Null)
+            .expect("a large answer must arrive, not read as a dead daemon");
+        assert_eq!(answer["issues"], expected);
 
         handle.join().unwrap();
         let _ = std::fs::remove_dir_all(&dir);
@@ -512,8 +582,9 @@ mod tests {
         let endpoint = Endpoint::load(&path).unwrap();
         let handle = spawn(server, 1);
 
-        // Larger than MAX_BODY, so the server refuses on size rather than auth.
-        let huge = json!({ "payload": "x".repeat(MAX_BODY + 1024) });
+        // Larger than MAX_REQUEST_BODY, so the server refuses on size rather
+        // than auth.
+        let huge = json!({ "payload": "x".repeat(MAX_REQUEST_BODY + 1024) });
         let answer = ask(&endpoint, "POST", "/dismiss", huge).unwrap();
         assert!(answer["error"].as_str().unwrap().contains("too large"));
 

@@ -1,0 +1,28 @@
+[package]
+name = "jd-soak"
+description = "The soak and chaos rig for the sync client (specs/drive_sync_soak.md): persona actors reproducing sync-hostile application write patterns, a fault agent, an independent verifier that never trusts the daemon's own green, and the conductor that alternates storm and settle segments for weeks."
+edition.workspace = true
+version.workspace = true
+license.workspace = true
+publish.workspace = true
+
+[dependencies]
+# Personality-aware name comparison, so a device is never failed for obeying
+# its own volume's rules.
+jd-vfs = { path = "../jd-vfs" }
+# The server, as the remote actor and the verifier reach it.
+jd-proto = { path = "../jd-proto" }
+# The encrypted lane: known-ciphertext hashes for the never-materializes check.
+jd-crypto = { path = "../jd-crypto" }
+# Reading a device's config and writing its credential. The rig provisions the
+# daemon from outside and then leaves it entirely alone (spec S2).
+jd-daemon = { path = "../jd-daemon" }
+jd-platform = { path = "../jd-platform" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+sha2 = "0.10"
+thiserror = "1"
+
+[[bin]]
+name = "jd-soak"
+path = "src/main.rs"

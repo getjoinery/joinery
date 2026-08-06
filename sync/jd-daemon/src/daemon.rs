@@ -397,6 +397,21 @@ pub fn handle_control(
     }
 }
 
+/// How many issues one answer carries.
+///
+/// The list is what a person is going to read, and nobody reads three hundred
+/// of anything — so the cap costs the user nothing and buys a bounded answer.
+///
+/// Bounded matters more than it sounds. The answer grows with the number of
+/// things needing attention, so an uncapped list makes the status call largest
+/// exactly when the user has most to look at; past a certain size a client
+/// simply cannot read it, and the whole surface goes dark while sync carries on
+/// invisibly behind it. That happened at 306 issues, and it took the dismiss
+/// command down with it — the ids come from this very call, so there was no way
+/// back under the limit. The count is always reported in full, so nothing is
+/// hidden by being left out of the list.
+pub const MAX_REPORTED_ISSUES: usize = 50;
+
 pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
     use serde_json::json;
     json!({
@@ -416,7 +431,12 @@ pub fn snapshot_json(s: &Snapshot) -> serde_json::Value {
         "last_pass_ms": s.health.last_pass_ms,
         "entries": s.health.entries,
         "blocker": s.health.blocker.as_ref().map(|b| b.message()),
-        "issues": s.health.issues.iter().map(|i| json!({
+        // The full count, always, even though the list below is capped. A
+        // shell that showed "50 issues" when there were three hundred would be
+        // making the same understatement the whole health model exists to
+        // prevent.
+        "issues_total": s.health.issues.len(),
+        "issues": s.health.issues.iter().take(MAX_REPORTED_ISSUES).map(|i| json!({
             "id": i.id,
             "kind": i.kind,
             "summary": i.summary,
@@ -463,6 +483,58 @@ mod tests {
         assert_eq!(status, 200);
         assert_eq!(body["summary"], "Starting up");
         assert_ne!(body["indicator"], "green");
+    }
+
+    #[test]
+    fn a_status_answer_stays_readable_however_many_things_are_wrong() {
+        // The failure this prevents, found on the soak rig: the answer grows with
+        // the number of open issues, and past a certain size a client cannot read
+        // it at all — so the tray, the CLI and the settings page all go dark
+        // exactly when the user has most to look at, while sync carries on
+        // invisibly behind them. Worse, `dismiss` needs the ids from this call,
+        // so there was no way back under the limit.
+        let issues: Vec<crate::health::Issue> = (0..400)
+            .map(|i| crate::health::Issue {
+                id: i,
+                kind: "unsyncable".into(),
+                detail: "CaseClash { with: \"a rather long file name.txt\" }".repeat(4),
+                summary: "Cannot be saved here: the name differs only by capitalization.".into(),
+                created_at: 0,
+            })
+            .collect();
+        let snapshot = Snapshot {
+            health: Health {
+                indicator: Indicator::Attention,
+                entries: Default::default(),
+                pending_ops: 0,
+                issues,
+                blocker: None,
+                last_pass_ms: None,
+                cursor: 0,
+            },
+            paused: false,
+            device_name: "device-a".into(),
+            base_url: "https://example.com".into(),
+            sync_root: "/home/u/Joinery Drive".into(),
+            custody: "in a file".into(),
+            vault: false,
+        };
+
+        let json = snapshot_json(&snapshot);
+        let listed = json["issues"].as_array().unwrap().len();
+        assert_eq!(listed, MAX_REPORTED_ISSUES);
+
+        // The count is never capped, only the list. A client saying "50 issues"
+        // to somebody who has four hundred would be understating, which is the
+        // one direction this indicator must never err in.
+        assert_eq!(json["issues_total"], 400);
+
+        // And the whole answer stays comfortably inside what a client will read.
+        let bytes = serde_json::to_string(&json).unwrap().len();
+        assert!(
+            bytes < 64 * 1024,
+            "a status answer grew to {bytes} bytes with 400 issues open"
+        );
     }
 
     #[test]

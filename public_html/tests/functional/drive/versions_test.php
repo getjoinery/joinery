@@ -89,6 +89,30 @@ $expected = (int)$dblink->query("SELECT COALESCE(SUM(b.fbb_size_bytes),0) FROM f
 check((int)$usage->get('dru_bytes_used') === $expected, 'usage = head + versions bytes (' . $expected . ')');
 
 // ---------------------------------------------------------------------------
+section('the listing says what each version holds');
+
+// Without a content hash a client can list a file's history and still not know
+// which entry holds the bytes it is looking for. The sync client's no-loss check
+// asks exactly that question of every superseded version, so an export carrying
+// only sizes and timestamps makes a whole class of data loss unfalsifiable.
+require_once(PathHelper::getIncludePath('logic/drive_versions_logic.php'));
+$listing = drive_versions_logic(array('file_id' => (int)$file->key));
+$rows = $listing->data['versions'] ?? array();
+check(count($rows) === 2, 'the listing returns both versions');
+
+$listed_hashes = array();
+foreach ($rows as $row) {
+	check(array_key_exists('content_sha256', $row), 'version ' . $row['version_number'] . ' reports a content hash');
+	$listed_hashes[] = $row['content_sha256'];
+}
+$actual_hashes = $dblink->query(
+	"SELECT b.fbb_sha256 FROM fvr_file_versions v JOIN fbb_file_blobs b ON b.fbb_file_blob_id = v.fvr_fbb_file_blob_id
+	  WHERE v.fvr_fil_file_id = " . (int)$file->key . " ORDER BY v.fvr_version_number DESC"
+)->fetchAll(PDO::FETCH_COLUMN);
+check($listed_hashes === $actual_hashes, 'the hashes are the ones the versions actually point at, newest first');
+check(count(array_unique(array_filter($listed_hashes))) === 2, 'the two versions hold different content');
+
+// ---------------------------------------------------------------------------
 section('version restore');
 
 // Restore the oldest version (blob b1). The current head (b3) demotes to a version.

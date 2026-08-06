@@ -1,6 +1,19 @@
 # Drive Sync Soak & Chaos Environment — Specification
 
-**Status:** Specced. Companion to `specs/drive_sync_clients.md` (the parent
+**Status:** **Phase A built and first run live 2026-08-06 (uncommitted).**
+The rig has now driven two real daemons against a real instance, and has already
+paid for itself — see § What the first live runs found.
+
+**Phase A build:** The `jd-soak` crate is a workspace member with 145 tests
+green, the host topology is `{repo root}/sync/soak/`, and the bounded gate is
+`tests/functional/sync/sync_soak_gate.sh`. The rig itself is live on the soak VPS
+(two daemons under systemd, campaigns run by hand so far). **No cycle has yet
+come back green** — see the findings section. Phases B and C are unbuilt. One decision changed in the building of it
+(S10, below): the devices are host processes under one unix account each rather
+than containers, because the daemon's control channel is loopback-bound by design
+and a verifier outside a container cannot ask it anything.
+
+Companion to `specs/drive_sync_clients.md` (the parent
 spec). The parent spec's `jd-sim` harness is deterministic and simulated; this
 environment is the opposite half of the verification story: the **real daemon**
 on **real filesystems** against the **real server**, driven by realistic
@@ -314,6 +327,155 @@ worse than no verifier.
 - **S9 — Log-only surfacing** (owner-confirmed 2026-08-06): violations and
   daily summaries land in the report file and forensics bundles on the VPS;
   checked periodically by hand. No email/push alerting.
+
+- **S10 — Devices are host processes under one unix account each**, not
+  containers (decided while building Phase A, 2026-08-06). This supersedes the
+  compose topology sketched in § Architecture.
+
+  The daemon binds its control channel to **loopback on a kernel-chosen port**,
+  which is correct — binding it to every interface would put a client's sync
+  controls on the network. It also means a daemon inside a container is
+  unreachable from outside it, and the verifier must be able to ask a device when
+  it has stopped working: assertion 1 *is* that question, and assertion 5 is
+  checked against the answer.
+
+  Three ways out, and only one is acceptable. Changing the daemon is refused by
+  S2 — the program soaked has to be the program that ships. Proxying every status
+  call through `docker exec` adds a moving part inside the one component whose
+  trustworthiness the entire rig rests on. Running each daemon as an ordinary
+  process under its own unix account costs nothing and gives back the thing
+  containers were wanted for: a **per-device** network fault, through
+  `iptables -m owner --uid-owner`, which cuts one daemon's traffic to the server
+  and leaves its neighbours syncing. `Restart=always` on a systemd template unit
+  supplies the supervisor that turns `kill -9` into reboot semantics.
+
+  What this genuinely defers is the **volume** fault — yanking a sync root
+  mid-storm — which wants a filesystem image rather than a container and lands
+  with the loopback devices in Phase B. Nothing else in the fault matrix needs a
+  container. The soak *server* is unaffected: it remains a standard container
+  install on its own box, per S1.
+
+- **S11 — Phase A links devices with the password login, not the browser
+  ceremony** (decided while building Phase A, 2026-08-06). Both mint a real
+  per-device session key through the real API; the only thing the ceremony adds
+  is a vault key sealed to the device, and no Phase A persona touches an
+  encrypted folder. The ceremony path gets built when the encrypted lane turns on
+  in Phase C, which is the point at which the difference starts to matter. The
+  ceremony itself is already live-verified separately (parent spec, Phase 0).
+
+# What Phase A actually shipped
+
+Against the Phase A list at the top of § Phases:
+
+| Asked for | Built |
+|---|---|
+| `jd-soak` crate: actor / verify / orchestrate | `{repo root}/sync/jd-soak/`, workspace member, 130 tests. Also `chaos`, `report`, `init` and `provision` as their own subcommands. |
+| journal | `journal.rs` — intent/commit/failed/fault/verdict/segment/sample, one JSONL per writer, merged by timestamp on read. Commits fsync'd; intents not (process death is the fault model, not power loss). |
+| tree-differ | `tree.rs` — hashes every file, compares names through `jd-vfs` personality keys, and honours each device's own exclusions. |
+| compose topology, soak-server + two ext4 devices | Superseded by S10. `{repo root}/sync/soak/setup-host.sh` builds the accounts, roots, units and fleet description; the server stays a standard container install elsewhere. |
+| device link scripted | `jd-soak provision` (S11). |
+| core personas | `office`, `editor`, `photoshop`, `sqlite-app`, `browser`, `messy-human`, `name-swapper`, and `remote-user` in `remote.rs`. |
+| kill + partition chaos | Both, plus freeze (SIGSTOP/SIGCONT) and restart, on Poisson arrivals. Faults that could not be injected are journaled as `refused` so a run is never stronger than it looks. |
+| the six settle assertions | All six in `verify.rs`, each with its own tests. |
+| `sync_soak_gate.sh` | `tests/functional/sync/sync_soak_gate.sh` — live, dev-only, needs `[rust]`. **Not yet run against a real rig.** |
+
+Two things worth knowing that were not in the plan:
+
+- **`drive_versions` did not report what a version holds.** The export carried
+  size and timestamps but no content hash, so a client could list a file's
+  history and not tell which entry held the bytes it was looking for — and
+  assertion 3 could not clear a superseded content. `content_sha256` added to the
+  export; it is the head's identity in the same domain (plaintext bytes for a
+  plaintext file, ciphertext for an encrypted one).
+- **The harness is tested against a world with no client in it**, and is required
+  to fail there. That test is in `jd-soak/tests/campaign.rs` and it is the one
+  that matters: a verifier that called an empty world green would call a broken
+  client green too.
+
+# What the first live runs found
+
+Two bounded campaigns against `drivetest.getjoinery.com`, 2026-08-06 — 6,425 and
+8,551 actor operations, three injected faults each.
+
+## One real defect in shipping code
+
+**The control channel went dark exactly when the user had most to look at.**
+`jd-platform`'s `MAX_BODY` was one constant serving two opposite purposes: the
+largest request the daemon will read, and the largest answer a client will read
+back. The `/status` answer grows with the number of open issues, so at 306 issues
+it reached 70 KB, the client truncated it at 64 KB, the JSON failed to parse, and
+`ask()` returned `None` — which every caller reports as **"the sync daemon did
+not answer."** The daemon was running perfectly and syncing normally throughout.
+
+The shape is what makes it serious. A client that goes blind in proportion to how
+much is wrong is the precise failure the health model exists to prevent, and it
+took `dismiss` down with it: the issue ids come from the call that had stopped
+working, so there was no way back under the limit.
+
+Fixed in three places, all mutation-verified:
+- the two caps are separate constants, and a `const` assertion makes collapsing
+  them back a compile error;
+- `ask()` reads one byte past its cap so a truncated answer is refused as
+  truncated rather than failing to parse into silence;
+- the daemon caps the issue *list* at 50 (`MAX_REPORTED_ISSUES`) and reports
+  `issues_total` separately, so the answer is bounded by construction and no
+  shell ever understates the count.
+
+Verified live: 405 open issues, answer down from 70 KB to 12 KB, CLI reporting
+405.
+
+## One server-configuration finding
+
+**A fresh install with Drive enabled refuses every upload.** `drive_upload_init`
+bails out when `drive_storage_bytes` or `drive_max_file_bytes` is 0, and both
+default to 0 with no subscription tier. A device links successfully and then
+fails every upload with *"That upload would exceed the storage quota"* — a quota
+message about a quota nobody set. Worth deciding separately from this spec
+whether that is a defaulting problem or a wording one.
+
+Also: the stock `api_rate_limit_requests` of 1000/hour is right for a person and
+far too low for a storm. Raised on the soak instance, which is what S1 exists to
+allow. The client's behaviour under it was correct — surfaced blocker, retrying,
+never silent.
+
+## Four defects in the rig itself, all fixed
+
+1. **The no-loss oracle was far too strong.** It demanded that *every* content an
+   actor ever committed remain findable, and reported 2,966 violations in one
+   segment. Nearly all were local writes replaced at the same path seconds later,
+   before any client could upload them — a user overwriting their own file, which
+   no sync client captures. Narrowed to what the spec actually says: the last
+   committed version of every live path, plus every content **the server was
+   observed to hold**, which is now remembered across settles.
+2. **Issue honesty was measured against work in flight.** 248 pending uploads
+   mid-drain read as 248 things the daemon was hiding. Now only terminal states
+   (`unsyncable`, `pending_key`) require a surfaced reason; a draining queue is
+   what a working client looks like.
+3. **The verifier looked for the OS trash in the wrong place** — under
+   `JOINERY_DRIVE_HOME` rather than the daemon account's unix home. It would have
+   called a correctly-trashed file lost. `Device` now carries `unix_home`.
+4. **A fault could outlive the storm that started it.** A 195-second partition
+   drawn near the end of a 180-second segment held it open, and the settle then
+   ran against a device the rig itself had cut off. Durations are trimmed to what
+   is left of the segment.
+
+Plus one scaling fix found by the rate limiter: the verifier walked every file's
+version history every settle — one API call per file, which at 100k entries is
+not viable. It now only searches version history when something is genuinely
+unaccounted for, and stops as soon as it is found.
+
+## What has not been demonstrated yet
+
+**A green cycle.** Both runs failed convergence, and on this hardware that is
+expected rather than mysterious: one vCPU and 961 MB running Postgres, PHP-FPM,
+two daemons and eight actors, with the server on the same box. The storm
+out-produces what the settle window can drain — 8,551 operations committed, ~500
+still queued at the deadline. The rig is measuring the box, not the client.
+
+The next run needs the storm slowed (`--pace-ms` well above 400) or the settle
+deadline raised well past the storm length, and probably both. Until a cycle
+comes back green, nothing here says the client is correct — only that the rig
+can tell when it is not, which it has now demonstrated four times.
 
 # Docs to update when phases land
 
