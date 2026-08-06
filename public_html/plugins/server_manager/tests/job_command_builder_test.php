@@ -1301,6 +1301,67 @@ check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') =
 check(in_array('backup_run', ManagementJob::filterTypes(), true),
 	'backup_run is a filterable job type, so fleet runs are findable on the jobs pages');
 
+// A target holding a node (write-only) credential hands nodes THAT key's
+// token; the main delete-capable credential then never travels to a node.
+$bkt_split = new BackupTarget(NULL);
+$bkt_split->set('bkt_name', 'HarnessTest Split Target ' . bin2hex(random_bytes(3)));
+$bkt_split->set('bkt_provider', 'b2');
+$bkt_split->set('bkt_bucket', 'harness-split-bucket');
+$bkt_split->set('bkt_credentials', json_encode(array('access_key' => 'MAIN', 'secret_key' => 'main_full_perm')));
+$bkt_split->set('bkt_node_credentials', json_encode(array('access_key' => 'NODE', 'secret_key' => 'node_write_only')));
+$bkt_split->save();
+harness_register_row('bkt_backup_targets', 'bkt_id', $bkt_split->key);
+
+$split_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/splitnode/public_html',
+	'mgn_bkt_backup_target_id' => $bkt_split->key));
+
+$split_lines = explode("\n", JobCommandBuilder::build_backup_run($split_node)[0]['cmd']);
+$split_config = json_decode($split_lines[1] ?? '', true);
+$node_token = '__SM_NODE_CREDS_' . (int)$bkt_split->key . '__';
+$main_token = '__SM_CREDS_' . (int)$bkt_split->key . '__';
+check(($split_config['credentials_b64'] ?? '') === $node_token,
+	'with a node credential configured, backup_run carries the node token');
+check(strpos(implode("\n", $split_lines), $main_token) === false,
+	'the main (delete-capable) token appears nowhere in the node-bound command');
+
+// The one-off backup jobs upload from the node too, so their uploader follows
+// the same rule.
+$split_upload = '';
+foreach (JobCommandBuilder::build_backup_database($split_node) as $s) {
+	if (strpos($s['label'] ?? '', 'Upload backup') === 0) { $split_upload = $s['cmd']; break; }
+}
+check(strpos($split_upload, $node_token) !== false,
+	'the ad-hoc backup uploader also carries the node token', substr($split_upload, 0, 120));
+check(strpos($split_upload, $main_token) === false,
+	'and never the main token');
+
+// Only an UPLOAD may run under the write-only key. A cloud delete needs delete
+// capability and a restore download needs read, so those node-side scripts must
+// keep the main token even when a node credential is configured — otherwise a
+// properly scoped write-only key would fail exactly the operations it is
+// scoped against.
+$split_del = '';
+foreach (JobCommandBuilder::build_delete_backup($split_node, array(
+		'target' => 'cloud', 'cloud_path' => 'joinery-backups/x/y.tar.gz')) as $s) {
+	if (($s['label'] ?? '') === 'Delete cloud backup') { $split_del = $s['cmd']; }
+}
+check($split_del !== '', 'a cloud delete step is emitted for the split-credential target');
+check(strpos($split_del, $main_token) !== false && strpos($split_del, $node_token) === false,
+	'a cloud delete carries the main token, never the write-only one');
+
+$split_dl = '';
+foreach (JobCommandBuilder::build_restore_database($split_node, array(
+		'filename' => 'splitnode-20260101.sql.gz.enc', 'cloud_path' => 'joinery-backups/x/splitnode-20260101.sql.gz.enc')) as $s) {
+	if (($s['label'] ?? '') === 'Download backup from cloud') { $split_dl = $s['cmd']; }
+}
+check($split_dl !== '', 'a cloud restore emits a download step for the split-credential target');
+check(strpos($split_dl, $main_token) !== false && strpos($split_dl, $node_token) === false,
+	'a restore download carries the main token, never the write-only one');
+
+// Without a node credential, everything stays on the main token ($run_node's
+// target has none) — already asserted above via credentials_b64 === __SM_CREDS_.
+
 section('Decommission: ship + run remove_account.sh, then verify gone');
 
 // A Docker node's teardown runs entirely on the host (docker + apache live there):

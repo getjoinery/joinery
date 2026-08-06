@@ -18,7 +18,7 @@
  *
  * Run: php plugins/server_manager/tests/backup_target_encryption_test.php
  *
- * @version 1.0
+ * @version 1.1 - node credential slot (bkt_node_credentials): same sealing, independent lifecycle
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -144,6 +144,53 @@ try {
 	try { $broken_read->get_credentials(); }
 	catch (BackupTargetException $e) { $threw = true; }
 	check($threw, 'get_credentials throws on an unopenable sealed value (never a silent [])');
+
+	// -----------------------------------------------------------------------
+	section('node credential slot: absent by default, sealed the same way');
+	// -----------------------------------------------------------------------
+
+	$NODE_SECRET = 'nk_writeonly_secret_77';
+	$slot = new BackupTarget($created_id, TRUE);
+	check(!$slot->has_node_credentials(), 'a target starts with no node credential');
+	check($slot->get_node_credentials() === array(), 'get_node_credentials is [] when unconfigured');
+
+	$slot->set('bkt_node_credentials', json_encode(array(
+		'access_key' => 'NODE_PUB',
+		'secret_key' => $NODE_SECRET,
+		'region'     => 'us-west-002',
+		'endpoint'   => 'https://s3.us-west-002.backblazeb2.com',
+	)));
+	$slot->save();
+
+	$slot_read = new BackupTarget($created_id, TRUE);
+	check($slot_read->has_node_credentials(), 'has_node_credentials sees the stored slot');
+	check($slot_read->get_node_credentials()['secret_key'] === $NODE_SECRET,
+		'node secret round-trips through get_node_credentials');
+
+	$stmt = $db->prepare('SELECT bkt_node_credentials FROM bkt_backup_targets WHERE bkt_id = ?');
+	$stmt->execute(array($created_id));
+	$raw_node = (string)$stmt->fetchColumn();
+	if ($has_secretbox) {
+		check(strpos($raw_node, $NODE_SECRET) === false, 'raw node value holds no plaintext secret');
+		$node_decoded = json_decode($raw_node, true);
+		check(is_array($node_decoded) && isset($node_decoded['enc'])
+			&& SecretBox::looksEncrypted($node_decoded['enc']),
+			'node slot is sealed in the same {enc:...} shape');
+	} else {
+		harness_skip('raw node value holds no plaintext secret',
+			'no secret_box_key on this install — plaintext fallback (round-trip verified above)');
+		harness_skip('node slot is sealed in the same {enc:...} shape',
+			'no secret_box_key on this install');
+	}
+
+	// The two slots are independent: clearing the node slot must not touch the
+	// main one, since falling back to the main key is exactly what clearing means.
+	$slot_read->set('bkt_node_credentials', null);
+	$slot_read->save();
+	$cleared = new BackupTarget($created_id, TRUE);
+	check(!$cleared->has_node_credentials(), 'clearing the node slot empties it');
+	check((string)json_encode($cleared->get('bkt_credentials')) !== 'null',
+		'the main slot survives a node-slot clear');
 
 } finally {
 	if ($created_id) {

@@ -5,6 +5,11 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.25 - node-bound backup steps carry __SM_NODE_CREDS_<id>__ when the target holds a
+ *                 write-only node credential, so a node is handed a key that can add to the shelf
+ *                 but never erase it; the main (delete-capable) credential then stays on the
+ *                 control plane. With no node credential configured, the main token is emitted
+ *                 and nothing changes.
  * @version 1.24 - build_backup_run(): this control plane's own backup of a node, run by the node's
  *                 own engine with the bucket, a write-only credential and the recovery key supplied
  *                 per run and never stored there. Writing a node's own recovery key is retired —
@@ -709,7 +714,7 @@ class JobCommandBuilder {
 			'provider'                  => (string)$target->get('bkt_provider'),
 			'bucket'                    => (string)$target->get('bkt_bucket'),
 			'path_prefix'               => (string)($target->get('bkt_path_prefix') ?: 'joinery-backups'),
-			'credentials_b64'           => '__SM_CREDS_' . (int)$target->key . '__',
+			'credentials_b64'           => self::creds_token($target),
 			'recovery_public_key'       => $recovery_pub,
 			'slug'                      => $slug,
 			'type'                      => (($params['type'] ?? 'project') === 'database') ? 'database' : 'project',
@@ -912,7 +917,7 @@ class JobCommandBuilder {
 				$bucket    = $target->get('bkt_bucket');
 				$dl_path   = '/backups/' . basename($filename);
 
-				$uploader_script = self::build_node_uploader_script($bucket, $target->key);
+				$uploader_script = self::build_node_uploader_script($bucket, $target, 'download');
 				$eof = '__JOINERY_UPLOADER_EOF__';
 				$cp_arg = escapeshellarg($cloud_path);
 				$dl_arg = escapeshellarg($dl_path);
@@ -999,7 +1004,7 @@ class JobCommandBuilder {
 			$bucket    = $target->get('bkt_bucket');
 			$dl_path   = '/backups/' . basename($filename);
 
-			$uploader_script = self::build_node_uploader_script($bucket, $target->key);
+			$uploader_script = self::build_node_uploader_script($bucket, $target, 'download');
 			$eof    = '__JOINERY_UPLOADER_EOF__';
 			$cp_arg = escapeshellarg($cloud_path);
 			$dl_arg = escapeshellarg($dl_path);
@@ -1525,7 +1530,7 @@ class JobCommandBuilder {
 		$check = 'test -n "$UPLOAD_FILE" && test -f "$UPLOAD_FILE"';
 		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$UPLOAD_FILE\")\"";
 
-		$uploader_script = self::build_node_uploader_script($bucket, $target->key);
+		$uploader_script = self::build_node_uploader_script($bucket, $target, 'upload');
 		$eof = '__JOINERY_UPLOADER_EOF__';
 
 		// Optional local cleanup is folded into the SAME step as the upload so it
@@ -1562,23 +1567,50 @@ class JobCommandBuilder {
 	 * block. The result runs under `php -` on the node with no file deps.
 	 *
 	 * Credentials never persist in the step command: the block reads a
-	 * __SM_CREDS_<id>__ token that the agent (>= 0.4.0) replaces with the
-	 * unsealed credentials in memory just before the step runs (S-8). There is
-	 * deliberately no inline fallback — a job an old agent cannot run fails
-	 * visibly, whereas inlined credentials would persist in the job row forever.
+	 * credential token (see creds_token) that the agent (>= 0.4.0; >= 0.4.1 for
+	 * node tokens) replaces with the unsealed credentials in memory just before
+	 * the step runs (S-8). There is deliberately no inline fallback — a job an
+	 * old agent cannot run fails visibly, whereas inlined credentials would
+	 * persist in the job row forever.
 	 */
-	private static function build_node_uploader_script($bucket, $target_id) {
+	private static function build_node_uploader_script($bucket, $target, $op = 'upload') {
 		$signer_path = PathHelper::getIncludePath('includes/S3Signer.php');
 		$dispatcher_path = PathHelper::getIncludePath('plugins/server_manager/includes/node_uploader.php');
 
 		$signer = self::strip_php_tags(file_get_contents($signer_path));
 		$dispatcher = self::strip_php_tags(file_get_contents($dispatcher_path));
 
-		$token = '__SM_CREDS_' . (int)$target_id . '__';
+		// Only an upload can run under the write-only node credential. A
+		// download needs read and a cloud delete needs delete, which only the
+		// main credential has — handing those operations the node key would
+		// fail them against a properly scoped bucket key.
+		$token = ($op === 'upload')
+			? self::creds_token($target)
+			: '__SM_CREDS_' . (int)$target->key . '__';
 		$creds_block = '$creds = json_decode(base64_decode(' . var_export($token, true) . '), true);' . "\n"
 		             . '$bucket = ' . var_export($bucket, true) . ";\n";
 
 		return "<?php\n" . $signer . "\n" . $creds_block . "\n" . $dispatcher;
+	}
+
+	/**
+	 * The credential placeholder a NODE-bound step carries for this target.
+	 *
+	 * A target can hold a second, write-only credential (bkt_node_credentials).
+	 * When it does, node-bound steps carry __SM_NODE_CREDS_<id>__ and the node
+	 * is handed a key that can add objects to the shelf but never delete —
+	 * a compromised node then cannot erase the fleet's backups. The main
+	 * (delete-capable) credential stays on the control plane for retention and
+	 * listings. When no node credential is configured, the main token is
+	 * emitted and behaviour is unchanged.
+	 *
+	 * The choice is made at build time, where the data lives; the agent stays
+	 * strict and resolves exactly the slot the token names. A node token built
+	 * while the slot was filled fails visibly if the slot is later cleared.
+	 */
+	private static function creds_token($target) {
+		$slot = $target->has_node_credentials() ? '__SM_NODE_CREDS_' : '__SM_CREDS_';
+		return $slot . (int)$target->key . '__';
 	}
 
 	/**
@@ -1763,7 +1795,7 @@ class JobCommandBuilder {
 			if ($target) {
 				$bucket = $target->get('bkt_bucket');
 
-				$uploader_script = self::build_node_uploader_script($bucket, $target->key);
+				$uploader_script = self::build_node_uploader_script($bucket, $target, 'delete');
 				$eof = '__JOINERY_UPLOADER_EOF__';
 				$remote_key = escapeshellarg($cloud_path);
 				$cmd = "php -- delete {$remote_key} <<'{$eof}'\n{$uploader_script}\n{$eof}";

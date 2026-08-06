@@ -24,7 +24,7 @@ A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 | Triggered by | the `Backup` scheduled task | the control plane's `FleetBackupRun` |
 | Executed by | `BackupRunner` on the machine | `BackupRunner` on the machine |
 | Recovery key | the site's own `backup_recovery_public_key` | the control plane's, supplied per run |
-| Bucket credentials | stored on the machine | write-only, supplied per run, never stored |
+| Bucket credentials | stored on the machine | supplied per run, never stored; write-only via the target's node credential |
 | Prunes the shelf | the site | the control plane |
 | Depends on | nothing | the control plane being alive at the scheduled moment |
 
