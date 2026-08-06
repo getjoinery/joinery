@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.20.0
+ * @version 2.21.0
+ * @changelog 2.21.0 - Every form emits a validation error summary container (.jy-error-summary) immediately before its first submit button (end of form when there is none); on a re-render carrying errors, PHP fills it with one linked item per failing field so an off-screen error is named where the person is looking. Form options: error_summary (default true), error_summary_title ({n} placeholder)
  * @changelog 2.20.0 - An input option this class never reads is refused rather than dropped: the known set is derived from the source of the writer and its parents, so a misspelled option (help_text for helptext) stops the page in debug instead of silently rendering a field without it
  * @changelog 2.19.0 - validateVisibilityRules() throws InvalidArgumentException instead of trigger_error(E_USER_ERROR), which PHP 8.4 deprecates; the failure is a caller mistake, so it still halts, but it is now catchable and carries a trace to the bad call
  * @changelog 2.18.0 - Added the inputmode option on text inputs, so a code or numeric field can raise the numeric keypad on a phone without becoming type=number
@@ -41,6 +42,7 @@ abstract class FormWriterV2Base {
     protected $model_validated_fields = [];  // Track fields using automatic model validation
     protected $use_deferred_output = false;  // Deferred output mode flag
     protected $deferred_output = [];  // Collected field HTML when in deferred mode
+    protected $error_summary_emitted = false;  // The summary container is emitted once, before the first submit button
     protected $edit_primary_key_value = null;  // Store edit key for automatic hidden field
 
     // Static property for custom validators
@@ -197,6 +199,8 @@ abstract class FormWriterV2Base {
             'validation' => true,  // Validation enabled by default
             'class' => '',
             'enctype' => null,
+            'error_summary' => true,  // Emit the .jy-error-summary container; false for compact inline forms where a summary is noise
+            'error_summary_title' => null,  // Overrides the summary title; '{n}' is replaced with the failing-field count
             'debug' => false  // Debug mode - outputs validation details to console
         ];
     }
@@ -2743,6 +2747,14 @@ abstract class FormWriterV2Base {
     public function end_form() {
         $html = '';
 
+        // A form with no submit button still gets the summary container (at
+        // the end, where the JS fallback would have put it), so server-side
+        // errors always have somewhere to land.
+        if (!$this->error_summary_emitted && $this->errorSummaryEnabled()) {
+            $this->error_summary_emitted = true;
+            $html .= $this->renderErrorSummary();
+        }
+
         // Get JavaScript validation (this returns HTML string)
         $html .= $this->getJavascriptValidation();
 
@@ -2757,6 +2769,67 @@ abstract class FormWriterV2Base {
         } else {
             echo $html;
         }
+    }
+
+    /**
+     * Whether this writer emits the validation error summary container.
+     * Renderers with no markup (FormWriterV2JSON) override this to opt out.
+     *
+     * @return bool
+     */
+    protected function errorSummaryEnabled() {
+        return $this->options['error_summary'] !== false;
+    }
+
+    /**
+     * Render the validation error summary container.
+     *
+     * Emitted once per form, immediately before the first submit button.
+     * Ships empty and hidden; JoineryValidator fills it when a submit attempt
+     * fails client-side validation. When the form re-renders carrying
+     * $this->errors (server-side validation), PHP fills the same container
+     * with identical markup, so an off-screen failing field is named right
+     * where the person is looking. Each item links to the field it names;
+     * the anchor's data-field lets the client validator manage the item
+     * through its own showError()/clearError() lifecycle.
+     *
+     * @return string HTML
+     */
+    protected function renderErrorSummary() {
+        $html = '<div class="jy-error-summary" id="' . htmlspecialchars($this->form_id) . '_error_summary" role="alert" tabindex="-1"';
+
+        if (empty($this->errors)) {
+            return $html . ' hidden><p class="jy-error-summary-title"></p><ul class="jy-error-summary-list"></ul></div>';
+        }
+
+        $count = count($this->errors);
+        $title = $this->options['error_summary_title']
+            ?? ($count === 1 ? '1 field needs attention:' : '{n} fields need attention:');
+        $title = str_replace('{n}', (string)$count, $title);
+
+        $html .= '><p class="jy-error-summary-title">' . htmlspecialchars($title) . '</p>';
+        $html .= '<ul class="jy-error-summary-list">';
+        foreach ($this->errors as $name => $messages) {
+            $field = $this->fields[$name] ?? null;
+            $label = ($field && is_string($field['label']) && $field['label'] !== '')
+                ? $field['label']
+                : ucfirst(str_replace(['_', '-'], ' ', $name));
+            // A radio/checkbox group has no single input to point at — link
+            // its container instead. Everything else links the input's id.
+            $type = $field['input_type'] ?? '';
+            if ($type === 'radio' || $type === 'checkboxlist') {
+                $target = $name . '_container';
+            } else {
+                $target = ($field['options']['id'] ?? null) ?: $name;
+            }
+            $message = implode('; ', (array)$messages);
+            $html .= '<li data-field="' . htmlspecialchars($name) . '">'
+                . '<a href="#' . htmlspecialchars($target) . '" data-field="' . htmlspecialchars($name) . '">'
+                . htmlspecialchars($label) . '</a> — ' . htmlspecialchars($message) . '</li>';
+        }
+        $html .= '</ul></div>';
+
+        return $html;
     }
 
     /**
@@ -3002,6 +3075,10 @@ abstract class FormWriterV2Base {
         echo '        var validator = new JoineryValidator(form, {';
         echo '            rules: ' . json_encode($js_rules, JSON_UNESCAPED_SLASHES) . ',';
         echo '            messages: ' . json_encode($js_messages, JSON_UNESCAPED_SLASHES) . ',';
+        echo '            errorSummary: ' . ($this->errorSummaryEnabled() ? 'true' : 'false') . ',';
+        if (!empty($this->options['error_summary_title'])) {
+            echo '            errorSummaryTitle: ' . json_encode($this->options['error_summary_title'], JSON_UNESCAPED_SLASHES) . ',';
+        }
         echo '            debug: true';  // Always enable debug
         echo '        });';
         // Expose the instance so page JS can take over submission (set
@@ -3959,6 +4036,10 @@ JS;
     protected function outputSubmitButton($name, $label, $options) {
         $data = $this->prepareSubmitData($name, $label, $options);
         $html = $this->renderSubmitButton($data);
+        if (!$this->error_summary_emitted && $this->errorSummaryEnabled()) {
+            $this->error_summary_emitted = true;
+            $html = $this->renderErrorSummary() . $html;
+        }
         $this->handleOutput($name, $html);
     }
 

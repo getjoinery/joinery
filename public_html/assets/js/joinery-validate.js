@@ -1,7 +1,12 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.1.1
+ * @version 1.2.0
+ * @changelog 1.2.0 - A failed submit attempt fills the form's error summary
+ *   (.jy-error-summary, emitted by FormWriter before the first submit button;
+ *   created here when absent): one linked item per invalid field, focus moves
+ *   to the summary, items live-update as fields are fixed. Off by default
+ *   nowhere - options.errorSummary === false opts a form out.
  * @changelog 1.1.1 - The native re-dispatch is deferred out of the submit
  *   event's own dispatch. requestSubmit() returns silently while a form's
  *   submit event is still firing, and a validation pass with no real I/O
@@ -13,7 +18,7 @@
  *   validated submission and may cancel it. form.submit() remains only as
  *   the no-requestSubmit legacy fallback.
  */
-console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bold');
+console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bold');
 
 (function() {
     'use strict';
@@ -49,6 +54,13 @@ console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bo
             this.submitHandler = options.submitHandler;
             this.invalidHandler = options.invalidHandler;
 
+            // Error summary: a linked list of everything wrong, shown next to
+            // the submit button on a failed submit attempt (never while typing)
+            this.errorSummary = options.errorSummary !== false;
+            this.errorSummaryTitle = options.errorSummaryTitle || null;
+            this.fieldErrors = new Map();   // summary key -> current message
+            this.summaryShown = false;      // live-update items only once revealed
+
             // Track which fields have been touched by user
             this.touchedFields = new Set();
 
@@ -61,6 +73,14 @@ console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bo
         init() {
             // Prevent browser's default validation UI
             this.form.setAttribute('novalidate', 'novalidate');
+
+            // Adopt a server-filled summary (PHP renders the container visible
+            // when the form re-rendered carrying server-side errors) so the
+            // per-field lifecycle below manages its items from the start.
+            if (this.errorSummary) {
+                const existing = this.getSummaryContainer(false);
+                if (existing && !existing.hidden) this.summaryShown = true;
+            }
 
             // Submit handler - simple and deterministic
             this.form.addEventListener('submit', async (e) => {
@@ -166,6 +186,7 @@ console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bo
                         }
                     }
                 } else {
+                    this.showSummary();
                     if (this.invalidHandler) {
                         if (this.debug) console.log('→ Calling invalidHandler');
                         this.invalidHandler(e, this);
@@ -557,6 +578,11 @@ console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bo
                 // Regular field - insert error after field
                 field.parentNode.insertBefore(error, field.nextSibling);
             }
+
+            // Record for the error summary. Updates a visible summary's item;
+            // never reveals the summary on its own (blur errors stay quiet).
+            this.fieldErrors.set(this.summaryKey(field.name), message);
+            if (this.summaryShown) this.syncSummaryItem(this.summaryKey(field.name));
         }
 
         clearError(field) {
@@ -601,6 +627,199 @@ console.log('%c=== JOINERY VALIDATION v1.1.1 ===', 'color: blue; font-weight: bo
                     label.remove();
                 }
             }
+
+            // Drop from the error summary; a visible summary loses this item
+            // and hides itself when the last one goes.
+            this.fieldErrors.delete(this.summaryKey(field.name));
+            if (this.summaryShown) this.syncSummaryItem(this.summaryKey(field.name));
+        }
+
+        // ── Error summary ────────────────────────────────────────────────
+        // A failed submit attempt reveals one block above the submit button
+        // naming every invalid field, each item a link that jumps to and
+        // focuses the field. FormWriter emits the container server-side; a
+        // hand-rolled form gets one created here. Items share the summary
+        // key with PHP's server-side fill (field name without a [] suffix),
+        // so both producers manage the same list.
+
+        summaryKey(fieldName) {
+            return fieldName.replace(/\[\]$/, '');
+        }
+
+        cssEscape(value) {
+            return (window.CSS && CSS.escape) ? CSS.escape(value) : value.replace(/(["\\])/g, '\\$1');
+        }
+
+        getSummaryContainer(create) {
+            let container = this.form.querySelector('.jy-error-summary');
+            if (!container && create) {
+                container = document.createElement('div');
+                container.className = 'jy-error-summary';
+                if (this.form.id) container.id = this.form.id + '_error_summary';
+                container.setAttribute('role', 'alert');
+                container.setAttribute('tabindex', '-1');
+                container.hidden = true;
+                container.innerHTML = '<p class="jy-error-summary-title"></p><ul class="jy-error-summary-list"></ul>';
+                const firstSubmit = this.form.querySelector('button[type="submit"], input[type="submit"], button:not([type])');
+                if (firstSubmit) {
+                    firstSubmit.parentNode.insertBefore(container, firstSubmit);
+                } else {
+                    this.form.appendChild(container);
+                }
+            }
+            if (container && !container.dataset.jySummaryWired) {
+                container.dataset.jySummaryWired = '1';
+                container.addEventListener('click', (e) => {
+                    const link = e.target.closest('a[data-field]');
+                    if (!link) return;
+                    // Move programmatically: a bare hash navigation would add
+                    // a history entry per click, so Back would walk the
+                    // person's own error list instead of leaving the page.
+                    e.preventDefault();
+                    this.jumpToField(link.dataset.field, (link.getAttribute('href') || '').slice(1));
+                });
+            }
+            return container;
+        }
+
+        showSummary() {
+            if (!this.errorSummary || this.fieldErrors.size === 0) return;
+            const container = this.getSummaryContainer(true);
+            if (!container) return;
+            this.summaryShown = true;
+            // A validation pass is the whole truth for rule-covered fields:
+            // clear leftovers (a server-side fill) this pass found valid.
+            // Items for fields the client has no rule for (server-only checks
+            // like uniqueness) are left alone.
+            const list = container.querySelector('.jy-error-summary-list');
+            if (list) {
+                const ruleKeys = new Set(Object.keys(this.rules).map(r => this.summaryKey(r.replace(/['"]/g, ''))));
+                for (const li of Array.from(list.children)) {
+                    const key = li.dataset.field;
+                    if (key && ruleKeys.has(key) && !this.fieldErrors.has(key)) li.remove();
+                }
+            }
+            for (const key of this.fieldErrors.keys()) this.syncSummaryItem(key);
+            this.updateSummaryChrome(container);
+            // Land the person (and a screen reader) on the explanation, not
+            // on a button that did nothing.
+            try { container.focus({ preventScroll: false }); } catch (e) { container.focus(); }
+        }
+
+        syncSummaryItem(key) {
+            const container = this.getSummaryContainer(false);
+            if (!container) return;
+            const list = container.querySelector('.jy-error-summary-list');
+            if (!list) return;
+            let item = null;
+            for (const li of list.children) {
+                if (li.dataset.field === key) { item = li; break; }
+            }
+            if (this.fieldErrors.has(key)) {
+                if (!item) {
+                    item = document.createElement('li');
+                    item.dataset.field = key;
+                    list.appendChild(item);
+                }
+                this.renderSummaryItem(item, key);
+            } else if (item) {
+                item.remove();
+            }
+            this.updateSummaryChrome(container);
+        }
+
+        renderSummaryItem(item, key) {
+            const field = this.findFields(key)[0] || null;
+            const link = document.createElement('a');
+            link.dataset.field = key;
+            link.href = '#' + (field ? this.resolveTargetId(key, field) : '');
+            link.textContent = field ? this.resolveFieldLabel(key, field) : this.humanizeFieldName(key);
+            item.textContent = '';
+            item.appendChild(link);
+            item.appendChild(document.createTextNode(' — ' + (this.fieldErrors.get(key) || '')));
+        }
+
+        updateSummaryChrome(container) {
+            const list = container.querySelector('.jy-error-summary-list');
+            const count = list ? list.children.length : 0;
+            if (count === 0) {
+                container.hidden = true;
+                this.summaryShown = false;
+                return;
+            }
+            const title = container.querySelector('.jy-error-summary-title');
+            if (title) {
+                const template = this.errorSummaryTitle
+                    || (count === 1 ? '1 field needs attention:' : '{n} fields need attention:');
+                title.textContent = template.replace('{n}', String(count));
+            }
+            container.hidden = false;
+        }
+
+        resolveTargetId(key, field) {
+            const isGroup = field.type === 'radio' || (field.type === 'checkbox' && field.name.endsWith('[]'));
+            // A group has no single input to point at — link its container.
+            if (!isGroup && field.id) return field.id;
+            const container = document.getElementById(key + '_container');
+            if (container && this.form.contains(container)) return container.id;
+            if (field.id) return field.id;
+            // Assign one so the link always has somewhere to point.
+            field.id = (this.form.id ? this.form.id + '_' : 'jy_') + key.replace(/[^A-Za-z0-9_-]/g, '_');
+            return field.id;
+        }
+
+        resolveFieldLabel(key, field) {
+            const isGroup = field.type === 'radio' || (field.type === 'checkbox' && field.name.endsWith('[]'));
+            if (isGroup) {
+                // The group's heading label carries no for= — read it from the
+                // field container when there is one.
+                const container = document.getElementById(key + '_container');
+                if (container && this.form.contains(container)) {
+                    const groupLabel = container.querySelector('.form-label');
+                    if (groupLabel && groupLabel.textContent.trim()) {
+                        return this.stripLabelDecoration(groupLabel.textContent);
+                    }
+                }
+            }
+            if (field.id) {
+                const label = this.form.querySelector('label[for="' + this.cssEscape(field.id) + '"]');
+                if (label && label.textContent.trim()) {
+                    return this.stripLabelDecoration(label.textContent);
+                }
+            }
+            const aria = field.getAttribute('aria-label');
+            if (aria && aria.trim()) return aria.trim();
+            if (field.placeholder && field.placeholder.trim()) return field.placeholder.trim();
+            return this.humanizeFieldName(key);
+        }
+
+        stripLabelDecoration(text) {
+            // Trailing required markers: "Email *", "Email:", "Email: *"
+            return text.trim().replace(/[\s*:]+$/, '');
+        }
+
+        humanizeFieldName(key) {
+            const words = key.replace(/[_-]+/g, ' ').trim();
+            return words ? words.charAt(0).toUpperCase() + words.slice(1) : key;
+        }
+
+        jumpToField(key, targetId) {
+            const field = this.findFields(key)[0] || null;
+            let target = targetId ? document.getElementById(targetId) : null;
+            if (!target) target = field;
+            if (!target) return;
+            // The target may have been hidden between validation and the
+            // click — open ancestor <details> and un-hide ancestors so the
+            // link never dead-ends.
+            for (let el = target; el && el !== document.body; el = el.parentElement) {
+                if (el.tagName === 'DETAILS') el.open = true;
+                if (el.hidden) el.hidden = false;
+            }
+            const reduceMotion = window.matchMedia
+                && window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+            target.scrollIntoView({ behavior: reduceMotion ? 'auto' : 'smooth', block: 'center' });
+            const focusable = (field && !field.disabled) ? field : target;
+            try { focusable.focus({ preventScroll: true }); } catch (e) { /* pre-options browsers */ }
         }
 
         findErrorLabel(form, fieldName) {

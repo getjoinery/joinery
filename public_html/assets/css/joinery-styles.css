@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.8.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.9.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -874,6 +874,37 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   color: var(--jy-color-danger);
 }
 .jy-ui .error-list { list-style: none; padding: 0; margin: 0; }
+
+/* Validation error summary — the .jy-error-summary container FormWriter emits
+   before a form's first submit button, filled by JoineryValidator on a failed
+   submit attempt (or by PHP when the form re-renders carrying server errors).
+   Unscoped because forms exist on every theme, inside .jy-ui or not; token
+   fallbacks keep it legible where a branded theme redefines nothing. */
+.jy-error-summary {
+  margin: var(--jy-space-4, 1rem) 0;
+  padding: var(--jy-space-3, .75rem) var(--jy-space-4, 1rem);
+  border: 1px solid var(--jy-color-danger, #b3261e);
+  border-left-width: 4px;
+  border-radius: var(--jy-radius, 6px);
+  background: var(--jy-color-danger-bg, #fbeae9);
+  color: var(--jy-color-text, #1a1d23);
+}
+.jy-error-summary:focus {
+  outline: 2px solid var(--jy-color-danger, #b3261e);
+  outline-offset: 2px;
+}
+.jy-error-summary-title {
+  margin: 0 0 var(--jy-space-1, .25rem);
+  font-weight: 600;
+  color: var(--jy-color-danger, #b3261e);
+}
+.jy-error-summary-list { margin: 0; padding-left: 1.25rem; }
+.jy-error-summary-list li { margin: .15rem 0; }
+.jy-error-summary-list a {
+  color: var(--jy-color-danger, #b3261e);
+  text-decoration: underline;
+}
+.jy-error-summary-list a:hover { text-decoration: none; }
 
 .jy-ui .form-help {
   display: block;

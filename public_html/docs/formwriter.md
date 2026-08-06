@@ -1194,6 +1194,39 @@ User Input → JavaScript Validation → Form Submission
          Model->save() → Database
 ```
 
+### The Error Summary Container
+
+Every form emits one summary container immediately before its **first** submit
+button (at the end of the form when there is no submit button):
+
+```html
+<div class="jy-error-summary" id="{form_id}_error_summary" role="alert" tabindex="-1" hidden>
+  <p class="jy-error-summary-title"></p>
+  <ul class="jy-error-summary-list"></ul>
+</div>
+```
+
+Two producers fill it with identical markup. **Client side**, JoineryValidator
+populates and reveals it when a submit attempt fails validation (see
+[Validation § The Error Summary](validation.md#the-error-summary)). **Server
+side**, a form rendered while carrying errors (`setErrors()`, or a `validate()`
+that failed) renders the container unhidden with one item per failing field —
+`<li><a href="#{target_id}">{label}</a> — {message}</li>` — so a server-rejected
+save names its fields next to the submit button even when they are off screen.
+
+Form options:
+
+```php
+$formwriter = new FormWriterV2HTML5('form1', [
+    'error_summary' => false,                    // suppress entirely (compact inline forms)
+    'error_summary_title' => 'Fix {n} things:',  // override the title; {n} = failing-field count
+]);
+```
+
+`FormWriterV2JSON` emits no container — a JSON definition has no markup, and
+the API error envelope already carries per-field messages for native
+renderers.
+
 ### Multi-Action Forms (multiple submit buttons)
 
 A form may carry more than one submit button (e.g. **Save**, **Save & Write to disk**, **Delete**). Two behaviors make these work the same whether or not the form has validation rules:
