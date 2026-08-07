@@ -136,7 +136,6 @@ try {
 	$pdriver = new RecordingMockDriver();
 	$pdriver->fail_keys = [$pf . '/thumb'];                      // the 2nd object PUT fails
 	$sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
-	$sync_row->setAccessible(true);
 	$pres = $sync_row->invoke(null, $multi_profile, $pf, $pdriver);
 	ok('partial-push: row reported failed', $pres === 'failed');
 	ok('partial-push: the already-pushed original was deleted (rollback)',

@@ -61,7 +61,6 @@ function topo_checker(?array $topology, ?array $fleet_state = null): InboundEmai
 	);
 	foreach ($props as $name => $value) {
 		$p = $ref->getProperty($name);
-		$p->setAccessible(true);
 		$p->setValue($checker, $value);
 	}
 	return $checker;
@@ -74,7 +73,6 @@ function topo(string $mode, string $mx = '', string $ip = '', bool $enabled = fa
 
 function call_private($obj, string $method, ...$args) {
 	$m = new ReflectionMethod(get_class($obj), $method);
-	$m->setAccessible(true);
 	return $m->invoke($obj, ...$args);
 }
 

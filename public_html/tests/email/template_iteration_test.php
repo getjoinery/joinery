@@ -26,13 +26,10 @@ class EmailTemplateIterationTest {
         $this->instance = $reflection->newInstanceWithoutConstructor();
 
         $this->renderString = $reflection->getMethod('_render_string');
-        $this->renderString->setAccessible(true);
 
         $this->expandLoops = $reflection->getMethod('_expand_loops');
-        $this->expandLoops->setAccessible(true);
 
         $this->substituteVariables = $reflection->getMethod('_substitute_variables');
-        $this->substituteVariables->setAccessible(true);
     }
 
     private function render($template, $values) {

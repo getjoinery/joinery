@@ -29,13 +29,35 @@ The entire fleet runs Ubuntu 24.04 LTS with the distro-default stack: PostgreSQL
 
 Verified against the 26.04 (resolute) archive 2026-08-01: **PostgreSQL 18, PHP 8.5**. Note the PHP jump is two major versions (8.3 → 8.5) — the deprecation sweep in step 3 covers both 8.4's and 8.5's removals. Timing gate: 26.04 is in the LTS upgrade channel but still `Supported: 0` — `do-release-upgrade` will not offer the jump from 24.04 until 26.04.1 is released (historically mid-to-late August; 24.04.1 was Aug 29). Do not use `-d` to force it on fleet boxes; scratch-box work in this phase can use `-d` or a fresh 26.04 image.
 
-Remaining Phase 0 steps:
+**Phase 0 is complete — executed on a real 26.04 VPS (50.116.49.175) on
+2026-08-06**, both a bare-metal site and a container site. Stack as shipped:
+**Ubuntu 26.04 (resolute), PHP 8.5.4, PostgreSQL 18.4, Apache 2.4.66.**
 
-1. Bring up a scratch 26.04 container/VM; record `postgresql`, `php`, `apache2` versions from the default archive.
-2. Run `install.sh` dev/server setup against it (after the Phase 1 parameterization) and stand up a site from a dev backup.
-3. Run the full test estate (`safe` + `db` tiers) under the new PHP. Sweep deprecations — PHP ≥ 8.4's implicitly-nullable-parameter deprecation (`function f(Type $x = null)`) is the likely bulk item in a codebase this size; fix warnings at the source, not by suppressing.
-4. Composer dependency audit under the new PHP version (`composerAutoLoad` vendor tree rebuilt on-target).
-5. Confirm PostgreSQL 18 restores a PG 16 dump cleanly (it does by design; verify with a real site dump) and that the app's SQL surface raises nothing (the db tier is the gate).
+1. **Done.** Versions above, from the default archive with no PPA.
+2. **Done.** `install.sh server` + `site` both stood up sites. Two defects
+   blocked it and are fixed in `install.sh` 2.45: `-y server` prompted for the
+   postgres password and exited 1 on EOF (now `--password-file`, else
+   auto-generated to `/root/.joinery_postgres_password`, 0600); and **26.04
+   ships no `php8.5-opcache`** — 8.5 compiles OPcache in, and apt takes the
+   extension list as one transaction, so asking for it failed the whole batch
+   and left the box with no pgsql, mbstring, gd or sodium either. The package
+   list is now filtered to what the release actually packages, the apt exit
+   code is read, and twelve required modules are verified against `php -m`.
+3. **Done.** Test estate run under 8.5; the deprecation sweep is in
+   `specs/php_85_pg18_code_prep.md`. Bulk item was **not** implicitly-nullable
+   parameters (three sites total) but `ReflectionProperty::setAccessible()` —
+   73 calls across 41 files, three of them in `tests/lib/harness.php`, where
+   `harness_shutdown_report()` prints `error_get_last()` and so reported the
+   harness's own deprecation as the cause of every crash. All removed.
+4. **Done.** Composer builds on 8.5; `why-not php 8.5` clean.
+5. **Done.** PG 18 restored a real PG 16 site dump with 0 errors and identical
+   row counts; `update_database` and `create_install_sql.php` both green on 18.
+
+One application bug surfaced only by a *fresh* install and is fixed:
+`SessionControl`'s must-change-password / must-accept-terms redirects read an
+undefined `REQUEST_URI` and then `exit()` under CLI. A newly installed admin
+carries `force_password_change` from birth, so on any newly built node this
+killed CLI scripts mid-run — including this campaign's own per-node test gate.
 
 ## Phase 1 — Installer and Image Work
 

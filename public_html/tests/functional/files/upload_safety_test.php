@@ -297,7 +297,6 @@ foreach (array('upload_dir' => $upload_dir, 'fast-serve dir' => $fast_dir) as $l
 // the directory placement above has to hold. Pin it so the assumption is
 // visible rather than implied.
 $mint = new ReflectionMethod('File', '_mint_unique_name');
-$mint->setAccessible(true);
 $minted = $mint->invoke(null, '../../evil.php');
 check(substr($minted, -4) === '.php', 'the minter preserves a .php extension verbatim', 'got: ' . $minted);
 check(strpos($minted, '/') === false, 'the minter strips path separators', 'got: ' . $minted);

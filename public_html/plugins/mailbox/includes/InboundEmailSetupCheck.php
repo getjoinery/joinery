@@ -23,6 +23,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.37 - the nullable model parameter is declared nullable, so PHP 8.5
+ *                 stops deprecating it
  * @version 1.36 - the protected plan carries the foreign signing key as a record
  *                 that must be absent, so the publish box removes it instead of
  *                 reporting nothing to change beside a check that says otherwise
@@ -2585,7 +2587,7 @@ class InboundEmailSetupCheck {
 	 * the domain — the most likely version of this, since switching providers
 	 * leaves the old key published.
 	 */
-	private function providerVerificationResult($domain, $txtOk, $spf, InboundEmailDomain $model = null) {
+	private function providerVerificationResult($domain, $txtOk, $spf, ?InboundEmailDomain $model = null) {
 		if (!$txtOk) {
 			return $this->r('domain.provider', $domain, 'domain', 'No relay provider authorized', self::REQUIRED, self::UNKNOWN,
 				'DNS TXT lookup for ' . $domain . ' failed — try again.');

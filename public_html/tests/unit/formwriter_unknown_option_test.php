@@ -21,7 +21,8 @@
  * What is pinned:
  *   - the known set is DERIVED from the writer's source and its parents', so
  *     implementing an option is declaring it and no hand-list can fall behind
- *   - an unknown option stops the page in debug and names the nearest real one
+ *   - an unknown option is refused and names the nearest real one: debug stops
+ *     the page, production logs it and renders, and both carry the same message
  *   - every option the shipped writers actually read is accepted
  *   - no caller in the tree passes an option FormWriter does not read
  *
@@ -33,7 +34,11 @@
  *
  * Run:  php tests/unit/formwriter_unknown_option_test.php
  *
- * @version 1.0
+ * @version 1.1 - Reads the refusal from whichever channel the site uses instead
+ *                of only the debug throw. Declared `env: any`, it asserted dev
+ *                behaviour, so ten of its checks failed on any production-mode
+ *                install with nothing wrong — found on a fresh 26.04 box. The
+ *                production path (log and render) is now pinned too.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -48,6 +53,36 @@ if (session_status() === PHP_SESSION_NONE) {
 function fw_thrown(callable $fn): string {
 	try { $fn(); return ''; }
 	catch (Throwable $e) { return $e->getMessage(); }
+}
+
+/**
+ * The refusal message for $fn, read from whichever channel this site uses.
+ *
+ * The contract is deliberately environment-dependent — debug throws, production
+ * logs and renders, because a live site refusing a page over a misspelled help
+ * string would be the worse failure. Reading only the throw made this test
+ * assert dev behaviour while declaring `env: any`, so every check below it
+ * failed on a production-mode install with nothing wrong. Both channels carry
+ * the same message, so both are pinned here and the test means the same thing
+ * wherever it runs.
+ *
+ * Returns '' when the option was accepted, and a message beginning
+ * UNEXPECTED THROW when production raised where it should have logged.
+ */
+function fw_refusal(callable $fn): string {
+	if (Globalvars::get_instance()->get_setting('debug', false, true)) {
+		return fw_thrown($fn);
+	}
+	$log  = tempnam(sys_get_temp_dir(), 'fw_refusal_');
+	$prev = ini_get('error_log');
+	ini_set('error_log', $log);
+	$threw = '';
+	try { $fn(); }
+	catch (Throwable $e) { $threw = 'UNEXPECTED THROW: ' . $e->getMessage(); }
+	ini_set('error_log', $prev);
+	$logged = trim((string)@file_get_contents($log));
+	@unlink($log);
+	return $threw !== '' ? $threw : $logged;
 }
 
 // ---------------------------------------------------------------------------
@@ -74,7 +109,7 @@ section('An unknown option stops the page instead of being ignored');
 
 $form = new FormWriterV2HTML5('fw_probe_form');
 
-$msg = fw_thrown(function () use ($form) {
+$msg = fw_refusal(function () use ($form) {
 	ob_start();
 	$form->textinput('probe_a', 'Probe', array('help_text' => 'dropped on the floor'));
 	ob_end_clean();
@@ -87,7 +122,7 @@ check(strpos($msg, "'helptext'") !== false,
 
 // A word nothing is close to gets no suggestion. Naming the wrong option is
 // worse than naming none.
-$msg = fw_thrown(function () use ($form) {
+$msg = fw_refusal(function () use ($form) {
 	ob_start();
 	$form->textinput('probe_b', 'Probe', array('zzqqxx' => 1));
 	ob_end_clean();
@@ -97,7 +132,7 @@ check($msg !== '' && strpos($msg, 'Did you mean') === false,
 
 // Real options still render, which is the check that keeps this from being a
 // rule that only says no.
-$ok = fw_thrown(function () use ($form) {
+$ok = fw_refusal(function () use ($form) {
 	ob_start();
 	$form->textinput('probe_c', 'Probe', array(
 		'helptext' => 'shown', 'maxlength' => 20, 'required' => true,
@@ -108,7 +143,7 @@ $ok = fw_thrown(function () use ($form) {
 check($ok === '', 'a field of entirely real options renders untouched', $ok);
 
 // The value FormWriter itself adds during registration must never trip it.
-$ok = fw_thrown(function () {
+$ok = fw_refusal(function () {
 	$bound = new FormWriterV2HTML5('fw_bound_form');
 	$bound->set_values(array('probe_d' => 'from the model'));
 	ob_start();
@@ -126,7 +161,7 @@ foreach (array(
 	'dateinput'      => array('help_text' => 'x'),
 	'passwordinput'  => array('help_text' => 'x'),
 ) as $method => $options) {
-	$msg = fw_thrown(function () use ($form, $method, $options) {
+	$msg = fw_refusal(function () use ($form, $method, $options) {
 		ob_start();
 		$form->$method('probe_' . $method, 'Probe', $options);
 		ob_end_clean();

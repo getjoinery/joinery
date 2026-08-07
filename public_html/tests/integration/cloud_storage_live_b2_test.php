@@ -49,7 +49,6 @@ require_once(PathHelper::getIncludePath('includes/cloud_storage/BlobStorageProfi
 function set_enabled_mem($value) {
 	$gv = Globalvars::get_instance();
 	$ref = new ReflectionProperty('Globalvars', 'settings');
-	$ref->setAccessible(true);
 	$arr = $ref->getValue($gv);
 	$arr['cloud_storage_enabled'] = $value;
 	$ref->setValue($gv, $arr);
@@ -190,7 +189,7 @@ try {
 	ok('gate: anonymous read DENIED ⇒ pass', $vstep && $vstep['status'] === 'pass');
 
 	section('D. Privacy gate FAIL pipeline (real anonymous 2xx stand-in)');
-	$anon = new ReflectionMethod('CloudStorageLifecycle', '_anonymous_status'); $anon->setAccessible(true);
+	$anon = new ReflectionMethod('CloudStorageLifecycle', '_anonymous_status');
 	$status = $anon->invoke(null, 'https://www.google.com/generate_204');
 	if ($status === 0) { harness_skip('FAIL pipeline', 'no outbound network to the 2xx stand-in URL'); }
 	else {

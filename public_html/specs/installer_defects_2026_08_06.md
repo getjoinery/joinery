@@ -1,6 +1,6 @@
 # Installer Defects Found Provisioning the Soak VPS
 
-**Status:** Built 2026-08-06 (uncommitted). §§ 1–6 fixed in
+**Status:** Built and committed 2026-08-06. §§ 1–6 fixed in
 `install.sh` 2.43 / `Dockerfile.template` 4.8 / `_site_init.sh` 2.7 /
 `fix_permissions.sh` 2.7, contract-test assertions added (274 checks green),
 live gate written at `tests/functional/install/install_container_gate.sh`

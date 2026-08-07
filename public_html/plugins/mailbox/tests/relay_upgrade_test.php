@@ -295,7 +295,6 @@ class RelayUpgradeTest {
 	 */
 	private function assertUpgradeNeverDestroys() {
 		$method = new ReflectionMethod('RelayCloudProvisioner', 'destroyInstanceQuietly');
-		$method->setAccessible(true);
 
 		$deleted = array();
 		$driver = new RuFakeDriver();

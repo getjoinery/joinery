@@ -451,11 +451,20 @@ function set_setting_raw($name, $value) {
 	$q->execute(array($value, $name));
 }
 
-/** Snapshot the Globalvars in-memory settings cache (for restore below). */
+/**
+ * Snapshot the Globalvars in-memory settings cache (for restore below).
+ *
+ * Reflection reaches private members without `setAccessible(true)` — that has
+ * been a no-op since PHP 8.1 and is deprecated in 8.5. Do not add it back here
+ * in particular: this function runs in most tests, and the deprecation it
+ * raised became the last entry in `error_get_last()`, which is what
+ * harness_shutdown_report() prints when a test dies. Every crash on 8.5 was
+ * therefore reported as "setAccessible is deprecated" regardless of its actual
+ * cause, which cost a real debugging session.
+ */
 function harness_settings_snapshot() {
 	$gv = Globalvars::get_instance();
 	$ref = new ReflectionProperty('Globalvars', 'settings');
-	$ref->setAccessible(true);
 	$arr = $ref->getValue($gv);
 	return is_array($arr) ? $arr : array();
 }
@@ -464,7 +473,6 @@ function harness_settings_snapshot() {
 function harness_settings_restore($snapshot) {
 	$gv = Globalvars::get_instance();
 	$ref = new ReflectionProperty('Globalvars', 'settings');
-	$ref->setAccessible(true);
 	$ref->setValue($gv, $snapshot);
 }
 
@@ -482,7 +490,6 @@ function harness_set_setting_mem($key, $value) {
 	}
 	$gv = Globalvars::get_instance();
 	$ref = new ReflectionProperty('Globalvars', 'settings');
-	$ref->setAccessible(true);
 	$arr = $ref->getValue($gv);
 	if (!is_array($arr)) $arr = array();
 	$arr[$key] = $value;

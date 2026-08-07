@@ -271,7 +271,6 @@ class ImapPollerTest {
 		$this->account_ids[] = intval($acct->key);
 
 		$record = new ReflectionMethod('ImapIngestor', 'recordRun');
-		$record->setAccessible(true);
 		$ingestor = new ImapIngestor($acct);
 
 		$before = $this->runRecordCount($acct->key);

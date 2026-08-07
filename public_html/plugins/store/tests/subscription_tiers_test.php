@@ -78,7 +78,6 @@ function st_apply_settings(array $values) {
 	}
 	$ref = new ReflectionClass('Globalvars');
 	$map = $ref->getProperty('instance_map');
-	$map->setAccessible(true);
 	$map->setValue(null, array());
 }
 

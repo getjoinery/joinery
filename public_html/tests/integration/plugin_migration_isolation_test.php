@@ -40,9 +40,7 @@ mkdir($scratch, 0777, true);
 
 $manager = new PluginManager();
 $run_php = new ReflectionMethod('PluginManager', 'runPhpMigrations');
-$run_php->setAccessible(true);
 $run_sql = new ReflectionMethod('PluginManager', 'runSqlMigration');
-$run_sql->setAccessible(true);
 
 try {
 	section('A. Failing php migration: real error surfaces, transaction survives');

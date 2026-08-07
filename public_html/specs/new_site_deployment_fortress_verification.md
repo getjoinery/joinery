@@ -105,14 +105,14 @@ above. Each step gates the next.
 
 ## Ordered work
 
-### 1. Get the tree deployable (task)
+### 1. Get the tree deployable (task) — DONE
 
 Publish Upgrade builds from the repo, so a clean commit is the literal first
-gate. There is a large uncommitted backlog on dev — compose maturity (staged,
-message ready), drive core + encryption, password vault, mobile billing, AI
-memory, test-estate fixes, the URL-validator refactor. Land it in reviewable
-commits, run the `safe` tier as the pre-deploy gate, then publish a version via
-the Server Manager dashboard.
+gate. The backlog this item was written against — compose maturity, drive core +
+encryption, password vault, mobile billing, AI memory, test-estate fixes, the
+URL-validator refactor — is committed, and releases have shipped from it since.
+The tree is clean as of 2026-08-07 apart from work in flight, so this item stays
+satisfied by running the `safe` tier and publishing before each deployment.
 
 **Done when:** working tree is clean (or intentionally staged), `php tests/run.php
 safe` is green, and a version is published.

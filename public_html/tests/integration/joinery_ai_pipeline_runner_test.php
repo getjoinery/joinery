@@ -103,7 +103,6 @@ class FixtureJudgeJob implements PipelineJobInterface {
 // plugins/*/pipeline_jobs/ filesystem scan so no throwaway file is needed.
 $registry_ref = new ReflectionClass('PipelineJobRegistry');
 $jobs_prop = $registry_ref->getProperty('jobs');
-$jobs_prop->setAccessible(true);
 $jobs_prop->setValue(null, ['test_fixture_job' => 'FixtureJudgeJob']);
 
 $db = DbConnector::get_instance()->get_db_link();
@@ -267,7 +266,6 @@ ok('f1 recorded, f2 never reached', FixtureJudgeJob::$recorded === ['f1' => ['ve
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunner.php'));
 $throttled = new ReflectionMethod('RecipeRunner', 'failureEmailThrottled');
-$throttled->setAccessible(true);
 
 [$recipe7, $run7, $ctx7] = make_recipe_and_run($owner_uid, 5, 50);
 

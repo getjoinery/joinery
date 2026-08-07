@@ -48,6 +48,18 @@ abstract class PublicPageBase {
 		echo '<' . $tag . $class_attr . ' data-vault-lock-slot></' . $tag . '>';
 	}
 
+	/**
+	 * The visitor's resolved location, as SessionControl reports it.
+	 *
+	 * Declared because the constructor assigns it: creating a property that no
+	 * class declares has been deprecated since PHP 8.2 and becomes an error in
+	 * PHP 9. Every page construction hit it, so it was the most-raised
+	 * deprecation in the tree after the null-argument ones.
+	 *
+	 * @var mixed
+	 */
+	protected $location_data;
+
 	protected static $header_defaults = array(
 		//'title' => '',
 		'showheader' => TRUE,

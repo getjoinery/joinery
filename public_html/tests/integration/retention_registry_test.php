@@ -148,7 +148,6 @@ $db->exec("INSERT INTO err_general_errors (err_message, err_create_time)
 // Drive the sweep's own isolation by calling it with the exploding rule ahead
 // of a real one, using the same code path the scheduled run takes.
 $reflect = new ReflectionMethod('RetentionSweep', 'runMethodRule');
-$reflect->setAccessible(true);
 $threw = false;
 try {
 	$reflect->invoke(new RetentionSweep(),

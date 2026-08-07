@@ -369,7 +369,6 @@ $tile_src = sys_get_temp_dir() . '/drvpriv_tile_' . bin2hex(random_bytes(4)) . '
 $tile_im = imagecreatetruecolor(64, 64);
 imagefilledrectangle($tile_im, 0, 0, 63, 63, imagecolorallocate($tile_im, 200, 60, 40));
 imagepng($tile_im, $tile_src);
-imagedestroy($tile_im);
 $tile = DriveSealed::createSealedFile($tile_src, 'tile.png', 'image/png', (int)$owner->key,
 	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE, 'fil_fol_folder_id' => $pfolder->key));
 $made_files[] = $tile->key;
@@ -586,7 +585,6 @@ $img_path = sys_get_temp_dir() . '/drvpriv_' . bin2hex(random_bytes(4)) . '.png'
 $im = imagecreatetruecolor(240, 160);
 imagefilledrectangle($im, 0, 0, 239, 159, imagecolorallocate($im, 12, 130, 200));
 imagepng($im, $img_path);
-imagedestroy($im);
 
 $ifile = File::createFromBytes(file_get_contents($img_path), 'holiday.png', 'image/png', (int)$owner->key,
 	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));

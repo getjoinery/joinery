@@ -51,7 +51,6 @@ class ProviderAuthTest {
 	/** Invoke a private static method by reflection. */
 	private function callStatic($class, $method, array $args) {
 		$m = new ReflectionMethod($class, $method);
-		$m->setAccessible(true);
 		return $m->invokeArgs(null, $args);
 	}
 
@@ -236,7 +235,6 @@ class ProviderAuthTest {
 		}
 
 		$m = new ReflectionMethod('InboundEmailRouter', 'readAuthResults');
-		$m->setAccessible(true);
 
 		// (1) Provider auth present → used; nulls become 'none'; source preserved.
 		$provider_auth = ['spf' => 'pass', 'dkim' => null, 'dmarc' => 'fail', 'source' => 'mailgun'];

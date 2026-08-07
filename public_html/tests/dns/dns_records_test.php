@@ -278,7 +278,6 @@ section('Cloudflare never turns the orange cloud on');
 // the reconciler exists to end.
 $cf = new CloudflareDnsDriver(array('api_token' => 'unused'));
 $to_api = new ReflectionMethod('CloudflareDnsDriver', 'toApi');
-$to_api->setAccessible(true);
 
 foreach (array(
 	array('A', 'mail.example.com', '1.2.3.4'),
@@ -532,7 +531,6 @@ $make = function (array $headers) use ($cf_body) {
 	// The fake client replaces Guzzle after construction; the constructor's own
 	// client is never used.
 	$ref = new ReflectionProperty('DnsDriverBase', 'http');
-	$ref->setAccessible(true);
 	$ref->setValue($driver, $http);
 	return array($driver, $http);
 };

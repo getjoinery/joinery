@@ -38,7 +38,6 @@ $db = DbConnector::get_instance()->get_db_link();
 // Derive the action list from the dispatcher's own error-tab map, so a newly
 // added action is covered automatically and the count can never drift from reality.
 $error_tab_prop = new ReflectionProperty('NodeDetailActions', 'error_tab');
-$error_tab_prop->setAccessible(true);
 $ALL_ACTIONS = array_keys($error_tab_prop->getValue());
 
 /** Count non-deleted jobs for a node (any created mutation shows up here). */

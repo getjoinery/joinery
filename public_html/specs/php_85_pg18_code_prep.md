@@ -15,7 +15,17 @@ tunings, checked in the served SAPI) and 1.5 (pg_hba round trip) all pass. What
 is still unverified needs hardware that does not exist yet — a container host
 for the Docker paths, and a 26.04 box for everything in Phase 2.
 
-Phase 2 remains gated on the OS campaign.
+**Phase 0 of the campaign spec is complete (2026-08-06, a real 26.04 VPS).**
+Everything under *Verification that belongs on the new stack* below has been run
+on Ubuntu 26.04 / PHP 8.5.4 / PostgreSQL 18.4 and carries its result inline. Two
+installer defects and one application bug had to be fixed to get there; they are
+recorded in `specs/fleet_ubuntu_2604_postgres_upgrade.md` § Phase 0.
+
+Phase 2 remains gated on the OS campaign. Item 1 (the 26.04 base image) is
+verified — `joinery-base:2.0` was built `FROM ubuntu:26.04` on the test box and a
+container site on it serves, with the `Dockerfile.template` runtime globs and the
+container pg_hba round trip both proven — but deliberately **not landed**, since
+merging it forces `install.sh build-base` on every Docker host.
 
 Bumping Brevo exposed a deploy gap that belongs to no item here and is now
 closed: `ComposerValidator` checked only that a required package was *present*
@@ -104,9 +114,16 @@ core-only and missed every plugin — 12 recorded against 53 actual. Counts for
 were re-verified across the whole tree at build time and were correct as written.
 Any future audit item must be counted across `plugins/` as well as core.
 
+**Second scope correction (2026-08-06, from the E_ALL run on 26.04).** Two of the
+sweep's own claims were wrong, both from counting core only, and the lesson is
+the same one: **count across `plugins/` and `tests/`, and trust a run over a
+grep.** `setAccessible()` was recorded below as having no occurrences anywhere;
+there were **73 across 41 files**. Implicitly nullable parameters were recorded
+as two; there are three. Both are fixed.
+
 **Clean — no occurrences anywhere in app code:** `(boolean)`/`(integer)`/`(double)`/
 `(binary)` casts, `MHASH_*`, mysqli, `xml_set_*`, `xml_parser_free`,
-`SplObjectStorage`, `setAccessible()`, `socket_set_timeout`, `lcg_value`,
+`SplObjectStorage`, `socket_set_timeout`, `lcg_value`,
 `DatePeriod`, 2-argument `stream_context_set_option`, `session_set_save_handler`,
 the deprecated `session.*` INI settings, the `SID` constant, `disable_classes`,
 `$_SESSION` keys containing a pipe character. No user-defined function collides
@@ -116,8 +133,11 @@ with a global added in 8.4 or 8.5 (`array_find`, `array_any`, `array_all`,
 form is deprecated. The tree defines two traits, so 8.5's trait/parent binding
 order change carries negligible risk.
 
-**Implicitly nullable parameters — two, total.** Both in `includes/VaultDeferredWork.php`.
-This was expected to be the bulk deprecation item and is not.
+**Implicitly nullable parameters — three, total.** Two in
+`includes/VaultDeferredWork.php`, one at
+`plugins/mailbox/includes/InboundEmailSetupCheck.php:2588` (found by the E_ALL
+run, not the grep). This was expected to be the bulk deprecation item and is
+not — `setAccessible()` was, at 73 sites.
 
 **PDO is clear of the common traps.** `DbConnector.php` supplies credentials only
 inside the DSN and passes no constructor arguments, so PHP 8.4's "DSN credentials
@@ -609,30 +629,47 @@ None of these can land before 26.04 nodes exist.
 ### Verification that belongs on the new stack, not in Phase 1
 
 These are behaviour changes with no code fix — they need a run, not an edit.
+**All of them were run on 26.04 / PHP 8.5.4 / PG 18.4 on 2026-08-06** (the
+campaign spec's Phase 0); each bullet carries its result.
 
 - **`round()` was reimplemented in 8.4.** Store money math is the exposure. The
   `db` tier is the gate; add a targeted check if one does not already cover
-  rounding at the cent boundary.
+  rounding at the cent boundary. **Result: byte-identical between 8.3 and 8.5**
+  across 47 cases (raw `round`, the coupon percent path, the micros path,
+  `number_format`, cent conversion). Non-issue.
 - **`password_hash` bcrypt cost rose from 10 to 12 in 8.4.** User accounts are
   unaffected — `data/users_class.php` hashes and rehashes against
   `PASSWORD_ARGON2ID`. The exposure is `data/file_share_links_class.php:60`,
   which uses `PASSWORD_DEFAULT` (still bcrypt), so share-link password hashing
   gets roughly four times slower. Existing hashes still verify. Confirm the
-  latency is acceptable on a 1 GB node rather than assuming it.
+  latency is acceptable on a 1 GB node rather than assuming it. **Result:
+  60ms to 237ms on a 1 GB node, and cost-10 hashes still verify.**
+  `file_share_links_class.php` has no `password_needs_rehash` path, so only
+  newly created links pay it, once. Acceptable.
 - **Deprecation sweep at `E_ALL`.** The dev box runs `error_reporting = 22527`
   (`E_ALL & ~E_DEPRECATED & ~E_STRICT`), so a sweep on the scratch box will
   report nothing useful unless it is raised first. Check the deployed `php.ini`
   for the 8.4-deprecated `session.*` settings at the same time; none are set
-  from code.
+  from code. **Result: swept at `E_ALL`.** Fixed here: 73 `setAccessible()`
+  calls across 41 files, a third implicitly-nullable parameter
+  (`InboundEmailSetupCheck.php:2588`), two reintroduced `imagedestroy()` calls,
+  the undeclared `PublicPageBase::$location_data` dynamic property, and
+  null-to-internal-function arguments in `UploadHandler`, `JobCommandBuilder`
+  and `inbound_email_alias_class`. **Deliberately not fixed:** the remaining
+  null-argument sites, which are deprecations only under PHP 9 — out of scope
+  by owner decision 2026-08-06.
 - **PG 18 `pg_upgrade` and data checksums.** 18 enables data checksums by default
   at `initdb`. `pg_upgradecluster`, which the campaign spec names for procedure B,
   dump/restores by default and is unaffected. But `pg_upgrade --link` against a
   non-checksummed 16 cluster will refuse, so if anyone reaches for it they need
   `initdb --no-data-checksums`. This belongs as a line in the campaign spec's
-  procedure B.
+  procedure B. **Result: a real PG 16 site dump restored into 18 with 0 errors
+  and identical row counts**, and `update_database` — whose catalog
+  introspection had never been run against 18 — came back green.
 - **Generated `install.sql` loads on 18** — `create_install_sql.php` output is
   text-format `COPY`, which is not affected by 18's CSV `\.` change, but the
   install path should be exercised once on the scratch box regardless.
+  **Result: round-trips on 18.**
 
 ## Verification
 

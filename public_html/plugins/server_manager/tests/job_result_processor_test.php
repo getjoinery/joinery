@@ -44,7 +44,6 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 /** Call a private static on JobResultProcessor. */
 function jrp_call($method, array $args) {
 	$m = new ReflectionMethod('JobResultProcessor', $method);
-	$m->setAccessible(true);
 	return $m->invokeArgs(null, $args);
 }
 

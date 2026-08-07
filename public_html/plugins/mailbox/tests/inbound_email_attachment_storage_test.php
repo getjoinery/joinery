@@ -236,7 +236,6 @@ class InboundAttachmentStorageTest {
 		// attachOriginal is private — invoke via reflection.
 		$sender = new MailboxSender(MailboxViewer::forUser(0, 10));
 		$ref = new ReflectionMethod('MailboxSender', 'attachOriginal');
-		$ref->setAccessible(true);
 		$total = $ref->invoke($sender, $email, $source);
 
 		$this->ok($total === strlen($this->pdf_bytes) + strlen($this->png_bytes),

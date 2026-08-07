@@ -44,7 +44,6 @@ $db = DbConnector::get_instance()->get_db_link();
 /** Call a protected PluginManager method. */
 function pm_call($manager, $method, array $args = array()) {
     $m = new ReflectionMethod('PluginManager', $method);
-    $m->setAccessible(true);
     return $m->invokeArgs($manager, $args);
 }
 
@@ -314,7 +313,6 @@ section('Deletion-rule pruning does not depend on activation state');
 // because the failure mode is silent data damage on an unrelated action.
 require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
 $registry = new ReflectionMethod('DeletionRule', 'getModelRegistry');
-$registry->setAccessible(true);
 $reg = $registry->invoke(null);
 $known = $reg['all_tables'];
 

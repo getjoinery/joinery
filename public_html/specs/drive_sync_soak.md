@@ -1,6 +1,6 @@
 # Drive Sync Soak & Chaos Environment — Specification
 
-**Status:** **Phase A built and first run live 2026-08-06 (uncommitted).**
+**Status:** **Phase A built and first run live 2026-08-06, committed as `ebe756f3`.**
 The rig has now driven two real daemons against a real instance, and has already
 paid for itself — see § What the first live runs found.
 
