@@ -57,6 +57,15 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 				continue;   // Somebody's decision, not a gap. Nothing to report.
 			}
 
+			// A node that hosts no Joinery site is not a backup candidate: the
+			// run executes the site's own engine at {web_root}/utils/run_backup.php.
+			// Relays and DNS boxes live here too, and reporting them as problems
+			// on every pass trains an operator to stop reading the report.
+			if (trim((string)$node->get('mgn_web_root')) === '') {
+				$skipped[] = $slug . ' (hosts no Joinery site)';
+				continue;
+			}
+
 			$latest = ManagementJob::latestForNode($node->key, 'backup_run');
 			if ($latest && in_array($latest->get('mjb_status'), array('pending', 'running'), true)) {
 				$skipped[] = $slug . ' (previous run still going)';
