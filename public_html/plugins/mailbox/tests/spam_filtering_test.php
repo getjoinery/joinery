@@ -80,7 +80,6 @@ class SpamFilteringTest {
 	private function setSetting(string $name, string $value): void {
 		$gv = Globalvars::get_instance();
 		$ref = new ReflectionProperty('Globalvars', 'settings');
-		$ref->setAccessible(true);
 		$settings = $ref->getValue($gv);
 		if (!is_array($settings)) { $settings = array(); }
 		$settings[$name] = $value;
@@ -113,7 +112,6 @@ class SpamFilteringTest {
 		$router = new ScriptedScanRouter();
 		$router->scan_result = $scan_result;
 		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->setAccessible(true);
 		return $m->invoke($router, $raw, $provider_spam);
 	}
 
@@ -121,7 +119,6 @@ class SpamFilteringTest {
 	private function interpret(string $body) {
 		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'interpretScanResponse');
-		$m->setAccessible(true);
 		return $m->invoke($router, $body);
 	}
 
@@ -129,7 +126,6 @@ class SpamFilteringTest {
 	private function classify(array $auth, string $content_signal = 'none') {
 		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'classifySpam');
-		$m->setAccessible(true);
 		return $m->invoke($router, $auth, $content_signal);
 	}
 
@@ -137,7 +133,6 @@ class SpamFilteringTest {
 	private function readSpamHeader(string $raw): array {
 		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'readSpamHeader');
-		$m->setAccessible(true);
 		return $m->invoke($router, $raw);
 	}
 
@@ -145,7 +140,6 @@ class SpamFilteringTest {
 	private function resolveContentSpam(string $raw, $provider_spam = null): array {
 		$router = new InboundEmailRouter();
 		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->setAccessible(true);
 		return $m->invoke($router, $raw, $provider_spam);
 	}
 
@@ -281,7 +275,6 @@ class SpamFilteringTest {
 		$router = new ScriptedScanRouter();
 		$router->scan_result = $LOCAL_SPAM;
 		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->setAccessible(true);
 		$m->invoke($router, $hamBody, null);
 		check($router->scan_calls === 0, 'colocated → the scanner is not called',
 			'scan_calls = ' . $router->scan_calls);
@@ -321,7 +314,6 @@ class SpamFilteringTest {
 		$router = new ScriptedScanRouter();
 		$router->scan_result = $LOCAL_SPAM;
 		$m = new ReflectionMethod('InboundEmailRouter', 'resolveContentSpam');
-		$m->setAccessible(true);
 		$m->invoke($router, '', null);
 		check($router->scan_calls === 0, 'empty raw → the scanner is not called',
 			'scan_calls = ' . $router->scan_calls);

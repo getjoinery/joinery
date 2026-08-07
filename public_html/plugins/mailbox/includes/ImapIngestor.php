@@ -1011,7 +1011,6 @@ class ImapIngestor {
 		// for the manifest and the future stored-raw retrieval path.
 		try {
 			$ref = new ReflectionProperty('Horde_Mime_Part', '_transferEncoding');
-			$ref->setAccessible(true);
 			$enc = (string)$ref->getValue($part);
 			return $enc !== '' ? $enc : '7bit';
 		} catch (Throwable $e) {

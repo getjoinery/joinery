@@ -191,7 +191,6 @@ class RawMessageStoreTest {
 	/** Force CloudStorageDriverFactory::forVisibility('private') to return $mock. */
 	private function injectPrivateDriver($mock) {
 		$ref = new ReflectionProperty('CloudStorageDriverFactory', 'cached_private');
-		$ref->setAccessible(true);
 		$ref->setValue(null, $mock);
 	}
 

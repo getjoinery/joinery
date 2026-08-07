@@ -58,13 +58,11 @@ function assert_between($low, $high, $actual, $label) {
 function read_stash() {
 	$r = new ReflectionClass('AbTest');
 	$p = $r->getProperty('request_assignments');
-	$p->setAccessible(true);
 	return $p->getValue();
 }
 function reset_stash() {
 	$r = new ReflectionClass('AbTest');
 	$p = $r->getProperty('request_assignments');
-	$p->setAccessible(true);
 	$p->setValue(null, []);
 }
 

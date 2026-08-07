@@ -85,9 +85,7 @@ try {
 	// needs is a *correctly signed* URL whose timestamp is already gone.
 	$past = time() - 10;
 	$sign_key = new ReflectionMethod('File', '_get_signing_key');
-	$sign_key->setAccessible(true);
 	$sign_payload = new ReflectionMethod('File', '_signed_url_payload');
-	$sign_payload->setAccessible(true);
 	$past_sig = hash_hmac('sha256',
 		$sign_payload->invoke($file, 'original', $past), $sign_key->invoke(null, true));
 	$short = parse_url($signed, PHP_URL_PATH) . '?expires=' . $past . '&sig=' . $past_sig;

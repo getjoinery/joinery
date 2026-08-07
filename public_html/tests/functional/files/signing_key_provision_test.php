@@ -34,7 +34,6 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 /** Clear the per-request key cache so the next call re-reads the row. */
 function forget_cached_key() {
 	$p = new ReflectionProperty('File', 'signing_key');
-	$p->setAccessible(true);
 	$p->setValue(null, null);
 }
 
@@ -75,7 +74,6 @@ try {
 	forget_cached_key();
 	$file = new File(NULL);
 	$ref = new ReflectionProperty('SystemBase', 'key');
-	$ref->setAccessible(true);
 	$ref->setValue($file, 424242);   // no row needed: signing covers id/size/expiry
 	$file->set('fil_name', 'signing_key_provision_test.txt');
 

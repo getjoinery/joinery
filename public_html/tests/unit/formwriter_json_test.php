@@ -270,7 +270,6 @@ $json = new FormWriterV2JSON('account_edit');
 account_edit_logic_form($json, null);
 
 $fields_prop = new ReflectionProperty('FormWriterV2Base', 'fields');
-$fields_prop->setAccessible(true);
 $html5_names = array_keys($fields_prop->getValue($html5));
 $json_names = array_keys($fields_prop->getValue($json));
 

@@ -25,7 +25,6 @@ require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
 
 function resolve($column, $own_prefix) {
     $method = new ReflectionMethod('DeletionRule', 'getSourceTableFromColumn');
-    $method->setAccessible(true);
     return $method->invoke(null, $column, $own_prefix);
 }
 

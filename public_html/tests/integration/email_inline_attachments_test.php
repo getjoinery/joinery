@@ -93,7 +93,6 @@ ini_set('error_log', $log_file);
 // Resend — inspect the built payload directly (private builder via reflection).
 $resend = new ResendProvider();
 $ref = new ReflectionMethod('ResendProvider', 'buildPayload');
-$ref->setAccessible(true);
 $payload = $ref->invoke($resend, $message);
 $resend_atts = $payload['attachments'] ?? [];
 $found_degraded = false;
@@ -109,7 +108,6 @@ ok('Resend still sends both parts as attachments', count($resend_atts) === 2);
 // Brevo — call its base-email builder to trigger the same degrade + log marker.
 $brevo = new BrevoProvider();
 $ref_b = new ReflectionMethod('BrevoProvider', 'buildBaseEmail');
-$ref_b->setAccessible(true);
 try {
     $ref_b->invoke($brevo, $message, Globalvars::get_instance());
     $brevo_ran = true;

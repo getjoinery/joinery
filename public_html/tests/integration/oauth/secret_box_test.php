@@ -27,7 +27,6 @@ class SecretBoxTest {
     private function withKey($value, callable $fn) {
         $gv = Globalvars::get_instance();
         $ref = new ReflectionProperty('Globalvars', 'settings');
-        $ref->setAccessible(true);
         $arr = $ref->getValue($gv);
         $orig = $arr['secret_box_key'] ?? null;
         $arr['secret_box_key'] = $value;

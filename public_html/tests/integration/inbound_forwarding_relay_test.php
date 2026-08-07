@@ -48,7 +48,6 @@ class InboundForwardingRelayTest {
 	private function setSetting($key, $value) {
 		$gv = Globalvars::get_instance();
 		$ref = new ReflectionProperty('Globalvars', 'settings');
-		$ref->setAccessible(true);
 		$arr = $ref->getValue($gv);
 		if (!is_array($arr)) { $arr = array(); }
 		$arr[$key] = $value;

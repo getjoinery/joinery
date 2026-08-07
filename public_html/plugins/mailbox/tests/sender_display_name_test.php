@@ -71,9 +71,7 @@ class SenderDisplayNameTest {
 	function run() {
 		$this->router = new InboundEmailRouter();
 		$this->method = new ReflectionMethod('InboundEmailRouter', 'senderDisplayString');
-		$this->method->setAccessible(true);
 		$this->parse = new ReflectionMethod('InboundEmailRouter', 'parseEmail');
-		$this->parse->setAccessible(true);
 
 		$this->testKeepsTheName();
 		$this->testAddressStaysUsable();

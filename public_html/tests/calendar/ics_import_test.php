@@ -141,7 +141,6 @@ ok('round-trip: DTEND is UTC 10:00', ($e3['DTEND']['value'] ?? null) === '202606
 section('_mapTimes (timezone math)');
 
 $mapTimes = new ReflectionMethod('IcsImporter', '_mapTimes');
-$mapTimes->setAccessible(true);
 function map_props($ics_snippet) {
     $full = "BEGIN:VCALENDAR\nBEGIN:VEVENT\n" . $ics_snippet . "\nEND:VEVENT\nEND:VCALENDAR\n";
     $p = IcsImporter::parse($full);

@@ -153,7 +153,6 @@ check($hit['protected_withheld'] === $miss['protected_withheld']
    'withheld/locked/capped signals are identical for a matching vs non-matching query');
 // And the rendered note is byte-identical (the tool formats fixed strings).
 $fmt = new ReflectionMethod('SearchConversationsTool', 'format');
-$fmt->setAccessible(true);
 $note_hit  = $fmt->invoke(null, ['matches'=>[], 'protected_withheld'=>true, 'protected_capped'=>false, 'locked'=>true], 'UTC');
 $note_miss = $fmt->invoke(null, ['matches'=>[], 'protected_withheld'=>true, 'protected_capped'=>false, 'locked'=>true], 'UTC');
 check($note_hit === $note_miss, 'the withheld note is byte-identical regardless of the query');
@@ -179,7 +178,6 @@ check(!array_filter($exc['matches'], fn($m) => (int)$m['id'] === $self_id),
 
 section('Capability gating (acceptance #5, gate independence)');
 $rm = new ReflectionMethod('ChatRunner', 'resolveAllowedTools');
-$rm->setAccessible(true);
 $gate_conv = $make_standard($uidA, 'Gate probe', '');
 $ctxA = new ChatTurnContext($gate_conv, $uidA);
 

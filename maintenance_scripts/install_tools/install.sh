@@ -1,4 +1,21 @@
 #!/usr/bin/env bash
+#VERSION 2.45 - The PHP extension list survives an extension that stops being
+#              packaged. PHP 8.5 compiles OPcache in, so Ubuntu 26.04 ships no
+#              php8.5-opcache; asking for it failed the whole apt transaction
+#              and left the box with no pgsql, mbstring or gd either. The list
+#              is now filtered to what the release packages, the install's exit
+#              code is read, and the modules themselves are verified against
+#              `php -m` afterwards - which is the actual requirement, and the
+#              only form of it that a built-in extension can satisfy.
+#VERSION 2.44 - `server` gets the password handling the header has always
+#              described and `site` has always had: --password-file, then
+#              POSTGRES_PASSWORD, then auto-generation, with the prompt reserved
+#              for a real keyboard. It used to prompt unconditionally, so
+#              `install.sh -y server` under nohup/cron/an agent read EOF, called
+#              that an empty password and exited 1 without installing anything.
+#              A generated password is written to /root/.joinery_postgres_password
+#              (0600), which is where `site --password-file` and the install job
+#              already look for it.
 #VERSION 2.43 - Every prompt has an answer when nobody is at the keyboard: EOF
 #              takes the prompt's default instead of killing the script under
 #              set -e, and destructive prompts default to refuse. -y/--yes and
@@ -1869,10 +1886,12 @@ do_server_setup() {
     # first container run.
     local SKIP_POSTGRES_PASSWORD=0
     local ALLOW_UNSUPPORTED_OS=0
+    local PASSWORD_FILE=""
     for arg in "$@"; do
         case "$arg" in
             --skip-postgres-password) SKIP_POSTGRES_PASSWORD=1 ;;
             --allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1 ;;
+            --password-file=*) PASSWORD_FILE="${arg#*=}" ;;
             *) consume_global_flag "$arg" || { print_error "Unknown option for server: $arg"; exit 1; } ;;
         esac
     done
@@ -1913,30 +1932,69 @@ do_server_setup() {
         fi
     fi
 
-    # Get PostgreSQL password (skipped when building the shared base image)
+    # Get PostgreSQL password (skipped when building the shared base image).
+    #
+    # Sources, in priority order: --password-file, POSTGRES_PASSWORD in the
+    # environment, then auto-generation. The prompt is reached only when a human
+    # is at the keyboard, which is what the header has always documented and what
+    # `site` has always done. Prompting unconditionally meant `install.sh -y
+    # server` under nohup, cron, or a job agent read EOF, called that an empty
+    # password, and exited 1 before installing anything — the one form of the
+    # command an unattended install can use.
     POSTGRES_PASSWORD="${POSTGRES_PASSWORD:-}"
 
+    if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [ -n "$PASSWORD_FILE" ]; then
+        if [ ! -f "$PASSWORD_FILE" ]; then
+            print_error "Password file not found: $PASSWORD_FILE"
+            exit 1
+        fi
+        POSTGRES_PASSWORD=$(tr -d '\n' < "$PASSWORD_FILE")
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+            print_error "Password file is empty: $PASSWORD_FILE"
+            exit 1
+        fi
+        print_info "Password read from file: $PASSWORD_FILE"
+    fi
+
     if [ "$SKIP_POSTGRES_PASSWORD" -eq 0 ] && [[ -z "$POSTGRES_PASSWORD" ]]; then
-        print_info "PostgreSQL password not set."
-        echo -n "Please enter a password for PostgreSQL postgres user: "
-        read -s POSTGRES_PASSWORD || true
-        echo ""
+        if [ "$ASSUME_YES" -eq 1 ] || [ ! -t 0 ]; then
+            # Nobody to ask. Generate one and record it where the rest of the
+            # platform already looks for a bare-metal node's postgres password
+            # (`site --password-file`, and the server_manager install job).
+            POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
+            local pw_record="/root/.joinery_postgres_password"
+            if (umask 077 && printf '%s\n' "$POSTGRES_PASSWORD" > "$pw_record") 2>/dev/null; then
+                chmod 600 "$pw_record" 2>/dev/null || true
+                print_info "Auto-generated the postgres password and wrote it to $pw_record (mode 600)."
+            else
+                # Recording it is how an unattended caller gets it back, so a
+                # failure to write is worth saying out loud rather than leaving
+                # the operator to discover the file is absent later.
+                print_warning "Auto-generated the postgres password but could not write $pw_record."
+                print_warning "It is printed in this run's summary and nowhere else — save it now."
+            fi
+        else
+            print_info "PostgreSQL password not set."
+            echo -n "Please enter a password for PostgreSQL postgres user: "
+            read -s POSTGRES_PASSWORD || true
+            echo ""
 
-        if [[ -z "$POSTGRES_PASSWORD" ]]; then
-            print_error "PostgreSQL password cannot be empty."
-            exit 1
+            if [[ -z "$POSTGRES_PASSWORD" ]]; then
+                print_error "PostgreSQL password cannot be empty."
+                exit 1
+            fi
+
+            echo -n "Confirm password: "
+            read -s POSTGRES_PASSWORD_CONFIRM || true
+            echo ""
+
+            if [[ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]]; then
+                print_error "Passwords do not match. Please run the script again."
+                exit 1
+            fi
+
+            print_success "PostgreSQL password set successfully."
         fi
-
-        echo -n "Confirm password: "
-        read -s POSTGRES_PASSWORD_CONFIRM || true
-        echo ""
-
-        if [[ "$POSTGRES_PASSWORD" != "$POSTGRES_PASSWORD_CONFIRM" ]]; then
-            print_error "Passwords do not match. Please run the script again."
-            exit 1
-        fi
-
-        print_success "PostgreSQL password set successfully."
     fi
 
     # Update system packages
@@ -1990,17 +2048,66 @@ do_server_setup() {
 
     # Install PHP and extensions
     print_step "Installing PHP ${PHP_VERSION}..."
-    # Suffixes, not package names: apt takes the whole list as one transaction,
-    # so a name that does not resolve on this release fails the batch and takes
-    # every other extension down with it.
+    #
+    # Suffixes, not package names, because apt takes the whole list as one
+    # transaction: a name that does not resolve on this release fails the batch
+    # and takes every other extension down with it. Suffixes alone are not
+    # enough, though — an extension can stop being packaged separately at all.
+    # PHP 8.5 compiles OPcache into the interpreter, so Ubuntu 26.04 ships no
+    # php8.5-opcache, and asking for it is how a release bump produces a box
+    # with no pgsql, no mbstring and no gd either.
+    #
+    # So ask this release for what it actually packages, then prove the modules
+    # are loaded. The module check is the guarantee; the package list is only
+    # how the modules usually arrive.
     local PHP_EXTENSIONS=(fpm cli common pgsql xml curl gd dev mbstring opcache
                           soap zip bcmath intl readline sqlite3)
     local PHP_PACKAGES=()
-    local ext
+    local PHP_UNPACKAGED=()
+    local ext pkg
     for ext in "${PHP_EXTENSIONS[@]}"; do
-        PHP_PACKAGES+=("php${PHP_VERSION}-${ext}")
+        pkg="php${PHP_VERSION}-${ext}"
+        if apt-cache show "$pkg" >/dev/null 2>&1; then
+            PHP_PACKAGES+=("$pkg")
+        else
+            PHP_UNPACKAGED+=("$ext")
+        fi
     done
-    apt install -y "${PHP_PACKAGES[@]}"
+
+    if [ ${#PHP_UNPACKAGED[@]} -gt 0 ]; then
+        print_info "Not packaged separately on PHP ${PHP_VERSION}: ${PHP_UNPACKAGED[*]} — expected built in, verified below"
+    fi
+
+    if ! apt install -y "${PHP_PACKAGES[@]}"; then
+        print_error "Failed to install PHP ${PHP_VERSION} packages"
+        echo ""
+        echo "Requested: ${PHP_PACKAGES[*]}"
+        echo "Nothing further is configured, because a partial extension set"
+        echo "fails later and much less clearly than this does."
+        exit 1
+    fi
+
+    # The modules the platform actually needs at runtime, named as `php -m`
+    # reports them. fpm/cli/common/dev/readline carry no runtime module of their
+    # own and are covered by the install succeeding.
+    local REQUIRED_MODULES=(pgsql pdo_pgsql xml curl gd mbstring soap zip bcmath intl sqlite3 "Zend OPcache")
+    local LOADED_MODULES MISSING_MODULES=()
+    LOADED_MODULES="$(php -m 2>/dev/null)"
+    local mod
+    for mod in "${REQUIRED_MODULES[@]}"; do
+        if ! grep -qix -- "$mod" <<< "$LOADED_MODULES"; then
+            MISSING_MODULES+=("$mod")
+        fi
+    done
+    if [ ${#MISSING_MODULES[@]} -gt 0 ]; then
+        print_error "PHP ${PHP_VERSION} is missing required modules: ${MISSING_MODULES[*]}"
+        echo ""
+        echo "These are installed but not loaded, or this release packages them"
+        echo "under names this script does not know. The site would install and"
+        echo "then fail at the first database call, upload or archive."
+        exit 1
+    fi
+    print_success "PHP modules verified: ${REQUIRED_MODULES[*]}"
 
     print_success "PHP installation completed. Version: $(php -v | head -n1)"
 
@@ -3929,7 +4036,10 @@ show_help() {
     echo "  list         List existing Joinery sites (Docker and bare-metal)"
     echo ""
     echo "Server Command Options:"
-    echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 24.04 LTS"
+    echo "  --allow-unsupported-os Proceed on an OS other than Ubuntu 24.04/26.04 LTS"
+    echo "  --password-file=FILE   Read the postgres role password from FILE"
+    echo "                         (else POSTGRES_PASSWORD=, else auto-generated"
+    echo "                         into /root/.joinery_postgres_password)"
     echo ""
     echo "Site Command Options:"
     echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"

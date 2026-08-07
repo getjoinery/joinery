@@ -131,7 +131,6 @@ harness_defer(function () use ($tmp_dir) {
 
 $manager = new PluginManager();
 $validate = new ReflectionMethod('PluginManager', 'validatePlugin');
-$validate->setAccessible(true);
 
 file_put_contents($tmp_dir . '/plugin.json', json_encode(array(
 	'name' => 'Licensing Test Fixture', 'version' => '0.0.1', 'status' => 'alpha-ish',

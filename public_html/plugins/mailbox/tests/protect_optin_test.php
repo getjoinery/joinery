@@ -87,7 +87,6 @@ class ProtectOptinTest {
 		section('The protected shape follows the enforcement flag, not the level');
 
 		$applies = new ReflectionMethod('InboundEmailSetupCheck', 'protectedShapeApplies');
-		$applies->setAccessible(true);
 		$check = new InboundEmailSetupCheck();
 
 		check($applies->invoke($check, new PoFakeDomain(true, 'fortress')) === true,
@@ -134,7 +133,6 @@ class ProtectOptinTest {
 		section('Fortress is not finished until sending is locked');
 
 		$m = new ReflectionMethod('InboundEmailSetupCheck', 'sendProtectionResult');
-		$m->setAccessible(true);
 
 		// Four states, four fixes. Driven by stubbing the two facts the row reads,
 		// so no DNS is touched: is it signing, and do the published records already
@@ -146,7 +144,6 @@ class ProtectOptinTest {
 				public function strictRecordsPublished(InboundEmailDomain $model): bool { return $this->strict; }
 			};
 			$mm = new ReflectionMethod($check, 'sendProtectionResult');
-			$mm->setAccessible(true);
 			return $mm->invoke($check, 'example.com', new PoFakeDomain($signing, 'fortress'));
 		};
 
@@ -182,7 +179,6 @@ class ProtectOptinTest {
 		// — which is what a first cut of this did, on a real domain that was
 		// dropping its own mail at the time.
 		$spf = new ReflectionMethod('InboundEmailSetupCheck', 'spfAuthorizesNothing');
-		$spf->setAccessible(true);
 		$c = new InboundEmailSetupCheck();
 		foreach (array('v=spf1 -all', 'V=SPF1 -ALL', 'v=spf1   -all  ') as $rec) {
 			check($spf->invoke($c, $rec) === true, 'authorizes nothing: ' . trim($rec));

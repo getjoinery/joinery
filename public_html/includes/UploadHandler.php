@@ -74,11 +74,16 @@ class UploadHandler
                 'Content-Range',
                 'Content-Disposition'
             ),
-            // By default, allow redirects to the referer protocol+host:
+            // By default, allow redirects to the referer protocol+host.
+            // Most requests carry no Referer at all, so this is read as a string
+            // that may be absent rather than one that is always there — passing
+            // NULL to parse_url() is deprecated and becomes a TypeError in PHP 9.
+            // With no referer the pattern degrades to '/^:\/\//', which matches
+            // nothing, and matching nothing is the safe end of this option.
             'redirect_allow_target' => '/^'.preg_quote(
-                    parse_url($this->get_server_var('HTTP_REFERER'), PHP_URL_SCHEME)
+                    parse_url((string)$this->get_server_var('HTTP_REFERER'), PHP_URL_SCHEME)
                     .'://'
-                    .parse_url($this->get_server_var('HTTP_REFERER'), PHP_URL_HOST)
+                    .parse_url((string)$this->get_server_var('HTTP_REFERER'), PHP_URL_HOST)
                     .'/', // Trailing slash to not match subdomains by mistake
                     '/' // preg_quote delimiter param
                 ).'/',

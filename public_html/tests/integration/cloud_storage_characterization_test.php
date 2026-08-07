@@ -63,9 +63,7 @@ function make_blob_row(array $overrides = []) {
 // single fixture id (not syncBatch) keeps the test from touching other rows.
 $profile  = new BlobStorageProfile();
 $sync_row = new ReflectionMethod('CloudOffloadEngine', '_sync_row');
-$sync_row->setAccessible(true);
 $pull_row = new ReflectionMethod('CloudOffloadEngine', '_pull_row');
-$pull_row->setAccessible(true);
 
 section('Cloud storage characterization (pins current behavior)');
 
@@ -149,9 +147,7 @@ try {
 	//    via the lifecycle helpers — no live task is touched)
 	// -------------------------------------------------------------------
 	$activate   = new ReflectionMethod('CloudStorageLifecycle', '_activate_task');
-	$activate->setAccessible(true);
 	$deactivate = new ReflectionMethod('CloudStorageLifecycle', '_deactivate_task');
-	$deactivate->setAccessible(true);
 
 	$probe_class = 'CharProbeTask_' . bin2hex(random_bytes(3));
 	$activate->invoke(null, $probe_class);

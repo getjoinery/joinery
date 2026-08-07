@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.26 - paths and the site URL are cast before parsing, so an unset one
+ *                 raises nothing on PHP 8.5
  * @version 1.25 - node-bound backup steps carry __SM_NODE_CREDS_<id>__ when the target holds a
  *                 write-only node credential, so a node is handed a key that can add to the shelf
  *                 but never erase it; the main (delete-capable) credential then stays on the
@@ -397,7 +399,11 @@ class JobCommandBuilder {
 	 * Config is one level up from web_root (public_html).
 	 */
 	private static function get_config_path($node) {
-		$web_root = rtrim($node->get('mgn_web_root'), '/');
+		// mgn_web_root is NULL on a node with no site — a bare install, a relay
+		// shard, a DNS box. rtrim(NULL) is deprecated and becomes a TypeError in
+		// PHP 9; the path this builds for such a node was already meaningless,
+		// and it stays exactly as meaningless rather than changing behaviour.
+		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
 		return dirname($web_root) . '/config/Globalvars_site.php';
 	}
 
@@ -421,7 +427,8 @@ class JobCommandBuilder {
 	 * Get the maintenance scripts path from the web root.
 	 */
 	private static function get_scripts_path($node) {
-		$web_root = rtrim($node->get('mgn_web_root'), '/');
+		// See get_config_path(): a siteless node stores NULL here.
+		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
 		return dirname($web_root) . '/maintenance_scripts';
 	}
 
@@ -470,7 +477,9 @@ class JobCommandBuilder {
 	 * routes here when API isn't available.
 	 */
 	public static function build_check_status_ssh($node) {
-		$web_root = $node->get('mgn_web_root');
+		// Cast for the same reason as get_config_path(): a siteless node stores
+		// NULL, and this value reaches dirname() below.
+		$web_root = (string)$node->get('mgn_web_root');
 		$skip_joinery = $node->get('mgn_skip_joinery_checks');
 
 		$steps = [
@@ -525,7 +534,9 @@ class JobCommandBuilder {
 
 		// SSL certificate check. For Docker nodes the cert lives on the host (where the
 		// reverse-proxy Apache and certbot run), not inside the container — hence on_host.
-		$domain = parse_url($node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
+		// mgn_site_url is NULL on a node with no site — a bare install, a relay
+		// shard, a DNS box — so it is cast rather than passed straight through.
+		$domain = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
 		if ($domain) {
 			$is_docker  = (bool)$node->get('mgn_container_name');
 			$domain_esc = escapeshellarg($domain);

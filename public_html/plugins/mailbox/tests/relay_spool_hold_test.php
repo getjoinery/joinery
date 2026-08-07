@@ -72,7 +72,6 @@ class RelaySpoolHoldTest {
 		// an unsaved relay is enough to construct the consumer.
 		$this->consumer = new RelaySpoolConsumer(new MailboxRelay(NULL));
 		$ref = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestOne');
-		$ref->setAccessible(true);
 		$this->ingest = $ref;
 		echo (php_sapi_name() === 'cli' ? '' : '<br>') . '  fixtures ready (suffix ' . $this->suffix . ")\n";
 	}

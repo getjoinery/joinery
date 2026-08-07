@@ -1196,7 +1196,6 @@ class InboundEmailRouter {
 	private function partTransferEncoding($part): string {
 		try {
 			$ref = new ReflectionProperty('Horde_Mime_Part', '_transferEncoding');
-			$ref->setAccessible(true);
 			$enc = (string)$ref->getValue($part);
 			return $enc !== '' ? $enc : '7bit';
 		} catch (Throwable $e) {

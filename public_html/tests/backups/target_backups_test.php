@@ -36,7 +36,6 @@ require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 /** Call a private static on S3Signer. */
 function s3_call($method, array $args) {
 	$m = new ReflectionMethod('S3Signer', $method);
-	$m->setAccessible(true);
 	return $m->invokeArgs(null, $args);
 }
 

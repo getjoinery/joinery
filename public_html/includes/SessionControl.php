@@ -1359,9 +1359,25 @@ class SessionControl{
 
 		}
 		else{
+			// Both checks below end in a browser redirect, and on the CLI there is
+			// no browser and no REQUEST_URI. Unguarded, a scheduled task or
+			// maintenance script running as a user who still owes a password change
+			// or a terms acceptance read an undefined REQUEST_URI, called header()
+			// into the void, and then exit()ed mid-run — the script died with
+			// nothing said about why. A fresh install reaches this immediately: the
+			// admin account the installer creates carries force_password_change
+			// from birth, so on a newly built node it was every CLI entry point,
+			// not an edge case.
+			//
+			// Resolved once, so the two checks cannot disagree about what page is
+			// being viewed. NULL means "not a request", which is not the same as a
+			// request whose path happens to be empty.
+			$current_path = (PHP_SAPI === 'cli')
+				? NULL
+				: parse_url((string)($_SERVER['REQUEST_URI'] ?? ''), PHP_URL_PATH);
+
 			// Check if user must change password before accessing any other page
-			if ($this->must_change_password()) {
-				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+			if ($current_path !== NULL && $this->must_change_password()) {
 				// Don't redirect if already on the password change page or logging out
 				if ($current_path !== '/change-password-required' && $current_path !== '/logout') {
 					header('Location: /change-password-required');
@@ -1370,8 +1386,7 @@ class SessionControl{
 			}
 
 			// Check if user must accept terms before accessing any other page
-			if ($this->must_accept_terms()) {
-				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
+			if ($current_path !== NULL && $this->must_accept_terms()) {
 				if ($current_path !== '/terms-accept' && $current_path !== '/logout') {
 					header('Location: /terms-accept');
 					exit();
