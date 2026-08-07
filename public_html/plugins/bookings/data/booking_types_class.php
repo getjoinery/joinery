@@ -59,6 +59,8 @@ class BookingType extends SystemBase {
 	// booking type.
 	protected static $foreign_key_actions = [
 		'bkt_svy_survey_id' => ['action' => 'null'],
+		'bkt_usr_user_id' => ['action' => 'permanent_delete'],
+		'bkt_pro_product_id' => ['action' => 'null'],
 	];
 
 	/** Resolve a booking type by its globally-unique public slug. */

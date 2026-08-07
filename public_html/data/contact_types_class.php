@@ -13,7 +13,6 @@ class ContactTypeException extends SystemBaseException {}
 class ContactType extends SystemBase {	public static $prefix = 'ctt';
 	public static $tablename = 'ctt_contact_types';
 	public static $pkey_column = 'ctt_contact_type_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

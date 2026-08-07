@@ -36,7 +36,8 @@ class MailingListRegistrant extends SystemBase {	public static $prefix = 'mlr';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [
-		'mlr_mlt_mailing_list_id' => ['action' => 'prevent', 'message' => 'Cannot delete mailing list - registrants exist']
+		'mlr_mlt_mailing_list_id' => ['action' => 'prevent', 'message' => 'Cannot delete mailing list - registrants exist'],
+		'mlr_usr_user_id' => ['action' => 'cascade']
 	];
 
 		/**

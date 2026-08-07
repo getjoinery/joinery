@@ -30,6 +30,10 @@ class Passkey extends SystemBase {
 	public static $tablename = 'pkc_passkey_credentials';
 	public static $pkey_column = 'pkc_passkey_credential_id';
 
+	protected static $foreign_key_actions = [
+		'pkc_usr_user_id' => ['action' => 'permanent_delete'],
+	];
+
 	public static $api_readable = true;
 	public static $api_writable = false;
 	public static $api_unreadable_fields = array('pkc_source_json');
@@ -61,8 +65,6 @@ class Passkey extends SystemBase {
 	public static $index_specifications = array(
 		array('columns'=>array('pkc_credential_id'), 'unique'=>true, 'where'=>'pkc_delete_time IS NULL'),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);

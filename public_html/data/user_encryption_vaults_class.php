@@ -34,6 +34,10 @@ class UserEncryptionVault extends SystemBase {
 	public static $tablename = 'uev_user_encryption_vaults';
 	public static $pkey_column = 'uev_user_encryption_vault_id';
 
+	protected static $foreign_key_actions = [
+		'uev_usr_user_id' => ['action' => 'permanent_delete'],
+	];
+
 	public static $api_readable = false;
 	public static $api_writable = false;
 
@@ -57,8 +61,6 @@ class UserEncryptionVault extends SystemBase {
 		'uev_created_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'uev_updated_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);

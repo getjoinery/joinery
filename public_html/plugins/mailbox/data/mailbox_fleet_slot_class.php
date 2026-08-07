@@ -35,10 +35,6 @@ class MailboxFleetSlot extends SystemBase {
 		'mft_usr_user_id'   => ['action' => 'null'],
 	];
 
-	public static $permanent_delete_actions = [
-		'MailboxFleetDomainClaim' => ['fkey_column' => 'mfd_mft_slot_id', 'action' => 'delete'],
-	];
-
 	public static $field_specifications = array(
 		'mft_mailbox_fleet_slot_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'mft_mfs_shard_id'          => array('type'=>'int8', 'is_nullable'=>false),

@@ -18,8 +18,6 @@ class FileChange extends SystemBase {
 	public static $tablename = 'fch_file_changes';
 	public static $pkey_column = 'fch_file_change_id';
 
-	public static $permanent_delete_actions = array();
-
 	// Owner is a real user reference; when the user is deleted their change rows
 	// go with them. fch_source_usr_user_id (the actor) is a non-standard name and
 	// registers no rule — an actor leaving does not rewrite history.

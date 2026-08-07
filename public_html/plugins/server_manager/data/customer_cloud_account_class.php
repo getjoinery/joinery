@@ -24,7 +24,9 @@ class CustomerCloudAccount extends SystemBase {
 	public static $tablename = 'cca_customer_cloud_accounts';
 	public static $pkey_column = 'cca_id';
 
-	public static $permanent_delete_actions = array();
+	protected static $foreign_key_actions = array(
+		'cca_usr_user_id' => array('action' => 'permanent_delete'),
+	);
 
 	public static $field_specifications = array(
 		'cca_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

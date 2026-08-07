@@ -21,6 +21,10 @@ class AbTestVariant extends SystemBase {
 	public static $tablename = 'abv_variants';
 	public static $pkey_column = 'abv_variant_id';
 
+	protected static $foreign_key_actions = array(
+		'abv_abt_test_id' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
 		'abv_variant_id'    => array('type' => 'int8', 'is_nullable' => false, 'serial' => true),
 		'abv_abt_test_id'   => array('type' => 'int8', 'is_nullable' => false),

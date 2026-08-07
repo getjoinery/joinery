@@ -22,7 +22,10 @@ class RequestLog extends SystemBase {
 	}
 	public static $tablename = 'rql_request_logs';
 	public static $pkey_column = 'rql_request_log_id';
-	public static $permanent_delete_actions = array();
+
+	protected static $foreign_key_actions = [
+		'rql_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+	];
 
 	// Retention: the daily sweep deletes rows older than the window.
 	// 0 in the setting means never purge. See docs/scheduled_tasks.md.

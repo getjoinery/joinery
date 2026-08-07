@@ -13,6 +13,11 @@ class Comment extends SystemBase {	public static $prefix = 'cmt';
 	public static $tablename = 'cmt_comments';
 	public static $pkey_column = 'cmt_comment_id';
 
+	protected static $foreign_key_actions = array(
+		'cmt_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+		'cmt_pst_post_id' => array('action' => 'cascade'),
+	);
+
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
 	// under the deny-by-default owner-or-staff row scope.
 	public static $api_readable = true;

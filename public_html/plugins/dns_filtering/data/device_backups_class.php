@@ -6,7 +6,6 @@ require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
-
 class SdDeviceBackupException extends SystemBaseException {}
 
 class SdDeviceBackup extends SystemBase {
@@ -14,6 +13,10 @@ class SdDeviceBackup extends SystemBase {
 	public static $prefix = 'sbk';
 	public static $tablename = 'sbk_device_backups';
 	public static $pkey_column = 'sbk_device_backup_id';
+
+	protected static $foreign_key_actions = array(
+		'sbk_usr_user_id' => array('action' => 'cascade'),
+	);
 
 	/**
 	 * Field specifications define database column properties and validation rules
@@ -38,8 +41,6 @@ class SdDeviceBackup extends SystemBase {
 	    'sbk_delete_time' => array('type'=>'timestamp(6)'),
 	    'sbk_deactivation_pin' => array('type'=>'varchar(10)'),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function get_readable_name(){
 		return preg_replace('/^user\d+-/', '', $this->get('sbk_device_backup_name'));

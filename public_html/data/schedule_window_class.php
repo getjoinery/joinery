@@ -29,7 +29,6 @@ class ScheduleWindow extends SystemBase {
 	);
 
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
-	public static $permanent_delete_actions = array();
 
 	// Business-rule extension point. TODO: add cross-field validation, computed
 	// export_as_array() keys, or relationship loading here. Override prepare()

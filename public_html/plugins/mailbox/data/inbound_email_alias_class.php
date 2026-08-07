@@ -121,7 +121,11 @@ class InboundEmailAlias extends SystemBase {
 	 * Parse destinations string into array (handles comma or newline separated).
 	 */
 	function parse_destinations($destinations) {
-		$raw = preg_split('/[\s,]+/', trim($destinations));
+		// An alias with no destinations stores NULL, and every caller passes the
+		// column straight in, so the empty case reaches here as NULL rather than
+		// ''. trim(NULL) is deprecated and becomes a TypeError in PHP 9; the
+		// empty-array result is unchanged.
+		$raw = preg_split('/[\s,]+/', trim((string)$destinations));
 		$clean = array();
 		foreach ($raw as $d) {
 			$d = trim($d);

@@ -26,7 +26,10 @@ class SessionAnalytic extends SystemBase {	public static $prefix = 'sev';
 	}
 	public static $tablename = 'sev_session_analytics';
 	public static $pkey_column = 'sev_session_analytic_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'sev_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

@@ -1591,6 +1591,10 @@ class MethodExistenceTest {
      *     a 'type' accepted by DatabaseUpdater::acceptedColumnTypeRegex()
      *   - a SystemMultiBase subclass in the same file whose $model_class
      *     points back at the model, implementing getMultiResults()
+     *   - every foreign-key-shaped column that resolves to a source table by
+     *     naming convention has a declared action in $foreign_key_actions
+     *     (an undeclared relationship registers as 'prevent' and refuses the
+     *     source row's deletion; ModelTester fails the db tier for it)
      *
      *   ADVISORIES (⚠️ — reported, do not affect exit code):
      *   - $permanent_delete_actions declared on the class (nothing reads it)
@@ -1650,8 +1654,12 @@ class MethodExistenceTest {
             $props = $reflection->getStaticProperties();
             if (!empty($props['tablename'])) {
                 $all_tables[$props['tablename']] = $class;
-                if (!empty($props['prefix'])) {
-                    $prefix_tables[$props['prefix']] = $props['tablename'];
+                if (!empty($props['prefix'])
+                    && !in_array($props['tablename'], $prefix_tables[$props['prefix']] ?? [], true)) {
+                    // A prefix can be claimed by two models (bkt, cnv, rcp...);
+                    // keep every claimant so the convention mirror can
+                    // disambiguate the way DeletionRule does.
+                    $prefix_tables[$props['prefix']][] = $props['tablename'];
                 }
             }
             if (isset($file_models[$class])) continue;
@@ -1743,8 +1751,8 @@ class MethodExistenceTest {
             // Deletion behaviour is declared by the child model in
             // $foreign_key_actions, so a model declaring $permanent_delete_actions
             // is stating a rule nothing reads (see docs/deletion_system.md).
-            $pda = $reflection->getProperty('permanent_delete_actions');
-            if ($pda->getDeclaringClass()->getName() === $class) {
+            if ($reflection->hasProperty('permanent_delete_actions')
+                && $reflection->getProperty('permanent_delete_actions')->getDeclaringClass()->getName() === $class) {
                 $advisories[] = "$class: \$permanent_delete_actions is declared but nothing reads it "
                               . "— deletion behaviour belongs in the child model's \$foreign_key_actions "
                               . "(see docs/deletion_system.md)";
@@ -1777,6 +1785,21 @@ class MethodExistenceTest {
                               . "table by naming convention, and no 'source_table' or 'source_class' override is "
                               . "given — this rule will NOT register. Add 'source_table' (or 'source_class') to "
                               . "the override.";
+            }
+
+            // Every FK-shaped column that DOES resolve by convention must have
+            // a declared action — an undeclared relationship registers as
+            // 'prevent' and refuses the source row's deletion, and ModelTester
+            // fails the db tier for it. Same rule, surfaced at edit time.
+            foreach ($specs as $column => $spec) {
+                if ($column === $pkey || array_key_exists($column, $fk_actions)) {
+                    continue;
+                }
+                if ($this->resolvesFkColumnByConvention($column, $prefix, $prefix_tables)) {
+                    $errors[] = "$class: column '$column' is a detected foreign key with no declared "
+                              . "deletion action — add it to \$foreign_key_actions "
+                              . "(see docs/deletion_system.md for choosing an action)";
+                }
             }
         }
 
@@ -1823,7 +1846,22 @@ class MethodExistenceTest {
         if ($first_segment === false || $first_segment === '') {
             return false;
         }
-        return isset($prefix_tables[$first_segment]);
+        $candidates = $prefix_tables[$first_segment] ?? [];
+        if (count($candidates) === 1) {
+            return true;
+        }
+        if (count($candidates) === 0) {
+            return false;
+        }
+        // Ambiguous prefix: resolve only on an exact singular/plural entity
+        // match, exactly as DeletionRule::getSourceTableFromColumn() does.
+        $entity = substr($remainder, 0, strpos($remainder, '_id'));
+        foreach ($candidates as $candidate) {
+            if ($candidate === $entity || $candidate === $entity . 's') {
+                return true;
+            }
+        }
+        return false;
     }
 
     /**

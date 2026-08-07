@@ -42,6 +42,7 @@ class InboundImapFolder extends SystemBase {
 	protected static $foreign_key_actions = array(
 		// permanent_delete, not cascade: a folder owns its label memberships.
 		'iif_iia_inbound_imap_account_id' => array('action' => 'permanent_delete'),
+		'iif_ilb_inbound_email_label_id'  => array('action' => 'null'),
 	);
 
 	public static $field_specifications = array(

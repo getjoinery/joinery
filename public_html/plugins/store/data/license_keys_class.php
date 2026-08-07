@@ -16,7 +16,9 @@ class LicenseKey extends SystemBase {	public static $prefix = 'lck';
 	public static $ai_readable = false;
 
 	protected static $foreign_key_actions = [
-		'lck_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'lck_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'lck_ord_order_id' => ['action' => 'null'],
+		'lck_odi_order_item_id' => ['action' => 'null']
 	];
 
 	public static $field_specifications = array(

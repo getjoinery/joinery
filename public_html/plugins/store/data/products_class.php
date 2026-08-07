@@ -44,6 +44,7 @@ class Product extends SystemBase {
 		'pro_fil_file_id' => ['action' => 'null'],
 		'pro_emt_receipt_template_id' => ['action' => 'null'],
 		'pro_sbt_subscription_tier_id' => ['action' => 'prevent', 'message' => 'Cannot delete subscription tier - products still grant it'],
+		'pro_grp_group_id' => ['action' => 'prevent', 'message' => 'products still use this group for access control'],
 	];
 
 	const PRICE_TYPE_ONE = 1;

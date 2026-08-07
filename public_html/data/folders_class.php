@@ -23,7 +23,6 @@ class Folder extends SystemBase {
 	public static $pkey_column = 'fol_folder_id';
 
 	// Not a REST/AI resource — all access flows through the drive_* actions.
-	public static $permanent_delete_actions = array();
 
 	// When the owner is deleted, reassign to the deleted-user sentinel (matches
 	// File's owner rule). fol_parent_folder_id is a self-reference with a

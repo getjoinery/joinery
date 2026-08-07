@@ -18,6 +18,10 @@ class SdScheduledBlock extends SystemBase {
 	public static $tablename = 'sdb_scheduled_blocks';
 	public static $pkey_column = 'sdb_scheduled_block_id';
 
+	protected static $foreign_key_actions = array(
+		'sdb_sdd_device_id' => array('action' => 'permanent_delete'),
+	);
+
 	public static $field_specifications = array(
 	    'sdb_scheduled_block_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sdb_sdd_device_id' => array('type'=>'int4'),

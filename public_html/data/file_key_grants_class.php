@@ -26,8 +26,6 @@ class FileKeyGrant extends SystemBase {
 	public static $tablename = 'fkg_file_key_grants';
 	public static $pkey_column = 'fkg_file_key_grant_id';
 
-	public static $permanent_delete_actions = array();
-
 	// The grantee reference cascades on user delete. The file reference is
 	// four-segment (fkg_fil_file_id) so deletion-rule auto-detection cascades the
 	// grant when the file is permanently deleted.

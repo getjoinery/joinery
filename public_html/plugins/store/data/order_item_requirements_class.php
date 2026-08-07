@@ -17,11 +17,16 @@ class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 	public static $tablename = 'oir_order_item_requirements';
 	public static $pkey_column = 'oir_order_item_requirement_id';
 
+	protected static $foreign_key_actions = [
+		'oir_odi_order_item_id' => ['action' => 'cascade'],
+		'oir_prq_product_requirement_id' => ['action' => 'null'],
+		'oir_qst_question_id' => ['action' => 'null'],
+	];
+
 	// REST CRUD exposure (Layer 1): the provisioning control plane polls
 	// these rows (checkout answers, e.g. the hosting domain question) over
 	// the API. Read-only surface; reads require permission >= 5.
 	public static $api_readable = true;
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

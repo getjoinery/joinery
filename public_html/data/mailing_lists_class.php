@@ -39,6 +39,7 @@ class MailingList extends SystemBase {	public static $prefix = 'mlt';
 	protected static $foreign_key_actions = [
 		'mlt_emt_email_template_id' => ['action' => 'prevent', 'message' => 'Cannot delete email template - mailing lists exist'],
 		'mlt_fil_file_id' => ['action' => 'null'],
+		'mlt_ctt_contact_type_id' => ['action' => 'prevent', 'message' => 'mailing lists are built from this contact type - repoint them first'],
 	];
 	
 	const VISIBILITY_PRIVATE = 0;  //NOT LISTED ANYWHERE FOR SUBSCRIPTION, MUST BE SIGNED UP BY AN ADMIN

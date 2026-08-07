@@ -64,7 +64,8 @@ class EventSession extends SystemBase {
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [
-		'evs_vid_video_id' => ['action' => 'prevent', 'message' => 'Cannot delete video - event sessions exist']
+		'evs_vid_video_id' => ['action' => 'prevent', 'message' => 'Cannot delete video - event sessions exist'],
+		'evs_evt_event_id' => ['action' => 'permanent_delete']
 	];
 
 		/**

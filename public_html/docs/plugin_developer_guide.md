@@ -364,10 +364,10 @@ class MyData extends SystemBase {
         'mdt_created'     => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
     );
 
-    // REQUIRED on every model (may be empty): cleanup actions for permanent_delete().
-    public static $permanent_delete_actions = array();
-
-    // Define foreign key behavior (optional - defaults to cascade)
+    // REQUIRED for every foreign-key-shaped column: what happens to these rows
+    // when the referenced row is deleted. An undeclared relationship registers
+    // as 'prevent' and refuses the referenced row's deletion. See
+    // docs/deletion_system.md for how to choose an action.
     protected static $foreign_key_actions = array(
         'mdt_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED)
     );

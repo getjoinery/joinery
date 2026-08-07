@@ -20,7 +20,6 @@ class CalEntryException extends SystemBase {
         'cex_cal_entry_id' => array('action' => 'cascade'),
     );
 
-    public static $permanent_delete_actions = array();
 }
 
 class MultiCalEntryException extends SystemMultiBase {

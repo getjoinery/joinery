@@ -14,6 +14,10 @@ class SdScheduledBlockRule extends SystemBase {
 	public static $tablename = 'sbr_scheduled_block_rules';
 	public static $pkey_column = 'sbr_scheduled_block_rule_id';
 
+	protected static $foreign_key_actions = array(
+		'sbr_sdb_scheduled_block_id' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
 	    'sbr_scheduled_block_rule_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sbr_sdb_scheduled_block_id' => array('type'=>'int4'),

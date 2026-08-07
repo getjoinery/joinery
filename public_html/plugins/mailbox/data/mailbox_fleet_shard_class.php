@@ -30,7 +30,6 @@ class MailboxFleetShard extends SystemBase {
 
 	// Slots reference the shard; deleting a shard with live slots is refused at
 	// the logic layer (tenants must be migrated first), so no cascade here.
-	public static $permanent_delete_actions = [];
 
 	public static $field_specifications = array(
 		'mfs_mailbox_fleet_shard_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

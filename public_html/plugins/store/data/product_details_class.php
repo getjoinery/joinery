@@ -24,7 +24,9 @@ class ProductDetail extends SystemBase {	public static $prefix = 'prd';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [
-		'prd_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'prd_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'prd_pro_product_id' => ['action' => 'cascade'],
+		'prd_prv_product_version_id' => ['action' => 'cascade']
 	];
 
 		/**

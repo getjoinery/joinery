@@ -24,10 +24,14 @@ class AipRecipeItemLog extends SystemBase {
     public static $tablename = 'aip_recipe_item_log';
     public static $pkey_column = 'aip_log_id';
 
+    protected static $foreign_key_actions = array(
+        // 'rcp' prefix collides: convention would resolve to RelayCloudProvision, not Recipe
+        'aip_rcp_recipe_id' => array('action' => 'cascade', 'source_class' => 'Recipe'),
+        'aip_rcr_run_id' => array('action' => 'cascade'),
+    );
+
     const STATUS_DONE  = 'done';
     const STATUS_ERROR = 'error';
-
-    public static $permanent_delete_actions = array();
 
     public static $field_specifications = array(
         'aip_log_id'         => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

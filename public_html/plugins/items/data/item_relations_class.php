@@ -22,7 +22,10 @@ class ItemRelation extends SystemBase {
 	public static $url_namespace = 'item_relation';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
 	protected static $foreign_key_actions = [
-		'itr_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'itr_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'itr_itm_item_id_left' => ['action' => 'cascade'],
+		'itr_itm_item_id_right' => ['action' => 'cascade'],
+		'itr_itt_item_relation_type_id' => ['action' => 'prevent', 'message' => 'item relations of this type exist - retype or delete them first']
 	];
 
 	/**

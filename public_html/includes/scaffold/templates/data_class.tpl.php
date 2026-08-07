@@ -68,9 +68,6 @@ class <?= $entity ?> extends SystemBase {
 	// What happens to these rows when a referenced parent is deleted — docs/deletion_system.md
 	protected static $foreign_key_actions = <?= ScaffoldGenerator::phpValue($delete['foreign_key_actions'], 1) ?>;
 <?php endif; ?>
-
-	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
-	public static $permanent_delete_actions = <?= ScaffoldGenerator::phpValue($delete['permanent_delete_actions'] ?? [], 1) ?>;
 <?php if ($owner_field !== null && $owner_field !== $prefix . '_usr_user_id'): ?>
 
 	// Non-standard ownership: rows are owned via <?= $owner_field ?>, not the

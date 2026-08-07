@@ -26,7 +26,10 @@ class EventLog extends SystemBase {	public static $prefix = 'evl';
 	}
 	public static $tablename = 'evl_event_logs';
 	public static $pkey_column = 'evl_event_log_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = array(
+		'evl_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+	);
 
 		/**
 	 * Field specifications define database column properties and validation rules

@@ -62,7 +62,9 @@ class File extends SystemBase {	public static $prefix = 'fil';
 		// A permanently deleted folder orphans its files to the drive root rather
 		// than destroying them. Normal folder deletion goes through the trash logic
 		// (soft-delete cascade), not raw permanent_delete.
-		'fil_fol_folder_id' => ['action' => 'null']
+		'fil_fol_folder_id' => ['action' => 'null'],
+		'fil_fbb_file_blob_id' => ['action' => 'prevent', 'message' => 'files still reference this blob'],
+		'fil_grp_group_id' => ['action' => 'prevent', 'message' => 'files still use this group for access control - reassign them first']
 	];
 
 	// Retention: Drive trash. Declared here rather than on Folder because files

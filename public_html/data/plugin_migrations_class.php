@@ -11,8 +11,6 @@ class PluginMigrationNotSentException extends PluginMigrationException {}
 class PluginMigration extends SystemBase {    public static $prefix = 'plm';
     public static $tablename = 'plm_plugin_migrations';
     public static $pkey_column = 'plm_plugin_migration_id';
-    public static $permanent_delete_actions = array(
-    );  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
         /**
      * Field specifications define database column properties and validation rules

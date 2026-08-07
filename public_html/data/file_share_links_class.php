@@ -19,8 +19,6 @@ class FileShareLink extends SystemBase {
 	public static $tablename = 'fsl_file_share_links';
 	public static $pkey_column = 'fsl_file_share_link_id';
 
-	public static $permanent_delete_actions = array();
-
 	protected static $foreign_key_actions = array(
 		'fsl_usr_user_id' => array('action' => 'cascade'),
 	);

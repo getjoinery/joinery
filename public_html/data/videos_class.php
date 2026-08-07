@@ -21,7 +21,8 @@ class Video extends SystemBase {	public static $prefix = 'vid';
 	public static $url_namespace = 'video';
 
 	protected static $foreign_key_actions = [
-		'vid_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'vid_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'vid_grp_group_id' => ['action' => 'prevent', 'message' => 'videos still use this group for access control']
 	];
 
 		/**

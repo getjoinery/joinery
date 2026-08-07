@@ -89,8 +89,7 @@ A JSON file — the same format as every other declarative manifest in the platf
 
   "delete": {
     "strategy": "soft",
-    "foreign_key_actions": {},
-    "permanent_delete_actions": {}
+    "foreign_key_actions": {}
   },
 
   "fields": [

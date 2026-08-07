@@ -67,9 +67,10 @@ class Recipe extends SystemBase {
 
     // rcp_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
     // convention (the owning User's own prefix isn't in the column), so it
-    // needs an explicit source table to cascade correctly on user deletion.
+    // needs an explicit source table. permanent_delete rather than cascade:
+    // recipes have children (runs, item logs) that a flat delete would strand.
     protected static $foreign_key_actions = [
-        'rcp_owner_user_id' => ['action' => 'cascade', 'source_table' => 'usr_users'],
+        'rcp_owner_user_id' => ['action' => 'permanent_delete', 'source_table' => 'usr_users'],
     ];
 
     const MODE_AGENT    = 'agent';

@@ -45,7 +45,8 @@ class ConversationParticipant extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'cnp_usr_user_id' => ['action' => 'permanent_delete'],
-		'cnp_cnv_conversation_id' => ['action' => 'permanent_delete']
+		// 'cnv' prefix collides with ContentVersion - name the source explicitly
+		'cnp_cnv_conversation_id' => ['action' => 'permanent_delete', 'source_class' => 'Conversation']
 	];
 
 	public static $field_specifications = array(

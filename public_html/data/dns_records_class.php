@@ -39,7 +39,6 @@ class ManagedDnsRecord extends SystemBase {	public static $prefix = 'dnr';
 	public static $pkey_column = 'dnr_dns_record_id';
 
 	/** Nothing references an ownership row; it is a leaf. */
-	public static $permanent_delete_actions = array();
 
 	public static $field_specifications = array(
 	    'dnr_dns_record_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

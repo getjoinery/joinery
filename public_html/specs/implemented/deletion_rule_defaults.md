@@ -131,3 +131,44 @@ These landed alongside the investigation and are not part of this spec's work:
   mechanism or removed.
 - The worked example at line 435 shows the mailbox domain→alias rule as
   `cascade`, which is the exact mistake this spec exists to prevent. Replace it.
+
+## Implementation record (2026-08-06)
+
+Built in full, plus the audit surfaced and fixed defects beyond the spec's scope:
+
+- **All 218 convention-resolvable FK columns now declare an action** (100 were
+  undeclared). Final registered distribution on dev: 71 cascade, 51 null,
+  32 set_value, 31 permanent_delete, 28 prevent; re-registration reports zero
+  warnings. Zero cascade rules point at a child-bearing target (was 39).
+- **Default flipped**: an undeclared relationship registers as `prevent` with a
+  message naming the model and column (`data/deletion_rule_class.php`).
+- **Prefix collisions found and fixed** — six prefixes are claimed by two models
+  (bkt, cnv, rcp, fil, abt, del), and three mis-resolved live rules:
+  bookings' type column resolved to backup targets, AI recipe references
+  resolved to relay cloud provisions, and ConversationParticipant's DECLARED
+  conversation rule silently registered against content versions. The resolver
+  now disambiguates by matching the entity embedded in the column name
+  (bkn_bkt_booking_type_id names bkt_booking_types) and refuses to guess when
+  no candidate matches; the affected declarations also carry explicit
+  source_class.
+- **Gates**: ModelTester fails any model with an undeclared detected FK
+  (db tier); validate_php_file.php's model contract reports the same as an
+  error at edit time, with its convention mirror updated to match.
+- **`$permanent_delete_actions` deleted** (the spec's recommended option):
+  property removed from SystemBase and all 63 declaring models, ModelTester
+  validation replaced, scaffold template line dropped, docs corrected.
+  MailboxFleetSlot's one non-empty declaration was already equivalent to
+  MailboxFleetDomainClaim's declared cascade.
+- **Declared-rule corrections**: mail import runs iea rule cascade ->
+  permanent_delete (runs own entry rows); Recipe owner rule and AgentFile
+  candidate self-reference cascade -> permanent_delete (both targets have
+  children); event registrants/sessions rules pinned to permanent_delete in
+  plugins/event_manager/tests/event_deletion_test.php.
+- **A latent test-fixture leak exposed**: provisioning_setup_test registered
+  its provision row for teardown under a wrong pkey name, and the old
+  inferred cascade was silently deleting it via the buyer user. The new
+  prevent rule refused that deletion, exposing the bug; fixed (cvp_id).
+- **Verified**: safe tier 93/93; db tier 239/239 (models_crud runs the new
+  gate against every model); deletion_rule_registration_test extended to pin
+  the prevent default and ambiguous-prefix resolution (26 checks); rules
+  re-registered on dev with zero warnings and zero orphans pruned.

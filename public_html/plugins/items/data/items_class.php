@@ -14,6 +14,10 @@ class Item extends SystemBase {
 	public static $tablename = 'itm_items';
 	public static $pkey_column = 'itm_item_id';
 
+	protected static $foreign_key_actions = [
+		'itm_usr_user_id' => ['action' => 'permanent_delete'],
+	];
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'User-owned items in the items plugin.';

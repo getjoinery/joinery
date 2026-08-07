@@ -42,8 +42,6 @@ class AiMessageAttachment extends SystemBase {
         'aia_aim_message_id' => ['action' => 'cascade'],
     ];
 
-    public static $permanent_delete_actions = array();
-
     public static $field_specifications = array(
         'aia_attachment_id'   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         // Indexed: looked up on every message render (displayListForMessage),

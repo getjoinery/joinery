@@ -19,14 +19,13 @@ class FileVersion extends SystemBase {
 	public static $tablename = 'fvr_file_versions';
 	public static $pkey_column = 'fvr_file_version_id';
 
-	public static $permanent_delete_actions = array();
-
 	// When the file is permanently deleted, each version is permanent-deleted too
 	// (so its blob reference is released, below). The saver reference is audit
 	// only — anonymize it rather than cascade-deleting history.
 	protected static $foreign_key_actions = array(
 		'fvr_fil_file_id' => array('action' => 'permanent_delete'),
 		'fvr_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+		'fvr_fbb_file_blob_id' => array('action' => 'prevent', 'message' => 'file versions still reference this blob'),
 	);
 
 	public static $field_specifications = array(

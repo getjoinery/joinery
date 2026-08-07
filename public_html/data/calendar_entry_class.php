@@ -79,7 +79,6 @@ class CalendarEntry extends SystemBase {
 	protected static $foreign_key_actions = array();
 
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
-	public static $permanent_delete_actions = array();
 
 	// Polymorphic ownership: a native entry is owned by a CalendarSubject, not a
 	// real usr_users FK. Only a user-typed subject maps to a user id; reserved

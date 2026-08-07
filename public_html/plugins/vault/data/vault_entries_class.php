@@ -30,6 +30,10 @@ class VaultEntry extends SystemBase {
 	public static $tablename = 'vle_vault_entries';
 	public static $pkey_column = 'vle_vault_entry_id';
 
+	protected static $foreign_key_actions = array(
+		'vle_usr_user_id' => array('action' => 'cascade'),
+	);
+
 	public static $api_readable = false;
 	public static $api_writable = false;
 
@@ -42,8 +46,6 @@ class VaultEntry extends SystemBase {
 		'vle_updated_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'vle_delete_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);

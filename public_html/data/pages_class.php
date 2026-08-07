@@ -64,7 +64,8 @@ class Page extends SystemBase {	public static $prefix = 'pag';
 	);
 
 	protected static $foreign_key_actions = [
-		'pag_fil_file_id' => ['action' => 'null']
+		'pag_fil_file_id' => ['action' => 'null'],
+		'pag_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
 
 /**

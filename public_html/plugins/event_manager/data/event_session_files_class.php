@@ -20,7 +20,8 @@ class EventSessionFile extends SystemBase {	public static $prefix = 'esf';
 	public static $ai_excluded_fields = [];
 
 	protected static $foreign_key_actions = [
-		'esf_fil_file_id' => ['action' => 'prevent', 'message' => 'Cannot delete file - event sessions exist']
+		'esf_fil_file_id' => ['action' => 'prevent', 'message' => 'Cannot delete file - event sessions exist'],
+		'esf_evs_event_session_id' => ['action' => 'cascade']
 	];
 
 		/**

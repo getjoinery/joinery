@@ -11,7 +11,7 @@ The deletion system manages cascading deletes, foreign key constraints, and refe
 - **Child-Centric**: Child models declare how they should be handled when their parent is deleted (not the other way around)
 - **Auto-Detection**: Foreign keys are automatically detected from column naming patterns (`xxx_yyy_entity_id`)
 - **Incremental Registration**: Deletion rules are registered per-model without affecting other models' rules
-- **Default CASCADE**: If no behavior is specified, dependent records are deleted automatically
+- **Declared, never guessed**: every detected foreign key must carry a declared action; an undeclared relationship registers as `prevent` and refuses the referenced row's deletion, naming the model and column to declare
 - **Separation of Concerns**: Core and plugin deletion rules are managed independently
 
 ## How It Works
@@ -44,6 +44,15 @@ A column whose first segment isn't a registered model prefix (a role name
 like `owner`, a self-reference like `parent`, an external id like
 `stripe_customer`) registers nothing — never a wrong guess. Give it an
 explicit `source_table` (see below) if it does need to cascade.
+
+**Ambiguous prefixes.** A prefix can be claimed by two models (`bkt` is both
+BookingType and BackupTarget; `cnv` is both Conversation and ContentVersion).
+The column name embeds the singular entity — `bkn_bkt_booking_type_id` names
+`bkt_booking_types` — so resolution matches that against the candidates'
+table names and accepts only an exact singular/plural match. A column that
+matches none of the candidates (`bkh_bkt_target_id` — the entity part is
+abbreviated) stays unrecognized, and its declaration must name
+`source_table`/`source_class` explicitly.
 
 ### Escape Hatch: Columns That Don't Fit the Convention
 
@@ -80,13 +89,43 @@ Five actions are available:
 | `null` | Set foreign key to NULL | Optional relationships |
 | `prevent` | Block deletion if dependents exist | Critical references that can't be orphaned |
 
-**`cascade` vs `permanent_delete`**: Use `cascade` (the default) for leaf tables that have no children and no custom deletion logic. Use `permanent_delete` when the dependent model has its own `permanent_delete()` override or has child tables that need recursive cleanup. `permanent_delete` is slower (loads each record individually) but enables multi-level cascading.
+### Choosing an action
+
+Ask one question first: **does the referenced row OWN this row, or is it
+merely referenced by it?** Both look identical in the schema — an integer
+`_id` column — which is why the engine never guesses. An order owns its order
+items (they should die with it); a phone number does not own the user who
+references it (deleting the number must never delete the user).
+
+| Relationship | Child's shape | Action |
+|---|---|---|
+| Owned | has children of its own, or a `permanent_delete()` override | `permanent_delete` |
+| Owned | true leaf — no children, no custom cleanup | `cascade` |
+| Mere reference | link is optional; row stays meaningful without it | `null` (nullable columns only) or `set_value` with a sentinel |
+| Load-bearing reference | row is broken or dangerous without it (access gates, financial records) | `prevent` with a message |
+
+Two traps worth naming:
+
+- **`cascade` on a child that has children strands the grandchildren.**
+  `cascade` is a flat SQL `DELETE` — none of the child's own deletion rules
+  run. If the target table appears as a source table anywhere in
+  `del_deletion_rules`, the action must be `permanent_delete`, not `cascade`.
+- **`null` on an access gate silently opens the gate.** A group that gates
+  events, files, or products must `prevent`, not `null` — clearing the FK
+  would make the content public.
+
+When genuinely unsure, declare `prevent`: a wrong `prevent` fails loudly with
+the model and column named and is a one-line fix; a wrong `cascade` silently
+destroys data.
 
 ### 3. Default Behavior
 
-If no `$foreign_key_actions` is specified:
-- **Default action**: `cascade` (dependent records are deleted)
-- This is safe for most relationships and eliminates configuration for common cases
+Every foreign-key-shaped column must have an entry in
+`$foreign_key_actions` — ModelTester fails the `db` tier for any model with a
+detected foreign key and no declared action. A column that reaches
+registration undeclared registers as `prevent` with a message naming the
+model and column, so an undeclared delete path fails loudly at delete time
+instead of quietly deleting rows nobody intended.
 
 ## Database-Level Foreign Keys (the integrity backstop)
 
@@ -173,13 +212,15 @@ class Event extends SystemBase {
 }
 ```
 
-**No Configuration Needed (Cascade)**
+**Cascade (owned leaf rows)**
 ```php
 class UserActivityLog extends SystemBase {
     public static $tablename = 'ual_user_activity_logs';
 
-    // No $foreign_key_actions needed!
-    // ual_usr_user_id will automatically cascade delete
+    protected static $foreign_key_actions = [
+        // Log rows are owned by the user and have no children of their own
+        'ual_usr_user_id' => ['action' => 'cascade']
+    ];
 }
 ```
 
@@ -194,7 +235,7 @@ class Message extends SystemBase {
     protected static $foreign_key_actions = [
         'msg_usr_sender_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
         'msg_usr_recipient_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
-        'msg_thread_id' => ['action' => 'cascade']  // Optional: explicit cascade
+        'msg_thread_id' => ['action' => 'cascade']  // Messages die with their thread
     ];
 }
 ```
@@ -321,7 +362,7 @@ CREATE TABLE del_deletion_rules (
     del_source_table VARCHAR(255),      -- Parent table (e.g., 'usr_users')
     del_target_table VARCHAR(255),      -- Child table (e.g., 'ord_orders')
     del_target_column VARCHAR(255),     -- Foreign key column (e.g., 'ord_usr_user_id')
-    del_action VARCHAR(50),             -- 'cascade', 'set_value', 'null', 'prevent'
+    del_action VARCHAR(50),             -- 'cascade', 'permanent_delete', 'set_value', 'null', 'prevent'
     del_action_value VARCHAR(255),      -- Value for 'set_value' action
     del_message TEXT,                   -- Message for 'prevent' action
     del_plugin VARCHAR(255)             -- Plugin name (NULL for core)
@@ -412,6 +453,7 @@ When `permanent_delete()` is called:
    - Count how many dependent records exist
    - If count > 0, apply the action:
      - **cascade**: DELETE dependent records
+     - **permanent_delete**: load each dependent as its model and call `permanent_delete()` on it
      - **set_value**: UPDATE dependent records to set value
      - **null**: UPDATE dependent records to NULL
      - **prevent**: THROW error and rollback
@@ -429,10 +471,13 @@ When creating a new model with parent-child relationships, plan for **both** sof
 Declare on the **child** model what happens when its parent is permanently deleted:
 
 ```php
-// Child model — alias belongs to a domain
+// Child model — alias belongs to a domain. Aliases have children of their
+// own (grants, filters, IMAP accounts), so the action is permanent_delete:
+// each alias is loaded and deleted through its own rules. A flat 'cascade'
+// here would delete the alias rows and strand everything hanging off them.
 class InboundEmailAlias extends SystemBase {
     protected static $foreign_key_actions = [
-        'iea_ied_inbound_email_domain_id' => ['action' => 'cascade'],
+        'iea_ied_inbound_email_domain_id' => ['action' => 'permanent_delete'],
     ];
 }
 
@@ -528,6 +573,6 @@ descendants, so there is nothing to restore selectively:
 1. **Use constants for sentinel values**: `User::USER_DELETED` instead of hardcoded `3`
 2. **Add messages for prevent actions**: Help users understand why deletion failed
 3. **Test deletion impact**: Use `permanent_delete_dry_run()` before actual deletion
-4. **Prefer CASCADE for logs and temporary data**: Default behavior is usually correct
-5. **Use PREVENT sparingly**: Only for truly critical references that can't be orphaned
+4. **Check the child for children before choosing `cascade`**: if the target table is itself a source table in `del_deletion_rules`, use `permanent_delete`
+5. **When unsure, `prevent`**: it fails loudly and is a one-line fix; a wrong `cascade` silently destroys data
 6. **Document custom permanent_delete()**: Explain any special pre/post-deletion logic

@@ -43,7 +43,9 @@ class AgentFile extends SystemBase {
 	protected static $foreign_key_actions = array(
 		// Self-referential (a candidate row points at the file it would replace),
 		// so it doesn't fit the {prefix}_{target_prefix}_..._id convention.
-		'agf_candidate_for' => array('action' => 'cascade', 'source_table' => 'agf_agent_files'),
+		// permanent_delete so a candidate's own dependents (however unlikely a
+		// chain is) delete through their rules rather than a flat SQL delete.
+		'agf_candidate_for' => array('action' => 'permanent_delete', 'source_table' => 'agf_agent_files'),
 	);
 
 	public static $field_specifications = array(

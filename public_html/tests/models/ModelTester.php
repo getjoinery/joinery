@@ -79,8 +79,8 @@ class ModelTester {
             $dbhelper->set_test_mode();
         }
         
-        // Validate permanent_delete_actions configuration
-        $this->validate_permanent_delete_actions();
+        // Every FK-shaped column must declare its deletion action
+        $this->validate_foreign_key_declarations();
         
         // Validate primary key configuration
         $this->validate_primary_key_configuration();
@@ -90,7 +90,7 @@ class ModelTester {
                 // Read-only mode: Only run safe validation tests (no insert/update/delete)
                 if ($verbose) echo "Read-only mode: Skipping CRUD operations, running validation only...<br>\n"; flush();
                 // Note: Primary key validation already ran above
-                // Note: permanent_delete_actions validation already ran above
+                // Note: foreign key declaration validation already ran above
                 
                 if ($verbose) echo "Validating sequence synchronization...<br>\n"; flush();
                 $this->test_automated_sequence_synchronization($debug);
@@ -279,18 +279,6 @@ class ModelTester {
                 flush();
             }
         });
-        
-        // Check if model has empty permanent_delete_actions and warn only if foreign keys exist
-        if (!$this->can_permanent_delete($model)) {
-            $foreign_keys = $this->find_foreign_key_references(get_class($model));
-            if (!empty($foreign_keys)) {
-                $foreign_key_list = array();
-                foreach ($foreign_keys as $column => $table) {
-                    $foreign_key_list[] = "$column (in table $table)";
-                }
-                $this->test_warn("Model has empty permanent_delete_actions array but foreign key references were detected: " . implode(', ', $foreign_key_list) . ". Configure permanent_delete_actions to handle these relationships.");
-            }
-        }
         
         if ($verbose) echo "Calling permanent_delete() now...<br>\n"; flush();
         try {
@@ -502,7 +490,7 @@ class ModelTester {
             try {
                 $model->permanent_delete();
             } catch (Exception $e) {
-                $this->test_warn("Cleanup failed for $context - permanent_delete_actions may need configuration: " . $e->getMessage());
+                $this->test_warn("Cleanup failed for $context - foreign_key_actions may need configuration: " . $e->getMessage());
             }
         }
     }
@@ -1911,13 +1899,13 @@ class ModelTester {
                 try {
                     $fresh_model->permanent_delete();
                 } catch (Exception $e) {
-                    $this->test_warn("Cleanup failed for varchar length test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                    $this->test_warn("Cleanup failed for varchar length test on $field - foreign_key_actions may need configuration: " . $e->getMessage());
                 }
             } else {
                 try {
                     $fresh_model->permanent_delete();
                 } catch (Exception $e) {
-                    $this->test_warn("Cleanup failed for varchar length test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                    $this->test_warn("Cleanup failed for varchar length test on $field - foreign_key_actions may need configuration: " . $e->getMessage());
                 }
                 // Database field doesn't match model specification - no length constraint enforced
                 $this->test_fail_no_throw("Field $field database constraint mismatch - model specifies max $max_length chars but database stored " . strlen($saved_value) . " chars from " . strlen($too_long_string) . " char input");
@@ -1992,7 +1980,7 @@ class ModelTester {
             try {
                 $model->permanent_delete();
             } catch (Exception $e) {
-                $this->test_warn("Cleanup failed for integer constraint test on $field - permanent_delete_actions may need configuration: " . $e->getMessage());
+                $this->test_warn("Cleanup failed for integer constraint test on $field - foreign_key_actions may need configuration: " . $e->getMessage());
             }
         } catch (Exception $e) {
             // Check if this is a test_fail exception - if so, re-throw it to fail the overall test
@@ -2085,7 +2073,7 @@ class ModelTester {
             } catch (Exception $delete_e) {
                 // Handle permanent delete failures separately - these are warnings, not test failures
                 if (strpos($delete_e->getMessage(), 'Cannot permanent delete') !== false) {
-                    $this->test_warn("Field $field accepts null values but cleanup failed due to permanent_delete_actions configuration: " . $delete_e->getMessage());
+                    $this->test_warn("Field $field accepts null values but cleanup failed due to foreign_key_actions configuration: " . $delete_e->getMessage());
                 } else {
                     $this->test_warn("Field $field accepts null values but cleanup failed: " . $delete_e->getMessage());
                 }
@@ -2203,123 +2191,50 @@ class ModelTester {
     }
     
     /**
-     * Validate permanent_delete_actions configuration
-     * Checks that the primary key is not incorrectly included in the permanent_delete_actions array
-     * Also checks for foreign keys that reference this table but aren't defined in permanent_delete_actions
+     * Every foreign-key-shaped column must carry a declared deletion action.
+     *
+     * An undeclared relationship registers as 'prevent', so it fails loudly at
+     * delete time - this gate moves that failure to the db tier, before a
+     * deploy. Recognition uses DeletionRule's own resolver, so the set of
+     * columns this gate demands is exactly the set the engine registers rules
+     * for (role-named and external-ID columns that resolve to no model are
+     * exempt).
      */
-    private function validate_permanent_delete_actions() {
+    private function validate_foreign_key_declarations() {
+        if (!class_exists('DeletionRule')) {
+            require_once(PathHelper::getIncludePath('data/deletion_rule_class.php'));
+        }
         $model_class = $this->model_class;
-        $dbhelper = DbConnector::get_instance();
-        $dblink = $dbhelper->get_db_link();
-        
-        // Check if the class has permanent_delete_actions defined
-        if (!property_exists($model_class, 'permanent_delete_actions')) {
-            // No permanent_delete_actions defined - this is fine
-            return;
-        }
-        
-        $permanent_delete_actions = $model_class::$permanent_delete_actions;
+        $reflection = new ReflectionClass($model_class);
         $primary_key = $model_class::$pkey_column;
-        
-        // Check if the primary key is incorrectly included in permanent_delete_actions
-        if (is_array($permanent_delete_actions) && array_key_exists($primary_key, $permanent_delete_actions)) {
-            $this->test_fail("Primary key '$primary_key' should not be included in permanent_delete_actions. The main record deletion is handled automatically by the permanent_delete() method.");
-        } else {
-            $this->test_pass("permanent_delete_actions configuration is correct (primary key not included)");
-        }
-        
-        // Find foreign keys referencing this model's primary key
-        $found_foreign_keys = $this->find_foreign_key_references($model_class);
-        
-        // Handle case where foreign key detection failed
-        if (isset($found_foreign_keys['unknown'])) {
-            $this->test_warn("Could not check foreign key references");
-            return;
-        }
-        
-        // Check for foreign keys not defined in permanent_delete_actions
-        $missing_foreign_keys = array();
-        foreach($found_foreign_keys as $column => $table) {
-            if (!array_key_exists($column, $permanent_delete_actions)) {
-                $missing_foreign_keys[] = "$column (in table $table)";
-            }
-        }
-        
-        if (!empty($missing_foreign_keys)) {
-            $this->test_warn("Foreign keys referencing this model are not defined in permanent_delete_actions: " . implode(', ', $missing_foreign_keys) . ". These will use the default 'delete' action.");
-        }
-    }
-    
-    /**
-     * Check if a model can safely call permanent_delete
-     * Returns true if safe, false if not (and issues a warning)
-     */
-    private function can_permanent_delete($model) {
-        $model_class = get_class($model);
-        if (property_exists($model_class, 'permanent_delete_actions') && 
-            is_array($model_class::$permanent_delete_actions) && 
-            empty($model_class::$permanent_delete_actions)) {
-            // Model has empty permanent_delete_actions - check if there are foreign keys
-            $foreign_keys = $this->find_foreign_key_references($model_class);
-            return empty($foreign_keys);
-        }
-        return true;
-    }
-    
-    /**
-     * Find foreign keys that reference this model's primary key
-     * Returns array of foreign key references
-     */
-    private function find_foreign_key_references($model_class) {
-        $dbhelper = DbConnector::get_instance();
-        $dblink = $dbhelper->get_db_link();
-        
-        // Find all foreign keys that reference this table
-        $sql = 'SELECT
-            t.table_name,
-            array_agg(c.column_name::text) as columns
-        FROM
-            information_schema.tables t
-        INNER JOIN information_schema.columns c ON
-            t.table_name = c.table_name
-        WHERE
-            t.table_schema = \'public\'
-            AND c.table_schema = \'public\'
-        GROUP BY t.table_name';
-        
+        $own_prefix = $reflection->hasProperty('prefix')
+            ? $reflection->getStaticPropertyValue('prefix') : null;
         try {
-            $q = $dblink->prepare($sql);
-            $q->execute();
-            $q->setFetchMode(PDO::FETCH_OBJ);
-        } catch(PDOException $e) {
-            // If we can't check, assume there might be foreign keys (be conservative)
-            return array('unknown' => 'unknown');
+            $fk_actions = $reflection->getStaticPropertyValue('foreign_key_actions', []);
+        } catch (ReflectionException $e) {
+            $fk_actions = [];
         }
-        
-        // Find foreign keys referencing this model's primary key
-        $found_foreign_keys = array();
-        $primary_key = $model_class::$pkey_column;
-        $model_table = $model_class::$tablename;
-        
-        while ($row = $q->fetch()) {
-            $table_name = $row->table_name;
-            $columns = $row->columns;
-            $columns_array = explode(',', trim($columns, '{}'));
-            
-            foreach($columns_array as $column) {
-                if(str_contains($column, $primary_key)) {
-                    // Skip if this is the primary key in its own table
-                    if ($column === $primary_key && $table_name === $model_table) {
-                        continue;
-                    }
-                    $found_foreign_keys[$column] = $table_name;
-                }
+
+        $undeclared = array();
+        foreach ($model_class::$field_specifications as $column => $spec) {
+            if ($column === $primary_key || array_key_exists($column, $fk_actions)) {
+                continue;
+            }
+            $source = DeletionRule::getSourceTableFromColumn($column, $own_prefix);
+            if ($source !== null) {
+                $undeclared[] = "$column (references $source)";
             }
         }
-        
-        return $found_foreign_keys;
+
+        if (!empty($undeclared)) {
+            $this->test_fail("Foreign-key-shaped columns with no declared deletion action: "
+                . implode(', ', $undeclared)
+                . ". Add each to $model_class::\$foreign_key_actions - undeclared relationships register as 'prevent' and refuse the source row's deletion.");
+        } else {
+            $this->test_pass("every foreign-key-shaped column declares a deletion action");
+        }
     }
-    
+
     /**
      * Validate primary key configuration and database consistency
      * Checks that the model's expected primary key exists in the database table

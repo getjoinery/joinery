@@ -28,8 +28,6 @@ class RecoveryVerification extends SystemBase {
 	public static $api_readable = false;
 	public static $api_writable = false;
 
-	public static $permanent_delete_actions = array();
-
 	protected static $foreign_key_actions = array(
 		'rcv_usr_user_id' => array('action' => 'cascade'),
 	);

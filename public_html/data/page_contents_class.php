@@ -43,7 +43,8 @@ class PageContent extends SystemBase {
 	public static $ab_testable_fields = array('pac_body');
 
 	protected static $foreign_key_actions = [
-		'pac_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'pac_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'pac_com_component_id' => ['action' => 'prevent', 'message' => 'page content still places this component - remove it from pages first']
 	];
 
 	/**

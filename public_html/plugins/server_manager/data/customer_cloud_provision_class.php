@@ -35,7 +35,11 @@ class CustomerCloudProvision extends SystemBase {
 	public static $tablename = 'cvp_customer_cloud_provisions';
 	public static $pkey_column = 'cvp_id';
 
-	public static $permanent_delete_actions = array();
+	protected static $foreign_key_actions = array(
+		'cvp_usr_user_id'    => array('action' => 'prevent', 'message' => 'this user has cloud provisions - deprovision them first'),
+		'cvp_cca_account_id' => array('action' => 'null'),
+		'cvp_mgn_node_id'    => array('action' => 'null'),
+	);
 
 	// Admin origin needs no order item, so spec-generated test rows validate;
 	// the update test must mutate a free-form field, not a code-enforced enum.

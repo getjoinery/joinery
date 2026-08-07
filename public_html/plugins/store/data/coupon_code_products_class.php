@@ -17,7 +17,8 @@ class CouponCodeProduct extends SystemBase {	public static $prefix = 'ccp';
 	public static $pkey_column = 'ccp_coupon_code_product_id';
 
 	protected static $foreign_key_actions = [
-		'ccp_ccd_coupon_code_id' => ['action' => 'prevent', 'message' => 'Cannot delete coupon code - products exist']
+		'ccp_ccd_coupon_code_id' => ['action' => 'prevent', 'message' => 'Cannot delete coupon code - products exist'],
+		'ccp_pro_product_id' => ['action' => 'cascade']
 	];
 
 		/**

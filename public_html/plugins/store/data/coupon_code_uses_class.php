@@ -14,7 +14,9 @@ class CouponCodeUse extends SystemBase {	public static $prefix = 'ccu';
 	public static $pkey_column = 'ccu_coupon_code_use_id';
 
 	protected static $foreign_key_actions = [
-		'ccu_ord_order_id' => ['action' => 'null']
+		'ccu_ord_order_id' => ['action' => 'null'],
+		'ccu_ccd_coupon_code_id' => ['action' => 'prevent', 'message' => 'this coupon has been used on orders - it is a financial record'],
+		'ccu_odi_order_item_id' => ['action' => 'cascade']
 	];
 
 		/**

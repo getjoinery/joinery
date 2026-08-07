@@ -25,6 +25,10 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 	public static $tablename = 'usa_users_addrs';
 	public static $pkey_column = 'usa_users_addr_id';
 
+	protected static $foreign_key_actions = array(
+		'usa_usr_user_id' => array('action' => 'cascade'),
+	);
+
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
 	// under the deny-by-default owner-or-staff row scope.
 	public static $api_readable = true;
@@ -36,7 +40,6 @@ class Address extends SystemBase {	public static $prefix = 'usa';
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Mailing or billing addresses attached to user accounts.';
 	public static $ai_excluded_fields = [];
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	const PRIVACY_SHOW_ALL = 1;
 	const PRIVACY_SHOW_CLIENTS = 2;
@@ -154,7 +157,6 @@ private static function UcAddress($string) {
 		}
 	    return $string;
 	}
-
 
 	public static function IsInMetroCode($address, $metro_code) {
 		// Check to see if the given address is in one of the given area codes
@@ -474,7 +476,6 @@ private static function UcAddress($string) {
 
 		return $address_data;
 	}
-
 
 	function get_number_and_street() {
 		$exploded_street = explode(' ', $this->get('usa_address1'), 1);

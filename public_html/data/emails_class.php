@@ -27,7 +27,9 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 	public static $pkey_column = 'eml_email_id';
 
 	protected static $foreign_key_actions = [
-		'eml_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'eml_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'eml_ctt_contact_type_id' => ['action' => 'null'],
+		'eml_mlt_mailing_list_id' => ['action' => 'null']
 	];
 
 	const FORMAT_HTML = 1;

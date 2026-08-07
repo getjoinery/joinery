@@ -60,7 +60,10 @@ class EventRegistrant extends SystemBase {	public static $prefix = 'evr';
 
 	protected static $foreign_key_actions = [
 		'evr_grp_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete group - event registrations exist'],
-		'evr_ord_order_id' => ['action' => 'null']
+		'evr_ord_order_id' => ['action' => 'null'],
+		'evr_odi_order_item_id' => ['action' => 'null'],
+		'evr_evt_event_id' => ['action' => 'permanent_delete'],
+		'evr_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
 
 		/**

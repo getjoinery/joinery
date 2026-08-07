@@ -13,7 +13,6 @@ class PublicMenuException extends SystemBaseException {}
 class PublicMenu extends SystemBase {	public static $prefix = 'pmu';
 	public static $tablename = 'pmu_public_menus';
 	public static $pkey_column = 'pmu_public_menu_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 		/**
 	 * Field specifications define database column properties and validation rules

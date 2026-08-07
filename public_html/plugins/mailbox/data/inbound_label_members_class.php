@@ -42,6 +42,7 @@ class InboundLabelMember extends SystemBase {
 	protected static $foreign_key_actions = array(
 		'ilm_iem_inbound_email_message_id' => array('action' => 'cascade'),
 		'ilm_ilb_inbound_email_label_id'   => array('action' => 'cascade'),
+		'ilm_iif_inbound_imap_folder_id'   => array('action' => 'cascade'),
 	);
 
 	public static $field_specifications = array(

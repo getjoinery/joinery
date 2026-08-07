@@ -8,8 +8,12 @@
  * any real business table) directly against the real del_deletion_rules
  * table, asserting:
  *   - an explicit 'source_table' override registers against exactly that table
- *   - a column that resolves by naming convention (real 'usr' prefix) gets
- *     the default cascade action with no declaration needed
+ *   - a column that resolves by naming convention (real 'usr' prefix) with no
+ *     declared action registers as prevent, with a message naming the model
+ *     and column - an undeclared relationship must fail loudly, never guess
+ *     a destructive cascade
+ *   - an ambiguous prefix (two models claim it) resolves by matching the
+ *     entity embedded in the column name, never by discovery order
  *   - a declared $foreign_key_actions key that resolves neither by
  *     convention nor by an override returns a warning and registers nothing
  *   - an FK-shaped column with NO declaration that also fails to resolve by
@@ -23,7 +27,7 @@
  * prefixed zzfix_, never used by a real model). Run:
  *   php tests/integration/deletion_rule_registration_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 /** @joinery-test
  * name: deletion_rule_registration
@@ -129,8 +133,28 @@ try {
     ok('convention resolution via real "usr" prefix: exactly one rule registered', count($rows) === 1);
     ok('convention resolution via real "usr" prefix: resolves to usr_users',
         count($rows) === 1 && $rows[0]['del_source_table'] === 'usr_users');
-    ok('convention resolution with no declared override: default action is cascade',
-        count($rows) === 1 && $rows[0]['del_action'] === 'cascade');
+    ok('convention resolution with no declared override: registers prevent, never a guessed cascade',
+        count($rows) === 1 && $rows[0]['del_action'] === 'prevent');
+    ok('undeclared relationship: prevent message names the model and column',
+        count($rows) === 1
+        && strpos((string)$rows[0]['del_message'], 'ZZFixtureConventionModel') !== false
+        && strpos((string)$rows[0]['del_message'], 'zzc_usr_user_id') !== false);
+
+    // --- Ambiguous prefix resolves by entity match, never discovery order ---
+    // 'bkt' is claimed by both BackupTarget (bkt_backup_targets) and
+    // BookingType (bkt_booking_types). The column name embeds the entity, so
+    // each resolves to its own table; an abbreviated entity (bkt_target)
+    // matches neither and must stay unrecognized.
+    ok('ambiguous prefix: bkn_bkt_booking_type_id resolves to bkt_booking_types',
+        DeletionRule::getSourceTableFromColumn('bkn_bkt_booking_type_id', 'bkn') === 'bkt_booking_types');
+    ok('ambiguous prefix: mgn_bkt_backup_target_id resolves to bkt_backup_targets',
+        DeletionRule::getSourceTableFromColumn('mgn_bkt_backup_target_id', 'mgn') === 'bkt_backup_targets');
+    ok('ambiguous prefix: msg_cnv_conversation_id resolves to cnv_conversations, not content versions',
+        DeletionRule::getSourceTableFromColumn('msg_cnv_conversation_id', 'msg') === 'cnv_conversations');
+    ok('ambiguous prefix with abbreviated entity: bkh_bkt_target_id stays unrecognized',
+        DeletionRule::getSourceTableFromColumn('bkh_bkt_target_id', 'bkh') === null);
+    ok('unambiguous prefix: entity match is not required (usr resolves as before)',
+        DeletionRule::getSourceTableFromColumn('ord_usr_user_id', 'ord') === 'usr_users');
 
     // --- Declared override that resolves neither by convention nor source_table
     $warnings = DeletionRule::registerModelRules('ZZFixtureWarnModel');

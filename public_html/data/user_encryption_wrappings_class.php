@@ -36,6 +36,11 @@ class UserEncryptionWrapping extends SystemBase {
 	public static $tablename = 'uew_user_encryption_wrappings';
 	public static $pkey_column = 'uew_user_encryption_wrapping_id';
 
+	protected static $foreign_key_actions = [
+		'uew_uev_user_encryption_vault_id' => ['action' => 'cascade'],
+		'uew_pkc_credential_id' => ['action' => 'cascade'],
+	];
+
 	public static $api_readable = false;
 	public static $api_writable = false;
 
@@ -58,8 +63,6 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_used_time'          => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'uew_delete_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);

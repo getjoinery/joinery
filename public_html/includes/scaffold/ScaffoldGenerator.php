@@ -402,7 +402,6 @@ class ScaffoldGenerator {
             // rather than reimplementing its mapping (the whole point is fidelity).
             $updater = new DatabaseUpdater(false);
             $create  = new ReflectionMethod('DatabaseUpdater', 'createTableIfMissing');
-            $create->setAccessible(true);
             $res = $create->invoke($updater, $entity, [], $dblink);
             if (!empty($res['errors'])) {
                 foreach ($res['errors'] as $e) {
@@ -801,8 +800,8 @@ class ScaffoldGenerator {
 
     /**
      * Render an arbitrary (possibly nested) value as PHP array() source. Used
-     * for declared, verbatim blocks like $foreign_key_actions /
-     * $permanent_delete_actions. Empty arrays render inline as array().
+     * for declared, verbatim blocks like $foreign_key_actions. Empty arrays
+     * render inline as array().
      *
      * @param int $depth tab depth of the array's closing brace
      */

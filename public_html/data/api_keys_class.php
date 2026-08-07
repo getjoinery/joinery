@@ -22,7 +22,10 @@ class ApiKey extends SystemBase {	public static $prefix = 'apk';
 	}
 	public static $tablename = 'apk_api_keys';
 	public static $pkey_column = 'apk_api_key_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = array(
+		'apk_usr_user_id' => array('action' => 'permanent_delete'),
+	);
 
 	// Key types: machine keys are admin-provisioned integration credentials with
 	// slow-hashed secrets; session keys are user-minted device credentials
