@@ -713,6 +713,22 @@ impl MockServer {
                 return Err(refuse(404, "NotFound", "That folder does not exist."));
             }
         }
+        // A live folder of that name in that parent already exists. The real
+        // server refuses this (`DriveHelper::folder_name_taken`), and the mock
+        // did not — so the engine was never once exercised against the refusal,
+        // and a client that loops forever on it reached a live box before
+        // anybody noticed. Trashed siblings do not count, exactly as there.
+        if st
+            .folders
+            .values()
+            .any(|f| !f.trashed && f.parent == parent && f.name == name)
+        {
+            return Err(refuse(
+                400,
+                "ActionError",
+                "A folder with that name already exists here.",
+            ));
+        }
         st.next_folder_id += 1;
         let id = st.next_folder_id;
         Self::record(&mut st, "folder", id, "created");
@@ -1791,10 +1807,11 @@ mod tests {
         let s = server();
         s.action_idempotent("drive_folder_create", &json!({ "name": "Docs" }), "k-1")
             .unwrap();
-        s.action_idempotent("drive_folder_create", &json!({ "name": "Docs" }), "k-2")
+        // A distinct name: a duplicate is refused on its own merits, which would
+        // mask whether the key was honoured. The question here is only whether a
+        // second key does the work a second time.
+        s.action_idempotent("drive_folder_create", &json!({ "name": "Notes" }), "k-2")
             .unwrap();
-        // Two entities, one path — counted as entities, because that is what
-        // "was the work done twice?" is actually asking.
         assert_eq!(s.live_counts(), (2, 0));
     }
 

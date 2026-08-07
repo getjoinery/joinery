@@ -362,13 +362,22 @@ pub fn check_no_loss(
         .collect();
 
     if lost_live.is_empty() && lost_history.is_empty() {
+        // The historical half is vacuous on a campaign's first settle: there is
+        // no earlier observation of the server to hold it to. Said out loud for
+        // the same reason assertion 4 says it — "all 0 contents are still
+        // there" reads as a check that ran and found nothing wrong, when in fact
+        // no check ran at all.
+        let history = if previously_on_server.is_empty() {
+            "no earlier settle to hold the server to yet".to_string()
+        } else {
+            format!(
+                "all {} contents the server had taken are still there",
+                previously_on_server.len()
+            )
+        };
         return Verdict::pass(
             "no-loss",
-            format!(
-                "{} live paths findable, and all {} contents the server had taken are still there",
-                latest.len(),
-                previously_on_server.len()
-            ),
+            format!("{} live paths findable; {history}", latest.len()),
         );
     }
 
@@ -890,6 +899,21 @@ mod tests {
         let still_there =
             check_no_loss(&records, &recoverable(&["second"], &["first"], &[]), &taken);
         assert!(still_there.ok, "{}", still_there.detail);
+    }
+
+    #[test]
+    fn the_first_settle_says_it_has_no_history_to_check_rather_than_checking_none() {
+        // "all 0 contents the server had taken are still there" reads as a check
+        // that ran and found nothing wrong. On a first settle no check ran.
+        let records = vec![commit("a.txt", "aa", "write")];
+        let verdict = check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
+        assert!(verdict.ok);
+        assert!(
+            verdict.detail.contains("no earlier settle"),
+            "{}",
+            verdict.detail
+        );
+        assert!(!verdict.detail.contains("all 0"), "{}", verdict.detail);
     }
 
     #[test]

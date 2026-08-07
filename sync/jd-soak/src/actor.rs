@@ -69,6 +69,10 @@ impl Actor {
             path: root.to_path_buf(),
             source: e,
         })?;
+        // Including the workspace itself and everything above it inside the sync
+        // root. The daemon runs as a different account and has to be able to
+        // write in here.
+        make_tree_writable(root.parent().unwrap_or(root), root);
         let label = format!("{device}/{}", persona.name());
         let journal = Journal::open(journal_dir, &format!("actor-{}-{}", device, persona.name()))?;
         Ok(Actor {
@@ -153,6 +157,7 @@ impl Actor {
             FsOp::Mkdir { path } => {
                 let target = self.resolve(path)?;
                 std::fs::create_dir_all(&target)?;
+                make_tree_writable(&self.root, &target);
                 Ok(vec![Done::dir(op.kind(), path)])
             }
             FsOp::Write { path, seed, size } => {
@@ -307,9 +312,60 @@ impl Actor {
 
     fn parent_of(&self, path: &Path) -> std::io::Result<()> {
         if let Some(parent) = path.parent() {
+            let fresh = !parent.exists();
             std::fs::create_dir_all(parent)?;
+            if fresh {
+                make_tree_writable(&self.root, parent);
+            }
         }
         Ok(())
+    }
+}
+
+/// Let the daemon write inside a directory this actor just made.
+///
+/// The actors run as root and the daemon runs as the device's own account, so a
+/// directory created with root's usual umask comes out mode 755 and the daemon
+/// cannot materialize anything into it. That is not a client bug, but it reads
+/// exactly like one: downloads fail with `permission denied`, the subtree never
+/// arrives, and the tree diff reports it as the device missing what the server
+/// has. It cost a settle before anybody looked at the error text.
+///
+/// `2775` rather than `775`: the setgid bit makes everything created inside
+/// inherit the group, so the daemon keeps its access all the way down without
+/// the actor having to revisit it.
+#[cfg(unix)]
+fn make_group_writable(dir: &Path) {
+    use std::os::unix::fs::PermissionsExt;
+    // Best effort. A directory somebody else owns cannot be chmod'ed, and
+    // failing the actor over that would stop the storm for something the next
+    // settle will report perfectly clearly anyway.
+    let _ = std::fs::set_permissions(dir, std::fs::Permissions::from_mode(0o2775));
+}
+
+#[cfg(not(unix))]
+fn make_group_writable(_dir: &Path) {}
+
+/// The same, for every level from `base` down to `target`.
+///
+/// `create_dir_all` makes intermediate directories too, and chmod'ing only the
+/// deepest one leaves a wall higher up: the daemon cannot enter a directory it
+/// cannot write, so one missed level strands everything below it. That is
+/// exactly how the first version of this fix still failed — the actor's own
+/// workspace directory was created straight from `create_dir_all` and never
+/// touched, so every persona's whole tree was unreachable.
+fn make_tree_writable(base: &Path, target: &Path) {
+    let Ok(rest) = target.strip_prefix(base) else {
+        make_group_writable(target);
+        return;
+    };
+    let mut at = base.to_path_buf();
+    make_group_writable(&at);
+    for part in rest.iter() {
+        at.push(part);
+        if at.is_dir() {
+            make_group_writable(&at);
+        }
     }
 }
 

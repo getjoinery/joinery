@@ -433,7 +433,11 @@ mod tests {
             .action("drive_folder_create", json!({ "name": "Docs" }))
             .is_err());
         n.set_faults(NetFaults::none());
-        n.action("drive_folder_create", json!({ "name": "Docs" }))
+        // A different name on the retry, because the server refuses a duplicate
+        // and would otherwise hide the very thing being demonstrated behind a
+        // name collision. What is under test is that the work happened twice,
+        // not what it was called.
+        n.action("drive_folder_create", json!({ "name": "Docs (retry)" }))
             .unwrap();
         assert_eq!(n.server().live_counts(), (2, 0), "two folders — the bug");
     }
