@@ -576,17 +576,8 @@ private static function UcName($string) {
 		//$user_data['EMAIL_UPDATES'] = self::EMAIL_UPDATES;
 		//$user_data['EMAIL_USER_FEEDBACK'] = self::EMAIL_USER_FEEDBACK;
 		
-		/*
-		$last_recurring_email_date = RecurringMailer::GetDaysSinceLastEmail(
-			$this->key, array('craigslist_reminder_email', 'request_expiry'));
-			*/
+		$user_data['usr_days_since_last_email'] = $user_data['usr_day_since_register'];
 
-		if ($last_recurring_email_date) {
-			$user_data['usr_days_since_last_email'] = intval(time() / 86400) - intval(date_create($last_recurring_email_date)->format('U') / 86400);
-		} else {
-			$user_data['usr_days_since_last_email'] = $user_data['usr_day_since_register'];
-		}
-		
 		//$user_data['usr_num_upsell_emails_sent'] = count(RecurringMailer::GetSentEmails($this->key, 'put'));
 
 		// Output the top 3 progress items for this user

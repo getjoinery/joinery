@@ -529,6 +529,14 @@
             "icon": "bell"
         },
         {
+            "slug": "core-settings-calendar",
+            "title": "Calendar",
+            "url": "/profile/calendar_settings",
+            "order": 65,
+            "permission": 0,
+            "icon": "calendar"
+        },
+        {
             "slug": "core-settings-security",
             "title": "Security",
             "url": "/profile/security",

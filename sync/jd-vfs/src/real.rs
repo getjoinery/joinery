@@ -456,6 +456,21 @@ impl OsSpoolFile {
             }
         }
 
+        // No agreement means the engine has never seen whatever is at this
+        // path: it is the user's, and this is the only copy of it. The caller
+        // moves such a file aside before getting here, but "the caller checked"
+        // is not a guarantee, and the cost of being wrong is the one thing this
+        // program may not do. Refuse and let the caller decide again.
+        //
+        // Still a check followed by a rename rather than one atomic step. On
+        // Linux `renameat2(RENAME_NOREPLACE)` would close the remaining
+        // instruction-width window; it is not in `std` and has no portable
+        // equivalent, so it is deliberately left as the next thing to do here
+        // rather than reached for with a dependency.
+        if expect.is_none() && target.symlink_metadata().is_ok() {
+            return Err(VfsError::AlreadyExists(target.to_path_buf()));
+        }
+
         if let Some(parent) = target.parent() {
             fs::create_dir_all(parent).map_err(|e| io_err(parent, e))?;
         }
@@ -629,6 +644,26 @@ mod tests {
         spool.commit(&target, Some(seen)).unwrap();
 
         assert_eq!(fs::read(&target).unwrap(), b"new content");
+    }
+
+    #[test]
+    fn committing_with_no_agreement_refuses_a_file_that_is_already_there() {
+        // No agreement means the engine has never seen whatever is at this
+        // path, so it belongs to the user and nothing else knows about it. The
+        // caller checks first and moves it aside, but between that check and
+        // this rename the user can save a file — and under a storm they do.
+        // Landing on top of it would destroy the only copy in existence.
+        let d = TempDir::new("guard-none");
+        let v = vfs(&d);
+        let target = v.root().unwrap().join("theirs.txt");
+
+        let mut spool = v.spool(&target).unwrap();
+        spool.write_all(b"the download").unwrap();
+        fs::write(&target, b"something the user just saved").unwrap();
+        let err = spool.commit(&target, None).unwrap_err();
+
+        assert!(matches!(err, VfsError::AlreadyExists(_)));
+        assert_eq!(fs::read(&target).unwrap(), b"something the user just saved");
     }
 
     #[test]

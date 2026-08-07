@@ -1239,3 +1239,13 @@
 	$migration['migration_file'] = 'backfill_drive_protection_level.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Calendar reminder + summary email templates for the CalendarEmails
+	// scheduled task. Idempotent: inserts only when the name is absent, so an
+	// admin-edited template is never overwritten.
+	$migration = array();
+	$migration['database_version'] = '168';
+	$migration['test'] = "SELECT count(1) as count FROM emt_email_templates WHERE emt_name = 'calendar_reminder'";
+	$migration['migration_file'] = 'migration_calendar_email_templates.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

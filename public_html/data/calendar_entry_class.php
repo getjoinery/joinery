@@ -45,6 +45,11 @@ class CalendarEntry extends SystemBase {
 		// AI/pipeline-authored entries land tentative; every human-authored path
 		// (the calendar form, .ics import) keeps the confirmed default.
 		'cal_status' => array('type'=>'varchar(12)', 'is_nullable'=>false, 'default'=>'confirmed'),
+		// Reminder email override: NULL = inherit the owner's default
+		// (cpr_reminder_default_minutes), 0 = no reminder for this entry,
+		// else minutes before start (60|30|15|5). On a recurring parent it
+		// applies to every occurrence. Consumed by CalendarEmailEngine.
+		'cal_reminder_minutes' => array('type'=>'int4', 'is_nullable'=>true),
 		'cal_visibility' => array('type'=>'varchar(16)', 'default'=>'details'),
 		'cal_type' => array('type'=>'varchar(16)', 'default'=>'personal'),
 		'cal_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -618,6 +623,15 @@ class MultiCalendarEntry extends SystemMultiBase {
 		}
 		if (!empty($this->options['non_recurring_only'])) {
 			$filters['cal_recurrence_type'] = "IS NULL";
+		}
+		// Window lower bound (reminder scans). Parenthesized so it keys separately
+		// from start_utc_before's plain cal_start_utc condition. Value must be a
+		// UTC timestamp from server code — format validated, never user input.
+		if (isset($this->options['start_utc_gte'])) {
+			$ts = $this->options['start_utc_gte'];
+			if (preg_match('/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})?$/', $ts)) {
+				$filters['(cal_start_utc'] = ">= '" . str_replace("'", '', $ts) . "')";
+			}
 		}
 		// Recurring-parent window pre-filter: parent must start before window end.
 		// Value must be a UTC timestamp from server code — format validated, never user input.

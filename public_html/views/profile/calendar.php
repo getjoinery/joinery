@@ -210,6 +210,19 @@ $formwriter->checkboxinput('entry_all_day', 'All day', [
 $formwriter->dropinput('entry_start', 'Start', ['options' => $time_options, 'value' => $e_start]);
 $formwriter->dropinput('entry_end',   'End',   ['options' => $time_options, 'value' => $e_end]);
 $formwriter->checkboxinput('entry_blocks', 'Block this time (removes it from your booking availability)', ['value' => $is_edit ? (bool)$display_entry->get('cal_blocks_availability') : true]);
+
+// Reminder override. '' = inherit the member's default (set on
+// /profile/calendar_settings); the first option's label shows what that
+// default currently is, so the choice is legible without leaving the form.
+$lead_labels = [60 => '1 hour before', 30 => '30 minutes before', 15 => '15 minutes before', 5 => '5 minutes before'];
+$default_label = ($reminder_default_minutes > 0 && isset($lead_labels[$reminder_default_minutes]))
+    ? 'Use my default (' . strtolower($lead_labels[$reminder_default_minutes]) . ')'
+    : 'Use my default (no reminder)';
+$cur_reminder = $is_edit ? $display_entry->get('cal_reminder_minutes') : null;
+$formwriter->dropinput('entry_reminder', 'Reminder', [
+    'options' => ['' => $default_label, '0' => 'No reminder', '60' => '1 hour before', '30' => '30 minutes before', '15' => '15 minutes before', '5' => '5 minutes before'],
+    'value'   => ($cur_reminder === null || $cur_reminder === '') ? '' : (string)(int)$cur_reminder,
+]);
 ?>
         <?php
         // ── Recurrence: real FormWriter inputs, show/hide driven entirely by

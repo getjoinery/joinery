@@ -701,6 +701,58 @@ pass plans afresh and nothing about it is anybody's problem). Where an overtaken
 operation ran into something worth knowing about, that thing reports itself: a
 scenario pins the conflict wording so this cannot quietly become silence.
 
+## The first long campaign — six cycles, and three things only length reveals
+
+**A memory leak, and the assertion built for it finally ran.** Leak-watch needs
+six settles to call a trend and had never once had them: every campaign before
+this died in its first or second. Device-a's resident set rose at every single
+settle — 16852 → 17904 → 17936 → 19900 → 19912 → 20140 KB. Monotonic across
+six samples is the shape the assertion exists to catch.
+
+**The client degrades over a campaign rather than reaching a steady state.**
+Items needing attention per settle: 26 → 56 → 95 → 141 → 165 → 189. A single
+cycle cannot distinguish "this client has a bug" from "this client accumulates
+one"; six can, and the answer is that it accumulates.
+
+**One file lost identically in three consecutive segments**
+(`Sub 5 (13)/33-文件.txt`, sha `a7bacb708f44`), which makes it the first loss
+stable enough to chase directly rather than statistically.
+
+### A rig-configuration false alarm, fixed
+
+Segments 2 and 3 reported *"12 (then 19) contents the server had taken have
+disappeared from it"* — the oracle's historical half, and much more alarming
+than a local loss because it accuses the server of dropping data it had
+accepted.
+
+It was the rig. The soak tier set `drive_versioning_depth = 50`, so the server
+prunes old versions exactly as designed, while the oracle holds it to *"once it
+has taken a content it still has it."* Six cycles of the messy-human persona
+overwriting the same files pushed them past fifty versions and the server did
+the right thing. Depth is now effectively unlimited on soak accounts, because
+the premise has to be made true rather than the oracle taught about pruning —
+the server is the oracle, and an oracle with an exception in it is not one.
+
+### The convergence assertion was too weak, and is now stronger
+
+Chasing why `audited-green` failed in every run while `convergence` passed:
+`is_settled()` asked the daemon's op queue and the indicator, and nothing else.
+An entry can sit in `pending_upload` with **no operation queued for it** — the
+silent stall this whole rig exists to find — and that read as settled. Run 16
+passed convergence holding eleven pending downloads and eight pending uploads;
+only the tree comparison noticed.
+
+Assertion 5 does not cover it either, and correctly so: it holds the daemon to
+explaining `unsyncable` and `pending_key`, on the reasoning that a draining
+queue should not demand an alert per file. So the gap is closed in
+`is_settled()` instead, which now also requires that no entry is in flight —
+`synced` and `out_of_scope` are agreement, `unsyncable` and `pending_key` are
+legitimate resting places, everything else is unfinished work.
+
+**This makes earlier convergence passes untrustworthy in hindsight**, runs 15
+through 17 included. It is the right direction: the assertion was calling
+something settled that was not.
+
 ## What has not been demonstrated yet
 
 **A green cycle.** Runs 1 and 2 failed for hardware reasons (the storm

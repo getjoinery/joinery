@@ -1,7 +1,13 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.2.0
+ * @version 1.2.1
+ * @changelog 1.2.1 - A submit event another listener already cancelled is
+ *   left alone. The re-dispatch exists so other listeners can veto a
+ *   validated submission; without this check a page handler that
+ *   preventDefault()s and takes over (e.g. posting via the API) was
+ *   validated-then-navigated anyway, unless it also knew to neuter
+ *   form.submit. Cancelling the original submission now means what it says.
  * @changelog 1.2.0 - A failed submit attempt fills the form's error summary
  *   (.jy-error-summary, emitted by FormWriter before the first submit button;
  *   created here when absent): one linked item per invalid field, focus moves
@@ -90,6 +96,14 @@ console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bo
                 if (this.form.dataset.jyValidated === '1') {
                     delete this.form.dataset.jyValidated;
                     if (this.debug) console.log('→ Validated re-dispatch, passing through');
+                    return;
+                }
+
+                // An earlier listener already cancelled this submission and
+                // owns it (API-posting pages preventDefault and take over).
+                // Validating and re-dispatching here would navigate over it.
+                if (e.defaultPrevented) {
+                    if (this.debug) console.log('→ Submission cancelled by another listener; standing aside');
                     return;
                 }
 

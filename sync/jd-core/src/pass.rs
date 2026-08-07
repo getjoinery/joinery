@@ -98,7 +98,42 @@ pub fn run_pass(
     //
     // First, because everything below finds entries by walking down from the
     // root and so cannot see these at all.
-    sweep_stranded_entries(env)?;
+    if sweep_stranded_entries(env)? > 0 {
+        // An entry the server knows about, with no way back to the root, is a
+        // hole in this store's picture rather than a wrong entry: the folder it
+        // sits in still exists, we have just lost our record of it. Re-deriving
+        // from the index is what a feed reset does and it is the right answer
+        // here too.
+        //
+        // A soak run spent three campaigns on this. A folder renamed while the
+        // files inside it were still uploading left the old folder entry with a
+        // missing ancestor, and the file beneath it retried an upload into a
+        // path that could not be resolved — forever, silently, because the walk
+        // from the root could not reach it to notice.
+        for (id, state) in walk_index(env)? {
+            absorb_remote(env, id, &state)?;
+        }
+        out.reset = true;
+        let left = sweep_stranded_entries(env)?;
+        if left > 0 {
+            // The server's index does not have the ancestor either. Say so and
+            // leave it: the walk above will run again next pass, which is waste
+            // but only waste. Discarding the records instead was tried, and the
+            // soak run that followed lost seven files where the run before it
+            // had lost none — the records are the only thing tying a local file
+            // to what the server already holds, and throwing them away to stop
+            // a repeated index walk trades a real risk for a cost.
+            env.store.raise_issue(
+                None,
+                "store_inconsistent",
+                &format!(
+                    "{left} tracked item(s) sit in a folder this device has lost its record of, \
+                     and the server's index does not have it either"
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        }
+    }
 
     // ---- one directory, one entry -------------------------------------------
     //
@@ -221,7 +256,7 @@ pub fn run_pass(
                 // Belt and braces: the sweep at the top of the pass has already
                 // removed anything with no way back to the root, and this list
                 // was walked from the root anyway.
-                env.store.delete_provisional_subtree(entry.id)?;
+                env.store.delete_subtree(entry.id)?;
                 continue;
             };
             let gone = match entry.id.entity_type {
@@ -233,7 +268,7 @@ pub fn run_pass(
                 // There is nothing to tell anyone about — and for a folder that
                 // means everything inside it too, or its children are left
                 // pointing at a parent that is not there any more.
-                env.store.delete_provisional_subtree(entry.id)?;
+                env.store.delete_subtree(entry.id)?;
                 continue;
             }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
@@ -998,17 +1033,21 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
         .filter(|e| e.id.entity_type == EntityType::Folder)
         .map(|e| e.id.server_id)
         .collect();
-    let mut swept = 0;
+    let mut real_stranded = 0;
     for entry in &all {
         let Some(parent) = entry.local_placement().parent else {
             continue;
         };
-        if folders.contains(&parent) || !entry.id.is_provisional() {
+        if folders.contains(&parent) {
             continue;
         }
-        swept += env.store.delete_provisional_subtree(entry.id)?;
+        if entry.id.is_provisional() {
+            env.store.delete_subtree(entry.id)?;
+        } else {
+            real_stranded += 1;
+        }
     }
-    Ok(swept)
+    Ok(real_stranded)
 }
 
 /// Path → folder id, for every folder the store tracks.
