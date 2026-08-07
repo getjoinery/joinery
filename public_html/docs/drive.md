@@ -132,7 +132,7 @@ model of its own:
 
 | Model | Table | Role |
 |-------|-------|------|
-| `Folder` | `fol_folders` | A node in a user's tree. Sibling-name uniqueness among live rows is a partial unique index on `(owner, COALESCE(parent,0), name) WHERE delete_time IS NULL`. |
+| `Folder` | `fol_folders` | A node in a user's tree. Sibling-name uniqueness among live rows is a partial unique index on `(owner, COALESCE(parent,0), name) WHERE delete_time IS NULL`. Save folders through `DriveHelper::save_folder_unless_name_taken()` — see below. |
 | `DriveUsage` | `dru_drive_usage` | One recomputed byte total per user (the quota gate + storage meter). |
 | `FileVersion` | `fvr_file_versions` | Prior content of a file — one row pins one historical blob. |
 | `FileAccessGrant` | `fga_file_access_grants` | A share of a file/folder to another member (`viewer` / `editor`). |
@@ -143,6 +143,16 @@ model of its own:
 Access and tree logic lives in `includes/DriveHelper.php`; the verbs are `drive_*`
 API actions (`logic/drive_*_logic.php`, each with a `_logic_descriptor()`), which
 page JavaScript (`assets/js/drive.js`) calls with the browser-session credential.
+
+**Two folders may not share a name under one parent, and the index is what
+enforces it.** `DriveHelper::folder_name_taken()` is a fast path that gives a
+clean answer before any work is done, but two requests can both pass it and both
+reach the insert — so every create, rename, move and restore saves through
+`DriveHelper::save_folder_unless_name_taken()`. On a uniqueness refusal it asks
+the same question again and, if the name is now taken, returns `false` for the
+caller to answer exactly as it would have a moment earlier; anything else is
+rethrown. Sync clients depend on this: a name that is taken is something they
+know how to resolve, while a raw database error is a failure they retry forever.
 
 ## Protection levels
 

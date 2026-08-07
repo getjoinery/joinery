@@ -62,7 +62,9 @@ function drive_rename_logic(array $input): LogicResult {
 			return LogicResult::error('A folder with that name already exists here.');
 		}
 		$entity->set('fol_name', $name);
-		$entity->save();
+		if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+			return LogicResult::error('A folder with that name already exists here.');
+		}
 		$owner = $owner_id;
 	} elseif ($is_encrypted_file) {
 		$entity->set('fil_encrypted_metadata', $enc_metadata);

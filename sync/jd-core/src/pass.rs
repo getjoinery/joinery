@@ -94,6 +94,12 @@ pub fn run_pass(
         absorb_remote(env, *id, state)?;
     }
 
+    // ---- nothing left with no way back to the root --------------------------
+    //
+    // First, because everything below finds entries by walking down from the
+    // root and so cannot see these at all.
+    sweep_stranded_entries(env)?;
+
     // ---- one directory, one entry -------------------------------------------
     //
     // Before naming, because naming is what turns this into a deadlock: it sees
@@ -212,6 +218,10 @@ pub fn run_pass(
         // download of a file that exists nowhere but this disk.
         if entry.id.is_provisional() {
             let Some(path) = relative_path(env, &entry)? else {
+                // Belt and braces: the sweep at the top of the pass has already
+                // removed anything with no way back to the root, and this list
+                // was walked from the root anyway.
+                env.store.delete_provisional_subtree(entry.id)?;
                 continue;
             };
             let gone = match entry.id.entity_type {
@@ -220,8 +230,10 @@ pub fn run_pass(
             };
             if gone {
                 // Created and removed again before it ever reached the server.
-                // There is nothing to tell anyone about.
-                env.store.delete_entry(entry.id)?;
+                // There is nothing to tell anyone about — and for a folder that
+                // means everything inside it too, or its children are left
+                // pointing at a parent that is not there any more.
+                env.store.delete_provisional_subtree(entry.id)?;
                 continue;
             }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
@@ -935,6 +947,16 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
 
 /// Every entry the store holds, walked from the root down so parents come
 /// before children.
+///
+/// Deliberately a walk and not a read of the table. Callers here work in paths,
+/// and an entry with no way back to the root has no path — handing them one
+/// makes it a sibling of everything else at the root, and naming then refuses
+/// the lot of them for clashing with each other. That is not a hypothetical: a
+/// soak run with this reading the table came back with twelve hundred
+/// unsyncable entries and nothing synced at all.
+///
+/// What the walk cannot see is swept up separately, before any of this runs —
+/// see [`sweep_stranded_entries`].
 pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
     let mut out = Vec::new();
     let mut queue: Vec<Option<i64>> = vec![None];
@@ -952,6 +974,41 @@ pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
         }
     }
     Ok(out)
+}
+
+/// Drop entries that name a parent the store does not have.
+///
+/// Everything else in a pass works in paths, and a path is built by walking
+/// parents up to the root. An entry whose parent has gone has no path, so no
+/// work is ever planned for it and nothing is ever raised about it — and
+/// because the rest of the pass finds entries by walking down from the root, it
+/// cannot even be reached to be noticed. A soak run ended with thirty-two files
+/// exactly there: `pending_upload` forever, on a device reporting itself busy
+/// rather than broken.
+///
+/// Only provisional entries are removed, and removing them is safe by
+/// definition: the server has never seen them, so there is nothing to preserve
+/// and nobody to tell. A stranded entry the server *does* know about would be a
+/// different problem needing a different answer, and there is no evidence of one
+/// — the sim asserts after every scenario that neither kind exists.
+fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
+    let all = env.store.every_entry()?;
+    let folders: std::collections::HashSet<i64> = all
+        .iter()
+        .filter(|e| e.id.entity_type == EntityType::Folder)
+        .map(|e| e.id.server_id)
+        .collect();
+    let mut swept = 0;
+    for entry in &all {
+        let Some(parent) = entry.local_placement().parent else {
+            continue;
+        };
+        if folders.contains(&parent) || !entry.id.is_provisional() {
+            continue;
+        }
+        swept += env.store.delete_provisional_subtree(entry.id)?;
+    }
+    Ok(swept)
 }
 
 /// Path → folder id, for every folder the store tracks.

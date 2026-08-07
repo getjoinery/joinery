@@ -226,7 +226,7 @@ fn describe(raw: StoredIssue) -> Issue {
         "pending_key" => {
             "Waiting for the owner to grant this device a key for an encrypted folder.".into()
         }
-        _ => raw.detail.clone(),
+        _ => plain_enough(&raw.detail),
     };
     Issue {
         id: raw.issue_id,
@@ -235,6 +235,22 @@ fn describe(raw: StoredIssue) -> Issue {
         summary,
         created_at: raw.created_at,
     }
+}
+
+/// The last line of defence before a server's own words reach a person.
+///
+/// Most of what a server sends back is written for the user and passes through
+/// untouched. Some of it is not: a soak run caught a folder create coming back
+/// as a Postgres unique-violation, constraint name and all, because a
+/// check-then-insert lost a race. That was fixed at the server, but the client
+/// talks to servers of every version and nobody should ever be shown a
+/// SQLSTATE. The raw text stays in `detail`, where it is still there to
+/// diagnose with.
+fn plain_enough(detail: &str) -> String {
+    if detail.contains("SQLSTATE[") || detail.contains("PDOException") {
+        return "The server could not carry this out and did not say why in terms worth showing. It will be tried again.".into();
+    }
+    detail.to_string()
 }
 
 fn unsyncable_summary(detail: &str) -> String {
@@ -516,6 +532,38 @@ mod tests {
         assert!(name.contains("Shorten"));
         assert!(path.contains("shallower"));
         assert_ne!(name, path);
+    }
+
+    #[test]
+    fn a_database_error_from_the_server_is_not_shown_to_the_user() {
+        // A soak run caught a folder create returning a Postgres unique
+        // violation verbatim. Fixed at that server, but the client meets
+        // servers of every version and a SQLSTATE is never a sentence.
+        let issue = describe(StoredIssue {
+            issue_id: 1,
+            entity: None,
+            kind: "withdrawn".into(),
+            detail: "create_remote_folder was not carried out: Database INSERT failed on table 'fol_folders' - SQLSTATE[23505]: Unique violation: 7 ERROR:  duplicate key value".into(),
+            created_at: 0,
+            dismissed: false,
+        });
+        assert!(!issue.summary.contains("SQLSTATE"));
+        assert!(!issue.summary.contains("fol_folders"));
+        // Still diagnosable: the raw text is kept where an operator looks.
+        assert!(issue.detail.contains("SQLSTATE"));
+    }
+
+    #[test]
+    fn a_server_message_written_for_a_person_is_left_alone() {
+        let issue = describe(StoredIssue {
+            issue_id: 1,
+            entity: None,
+            kind: "withdrawn".into(),
+            detail: "create_remote_folder was not carried out: A folder with that name already exists here.".into(),
+            created_at: 0,
+            dismissed: false,
+        });
+        assert!(issue.summary.contains("already exists here"));
     }
 
     #[test]

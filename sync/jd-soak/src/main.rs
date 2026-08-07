@@ -44,7 +44,29 @@ usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
 An ordinary account on the soak instance, from JD_SOAK_ACCOUNT (its sign-in
 identifier) and JD_SOAK_PASSWORD. Nothing here sends mail.";
 
+/// Let the group write everything this process creates.
+///
+/// The actors run as one account and each daemon as its own, so a file or
+/// directory the group cannot write is a wall between them — the daemon fails
+/// its download with `permission denied` and the settle reports the subtree as
+/// missing, which reads exactly like a client losing data. The default `022`
+/// builds that wall on every single create, and this rig creates constantly.
+///
+/// Set here rather than at each creation site because enumerating the creation
+/// sites is what failed twice: `create_dir_all` intermediates and ordinary file
+/// writes were both missed, and a walk that chmods afterwards can only fix
+/// directories it knows to visit. A umask cannot be forgotten.
+#[cfg(unix)]
+fn share_with_the_daemon_account() {
+    // Returns the previous mask and cannot fail.
+    unsafe { libc::umask(0o002) };
+}
+
+#[cfg(not(unix))]
+fn share_with_the_daemon_account() {}
+
 fn main() -> ExitCode {
+    share_with_the_daemon_account();
     let argv: Vec<String> = std::env::args().skip(1).collect();
     let (command, rest) = match argv.split_first() {
         Some((c, r)) => (c.as_str(), r.to_vec()),

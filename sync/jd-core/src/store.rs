@@ -451,12 +451,102 @@ impl Store {
         }
     }
 
+    /// Delete a provisional entry and everything underneath it.
+    ///
+    /// A provisional entry is one the server has never seen. When the directory
+    /// it stands for is removed from the disk before its create ever lands, the
+    /// entry is nothing at all — and so is every entry inside it, since nothing
+    /// under a folder the server has never heard of can have reached the server
+    /// either.
+    ///
+    /// Deleting only the folder is what a soak run caught: thirty-two files
+    /// left pointing at a parent that no longer existed. An entry whose path
+    /// cannot be resolved is skipped by every later pass, so those files sat in
+    /// `pending_upload` forever with no operation queued and nothing raised —
+    /// no work, no issue, no way to notice. Silence is the one failure this
+    /// client is not allowed.
+    ///
+    /// Returns how many entries went.
+    pub fn delete_provisional_subtree(&self, root: EntityId) -> StoreResult<usize> {
+        let mut doomed = vec![root];
+        let mut frontier = vec![root.server_id];
+        let mut guard = 0;
+        while let Some(parent) = frontier.pop() {
+            guard += 1;
+            if guard > 100_000 {
+                break; // a cycle in the tree is a bug elsewhere, not a reason to hang
+            }
+            for child in self.children_of(Some(parent))? {
+                doomed.push(child.id);
+                if child.id.entity_type == EntityType::Folder {
+                    frontier.push(child.id.server_id);
+                }
+            }
+        }
+
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            for id in &doomed {
+                let t = id.entity_type.to_string();
+                self.conn.execute(
+                    "DELETE FROM ops WHERE entity_type = ?1 AND server_id = ?2",
+                    params![t, id.server_id],
+                )?;
+                self.conn.execute(
+                    "DELETE FROM local_index WHERE entity_type = ?1 AND server_id = ?2",
+                    params![t, id.server_id],
+                )?;
+                self.conn.execute(
+                    "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
+                    params![t, id.server_id],
+                )?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(doomed.len())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
     pub fn delete_entry(&self, id: EntityId) -> StoreResult<()> {
         self.conn.execute(
             "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
             params![id.entity_type.to_string(), id.server_id],
         )?;
         Ok(())
+    }
+
+    /// Every entry there is, reachable from the root or not.
+    ///
+    /// A walk that starts at the root and follows children cannot see an entry
+    /// whose parent has gone: it is not skipped, it is unreachable. So an
+    /// orphan is invisible to the thing that would otherwise notice it, which is
+    /// how a soak run ended with thirty-two files stalled and nothing anywhere
+    /// saying so. Reading the table is the only way to be sure a pass has
+    /// considered everything it holds.
+    pub fn every_entry(&self) -> StoreResult<Vec<Entry>> {
+        let sql = "SELECT entity_type, server_id, parent_folder_id, remote_name, local_name,
+                          is_encrypted, remote_content_sha256, remote_size, remote_modified_time,
+                          head_change_id, remote_deleted, synced_content_sha256, synced_size, synced_parent_id,
+                          synced_name, synced_fp_size, synced_fp_mtime_ns, synced_fp_file_id,
+                          local_status, unsyncable_reason, wrapped_file_key,
+                          content_id, synced_remote_sha256, synced_remote_size
+                     FROM entries
+                    ORDER BY entity_type, server_id";
+        let mut stmt = self.conn.prepare(sql)?;
+        let rows = stmt.query_map([], row_to_entry)?;
+        let mut out = Vec::new();
+        for r in rows {
+            out.push(r?);
+        }
+        Ok(out)
     }
 
     /// Children of a folder (`None` for the drive root).
@@ -794,6 +884,20 @@ impl Store {
 
     // ---- issues ------------------------------------------------------------
 
+    /// Record something the user needs to know about, once.
+    ///
+    /// An issue is a *thing that needs attention*, not an event, so the same
+    /// thing said again is the same thing. A pass re-reaches the same
+    /// conclusion about the same entity every time it runs, and without this a
+    /// single stuck file becomes thousands of identical rows: a soak run
+    /// finished with 1,152 issues on a device that had three problems. That is
+    /// not a display nuisance — it is the difference between a person seeing
+    /// their three problems and giving up on the list.
+    ///
+    /// Matching is on the exact wording as well as the entity and kind, so a
+    /// changed detail is a changed situation and does get through. A dismissed
+    /// issue is not matched: if the user waved it away and it happened again,
+    /// they should hear about it again.
     pub fn raise_issue(
         &self,
         entity: Option<EntityId>,
@@ -801,16 +905,27 @@ impl Store {
         detail: &str,
         now: i64,
     ) -> StoreResult<i64> {
+        let etype = entity.map(|e| e.entity_type.to_string());
+        let sid = entity.map(|e| e.server_id);
+        let existing: Option<i64> = self
+            .conn
+            .query_row(
+                "SELECT issue_id FROM issues
+                  WHERE dismissed = 0
+                    AND entity_type IS ?1 AND server_id IS ?2
+                    AND kind = ?3 AND detail = ?4
+                  LIMIT 1",
+                params![etype, sid, kind, detail],
+                |r| r.get(0),
+            )
+            .optional()?;
+        if let Some(id) = existing {
+            return Ok(id);
+        }
         self.conn.execute(
             "INSERT INTO issues (entity_type, server_id, kind, detail, created_at)
              VALUES (?1, ?2, ?3, ?4, ?5)",
-            params![
-                entity.map(|e| e.entity_type.to_string()),
-                entity.map(|e| e.server_id),
-                kind,
-                detail,
-                now
-            ],
+            params![etype, sid, kind, detail, now],
         )?;
         Ok(self.conn.last_insert_rowid())
     }
@@ -1322,6 +1437,46 @@ mod tests {
         let open = s.open_issues().unwrap();
         assert_eq!(open.len(), 1);
         assert_eq!(open[0].kind, "quota");
+    }
+
+    #[test]
+    fn the_same_problem_said_twice_is_still_one_problem() {
+        // A pass re-reaches the same conclusion about the same entity every
+        // time it runs. A soak run finished with 1,152 issues on a device that
+        // had three problems, 1,166 of them one stuck file saying the same
+        // sentence over and over.
+        let s = Store::open_in_memory().unwrap();
+        let first = s
+            .raise_issue(Some(EntityId::file(1)), "reconcile", "the same thing", 1000)
+            .unwrap();
+        for t in 1..500 {
+            let again = s
+                .raise_issue(
+                    Some(EntityId::file(1)),
+                    "reconcile",
+                    "the same thing",
+                    1000 + t,
+                )
+                .unwrap();
+            assert_eq!(again, first, "it is the same issue, not a new one");
+        }
+        assert_eq!(s.open_issues().unwrap().len(), 1);
+
+        // A different situation about the same file still gets through.
+        s.raise_issue(Some(EntityId::file(1)), "reconcile", "something else", 2000)
+            .unwrap();
+        // As does the same sentence about a different file.
+        s.raise_issue(Some(EntityId::file(2)), "reconcile", "the same thing", 2000)
+            .unwrap();
+        assert_eq!(s.open_issues().unwrap().len(), 3);
+
+        // And waving one away means the next occurrence is heard again — it
+        // happened a second time, which is news.
+        s.dismiss_issue(first).unwrap();
+        assert_eq!(s.open_issues().unwrap().len(), 2);
+        s.raise_issue(Some(EntityId::file(1)), "reconcile", "the same thing", 3000)
+            .unwrap();
+        assert_eq!(s.open_issues().unwrap().len(), 3);
     }
 
     #[test]

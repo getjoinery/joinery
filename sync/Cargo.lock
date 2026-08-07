@@ -1437,6 +1437,7 @@ dependencies = [
  "jd-platform",
  "jd-proto",
  "jd-vfs",
+ "libc",
  "serde",
  "serde_json",
  "sha2",

@@ -295,14 +295,20 @@ fn a_download_onto_a_file_that_changed_underneath_is_refused() {
         .user_write("shared.txt", b"edited while we were not looking");
 
     let report = do_one(&device, id, Action::Download);
-    assert_eq!(report.withdrawn, 1);
+    assert_eq!(report.overtaken, 1);
     assert_eq!(
         device.fs.peek("shared.txt").unwrap(),
         b"edited while we were not looking",
         "the local edit survived"
     );
+    // Nothing is raised here. What the user needs to hear about is the conflict
+    // this ran into, and that speaks for itself in its own words — see
+    // a_conflict_is_reported_by_the_conflict_and_not_by_the_download_that_hit_it.
     let issues = device.store.open_issues().unwrap();
-    assert_eq!(issues.len(), 1, "and the user is told about it");
+    assert!(
+        issues.is_empty(),
+        "the refused download is not the story: {issues:?}"
+    );
 }
 
 #[test]
@@ -462,7 +468,7 @@ fn an_interrupted_op_that_did_not_land_goes_back_in_the_queue() {
 }
 
 #[test]
-fn an_op_whose_premise_is_gone_is_withdrawn_rather_than_retried_forever() {
+fn an_op_whose_premise_is_gone_is_dropped_rather_than_retried_forever() {
     // The file was deleted while the op sat in the queue. Retrying it until the
     // heat death of the universe would leave the client permanently busy and
     // permanently useless.
@@ -483,12 +489,15 @@ fn an_op_whose_premise_is_gone_is_withdrawn_rather_than_retried_forever() {
             },
         },
     );
-    assert_eq!(report.withdrawn, 1);
+    assert_eq!(report.overtaken, 1);
     assert!(
         device.store.queued_ops().unwrap().is_empty(),
-        "the intent is withdrawn, not left to spin"
+        "the intent is dropped, not left to spin"
     );
-    assert_eq!(device.store.open_issues().unwrap().len(), 1);
+    assert!(
+        device.store.open_issues().unwrap().is_empty(),
+        "deleting a file before it uploaded is an ordinary thing to do"
+    );
 }
 
 #[test]
@@ -556,7 +565,7 @@ fn the_whole_matrix_at_once_still_ends_with_the_right_bytes() {
 }
 
 #[test]
-fn a_withdrawn_download_leaves_no_spool_behind() {
+fn an_abandoned_download_leaves_no_spool_behind() {
     let (_clock, server, device) = world();
     server.seed_file(None, "gone.txt", b"here for now");
     let id = EntityId::file(999);
@@ -566,7 +575,7 @@ fn a_withdrawn_download_leaves_no_spool_behind() {
         .unwrap();
 
     let report = do_one(&device, id, Action::Download);
-    assert_eq!(report.withdrawn, 1, "the server never had file 999");
+    assert_eq!(report.overtaken, 1, "the server never had file 999");
     assert_eq!(
         device.fs.spool_count(),
         0,

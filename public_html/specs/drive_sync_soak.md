@@ -587,16 +587,83 @@ soak VPS, alongside `run2-violation`. **The devices are still deadlocked**, so a
 candidate fix can be tested against a live reproduction even without a
 deterministic one.
 
+## Run 5 — a silent stall, and the reason nothing could see it
+
+Run 5 ran on the merged-folder fix with a fresh account and a fresh rig. The
+deadlock was gone. What it left behind was worse, and quieter: **thirty-two
+entries on one device sat in `pending_upload` with no operation queued and
+nothing raised**, frozen for the whole fifteen-minute settle while the device
+reported itself busy rather than broken. Every one of them named a parent folder
+that was **not in the store at all**.
+
+**How they got there.** A folder the server has never seen is a *provisional*
+entry. When the directory it stands for is removed from the disk before its
+create lands, the pass correctly concludes the entry is nothing at all and
+deletes it — but deleted only the folder, leaving the entries for the files
+inside it naming a parent that had gone.
+
+**Why nothing noticed.** A pass resolves an entry to a path by walking parents
+up to the root, so an entry with no parent has no path and is skipped. Worse,
+the pass enumerated entries by *walking down from the root*, which cannot reach
+an entry whose parent is missing — the orphans were not merely skipped, they
+were invisible to the only thing that could have found them. No work planned, no
+issue raised, no state anybody could observe from outside.
+
+**Fixed in three parts**, because one of them alone would leave the hole:
+
+1. `Store::delete_provisional_subtree` takes the whole subtree, so removing a
+   never-created folder cannot strand what was inside it.
+2. The pass enumerates from the table rather than walking the tree, so an
+   orphan is at least *seen*. Callers either resolve paths themselves or sort by
+   depth afterwards, so nothing depended on the walk's ordering.
+3. An entry that resolves to no path is cleaned up rather than skipped, so
+   however the state arises it does not persist.
+
+`assert_no_entry_is_stranded` now runs after **every** sim scenario, which turns
+the whole existing suite into a net for this class. It is checked there rather
+than only in a dedicated test because the state is cheap to detect and
+impossible to see from outside — the combination that makes an invariant worth
+having.
+
+Run 5 also produced the **first `no-loss` violation on a converged-ish run**: one
+committed file (`Projects/Copy of doc-9.txt`) was on no device, not on the
+server, and not in a trash. A file whose entry was stranded and then deleted
+locally would land exactly there, so this is expected to go with the fix above —
+unproven until a run says so.
+
+## Two more findings, both fixed
+
+**A folder create returned a raw `SQLSTATE[23505]`.** `folder_name_taken()` runs
+before the insert, so two concurrent creates both pass it and the partial unique
+index refuses the loser — with a Postgres constraint name, verbatim, to the
+client. A sync client retries an unexplained database failure forever; it knows
+what to do with a name that is taken. Every folder create, rename, move and
+restore now saves through `DriveHelper::save_folder_unless_name_taken()`, which
+on a uniqueness refusal asks the same question again and answers as it would
+have a moment earlier. The client also refuses to show any message carrying a
+`SQLSTATE` to a user, keeping the raw text in the issue's detail — it meets
+servers of every version.
+
+**Deleting a file while it was uploading raised an item needing attention.**
+Every operation that stopped raised an issue, whether or not anything was wrong.
+Withdrawal is now two outcomes: *withdrawn* (the server refused it in a way
+another attempt will not change — raised, because a person must decide) and
+*overtaken* (the premise stopped holding — dropped in silence, because the next
+pass plans afresh and nothing about it is anybody's problem). Where an overtaken
+operation ran into something worth knowing about, that thing reports itself: a
+scenario pins the conflict wording so this cannot quietly become silence.
+
 ## What has not been demonstrated yet
 
-**A green cycle**, and run 3 shows why: the client has a convergence bug. Runs 1
-and 2 failed for hardware reasons (the storm out-produced what the settle could
-drain on one vCPU); run 3 was gentled until that stopped being true, and what
-was left underneath is the folder-create retry loop above.
+**A green cycle.** Runs 1 and 2 failed for hardware reasons (the storm
+out-produced what the settle could drain on one vCPU); run 3 was gentled until
+that stopped being true and exposed the folder-create deadlock; run 5 exposed
+the stall underneath that. Each run has reached further than the last, which is
+the rig working — but nothing has yet come back clean.
 
-So the sequence is now: fix the retry loop, re-run at run 3's pacing, and expect
-green. Only then is it worth turning the intensity back up — a campaign at run
-2's rate would just bury the next finding under the same loop.
+Also still outstanding: a multi-cycle campaign (leak-watch needs six settles and
+no campaign has passed one), and `sync_soak_gate.sh` run as an actual gate
+rather than by hand.
 
 # Docs to update when phases land
 

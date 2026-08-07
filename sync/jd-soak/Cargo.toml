@@ -23,6 +23,11 @@ serde_json = "1"
 sha2 = "0.10"
 thiserror = "1"
 
+[target.'cfg(unix)'.dependencies]
+# Only for umask. The actors run as one account and the daemons as another, so
+# the default 022 would strip group write off everything an actor creates.
+libc = "0.2"
+
 [[bin]]
 name = "jd-soak"
 path = "src/main.rs"

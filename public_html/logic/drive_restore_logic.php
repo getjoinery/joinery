@@ -51,7 +51,11 @@ function drive_restore_logic(array $input): LogicResult {
 					$entity->set('fol_name', substr($name, 0, 255));
 				}
 				$entity->set('fol_parent_folder_id', null);
-				$entity->save();
+				if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+					// Something else claimed the free name between the search
+					// above and here. The folder is still safely in the trash.
+					return LogicResult::error('That name was taken while restoring. Try again.');
+				}
 			}
 		}
 		DriveHelper::restore_folder_cascade($entity);

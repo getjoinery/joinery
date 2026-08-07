@@ -172,4 +172,43 @@ check($branch_after->get('fol_delete_time') === null, 'Branch restored with pare
 check($leaf_after->get('fil_delete_time') === null, 'Leaf file restored with parent');
 check($early_after->get('fol_delete_time') !== null, 'EarlyGone (trashed earlier) stays in trash');
 
+section('Losing a name race answers like a name clash, not a database error');
+// folder_name_taken() runs before the insert, so two concurrent creates can
+// both pass it and the partial unique index refuses the loser. Saving a folder
+// whose name is already taken puts the row in exactly that state, without
+// needing two real requests in flight.
+$raceDir = mk_folder('RaceTarget');
+check(res_ok($raceDir), 'create RaceTarget');
+
+$loser = new Folder(NULL);
+$loser->set('fol_usr_user_id', (int)$owner->key);
+$loser->set('fol_name', 'RaceTarget');
+$loser->set('fol_protection_level', 'standard');
+$saved = null;
+$threw = null;
+try {
+	$saved = DriveHelper::save_folder_unless_name_taken($loser);
+} catch (Exception $e) {
+	$threw = $e->getMessage();
+}
+check($threw === null, 'a lost race does not escape as an exception'
+	. ($threw === null ? '' : " (got: $threw)"));
+check($saved === false, 'the helper reports the name as taken rather than saving');
+check(!$loser->key, 'the losing folder was not created');
+
+// A failure the helper cannot explain must still reach the caller: nothing
+// here should turn an unrelated database fault into a quiet false.
+$broken = new Folder(NULL);
+$broken->set('fol_usr_user_id', (int)$owner->key);
+$broken->set('fol_name', str_repeat('z', 300)); // longer than the column allows
+$broken->set('fol_protection_level', 'standard');
+$rethrown = false;
+try {
+	DriveHelper::save_folder_unless_name_taken($broken);
+	if ($broken->key) { $made_folders[] = $broken->key; }
+} catch (Exception $e) {
+	$rethrown = true;
+}
+check($rethrown, 'a failure that is not a name clash is rethrown');
+
 harness_finish();

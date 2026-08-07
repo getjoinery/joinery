@@ -85,7 +85,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 	}
 	$folder->set('fol_name', $name);
 	$folder->set('fol_protection_level', $level);
-	$folder->save();
+	if (!DriveHelper::save_folder_unless_name_taken($folder)) {
+		return LogicResult::error('A folder with that name already exists here.');
+	}
 	$folder->load(); // repopulate serial pkey + default columns for the export
 
 	FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FOLDER, $folder->key, $user_id, $user_id);
