@@ -98,6 +98,8 @@ function calendar_logic(array $input): LogicResult {
         $end_t   = LibraryFunctions::fetch_variable_local($input, 'entry_end',   '', '', '', 'safemode', NULL);
         $scope   = LibraryFunctions::fetch_variable_local($input, 'scope', '', '', '', 'safemode', NULL);
         $odate   = LibraryFunctions::fetch_variable_local($input, 'occurrence_date', '', '', '', 'safemode', NULL);
+        // '' = use my default (stored NULL); 0 = no reminder; else minutes before start.
+        $reminder = _calendar_parse_reminder(LibraryFunctions::fetch_variable_local($input, 'entry_reminder', '', '', '', 'safemode', NULL));
 
         // Recurrence fields — read from the declarative FormWriter inputs.
         // The "Repeats" checkbox gates everything; frequency must be a known type.
@@ -203,7 +205,7 @@ function calendar_logic(array $input): LogicResult {
                         $parent, ($scope ?: 'this'), $odate, $title, $all_day, $blocks,
                         $start_local, $end_local, $start_utc, $end_utc, $tz,
                         $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date,
-                        $subject
+                        $subject, $reminder
                     );
                 }
             }
@@ -220,6 +222,7 @@ function calendar_logic(array $input): LogicResult {
                 }
                 _calendar_set_fields($entry, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
                 _calendar_set_recurrence($entry, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
+                $entry->set('cal_reminder_minutes', $reminder);
                 $entry->save();
             }
             return LogicResult::redirect('/profile/calendar?saved=1');
@@ -266,6 +269,11 @@ function calendar_logic(array $input): LogicResult {
     $page_vars['saved']   = !empty($input['saved']);
     $page_vars['deleted'] = !empty($input['deleted']);
 
+    // The owner's default reminder lead, so the entry form's "Use my default"
+    // option can say what it currently means.
+    require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+    $page_vars['reminder_default_minutes'] = (int)CalendarPreference::get_for($user_id)->get('cpr_reminder_default_minutes');
+
     // Has this subject authored (or imported) anything of its own yet? Drives the
     // first-run import prompt, which retires permanently on the first entry.
     // Counted account-wide rather than per visible month, so paging to an empty
@@ -304,6 +312,20 @@ function _calendar_set_fields(
     string $tz
 ): void {
     $entry->set_core_fields($title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
+}
+
+/**
+ * Normalize a submitted reminder choice for cal_reminder_minutes.
+ * '' (use my default) → null; a valid lead choice (0 = no reminder, else
+ * minutes before start) → int; anything else → null.
+ */
+function _calendar_parse_reminder($raw): ?int {
+    if ($raw === null || $raw === '' || !is_numeric($raw)) {
+        return null;
+    }
+    require_once(PathHelper::getIncludePath('data/calendar_preference_class.php'));
+    $v = (int)$raw;
+    return in_array($v, CalendarPreference::REMINDER_MINUTE_CHOICES, true) ? $v : null;
 }
 
 function _calendar_set_recurrence(
@@ -377,8 +399,11 @@ function _calendar_save_recurring_scope(
     ?string $rec_days,
     ?int $rec_week,
     ?string $rec_end_date,
-    $subject
+    $subject,
+    $reminder = false
 ): void {
+    // $reminder: false = not submitted (keep/copy what the row has),
+    // null = "use my default", int = explicit choice (0 = no reminder).
     switch ($scope) {
         case 'this':
             // Add exception for the original date.
@@ -395,6 +420,7 @@ function _calendar_save_recurring_scope(
             $rep->set('cal_parent_entry_id',   $parent->key);
             $rep->set('cal_parent_entry_date', $odate);
             _calendar_set_fields($rep, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
+            $rep->set('cal_reminder_minutes', ($reminder === false) ? $parent->get('cal_reminder_minutes') : $reminder);
             $rep->save();
             break;
 
@@ -422,6 +448,7 @@ function _calendar_save_recurring_scope(
             $new_parent->set('cal_type',         $parent->get('cal_type') ?: 'personal');
             _calendar_set_fields($new_parent, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
             _calendar_set_recurrence($new_parent, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
+            $new_parent->set('cal_reminder_minutes', ($reminder === false) ? $parent->get('cal_reminder_minutes') : $reminder);
             $new_parent->save();
 
             foreach ($future_exceptions as $ex_date) {
@@ -437,6 +464,9 @@ function _calendar_save_recurring_scope(
             // Update the parent in place; preserve existing exceptions.
             _calendar_set_fields($parent, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
             _calendar_set_recurrence($parent, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
+            if ($reminder !== false) {
+                $parent->set('cal_reminder_minutes', $reminder);
+            }
             $parent->save();
             break;
     }

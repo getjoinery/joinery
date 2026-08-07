@@ -1400,3 +1400,55 @@ fn an_entry_whose_parent_has_gone_is_cleaned_up_rather_than_stranded_forever() {
         "nothing here was ever anywhere but this store"
     );
 }
+
+#[test]
+fn a_folder_whose_ancestor_is_missing_is_re_derived_rather_than_left_uploading_forever() {
+    // Taken from run 8 of the soak rig, which spent three campaigns failing to
+    // converge on it. A device held folder "Sub 13" whose own parent was not in
+    // the store at all, and a file beneath it retried an upload into a path
+    // that could not be resolved — forever, and silently, because the pass
+    // finds entries by walking down from the root and could not reach it.
+    //
+    // The entry is real: the server has the folder. So the answer is not to
+    // drop it but to re-derive from the index, the same thing a feed reset does.
+    let world = World::new(65, &["laptop"]);
+    let mut committed = Committed::default();
+    let dev = world.device("laptop");
+
+    dev.fs.user_mkdir("Work");
+    dev.fs.user_mkdir("Work/Reports");
+    dev.fs
+        .user_write("Work/Reports/q1.txt", b"january through march");
+    committed.note("Work/Reports/q1.txt", b"january through march");
+    assert!(world.settle().is_some());
+
+    // Lose the record of the outer folder, exactly as the rig found it.
+    let outer = dev
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "Work")
+        .expect("the outer folder");
+    dev.store.delete_entry(outer.id).unwrap();
+    assert!(
+        dev.store
+            .every_entry()
+            .unwrap()
+            .iter()
+            .any(|e| e.local_placement().parent == Some(outer.id.server_id)),
+        "an entry the server knows about now has no way back to the root"
+    );
+
+    assert!(world.settle().is_some(), "it should settle");
+    assert_invariants(&world, &committed);
+    assert!(
+        world.server.tree().contains_key("Work/Reports/q1.txt"),
+        "and the file is still where it was: {:?}",
+        world.server.tree().keys().collect::<Vec<_>>()
+    );
+    assert!(
+        dev.store.open_issues().unwrap().is_empty(),
+        "a store that repaired itself is not something to bother anybody with"
+    );
+}

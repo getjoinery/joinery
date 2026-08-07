@@ -59,8 +59,41 @@ impl Status {
     ///
     /// `working` is not settled, however long it has been going. `stopped` is
     /// not settled either — the daemon is telling us it cannot sync at all.
+    ///
+    /// **The entry states have to have come to rest as well as the queue.**
+    /// Asking the op queue alone is too kind:
+    /// an entry can sit in `pending_upload` with **no operation queued for it**,
+    /// which is precisely the silent stall this rig exists to find. Run 16
+    /// passed convergence with eleven pending downloads and eight pending
+    /// uploads outstanding, and only the tree comparison in assertion 2 noticed.
+    /// Assertion 5 did not catch it either — it holds the daemon to explaining
+    /// `unsyncable` and `pending_key`, on the reasoning that a draining queue
+    /// should not demand an alert per file. That reasoning is right, and it
+    /// leaves this gap, so the gap gets closed here instead.
     pub fn is_settled(&self) -> bool {
-        (self.indicator == "green" || self.indicator == "attention") && self.pending_ops == 0
+        (self.indicator == "green" || self.indicator == "attention")
+            && self.pending_ops == 0
+            && self.entries_in_flight() == 0
+    }
+
+    /// Entries that are neither in agreement nor at a legitimate resting place.
+    ///
+    /// `synced` and `out_of_scope` are agreement. `unsyncable` and
+    /// `pending_key` are resting places: nothing on this machine will move them
+    /// and both are surfaced to the user by name. Everything else is work that
+    /// has not finished, and a device holding any of it has not settled however
+    /// empty its queue looks.
+    pub fn entries_in_flight(&self) -> u64 {
+        self.entries
+            .iter()
+            .filter(|(state, _)| {
+                !matches!(
+                    state.as_str(),
+                    "synced" | "out_of_scope" | "unsyncable" | "pending_key"
+                )
+            })
+            .map(|(_, n)| *n)
+            .sum()
     }
 
     pub fn is_stopped(&self) -> bool {
@@ -250,6 +283,37 @@ mod tests {
         );
         assert!(s.is_settled());
         assert_eq!(s.unsettled_entries(), 1);
+    }
+
+    #[test]
+    fn an_entry_still_in_flight_is_not_settled_however_empty_the_queue_is() {
+        // The gap this closes. An entry can sit in pending_upload with no
+        // operation queued for it, which is the silent stall the whole rig
+        // exists to find — and asking only the queue called it settled. Run 16
+        // passed convergence holding eleven pending downloads and eight pending
+        // uploads; only the tree comparison noticed.
+        let s = status(
+            "green",
+            0,
+            json!({"synced": 80, "pending_upload": 8, "pending_download": 11}),
+            json!([]),
+        );
+        assert!(!s.is_settled());
+        assert_eq!(s.entries_in_flight(), 19);
+    }
+
+    #[test]
+    fn a_resting_place_does_not_count_as_in_flight() {
+        // Nothing on this machine will move these, and both are surfaced by
+        // name. Waiting for them would time out on correct behaviour.
+        let s = status(
+            "attention",
+            0,
+            json!({"synced": 5, "unsyncable": 2, "pending_key": 1, "out_of_scope": 3}),
+            json!([{"id": 1, "kind": "unsyncable", "summary": "s", "detail": "d"}]),
+        );
+        assert_eq!(s.entries_in_flight(), 0);
+        assert!(s.is_settled());
     }
 
     #[test]

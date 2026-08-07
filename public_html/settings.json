@@ -825,6 +825,17 @@
       "helptext": "How many photos each kind of record may carry, as a JSON object. Example: {\"user\": 6}."
     },
     {
+      "name": "calendar_email_log_retention_days",
+      "default": "90",
+      "group": "logging",
+      "label": "Days to keep the calendar email log",
+      "type": "number",
+      "validation": {
+        "min": 0
+      },
+      "helptext": "The send ledger for calendar reminder and summary emails. The daily retention sweep deletes anything older. 0 keeps them indefinitely."
+    },
+    {
       "name": "request_log_retention_days",
       "default": "90",
       "group": "logging",

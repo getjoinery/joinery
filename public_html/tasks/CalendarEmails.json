@@ -1,0 +1,6 @@
+{
+    "name": "Calendar Email Reminders & Summaries",
+    "description": "Sends per-entry reminder emails and daily/weekly calendar summary emails to members who opted in on their calendar settings page. Sends nothing until a member opts in.",
+    "activate_on_install": true,
+    "default_frequency": "every_run"
+}

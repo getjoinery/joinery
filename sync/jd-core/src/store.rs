@@ -451,23 +451,23 @@ impl Store {
         }
     }
 
-    /// Delete a provisional entry and everything underneath it.
+    /// Forget an entry and everything underneath it.
     ///
-    /// A provisional entry is one the server has never seen. When the directory
-    /// it stands for is removed from the disk before its create ever lands, the
-    /// entry is nothing at all — and so is every entry inside it, since nothing
-    /// under a folder the server has never heard of can have reached the server
-    /// either.
+    /// This drops the *record*, never a file. Anything still on the disk is
+    /// found again by the next scan as a local creation and uploaded afresh,
+    /// which is the safe direction: the worst case is re-sending bytes the
+    /// server already has.
     ///
-    /// Deleting only the folder is what a soak run caught: thirty-two files
-    /// left pointing at a parent that no longer existed. An entry whose path
-    /// cannot be resolved is skipped by every later pass, so those files sat in
+    /// Callers use it for entries that have no way back to the root. Removing
+    /// only the folder is what a soak run caught: thirty-two files left
+    /// pointing at a parent that no longer existed. An entry whose path cannot
+    /// be resolved is skipped by every later pass, so those files sat in
     /// `pending_upload` forever with no operation queued and nothing raised —
     /// no work, no issue, no way to notice. Silence is the one failure this
     /// client is not allowed.
     ///
     /// Returns how many entries went.
-    pub fn delete_provisional_subtree(&self, root: EntityId) -> StoreResult<usize> {
+    pub fn delete_subtree(&self, root: EntityId) -> StoreResult<usize> {
         let mut doomed = vec![root];
         let mut frontier = vec![root.server_id];
         let mut guard = 0;

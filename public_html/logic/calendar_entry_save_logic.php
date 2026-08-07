@@ -15,6 +15,9 @@
  *   start_time / end_time  'HH:MM' or 'HH:MM:SS' (required unless all_day)
  *   timezone         IANA id the wall-clock values are in; defaults to the
  *                    profile timezone
+ *   reminder_minutes optional reminder override; only applied when present.
+ *                    '' = use my default, 0 = no reminder, else 60|30|15|5
+ *                    minutes before start
  *   recurrence       null, or { type: daily|weekly|monthly|yearly,
  *                    interval, days_of_week: [0-6] (weekly) or single 0-6
  *                    (monthly by-weekday), week_of_month: 1-4|-1,
@@ -24,7 +27,7 @@
  * logic/calendar_logic.php do the field/recurrence writes and the
  * scope-aware series splits.
  *
- * @version 1.0.1
+ * @version 1.1.0
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -53,6 +56,13 @@ function calendar_entry_save_logic(array $input): LogicResult {
 	$blocks  = !isset($input['blocks']) || (!empty($input['blocks']) && $input['blocks'] !== '0');
 	$scope   = (string)($input['scope'] ?? '');
 	$odate   = trim((string)($input['occurrence_date'] ?? ''));
+
+	// Reminder override: only touched when the caller sends the field (the
+	// quick-entry popover omits it, which must not clobber a stored choice).
+	// '' = use my default (NULL); 0 = no reminder; else minutes before start.
+	$reminder = array_key_exists('reminder_minutes', $input)
+		? _calendar_parse_reminder($input['reminder_minutes'])
+		: false;
 
 	if (!preg_match('/^\d{4}-\d{2}-\d{2}$/', $date)) {
 		return LogicResult::error('Enter a valid date.');
@@ -148,7 +158,7 @@ function calendar_entry_save_logic(array $input): LogicResult {
 					$parent, ($scope !== '' ? $scope : 'this'), $odate, $title, $all_day, $blocks,
 					$start_local, $end_local, $start_utc, $end_utc, $tz,
 					$rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date,
-					$subject
+					$subject, $reminder
 				);
 				return LogicResult::render(array('saved' => true, 'entry_id' => (int)$parent->key));
 			}
@@ -167,6 +177,9 @@ function calendar_entry_save_logic(array $input): LogicResult {
 		}
 		_calendar_set_fields($entry, $title, $all_day, $blocks, $start_local, $end_local, $start_utc, $end_utc, $tz);
 		_calendar_set_recurrence($entry, $rec_type, $rec_interval, $rec_days, $rec_week, $rec_end_date);
+		if ($reminder !== false) {
+			$entry->set('cal_reminder_minutes', $reminder);
+		}
 		$entry->save();
 
 		return LogicResult::render(array('saved' => true, 'entry_id' => (int)$entry->key));
@@ -207,6 +220,7 @@ function calendar_entry_save_logic_descriptor(): array {
 			'end_time'        => ['type' => 'string', 'required' => false, 'label' => 'End time (HH:MM)'],
 			'timezone'        => ['type' => 'string', 'required' => false, 'label' => 'IANA timezone of the wall-clock values'],
 			'occurrence_date' => ['type' => 'string', 'required' => false, 'label' => 'Occurrence date (recurring edit)'],
+			'reminder_minutes'=> ['type' => 'string', 'required' => false, 'label' => 'Reminder override: empty = use my default, 0 = none, else 60|30|15|5 minutes before'],
 			'scope'           => ['type' => 'string', 'required' => false, 'enum' => ['this', 'future', 'all'], 'label' => 'Recurring edit scope'],
 			// 'recurrence' is deliberately not declared: it is a single object
 			// ({type, interval, days_of_week, ...}), and the schema's 'array'

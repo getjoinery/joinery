@@ -7,7 +7,7 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.21.0
+ * @version 2.22.0
  * @changelog 2.21.0 - Every form emits a validation error summary container (.jy-error-summary) immediately before its first submit button (end of form when there is none); on a re-render carrying errors, PHP fills it with one linked item per failing field so an off-screen error is named where the person is looking. Form options: error_summary (default true), error_summary_title ({n} placeholder)
  * @changelog 2.20.0 - An input option this class never reads is refused rather than dropped: the known set is derived from the source of the writer and its parents, so a misspelled option (help_text for helptext) stops the page in debug instead of silently rendering a field without it
  * @changelog 2.19.0 - validateVisibilityRules() throws InvalidArgumentException instead of trigger_error(E_USER_ERROR), which PHP 8.4 deprecates; the failure is a caller mistake, so it still halts, but it is now catchable and carries a trace to the bad call
@@ -58,7 +58,10 @@ abstract class FormWriterV2Base {
      * @param array $options Form options including action, method, values, csrf, etc.
      */
     public function __construct($form_id, $options = []) {
-        $this->form_id = $form_id;
+        // The form name is the DOM id. An explicit 'id' option overrides it —
+        // callers reasonably pass one expecting it to be honored, and silently
+        // dropping it leaves page JS bound to an id that never renders.
+        $this->form_id = (isset($options['id']) && $options['id'] !== '') ? $options['id'] : $form_id;
         $this->options = array_merge($this->getDefaultOptions(), $options);
 
         // Auto-detect form action if not specified

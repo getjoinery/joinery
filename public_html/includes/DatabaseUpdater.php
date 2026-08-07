@@ -910,12 +910,15 @@ class DatabaseUpdater {
             
             foreach ($classes as $class) {
                 $table = $class::$tablename;
-                
-                // Add missing constraints
-                if ($this->cleanup || $this->upgrade) {
-                    $this->addMissingConstraints($class, $table, $dblink, $results);
-                }
-                
+
+                // Add missing constraints in every mode. A plain run creates
+                // new tables, and withholding their declared unique
+                // constraints leaves at-most-once enforced only in the model
+                // layer with nothing in the output saying so. Adding is safe
+                // to attempt anywhere: a table whose data blocks a constraint
+                // is reported in the unresolved-drift summary, not failed.
+                $this->addMissingConstraints($class, $table, $dblink, $results);
+
                 // Remove obsolete constraints (cleanup mode only)
                 if ($this->cleanup) {
                     $this->removeObsoleteConstraints($class, $table, $dblink, $results);
