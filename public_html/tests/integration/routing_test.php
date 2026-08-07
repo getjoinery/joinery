@@ -618,10 +618,18 @@ class HttpRoutingTestRunner {
         
             //removed: echo "8. TESTING AJAX ENDPOINTS\n";
         
+        // The one surviving flat endpoint is the Stripe webhook, and it is
+        // served by the store plugin — so it exists only while that plugin is
+        // active, exactly like /products above. Asserting it unconditionally
+        // fails on any site that does not sell anything.
+        $store_active = PluginHelper::isPluginActive('store');
+
         $test_cases = [
             // Existing flat endpoint — a surviving webhook (the flat /ajax/*
             // namespace now hosts only external webhooks; page JS uses /api/v1).
-            ['/ajax/stripe_webhook', [200, 400, 401, 403, 405], 'Existing AJAX endpoint'],
+            ['/ajax/stripe_webhook',
+                $store_active ? [200, 400, 401, 403, 405] : [404],
+                'Existing AJAX endpoint (store ' . ($store_active ? 'active' : 'inactive') . ')'],
 
             // AJAX endpoint that doesn't exist
             ['/ajax/definitely-fake-endpoint', [404, 401, 403], 'AJAX endpoint (does not exist)'],

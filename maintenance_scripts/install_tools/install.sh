@@ -1,4 +1,10 @@
 #!/usr/bin/env bash
+#VERSION 2.46 - Origin certificates issue on dual-stack hosts. The HTTP-01
+#              decision compared `curl ifconfig.me` against the domain's A
+#              record, but curl answers with the IPv6 address on any host that
+#              has one, so the two never matched: the box fell through to
+#              DNS-01 and issued nothing. Both families are now asked for
+#              explicitly, and either one reaching this host is enough.
 #VERSION 2.45 - The PHP extension list survives an extension that stops being
 #              packaged. PHP 8.5 compiles OPcache in, so Ubuntu 26.04 ships no
 #              php8.5-opcache; asking for it failed the whole apt transaction
@@ -861,12 +867,24 @@ provision_origin_cert() {
         apt-get install -y -qq certbot python3-certbot-apache
     fi
 
-    local server_ip dns_ip
-    server_ip=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
-    dns_ip=$(dig +short "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+    # Ask for each family explicitly. A bare `curl ifconfig.me` answers with
+    # whichever address the host prefers, and a dual-stack host prefers IPv6 --
+    # so comparing that reply against an A record never matches, and a box that
+    # was entitled to HTTP-01 silently loses it. Every new Linode is dual-stack.
+    local server_ip4 server_ip6 dns_ip4 dns_ip6
+    # Every probe ends in `|| true`: a host with no IPv6, or a domain with no
+    # AAAA record, is the normal case, not an error -- and setup_ssl.sh sources
+    # this under `set -euo pipefail`, where an empty grep would otherwise abort
+    # the run before certbot is ever reached.
+    server_ip4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+    server_ip6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+    dns_ip4=$(dig +short A "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9.]+$' | head -1 || true)
+    dns_ip6=$(dig +short AAAA "$domain" @1.1.1.1 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1 || true)
 
-    # Step 1: direct-to-origin -> HTTP-01.
-    if [ -n "$server_ip" ] && [ -n "$dns_ip" ] && [ "$server_ip" = "$dns_ip" ]; then
+    # Step 1: direct-to-origin -> HTTP-01. Either family arriving here is
+    # enough; certbot only needs the challenge to reach this box.
+    if { [ -n "$server_ip4" ] && [ "$server_ip4" = "$dns_ip4" ]; } \
+       || { [ -n "$server_ip6" ] && [ "$server_ip6" = "$dns_ip6" ]; }; then
         print_step "Domain ${domain} points at this server — using LE HTTP-01 challenge"
         if certbot --apache -d "$domain" --non-interactive --agree-tos --register-unsafely-without-email --no-redirect; then
             print_success "Issued LE certificate for ${domain} (HTTP-01)"

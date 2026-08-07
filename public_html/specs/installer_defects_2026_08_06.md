@@ -5,9 +5,10 @@
 `fix_permissions.sh` 2.7, contract-test assertions added (274 checks green),
 live gate written at `tests/functional/install/install_container_gate.sh`
 (never yet run on a real box). § 7 still needs its publish — nothing there
-reaches an installing user until a release carries it. **§ 8 is unbuilt**: it
-was found after the others, provisioning SSL on the same box, and is the reason
-that box has no certificate the installer issued.
+reaches an installing user until a release carries it. **§ 8 is built**
+(`install.sh` 2.46, 2026-08-07) and proven: the installer's own HTTP-01 path
+issued a certificate for `upgradetest.getjoinery.com` on a dual-stack 26.04
+box.
 
 Found by running the published install path end to end on a bare Ubuntu
 24.04.4 Linode (45.33.72.32, 1 vCPU / 961 MB) to provision the soak host of
@@ -246,9 +247,24 @@ should carry §§ 1–6.
 
 ## 8 — Automatic SSL never runs on a dual-stack host
 
-**Severity: high.** Found afterwards, reinstalling the same box as
-`drivetest.getjoinery.com` with SSL enabled. Unlike §§ 1–7 this one is **still
-live in the tree** (`install.sh` 2.43, line 844).
+**Severity: high. FIXED in `install.sh` 2.46 (2026-08-07).** Found reinstalling
+the soak box as `drivetest.getjoinery.com` with SSL enabled, and confirmed a
+second time on `upgradetest.getjoinery.com` — the 26.04 box, which sat without a
+certificate for exactly this reason.
+
+Both families are now probed explicitly (`curl -4` / `curl -6`, `dig A` /
+`dig AAAA`) and either one reaching this host satisfies the check. **Every probe
+ends in `|| true`**, which is not decoration: `sysadmin_tools/setup_ssl.sh`
+sources this function under `set -euo pipefail`, so a domain with no AAAA record
+makes the `grep` return non-zero and kills the run before certbot is reached —
+silently, with exit 1 and no output. That was introduced while fixing this and
+caught only because the re-run produced nothing at all.
+
+Proof it works: `setup_ssl.sh upgradetest.getjoinery.com` reported
+`Issued LE certificate ... (HTTP-01)` on a box whose `ifconfig.me` answers with
+IPv6. Note the fleet never hit this because getjoinery and scrolldaddy have no
+global IPv6 — it bites new Linodes, which come up dual-stack, and so it would
+have hit every rebuild-from-backup node in the OS campaign.
 
 `provision_origin_cert` decides whether to attempt the HTTP-01 challenge by
 comparing this machine's address to the domain's:

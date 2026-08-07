@@ -37,7 +37,13 @@ $handoff     = $site_root . '/maintenance_scripts/install_tools/linode_stackscri
 $wrapper     = $site_root . '/maintenance_scripts/install_tools/linode_stackscript_wrapper.sh';
 $reset_tool  = $site_root . '/maintenance_scripts/sysadmin_tools/reset_admin_password.php';
 $bundle_tool = $site_root . '/maintenance_scripts/sysadmin_tools/install_bundle.php';
+// A development tree keeps LICENSE.md beside public_html; an installed site
+// keeps it inside public_html, because that is where publish_upgrade.php copies
+// it into the archive. Look in both, so this reads the same on either layout.
 $license     = $site_root . '/LICENSE.md';
+if (!is_file($license)) {
+	$license = PathHelper::getRootDir() . '/LICENSE.md';
+}
 $publish     = PathHelper::getIncludePath('plugins/server_manager/includes/publish_upgrade.php');
 $quickstart  = PathHelper::getIncludePath('docs/quickstart.md');
 $upgrade     = PathHelper::getIncludePath('utils/upgrade.php');

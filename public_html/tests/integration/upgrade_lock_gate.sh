@@ -74,9 +74,16 @@ kill -9 "$HOLD_PID" 2>/dev/null; wait "$HOLD_PID" 2>/dev/null
 chk "lock freed by process death"  "$(php "$T/try.php" "$T" "$LOCK")" "OK"
 
 echo "== an unopenable lock path reads as held, not as a crash =="
-mkdir -p "$T/ro"; chmod 500 "$T/ro"
-chk "unwritable dir returns false" "$(php "$T/try.php" "$T" "$T/ro/.upgrade.lock")" "BUSY"
-chmod 700 "$T/ro"
+# Root ignores the directory permission this case depends on, so the check can
+# only mean anything for an unprivileged run. Skipping beats asserting something
+# the kernel has already decided.
+if [ "$(id -u)" -eq 0 ]; then
+    echo "  SKIP: unwritable dir returns false (running as root; 0500 does not stop root)"
+else
+    mkdir -p "$T/ro"; chmod 500 "$T/ro"
+    chk "unwritable dir returns false" "$(php "$T/try.php" "$T" "$T/ro/.upgrade.lock")" "BUSY"
+    chmod 700 "$T/ro"
+fi
 
 echo "== the guard sits where it protects =="
 call_line=$(grep -n 'upgrade_lock_handle = acquire_upgrade_lock' "$SRC" | head -1 | cut -d: -f1)

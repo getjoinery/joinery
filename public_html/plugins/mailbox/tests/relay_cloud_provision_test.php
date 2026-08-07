@@ -23,6 +23,7 @@
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelaySsh.php'));
 
 class RcpFakeDriver implements CloudComputeProvider {
 	public $instances = array();
@@ -76,6 +77,9 @@ class RelayCloudProvisionTest {
 
 	private $wg_setting_was = null;
 
+	/** Path of the throwaway pull key this run wrote, '' when the box had its own. */
+	public $pull_pub_created = '';
+
 	function run() {
 		try {
 			// The engine requires the main box's WireGuard identity; give the
@@ -89,6 +93,17 @@ class RelayCloudProvisionTest {
 				$db->exec("INSERT INTO stg_settings (stg_name, stg_value) VALUES ('mailbox_relay_wg_public_key', 'FAKE-MAIN-WG')"
 					. " ON CONFLICT (stg_name) DO UPDATE SET stg_value = 'FAKE-MAIN-WG'");
 			}
+			// The engine also requires the main box's relay pull key, which
+			// lives on the filesystem rather than in the database — so a clone
+			// of this deployment has the setting above but not the file, and
+			// every provisioning run fails at 'lost its relay identity'. Same
+			// treatment as the WireGuard key: supply a fake, remove it after.
+			$pull_pub = RelaySsh::pullKeyPath() . '.pub';
+			if (!is_file($pull_pub) || trim((string)@file_get_contents($pull_pub)) === '') {
+				@file_put_contents($pull_pub, "ssh-ed25519 AAAAFAKEPULLKEYFORTESTS relay-pull-test\n");
+				$this->pull_pub_created = is_file($pull_pub) ? $pull_pub : '';
+			}
+
 			$this->installSeams();
 			$this->testHappyPath();
 			$this->testCreateFails();
@@ -100,6 +115,9 @@ class RelayCloudProvisionTest {
 		} finally {
 			RelayCloudProvisioner::$driver_factory = null;
 			RelayCloudProvisioner::$runner = null;
+			if ($this->pull_pub_created !== '') {
+				@unlink($this->pull_pub_created);
+			}
 			$this->cleanupRows();
 		}
 	}
