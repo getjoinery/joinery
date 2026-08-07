@@ -37,7 +37,6 @@ class FileBlob extends SystemBase {
 
 	// Physical storage: not user-facing, not API-exposed, not AI-readable. A
 	// blob never soft-deletes — release() reclaims it directly at refcount 0.
-	public static $permanent_delete_actions = array();
 
 	public static $field_specifications = array(
 		'fbb_file_blob_id'      => array('type'=>'int8','is_nullable'=>false,'serial'=>true),

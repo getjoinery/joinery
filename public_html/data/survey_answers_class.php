@@ -37,7 +37,9 @@ class SurveyAnswer extends SystemBase {	public static $prefix = 'sva';
 	public static $ai_untrusted_fields = ['sva_answer'];
 
 	protected static $foreign_key_actions = [
-		'sva_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'sva_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'sva_svy_survey_id' => ['action' => 'cascade'],
+		'sva_qst_question_id' => ['action' => 'cascade']
 	];
 
 	/**

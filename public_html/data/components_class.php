@@ -22,7 +22,6 @@ class Component extends SystemBase {
 	public static $prefix = 'com';
 	public static $tablename = 'com_components';
 	public static $pkey_column = 'com_component_id';
-	public static $permanent_delete_actions = array();
 
 	/**
 	 * Field specifications define database column properties and validation rules

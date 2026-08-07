@@ -34,8 +34,6 @@ class MailboxFleetDomainClaim extends SystemBase {
 		'mfd_mft_slot_id' => ['action' => 'cascade'],
 	];
 
-	public static $permanent_delete_actions = [];
-
 	public static $field_specifications = array(
 		'mfd_mailbox_fleet_domain_claim_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'mfd_mft_slot_id'  => array('type'=>'int8', 'is_nullable'=>false),

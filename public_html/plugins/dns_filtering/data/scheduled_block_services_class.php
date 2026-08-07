@@ -14,6 +14,10 @@ class SdScheduledBlockService extends SystemBase {
 	public static $tablename = 'sbs_scheduled_block_services';
 	public static $pkey_column = 'sbs_scheduled_block_service_id';
 
+	protected static $foreign_key_actions = array(
+		'sbs_sdb_scheduled_block_id' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
 	    'sbs_scheduled_block_service_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sbs_sdb_scheduled_block_id' => array('type'=>'int4'),

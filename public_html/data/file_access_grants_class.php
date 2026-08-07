@@ -19,8 +19,6 @@ class FileAccessGrant extends SystemBase {
 	public static $tablename = 'fga_file_access_grants';
 	public static $pkey_column = 'fga_file_access_grant_id';
 
-	public static $permanent_delete_actions = array();
-
 	// The grantee reference cascades on user delete. fga_granted_by_user_id is a
 	// non-standard name ('granted' is no model prefix), so it registers no rule.
 	protected static $foreign_key_actions = array(

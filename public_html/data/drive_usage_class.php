@@ -22,8 +22,6 @@ class DriveUsage extends SystemBase {
 	public static $tablename = 'dru_drive_usage';
 	public static $pkey_column = 'dru_drive_usage_id';
 
-	public static $permanent_delete_actions = array();
-
 	protected static $foreign_key_actions = array(
 		'dru_usr_user_id' => array('action' => 'cascade'),
 	);

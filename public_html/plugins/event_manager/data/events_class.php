@@ -71,6 +71,7 @@ class Event extends SystemBase {	public static $prefix = 'evt';
 		// A survey attached to an event for response collection is optional -
 		// deleting the survey should just detach it, not delete the event.
 		'evt_svy_survey_id' => ['action' => 'null'],
+		'evt_grp_group_id' => ['action' => 'prevent', 'message' => 'events still use this group for access control'],
 	];
 
 	const STATUS_ACTIVE = 1;

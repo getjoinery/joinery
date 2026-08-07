@@ -35,7 +35,6 @@ class AppBridgeToken extends SystemBase {	public static $prefix = 'abt';
 	];
 
 	// Rows are transient (used or expired within a minute); nothing references them.
-	public static $permanent_delete_actions = array();
 
 	public static $field_specifications = array(
 	    'abt_app_bridge_token_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

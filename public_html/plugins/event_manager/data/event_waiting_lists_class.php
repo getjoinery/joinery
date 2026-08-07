@@ -24,11 +24,15 @@ class WaitingList extends SystemBase {	public static $prefix = 'ewl';
 	public static $tablename = 'ewl_waiting_lists';
 	public static $pkey_column = 'ewl_waiting_list_id';
 
+	protected static $foreign_key_actions = array(
+		'ewl_evt_event_id' => array('action' => 'cascade'),
+		'ewl_usr_user_id' => array('action' => 'cascade'),
+	);
+
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
 	// under the deny-by-default owner-or-staff row scope.
 	public static $api_readable = true;
 	public static $api_writable = true;
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	/**
 	 * Field specifications define database column properties and validation rules

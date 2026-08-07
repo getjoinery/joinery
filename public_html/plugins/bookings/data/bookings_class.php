@@ -18,6 +18,14 @@ class Booking extends SystemBase {
 	public static $tablename = 'bkn_bookings';
 	public static $pkey_column = 'bkn_booking_id';
 
+	protected static $foreign_key_actions = [
+		// bkt collides with core BackupTarget - name the source explicitly
+		'bkn_bkt_booking_type_id' => ['action' => 'prevent', 'source_class' => 'BookingType', 'message' => 'bookings of this type exist'],
+		'bkn_usr_user_id_booked' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'bkn_usr_user_id_client' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'bkn_pro_product_id' => ['action' => 'null'],
+	];
+
 	public static $ai_readable        = true;
 	public static $ai_owner_field     = ['bkn_usr_user_id_booked', 'bkn_usr_user_id_client']; // a member sees bookings where they are host or client
 	public static $ai_description     = 'Time-slot bookings: appointments booked against a booking type.';

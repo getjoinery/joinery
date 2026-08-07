@@ -24,6 +24,10 @@ class StripeCustomer extends SystemBase {
 	public static $tablename = 'stc_stripe_customers';
 	public static $pkey_column = 'stc_stripe_customer_id';
 
+	protected static $foreign_key_actions = array(
+		'stc_usr_user_id' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
 		'stc_stripe_customer_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true, 'is_primary_key'=>true),
 		'stc_usr_user_id'        => array('type'=>'int8', 'is_nullable'=>false, 'required'=>true, 'unique'=>true),

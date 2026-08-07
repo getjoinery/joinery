@@ -13,7 +13,11 @@ class ContentVersionException extends SystemBaseException {}
 class ContentVersion extends SystemBase {	public static $prefix = 'cnv';
 	public static $tablename = 'cnv_content_versions';
 	public static $pkey_column = 'cnv_content_version_id';
-	
+
+	protected static $foreign_key_actions = array(
+		'cnv_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+	);
+
 	const TYPE_POST = 1;
 	const TYPE_PAGE_CONTENT = 2;
 	const TYPE_EMAIL = 3;

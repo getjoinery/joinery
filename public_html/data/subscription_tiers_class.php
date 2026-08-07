@@ -14,6 +14,10 @@ class SubscriptionTier extends SystemBase {
     public static $tablename = 'sbt_subscription_tiers';
     public static $pkey_column = 'sbt_subscription_tier_id';
 
+    protected static $foreign_key_actions = [
+        'sbt_grp_group_id' => ['action' => 'prevent', 'message' => 'subscription tiers grant membership of this group - repoint them first'],
+    ];
+
     // REST CRUD exposure (Layer 1). Public catalog content (Bucket A): readable,
     // writable, and world-readable; writes inherit the deny-by-default scope.
     public static $api_readable = true;

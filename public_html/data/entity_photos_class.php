@@ -18,6 +18,10 @@ class EntityPhoto extends SystemBase {
 	public static $tablename = 'eph_entity_photos';
 	public static $pkey_column = 'eph_entity_photo_id';
 
+	protected static $foreign_key_actions = array(
+		'eph_fil_file_id' => array('action' => 'cascade'),
+	);
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_description     = 'Photos attached to events, locations, products, and other entities.';

@@ -69,8 +69,6 @@ class InboundEmailFilter extends SystemBase {
 		'fil_ied_inbound_email_domain_id' => array('action' => 'cascade'),
 	);
 
-	public static $permanent_delete_actions = array();
-
 	public static $field_specifications = array(
 		'fil_inbound_email_filter_id'    => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		// Scope: a filter belongs to a mailbox (alias). NULL alias = domain-wide,

@@ -12,8 +12,10 @@ class ProductVersionException extends SystemBaseException {}
 class ProductVersion extends SystemBase {	public static $prefix = 'prv';
 	public static $tablename = 'prv_product_versions';
 	public static $pkey_column = 'prv_product_version_id';
-	
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = [
+		'prv_pro_product_id' => ['action' => 'permanent_delete'],
+	];
 
 		/**
 	 * Field specifications define database column properties and validation rules

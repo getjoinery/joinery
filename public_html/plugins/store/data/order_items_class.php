@@ -44,7 +44,9 @@ class OrderItem extends SystemBase {	public static $prefix = 'odi';
 	protected static $foreign_key_actions = [
 		'odi_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'odi_pro_product_id' => ['action' => 'prevent', 'message' => 'Cannot delete product - order items exist'],
-		'odi_evr_event_registrant_id' => ['action' => 'prevent', 'message' => 'Cannot delete event registration - order items exist']
+		'odi_evr_event_registrant_id' => ['action' => 'prevent', 'message' => 'Cannot delete event registration - order items exist'],
+		'odi_ord_order_id' => ['action' => 'permanent_delete'],
+		'odi_prv_product_version_id' => ['action' => 'prevent', 'message' => 'this product version has been ordered - order items reference it']
 	];
 
 	public const STATUS_UNPAID = 1;

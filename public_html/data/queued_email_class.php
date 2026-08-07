@@ -20,7 +20,6 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	// welcome/alert emails through the API (POST QueuedEmail). Writes
 	// require an admin-level principal (default authorization).
 	public static $api_writable = true;
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
 
 	// The various states an email can be in
 	const QUEUED = 1; // Queued, but not approved yet

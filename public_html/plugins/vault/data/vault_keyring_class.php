@@ -29,6 +29,10 @@ class VaultKeyring extends SystemBase {
 	public static $tablename = 'vlk_vault_keyring';
 	public static $pkey_column = 'vlk_vault_keyring_id';
 
+	protected static $foreign_key_actions = array(
+		'vlk_usr_user_id' => array('action' => 'cascade'),
+	);
+
 	public static $api_readable = false;
 	public static $api_writable = false;
 
@@ -40,8 +44,6 @@ class VaultKeyring extends SystemBase {
 		'vlk_created_time'  => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'vlk_updated_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);

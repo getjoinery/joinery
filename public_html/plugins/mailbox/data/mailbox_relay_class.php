@@ -59,7 +59,6 @@ class MailboxRelay extends SystemBase {
 
 	// A relay row owns no dependent rows (the message/spool link is by value, not
 	// FK), so a permanent delete cascades to nothing.
-	public static $permanent_delete_actions = [];
 
 	public static $field_specifications = array(
 		'mrl_mailbox_relay_id'   => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

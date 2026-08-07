@@ -10,6 +10,11 @@ class RecipeRun extends SystemBase {
     public static $tablename = 'rcr_recipe_runs';
     public static $pkey_column = 'rcr_run_id';
 
+    protected static $foreign_key_actions = array(
+        // 'rcp' prefix collides: convention would resolve to RelayCloudProvision, not Recipe
+        'rcr_rcp_recipe_id' => array('action' => 'permanent_delete', 'source_class' => 'Recipe'),
+    );
+
     const STATUS_PENDING    = 'pending';
     const STATUS_RUNNING    = 'running';
     const STATUS_SUCCESS    = 'success';

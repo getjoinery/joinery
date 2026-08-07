@@ -16,6 +16,11 @@ class SurveyQuestion extends SystemBase {	public static $prefix = 'srq';
 	public static $tablename = 'srq_survey_questions';
 	public static $pkey_column = 'srq_survey_question_id';
 
+	protected static $foreign_key_actions = [
+		'srq_svy_survey_id' => ['action' => 'cascade'],
+		'srq_qst_question_id' => ['action' => 'cascade'],
+	];
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_owner_field     = false; // ownerless catalog — members read all rows

@@ -105,10 +105,11 @@ class BackupHistory extends SystemBase {
 	// target name is denormalised onto the row precisely so the history still
 	// reads correctly once the target is gone. Hence 'null', not 'cascade'.
 	protected static $foreign_key_actions = array(
-		'bkh_bkt_target_id' => array('action' => 'null'),
+		// 'bkt' is claimed by both BackupTarget and BookingType, and the column
+		// name (bkt_target, not bkt_backup_target) defeats the entity match -
+		// name the source explicitly.
+		'bkh_bkt_target_id' => array('action' => 'null', 'source_class' => 'BackupTarget'),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	function prepare() {
 		if (!in_array($this->get('bkh_type'), array('project', 'database'), true)) {

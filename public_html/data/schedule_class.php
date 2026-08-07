@@ -41,7 +41,6 @@ class Schedule extends SystemBase {
 	protected static $foreign_key_actions = array();
 
 	// Cleanup when permanent_delete() runs on a row of this model — docs/deletion_system.md
-	public static $permanent_delete_actions = array();
 
 	// Polymorphic ownership. A schedule is owned by a CalendarSubject, not a real
 	// usr_users FK, so the owner-or-staff check resolves the subject first: only a

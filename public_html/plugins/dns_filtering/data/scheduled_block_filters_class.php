@@ -14,6 +14,10 @@ class SdScheduledBlockFilter extends SystemBase {
 	public static $tablename = 'sbf_scheduled_block_filters';
 	public static $pkey_column = 'sbf_scheduled_block_filter_id';
 
+	protected static $foreign_key_actions = array(
+		'sbf_sdb_scheduled_block_id' => array('action' => 'cascade'),
+	);
+
 	public static $field_specifications = array(
 	    'sbf_scheduled_block_filter_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 	    'sbf_sdb_scheduled_block_id' => array('type'=>'int4'),

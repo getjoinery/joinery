@@ -132,8 +132,17 @@ class DeletionRule extends SystemBase {
                 continue;
             }
 
-            // Determine action: explicit override or default cascade
-            $rule = $override ?? ['action' => 'cascade'];
+            // An undeclared relationship registers as 'prevent', never a guessed
+            // destructive action. The engine cannot tell ownership from mere
+            // reference (both are just an _id column), and guessing 'cascade'
+            // here once made deleting a phone number delete the user who
+            // referenced it. An undeclared delete path now fails loudly at
+            // delete time, naming the model and column to declare.
+            $rule = $override ?? [
+                'action' => 'prevent',
+                'message' => "- no deletion action is declared for this relationship. "
+                    . "Add '$column' to $model_class::\$foreign_key_actions.",
+            ];
 
             // A typo here used to register silently and then no-op at delete time,
             // so a misspelled 'prevent' permitted the very deletion it was meant to
@@ -218,12 +227,15 @@ class DeletionRule extends SystemBase {
      * 'aip_' -> 'rcr_run_id' -> first segment 'rcr' is RecipeRun's registered
      * prefix -> its real table, rcr_recipe_runs.
      *
+     * Public because ModelTester's declaration gate must apply the exact same
+     * recognition rule - a second implementation would drift.
+     *
      * @param string $column The column name being examined
      * @param string|null $own_prefix The declaring model's own $prefix
      * @return string|null The real source table, or null if the column isn't
      *   recognized as a foreign key by convention (never a guess)
      */
-    private static function getSourceTableFromColumn($column, $own_prefix) {
+    public static function getSourceTableFromColumn($column, $own_prefix) {
         if (!$own_prefix) {
             return null;
         }
@@ -244,7 +256,29 @@ class DeletionRule extends SystemBase {
         }
 
         $registry = self::getModelRegistry();
-        return $registry['prefix_to_table'][$first_segment] ?? null;
+        $candidates = $registry['prefix_to_tables'][$first_segment] ?? [];
+        if (count($candidates) === 1) {
+            return $candidates[0];
+        }
+        if (count($candidates) === 0) {
+            return null;
+        }
+
+        // Two models declare this prefix (e.g. 'bkt' is both BookingType and
+        // BackupTarget). The column name embeds the singular entity
+        // ({own}_{prefix}_{entity}_id), so match that against the candidate
+        // table names instead of taking whichever model was discovered first:
+        // bkn_bkt_booking_type_id names bkt_booking_types. Resolve only on an
+        // exact singular/plural match - a column that matches none of the
+        // candidates stays unrecognized rather than guessed, and a declared
+        // override for it must name 'source_table'/'source_class'.
+        $entity = substr($remainder, 0, strpos($remainder, '_id'));
+        foreach ($candidates as $candidate) {
+            if ($candidate === $entity || $candidate === $entity . 's') {
+                return $candidate;
+            }
+        }
+        return null;
     }
 
     /**
@@ -261,7 +295,7 @@ class DeletionRule extends SystemBase {
      */
     private static function getModelRegistry() {
         if (self::$model_registry === null) {
-            $prefix_to_table = [];
+            $prefix_to_tables = [];
             $all_tables = [];
 
             $classes = LibraryFunctions::discover_model_classes([
@@ -277,14 +311,17 @@ class DeletionRule extends SystemBase {
 
                 if ($reflection->hasProperty('prefix')) {
                     $prefix = $reflection->getStaticPropertyValue('prefix');
-                    if ($prefix && !isset($prefix_to_table[$prefix])) {
-                        $prefix_to_table[$prefix] = $table;
+                    // Keep every table claiming the prefix - six prefixes are
+                    // declared by two models each (bkt, cnv, rcp, fil, abt,
+                    // del), and getSourceTableFromColumn() disambiguates.
+                    if ($prefix && !in_array($table, $prefix_to_tables[$prefix] ?? [], true)) {
+                        $prefix_to_tables[$prefix][] = $table;
                     }
                 }
             }
 
             self::$model_registry = [
-                'prefix_to_table' => $prefix_to_table,
+                'prefix_to_tables' => $prefix_to_tables,
                 'all_tables' => $all_tables,
             ];
         }

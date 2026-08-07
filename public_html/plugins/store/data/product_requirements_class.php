@@ -17,6 +17,11 @@ class ProductRequirement extends SystemBase {	public static $prefix = 'prq';
 	public static $tablename = 'prq_product_requirements';
 	public static $pkey_column = 'prq_product_requirement_id';
 
+	protected static $foreign_key_actions = [
+		'prq_fil_file_id' => ['action' => 'null'],
+		'prq_qst_question_id' => ['action' => 'prevent', 'message' => 'product requirements are built on this question - repoint them first'],
+	];
+
 	// AI auto-discovery (read)
 	public static $ai_readable        = true;
 	public static $ai_owner_field     = false; // ownerless catalog — members read all rows

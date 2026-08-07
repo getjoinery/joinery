@@ -29,7 +29,10 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	public static $ai_untrusted_fields = ['msg_body'];
 
 	protected static $foreign_key_actions = [
-		'msg_usr_user_id_sender' => ['action' => 'set_value', 'value' => User::USER_DELETED]
+		'msg_usr_user_id_sender' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		'msg_usr_user_id_recipient' => ['action' => 'set_value', 'value' => User::USER_DELETED],
+		// 'cnv' prefix collides with ContentVersion - name the source explicitly
+		'msg_cnv_conversation_id' => ['action' => 'cascade', 'source_class' => 'Conversation']
 	];
 
 		/**

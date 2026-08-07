@@ -50,7 +50,9 @@ class RelayCloudProvision extends SystemBase {
 	public static $tablename = 'rcp_relay_cloud_provisions';
 	public static $pkey_column = 'rcp_id';
 
-	public static $permanent_delete_actions = array();
+	protected static $foreign_key_actions = array(
+		'rcp_mrl_mailbox_relay_id' => array('action' => 'null'),
+	);
 
 	public static $field_specifications = array(
 		'rcp_id'              => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

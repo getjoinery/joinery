@@ -13,7 +13,10 @@ class EmailRecipientGroupException extends SystemBaseException {}
 class EmailRecipientGroup extends SystemBase {	public static $prefix = 'erg';
 	public static $tablename = 'erg_email_recipient_groups';
 	public static $pkey_column = 'erg_email_recipient_group_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = array(
+		'erg_eml_email_id' => array('action' => 'cascade'),
+	);
 
 		/**
 	 * Field specifications define database column properties and validation rules

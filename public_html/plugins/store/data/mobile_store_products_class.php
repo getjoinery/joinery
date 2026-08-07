@@ -37,10 +37,10 @@ class MobileStoreProduct extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'msp_pro_product_id' => ['action' => 'prevent', 'message' => 'Cannot delete product - mobile store mappings exist', 'source_table' => 'pro_products'],
+		'msp_prv_product_version_id' => ['action' => 'prevent'],
 	];
 
 	// Nothing references a mapping row, so permanent delete cascades nowhere.
-	public static $permanent_delete_actions = [];
 
 	public static $field_specifications = array(
 	    'msp_mobile_store_product_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

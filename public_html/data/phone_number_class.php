@@ -24,6 +24,10 @@ class PhoneNumber extends SystemBase {	public static $prefix = 'phn';
 	public static $tablename = 'phn_phone_numbers';
 	public static $pkey_column = 'phn_phone_number_id';
 
+	protected static $foreign_key_actions = [
+		'phn_usr_user_id' => ['action' => 'permanent_delete'],
+	];
+
 	// REST CRUD exposure (Layer 1). User-owned (Bucket B): readable + writable
 	// under the deny-by-default owner-or-staff row scope.
 	public static $api_readable = true;

@@ -38,6 +38,7 @@ class InboundMessageAttachment extends SystemBase {
 
 	protected static $foreign_key_actions = array(
 		'ima_iem_inbound_email_message_id' => array('action' => 'cascade'),
+		'ima_fil_file_id'                  => array('action' => 'cascade'),
 	);
 
 	public static $field_specifications = array(

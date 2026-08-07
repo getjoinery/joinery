@@ -15,7 +15,10 @@ class GroupMemberException extends SystemBaseException {}
 class GroupMember extends SystemBase {	public static $prefix = 'grm';
 	public static $tablename = 'grm_group_members';
 	public static $pkey_column = 'grm_group_member_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = [
+		'grm_grp_group_id' => ['action' => 'cascade'],
+	];
 
 	// AI auto-discovery (read)
 	// grm_foreign_key_id is polymorphic — its referent is determined by the parent

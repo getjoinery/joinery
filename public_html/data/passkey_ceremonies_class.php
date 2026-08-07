@@ -44,8 +44,6 @@ class PasskeyCeremony extends SystemBase {
 		'pks_created_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 
-	public static $permanent_delete_actions = array();
-
 	function __construct($key, $and_load = FALSE) {
 		parent::__construct($key, $and_load);
 	}

@@ -30,7 +30,11 @@ class ActivationCode extends SystemBase {	public static $prefix = 'act';
 	}
 	public static $tablename = 'act_activation_codes';
 	public static $pkey_column = 'act_activation_code_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value	
+
+	protected static $foreign_key_actions = array(
+		'act_usr_user_id' => array('action' => 'cascade'),
+		'act_phn_phone_number_id' => array('action' => 'cascade'),
+	);
 
 	/**
 	 * Field specifications define database column properties and validation rules

@@ -68,7 +68,9 @@ class MailImportRun extends SystemBase {
 	protected static $foreign_key_actions = array(
 		// Deleting the mailbox takes its imported mail with it, so the runs that
 		// brought that mail in go too — there is nothing left for them to report on.
-		'mir_iea_inbound_email_alias_id' => array('action' => 'cascade'),
+		// permanent_delete, not cascade: import runs own child entry rows — a flat
+		// cascade strands them.
+		'mir_iea_inbound_email_alias_id' => array('action' => 'permanent_delete'),
 		// The person leaving does not erase what was imported into a mailbox other
 		// people may still hold. Same treatment a deleted user's files get.
 		'mir_usr_user_id'                => array('action' => 'set_value', 'value' => User::USER_DELETED),

@@ -91,19 +91,24 @@ foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
 	$rules[$row['del_target_table']] = $row;
 }
 
+// Registrants and sessions have children of their own (order items reference
+// registrants; session files hang off sessions), so their action must be
+// permanent_delete - a flat cascade would strand the grandchildren. Waiting
+// list entries are true leaves, so plain cascade is correct there.
 foreach (array(
-	'evr_event_registrants' => 'evr_evt_event_id',
-	'evs_event_sessions'    => 'evs_evt_event_id',
-	'ewl_waiting_lists'     => 'ewl_evt_event_id',
-) as $table => $column) {
+	'evr_event_registrants' => array('evr_evt_event_id', 'permanent_delete'),
+	'evs_event_sessions'    => array('evs_evt_event_id', 'permanent_delete'),
+	'ewl_waiting_lists'     => array('ewl_evt_event_id', 'cascade'),
+) as $table => $expected) {
+	list($column, $action) = $expected;
 	check(isset($rules[$table]), "a deletion rule exists for $table",
 		'rules found: ' . implode(', ', array_keys($rules)));
 	if (isset($rules[$table])) {
 		check($rules[$table]['del_target_column'] === $column,
 			"the $table rule points at $column",
 			'actual: ' . $rules[$table]['del_target_column']);
-		check($rules[$table]['del_action'] === 'cascade',
-			"the $table rule cascades rather than orphaning or blocking",
+		check($rules[$table]['del_action'] === $action,
+			"the $table rule tears down through $action rather than orphaning or blocking",
 			'action: ' . $rules[$table]['del_action']);
 	}
 }

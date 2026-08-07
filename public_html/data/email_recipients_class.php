@@ -22,7 +22,12 @@ class EmailRecipient extends SystemBase {	public static $prefix = 'erc';
 	}
 	public static $tablename = 'erc_email_recipients';
 	public static $pkey_column = 'erc_email_recipient_id';
-	public static $permanent_delete_actions = array(	);  //OPTIONS ARE 'delete', 'null', 'skip', 'prevent', or a value to set to that value
+
+	protected static $foreign_key_actions = array(
+		'erc_eml_email_id' => array('action' => 'cascade'),
+		'erc_usr_user_id' => array('action' => 'null'),
+	);
+
 	
 	// Status codes
 	const EMAIL_SENT = 1;

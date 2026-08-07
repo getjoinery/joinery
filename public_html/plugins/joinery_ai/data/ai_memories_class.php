@@ -71,8 +71,6 @@ class AiMemory extends SystemBase {
         'mem_created_by_user_id' => ['action' => 'null',    'source_table' => 'usr_users'],
     ];
 
-    public static $permanent_delete_actions = array();
-
     // Generic CRUD testing (ModelTester) can't infer the scope/owner pairing
     // rule: user-scope rows need an owner, shared-scope rows must not have
     // one. Pin the scope whose validity doesn't depend on another row, and

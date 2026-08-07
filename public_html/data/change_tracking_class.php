@@ -22,6 +22,10 @@ class ChangeTracking extends SystemBase {
     public static $tablename = 'cht_change_tracking';
     public static $pkey_column = 'cht_change_tracking_id';
 
+    protected static $foreign_key_actions = array(
+        'cht_usr_user_id' => array('action' => 'set_value', 'value' => User::USER_DELETED),
+    );
+
     public static $field_specifications = array(
         'cht_change_tracking_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'cht_entity_type' => array('type'=>'varchar(50)', 'required'=>true),

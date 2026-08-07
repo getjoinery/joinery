@@ -19,8 +19,6 @@ class FileUpload extends SystemBase {
 	public static $tablename = 'fup_file_uploads';
 	public static $pkey_column = 'fup_file_upload_id';
 
-	public static $permanent_delete_actions = array();
-
 	protected static $foreign_key_actions = array(
 		'fup_usr_user_id'   => array('action' => 'cascade'),
 		'fup_fol_folder_id' => array('action' => 'null'),

@@ -290,7 +290,7 @@ harness_register_row('oir_order_item_requirements', 'oir_order_item_requirement_
 $f1 = $provider->fulfill($buyer, $fake_product, $odi, new Order(NULL), 0);
 check((int)($f1['ref_id'] ?? 0) > 0, 'fulfill creates a provision row');
 $cvp = new CustomerCloudProvision((int)$f1['ref_id'], TRUE);
-harness_register_row('cvp_customer_cloud_provisions', 'cvp_customer_cloud_provision_id', $cvp->key);
+harness_register_row('cvp_customer_cloud_provisions', 'cvp_id', $cvp->key);
 check($cvp->get('cvp_status') === 'pending_connect', 'provision starts at pending_connect (no grant)');
 check($cvp->get('cvp_slug') === 'fulfill-test-example-com', 'slug sanitized from the domain answer');
 check((int)$cvp->get('cvp_usr_user_id') === (int)$buyer->key, 'provision linked to the buyer');

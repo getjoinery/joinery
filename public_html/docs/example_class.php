@@ -17,7 +17,7 @@
  *
  * RELATED DOCS:
  * - docs/api.md ............................ REST API exposure, row scope, field floors
- * - docs/deletion_system.md ................ $foreign_key_actions / $permanent_delete_actions
+ * - docs/deletion_system.md ................ $foreign_key_actions
  * - docs/scheduled_tasks.md ................ $retention_policy (deletion on a timer)
  * - docs/validation.md ..................... field validation
  * - docs/logic_architecture.md ............. the logic layer that wraps these models
@@ -357,27 +357,25 @@ class Example extends SystemBase
     // ====================================================================
     //
     // $foreign_key_actions: what happens to THIS model's rows when a row they
-    // reference (a parent) is deleted. Omit a foreign key entirely to let it
-    // cascade-delete with the parent. Actions:
-    //   ['action' => 'null']                                  - set the FK to NULL
+    // reference is deleted. Every foreign-key-shaped column MUST declare an
+    // action (ModelTester fails the db tier otherwise); an undeclared
+    // relationship registers as 'prevent' and refuses the referenced row's
+    // deletion. Choose by asking whether the referenced row OWNS this row or
+    // is merely REFERENCED by it - docs/deletion_system.md has the full rule.
+    //   ['action' => 'permanent_delete']  - owned, and this model has children
+    //                                       or a permanent_delete() override
+    //   ['action' => 'cascade']           - owned, and this model is a leaf
+    //   ['action' => 'null']              - mere reference: clear the FK
     //   ['action' => 'set_value', 'value' => User::USER_DELETED] - reassign
-    //   ['action' => 'prevent', 'message' => '...']           - block parent deletion
+    //   ['action' => 'prevent', 'message' => '...'] - reference is load-bearing:
+    //                                       refuse to delete the referenced row
+    // If the column's prefix is claimed by two models (e.g. 'bkt'), add
+    // 'source_class' => 'TheModel' to name the referenced model explicitly.
     protected static $foreign_key_actions = [
         // 'exm_category_id' => ['action' => 'null'],
         // 'exm_created_by'  => ['action' => 'set_value', 'value' => User::USER_DELETED],
     ];
 
-    // $permanent_delete_actions: cleanup when permanent_delete() runs on a row
-    // of THIS model (delete owned files, cascade owned child rows). MUST be
-    // defined (even if empty) for every model class.
-    public static $permanent_delete_actions = array(
-        // 'delete_files' => array('exm_image_path'),
-        // 'cascade_delete' => array(
-        //     'table' => 'exm_related',
-        //     'foreign_key' => 'exm_example_id'
-        // )
-    );
-    
     // OPTIONAL: Retention — full reference: docs/scheduled_tasks.md#retention-windows
     // ====================================================================
     //

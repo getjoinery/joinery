@@ -31,6 +31,7 @@ class InboundMailboxSearchIndex extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'imi_usr_user_id' => ['action' => 'cascade'],
+		'imi_fil_file_id' => ['action' => 'cascade'],
 	];
 
 	// Retention: the /dev/shm working copies of this index, not the rows.
@@ -56,8 +57,6 @@ class InboundMailboxSearchIndex extends SystemBase {
 		'imi_created_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'imi_updated_time'     => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	public static $permanent_delete_actions = array();
 
 	/** The one bookkeeping row for a mailbox owner, creating it if absent. */
 	public static function loadOrCreateForUser(int $user_id): InboundMailboxSearchIndex {

@@ -22,6 +22,7 @@ class ManagedNode extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'mgn_mgh_host_id' => ['action' => 'null'],
+		'mgn_bkt_backup_target_id' => ['action' => 'null'],
 	];
 
 	public static $field_specifications = array(

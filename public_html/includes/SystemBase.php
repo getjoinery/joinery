@@ -42,7 +42,6 @@ abstract class SystemBase {
 	static $constants = array();
 	static $required = array();
 	static $required_user = array();
-	static $permanent_delete_actions = array();
 
 	/**
 	 * Every action name permanent_delete() knows how to execute. Anything outside
