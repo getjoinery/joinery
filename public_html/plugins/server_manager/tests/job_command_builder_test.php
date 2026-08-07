@@ -1201,12 +1201,76 @@ $run_node = jcb_node(array(
 // Refusals: a job that cannot say where the backup goes, or which site to back
 // up, fails at build time with a message the operator sees — not part-way
 // through a backup on the node.
+// Where a backup goes is the control plane's decision, not the node's: the
+// bucket, the credential and the recovery key all travel with the run. So a
+// node that names no target is only a problem when the choice is genuinely
+// ambiguous. With several shelves enabled, refuse and say so.
+$enabled_now = 0;
+$enabled_before = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
+$enabled_before->load();
+foreach ($enabled_before as $ignored) { $enabled_now++; }
+
 $threw = false;
+$refusal = '';
 try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
 		'mgn_web_root' => '/var/www/html/notarget/public_html')));
-} catch (Exception $e) { $threw = true; }
-check($threw, 'backup_run refuses a node with no enabled backup target');
+} catch (Exception $e) { $threw = true; $refusal = $e->getMessage(); }
+
+if ($enabled_now > 1) {
+	check($threw, 'backup_run refuses a target-less node while several shelves are enabled');
+	check(strpos($refusal, 'real choice') !== false,
+		'the refusal says the choice is real, not that nothing is configured', $refusal);
+} else {
+	check(!$threw, 'backup_run resolves a target-less node when one shelf is enabled');
+}
+
+// The single-shelf case is the one that matters in practice, and it is the
+// reason eight of eleven nodes sat un-backed-up: registering a node never
+// filled the pointer in. Disable this suite's own target so exactly the real
+// one remains, then assert the inference — restored immediately after.
+$bkt->set('bkt_enabled', false);
+$bkt->save();
+$sole_count = 0;
+$sole_id = null;
+$sole_set = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
+$sole_set->load();
+foreach ($sole_set as $only) {
+	$sole_count++;
+	$sole_id = $only->key;
+}
+if ($sole_count === 1) {
+	$inferred = JobCommandBuilder::get_target(jcb_node(array(
+		'mgn_web_root' => '/var/www/html/inferred/public_html')));
+	check($inferred !== null && $inferred->key == $sole_id,
+		'a node naming no target resolves to the sole enabled shelf',
+		'resolved: ' . var_export($inferred ? $inferred->key : null, true));
+} else {
+	harness_skip('sole-shelf inference', "this deployment has {$sole_count} enabled targets, not 1");
+}
+$bkt->set('bkt_enabled', true);
+$bkt->save();
+
+// A named target still wins outright — inference never overrides a recorded
+// choice, and a node pointing at a switched-off shelf is refused rather than
+// silently redirected to whatever else happens to be enabled.
+$named = JobCommandBuilder::get_target(jcb_node(array(
+	'mgn_web_root' => '/var/www/html/named/public_html',
+	'mgn_bkt_backup_target_id' => $bkt->key)));
+check($named !== null && $named->key == $bkt->key, 'a named target is used as named');
+
+$off = new BackupTarget(NULL);
+$off->set('bkt_name', 'HarnessTest Disabled ' . bin2hex(random_bytes(3)));
+$off->set('bkt_provider', 'b2');
+$off->set('bkt_bucket', 'harness-disabled-bucket');
+$off->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
+$off->set('bkt_enabled', false);
+$off->save();
+harness_register_row('bkt_backup_targets', 'bkt_id', $off->key);
+check(JobCommandBuilder::get_target(jcb_node(array(
+	'mgn_web_root' => '/var/www/html/offtarget/public_html',
+	'mgn_bkt_backup_target_id' => $off->key))) === null,
+	'a node naming a disabled target is refused, not redirected');
 
 $threw = false;
 try {

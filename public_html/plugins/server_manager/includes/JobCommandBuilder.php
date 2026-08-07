@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.27 - a node that names no backup target falls back to the control
+ *                 plane's sole enabled one, so a registered node is backed up
+ *                 without per-node setup; two or more and it still refuses
  * @version 1.26 - paths and the site URL are cast before parsing, so an unset one
  *                 raises nothing on PHP 8.5
  * @version 1.25 - node-bound backup steps carry __SM_NODE_CREDS_<id>__ when the target holds a
@@ -698,9 +701,16 @@ class JobCommandBuilder {
 
 		$target = self::get_target($node);
 		if (!$target) {
+			$enabled_count = self::enabled_target_count();
+			$why = ($enabled_count === 0)
+				? 'this control plane has no enabled backup target at all'
+				: ($enabled_count > 1
+					? "this control plane has {$enabled_count} enabled backup targets and this node names "
+						. 'none, so which one to use is a real choice — assign one to the node'
+					: 'the backup target this node names is missing or switched off');
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' has no enabled backup target, so there is nowhere to put "
-				. 'a backup this control plane takes.');
+				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this control plane takes: "
+				. $why . '.');
 		}
 
 		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
@@ -1463,16 +1473,54 @@ class JobCommandBuilder {
 	 * Returns BackupTarget or null.
 	 */
 	public static function get_target($node) {
-		$target_id = $node->get('mgn_bkt_backup_target_id');
-		if (!$target_id) return null;
 		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
-		try {
-			$target = new BackupTarget($target_id, TRUE);
-			if ($target->get('bkt_enabled')) {
-				return $target;
-			}
-		} catch (Exception $e) {}
-		return null;
+
+		// A node that names a shelf gets that shelf, and only that shelf. If the
+		// named one is gone or switched off, this returns null rather than
+		// quietly redirecting the archive somewhere the operator did not choose.
+		$target_id = $node->get('mgn_bkt_backup_target_id');
+		if ($target_id) {
+			try {
+				$target = new BackupTarget($target_id, TRUE);
+				if ($target->get('bkt_enabled')) {
+					return $target;
+				}
+			} catch (Exception $e) {}
+			return null;
+		}
+
+		// Nothing named. Everything the run needs — bucket, write-only
+		// credential, recovery key — is supplied by this control plane anyway,
+		// so the only open question is which shelf; and with exactly one enabled
+		// target there is no question to ask. Requiring the answer anyway is how
+		// a node ends up silently un-backed-up from the moment it is registered.
+		//
+		// Two or more, and the choice is real: refuse and let the operator make
+		// it, rather than guess which bucket a site's data belongs in.
+		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
+		$enabled->load();
+		$sole = null;
+		$count = 0;
+		foreach ($enabled as $candidate) {
+			$count++;
+			if ($count > 1) return null;
+			$sole = $candidate;
+		}
+		return $sole;
+	}
+
+	/**
+	 * How many enabled shelves this control plane has, for the refusal message
+	 * that tells an operator which problem they actually have: none configured,
+	 * or several and no choice recorded for this node.
+	 */
+	private static function enabled_target_count() {
+		require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
+		$enabled = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
+		$enabled->load();
+		$count = 0;
+		foreach ($enabled as $ignored) { $count++; }
+		return $count;
 	}
 
 	/**
