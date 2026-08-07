@@ -82,7 +82,7 @@ chmod($cfg5, 0400);
 $r5 = SecretBox::ensureConfigKey($cfg5);
 // Skip on environments running as root, where 0400 files stay writable.
 if (is_writable($cfg5)) {
-	skip('unwritable config reported', 'process can write read-only files (root)');
+	harness_skip('unwritable config reported', 'process can write read-only files (root)');
 } else {
 	check($r5['ok'] === false && $r5['action'] === 'unwritable', 'unwritable config reported');
 }
