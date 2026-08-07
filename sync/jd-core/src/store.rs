@@ -383,6 +383,74 @@ impl Store {
             .optional()?)
     }
 
+    /// Fold a provisional folder into the real one that turned out to be the
+    /// same directory, and forget the provisional.
+    ///
+    /// This exists because a device can end up holding **two entries for one
+    /// directory**. A pass reads the change feed and then walks the disk, so a
+    /// directory with no matching entry correctly gets a provisional identity —
+    /// no such folder existed on the server when the feed was read. If another
+    /// device creates that folder before this one's create lands, the create is
+    /// refused and the provisional survives; the winner's folder then arrives as
+    /// a second entry describing the same directory.
+    ///
+    /// Left alone the two deadlock: name resolution treats them as rival
+    /// siblings, the provisional outranks the real one, so the real folder is
+    /// refused as clashing with a name identical to its own, so it never
+    /// materializes, so it never supersedes the provisional, which re-plans its
+    /// doomed create every pass. Found on the soak rig at 611 refused creates
+    /// per folder with the queue flat for fifteen minutes.
+    ///
+    /// Merging is safe precisely for folders: the server permits one name per
+    /// parent, so a local directory and a remote folder at the same path cannot
+    /// be different things.
+    ///
+    /// What happens to each thing the provisional owned:
+    /// - **children** are re-pointed at the real folder — they are the same
+    ///   files, and orphaning them would re-upload the whole subtree;
+    /// - **local_index rows** move, so the hash cache is not thrown away and a
+    ///   rescan does not re-read every byte;
+    /// - **queued operations are dropped**, not moved. They were planned against
+    ///   an identity that no longer exists, and the only one that can be
+    ///   outstanding here is the create that will never succeed.
+    pub fn merge_folder(&self, from: EntityId, to: EntityId) -> StoreResult<()> {
+        if from == to || from.entity_type != EntityType::Folder {
+            return Ok(());
+        }
+        let t = from.entity_type.to_string();
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            self.conn.execute(
+                "UPDATE entries SET parent_folder_id = ?2 WHERE parent_folder_id = ?1",
+                params![from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "UPDATE local_index SET server_id = ?3
+                  WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM ops WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id],
+            )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
     pub fn delete_entry(&self, id: EntityId) -> StoreResult<()> {
         self.conn.execute(
             "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",

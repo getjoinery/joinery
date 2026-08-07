@@ -94,6 +94,12 @@ pub fn run_pass(
         absorb_remote(env, *id, state)?;
     }
 
+    // ---- one directory, one entry -------------------------------------------
+    //
+    // Before naming, because naming is what turns this into a deadlock: it sees
+    // two entries claiming one name and refuses the real one.
+    merge_duplicate_folders(env)?;
+
     // ---- what each entry is called here -------------------------------------
     //
     // Before the disk is walked, not after. The scan pairs what is on disk
@@ -949,6 +955,60 @@ pub(crate) fn all_entries(env: &ExecEnv) -> Result<Vec<Entry>, ExecError> {
 }
 
 /// Path → folder id, for every folder the store tracks.
+/// Fold away any provisional folder that turns out to be a real one.
+///
+/// The situation, which a device reaches through no fault of its own: a pass
+/// reads the change feed, finds no folder of that name, walks the disk, and
+/// gives the directory it finds a provisional identity. Between that feed read
+/// and its create landing, another device creates the same folder. The create is
+/// refused and the provisional survives — and the winner's folder then arrives
+/// as a second entry for the same directory.
+///
+/// Nothing downstream can resolve that. Name resolution treats the two as rival
+/// siblings and `resolution_order` ranks a provisional as materialized, so the
+/// provisional takes the name and the real folder is refused as clashing with a
+/// name identical to its own. Being unsyncable it never materializes, so it
+/// never occupies the path, so the provisional is never superseded, so it
+/// re-plans its doomed create every pass — forever, raising a fresh issue each
+/// time. The soak rig found it at 611 refused creates per folder.
+///
+/// Matching on exact name and parent, not on a comparison key: this is a repair
+/// for two records of one directory, and folding together two folders a
+/// filesystem merely cannot tell apart is a different decision that belongs to
+/// naming, which is equipped to make it.
+///
+/// Iterated because merging a parent re-points its children, which can expose a
+/// pair one level down. Bounded, because a repair that could loop is worse than
+/// one that waits for the next pass.
+fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
+    let mut merged = 0;
+    for _ in 0..8 {
+        let entries = all_entries(env)?;
+        let mut real: HashMap<(Option<i64>, String), i64> = HashMap::new();
+        for e in &entries {
+            if e.id.entity_type == EntityType::Folder && !e.id.is_provisional() && !e.remote_deleted
+            {
+                real.insert((e.remote.parent, e.remote.name.clone()), e.id.server_id);
+            }
+        }
+        let mut this_round = 0;
+        for e in &entries {
+            if e.id.entity_type != EntityType::Folder || !e.id.is_provisional() {
+                continue;
+            }
+            if let Some(&id) = real.get(&(e.remote.parent, e.remote.name.clone())) {
+                env.store.merge_folder(e.id, EntityId::folder(id))?;
+                this_round += 1;
+            }
+        }
+        merged += this_round;
+        if this_round == 0 {
+            break;
+        }
+    }
+    Ok(merged)
+}
+
 fn folder_paths(env: &ExecEnv) -> Result<HashMap<String, i64>, ExecError> {
     let mut out = HashMap::new();
     for entry in all_entries(env)? {

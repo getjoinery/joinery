@@ -464,18 +464,139 @@ version history every settle — one API call per file, which at 100k entries is
 not viable. It now only searches version history when something is genuinely
 unaccounted for, and stops as soon as it is found.
 
+## Run 3 — the rig's first real finding about the client
+
+Reset to a clean account and deliberately gentled: 120 s storm, 2 s actor pace,
+900 s settle deadline. **869 actor operations, 3 faults, and four of the six
+assertions passed** — the rig defects above are fixed, so what remains is the
+client.
+
+**A folder create that collides by name is retried forever.** `create_remote_folder`
+comes back *"A folder with that name already exists here"*, the operation is
+withdrawn, an issue is raised — and the same create is planned again on the next
+pass, and the next. Measured during the settle with every actor stopped:
+
+| | |
+|---|---|
+| `pending_ops` | **66, flat**, for the whole 900 s |
+| open issues | 930 → 1004 in 45 s, ending at **1,340 and still climbing** |
+| distinct causes | **3** |
+
+Flat queue plus growing issues from three causes is a loop, not a backlog. The
+device's own state store says why. It holds **two entries for one directory**:
+
+| entity | name | status |
+|---|---|---|
+| `642` (real) | `Shared-office` | **unsyncable**, reason `unicode_clash:Shared-office` |
+| `-3` (provisional) | `Shared-office` | `pending_upload`, 611 refused creates |
+| `644` / `-2` | `Shared-name-swapper` | the same pair, 611 refused creates |
+| `646` | `Shared-messy-human` | `synced` — this one adopted cleanly |
+
+The server's folder is refused as clashing with a name **identical to its own**,
+because the device's provisional twin holds first claim on it (`resolution_order`
+ranks a provisional as materialized). The provisional can never be created — the
+server refuses the duplicate name. The remote can never materialize — the
+provisional owns the name. The deadlock is closed and self-sustaining, and the
+subtree beneath is stranded, which is what the `audited-green` differences are
+downstream of. The same self-clash appears on files: `Report 2.docx`,
+`slot-3.dat`, `app.db-shm`.
+
+**Root cause, established 2026-08-06 and reproduced deterministically.** A pass
+reads the change feed, *then* walks the disk. A device that finds a directory
+with no matching entry mints a provisional identity for it — correctly, because
+at feed-read time no such folder existed on the server. In the window between
+that feed read and its create landing, another device creates the same folder.
+The create is refused and **the provisional survives**.
+
+The winner's folder then arrives in the feed as a real entry, and the device is
+holding two entries describing one directory. Name resolution treats them as
+rival siblings, and `resolution_order` ranks a provisional as materialized — so
+the provisional wins the name and the real folder is refused as clashing with
+itself. Unsyncable means it never materializes, so it never occupies the path,
+so the provisional is never superseded, so it re-plans its create every pass.
+
+The engine has **no rule that a provisional entry and a remote entry at the same
+placement are the same thing.** For folders they always are: the server enforces
+one name per parent, so a local directory and a remote folder at the same path
+cannot be different things.
+
+Reproduced as `a_folder_that_lost_a_creation_race_still_converges` in
+`jd-sim/tests/scenarios.rs`, carrying `#[ignore]` because it fails — it is an
+open bug, not a regression guard. `cargo test -p jd-sim -- --ignored` runs it.
+Getting there took four wrong attempts, all of which the engine survived; the
+reason none of them reproduced is that an offline device never mints anything at
+all (a pass that cannot read the feed aborts before the scan), so the window is
+narrower than "two devices race" — it is bounded by one device's own pass.
+
+**Fixed** in `jd-core`: `Store::merge_folder` folds a provisional folder into the
+real one that turned out to be the same directory — children re-pointed, hash
+cache moved, the doomed create dropped — and `pass::merge_duplicate_folders`
+runs it before naming, which is what would otherwise turn the pair into rivals.
+Doing it as a pass pre-step rather than in the create's error handler makes the
+state unreachable however it arises, including from a crash, and avoids matching
+on a server message string. Safe precisely for folders: the server permits one
+name per parent, so a local directory and a remote folder at the same path
+cannot be different things.
+
+Verified twice. The reproduction above now passes, and deploying the build onto
+the **still-deadlocked live devices** cleared them: provisional folders 2 → 0 on
+device-a, the issue count frozen at 7,675 after climbing at ~1.6/s for fifteen
+minutes, and the queue replaced by real work (42 downloads, 14 folder creates, 5
+moves) instead of a create that could never succeed.
+
+**Files are not the same case and are not a bug.** The remaining self-clashes are
+two genuine server files sharing a name in one folder, which the server permits
+and a filesystem cannot hold. Surfacing the loser is the designed behaviour, not
+a deadlock.
+
+Those four orderings are frozen too, as a **guard** rather than a reproduction:
+they pin the paths that do work, so a fix cannot quietly break them.
+
+Two things this is *not*. It is not silent: `issues-honest` passed with 1,905
+surfaced across the fleet, so the client is loudly stuck rather than quietly
+broken. And it is not a data-loss bug: `no-loss` passed.
+
+**Second, smaller finding:** a raw database error reaches the user. One issue
+summary reads `create_remote_folder was not carried out: Database INSERT failed
+on table 'fol_folders' - SQLSTATE[23505]…`. A unique-constraint violation is the
+server's business, not something to show a person.
+
+Whether any of the content differences (`Report 1.docx differs: device … vs
+server …`) is an independent bug cannot be told until the loop is fixed — a
+client that never finishes will differ from the server for reasons that say
+nothing about its correctness.
+
+**A fifth finding, in the rig again, and it wasted a settle:** the actors run as
+root while each daemon runs as its own account, so directories an actor created
+came out mode 755 and the daemon could not materialize anything inside them.
+Downloads failed `permission denied`, whole subtrees never arrived, and the tree
+diff reported it as the device missing what the server had — indistinguishable
+from a client bug until somebody read the error text. Actor-created directories
+are now `2775`, the setgid bit carrying the group all the way down.
+
+**A third finding, and the reason the first survived this long:** the mock server
+did not enforce folder-name uniqueness, while the real one always has
+(`DriveHelper::folder_name_taken`). The simulator has therefore never once
+exercised the engine against that refusal — it was answering a question the real
+server never asks. Fixed. Two existing tests that proved "a retry without a key
+does the work twice" by creating a duplicate folder now use distinct names, since
+the duplicate would legitimately be refused.
+
+Evidence kept off the rig at `/root/soak-evidence/run3-folder-retry-loop` on the
+soak VPS, alongside `run2-violation`. **The devices are still deadlocked**, so a
+candidate fix can be tested against a live reproduction even without a
+deterministic one.
+
 ## What has not been demonstrated yet
 
-**A green cycle.** Both runs failed convergence, and on this hardware that is
-expected rather than mysterious: one vCPU and 961 MB running Postgres, PHP-FPM,
-two daemons and eight actors, with the server on the same box. The storm
-out-produces what the settle window can drain — 8,551 operations committed, ~500
-still queued at the deadline. The rig is measuring the box, not the client.
+**A green cycle**, and run 3 shows why: the client has a convergence bug. Runs 1
+and 2 failed for hardware reasons (the storm out-produced what the settle could
+drain on one vCPU); run 3 was gentled until that stopped being true, and what
+was left underneath is the folder-create retry loop above.
 
-The next run needs the storm slowed (`--pace-ms` well above 400) or the settle
-deadline raised well past the storm length, and probably both. Until a cycle
-comes back green, nothing here says the client is correct — only that the rig
-can tell when it is not, which it has now demonstrated four times.
+So the sequence is now: fix the retry loop, re-run at run 3's pacing, and expect
+green. Only then is it worth turning the intensity back up — a campaign at run
+2's rate would just bury the next finding under the same loop.
 
 # Docs to update when phases land
 

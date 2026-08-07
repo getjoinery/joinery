@@ -235,6 +235,161 @@ fn a_file_written_on_one_computer_appears_on_the_other() {
 }
 
 #[test]
+fn two_computers_making_the_same_folder_both_end_up_with_it() {
+    // A guard, not a reproduction — and the distinction is the point.
+    //
+    // The soak rig found a real deadlock live on 2026-08-06: a device ended up
+    // holding TWO entries for one directory, a provisional one it could never
+    // create (the server refuses the duplicate name) and the server's real one
+    // marked unsyncable for clashing with a name identical to its own. Neither
+    // could ever resolve. 611 refused creates per folder, the queue flat for
+    // fifteen minutes, the issue count past 1,300.
+    //
+    // This exercises the same collision through every ordering that could be
+    // constructed here — simultaneous, sequenced, and with the loser cut off so
+    // it mints its provisional before it can know the name is taken — and the
+    // engine recovers from all of them. So this test does NOT cover the live
+    // bug; it pins the paths that DO work, so a fix for the live one cannot
+    // quietly break them. The live trigger is still unidentified.
+    //
+    // It also only became meaningful once the mock server started refusing
+    // duplicate folder names the way the real one always has. Before that the
+    // simulator was answering a question the real server never asks.
+    let world = World::new(8_600_601, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    // Both make the folder before either has run a pass, and then the DESKTOP
+    // goes first — far enough to give its directory a provisional identity and
+    // to have its create refused, before it has ever heard of the laptop's.
+    // That order is what the live rig produced by simple concurrency, and it is
+    // the whole reproduction: a device that mints a provisional folder and only
+    // afterwards learns the server already has one.
+    for device in ["laptop", "desktop"] {
+        let fs = &world.device(device).fs;
+        fs.user_mkdir("Projects");
+        let path = format!("Projects/from-{device}.txt");
+        let body = format!("written on the {device}");
+        fs.user_write(&path, body.as_bytes());
+        committed.note(&path, body.as_bytes());
+    }
+
+    // The desktop is offline while it first notices its own folder. That is the
+    // only way to get the ordering genuine concurrency produced live: a pass
+    // reads the change feed BEFORE it walks the disk, so a connected device
+    // always learns about the other's folder first and pairs with it cleanly.
+    // Cut off, the desktop mints a provisional identity for a name it does not
+    // yet know is taken.
+    world.device("desktop").net.set_faults(NetFaults {
+        drop_before: 1000,
+        ..NetFaults::none()
+    });
+    world.pass(world.device("desktop"));
+
+    // The laptop, online throughout, wins the name on the server.
+    world.pass(world.device("laptop"));
+
+    // The desktop comes back and meets a folder it already believes is its own.
+    world.device("desktop").net.set_faults(NetFaults::none());
+
+    assert!(
+        world.settle().is_some(),
+        "neither computer ever stopped trying: the loser of a folder-name race \
+         re-plans the same create every pass instead of adopting the winner"
+    );
+    assert_invariants(&world, &committed);
+
+    // One folder, and both files inside it — on the server and on both disks.
+    assert_eq!(world.server.live_counts(), (1, 2));
+    for device in ["laptop", "desktop"] {
+        let fs = &world.device(device).fs;
+        assert!(
+            fs.peek("Projects/from-laptop.txt").is_some()
+                && fs.peek("Projects/from-desktop.txt").is_some(),
+            "{device} is missing one of the two files that went into the shared folder"
+        );
+    }
+}
+
+/// The live deadlock from the soak rig, reduced to its exact state, and now
+/// fixed — `pass::merge_duplicate_folders` folds the two entries together
+/// before naming can turn them into rivals.
+///
+/// Root cause, established 2026-08-06. A pass reads the change feed, then walks
+/// the disk. A device that finds a directory with no matching entry mints a
+/// provisional identity for it — correctly, because at feed-read time no such
+/// folder existed on the server. In the window between that feed read and its
+/// create landing, another device creates the same folder. The create is refused
+/// ("A folder with that name already exists here") and the provisional survives.
+///
+/// The winner's folder then arrives in the feed as a real entry, and the device
+/// is holding **two entries describing one directory**. Name resolution treats
+/// them as rival siblings; `resolution_order` ranks a provisional as
+/// materialized, so the provisional wins the name and the real folder is marked
+/// `Unsyncable(UnicodeClash)` — against a name identical to its own. Unsyncable
+/// means it never materializes, so it never occupies the path, so the
+/// provisional is never superseded, so it re-plans its create every pass. Live:
+/// 611 refused creates per folder, the queue flat for fifteen minutes, issues
+/// past 1,300, and the whole subtree beneath stranded.
+///
+/// The engine has no rule that a provisional entry and a remote entry at the
+/// same placement are the same thing. For folders they always are — the server
+/// enforces one name per parent — so the fix is to merge them before planning,
+/// which also makes the state unreachable however else it might arise.
+#[test]
+fn a_folder_that_lost_a_creation_race_still_converges() {
+    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+    use serde_json::json;
+
+    let world = World::new(99, &["laptop"]);
+    let device = world.device("laptop");
+
+    // Another device already made Projects on the server.
+    world
+        .server
+        .action("drive_folder_create", &json!({ "name": "Projects" }))
+        .unwrap();
+
+    // This one has the directory on disk and — the state the race leaves — a
+    // provisional entry minted before it could know the name was taken.
+    device.fs.user_mkdir("Projects");
+    device.fs.user_write("Projects/mine.txt", b"written here");
+    let id = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&Entry {
+            id,
+            remote: Placement {
+                parent: None,
+                name: "Projects".into(),
+            },
+            remote_content: None,
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: LocalStatus::PendingUpload,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    assert!(
+        world.settle().is_some(),
+        "the device never stops trying: its provisional folder holds the name, \
+         so the server's real folder is refused as clashing with itself, so it \
+         never materializes, so the provisional is never superseded"
+    );
+
+    // One folder, and the file inside it reached the server.
+    assert_eq!(world.server.live_counts(), (1, 1));
+}
+
+#[test]
 fn two_computers_editing_the_same_file_both_keep_their_work() {
     // The case people actually hit. Neither edit may be discarded, and both
     // computers must end up seeing the same two files.

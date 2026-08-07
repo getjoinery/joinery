@@ -1,9 +1,21 @@
 # Drive Private Tier — server-custody encrypted files, opened in-window
 
-**Status: DRAFT 2026-08-02 — build spec for the Private rung on Drive, per
-`specs/protection_levels_platform.md` (doctrine, resolved decisions R1–R3).
-Unbuilt. Written for maximum reuse of the machinery that already exists;
-each section names the code it rides on and the refactors it needs.**
+**Status: BUILT and verified 2026-08-06.** Shipped in `1e5097d4`, covered by
+`tests/functional/drive/private_tier_test.php` (103 checks) and
+`tests/vault/sealed_file_container_test.php` (83 checks), docs written. Build
+spec for the Private rung on Drive, per `specs/protection_levels_platform.md`
+(doctrine, resolved decisions R1–R3). Written for maximum reuse of the
+machinery that already exists; each section names the code it rides on and the
+refactors it needs.
+
+**Deliberately still in `specs/` rather than `specs/implemented/`.** Every
+build-order step below is done except the last: this spec files *together with*
+the doctrine spec when the shared level-picker component lands. Drive's own
+level UI is complete and lives in `assets/js/drive.js`; what is outstanding is
+the **shared** picker, which is the doctrine spec's deliverable rather than
+this one's. The same coupling is recorded in
+`specs/implemented/drive_private_tier_defects.md`, so moving this file early
+would contradict a filed decision and break its references.
 
 **Defects found in review of the build are tracked in
 `specs/implemented/drive_private_tier_defects.md` (D1–D7). D7 carries the answer to this
@@ -293,3 +305,7 @@ picker component from `specs/protection_levels_platform.md`.
 7. R4 rotation callback + tests.
 8. Docs + doctrine spec cross-references; move both specs to implemented
    together when the picker component lands.
+
+Steps 1–7 and the docs half of step 8 are done. The filing half is all that is
+left, and it waits on the doctrine spec's shared picker rather than on anything
+in Drive.
