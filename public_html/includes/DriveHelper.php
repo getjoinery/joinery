@@ -767,6 +767,45 @@ class DriveHelper {
 		return $q->fetchColumn() !== false;
 	}
 
+	/**
+	 * Save a folder whose sibling name has just been checked, telling a lost
+	 * name race apart from a genuine failure.
+	 *
+	 * folder_name_taken() is a fast path, not a guarantee: two writers can both
+	 * pass it and both reach the insert, and the partial unique index refuses
+	 * the loser. Rather than reading the driver's error text, this asks the same
+	 * question a second time — if the name is taken now, the race is the whole
+	 * explanation, and the caller answers exactly as it would have a moment
+	 * earlier. Anything else is rethrown untouched.
+	 *
+	 * The caller that needs this most is a sync client: it retries an
+	 * unexplained database failure forever, but it knows what to do with a name
+	 * that is already taken.
+	 *
+	 * Returns TRUE when the folder saved, FALSE when the name was taken meanwhile.
+	 */
+	public static function save_folder_unless_name_taken($folder) {
+		self::require_classes();
+		try {
+			$folder->save();
+			return true;
+		} catch (Exception $e) {
+			if (strpos($e->getMessage(), '23505') === false) {
+				throw $e; // not a uniqueness refusal — nothing here explains it
+			}
+			$taken = self::folder_name_taken(
+				(int)$folder->get('fol_usr_user_id'),
+				(int)$folder->get('fol_parent_folder_id'),
+				$folder->get('fol_name'),
+				(int)$folder->key
+			);
+			if ($taken) {
+				return false;
+			}
+			throw $e;
+		}
+	}
+
 	// ------------------------------------------------------------------
 	// Trash lifecycle — soft-delete cascade and selective restore
 	// ------------------------------------------------------------------

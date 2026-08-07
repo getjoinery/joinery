@@ -81,10 +81,20 @@ pub enum ExecError {
 pub enum OpOutcome {
     /// Applied, and the agreement now reflects it.
     Done,
+    /// Refused in a way another attempt will not change: the server rejected
+    /// it, or this build cannot carry it out. Dropped rather than retried, and
+    /// raised as an issue — a person has to decide what happens next.
+    Withdrawn(String),
     /// The premise no longer holds — the file was deleted while the op sat in
     /// the queue, the entry is gone from the server. Dropped rather than
     /// retried; the next round decides afresh from what is actually there.
-    Withdrawn(String),
+    ///
+    /// Separate from `Withdrawn` because nothing here is anybody's problem.
+    /// Deleting a file while it happens to be uploading is an ordinary thing to
+    /// do, and a soak run found it leaving behind an item asking the user to
+    /// look at a file they had just thrown away. The work still stops; it just
+    /// stops quietly.
+    Overtaken(String),
     /// Try again later. Carries what to say about it in the meantime.
     Retry(String),
 }
@@ -94,6 +104,10 @@ pub enum OpOutcome {
 pub struct ExecReport {
     pub done: usize,
     pub withdrawn: usize,
+    /// Dropped because the world moved on. Counted apart from `withdrawn` so a
+    /// quiet drop still shows up somewhere — a pass that silently abandoned
+    /// half its work would otherwise look like a pass with less to do.
+    pub overtaken: usize,
     pub retrying: usize,
     /// Ops left alone because their backoff has not elapsed.
     pub deferred: usize,
@@ -101,7 +115,7 @@ pub struct ExecReport {
 
 impl ExecReport {
     pub fn attempted(&self) -> usize {
-        self.done + self.withdrawn + self.retrying
+        self.done + self.withdrawn + self.overtaken + self.retrying
     }
 }
 
@@ -239,6 +253,7 @@ pub fn run_queued(env: &ExecEnv) -> Result<ExecReport, ExecError> {
         match run_one(env, &op)? {
             OpOutcome::Done => report.done += 1,
             OpOutcome::Withdrawn(_) => report.withdrawn += 1,
+            OpOutcome::Overtaken(_) => report.overtaken += 1,
             OpOutcome::Retry(_) => report.retrying += 1,
         }
     }
@@ -269,6 +284,11 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             )?;
             env.store.drop_op(op.op_id)?;
         }
+        OpOutcome::Overtaken(_) => {
+            // No issue: there is nothing here for a person to decide. The next
+            // scan plans from what is on the disk and the server now.
+            env.store.drop_op(op.op_id)?;
+        }
         OpOutcome::Retry(why) => {
             let delay = retry_delay_ms(op.attempts + 1) as i64;
             env.store
@@ -292,8 +312,9 @@ fn classify(e: &ExecError) -> OpOutcome {
         ExecError::Proto(ProtoError::Api {
             status, message, ..
         }) => match status {
-            // Gone. Nothing to retry against; the next round re-derives.
-            404 => OpOutcome::Withdrawn(message.clone()),
+            // Gone. Nothing to retry against; the next round re-derives, and
+            // there is nothing here to tell anybody about.
+            404 => OpOutcome::Overtaken(message.clone()),
             // Out of step with the server, which is a thing that resolves.
             409 | 423 | 429 => OpOutcome::Retry(message.clone()),
             s if *s >= 500 => OpOutcome::Retry(message.clone()),
@@ -301,7 +322,7 @@ fn classify(e: &ExecError) -> OpOutcome {
         },
         ExecError::Proto(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Vfs(jd_vfs::VfsError::NotFound(p)) => {
-            OpOutcome::Withdrawn(format!("{} is no longer there", p.display()))
+            OpOutcome::Overtaken(format!("{} is no longer there", p.display()))
         }
         ExecError::Vfs(other) => OpOutcome::Retry(other.to_string()),
         ExecError::Contract(m) | ExecError::UnknownOp(m) => OpOutcome::Withdrawn(m.clone()),
@@ -327,7 +348,7 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         "park_remote" => {
             let entry = match env.store.get_entry(op.entity)? {
                 Some(e) => e,
-                None => return Ok(OpOutcome::Withdrawn("the entry is gone".into())),
+                None => return Ok(OpOutcome::Overtaken("the entry is gone".into())),
             };
             let to = Placement {
                 parent: entry.remote.parent,
@@ -338,7 +359,7 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         "park_local" => {
             let entry = match env.store.get_entry(op.entity)? {
                 Some(e) => e,
-                None => return Ok(OpOutcome::Withdrawn("the entry is gone".into())),
+                None => return Ok(OpOutcome::Overtaken("the entry is gone".into())),
             };
             let to = Placement {
                 parent: entry.remote.parent,
@@ -663,7 +684,7 @@ fn stat(env: &ExecEnv, id: EntityId, urls: bool) -> Result<Option<Value>, ExecEr
 
 fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -675,10 +696,10 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // was fresh when the round was planned may not be by the time a queue of
     // large files reaches this one.
     let Some(item) = stat(env, op.entity, true)? else {
-        return Ok(OpOutcome::Withdrawn("the server no longer has it".into()));
+        return Ok(OpOutcome::Overtaken("the server no longer has it".into()));
     };
     if item.get("deleted").and_then(Value::as_bool) == Some(true) {
-        return Ok(OpOutcome::Withdrawn("it is in the server's trash".into()));
+        return Ok(OpOutcome::Overtaken("it is in the server's trash".into()));
     }
     let want_sha = item
         .get("content_sha256")
@@ -739,7 +760,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 // starting over would punish exactly the largest files.
                 remints += 1;
                 let Some(fresh) = stat(env, op.entity, true)? else {
-                    return Ok(OpOutcome::Withdrawn("the server no longer has it".into()));
+                    return Ok(OpOutcome::Overtaken("the server no longer has it".into()));
                 };
                 url = fresh
                     .get("download_url")
@@ -805,7 +826,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let fingerprint = match spool.commit(&path, entry.synced_fingerprint) {
         Ok(fp) => fp,
         Err(jd_vfs::VfsError::AlreadyExists(_)) => {
-            return Ok(OpOutcome::Withdrawn(
+            return Ok(OpOutcome::Overtaken(
                 "the file changed here while it was downloading".into(),
             ))
         }
@@ -834,7 +855,7 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 
 fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -842,7 +863,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         return Ok(OpOutcome::Retry("the sync folder is not available".into()));
     };
     let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the file is no longer on this computer".into(),
         ));
     };
@@ -1012,7 +1033,7 @@ fn reseal_metadata(
         Err(e) => return Ok(Err(OpOutcome::Retry(e.to_string()))),
     };
     let Some(item) = stat(env, entry.id, false)? else {
-        return Ok(Err(OpOutcome::Withdrawn(
+        return Ok(Err(OpOutcome::Overtaken(
             "the server no longer has it".into(),
         )));
     };
@@ -1187,7 +1208,7 @@ fn encrypt_for_upload(
 /// were editing at once.
 fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1207,7 +1228,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         return Ok(OpOutcome::Retry("the sync folder is not available".into()));
     };
     if env.vfs.fingerprint(&from)?.is_none() {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the local copy is no longer there".into(),
         ));
     }
@@ -1264,7 +1285,7 @@ fn create_remote_folder(
     let parent = match env.store.get_entry(op.entity)? {
         Some(e) => e.remote.parent,
         None => {
-            return Ok(OpOutcome::Withdrawn(
+            return Ok(OpOutcome::Overtaken(
                 "the entry is no longer tracked".into(),
             ))
         }
@@ -1294,7 +1315,7 @@ fn create_remote_folder(
         .ok_or_else(|| ExecError::Contract("created folder has no id".into()))?;
 
     let Some(mut entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1327,7 +1348,7 @@ fn create_local_folder(
         Err(e) => return Err(e.into()),
     }
     let Some(mut entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1341,12 +1362,12 @@ fn create_local_folder(
 /// Apply this computer's move to the server.
 fn move_remote(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, ExecError> {
     let Some(mut entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
     if op.entity.is_provisional() {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "it does not exist on the server yet".into(),
         ));
     }
@@ -1420,7 +1441,7 @@ fn move_local(
     source: Option<Placement>,
 ) -> Result<OpOutcome, ExecError> {
     let Some(mut entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1467,7 +1488,7 @@ fn move_local(
 
 fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1512,7 +1533,7 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 /// engine loses an edit it never looked at.
 fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(mut entry) = require_entry(env, op.entity)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
         ));
     };
@@ -1527,7 +1548,7 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         return Ok(OpOutcome::Retry("the sync folder is not available".into()));
     };
     let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the file is no longer on this computer".into(),
         ));
     };
@@ -1541,7 +1562,7 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     };
     let remote_sha = entry.remote_content.as_ref().map(|c| c.sha256.clone());
     if remote_sha.as_deref() != Some(local_sha.as_str()) {
-        return Ok(OpOutcome::Withdrawn(
+        return Ok(OpOutcome::Overtaken(
             "the two sides turned out not to match after all".into(),
         ));
     }

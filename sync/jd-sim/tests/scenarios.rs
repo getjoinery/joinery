@@ -442,6 +442,44 @@ fn a_file_deleted_on_one_computer_goes_from_the_other_too() {
 }
 
 #[test]
+fn a_file_deleted_before_it_ever_uploaded_leaves_nothing_needing_attention() {
+    // Somebody saves a file and thinks better of it a moment later, while the
+    // network happens to be down. Nothing is wrong and nothing was lost: the
+    // file was never anywhere but this disk. The soak rig found the client
+    // ending that story with an item asking the user to look at it.
+    let world = World::new(61, &["laptop"]);
+    let dev = world.device("laptop");
+
+    dev.fs
+        .user_write("fleeting.txt", b"typed, then thought better of");
+    dev.net.set_faults(NetFaults {
+        drop_before: u64::MAX, // nothing gets out
+        ..NetFaults::none()
+    });
+    world.pass(dev);
+
+    dev.fs.user_remove("fleeting.txt");
+    dev.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it should settle");
+
+    assert_eq!(
+        world.server.live_counts(),
+        (0, 0),
+        "a file deleted before its first upload never reaches the server"
+    );
+    let issues = dev.store.open_issues().unwrap();
+    assert!(
+        issues.is_empty(),
+        "nothing here is the user's problem, so nothing should be raised: {issues:?}"
+    );
+    assert_eq!(
+        dev.store.pending_op_count().unwrap(),
+        0,
+        "and no work is left queued for a file that no longer exists"
+    );
+}
+
+#[test]
 fn a_name_swap_does_not_lose_either_file() {
     // A → B while B → A. There is no order of moves that works, so the engine
     // has to park one of them. Getting this wrong loses a file outright.
@@ -1233,4 +1271,132 @@ fn renaming_a_file_in_a_vault_re_encrypts_its_name_rather_than_sending_it() {
     );
     assert!(!disk.contains_key("Private/old name.txt"));
     assert_nothing_lost(&world, &committed);
+}
+
+#[test]
+fn a_conflict_is_reported_by_the_conflict_and_not_by_the_download_that_hit_it() {
+    // A download refused because the file changed underneath is not itself
+    // anything to tell somebody. What matters is the conflict it ran into, and
+    // that has its own wording. Written to settle whether the refusal needs to
+    // speak for itself: if this ever stops holding, it does.
+    let world = World::new(62, &["laptop", "desktop"]);
+    world.device("laptop").fs.user_write("doc.txt", b"original");
+    assert!(world.settle().is_some());
+
+    world
+        .device("laptop")
+        .fs
+        .user_write("doc.txt", b"the laptop's version");
+    world
+        .device("desktop")
+        .fs
+        .user_write("doc.txt", b"the desktop's version");
+    assert!(world.settle().is_some());
+
+    let told: Vec<_> = world
+        .devices
+        .iter()
+        .flat_map(|d| d.store.open_issues().unwrap())
+        .collect();
+    assert!(
+        told.iter().any(|i| i.kind == "reconcile"),
+        "the conflict itself is reported: {told:?}"
+    );
+}
+
+#[test]
+fn a_folder_deleted_before_it_ever_reached_the_server_takes_its_files_with_it() {
+    // The shape a soak run ended in: thirty-two files in pending_upload with no
+    // operation queued and nothing raised. A folder the server had never seen
+    // was removed from the disk, its entry was dropped as never-existed, and
+    // the entries for the files inside it were left naming a parent that had
+    // gone. A pass builds an entry's path by walking parents to the root, so
+    // those files had no path — and a walk from the root could not even see
+    // them, so nothing could ever notice.
+    let world = World::new(63, &["laptop"]);
+    let committed = Committed::default();
+    let dev = world.device("laptop");
+
+    dev.net.set_faults(NetFaults {
+        drop_before: u64::MAX,
+        ..NetFaults::none()
+    });
+    dev.fs.user_mkdir("Projects");
+    dev.fs.user_write("Projects/plan.txt", b"the plan");
+    dev.fs.user_write("Projects/budget.txt", b"the numbers");
+    world.pass(dev); // mints provisional entries; nothing can land
+
+    // Thrown away again before any of it reached the server. Nothing here was
+    // ever committed anywhere else, so nothing is lost by it going.
+    dev.fs.user_remove("Projects/plan.txt");
+    dev.fs.user_remove("Projects/budget.txt");
+    dev.fs.user_remove("Projects");
+
+    dev.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it should settle");
+
+    assert_invariants(&world, &committed);
+    assert_eq!(
+        world.server.live_counts(),
+        (0, 0),
+        "none of it ever reached the server"
+    );
+    assert!(
+        dev.store.open_issues().unwrap().is_empty(),
+        "and none of it is anybody's problem"
+    );
+}
+
+#[test]
+fn an_entry_whose_parent_has_gone_is_cleaned_up_rather_than_stranded_forever() {
+    // However it arises, an entry naming a parent that is not in the store has
+    // no path, and a pass finds work by resolving paths. A soak run ended with
+    // thirty-two files exactly there: pending_upload, no operation queued,
+    // nothing raised, on a device reporting itself busy rather than broken.
+    //
+    // The state is built directly rather than provoked, because the orderings
+    // that produce it are the kind that shift under you — and what has to hold
+    // is the recovery, not the route in.
+    let world = World::new(64, &["laptop"]);
+    let committed = Committed::default();
+    let dev = world.device("laptop");
+
+    dev.fs.user_write("real.txt", b"an ordinary file");
+    assert!(world.settle().is_some());
+
+    let ghost_folder = jd_core::EntityId::folder(dev.store.next_provisional_id().unwrap());
+    let orphan = jd_core::EntityId::file(dev.store.next_provisional_id().unwrap());
+    let mut entry = dev
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.id.entity_type == jd_core::EntityType::File)
+        .expect("the ordinary file");
+    entry.id = orphan;
+    entry.remote = jd_core::Placement {
+        parent: Some(ghost_folder.server_id),
+        name: "stranded.txt".into(),
+    };
+    entry.synced_placement = None;
+    entry.synced_content = None;
+    entry.synced_fingerprint = None;
+    entry.status = jd_core::LocalStatus::PendingUpload;
+    dev.store.put_entry(&entry).unwrap();
+
+    assert!(
+        dev.store
+            .every_entry()
+            .unwrap()
+            .iter()
+            .any(|e| e.local_placement().parent == Some(ghost_folder.server_id)),
+        "an entry now names a parent that does not exist, which is the state under test"
+    );
+
+    assert!(world.settle().is_some(), "it should still settle");
+    assert_invariants(&world, &committed);
+    assert!(
+        dev.store.open_issues().unwrap().is_empty(),
+        "nothing here was ever anywhere but this store"
+    );
 }

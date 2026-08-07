@@ -394,4 +394,40 @@ pub fn assert_invariants(world: &World, committed: &Committed) {
     // is the one reported first when both fail.
     assert_nothing_lost(world, committed);
     assert_converged(world);
+    assert_no_entry_is_stranded(world);
+}
+
+/// No entry may name a parent that is not in the store.
+///
+/// A pass finds work by resolving each entry to a path, and a path is built by
+/// following parents up to the root. An entry whose parent has gone has no
+/// path, so nothing is ever planned for it and nothing is ever raised about it:
+/// it sits in `pending_upload` for as long as the client runs. A soak run ended
+/// with thirty-two files exactly there, and every device reported itself busy
+/// rather than broken.
+///
+/// Checked after every scenario because the state is cheap to detect and
+/// impossible to notice from the outside — which is the combination that makes
+/// an invariant worth having.
+pub fn assert_no_entry_is_stranded(world: &World) {
+    for device in &world.devices {
+        let entries = device.store.every_entry().unwrap();
+        let known: std::collections::HashSet<i64> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+            .map(|e| e.id.server_id)
+            .collect();
+        let stranded: Vec<_> = entries
+            .iter()
+            .filter_map(|e| e.local_placement().parent.map(|p| (e, p)))
+            .filter(|(_, p)| !known.contains(p))
+            .map(|(e, p)| format!("{} (parent {p} is not in the store)", e.remote.name))
+            .collect();
+        assert!(
+            stranded.is_empty(),
+            "{} has entries with no way back to the root, so no pass will ever \
+             consider them: {stranded:?}",
+            device.name
+        );
+    }
 }

@@ -348,12 +348,15 @@ fn make_group_writable(_dir: &Path) {}
 
 /// The same, for every level from `base` down to `target`.
 ///
-/// `create_dir_all` makes intermediate directories too, and chmod'ing only the
-/// deepest one leaves a wall higher up: the daemon cannot enter a directory it
-/// cannot write, so one missed level strands everything below it. That is
-/// exactly how the first version of this fix still failed — the actor's own
-/// workspace directory was created straight from `create_dir_all` and never
-/// touched, so every persona's whole tree was unreachable.
+/// The process umask (see `main`) is what keeps group write on everything an
+/// actor creates. This walk is the backstop for directories it did not create:
+/// a sync root laid down by `setup-host.sh`, or a tree left behind by an
+/// earlier run of a build that predates the umask.
+///
+/// It covers every level rather than the deepest, because the daemon cannot
+/// enter a directory it cannot write and one missed level strands everything
+/// below it — which is how an earlier version of this still failed, with the
+/// actor's own workspace created straight from `create_dir_all`.
 fn make_tree_writable(base: &Path, target: &Path) {
     let Ok(rest) = target.strip_prefix(base) else {
         make_group_writable(target);

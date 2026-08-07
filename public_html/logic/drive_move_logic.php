@@ -129,7 +129,9 @@ function drive_move_logic(array $input): LogicResult {
 			return LogicResult::error('A folder with that name already exists in the destination.');
 		}
 		$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
-		$entity->save();
+		if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+			return LogicResult::error('A folder with that name already exists in the destination.');
+		}
 		$owner = $owner_id;
 	} else {
 		// Convert before the move lands, so a failure leaves the file where it was

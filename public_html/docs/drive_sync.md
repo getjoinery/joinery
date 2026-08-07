@@ -423,7 +423,21 @@ that spins forever, which teaches the user to ignore it.
 Issues carry a sentence rather than a code: "Cannot be saved here: the name
 differs from *Report.txt* only by capitalization, and this disk cannot tell the
 two apart. Rename one of them." The most important one is the missing folder,
-which leads with *nothing has been deleted*.
+which leads with *nothing has been deleted*. A server message that is plainly
+not written for a person — anything carrying a `SQLSTATE` — is replaced rather
+than shown; the original stays in the issue's detail for diagnosis.
+
+**Stopping work is not the same as raising an issue.** An operation that cannot
+proceed ends one of two ways. It is *withdrawn* when the server refused it in a
+way another attempt will not change, and that is raised: somebody has to decide
+what happens next. It is *overtaken* when the premise simply stopped holding —
+the file was deleted while it was uploading, the entry is gone from the server,
+the download landed on a file that had changed underneath. Overtaken work is
+dropped in silence, because nothing about it is anybody's problem and the next
+pass plans afresh from what is actually there. Deleting a file you had just
+saved is an ordinary thing to do and must not leave an item asking you to look
+at it. Where an overtaken operation ran into something the user *does* need to
+know about — a conflict, say — that thing reports itself in its own words.
 
 The server side of the same promise is `sde_last_seen_time`: the security page
 shows when each device last synced, so a stalled device is visible from every
