@@ -288,8 +288,35 @@ pub fn read_file(path: &Path) -> Result<Vec<Record>> {
 /// This is the no-loss oracle's left-hand side: for each path, the content that
 /// the last completed write put there. Only commits count — an intent with no
 /// commit is an operation nobody can say happened.
+///
+/// **A claim follows its directory.** Renaming or deleting a directory moves or
+/// destroys everything under it, and claims keyed by full path have to move or
+/// go with it. Without that, a file written inside a folder that is later
+/// renamed keeps a claim at a path nothing will ever be at again — and when the
+/// user overwrites that same file at its new path, the stale claim demands
+/// content the user themselves replaced. It reads as data loss and it is not:
+/// runs 8 and 9 reported five files that way, and two of them were a file the
+/// messy-human persona had overwritten after shuffling its folders.
+///
+/// **What this still cannot express.** Claims are keyed by path and nothing
+/// else, but each device has its own tree and syncing is what eventually makes
+/// them agree. Two devices renaming their own copy of a shared folder during a
+/// storm both re-key every claim under it, including claims for files the other
+/// device wrote — and a rename that arrives on the second device by sync is not
+/// journaled by any actor at all, so a claim can be left behind by that too.
+///
+/// The consequence is bounded: it can only ever move a claim to a path nothing
+/// is at, which shows up as a *reported* loss. It cannot hide a real one, since
+/// a claim is validated by searching for its **content** across every disk,
+/// every trash and the server — never by looking at its path. An oracle that
+/// errs toward alarm is the right way round, but it is not free, and this one
+/// cost a session. Keying claims by content lineage rather than path is the
+/// real answer if this keeps costing.
 pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, Committed> {
     let mut out: std::collections::BTreeMap<String, Committed> = std::collections::BTreeMap::new();
+    // A rename journals its source and then its destination, in that order.
+    // This holds the source until the destination arrives.
+    let mut renamed_from: Option<String> = None;
     for record in records {
         if let Record::ActorCommit {
             actor,
@@ -304,34 +331,83 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
         {
             match op.as_str() {
                 // A delete removes the claim: the user asked for it to be gone,
-                // so its absence everywhere is correct rather than loss.
+                // so its absence everywhere is correct rather than loss. For a
+                // directory that means everything inside it, which went too.
                 "remove" | "remove_dir" | "trash" => {
+                    renamed_from = None;
                     out.remove(path);
+                    for key in under(&out, path) {
+                        out.remove(&key);
+                    }
                 }
+                // The source of a rename holds nothing any more. What was inside
+                // it is not gone though — it is at the destination, which
+                // arrives in the very next record.
                 "rename" => {
-                    // The commit for a rename carries the destination path; the
-                    // source no longer holds anything to look for.
                     out.remove(path);
+                    renamed_from = Some(path.clone());
+                }
+                "rename_into" => {
+                    if let Some(from) = renamed_from.take() {
+                        for key in under(&out, &from) {
+                            let Some(mut claim) = out.remove(&key) else {
+                                continue;
+                            };
+                            let moved = format!("{path}/{}", &key[from.len() + 1..]);
+                            claim.path = moved.clone();
+                            out.insert(moved, claim);
+                        }
+                    }
+                    insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
                 _ => {
-                    if let Some(sha) = sha256 {
-                        out.insert(
-                            path.clone(),
-                            Committed {
-                                path: path.clone(),
-                                sha256: sha.clone(),
-                                size: *size,
-                                actor: actor.clone(),
-                                persona: persona.clone(),
-                                ts_ms: *ts_ms,
-                            },
-                        );
-                    }
+                    renamed_from = None;
+                    insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
             }
         }
     }
     out
+}
+
+/// Every claimed path that sits inside `dir`.
+///
+/// Matched on a `/`-terminated prefix so a folder called `Sub 1` never drags
+/// `Sub 12` along with it.
+fn under(out: &std::collections::BTreeMap<String, Committed>, dir: &str) -> Vec<String> {
+    let prefix = format!("{dir}/");
+    out.keys()
+        .filter(|k| k.starts_with(&prefix))
+        .cloned()
+        .collect()
+}
+
+#[allow(clippy::too_many_arguments)]
+fn insert_claim(
+    out: &mut std::collections::BTreeMap<String, Committed>,
+    path: &str,
+    sha256: &Option<String>,
+    size: u64,
+    actor: &str,
+    persona: &str,
+    ts_ms: u64,
+) {
+    // A directory commit carries no content, so there is nothing to look for
+    // later and nothing to record.
+    let Some(sha) = sha256 else {
+        return;
+    };
+    out.insert(
+        path.to_string(),
+        Committed {
+            path: path.to_string(),
+            sha256: sha.clone(),
+            size,
+            actor: actor.to_string(),
+            persona: persona.to_string(),
+            ts_ms,
+        },
+    );
 }
 
 /// One entry of the no-loss oracle.
@@ -365,7 +441,7 @@ pub fn all_committed_content(records: &[Record]) -> std::collections::BTreeSet<S
 mod tests {
     use super::*;
 
-    fn commit(seq: u64, op: &str, path: &str, sha: Option<&str>, ts: u64) -> Record {
+    pub(super) fn commit(seq: u64, op: &str, path: &str, sha: Option<&str>, ts: u64) -> Record {
         Record::ActorCommit {
             seq,
             actor: "device-a".into(),
@@ -512,5 +588,91 @@ mod tests {
         let oracle = last_committed(&records);
         assert!(!oracle.contains_key("tmp1234.tmp"));
         assert_eq!(oracle["Report.docx"].sha256, "aa");
+    }
+}
+
+#[cfg(test)]
+mod claim_follows_its_folder {
+    use super::tests::commit;
+    use super::*;
+
+    /// Replayed from run 9's journal, which reported this file as lost.
+    ///
+    /// The persona wrote it, shuffled the folders above it twice, then
+    /// overwrote it at the path it had been carried to. Nothing was lost — the
+    /// user replaced their own file — but a claim left behind at the old path
+    /// demanded content that no longer existed anywhere.
+    #[test]
+    fn a_file_overwritten_after_its_folders_were_renamed_is_not_lost() {
+        let records = vec![
+            commit(
+                1,
+                "write",
+                "Projects/Sub 12/Copy of doc-9.txt",
+                Some("14a3"),
+                10,
+            ),
+            commit(2, "rename", "Projects/Sub 12", None, 20),
+            commit(3, "rename_into", "Projects/Sub 12 (18)", None, 20),
+            commit(4, "rename", "Projects", None, 30),
+            commit(5, "rename_into", "Projects (19)", None, 30),
+            commit(
+                6,
+                "write",
+                "Projects (19)/Sub 12 (18)/Copy of doc-9.txt",
+                Some("37a2"),
+                40,
+            ),
+        ];
+        let latest = last_committed(&records);
+        assert_eq!(
+            latest.keys().collect::<Vec<_>>(),
+            vec!["Projects (19)/Sub 12 (18)/Copy of doc-9.txt"],
+            "one file, at the one path it is actually at"
+        );
+        assert_eq!(latest.values().next().unwrap().sha256, "37a2");
+    }
+
+    #[test]
+    fn deleting_a_folder_takes_the_claims_inside_it() {
+        let records = vec![
+            commit(1, "write", "Work/report.txt", Some("aaaa"), 10),
+            commit(2, "write", "Work/deep/notes.txt", Some("bbbb"), 11),
+            commit(3, "write", "Workbook.txt", Some("cccc"), 12),
+            commit(4, "remove_dir", "Work", None, 20),
+        ];
+        let latest = last_committed(&records);
+        assert_eq!(
+            latest.keys().collect::<Vec<_>>(),
+            vec!["Workbook.txt"],
+            "the folder went and took its contents; the similarly named file stayed"
+        );
+    }
+
+    #[test]
+    fn a_folder_rename_does_not_drag_in_a_longer_neighbour() {
+        let records = vec![
+            commit(1, "write", "Sub 1/a.txt", Some("aaaa"), 10),
+            commit(2, "write", "Sub 12/b.txt", Some("bbbb"), 11),
+            commit(3, "rename", "Sub 1", None, 20),
+            commit(4, "rename_into", "Sub 1 (2)", None, 20),
+        ];
+        let latest = last_committed(&records);
+        let mut keys: Vec<_> = latest.keys().cloned().collect();
+        keys.sort();
+        assert_eq!(keys, vec!["Sub 1 (2)/a.txt", "Sub 12/b.txt"]);
+    }
+
+    #[test]
+    fn a_renamed_file_still_moves_its_own_claim() {
+        // The case that already worked, kept so the folder handling cannot
+        // break it.
+        let records = vec![
+            commit(1, "write", "old.txt", Some("aaaa"), 10),
+            commit(2, "rename", "old.txt", None, 20),
+            commit(3, "rename_into", "new.txt", Some("aaaa"), 20),
+        ];
+        let latest = last_committed(&records);
+        assert_eq!(latest.keys().collect::<Vec<_>>(), vec!["new.txt"]);
     }
 }

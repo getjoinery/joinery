@@ -627,9 +627,57 @@ having.
 
 Run 5 also produced the **first `no-loss` violation on a converged-ish run**: one
 committed file (`Projects/Copy of doc-9.txt`) was on no device, not on the
-server, and not in a trash. A file whose entry was stranded and then deleted
-locally would land exactly there, so this is expected to go with the fix above —
-unproven until a run says so.
+server, and not in a trash. See the oracle finding below — most violations of
+this shape turned out to be the rig's own accounting.
+
+## The oracle was losing track of files when their folders moved
+
+Runs 8 and 9 reported five files as lost, and the hashes really were on no disk,
+in no trash and not on the server. The claims were wrong, not the client.
+
+`last_committed` keys a claim by full path, and it handled a file being renamed
+or deleted — but not a **folder**. The messy-human persona shuffles directories
+constantly, so a file written at `Projects (6) (10) (11)/Sub 12/Copy of doc-9.txt`
+was carried to `Projects (6) (10) (11) (19) (21)/Sub 12 (18)/Copy of doc-9.txt`
+by two folder renames, and then overwritten there by the same persona. That
+overwrite is explicitly *not* loss — the oracle says so, and refuses to demand
+every intermediate save — but the check is "replaced at the same path", and the
+path had changed underneath it. The stale claim survived and demanded content
+the user had themselves replaced.
+
+Fixed: a claim now follows its folder. A `rename` is paired with the
+`rename_into` that follows it and every claim beneath the old prefix is re-keyed;
+a deleted folder takes the claims inside it. Prefixes are matched with a
+trailing `/`, so `Sub 1` never drags `Sub 12` along.
+
+Replaying the preserved journals through the fix: **run 9's single violation
+disappears, and three of run 8's four remain.** Run 10, the first campaign with
+the fix, **passed `no-loss`** — the first time that invariant has come back
+clean.
+
+**What the fix still cannot express.** Claims are keyed by path and nothing
+else, but each device has its own tree and syncing is what eventually makes them
+agree. Both devices rename their own copy of a shared folder during a storm, and
+each rename re-keys every claim beneath it — including claims for files the
+other device wrote. A rename that arrives on the second device *by sync* is
+journaled by no actor at all, so a claim can be stranded that way too. The
+consequence is bounded: it can only move a claim to a path nothing is at, which
+shows as a reported loss. It cannot hide a real one, because a claim is checked
+by searching for its **content** everywhere, never by its path. Keying claims by
+content lineage rather than path is the real answer if this keeps costing.
+
+**The three from run 8 are still open**, and they are not obviously the above:
+`Projects/Sub 9/Sub 13/doc-15.txt` was written once (seq 44), never renamed,
+never deleted by any actor, and no `remove_dir` occurs anywhere in that run —
+yet its content was on no disk, in no trash and not on the server. A file
+removed locally that no actor removed is the client, or it is a claim stranded
+by a sync-driven rename. Deciding which needs the device trees, which run 8's
+bundle has and the later resets do not overwrite.
+
+The lesson is the one the rig was built on and nearly failed: **an oracle that
+is wrong in the direction of alarm is not harmless.** It cost a full session
+chasing client bugs that were not there, and it would have cost more if the
+paths had looked less peculiar.
 
 ## Two more findings, both fixed
 
