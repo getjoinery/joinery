@@ -12,7 +12,8 @@
  *   'feed_url'     - optional JSON endpoint; when set, paging refetches per range
  *   'initial_date' - Y-m-d to open on (default: today)
  *
- * @version 1.3.0
+ * @version 1.4.0 - high-contrast restyle: blue default chips with a left
+ *                  handle, past items grey with the colour on the handle
  */
 
 $items        = $component_config['items'] ?? [];
@@ -132,14 +133,27 @@ $cid = 'calgrid_' . substr(md5(uniqid('', true)), 0, 8);
     };
     CalGrid.prototype.chip = function(it){
         var s = parseUTC(it.start);
+        var e = parseUTC(it.end);
         var label = (it.all_day ? '' : (s ? fmtTime(s) + ' ' : '')) + (it.title || 'Busy');
-        var color = it.color || '#6b7280';
+        var color = it.color || '#2563eb';
         var isNative = it.source_key && String(it.source_key).indexOf('native:') === 0;
         var el = document.createElement(isNative ? 'button' : (it.url ? 'a' : 'span'));
         el.className = 'calgrid-chip';
-        el.style.background = color;
+        // Past items render grey with the colour kept on the left handle
+        // (all-day items stay current for their whole day).
+        var isPast = it.all_day
+            ? (s && ymd(s) < ymd(new Date()))
+            : ((e || s) && (e || s) < new Date());
+        if (isPast) { el.className += ' is-past'; }
+        el.style.setProperty('--chip-color', color);
         el.title = label;
-        el.textContent = label;
+        if (!it.all_day && s) {
+            var tspan = document.createElement('span');
+            tspan.className = 'calgrid-chip-time';
+            tspan.textContent = fmtTime(s);
+            el.appendChild(tspan);
+        }
+        el.appendChild(document.createTextNode(it.title || 'Busy'));
         if (!isNative && it.url) { el.href = it.url; }
         if (isNative) {
             el.type = 'button';

@@ -52,7 +52,7 @@ class CalendarItem {
         self::TYPE_EVENT    => '#2563eb',  // blue
         self::TYPE_BOOKING  => '#059669',  // green
         self::TYPE_EXTERNAL => '#9333ea',  // purple
-        self::TYPE_PERSONAL => '#6b7280',  // grey
+        self::TYPE_PERSONAL => '#2563eb',  // blue — the calendar's default look
     ];
 
     public function __construct(array $data = []) {

@@ -1,5 +1,5 @@
 /* ═══════════════════════════════════════════════════════════════
-   Joinery Default UI Kit  ·  custom.css  ·  v2.9.0
+   Joinery Default UI Kit  ·  custom.css  ·  v2.10.0
    Pure Slate design. Themeable values live in --jy-* tokens on
    :root so branded themes can override them without understanding
    internals. Component rules are scoped under .jy-ui to prevent
@@ -1630,22 +1630,36 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 .jy-ui .slotpick-empty { color: var(--jy-color-text-muted); font-size: .9rem; }
 
 /* ─── Calendar grid (month/week view) ───────────────────────── */
-.jy-ui .joinery-calgrid { font-family: inherit; --cg-border: var(--jy-color-border); --cg-accent: var(--jy-color-primary); }
-.jy-ui .calgrid-toolbar { display: flex; align-items: center; gap: .4rem; margin-bottom: .6rem; flex-wrap: wrap; }
-.jy-ui .calgrid-toolbar button { background: var(--jy-color-surface); border: 1px solid var(--cg-border); border-radius: 5px; padding: .3rem .6rem; cursor: pointer; font: inherit; }
+/* High-contrast, Gmail/Proton-style surface: the grid is a rounded panel
+   whose 1px lines come from a gap over a border-coloured backdrop (no double
+   borders), chips are solid colour with a darker left handle, and past chips
+   invert to grey with the colour kept on the handle. */
+.jy-ui .joinery-calgrid { font-family: inherit; --cg-border: var(--jy-color-border-strong, #c8ccd4); --cg-accent: #2563eb; }
+.jy-ui .calgrid-toolbar { display: flex; align-items: center; gap: .5rem; margin-bottom: .75rem; flex-wrap: wrap; }
+.jy-ui .calgrid-toolbar button { background: var(--jy-color-bg); border: 1px solid var(--cg-border); border-radius: 6px; padding: .35rem .7rem; cursor: pointer; font: inherit; font-weight: 500; color: var(--jy-color-text); }
+.jy-ui .calgrid-toolbar button:hover { background: var(--jy-color-surface-alt); }
 .jy-ui .calgrid-toolbar button.is-active { background: var(--cg-accent); color: #fff; border-color: var(--cg-accent); }
-.jy-ui .calgrid-title { font-weight: 600; margin: 0 .5rem; }
+.jy-ui .calgrid-title { font-weight: 600; font-size: 1.2rem; margin: 0 .5rem; }
 .jy-ui .calgrid-views { margin-left: auto; }
-.jy-ui .calgrid-grid { display: grid; grid-template-columns: repeat(7, 1fr); border: 1px solid var(--cg-border); border-bottom: none; }
-.jy-ui .calgrid-dow { text-align: center; font-size: .875rem; color: var(--jy-color-text-muted); padding: .3rem 0; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); background: var(--jy-color-surface); }
-.jy-ui .calgrid-cell { min-height: 100px; border-bottom: 1px solid var(--cg-border); border-right: 1px solid var(--cg-border); padding: .25rem; vertical-align: top; }
-.jy-ui .calgrid-cell.is-other { background: var(--jy-color-surface); color: var(--jy-color-text-subtle); }
-.jy-ui .calgrid-cell.is-today .calgrid-daynum { background: var(--cg-accent); color: #fff; border-radius: 50%; padding: 0 .35rem; }
-.jy-ui .calgrid-daynum { font-size: .875rem; display: inline-block; margin-bottom: .2rem; }
-.jy-ui .calgrid-chip { display: block; font-size: .8rem; line-height: 1.3; padding: .1rem .3rem; margin-bottom: .15rem; border-radius: 3px; color: #fff; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.jy-ui .calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .4rem; display: flex; gap: .6rem; }
-.jy-ui .calgrid-week-day:last-child { border-bottom: 1px solid var(--cg-border); }
-.jy-ui .calgrid-week-date { min-width: 6rem; font-size: .9375rem; color: var(--jy-color-text-muted); }
+.jy-ui .calgrid-grid { display: grid; grid-template-columns: repeat(7, 1fr); gap: 1px; background: var(--cg-border); border: 1px solid var(--cg-border); border-radius: 8px; overflow: hidden; }
+.jy-ui .calgrid-dow { text-align: center; font-size: .6875rem; font-weight: 600; text-transform: uppercase; letter-spacing: .05em; color: var(--jy-color-text-muted); padding: .4rem 0; background: var(--jy-color-surface); }
+.jy-ui .calgrid-cell { min-height: 100px; padding: .3rem; vertical-align: top; background: var(--jy-color-bg); }
+.jy-ui .calgrid-cell.is-other { background: var(--jy-color-surface); }
+.jy-ui .calgrid-cell.is-other .calgrid-daynum { color: var(--jy-color-text-subtle); }
+.jy-ui .calgrid-daynum { font-size: .8125rem; font-weight: 500; display: inline-flex; align-items: center; justify-content: center; width: 1.5rem; height: 1.5rem; margin-bottom: .2rem; border-radius: 50%; }
+.jy-ui .calgrid-cell.is-today .calgrid-daynum { background: var(--cg-accent); color: #fff; font-weight: 600; }
+.jy-ui .calgrid-chip { --chip-color: #2563eb; display: block; width: 100%; box-sizing: border-box; text-align: left; font-family: inherit; font-size: .78rem; font-weight: 500; line-height: 1.35; padding: .15rem .4rem .15rem .45rem; margin-bottom: .2rem; border: 0; border-left: 3px solid rgba(0, 0, 0, .28); border-left-color: color-mix(in srgb, var(--chip-color) 60%, #000); border-radius: 4px; background: var(--chip-color); color: #fff; cursor: pointer; text-decoration: none; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.jy-ui .calgrid-chip:hover { filter: brightness(.92); }
+.jy-ui .calgrid-chip .calgrid-chip-time { font-weight: 400; opacity: .85; margin-right: .3em; }
+/* A past item goes quiet — grey chip, muted text — but keeps its colour as
+   the left handle, so the calendar reads past/future at a glance. */
+.jy-ui .calgrid-chip.is-past { background: var(--jy-color-surface-alt); color: var(--jy-color-text-muted); border-left-color: var(--chip-color); }
+.jy-ui .calgrid-chip.is-past:hover { filter: none; background: var(--jy-color-surface); }
+.jy-ui .calgrid-chip.is-past .calgrid-chip-time { opacity: .7; }
+.jy-ui .calgrid-week-day { border: 1px solid var(--cg-border); border-bottom: none; padding: .5rem .6rem; display: flex; gap: .8rem; background: var(--jy-color-bg); }
+.jy-ui .calgrid-week-day:first-of-type { border-radius: 8px 8px 0 0; }
+.jy-ui .calgrid-week-day:last-of-type { border-bottom: 1px solid var(--cg-border); border-radius: 0 0 8px 8px; }
+.jy-ui .calgrid-week-date { min-width: 6rem; font-size: .9375rem; font-weight: 500; color: var(--jy-color-text-muted); }
 .jy-ui .calgrid-week-events { flex: 1; }
 .jy-ui .calgrid-empty { color: var(--jy-color-text-subtle); font-size: .875rem; }
 
@@ -1655,8 +1669,12 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
    stretches its week rows to fill the viewport (dow header row stays auto). */
 .page-content--app .jy-ui.cal-wrap { max-width: none; margin: 0; flex: 1; display: flex; flex-direction: column; }
 .page-content--app .jy-ui .joinery-calgrid { flex: 1; display: flex; flex-direction: column; }
+/* calgrid-body must join the flex chain or the grid's flex: 1 is inert and
+   the calendar stops short of the fold. */
+.page-content--app .jy-ui .calgrid-body { flex: 1; display: flex; flex-direction: column; }
 .page-content--app .jy-ui .calgrid-grid { flex: 1; grid-template-rows: auto; grid-auto-rows: minmax(78px, 1fr); }
 .page-content--app .jy-ui .calgrid-cell { min-height: 78px; }
+.page-content--app .jy-ui .calgrid-week-day { flex: 1 0 auto; }
 .jy-ui .cal-note { background: var(--jy-color-success-bg, #e6f7ec); border: 1px solid var(--jy-color-success, #2d7d46); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
 .jy-ui .cal-note-detail { margin: .4rem 0 0; padding-left: 1.2rem; font-size: .9em; }
 .jy-ui .cal-error { background: var(--jy-color-danger-bg); border: 1px solid var(--jy-color-danger); padding: .5rem .8rem; border-radius: var(--jy-radius-sm); margin-bottom: 1rem; }
