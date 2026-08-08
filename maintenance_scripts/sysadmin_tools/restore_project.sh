@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.4.2 - file restore works inside a container, where the process is already root
+#                  and the image ships no sudo: the six sudo calls now go through $SUDO, the
+#                  same test the sibling scripts use. A bare-metal backup restored into a
+#                  container loaded its database and then failed on sudo: command not found
 # Version: 1.4.1 - extraction stages beside the archive, not in /tmp (a RAM-sized tmpfs on
 #                  26.04 made a good archive report itself corrupt); the encryption sniff
 #                  no longer warns about null bytes on every plaintext restore
@@ -236,6 +240,20 @@ BACKUP_FILE=$(readlink -f "$BACKUP_FILE")
 
 # Project directory
 PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
+
+# Elevation, only where elevation is a thing. On bare metal this runs as an
+# ordinary user and needs sudo to write under /var/www/html. Inside a container
+# it runs as root and the image ships no sudo at all, so an unconditional
+# "sudo mkdir" fails with "command not found" — which is what a bare-metal
+# backup restored into a container hit, after the database had already loaded.
+# Same test as backup_files.sh, backup_project.sh, reconcile_site.sh and
+# restore_chain.sh use.
+SUDO=""
+if [ "$(id -u)" -ne 0 ]; then
+    if command -v sudo > /dev/null 2>&1 && sudo -n true 2>/dev/null; then
+        SUDO="sudo"
+    fi
+fi
 
 # Create the extraction directory, beside the ARCHIVE rather than in /tmp.
 #
@@ -530,7 +548,7 @@ perform_restore() {
                 EXISTING_BACKUP="${PROJECT_DIR}_backup_${BACKUP_TIMESTAMP}"
                 print_info "Backing up existing project to: $EXISTING_BACKUP"
 
-                if sudo mv "$PROJECT_DIR" "$EXISTING_BACKUP"; then
+                if $SUDO mv "$PROJECT_DIR" "$EXISTING_BACKUP"; then
                     print_success "Existing project backed up"
                 else
                     print_error "Failed to backup existing project"
@@ -541,14 +559,14 @@ perform_restore() {
                 # Explicitly checked: perform_restore runs as an `if` condition,
                 # which suppresses `set -e` for the whole function body — any
                 # command without its own check silently continues on failure.
-                if ! sudo mkdir -p "$PROJECT_DIR"; then
+                if ! $SUDO mkdir -p "$PROJECT_DIR"; then
                     print_error "Failed to create project directory: $PROJECT_DIR"
                     return 1
                 fi
             fi
         else
             # Create project directory if it doesn't exist (checked — see above)
-            if ! sudo mkdir -p "$PROJECT_DIR"; then
+            if ! $SUDO mkdir -p "$PROJECT_DIR"; then
                 print_error "Failed to create project directory: $PROJECT_DIR"
                 return 1
             fi
@@ -593,7 +611,7 @@ perform_restore() {
         # chaining the two with || reports success whenever the fallback succeeds —
         # even if the first copy died halfway through. Errors are not discarded
         # either: a copy that cannot be trusted has to be visible.
-        if ! sudo cp -a "$backup_dir/project_files/." "$PROJECT_DIR/"; then
+        if ! $SUDO cp -a "$backup_dir/project_files/." "$PROJECT_DIR/"; then
             print_error "Failed to copy project files to: $PROJECT_DIR"
             return 1
         fi
@@ -619,14 +637,14 @@ perform_restore() {
         # Set proper permissions using centralized script (production mode).
         # Checked: a permission-fix failure otherwise ends in "RESTORE COMPLETE"
         # with root-owned files and a site that 500s on every upload path.
-        if ! sudo "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production; then
+        if ! $SUDO "$SCRIPT_DIR/../install_tools/fix_permissions.sh" "$PROJECT_NAME" --production; then
             print_error "fix_permissions.sh failed — restored files may have wrong ownership/modes"
             return 1
         fi
 
         # Make maintenance scripts executable
         if [ -d "$PROJECT_DIR/maintenance_scripts" ]; then
-            sudo find "$PROJECT_DIR/maintenance_scripts" -type f -name "*.sh" -exec chmod 755 {} \;
+            $SUDO find "$PROJECT_DIR/maintenance_scripts" -type f -name "*.sh" -exec chmod 755 {} \;
         fi
 
         print_success "Project files restored and verified ($restored_count files): $PROJECT_DIR"

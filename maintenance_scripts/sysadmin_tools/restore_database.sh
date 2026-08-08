@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.3 - A dump from a newer PostgreSQL is refused before the schema is dropped, not
+#              after the load fails on it. An 18 dump into a 16 server died on line 13 with
+#              the target already emptied
 #Version 3.2 - Stale-staging sweep at startup (SIGKILL strands run no trap); jy_restore_ temp prefix
 #Version 3.1 - Staging writes checked (a truncated staged file can never load); plain-SQL sanity
 #              check before destroy; key via stdin (never argv); DB probe failures distinguished
@@ -19,7 +22,7 @@
 #     marker so callers (JobResultProcessor) can parse the outcome:
 #         RESTORE_OK | BACKUP_KEY_MISSING | DECRYPT_FAILED
 #         ARCHIVE_CORRUPT | RESTORE_LOAD_FAILED | DB_UNREACHABLE
-#         RESTORE_USAGE_ERROR
+#         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD
 #     Only RESTORE_LOAD_FAILED can leave the database modified; every other
 #     failure exits with it untouched.
 #   * Key resolution order: --key-file -> $BACKUP_ENCRYPTION_KEY ->
@@ -226,6 +229,34 @@ case "$INPUT_FILE" in
         ;;
 esac
 info "✓ Archive verified and staged ($(ls -lh "$SQL_TMP" | awk '{print $5}'))."
+
+# --- Stage 1b: refuse a dump this server is too old to load --------------------
+# pg_dump emits the settings and meta-commands of the version that WROTE the
+# dump, and each major adds some. An 18 dump opens with a \restrict command and
+# SET transaction_timeout; PostgreSQL 16 rejects the latter on line 13. That
+# rejection would otherwise arrive after DROP SCHEMA, leaving the target with
+# neither its old schema nor the new one — the one outcome this script's
+# verify-before-destroy contract exists to prevent.
+#
+# Both numbers are knowable here, with nothing yet touched. Older-into-newer is
+# allowed and is the normal upgrade direction (a PG 16 dump loads into 18); only
+# newer-into-older is refused.
+DUMP_PG_MAJOR="$(sed -n 's/^-- Dumped by pg_dump version \([0-9]\{1,\}\).*/\1/p' "$SQL_TMP" | head -1)"
+if [ -z "$DUMP_PG_MAJOR" ]; then
+    DUMP_PG_MAJOR="$(sed -n 's/^-- Dumped from database version \([0-9]\{1,\}\).*/\1/p' "$SQL_TMP" | head -1)"
+fi
+TARGET_VERSION_NUM="$(psql -U "$DB_USER" -XtAc 'SHOW server_version_num' 2>/dev/null | tr -cd '0-9')"
+if [ -n "$DUMP_PG_MAJOR" ] && [ -n "$TARGET_VERSION_NUM" ]; then
+    TARGET_PG_MAJOR=$(( TARGET_VERSION_NUM / 10000 ))
+    if [ "$DUMP_PG_MAJOR" -gt "$TARGET_PG_MAJOR" ]; then
+        info "✗ This dump was written by PostgreSQL ${DUMP_PG_MAJOR}; this server is ${TARGET_PG_MAJOR}."
+        info "  A newer dump uses syntax an older server rejects, so the load would fail"
+        info "  part-way through. Nothing has been changed — the database is untouched."
+        info "  Restore this onto PostgreSQL ${DUMP_PG_MAJOR} or newer."
+        echo "RESTORE_SERVER_TOO_OLD ${DUMP_PG_MAJOR} ${TARGET_PG_MAJOR}"
+        exit 8
+    fi
+fi
 
 # --- Stage 2: optional pre-restore safety dump (manual runs only) --------------
 # The dashboard always prepends its own auto-backup step, so we skip ours in

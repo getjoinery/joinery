@@ -654,7 +654,9 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 
 **From the dashboard**, the equivalent is a Server Manager **install_node** job in From-Backup mode (a fresh install plus the source's data, cloned in one job), or a **restore_project** / **restore_chain** job against a node that already has a site. Both reconcile identically.
 
-**A PostgreSQL major-version jump needs nothing special.** The dump-and-restore path crosses it: a PG 16 dump restores onto PG 18 as an ordinary restore.
+**A PostgreSQL major-version jump needs nothing special, upwards.** The dump-and-restore path crosses it: a PG 16 dump restores onto PG 18 as an ordinary restore.
+
+**Downwards it is refused.** A dump carries the syntax of the version that wrote it, so a newer dump cannot load into an older server. The restore reads the version out of the dump header and stops before touching the target database, reporting `RESTORE_SERVER_TOO_OLD`. The target must run a PostgreSQL at least as new as the source — which for a container target means a base image carrying it.
 
 ---
 

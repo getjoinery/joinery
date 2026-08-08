@@ -361,6 +361,12 @@ openssl magic bytes, not the filename, so a renamed archive still restores. It
 takes `--domain` to name the domain the restored site is to answer to; without
 it the site keeps the domain this machine's config already names.
 
+The target's PostgreSQL must be at least as new as the source's. A dump carries
+the syntax of the version that wrote it, so the restore reads that version from
+the dump header and refuses before replacing the schema when the target is
+older, reporting `RESTORE_SERVER_TOO_OLD` with the database untouched. Restoring
+onto a newer PostgreSQL is ordinary and needs nothing.
+
 A restore lands on an **installed** site. The config that carries this machine's
 database password and `secret_box_key` is never in a backup, so the sequence for
 new hardware is: install the site, then restore onto it. See

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.6.1 - shape.json is recorded however the script was invoked. It resolved its
+#                  own directory after cd-ing to the output directory, so a relative call
+#                  looked for reconcile_site.sh in /backups, found none, and skipped the
+#                  step and its warning together
 # Version: 2.6.0 - the backup stages beside its output rather than in /tmp, which on Ubuntu
 #                  26.04 is a RAM-sized tmpfs: any site bigger than it failed part-way with
 #                  No space left on device, after the database dump had already succeeded
@@ -479,7 +483,12 @@ fi
 # backup_info.txt says the same things in prose, for a human reading the archive.
 # This is the copy a restore reads, from the same generator the chain path uses,
 # so the two can never describe a site differently.
-SHAPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile_site.sh"
+# SCRIPT_DIR, not a fresh dirname of $0: by this point the script has cd'd into
+# the backup directory, so a relative invocation ("bash backup_project.sh") would
+# resolve "." to the OUTPUT directory and find no reconcile_site.sh there. That
+# failure is silent in the worst way — the [ -f ] guard skips the warning too, so
+# the archive simply comes out with no shape and nothing says so.
+SHAPER="${SCRIPT_DIR}/reconcile_site.sh"
 if [ -f "$SHAPER" ]; then
     if bash "$SHAPER" "$PROJECT_NAME" --print-shape --site-dir "$PROJECT_DIR" \
             --vhost-captured "$(if [ -n "$VHOST_FILE" ]; then echo yes; else echo no; fi)" \
@@ -490,6 +499,8 @@ if [ -f "$SHAPER" ]; then
         # shape-unknown and reconciles against the target anyway.
         print_warning "Could not record the site shape; continuing without it"
     fi
+else
+    print_warning "reconcile_site.sh is not beside this script; no shape recorded"
 fi
 
 # Step 4: Create metadata file
