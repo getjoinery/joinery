@@ -1526,6 +1526,102 @@ fn move_local(
     Ok(OpOutcome::Done)
 }
 
+/// A few names and a count, so one issue can describe a folder full of files
+/// without becoming unreadable.
+fn summarise(names: &[String]) -> String {
+    const SHOWN: usize = 3;
+    if names.len() <= SHOWN {
+        return names.join(", ");
+    }
+    format!(
+        "{}, and {} more",
+        names[..SHOWN].join(", "),
+        names.len() - SHOWN
+    )
+}
+
+/// Whether the server can be shown to already hold what is on disk here.
+///
+/// Two things both have to hold: the engine agreed some content with the server
+/// for this file, and the bytes on disk are still that content. Either one
+/// alone is not enough — an entry can be established and then edited, and an
+/// edit nobody has uploaded is exactly the work worth saving.
+///
+/// Anything this cannot vouch for is treated as not uploaded. Being wrong that
+/// way costs a spare copy beside the folder; being wrong the other way costs
+/// the file.
+fn is_on_the_server(env: &ExecEnv, child: &jd_vfs::DirEntry) -> Result<bool, ExecError> {
+    let Some(fp) = child.fingerprint else {
+        return Ok(false);
+    };
+    let Some(id) = env.store.entity_for_file_id(fp.file_id)? else {
+        return Ok(false);
+    };
+    let Some(entry) = env.store.get_entry(id)? else {
+        return Ok(false);
+    };
+    if entry.synced_content.is_none() {
+        return Ok(false);
+    }
+    let Some(synced) = entry.synced_fingerprint else {
+        return Ok(false);
+    };
+    Ok(fp.unchanged_from(&synced, &env.vfs.personality()))
+}
+
+/// Move work nobody has uploaded out of a folder that is about to be trashed.
+///
+/// Trashing a folder is a single rename and *everything* underneath goes with
+/// it, including files the engine has no record of. On a device that was dead
+/// or offline while the user kept working, those files are the user's only
+/// copy: never uploaded, and about to be in the system trash without the user
+/// having deleted anything.
+///
+/// So they are moved beside the folder first and picked up as new files on the
+/// next pass, which uploads them. Files the server already has are left to go
+/// with the folder — they are recoverable from the server, and rescuing them
+/// would litter the tree with copies of things nobody lost.
+fn rescue_unsynced(
+    env: &ExecEnv,
+    folder: &std::path::Path,
+    into: &std::path::Path,
+) -> Result<Vec<String>, ExecError> {
+    let mut rescued = Vec::new();
+    let children = match env.vfs.read_dir(folder) {
+        Ok(c) => c,
+        // A folder that is already gone has nothing to save out of it.
+        Err(jd_vfs::VfsError::NotFound(_)) => return Ok(rescued),
+        Err(e) => return Err(e.into()),
+    };
+    for child in children {
+        let path = folder.join(&child.name);
+        match child.kind {
+            jd_vfs::EntryKind::Directory => {
+                rescued.extend(rescue_unsynced(env, &path, into)?);
+            }
+            jd_vfs::EntryKind::File => {
+                if is_on_the_server(env, &child)? {
+                    continue;
+                }
+                // Its own name where that is free, because this is a rescue and
+                // not a conflict — calling it a conflicted copy would describe
+                // something that did not happen. The conflict name is the
+                // fallback that keeps the rescue from overwriting anything.
+                let plain = into.join(&child.name);
+                let to = if env.vfs.fingerprint(&plain)?.is_none() {
+                    plain
+                } else {
+                    free_conflict_path(env, &plain, &child.name)?
+                };
+                env.vfs.rename(&path, &to)?;
+                rescued.push(child.name.clone());
+            }
+            _ => {}
+        }
+    }
+    Ok(rescued)
+}
+
 fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
         return Ok(OpOutcome::Overtaken(
@@ -1535,13 +1631,43 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(path) = local_path(env, &entry)? else {
         return Ok(OpOutcome::Retry("the sync folder is not available".into()));
     };
+    if op.entity.entity_type == EntityType::Folder {
+        if let Some(parent) = path.parent() {
+            let rescued = rescue_unsynced(env, &path, parent)?;
+            if !rescued.is_empty() {
+                let detail = format!(
+                    "{} file(s) here had not reached the server yet and were moved to {} \
+                     rather than going to the trash with the folder: {}",
+                    rescued.len(),
+                    parent.display(),
+                    summarise(&rescued),
+                );
+                env.store.raise_issue(
+                    Some(op.entity),
+                    "rescued_from_trash",
+                    &detail,
+                    (env.now_ms)() as i64,
+                )?;
+            }
+        }
+    }
     match env.vfs.trash(&path) {
         Ok(()) => {}
         // Gone already is the outcome we wanted.
         Err(jd_vfs::VfsError::NotFound(_)) => {}
         Err(e) => return Err(e.into()),
     }
-    env.store.delete_entry(op.entity)?;
+    if op.entity.entity_type == EntityType::Folder {
+        // The whole subtree, not just the folder. Deleting the folder alone
+        // leaves its children naming a parent that is gone, and an entry with
+        // no parent has no path — a pass finds work by resolving paths, so
+        // those entries are never considered again and the files behind them
+        // sit there forever. The server deleted the folder, which took its
+        // contents with it, so there is nothing under here left to agree about.
+        env.store.delete_subtree(op.entity)?;
+    } else {
+        env.store.delete_entry(op.entity)?;
+    }
     Ok(OpOutcome::Done)
 }
 

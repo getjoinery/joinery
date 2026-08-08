@@ -1493,3 +1493,82 @@ fn a_second_conflict_on_one_file_does_not_overwrite_the_first_rescue() {
     );
     assert_invariants(&world, &committed);
 }
+
+#[test]
+fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
+    // Trashing a folder is a single rename and everything underneath goes with
+    // it, including files the engine has no record of. Run 22 of the soak rig
+    // did exactly that: files written while a daemon was dead were swept into
+    // the system trash when the folder they sat in was removed from the other
+    // device — never uploaded, and gone from the user's tree without the user
+    // having deleted anything.
+    let world = World::new(67, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    world.device("laptop").fs.user_mkdir("Projects");
+    world
+        .device("laptop")
+        .fs
+        .user_write("Projects/keep.txt", b"this one reached the server");
+    committed.note("Projects/keep.txt", b"this one reached the server");
+    assert!(world.settle().is_some());
+
+    // The laptop keeps working with nothing getting out, so this file exists
+    // in exactly one place in the world.
+    let laptop = world.device("laptop");
+    laptop.net.set_faults(NetFaults {
+        drop_before: u64::MAX,
+        ..NetFaults::none()
+    });
+    laptop
+        .fs
+        .user_write("Projects/fresh.txt", b"never uploaded anywhere");
+    committed.note("Projects/fresh.txt", b"never uploaded anywhere");
+    world.pass(laptop);
+
+    // Meanwhile somebody deletes the whole folder from the other computer.
+    let desktop = world.device("desktop");
+    desktop.fs.user_remove("Projects/keep.txt");
+    desktop.fs.user_remove("Projects");
+    world.pass(desktop);
+
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it should settle");
+
+    // The never-uploaded file has to still be on the disk. assert_invariants
+    // counts the trash as somewhere content may legitimately be, so it would
+    // pass on a file swept away with the folder — which is the whole thing
+    // this test exists to catch.
+    let tree = disk_tree(laptop);
+    let fresh = jd_sim::sha256_hex(b"never uploaded anywhere");
+    let found: Vec<&String> = tree
+        .iter()
+        .filter(|(_, hash)| hash.as_deref() == Some(fresh.as_str()))
+        .map(|(path, _)| path)
+        .collect();
+    assert!(
+        !found.is_empty(),
+        "work that never reached the server must be rescued out of a folder \
+         being trashed, not go with it; disk holds {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        laptop
+            .store
+            .open_issues()
+            .unwrap()
+            .iter()
+            .any(|i| i.kind == "rescued_from_trash"),
+        "and the user is told it moved, rather than being left to find it by \
+         accident"
+    );
+
+    // Deliberately the two narrower assertions rather than assert_invariants.
+    // The server really did delete the ancestor here, so the entry left naming
+    // it is the state the engine already surfaces as store_inconsistent and
+    // then deliberately keeps — discarding those records was tried once and
+    // cost seven files. Holding this scenario to assert_no_entry_is_stranded
+    // would be holding the engine to a stricter policy than the one it chose.
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
