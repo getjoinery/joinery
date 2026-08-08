@@ -9,9 +9,9 @@
  * implementing this interface. No other files need modification.
  *
  * This file also declares the optional RawMessageRelay, ApiSubmissionRelay,
- * and DkimRecordSource capabilities (below).
+ * DkimRecordSource, and SendingDomainRegistrar capabilities (below).
  *
- * @version 1.4
+ * @version 1.5
  */
 interface EmailServiceProvider {
     /**
@@ -165,4 +165,30 @@ interface DkimRecordSource {
      *                        unknown verdict, never a fabricated one.
      */
     public static function getDkimStatus(string $domain): array;
+}
+
+/**
+ * SendingDomainRegistrar - optional capability for providers whose API can
+ * register a new sending domain, so guided setup (the mailbox Setup tab's
+ * machine sender ceremony) can offer registration as a button instead of a
+ * dashboard errand. A provider opts in by adding this interface to its
+ * `implements` list; providers without it get manual instructions naming
+ * their dashboard, and the ceremony continues from what getDkimStatus()
+ * reports once the domain is registered there by hand.
+ *
+ * Providers that implement it: Mailgun (domains API, with DKIM authority
+ * forced to the created domain itself so keys are issued for the subdomain
+ * rather than inherited from its parent — inherited authority breaks strict
+ * DMARC alignment).
+ *
+ * @version 1.0
+ */
+interface SendingDomainRegistrar {
+    /**
+     * Create $domain as a sending domain at the provider. Idempotent: an
+     * already-registered domain returns 'ok'. Never throws.
+     *
+     * @return array{status:'ok'|'error'|'unreachable', error?:string}
+     */
+    public static function createSendingDomain(string $domain): array;
 }

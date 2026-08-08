@@ -1,6 +1,9 @@
 # Machine Sender Card: Guided Setup for a Separate Sending Identity
 
-**Status:** Decision-complete 2026-08-08, ready to build
+**Status:** Built 2026-08-08 — test-db suite 30/30, safe 94/94, db tier
+242/242, ceremony browser-verified on dev. The live acceptance gate (the
+jeremytunnell identity flip run through the card) is queued in the live
+verification list and needs a deploy to that node first.
 **Depends on:** `specs/mailbox_strict_sending_identities.md` (doctrine), DNS record
 management (`includes/dns/`, built), `defaultreplyto` (built).
 

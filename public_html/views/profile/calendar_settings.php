@@ -49,6 +49,13 @@
             <?php echo PublicPage::settings_layout_start(); ?>
 
             <div class="jy-panel jy-form-actions">
+                <?php if (!empty($page_vars['send_blocker'])): ?>
+                <div class="alert alert-warning">
+                    Heads up: this site's automated email is not able to send right now, so summaries and
+                    reminders will not arrive until the site admin fixes it. Your choices here are saved and
+                    take effect as soon as sending works.
+                </div>
+                <?php endif; ?>
                 <div id="cal-settings-alert" hidden></div>
                 <?php
                 $formwriter = $page->getFormWriter('cal-settings-form', [

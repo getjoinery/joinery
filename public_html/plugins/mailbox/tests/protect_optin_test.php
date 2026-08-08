@@ -451,12 +451,17 @@ class ProtectOptinTest {
 		// justify. That is the only caller allowed to.
 		$plan = new ReflectionMethod('InboundEmailSetupCheck', 'dnsPlan');
 		$params = $plan->getParameters();
-		check(count($params) === 2, 'dnsPlan takes the domain plus an explicit opt-in',
+		// Third parameter: the machine sender ceremony's stage flag
+		// (specs/mailbox_machine_sender_card.md) — same explicit-opt-in shape.
+		check(count($params) === 3, 'dnsPlan takes the domain plus two explicit opt-ins',
 			'got ' . count($params) . ' parameters');
 		check($params[1]->getName() === 'force_protected',
 			'the second parameter names what it does');
 		check($params[1]->isDefaultValueAvailable() && $params[1]->getDefaultValue() === false,
 			'and it defaults to OFF, so every existing caller keeps the ordinary shape');
+		check($params[2]->getName() === 'machine_stage'
+				&& $params[2]->isDefaultValueAvailable() && $params[2]->getDefaultValue() === false,
+			'the machine-stage flag also defaults OFF, so an untouched domain pays no provider call');
 
 		// protectedDomainChecks() is the pre-flight the ceremony verifies against.
 		// It must not consult the flag either, or it could never run before it.

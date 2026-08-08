@@ -14,6 +14,9 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.3 - the machine-sender family (domain.machine_sender*) lands in
+ *                Sending and is excluded from Receiving, which otherwise admits
+ *                every domain-layer row
  * @version 1.2 - relay rows and cards are scoped to mailboxes whose domain needs
  *                a relay (specs/mailbox_relay_surface_simplification.md)
  * @version 1.1 - a broken relay scanner surfaces as a Receiving card instead of
@@ -251,6 +254,11 @@ function _setup_is_forwarding_row(array $r): bool {
  * SRS, which only rewrites forwarded envelopes.
  */
 function _setup_is_sending_row(array $r): bool {
+	// The machine-sender family (domain.machine_sender*) is outbound: it is
+	// about where the site's automated mail sends from.
+	if (strpos((string)$r['id'], 'domain.machine_sender') === 0) {
+		return true;
+	}
 	return in_array($r['id'], array('plugin.relay', 'domain.dkim', 'host.opendkim'), true);
 }
 
@@ -284,6 +292,9 @@ function _setup_is_sending_row(array $r): bool {
  */
 function _setup_is_receiving_row(array $r, string $focus_domain = '', bool $needs_relay = true): bool {
 	if ($r['id'] === 'domain.dkim') { return false; }      // DKIM signing is outbound
+	// The machine-sender family is outbound too — and this filter admits every
+	// domain-layer row by default, so the exclusion must be explicit.
+	if (strpos((string)$r['id'], 'domain.machine_sender') === 0) { return false; }
 	// Deployment-wide, and legitimately so: the relay scans every message for
 	// every hosted domain, so "the relay is not scanning" is equally true of
 	// every mailbox behind it. That is what separates it from

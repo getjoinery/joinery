@@ -29,7 +29,8 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * session-gated compose transport is structurally unavailable — never route
  * these through resolveOutboundTransport().
  *
- * @version 1.0
+ * @version 1.1 - run() counts delivery failures ('failed') so the task can
+ *                report them instead of a clean "Sent 0"
  */
 class CalendarEmailEngine {
 
@@ -59,10 +60,10 @@ class CalendarEmailEngine {
 	 * One full pass: reminders then summaries.
 	 *
 	 * @param bool $dry_run  Compute candidates only — no sends, no ledger writes.
-	 * @return array ['reminders' => int, 'summaries' => int, 'preview' => string[]]
+	 * @return array ['reminders' => int, 'summaries' => int, 'failed' => int, 'preview' => string[]]
 	 */
 	public function run(bool $dry_run = false): array {
-		$result = ['reminders' => 0, 'summaries' => 0, 'preview' => []];
+		$result = ['reminders' => 0, 'summaries' => 0, 'failed' => 0, 'preview' => []];
 
 		foreach ($this->dueReminders() as $cand) {
 			if ($dry_run) {
@@ -85,6 +86,8 @@ class CalendarEmailEngine {
 			$subject = $this->reminderSubject($vars);
 			if ($this->deliver('calendar_reminder', $cand['user']->get('usr_email'), $vars, $subject)) {
 				$result['reminders']++;
+			} else {
+				$result['failed']++;
 			}
 		}
 
@@ -111,6 +114,8 @@ class CalendarEmailEngine {
 			}
 			if ($this->deliver('calendar_summary', $cand['user']->get('usr_email'), $vars, $vars['period_label'])) {
 				$result['summaries']++;
+			} else {
+				$result['failed']++;
 			}
 		}
 
