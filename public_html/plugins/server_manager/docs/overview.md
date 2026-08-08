@@ -1045,8 +1045,15 @@ Add more types by adding a method to `RunNodeUptimeChecks` and a `case` to the d
 3. Apply state machine:
    - On success: clear failure counter and `down_since`, set status `'up'`. Fire **recovered** alert on down→up transition.
    - On failure: increment `consecutive_failures`. Once it reaches `FAILURE_THRESHOLD` (default 2) and prior status wasn't `'down'`, set status `'down'`, set `down_since=now()`, fire **down** alert.
+   - **Inconclusive**: the probe records why in `mgn_uptime_last_error` and returns without touching status, the failure counter or `down_since`, and without alerting. `mgn_uptime_last_conclusive` is deliberately left alone, so a node that can never conclude eventually surfaces as stale rather than as healthy.
 
 Constants on the class: `TIMEOUT_SECONDS=10`, `FAILURE_THRESHOLD=2`. The cron tick interval (~15 min) is the natural rate limiter.
+
+**A probe only concludes when it reached the node.** A failure inside the monitoring host's own name resolution is evidence about the monitoring host, not about the node, so it is inconclusive. Without this, one broken resolver on the control plane fails every probe within a single tick, carries the whole fleet past the failure threshold together, and mails the operator that every site is down while every site is serving traffic — an inverted signal, since the one machine actually at fault is the only one reporting nothing wrong.
+
+`NodeMonitorHealth::is_name_resolution_failure($errno, $message)` makes the call, and all three check types route through it. It matches curl's `CURLE_COULDNT_RESOLVE_HOST`/`_PROXY` by number, and matches on message text for the two cases that carry no distinguishing number: a resolver that hangs rather than answering (curl reports the generic `CURLE_OPERATION_TIMEDOUT`, wording it "Resolving timed out after…"), and `fsockopen`, which reports getaddrinfo's text with errno 0. Everything else — refused connections, TLS failures, timeouts once dialling has begun — stays a genuine down result.
+
+The recorded error is worded from the monitoring host's point of view (`monitoring host could not resolve <name> (…)`) so the dashboard points at the real fault, and the tick's summary line counts these as skipped with the reason attached.
 
 **Alert email recipient** is resolved per tick via a fallback chain — no new setting:
 

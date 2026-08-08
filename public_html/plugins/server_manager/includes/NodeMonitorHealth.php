@@ -13,6 +13,9 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.8 - is_name_resolution_failure(): a probe that died in the monitoring host's own
+ *                resolver is a statement about us, not about the node, so callers can decline
+ *                to conclude instead of reporting the whole fleet down
  * @version 1.7 - fleet_backup_health cross-checks the node's claimed success against the bucket:
  *                a shelf listed after the claimed run that holds nothing new is a node whose
  *                backups are not landing, however healthy its own reports look
@@ -44,6 +47,26 @@ class NodeMonitorHealth {
 	const STALE_INTERVAL_MULTIPLE = 4;
 	/** Floor for the stale window, for nodes with very short intervals. */
 	const STALE_MINIMUM_SECONDS = 900;
+
+	/** Curl error numbers, named locally so they read as themselves. */
+	const CURLE_COULDNT_RESOLVE_PROXY = 5;
+	const CURLE_COULDNT_RESOLVE_HOST  = 6;
+
+	/**
+	 * Lowercase fragments that identify a name-resolution failure in an error
+	 * message. Covers curl's own wording (both the stock resolver and c-ares),
+	 * curl's timeout-during-resolution, and getaddrinfo as PHP's socket
+	 * functions report it.
+	 */
+	const RESOLUTION_FAILURE_MARKERS = [
+		'could not resolve',
+		'couldn\'t resolve',
+		'resolving timed out',
+		'getaddrinfo',
+		'name or service not known',
+		'temporary failure in name resolution',
+		'domain name not found',
+	];
 
 	/**
 	 * Evaluate one node.
@@ -152,6 +175,36 @@ class NodeMonitorHealth {
 	public static function interval($node): int {
 		$i = (int)$node->get('mgn_uptime_interval_seconds');
 		return $i > 0 ? $i : 300;
+	}
+
+	/**
+	 * Did a probe fail because THIS machine could not turn the node's hostname
+	 * into an address?
+	 *
+	 * A monitoring host whose resolver breaks fails every probe at once and
+	 * reports the entire fleet down while every node is serving traffic
+	 * normally. The probe never reached the node, so it proves nothing about
+	 * it; callers treat this as inconclusive rather than as a down result.
+	 *
+	 * Recognised from two sources. Curl names the condition outright with
+	 * CURLE_COULDNT_RESOLVE_HOST / _PROXY, but a resolver that hangs instead of
+	 * answering trips the connect timeout first and arrives as a generic
+	 * CURLE_OPERATION_TIMEDOUT whose only distinguishing mark is the message
+	 * ("Resolving timed out after..."). Socket probes have no error number to
+	 * offer at all, only getaddrinfo's text. Both are therefore matched on
+	 * message as well as number; pass $errno 0 where there is none.
+	 */
+	public static function is_name_resolution_failure(int $errno, string $message): bool {
+		if ($errno === self::CURLE_COULDNT_RESOLVE_PROXY || $errno === self::CURLE_COULDNT_RESOLVE_HOST) {
+			return true;
+		}
+		$haystack = strtolower($message);
+		foreach (self::RESOLUTION_FAILURE_MARKERS as $marker) {
+			if (strpos($haystack, $marker) !== false) {
+				return true;
+			}
+		}
+		return false;
 	}
 
 	private static function stale_window($node): int {

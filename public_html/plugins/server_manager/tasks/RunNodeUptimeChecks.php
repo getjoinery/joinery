@@ -8,10 +8,18 @@
  * "recovered" email on the down->up transition. One alert per
  * transition; no re-alerting while still down.
  *
+ * A probe only reports up or down when it actually reached the node. If it
+ * failed in this machine's own name resolution it never left here, so it is
+ * recorded as inconclusive and alerts nothing — otherwise a resolver fault on
+ * the monitoring host mails out the entire fleet as down while every node is
+ * serving traffic normally.
+ *
  * Each enabled node also gets an independent TLS certificate-expiry check
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 1.6 - a probe that dies in this machine's own resolver is inconclusive, not down:
+ *                a broken resolver on the monitoring host no longer alerts the whole fleet down
  * @version 1.5 - P-19: recovered alert reports real down duration (capture down_since before apply_state clears it)
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -169,9 +177,9 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * tcp_port check: open a TCP connection to the node's host on the
 	 * configured port. For services with no web endpoint — an inbound mail
 	 * relay is proven alive by accepting connections on 25, which is exactly
-	 * what it exists to do. A refused or timed-out connection is down; there
-	 * is no inconclusive case once host and port are set, so this check never
-	 * returns 'skip'.
+	 * what it exists to do. A refused or timed-out connection is down. The one
+	 * inconclusive case is a host given as a name that this machine cannot
+	 * resolve — nothing was ever dialled, so there is no result to report.
 	 */
 	private function check_tcp_port($node): array {
 		$host = trim((string)$node->get('mgn_host'));
@@ -182,6 +190,11 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$sock = @fsockopen($host, $port, $errno, $errstr, self::TIMEOUT_SECONDS);
 		if ($sock === false) {
 			$detail = trim($errstr) !== '' ? $errstr : ('error ' . $errno);
+			// fsockopen reports a DNS failure only in the message text, and with
+			// errno 0 — so classify on the message alone.
+			if (NodeMonitorHealth::is_name_resolution_failure(0, $detail)) {
+				return $this->unresolvable($host, $detail);
+			}
 			return [
 				'ok'      => false,
 				'status'  => 'done',
@@ -211,7 +224,13 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			return ['ok' => false, 'status' => 'skip', 'message' => 'api check selected but API keys not configured'];
 		}
 		if ($reason === 'transport') {
-			return ['ok' => false, 'message' => $result['message'] ?? 'transport failure', 'status' => 'done'];
+			$detail = $result['message'] ?? 'transport failure';
+			// fetch_status_via_api folds every curl failure into one reason, so the
+			// resolver case is separated back out here by its message.
+			if (NodeMonitorHealth::is_name_resolution_failure($result['errno'] ?? 0, $detail)) {
+				return $this->unresolvable(parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST), $detail);
+			}
+			return ['ok' => false, 'message' => $detail, 'status' => 'done'];
 		}
 		if ($reason === 'status') {
 			// fetch_status_via_api stores the code in the message as "HTTP NNN"
@@ -278,12 +297,35 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 
 		if ($errno) {
-			return ['ok' => false, 'message' => $errmsg ?: ('curl errno ' . $errno), 'status' => 'done'];
+			$detail = $errmsg ?: ('curl errno ' . $errno);
+			if (NodeMonitorHealth::is_name_resolution_failure($errno, $detail)) {
+				return $this->unresolvable($url_host !== '' ? $url_host : $health_url, $detail);
+			}
+			return ['ok' => false, 'message' => $detail, 'status' => 'done'];
 		}
 		if ($status >= 200 && $status < 400) {
 			return ['ok' => true, 'message' => null, 'status' => 'done'];
 		}
 		return ['ok' => false, 'message' => 'HTTP ' . $status, 'status' => 'done'];
+	}
+
+	/**
+	 * The inconclusive result for a probe that never left this machine because
+	 * the hostname would not resolve.
+	 *
+	 * Worded from the monitoring host's point of view on purpose: the operator
+	 * reading it on the dashboard needs to know the fault is here, not on the
+	 * node, since a broken resolver marks every node at once and the node
+	 * itself may be serving traffic perfectly.
+	 */
+	private function unresolvable(?string $hostname, string $detail): array {
+		$name = trim((string)$hostname);
+		return [
+			'ok'      => false,
+			'status'  => 'skip',
+			'message' => 'monitoring host could not resolve '
+			           . ($name !== '' ? $name : 'the node hostname') . ' (' . $detail . ')',
+		];
 	}
 
 	/**

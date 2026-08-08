@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.28 - fetch_status_via_api returns the curl errno alongside reason 'transport',
+ *                 so a caller can tell an unreachable node from an unresolvable name
  * @version 1.27 - a node that names no backup target falls back to the control
  *                 plane's sole enabled one, so a registered node is backed up
  *                 without per-node setup; two or more and it still refuses
@@ -270,8 +272,12 @@ class JobCommandBuilder {
 		$elapsed_ms = intval(round((microtime(true) - $start) * 1000));
 
 		if ($errno) {
+			// Carry the curl error number out with the message. 'transport' covers
+			// everything from a refused connection to an unresolvable name, and
+			// callers that must tell those apart cannot do it from prose alone.
 			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
-				'message' => $errmsg ?: 'transport failure', 'reason' => 'transport'];
+				'message' => $errmsg ?: 'transport failure', 'reason' => 'transport',
+				'errno' => $errno];
 		}
 		if ($status === 401 || $status === 403) {
 			return ['ok' => false, 'elapsed_ms' => $elapsed_ms, 'data' => null,
