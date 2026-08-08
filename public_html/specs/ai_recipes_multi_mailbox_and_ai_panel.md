@@ -375,6 +375,14 @@ below, sharing AgentLoop, providers, and prompt assembly. No recipe-side
 "task" mechanism is added — the composer is a chat entry point, not a fourth
 recipe mode.
 
+The composer's write safety is owned by **specs/ai_action_queue.md**: chat
+write tools do not execute directly — they enqueue proposed actions the owner
+approves or declines, and the panel gains a "Waiting for you" section for
+them. The composer is not built before the queue exists. That spec also sets
+the UI vocabulary this panel adopts: user-facing text speaks of **standing
+approvals** and **pending actions**, never "taint" — `TaintGate::explain()`
+is rewritten in that vocabulary, and this panel's confirm dialog inherits it.
+
 ---
 
 ## Documentation (updated when built, current-state voice)
