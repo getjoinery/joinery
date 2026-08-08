@@ -1,4 +1,22 @@
 #!/usr/bin/env bash
+#VERSION 2.49 - The deferred-certificate retry timer is installed by
+#              sysadmin_tools/arm_ssl_retry.sh rather than written out here. A
+#              restore that lands a site on a different domain has to arm the
+#              same machinery for its new name, and two copies of a retry loop
+#              that talks to a rate-limited CA is one copy too many.
+#VERSION 2.48 - Generated credentials are named by where they live, not printed.
+#              The server summary, the site summary and the admin-login block
+#              all echoed their value, so every unattended install left working
+#              credentials in its own log. The one exception is a generated
+#              postgres password that could not be recorded anywhere: that is
+#              still printed, since the alternative is losing it.
+#VERSION 2.47 - A default bare-metal install reaches its own database. `server`
+#              generated a postgres password and recorded it; `site` then
+#              generated a second one and never read the record, so the schema
+#              load authenticated with a credential the running server had never
+#              held and the install died. `site` now adopts the recorded
+#              password on bare metal, and still mints a per-site one for
+#              Docker, where each container owns its own PostgreSQL.
 #VERSION 2.46 - Origin certificates issue on dual-stack hosts. The HTTP-01
 #              decision compared `curl ifconfig.me` against the domain's A
 #              record, but curl answers with the IPv6 address on any host that
@@ -269,6 +287,20 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 # After bumping: run './install.sh build-base' on each host, then rebuild sites.
 BASE_IMAGE_VERSION="1.2"
 
+# Where `install.sh server` records the postgres role password it generated, and
+# where `install.sh site` looks for it on bare metal. One constant, because the
+# two commands have to agree on the path or a default install cannot reach its
+# own database.
+POSTGRES_PASSWORD_RECORD="/root/.joinery_postgres_password"
+
+# Whether this run generated the postgres password, and whether it managed to
+# record it. Together they decide what the closing summary may say: a password
+# the operator supplied is theirs already and is never echoed, a recorded one is
+# named by its path, and only a generated password with nowhere to live is
+# printed — because then the alternative is losing it.
+POSTGRES_PASSWORD_GENERATED=0
+POSTGRES_PASSWORD_RECORDED=0
+
 # This script's own version, read from the newest #VERSION header above rather
 # than restated here, so the number the help text prints is the number the file
 # actually carries. A second copy drifts the moment someone bumps the header.
@@ -376,10 +408,15 @@ print_admin_login() {
     echo "Admin login:"
     echo -e "  Email:    ${YELLOW}${email}${NC}"
     if [ -n "$password" ]; then
-        echo -e "  Password: ${YELLOW}${password}${NC}"
+        # The password already lives in the credentials file, so printing it
+        # here buys nothing and costs a working login sitting in the install
+        # log — which is exactly the file that gets tailed, shipped to a ticket
+        # and pasted into chat. Point at the file instead; the operator is one
+        # command away from it, and that command needs root.
+        echo -e "  Password: ${YELLOW}stored in ${cred_path}${NC}"
         echo ""
         echo "You will be asked to choose a new password at first sign-in."
-        echo -e "To see it again: ${BLUE}sudo ${show_cmd}${NC}"
+        echo -e "To read it: ${BLUE}sudo ${show_cmd}${NC}"
     else
         echo -e "  Password: ${YELLOW}the one supplied at install time${NC}"
     fi
@@ -495,139 +532,24 @@ should_setup_ssl() {
 }
 
 # An install that came up on HTTP because DNS wasn't pointing here yet leaves
-# behind a timer that keeps watching for it. The deployer points DNS whenever
-# they get to it — an hour later or a week later — and the certificate arrives
-# without them doing anything or knowing this existed.
+# behind a timer that keeps watching for it, so the certificate arrives on its
+# own whenever the deployer gets to the cutover.
 #
-# The DNS lookup before each attempt is what makes an indefinite retry safe.
-# Let's Encrypt allows five failed validations per hostname per hour, so
-# hammering certbot on a domain that cannot resolve would burn the budget that
-# the eventually-correct attempt needs. A failed lookup costs nothing.
-#
-# Units are templated on the domain so a multi-site box gets one instance per
-# site rather than one timer that can only ever serve the first.
+# The timer itself is armed by sysadmin_tools/arm_ssl_retry.sh, because a
+# RESTORE that lands a site on a different domain has to arm exactly the same
+# machinery for its new name — and two copies of a retry loop that talks to a
+# rate-limited CA is one copy too many.
 #
 # $1 = domain, $2 = on-host path to setup_ssl.sh for this install mode.
 install_ssl_retry_timer() {
     local domain="$1"
     local ssl_script="$2"
+    local armer="${SCRIPT_DIR}/../sysadmin_tools/arm_ssl_retry.sh"
 
-    if ! command -v systemctl > /dev/null 2>&1 || ! systemctl list-units > /dev/null 2>&1; then
-        return 1
-    fi
-
-    mkdir -p /etc/joinery/ssl-retry
-    cat > "/etc/joinery/ssl-retry/${domain}.conf" <<EOF
-# Written by install.sh when a certificate was deferred. Read by
-# /usr/local/sbin/joinery-ssl-retry. Removing this file stops the retries.
-DOMAIN=${domain}
-SETUP_SSL=${ssl_script}
-EOF
-    chmod 600 "/etc/joinery/ssl-retry/${domain}.conf"
-
-    cat > /usr/local/sbin/joinery-ssl-retry <<'RETRY_EOF'
-#!/usr/bin/env bash
-# Issue the certificate an install could not, once DNS finally points here.
-#
-# Installed by install.sh. Run from joinery-ssl-retry@<domain>.timer every few
-# minutes; does nothing at all until the domain resolves to this server, then
-# issues once and disables its own timer.
-set -u
-
-DOMAIN="${1:-}"
-[ -n "$DOMAIN" ] || exit 0
-
-CONF="/etc/joinery/ssl-retry/${DOMAIN}.conf"
-[ -f "$CONF" ] || exit 0
-# shellcheck source=/dev/null
-. "$CONF"
-
-SETUP_SSL="${SETUP_SSL:-}"
-if [ ! -x "$SETUP_SSL" ] && [ ! -f "$SETUP_SSL" ]; then
-    echo "setup_ssl.sh is no longer at $SETUP_SSL — nothing to run"
-    exit 0
-fi
-
-give_up() {
-    echo "$1"
-    rm -f "$CONF"
-    systemctl disable "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
-    systemctl stop --no-block "joinery-ssl-retry@${DOMAIN}.timer" > /dev/null 2>&1 || true
-    exit 0
+    [ -f "$armer" ] || return 1
+    bash "$armer" "$domain" --setup-ssl "$ssl_script" > /dev/null 2>&1
 }
 
-# A certificate signed by somebody else is the finish line. provision_origin_cert
-# falls back to a self-signed certificate rather than failing, so "a file exists
-# at the cert path" would end the retries on the first run and never issue a
-# real one. Self-signed means issuer equals subject.
-have_real_cert() {
-    local pem="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
-    [ -f "$pem" ] || return 1
-    local issuer subject
-    issuer=$(openssl x509 -in "$pem" -noout -issuer 2>/dev/null | sed 's/^issuer=//')
-    subject=$(openssl x509 -in "$pem" -noout -subject 2>/dev/null | sed 's/^subject=//')
-    [ -n "$issuer" ] && [ "$issuer" != "$subject" ]
-}
-
-have_real_cert && give_up "A CA-issued certificate is already in place for $DOMAIN."
-
-# The cheap check, before spending an attempt. Let's Encrypt counts failed
-# validations, not failed lookups.
-SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
-DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
-
-if [ -z "$DNS_IP" ]; then
-    echo "$DOMAIN does not resolve yet — waiting."
-    exit 0
-fi
-if [ -z "$SERVER_IP" ]; then
-    echo "Could not determine this server's public IP — waiting."
-    exit 0
-fi
-if [ "$DNS_IP" != "$SERVER_IP" ]; then
-    echo "$DOMAIN resolves to $DNS_IP, this server is $SERVER_IP — waiting."
-    exit 0
-fi
-
-echo "$DOMAIN now points here. Requesting a certificate."
-bash "$SETUP_SSL" "$DOMAIN" || echo "setup_ssl.sh returned non-zero; will try again."
-
-have_real_cert && give_up "Certificate issued for $DOMAIN. Retry timer disabled."
-
-echo "Still no CA-issued certificate for $DOMAIN — will try again."
-exit 0
-RETRY_EOF
-    chmod 755 /usr/local/sbin/joinery-ssl-retry
-
-    cat > /etc/systemd/system/joinery-ssl-retry@.service <<'EOF'
-[Unit]
-Description=Issue a deferred Joinery SSL certificate for %i
-After=network-online.target apache2.service
-Wants=network-online.target
-
-[Service]
-Type=oneshot
-ExecStart=/usr/local/sbin/joinery-ssl-retry %i
-EOF
-
-    cat > /etc/systemd/system/joinery-ssl-retry@.timer <<'EOF'
-[Unit]
-Description=Retry a deferred Joinery SSL certificate for %i
-
-[Timer]
-OnBootSec=3min
-OnUnitActiveSec=5min
-AccuracySec=30s
-Unit=joinery-ssl-retry@%i.service
-
-[Install]
-WantedBy=timers.target
-EOF
-
-    systemctl daemon-reload > /dev/null 2>&1 || true
-    systemctl enable --now "joinery-ssl-retry@${domain}.timer" > /dev/null 2>&1 || return 1
-    return 0
-}
 
 # Closing reminder for an install that came up on HTTP because DNS wasn't
 # pointing here yet. Printed in the summary so it survives a long scrollback.
@@ -1980,9 +1902,11 @@ do_server_setup() {
             # platform already looks for a bare-metal node's postgres password
             # (`site --password-file`, and the server_manager install job).
             POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
-            local pw_record="/root/.joinery_postgres_password"
+            POSTGRES_PASSWORD_GENERATED=1
+            local pw_record="$POSTGRES_PASSWORD_RECORD"
             if (umask 077 && printf '%s\n' "$POSTGRES_PASSWORD" > "$pw_record") 2>/dev/null; then
                 chmod 600 "$pw_record" 2>/dev/null || true
+                POSTGRES_PASSWORD_RECORDED=1
                 print_info "Auto-generated the postgres password and wrote it to $pw_record (mode 600)."
             else
                 # Recording it is how an unattended caller gets it back, so a
@@ -2640,7 +2564,21 @@ EOF
     print_info "1. Add your SSH public key to /home/user1/.ssh/authorized_keys"
     print_info "2. Create sites using: ./install.sh site SITENAME DOMAIN"
     print_info "   (the database password is generated for you; --password-file to choose one)"
-    print_info "3. PostgreSQL postgres password is: ${POSTGRES_PASSWORD}"
+    # Say where the password is, not what it is. This summary is the last thing
+    # an unattended install writes to its log, and installer logs get tailed,
+    # shipped and pasted — a password printed here outlives the terminal it was
+    # printed to. The one exception is a password that could not be recorded
+    # anywhere: then this line is the only copy, and withholding it would lose
+    # the credential outright.
+    if [ "$POSTGRES_PASSWORD_RECORDED" -eq 1 ]; then
+        print_info "3. The postgres password was written to ${POSTGRES_PASSWORD_RECORD} (mode 600)."
+    elif [ "$POSTGRES_PASSWORD_GENERATED" -eq 0 ]; then
+        print_info "3. The postgres password is the one you supplied."
+    elif [ -n "${POSTGRES_PASSWORD}" ]; then
+        print_warning "3. The postgres password could not be recorded to ${POSTGRES_PASSWORD_RECORD}."
+        print_warning "   It appears once, below, and nowhere else. Save it now, then clear this log."
+        print_info "   ${POSTGRES_PASSWORD}"
+    fi
     echo ""
     print_success "Server is ready for site deployment!"
 }
@@ -2866,11 +2804,12 @@ do_site_create() {
         fi
         print_info "Password read from file: $PASSWORD_FILE"
     elif [ -z "$POSTGRES_PASSWORD" ] || [ "$POSTGRES_PASSWORD" = "-" ]; then
-        # Auto-generate secure password if none provided or "-" specified
-        POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
-        print_info "Auto-generated secure password: $POSTGRES_PASSWORD"
-        print_warning "Save this password - you will need it for database access!"
-        PASSWORD_WAS_GENERATED=1
+        # Nothing was supplied. Resolving it is deferred until the mode is known:
+        # a bare-metal site talks to a PostgreSQL the `server` command already
+        # gave a password, so minting a second one here would produce a
+        # credential the running server has never heard of. See the resolution
+        # immediately after MODE is decided.
+        POSTGRES_PASSWORD=""
     fi
 
     # A password given on the command line was readable by every account on this
@@ -2925,6 +2864,49 @@ do_site_create() {
             exit 1
         fi
         MODE="bare-metal"
+    fi
+
+    # Resolve a password nobody supplied, now that the mode is known.
+    #
+    # Bare metal and Docker need opposite things here, which is why this cannot
+    # sit with the argument parsing:
+    #
+    # - Bare metal shares one PostgreSQL with the box. `install.sh server`
+    #   already set the postgres role's password and recorded it. Adopt that
+    #   one. Generating a fresh password instead leaves _site_init.sh
+    #   authenticating with a credential the running server has never held, and
+    #   the install dies at "Failed to load database schema" — which is what
+    #   `install.sh server` followed by `install.sh site`, both on defaults, did
+    #   before this. A site may still override it with --password-file or
+    #   POSTGRES_PASSWORD; those are read above and never reach here.
+    # - Docker gives each container its own PostgreSQL, built with
+    #   --skip-postgres-password and no role password at all, so a per-site
+    #   generated password is correct there and must stay per-site.
+    if [ -z "$POSTGRES_PASSWORD" ]; then
+        if [ "$MODE" = "bare-metal" ] && [ -r "$POSTGRES_PASSWORD_RECORD" ]; then
+            POSTGRES_PASSWORD=$(tr -d '\n' < "$POSTGRES_PASSWORD_RECORD")
+            if [ -n "$POSTGRES_PASSWORD" ]; then
+                print_info "Using the postgres password recorded by 'install.sh server' ($POSTGRES_PASSWORD_RECORD)"
+            fi
+        fi
+
+        if [ -z "$POSTGRES_PASSWORD" ]; then
+            POSTGRES_PASSWORD=$(openssl rand -base64 18 | tr -d '/+=' | head -c 24)
+            PASSWORD_WAS_GENERATED=1
+            if [ "$MODE" = "bare-metal" ]; then
+                # No record to adopt: this box's PostgreSQL was set up by
+                # something other than `install.sh server`. Say so, because the
+                # generated password only works if the postgres role already
+                # holds it.
+                print_warning "No postgres password recorded at $POSTGRES_PASSWORD_RECORD — generating one."
+                print_warning "If this box's postgres role has a different password, pass it with --password-file."
+            fi
+            # Named by where it lands, not by its value: this runs unattended
+            # far more often than it runs at a keyboard, and its output is a log
+            # file. The site's own config is the durable copy.
+            print_info "Auto-generated a database password for this site."
+            print_info "It is stored at /var/www/html/${SITENAME}/config/Globalvars_site.php (dbpassword)."
+        fi
     fi
 
     print_header "Creating Joinery Site: $SITENAME"
@@ -3702,7 +3684,7 @@ EOF
         echo -e "${GREEN}Installation Complete!${NC}"
         echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}http://$DOMAIN_NAME:$PORT/${NC}"
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "Database Password: in ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
         fi
     else
         print_header "Installation Complete!"
@@ -3714,8 +3696,8 @@ EOF
         echo ""
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
-            echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "${YELLOW}  A database password was generated for this site.${NC}"
+            echo -e "${YELLOW}  It is stored in: ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
             echo ""
         fi
@@ -3907,7 +3889,7 @@ do_site_baremetal() {
         echo -e "${GREEN}Installation Complete!${NC}"
         echo -e "Site: ${GREEN}$SITENAME${NC} | URL: ${GREEN}http://$DOMAIN_NAME/${NC}"
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
-            echo -e "Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "Database Password: in ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
         fi
     else
         print_header "Installation Complete!"
@@ -3924,8 +3906,8 @@ do_site_baremetal() {
         echo ""
         if [ "$PASSWORD_WAS_GENERATED" = "1" ]; then
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
-            echo -e "${YELLOW}  IMPORTANT: Save this auto-generated password!${NC}"
-            echo -e "${YELLOW}  Database Password: ${GREEN}$POSTGRES_PASSWORD${NC}"
+            echo -e "${YELLOW}  A database password was generated for this site.${NC}"
+            echo -e "${YELLOW}  It is stored in: ${GREEN}/var/www/html/$SITENAME/config/Globalvars_site.php${NC}"
             echo -e "${YELLOW}═══════════════════════════════════════════════════════════════${NC}"
             echo ""
         fi

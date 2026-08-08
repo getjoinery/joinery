@@ -31,6 +31,8 @@
  * it is handed cannot delete, and pruning that shelf belongs to the party that
  * owns it.
  *
+ * @version 1.3 - the meta artifact carries shape.json, so a restore knows what machine the
+ *                backup came off and can reconcile it to the one it is landing on
  * @version 1.2 - profiles: a run is one party's backup end to end (paths, lock, snapshot,
  *                bucket segment, recipient, history), plus a machine-wide mutex so two
  *                parties never archive the same tree at once
@@ -709,9 +711,15 @@ class BackupRunner {
 	}
 
 	/**
-	 * The bits a restore needs that are not in the project tree: the Apache
-	 * virtualhost, and a note of what this run was. Small, and rewritten every
-	 * run rather than made incremental — there is nothing to save.
+	 * The bits a restore needs that are not in the project tree: the site's
+	 * SHAPE, the Apache virtualhost, and a note of what this run was. Small, and
+	 * rewritten every run rather than made incremental — there is nothing to save.
+	 *
+	 * The virtualhost travels for reference, not for reinstallation. A restore
+	 * always regenerates the serving config from the platform's own templates
+	 * and only keeps this copy beside the live file when the two differ, because
+	 * a container's internal virtualhost on a plain server is a site with no
+	 * HTTPS — which is exactly how a rebuild drill lost its certificate.
 	 */
 	private static function build_meta(array $plan, $chain_d, $seq, $key_file) {
 		$stage = $chain_d . '/.meta-' . getmypid();
@@ -719,13 +727,37 @@ class BackupRunner {
 			return null;
 		}
 
+		$vhost_captured = false;
 		foreach (array(
 			'/etc/apache2/sites-available/' . $plan['project'] . '.conf',
 			'/etc/httpd/conf.d/' . $plan['project'] . '.conf',
 		) as $vhost) {
 			if (is_readable($vhost)) {
-				@copy($vhost, $stage . '/apache_config/' . basename($vhost));
+				$vhost_captured = @copy($vhost, $stage . '/apache_config/' . basename($vhost));
 				break;
+			}
+		}
+
+		// shape.json: the machine-readable answer to "what was this site running
+		// on". A restore reads it to say what it is landing on versus what it came
+		// from, and never has to guess. Written by the same script that reads it
+		// back on the way in, so the archive path and the chain path cannot
+		// describe a site differently.
+		$shaper = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/reconcile_site.sh';
+		if (is_file($shaper)) {
+			$shape_cmd = 'bash ' . escapeshellarg($shaper)
+				. ' ' . escapeshellarg($plan['project'])
+				. ' --print-shape'
+				. ' --site-dir ' . escapeshellarg(PathHelper::getSiteRoot())
+				. ' --vhost-captured ' . ($vhost_captured ? 'yes' : 'no')
+				. ' --out ' . escapeshellarg($stage . '/shape.json');
+			$sh_out = array(); $sh_rc = 0;
+			exec($shape_cmd . ' 2>&1', $sh_out, $sh_rc);
+			if ($sh_rc !== 0) {
+				// A backup without a shape is restorable — the restore treats it as
+				// shape-unknown and reconciles against the target anyway — so this
+				// is never a reason to fail the run.
+				error_log('BackupRunner: could not record the site shape; continuing without it.');
 			}
 		}
 

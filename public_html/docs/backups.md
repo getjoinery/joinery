@@ -66,7 +66,7 @@ the next was 37 kB.
     manifest.json           the restore contract — order, hashes, sealed keys
     files-0000.tar.gz.enc   the full
     db-0000.sql.gz.enc
-    meta-0000.tar.gz.enc    virtualhost + a note of the run
+    meta-0000.tar.gz.enc    shape.json + virtualhost + a note of the run
     files-0001.tar.gz.enc   an incremental
     db-0001.sql.gz.enc
     ...
@@ -85,6 +85,80 @@ standalone site that later joins a fleet keeps one location instead of starting
 a second pile beside the first. `profile` separates the parties, so a listing can
 always say whose backup an object is and each party's retention addresses only
 its own shelf.
+
+## What a backup carries besides files and database
+
+A backup has to be able to rebuild a site on hardware that is not the hardware it
+came from, so it records the facts about that hardware which a restore has to
+settle. `shape.json`, written by `reconcile_site.sh --print-shape` into the
+archive (full mode) or the meta artifact (chain mode):
+
+| Field | What it is for |
+|---|---|
+| `deployment_environment` | `docker` or `baremetal`, read from the site's own config — never probed for at runtime |
+| `domain`, `web_root`, `base_dir`, `site_template` | where the site thought it was |
+| `php_version`, `postgres_version` | what it was running under, so an incompatibility is legible later |
+| `vhost_captured`, `vhost_role` | whether a virtualhost travelled, and whether it was a container's internal one or a bare-metal site's public one |
+
+The virtualhost travels for **reference**, not for reinstallation — see
+[what a restore reconciles](#what-a-restore-reconciles).
+
+An archive with no `shape.json` restores normally: the source shape reads as
+unknown and the restore reconciles against the target regardless.
+
+## What a restore reconciles
+
+Every restore path — the archive, the chain, and a From-Backup clone — ends in
+`reconcile_site.sh`, which makes the restored site agree with the machine it
+landed on. It reports each value it changed and refuses rather than papering
+over a mismatch it cannot fix.
+
+**The identity**, in both places it lives:
+
+| Setting | Set to |
+|---|---|
+| `webDir` (config and `stg_settings`) | the domain the restore was given |
+| `deployment_environment` | the target's shape |
+| `baseDir`, `site_template` | the target's paths |
+| database credentials | left as the target's — never taken from the backup |
+
+**The domain is a required parameter.** It is not inferred, because the correct
+answer depends on intent that is not in the data: a rebuild keeps the site's own
+domain and cuts DNS afterwards, while a rehearsal must not claim it, and the same
+backup on the same box wants opposite answers. The dashboard pre-fills the field
+from the node's recorded URL.
+
+**Two files in a backup are the machine's, not the backup's**, and the target's
+own copies survive every restore:
+
+- `config/Globalvars_site.php` holds this machine's database password and its
+  `secret_box_key`. Restoring the source's copy is what turns a clean-looking
+  rebuild into `SQLSTATE[08006]` on every page — and it bites a same-shape
+  rebuild exactly as hard as a cross-shape one.
+- `config/backup_site_key` identifies one machine as a recipient of its own
+  backups. Two machines sharing it means one machine's key opens the other's
+  archives. `backup_envelope.php` mints a fresh one on first use, so absent is
+  the correct state.
+
+**The serving config is always regenerated** from the platform's own templates,
+in every case. On bare metal that is `virtualhost_update_script.sh` for the site
+and domain; in a container the internal virtualhost written at install time is
+already correct and the public name is served by the **host's** proxy, which
+`manage_domain.sh` writes. A container backup is missing the piece that
+terminates TLS, and a bare-metal backup carries a piece a container must never
+use, so neither direction can be handled by copying files.
+
+When the captured virtualhost differs from the generated one it is kept beside
+the live file as `{site}.conf.from-backup` and named in the output, so a
+hand-added redirect or alias survives on disk without being applied unattended.
+
+**The certificate is never waited for.** The reconcile arms
+`joinery-ssl-retry@{domain}.timer` (`arm_ssl_retry.sh`) and disarms the old
+domain's. That timer checks DNS every five minutes, does nothing until the
+domain resolves to this server, then issues once and disables itself. The
+`<IfFile>` guard on the `:443` block means the site serves HTTP until then
+rather than Apache refusing to start. Restore now, cut DNS later, certificate
+arrives on its own.
 
 ## How chains work
 
@@ -140,13 +214,21 @@ right up until someone needed it.
 php maintenance_scripts/sysadmin_tools/backup_envelope.php open \
     --sidecar manifest.json --private ~/recovery.key --key-out /tmp/k
 bash maintenance_scripts/sysadmin_tools/restore_chain.sh {project} \
-    --artifacts {downloaded chain dir} --key-file /tmp/k [--seq N]
+    --artifacts {downloaded chain dir} --key-file /tmp/k [--seq N] [--domain d]
 ```
 
 Every artifact is checked against its recorded size and hash **before anything
 is written**, so a truncated download fails while the live site is still intact.
 `--seq N` restores as at run N; the default is the newest. `--dry-run` reports
-the plan and needs no key.
+the plan and needs no key. `--domain` names the domain the restored site is to
+answer to; without it the site keeps the domain this machine's config already
+names.
+
+From the dashboard: the node's **Backups** tab lists chains as restore points
+and its Restore button runs the `restore_chain` job. That job recovers the chain
+key on the node from the node's own `backup_site_key`, so no recovery private key
+travels in a job record. A chain taken by a machine that no longer exists is
+restored from a shell with the recovery key, as above.
 
 ## Key model: one envelope per backup
 
@@ -275,7 +357,14 @@ bash maintenance_scripts/sysadmin_tools/restore_project.sh {project} {archive} -
 ```
 
 `restore_project.sh` decides whether an archive is encrypted by reading the
-openssl magic bytes, not the filename, so a renamed archive still restores.
+openssl magic bytes, not the filename, so a renamed archive still restores. It
+takes `--domain` to name the domain the restored site is to answer to; without
+it the site keeps the domain this machine's config already names.
+
+A restore lands on an **installed** site. The config that carries this machine's
+database password and `secret_box_key` is never in a backup, so the sequence for
+new hardware is: install the site, then restore onto it. See
+[Deploy and Upgrade](deploy_and_upgrade.md#rebuilding-a-site-on-new-hardware).
 
 Bucket credentials plus the password-manager private key are sufficient to
 recover from total loss of the machine.
@@ -297,6 +386,11 @@ the site will not boot.
 path. `restore_chain.sh` applies a chain in order. Both take an explicit
 directory override so the incremental and deletion-replay behaviour is tested
 against a throwaway tree rather than a live site.
+
+| Script | What it does |
+|---|---|
+| `reconcile_site.sh` | A site's shape, read both ways: `--print-shape` records it for a backup, the default mode makes a restored site agree with the machine it landed on |
+| `arm_ssl_retry.sh` | Arms (or disarms) the DNS-gated certificate retry for a domain |
 
 `includes/BackupEnvelope.php` reads and writes the same format;
 `tests/backups/backup_envelope_cli_test.php` holds both to that contract in

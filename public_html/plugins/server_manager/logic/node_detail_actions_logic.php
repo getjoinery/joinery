@@ -55,6 +55,7 @@ class NodeDetailActions {
 		'copy_database_local'      => 'database',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
+		'restore_chain'            => 'backups',
 		'backup_run'               => 'backups',
 		'save_backup_policy'       => 'backups',
 		'apply_update'             => 'updates',
@@ -294,12 +295,28 @@ class NodeDetailActions {
 					'filename'      => $filename,
 					'local_path'    => $local_path ?: null,
 					'cloud_path'    => $cloud_path ?: null,
+					'domain'        => trim($_POST['restore_domain'] ?? ''),
 					'skip_database' => empty($_POST['restore_database']),
 					'skip_files'    => empty($_POST['restore_files']),
-					'skip_apache'   => empty($_POST['restore_apache']),
 				];
+				// A missing or malformed domain throws out of the builder; the
+				// central catch in dispatch() turns that into a message on the
+				// Backups tab rather than a 500.
 				$steps = JobCommandBuilder::build_restore_project($node, $params);
 				$job = ManagementJob::createJob($node->key, 'restore_project', $steps, $params, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'restore_chain': {
+				$params = [
+					'chain_id'      => trim($_POST['chain_id'] ?? ''),
+					'profile'       => trim($_POST['chain_profile'] ?? ''),
+					'seq'           => trim($_POST['chain_seq'] ?? ''),
+					'domain'        => trim($_POST['restore_domain'] ?? ''),
+					'skip_database' => empty($_POST['restore_database']),
+				];
+				$steps = JobCommandBuilder::build_restore_chain($node, $params);
+				$job = ManagementJob::createJob($node->key, 'restore_chain', $steps, $params, $uid);
 				return self::jobUrl($job);
 			}
 

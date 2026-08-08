@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.2.0 - the chain is reconciled to the machine it lands on, exactly as the archive
+#                  path is: this machine's own config and site key survive the extraction, the
+#                  captured virtualhost is never installed, and reconcile_site.sh settles the
+#                  domain, the shape and the serving config. --domain names the result.
 # Version: 1.1.0 - a target whose last segment is not the directory the archive
 #                  carries is refused. It used to restore to dirname(target) plus
 #                  the archive's own name and still report success, so a restore
@@ -38,14 +42,28 @@
 #   --artifacts DIR   Directory holding manifest.json and the downloaded artifacts
 #   --key-file PATH   The chain data key (recover it with backup_envelope.php open)
 #   --seq N           Restore as at run N. Default: the newest run in the chain.
+#   --domain DOMAIN   The domain the restored site is to answer to. Defaults to
+#                     the domain THIS machine's config already names — a restore
+#                     run by hand has an operator present, so "leave this
+#                     machine's identity alone" is the right default. A restore
+#                     run as a job requires the value.
 #   --skip-database   Files only
+#   --skip-reconcile  Do not reconcile to this machine (files-only rehearsals and
+#                     restores into a scratch --target-dir)
 #   --dry-run         Verify the chain and report the plan; change nothing
 #   --force           Skip the confirmation prompt
 #   --help
+#
+# Two files are the MACHINE's, not the chain's, and survive the extraction:
+# config/Globalvars_site.php (this machine's database password and secret_box_key)
+# and config/backup_site_key (one machine's identity as a recipient of its own
+# backups). Inheriting either is how a clean-looking restore ends in
+# SQLSTATE[08006] on every page.
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.2.0"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -62,14 +80,19 @@ TARGET_DIR_OVERRIDE=""
 DRY_RUN=false
 FORCE=false
 SKIP_DATABASE=false
+DOMAIN=""
+SKIP_RECONCILE=false
 
 while [[ $# -gt 0 ]]; do
     case $1 in
-        --artifacts)     ARTIFACT_DIR="$2"; shift 2 ;;
-        --target-dir)    TARGET_DIR_OVERRIDE="$2"; shift 2 ;;
-        --key-file)      KEY_FILE="$2"; shift 2 ;;
-        --seq)           SEQ="$2"; shift 2 ;;
-        --skip-database) SKIP_DATABASE=true; shift ;;
+        --artifacts)      ARTIFACT_DIR="$2"; shift 2 ;;
+        --target-dir)     TARGET_DIR_OVERRIDE="$2"; shift 2 ;;
+        --key-file)       KEY_FILE="$2"; shift 2 ;;
+        --seq)            SEQ="$2"; shift 2 ;;
+        --domain)         DOMAIN="$2"; shift 2 ;;
+        --domain=*)       DOMAIN="${1#*=}"; shift ;;
+        --skip-reconcile) SKIP_RECONCILE=true; shift ;;
+        --skip-database)  SKIP_DATABASE=true; shift ;;
         --dry-run|-n)    DRY_RUN=true; shift ;;
         --force|-f)      FORCE=true; shift ;;
         # Print the header block to its end rather than a fixed line range, which
@@ -235,6 +258,40 @@ fi
 
 mkdir -p "$PARENT"
 
+# ── Keep what belongs to this machine ───────────────────────────────────────
+#
+# Extraction is incremental, which means it overwrites and it deletes — it will
+# happily replace this machine's site config with the source machine's. That
+# config holds the database password for the PostgreSQL on THIS box and the
+# secret_box_key that every secret at rest was encrypted with. Losing either is
+# unrecoverable in the second case and a site-wide SQLSTATE[08006] in the first.
+#
+# So they are copied out first and copied back after, rather than excluded:
+# --exclude on an incremental extract governs what is written, not what the
+# dumpdir listing causes tar to delete.
+KEEP_TMP=$(mktemp -d)
+KEPT_FILES=()
+cleanup_kept() { rm -rf "$KEEP_TMP"; }
+trap cleanup_kept EXIT
+
+for rel in config/Globalvars_site.php config/backup_site_key; do
+    if [ -f "${PROJECT_DIR}/${rel}" ]; then
+        mkdir -p "${KEEP_TMP}/$(dirname "$rel")"
+        if cp -a "${PROJECT_DIR}/${rel}" "${KEEP_TMP}/${rel}" 2>/dev/null \
+           || ${SUDO} cp -a "${PROJECT_DIR}/${rel}" "${KEEP_TMP}/${rel}" 2>/dev/null; then
+            KEPT_FILES+=("$rel")
+        else
+            print_error "Could not take a copy of ${PROJECT_DIR}/${rel} before extraction."
+            print_error "Refusing to extract over it — it holds this machine's database password"
+            print_error "and its secret_box_key, and the chain carries the source machine's."
+            exit 1
+        fi
+    fi
+done
+if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
+    print_info "Holding this machine's own ${KEPT_FILES[*]} across the extraction"
+fi
+
 # ── Apply ───────────────────────────────────────────────────────────────────
 #
 # --incremental on extraction is what replays deletions: each archive carries
@@ -258,21 +315,36 @@ for archive in "${FILES_ARCHIVES[@]}"; do
 done
 print_success "Files restored to ${PROJECT_DIR}"
 
+# Put this machine's own files back over whatever the chain brought.
+for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do
+    ${SUDO} mkdir -p "${PROJECT_DIR}/$(dirname "$rel")"
+    if ! ${SUDO} cp -a "${KEEP_TMP}/${rel}" "${PROJECT_DIR}/${rel}"; then
+        # The only copy of this machine's secret_box_key is now the one in
+        # KEEP_TMP, so the cleanup trap must not run. Pointing at a path that is
+        # about to be deleted would be worse than saying nothing.
+        trap - EXIT
+        print_error "Could not put this machine's ${rel} back after extraction."
+        print_error "The only copy is at ${KEEP_TMP}/${rel} and has been left there deliberately."
+        print_error "Put it back at ${PROJECT_DIR}/${rel} before the site is used: it holds this"
+        print_error "machine's database password and its secret_box_key, and without the latter"
+        print_error "every secret encrypted at rest on this box is unreadable."
+        exit 1
+    fi
+done
+if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
+    print_success "This machine's own ${KEPT_FILES[*]} kept"
+fi
+
+# The meta artifact holds shape.json and the captured virtualhost. Neither is
+# installed: it is unpacked so the reconcile step can say what shape this backup
+# came off, and keep a differing virtualhost beside the live one for review.
+META_TMP=""
 if [ -n "$META_ARCHIVE" ]; then
     META_TMP=$(mktemp -d)
-    trap 'rm -rf "$META_TMP"' EXIT
+    cleanup_kept() { rm -rf "$KEEP_TMP" "$META_TMP"; }
     ( set -o pipefail
       openssl enc -aes-256-cbc -d -pbkdf2 -pass fd:3 -in "$META_ARCHIVE" 2>/dev/null \
         | tar -xzf - -C "$META_TMP" ) 3< "$KEY_FILE" || true
-    VHOST=$(find "$META_TMP" -name '*.conf' -type f 2>/dev/null | head -1)
-    if [ -n "$VHOST" ] && [ -d /etc/apache2/sites-available ]; then
-        if [ -n "$SUDO" ] || [ "$(id -u)" -eq 0 ]; then
-            ${SUDO} cp "$VHOST" /etc/apache2/sites-available/
-            print_success "Apache config restored: $(basename "$VHOST")"
-        else
-            print_warning "Apache config in the backup was not restored (needs root): $(basename "$VHOST")"
-        fi
-    fi
 fi
 
 if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
@@ -287,6 +359,45 @@ if [ "$SKIP_DATABASE" = false ] && [ -n "$DB_ARCHIVE" ]; then
         fi
     else
         print_warning "restore_database.sh not found beside this script; database not restored."
+    fi
+fi
+
+# ── Reconcile to this machine ───────────────────────────────────────────────
+#
+# Same step the archive path runs, for the same reason: the chain came off a
+# machine that is not necessarily this one, and a site that disagrees with the
+# machine under it fails in ways that look like anything but a bad restore.
+#
+# Skipped for a --target-dir rehearsal, which is deliberately not a live site.
+if [ "$SKIP_RECONCILE" = true ] || [ -n "$TARGET_DIR_OVERRIDE" ]; then
+    print_info "Not reconciling (restored to ${PROJECT_DIR} as files only)."
+else
+    RECONCILE="${SCRIPT_DIR}/reconcile_site.sh"
+    if [ ! -f "$RECONCILE" ]; then
+        print_error "reconcile_site.sh is not beside this script — the restored site would be left"
+        print_error "pointing at the source machine's domain, shape and serving config."
+        exit 1
+    fi
+
+    USE_DOMAIN="$DOMAIN"
+    if [ -z "$USE_DOMAIN" ]; then
+        USE_DOMAIN=$(${SUDO} sed -n "s/^[[:space:]]*\$this->settings\['webDir'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" \
+            "${PROJECT_DIR}/config/Globalvars_site.php" 2>/dev/null | head -1)
+        if [ -z "$USE_DOMAIN" ]; then
+            print_error "No --domain was given and this machine's config names none."
+            exit 1
+        fi
+        print_info "No --domain given; keeping this machine's own domain: ${USE_DOMAIN}"
+    fi
+
+    RECONCILE_ARGS=("$PROJECT_NAME" --domain "$USE_DOMAIN")
+    [ -n "$META_TMP" ] && RECONCILE_ARGS+=(--backup-meta "$META_TMP")
+
+    print_info "Reconciling the restored site to this machine..."
+    if ! ${SUDO} bash "$RECONCILE" "${RECONCILE_ARGS[@]}"; then
+        print_error "Reconciliation failed. The files and database are restored, but the site does"
+        print_error "not yet agree with this machine — see the RECONCILE_ lines above."
+        exit 1
     fi
 fi
 

@@ -637,6 +637,7 @@ $restore_node = jcb_node(array(
 	'mgn_ssh_user' => 'root'));
 $restore_steps = JobCommandBuilder::build_restore_project($restore_node, array(
 	'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz',
+	'domain'     => 'restored.example.com',
 ));
 
 $rp_verify = null;
@@ -660,6 +661,154 @@ $probe = 'test -s ' . escapeshellarg($empty_root) . '/serve.php || '
 @shell_exec('( ' . $probe . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($empty_root . '/.rc'));
 $probe_rc = trim((string)@file_get_contents($empty_root . '/.rc'));
 check($probe_rc === '1', 'that assertion fails on a web root with no site', 'rc: ' . $probe_rc);
+
+section('Restore jobs reconcile the site to the machine they land on');
+
+// A backup can be rebuilt anywhere, so the machine it lands on is usually not
+// the one it came from. Every restore path has to settle the domain, the
+// deployment shape and the serving config — and prove it did.
+
+$rp_labels = array_map(function ($s) { return $s['label']; }, $restore_steps);
+$rp_all    = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $restore_steps));
+
+check(strpos($rp_all, '--domain ' . escapeshellarg('restored.example.com')) !== false,
+	'the restore is told which domain the site is to answer to');
+check(strpos($rp_all, '--skip-apache') === false,
+	'no restore path asks the script to skip the serving config');
+check(in_array('Verify the site agrees with this machine', $rp_labels),
+	'the job proves the restored identity', implode(' | ', $rp_labels));
+check(in_array('Verify the site is served', $rp_labels),
+	'the job proves the site is actually served', implode(' | ', $rp_labels));
+
+// The drill's failure passed an HTTP-only check comfortably: the site answered
+// on :80 the whole time, under a container's internal virtualhost, with a valid
+// certificate sitting unused on disk.
+$served = null;
+$identity = null;
+foreach ($restore_steps as $step) {
+	if (($step['label'] ?? '') === 'Verify the site is served') { $served = $step['cmd'] ?? ''; }
+	if (($step['label'] ?? '') === 'Verify the site agrees with this machine') { $identity = $step['cmd'] ?? ''; }
+}
+check(strpos((string)$served, 'https://') !== false,
+	'the served check asks for HTTPS, not merely HTTP', (string)$served);
+check(strpos((string)$served, 'exit 1') !== false,
+	'the served check can fail the job', (string)$served);
+check(strpos((string)$identity, 'deployment_environment') !== false
+	&& strpos((string)$identity, 'baremetal') !== false,
+	'the identity check asserts the deployment shape of THIS machine', (string)$identity);
+check(strpos((string)$identity, 'webDir') !== false,
+	'the identity check asserts the domain the site calls itself', (string)$identity);
+
+// The domain is required, never inferred. A node provisioned during an incident
+// carries whatever hostname somebody typed in a hurry, so adopting it silently
+// is the failure that only surfaces after DNS moves.
+$threw = false;
+try {
+	JobCommandBuilder::build_restore_project($restore_node, array(
+		'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz'));
+} catch (Exception $e) {
+	$threw = (strpos($e->getMessage(), 'domain') !== false);
+}
+check($threw, 'a restore with no domain is refused at job-build time, naming the reason');
+
+// A container's public face is the HOST's proxy virtualhost, which lives
+// outside the container and so appears in no backup at all.
+$dock_restore = jcb_node(array(
+	'mgn_container_name' => 'dockrestore',
+	'mgn_web_root'       => '/var/www/html/dockrestore/public_html'));
+$dock_steps = JobCommandBuilder::build_restore_project($dock_restore, array(
+	'local_path' => '/backups/dockrestore-2026-01-01-000000.tar.gz',
+	'domain'     => 'restored.example.com'));
+$dock_publish = null;
+foreach ($dock_steps as $step) {
+	if (($step['label'] ?? '') === 'Publish the domain on the container host') { $dock_publish = $step; }
+}
+check($dock_publish !== null, 'a container restore publishes the domain on its host');
+check(!empty($dock_publish['on_host']),
+	'that step runs on the host, not inside the container');
+check(strpos($dock_publish['cmd'] ?? '', 'manage_domain.sh') !== false,
+	'it uses manage_domain.sh, which owns the proxy virtualhost', $dock_publish['cmd'] ?? '');
+
+// A bare-metal node has nothing to proxy.
+$bare_publish = false;
+foreach ($restore_steps as $step) {
+	if (($step['label'] ?? '') === 'Publish the domain on the container host') { $bare_publish = true; }
+}
+check(!$bare_publish, 'a bare-metal restore emits no host proxy step');
+
+section('Chain restore: the fleet backups are restorable at all');
+
+// The manager backup profile writes CHAINS, not standalone archives. Without a
+// chain restore job the backups every scheduled run uploads could not be
+// restored from the dashboard.
+$chain_node = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/chainsite/public_html',
+	'mgn_slug'     => 'chainsite',
+	'mgn_ssh_user' => 'root'));
+
+$chain_threw = '';
+try {
+	JobCommandBuilder::build_restore_chain($chain_node, array(
+		'chain_id' => 'not-a-chain-id', 'domain' => 'chain.example.com'));
+} catch (Exception $e) { $chain_threw = $e->getMessage(); }
+check(strpos($chain_threw, 'chain id') !== false,
+	'a malformed chain id is refused, naming what was expected', $chain_threw);
+
+// The shape of the job itself. A chain restore that skipped any of these would
+// be a restore that wrote before it verified, or one that could not open what
+// it downloaded.
+$chain_steps = array();
+$chain_build_error = '';
+try {
+	$chain_steps = JobCommandBuilder::build_restore_chain($chain_node, array(
+		'chain_id' => 'chain-20260807_231507',
+		'domain'   => 'chain.example.com'));
+} catch (Exception $e) {
+	// Only legitimate when this control plane has no enabled target at all —
+	// then there is no shelf to read a chain from, and saying so at build time
+	// beats a job that dies halfway through a download.
+	$chain_build_error = $e->getMessage();
+}
+
+if ($chain_steps) {
+	$chain_labels = array_map(function ($s) { return $s['label']; }, $chain_steps);
+	$chain_all    = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $chain_steps));
+
+	check(in_array('Fetch the chain manifest', $chain_labels),
+		'the manifest is fetched first — it is the restore contract', implode(' | ', $chain_labels));
+	check(in_array('Recover the chain key', $chain_labels),
+		'the chain key is recovered on the node from its own site key');
+	check(strpos($chain_all, 'BackupRecoveryKey') === false
+		&& strpos($chain_all, 'recovery_private') === false,
+		'no recovery private key travels in the job record');
+	check(in_array('Download the chain artifacts', $chain_labels),
+		'every artifact the manifest names is downloaded');
+
+	// {prefix}/{slug}/{profile}/{chain_id}/. Dropping the profile segment would
+	// send a control plane's restore looking on the site's own shelf, where a
+	// chain of the same id may well exist and be somebody else's backup.
+	check(strpos($chain_all, '/chainsite/manager/chain-20260807_231507') !== false,
+		'the chain is read from the profile shelf it was written to', $chain_all);
+	check(strpos($chain_all, 'restore_chain.sh') !== false,
+		'the restore runs through restore_chain.sh, which verifies before it writes');
+	check(strpos($chain_all, '--domain ' . escapeshellarg('chain.example.com')) !== false,
+		'the chain restore is told which domain the site is to answer to');
+	check(in_array('Verify the site agrees with this machine', $chain_labels)
+		&& in_array('Verify the site is served', $chain_labels),
+		'a chain restore is gated the same way an archive restore is');
+
+	// The key must not outlive the restore that needed it.
+	$chain_restore_cmd = '';
+	foreach ($chain_steps as $step) {
+		if (($step['label'] ?? '') === 'Restore the chain') { $chain_restore_cmd = $step['cmd'] ?? ''; }
+	}
+	check(strpos($chain_restore_cmd, 'rm -f') !== false && strpos($chain_restore_cmd, 'exit $RC') !== false,
+		'the chain key is shredded afterwards without eating the exit code', $chain_restore_cmd);
+} else {
+	check(strpos($chain_build_error, 'target') !== false,
+		'with no shelf configured, the chain restore is refused at build time naming why',
+		$chain_build_error);
+}
 
 section('Copy database: docker source staging');
 
