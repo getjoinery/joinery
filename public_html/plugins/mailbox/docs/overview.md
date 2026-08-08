@@ -1688,6 +1688,16 @@ hook) triggers an immediate best-effort push, and the `SyncRelayMap` scheduled
 task reconciles every cron pass as the backstop — so a newly created alias
 reaches the relay before it can bounce.
 
+The Setup tab's relay card grades map freshness accordingly
+(`InboundEmailHealth::checkRelayMapFresh`): a map that differs from the last
+push while the reconcile task is alive and succeeding (a run within the last
+15 minutes) is **pending** — an amber wait ("address changes are queued"),
+because every domain/alias/system-sender change passes through that window
+for up to one tick. It is a red failure only when the task will not converge
+it: never ran, errored on its last run, or missed the window. Pending rides
+`ProvisioningCheckPending`, a subclass of `ProvisioningCheckFailed`, so every
+surface that cannot render the middle grade still treats it as unmet.
+
 ### Spool pull + deferred ingest
 
 `PullRelaySpool` (scheduled task) dials out over WireGuard as the deployment's

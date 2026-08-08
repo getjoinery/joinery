@@ -11,6 +11,8 @@
  * and actions post back to the Setup tab
  * (admin_mailbox_relay_tenant_actions()).
  *
+ * @version 2.2 - a pending health dot renders amber: unmet but converging is
+ *                a wait, not a fault
  * @version 2.1 - relay version line and the upgrade affordance, which differs by
  *                what the platform can reach (job / cloud wipe / the customer's
  *                own box / operator-managed shard)
@@ -133,7 +135,9 @@ function mailbox_relay_section_render($page, array $v): void {
 			$health_html = '';
 			if (is_array($row['health'])) {
 				foreach ($row['health'] as $h) {
-					$dot = $h['ok'] ? '🟢' : '🔴';
+					// Amber = pending: unmet but converging on the next
+					// reconcile tick, which is a wait rather than a fault.
+					$dot = !empty($h['pending']) ? '🟡' : ($h['ok'] ? '🟢' : '🔴');
 					$health_html .= '<span style="margin-right:.75rem;white-space:nowrap;" title="'
 						. htmlspecialchars($h['message'] !== '' ? $h['message'] : $h['label'], ENT_QUOTES) . '">'
 						. $dot . ' ' . htmlspecialchars($h['label']) . '</span>';
