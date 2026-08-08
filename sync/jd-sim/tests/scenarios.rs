@@ -1452,3 +1452,44 @@ fn a_folder_whose_ancestor_is_missing_is_re_derived_rather_than_left_uploading_f
         "a store that repaired itself is not something to bother anybody with"
     );
 }
+
+#[test]
+fn a_second_conflict_on_one_file_does_not_overwrite_the_first_rescue() {
+    // conflict_copy_name takes a suffix so repeats within a day can be told
+    // apart, and for a long time every caller passed 1. Both places that rescue
+    // a losing local version land it with a plain rename, so the second rescue
+    // of one file on one day destroyed the first — in the two functions whose
+    // whole purpose is not losing the user's work.
+    let world = World::new(66, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    world.device("laptop").fs.user_write("doc.txt", b"original");
+    committed.note("doc.txt", b"original");
+    assert!(world.settle().is_some());
+
+    for (mine, theirs) in [
+        (&b"laptop's first go"[..], &b"desktop's first go"[..]),
+        (&b"laptop's second go"[..], &b"desktop's second go"[..]),
+    ] {
+        world.device("laptop").fs.user_write("doc.txt", mine);
+        world.device("desktop").fs.user_write("doc.txt", theirs);
+        committed.note("doc.txt", mine);
+        committed.note("doc.txt", theirs);
+        assert!(world.settle().is_some());
+    }
+
+    // Both rescues have to still exist. assert_nothing_lost checks the content
+    // is findable somewhere; this checks it is findable *on the disk*, which is
+    // where a conflicted copy is supposed to be.
+    let tree = disk_tree(world.device("laptop"));
+    let rescues = tree
+        .keys()
+        .filter(|p| p.contains("conflicted copy"))
+        .count();
+    assert!(
+        rescues >= 2,
+        "each conflict keeps its own copy; found {rescues} in {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert_invariants(&world, &committed);
+}
