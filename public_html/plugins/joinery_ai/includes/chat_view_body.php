@@ -26,6 +26,18 @@ $selected_id = $selected ? (int)$selected->key : 0;
 // Effective model for the selected thread, used to price token usage.
 $conv_model = $selected ? ChatRender::conversationModel($selected) : '';
 
+// The queued-action cards resolve over /api/v1 (window.joineryApi + the
+// session CSRF token). The public shell already emits both; the admin shell
+// does not, so emit them here — a duplicate script tag just re-defines the
+// same transport, and querySelector reads the first meta.
+$joai_api_js = PathHelper::getIncludePath('assets/js/joinery-api.js');
+echo '<script src="/assets/js/joinery-api.js?v='
+   . (is_file($joai_api_js) ? filemtime($joai_api_js) : '1') . '"></script>' . "\n";
+if ($session->is_logged_in()) {
+    echo '<meta name="joinery-api-csrf" content="'
+       . htmlspecialchars($session->get_api_csrf_token(), ENT_QUOTES, 'UTF-8') . '" />' . "\n";
+}
+
 if (!function_exists('joai_pin_svg')) {
     // Small thumbtack marker shown beside pinned threads (no emoji; inline SVG
     // matches the admin theme's icon approach).
@@ -228,6 +240,11 @@ if (!function_exists('joai_pin_svg')) {
                 <?php foreach ($messages as $m): ?>
                     <?php if ($m->get('aim_role') === AiConversationMessage::ROLE_ASSISTANT): ?>
                         <?php echo ChatRender::assistantBubble($m, $tz, $conv_model); ?>
+                    <?php elseif ($m->get('aim_role') === AiConversationMessage::ROLE_EVENT): ?>
+                        <?php
+                        $t = LibraryFunctions::convert_time($m->get('aim_create_time'), 'UTC', $tz, 'g:i A');
+                        echo ChatRender::eventChip((string)$m->get('aim_content'), $t);
+                        ?>
                     <?php else: ?>
                         <?php
                         $t = LibraryFunctions::convert_time($m->get('aim_create_time'), 'UTC', $tz, 'g:i A');
@@ -237,6 +254,12 @@ if (!function_exists('joai_pin_svg')) {
                 <?php endforeach; ?>
             <?php endif; ?>
         </div>
+
+        <!-- Waiting for you: this conversation's pending queued actions,
+             rendered from server-stated facts (ai_actions_list) and resolved
+             through ai_action_resolve — one object, one renderer, one
+             execution path with the AI panel's list. -->
+        <div class="joai-chat-queued" id="joai-queued" hidden></div>
 
         <div class="joai-chat-thinking" id="joai-thinking" hidden>Working…</div>
 
@@ -500,7 +523,12 @@ if (!function_exists('joai_pin_svg')) {
                 activityEl.hidden = !line;
                 scrollToBottom();
             },
-            function (html, usage) { replaceBubble(messageId, html); updateUsage(usage); },
+            function (html, usage) {
+                replaceBubble(messageId, html);
+                updateUsage(usage);
+                // The finished turn may have queued a proposed action.
+                refreshQueuedCards();
+            },
             function (err) { renderFailedBubble(messageId, err); });
     }
 
@@ -1347,53 +1375,103 @@ if (!function_exists('joai_pin_svg')) {
         else if (action === 'delete') deleteTurn(bubble);
     });
 
-    // Confirm / cancel a pending action (event-delegated — bubbles arrive dynamically).
-    transcript.addEventListener('click', function (e) {
-        var yes = e.target.closest('.joai-chat-confirm-yes');
-        var no = e.target.closest('.joai-chat-confirm-no');
-        if (!yes && !no) return;
+    // ---- Waiting for you: this conversation's pending queued actions ----
+    // Cards are built from server-stated facts (ai_actions_list) — the client
+    // never interprets the stored arguments — and resolve through
+    // ai_action_resolve, the same path the AI panel's list uses.
+    var queuedBox = document.getElementById('joai-queued');
 
-        var card = e.target.closest('.joai-chat-confirm');
-        if (!card) return;
-        var conversationId = card.getAttribute('data-conversation-id');
-        var messageId = card.getAttribute('data-message-id');
-        var decision = yes ? 'confirm' : 'cancel';
+    function refreshQueuedCards() {
+        if (!queuedBox) return;
+        if (!currentConversationId || !window.joineryApi) { queuedBox.hidden = true; return; }
+        joineryApi.post('joinery_ai/ai_actions_list',
+                { conversation_id: currentConversationId, status: 'pending' })
+            .then(function (data) { renderQueuedCards((data && data.actions) || []); })
+            .catch(function () { /* quiet — the cards refresh on the next turn */ });
+    }
 
-        card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
-        setBusy(true);
-
-        var body = new FormData();
-        body.append('conversation_id', conversationId);
-        body.append('message_id', messageId);
-        body.append('decision', decision);
-
-        fetch(JOAI_BASE + 'chat_confirm', { method: 'POST', body: body })
-            .then(function (r) { return r.json(); })
-            .then(function (data) {
-                if (!data.success) { setBusy(false); alert(data.message || 'Action failed.'); return; }
-
-                // Protected chat + locked vault: unlock, then reload so the pending
-                // card re-renders for a fresh confirm.
-                if (data.locked) {
-                    setBusy(false);
-                    card.querySelectorAll('button').forEach(function (b) { b.disabled = false; });
-                    unlockVault().then(function (ok) { if (ok) location.reload(); });
-                    return;
+    function renderQueuedCards(actions) {
+        if (!queuedBox) return;
+        queuedBox.innerHTML = '';
+        if (!actions.length) { queuedBox.hidden = true; return; }
+        actions.forEach(function (a) {
+            var card = document.createElement('div');
+            card.className = 'joai-queued-card';
+            var head = document.createElement('div');
+            head.className = 'joai-queued-head';
+            head.textContent = 'Waiting for you';
+            card.appendChild(head);
+            if (a.locked) {
+                var lockedLine = document.createElement('p');
+                lockedLine.className = 'joai-queued-fact';
+                lockedLine.textContent = 'Sealed to your vault — unlock to view and resolve.';
+                card.appendChild(lockedLine);
+            } else {
+                (a.facts || []).forEach(function (line, i) {
+                    var p = document.createElement('p');
+                    p.className = 'joai-queued-fact' + (i === 0 ? ' joai-queued-headline' : '');
+                    p.textContent = line;
+                    card.appendChild(p);
+                });
+                if (a.model_note) {
+                    var det = document.createElement('details');
+                    det.className = 'joai-queued-note';
+                    var sum = document.createElement('summary');
+                    sum.textContent = 'The assistant’s stated reason';
+                    det.appendChild(sum);
+                    var q = document.createElement('blockquote');
+                    q.textContent = a.model_note;
+                    det.appendChild(q);
+                    card.appendChild(det);
                 }
+                var actionsRow = document.createElement('div');
+                actionsRow.className = 'joai-queued-actions';
+                var approve = document.createElement('button');
+                approve.type = 'button';
+                approve.className = 'joai-btn joai-btn-primary';
+                approve.textContent = 'Approve';
+                var decline = document.createElement('button');
+                decline.type = 'button';
+                decline.className = 'joai-btn';
+                decline.textContent = 'Decline';
+                approve.addEventListener('click', function () { resolveQueued(a.action_id, 'approve', card); });
+                decline.addEventListener('click', function () { resolveQueued(a.action_id, 'decline', card); });
+                actionsRow.appendChild(approve);
+                actionsRow.appendChild(decline);
+                card.appendChild(actionsRow);
+            }
+            queuedBox.appendChild(card);
+        });
+        queuedBox.hidden = false;
+        scrollToBottom();
+    }
 
-                // Non-fpm fallback may finish the resume inline.
-                if (data.status === 'complete') { replaceBubble(data.message_id, data.assistant_html); updateUsage(data.conversation_usage); return; }
-                if (data.status === 'failed') { renderFailedBubble(data.message_id, data.error || 'Action failed.'); return; }
-
-                // Async: reuse the pending bubble as the live bubble, stream the
-                // resumed reply into it, then swap in the final markdown bubble.
-                streamInto(data.message_id);
+    function resolveQueued(actionId, resolution, card) {
+        card.querySelectorAll('button').forEach(function (b) { b.disabled = true; });
+        joineryApi.post('joinery_ai/ai_action_resolve',
+                { action_id: actionId, resolution: resolution })
+            .then(function (data) {
+                var c = data && data.card;
+                var line = document.createElement('p');
+                line.className = 'joai-queued-fact';
+                if (c && c.status === 'approved') {
+                    line.textContent = 'Approved — done.' + (c.result ? ' ' + c.result : '');
+                } else if (c && c.status === 'failed') {
+                    line.textContent = 'Approved, but it failed: ' + (c.result || 'unknown error');
+                } else {
+                    line.textContent = 'Declined — nothing was run.';
+                }
+                card.innerHTML = '';
+                card.appendChild(line);
+                setTimeout(refreshQueuedCards, 4000);
             })
-            .catch(function () {
-                setBusy(false);
-                alert('Action failed.');
+            .catch(function (err) {
+                alert(err && err.message ? err.message : 'Could not resolve the action.');
+                refreshQueuedCards();
             });
-    });
+    }
+
+    refreshQueuedCards();
 
     function replaceBubble(messageId, html) {
         setBusy(false);

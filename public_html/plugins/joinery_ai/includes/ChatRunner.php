@@ -14,19 +14,16 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatMemory.
 
 /**
  * Drives one interactive chat turn over the shared AgentLoop, the chat
- * counterpart to RecipeRunner. Two entry points:
+ * counterpart to RecipeRunner. One entry point — runTurn(): the user just
+ * sent a message (already persisted). Build the system prompt + history, run
+ * the loop, and hand back the result plus the turn's ChatTurnContext (whose
+ * toolCalls() the endpoint persists).
  *
- *   - runTurn(): the user just sent a message (already persisted). Build the
- *     system prompt + history, run the loop, and hand back the result plus the
- *     turn's ChatTurnContext (whose toolCalls() the endpoint persists).
- *   - resumeTurn(): the admin confirmed or cancelled a pending mutating call.
- *     Replay the history, synthesize the approved/declined tool exchange with a
- *     self-consistent id pair, then continue the loop from there.
- *
- * The turn alternates one assistant message per user message: a confirmation
- * does not insert a second assistant row — the endpoint updates the pending
- * assistant message in place — so the transcript stays strictly alternating
- * and replayable.
+ * Mutating tool calls never execute inside the turn: the context queues each
+ * one for the owner's approval and the loop continues with a "queued" tool
+ * result (specs/implemented/ai_action_queue.md). Resolution happens out-of-band
+ * (ActionQueue::resolve()) and lands back in the transcript as an event row
+ * the model reads on its next turn.
  */
 class ChatRunner {
 
@@ -38,64 +35,7 @@ class ChatRunner {
         $ctx = new ChatTurnContext($conversation, $acting_user_id, $message_id);
         if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
         if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
-        $messages = self::buildHistoryMessages($conversation, null, $ctx);
-        return self::drive($conversation, $ctx, $messages);
-    }
-
-    /**
-     * Continue after a confirmation decision. $pending is the stored
-     * aim_pending_action ({tool, tool_use_id, input, description}); $lead_text
-     * is whatever the assistant said before proposing the call (folded into the
-     * synthesized assistant turn so the transcript has no orphaned text).
-     * $decision is 'confirm' or 'cancel'.
-     */
-    public static function resumeTurn(AiConversation $conversation, int $acting_user_id,
-            array $pending, string $lead_text, string $decision, int $message_id = 0,
-            ?callable $onTextDelta = null, ?callable $onActivity = null): array {
-        $ctx = new ChatTurnContext($conversation, $acting_user_id, $message_id);
-        if ($onTextDelta !== null) $ctx->setStreamSink($onTextDelta);
-        if ($onActivity !== null) $ctx->setActivityStamper($onActivity);
-
-        // History without the trailing pending-bearing assistant row — its
-        // text is folded into the synthesized tool-use turn below.
-        $messages = self::buildHistoryMessages($conversation, 'exclude_last_assistant', $ctx);
-
-        $id = (string)($pending['tool_use_id'] ?? '') ?: ('toolu_resume_' . bin2hex(random_bytes(6)));
-        $tool_use = [
-            'type'  => 'tool_use',
-            'id'    => $id,
-            'name'  => (string)($pending['tool'] ?? ''),
-            'input' => isset($pending['input']) && is_array($pending['input']) ? $pending['input'] : [],
-        ];
-
-        $assistant_content = [];
-        if (trim($lead_text) !== '') {
-            $assistant_content[] = ['type' => 'text', 'text' => $lead_text];
-        }
-        $assistant_content[] = self::normalizeToolUse($tool_use);
-        $messages[] = ['role' => 'assistant', 'content' => $assistant_content];
-
-        if ($decision === 'confirm') {
-            $result_block = AgentLoop::executeApproved($tool_use, $ctx);
-        } else {
-            $ctx->appendToolCall([
-                'name'         => $tool_use['name'],
-                'input'        => $tool_use['input'],
-                'started_time' => gmdate('Y-m-d H:i:s.u'),
-                'completed_time' => gmdate('Y-m-d H:i:s.u'),
-                'is_error'     => false,
-                'output'       => 'declined by user',
-                'duration_ms'  => 0,
-            ]);
-            $result_block = [
-                'type'        => 'tool_result',
-                'tool_use_id' => $id,
-                'content'     => 'The user declined to run this action. Do not retry it; '
-                               . 'acknowledge and continue.',
-            ];
-        }
-        $messages[] = ['role' => 'user', 'content' => [$result_block]];
-
+        $messages = self::buildHistoryMessages($conversation, $ctx);
         return self::drive($conversation, $ctx, $messages);
     }
 
@@ -129,14 +69,12 @@ class ChatRunner {
 
     /**
      * The text to store/show for a finished turn. Normally the model's reply;
-     * when the loop stopped without producing text (and isn't waiting on a
-     * confirmation), a short note explaining the terminal state so the bubble
-     * is never blank.
+     * when the loop stopped without producing text, a short note explaining
+     * the terminal state so the bubble is never blank.
      */
     public static function resolveAssistantText(array $result): string {
         $text = (string)($result['assistant_text'] ?? '');
         if ($text !== '') return $text;
-        if (!empty($result['pending_action'])) return '';   // the confirmation card carries the turn
         return self::stopReasonNote((string)($result['stop_reason'] ?? ''));
     }
 
@@ -194,12 +132,12 @@ class ChatRunner {
 
     /**
      * Anthropic-format message array from the stored transcript. Each row maps
-     * to one alternating user/assistant turn of plain text. $mode
-     * 'exclude_last_assistant' drops the trailing assistant row (the one that
-     * carries the pending action) so resumeTurn can synthesize its tool
-     * exchange without producing two assistant turns in a row.
+     * to one alternating turn of plain text: assistant rows speak as the
+     * assistant; user rows and EVENT rows (a queued action's resolution) are
+     * user-side turns, so the model reads how its proposals resolved on its
+     * next turn.
      */
-    private static function buildHistoryMessages(AiConversation $conversation, ?string $mode,
+    private static function buildHistoryMessages(AiConversation $conversation,
             ChatTurnContext $ctx): array {
         $rows = new MultiAiConversationMessage(
             ['conversation_id' => (int)$conversation->key, 'deleted' => false],
@@ -210,15 +148,6 @@ class ChatRunner {
         $msgs = [];
         foreach ($rows as $row) {
             $msgs[] = $row;
-        }
-
-        if ($mode === 'exclude_last_assistant') {
-            for ($i = count($msgs) - 1; $i >= 0; $i--) {
-                if ($msgs[$i]->get('aim_role') === AiConversationMessage::ROLE_ASSISTANT) {
-                    array_splice($msgs, $i, 1);
-                    break;
-                }
-            }
         }
 
         // Attachment routing context, resolved once for the whole history: the
@@ -439,9 +368,11 @@ class ChatRunner {
                            . "updated_by column.\n";
                 }
             }
-            $text .= "Some tools change data. When you propose a consequential change you "
-                   . "may be asked to confirm it with the admin before it runs; propose the "
-                   . "single most useful action and explain what it will do.\n";
+            $text .= "Tools that change data never run directly: each such call is queued "
+                   . "as a pending action the user approves or declines from their "
+                   . "pending-actions list, and you learn the outcome on a later turn. "
+                   . "Propose the single most useful action, say what it will do, and never "
+                   . "assume a queued action ran.\n";
         }
 
         // 4. Model catalog — when Data access is on.
@@ -523,13 +454,6 @@ class ChatRunner {
         } catch (Throwable $e) {
             return false;
         }
-    }
-
-    private static function normalizeToolUse(array $tool_use): array {
-        if (!isset($tool_use['input']) || (is_array($tool_use['input']) && empty($tool_use['input']))) {
-            $tool_use['input'] = new stdClass();
-        }
-        return $tool_use;
     }
 
 }

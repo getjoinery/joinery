@@ -120,7 +120,7 @@ function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
 	$recipe->set('rcp_name', 'iw test ' . bin2hex(random_bytes(3)));
 	$recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 	$recipe->set('rcp_pipeline_job', $job_id);
-	$recipe->set('rcp_source_config', json_encode(array('mailbox_alias' => $address)));
+	$recipe->set('rcp_source_config', json_encode(array('mailbox_aliases' => array($address))));
 	$recipe->set('rcp_owner_user_id', $owner_id);
 	$recipe->set('rcp_enabled', true);
 	$recipe->set('rcp_schedule_frequency', 'hourly');
@@ -161,7 +161,7 @@ try {
 
 	$recipe = iw_recipe($owner_id, 'email_triage', $address);
 	$job = PipelineJobRegistry::get('email_triage');
-	$config = array('mailbox_alias' => $address);
+	$config = array('mailbox_aliases' => array($address));
 
 	// -----------------------------------------------------------------------
 	section('a sealed binding needs a window; a standard one does not');
@@ -176,7 +176,7 @@ try {
 	$std_address = 'plain@' . $standard->get('ied_domain');
 	$std_recipe = iw_recipe($owner_id, 'email_triage', $std_address);
 	MailboxAliasConfig::clearPostureCache();
-	check($job->requiresVaultScope(array('mailbox_alias' => $std_address)) === null,
+	check($job->requiresVaultScope(array('mailbox_aliases' => array($std_address))) === null,
 		'a standard mailbox declares no scope');
 	check(!RecipeVaultScope::requiresWindow($std_recipe),
 		'so an ordinary recipe keeps its schedule');
@@ -829,7 +829,7 @@ try {
 	$refused = false;
 	$message = '';
 	try {
-		$job->validateConfig(array('mailbox_alias' => $closed_address),
+		$job->validateConfig(array('mailbox_aliases' => array($closed_address)),
 			iw_recipe($owner_id, 'email_triage', $closed_address));
 	} catch (InvalidArgumentException $e) {
 		$refused = true;
@@ -845,7 +845,7 @@ try {
 	MailboxAliasConfig::clearPostureCache();
 	$accepted = true;
 	try {
-		$job->validateConfig(array('mailbox_alias' => $closed_address),
+		$job->validateConfig(array('mailbox_aliases' => array($closed_address)),
 			iw_recipe($owner_id, 'email_triage', $closed_address));
 	} catch (InvalidArgumentException $e) {
 		$accepted = false;

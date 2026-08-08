@@ -64,7 +64,7 @@ $recipe->set('rcp_name', "email-schedule-draft-test-{$suffix}");
 $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 $recipe->set('rcp_pipeline_job', 'email_schedule');
 $recipe->set('rcp_owner_user_id', $owner_uid);
-$recipe->set('rcp_source_config', ['mailbox_alias' => $address]);
+$recipe->set('rcp_source_config', ['mailbox_aliases' => [$address]]);
 $recipe->set('rcp_max_iterations', 5);
 $recipe->set('rcp_max_tokens', 5000);
 $recipe->prepare();

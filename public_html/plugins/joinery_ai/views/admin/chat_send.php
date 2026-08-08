@@ -105,11 +105,6 @@ try {
     chat_send_fail('Joinery AI has reached its monthly token cap. Raise the cap in settings to continue.');
 }
 
-// If a prior turn left an unconfirmed proposal, sending a new message abandons
-// it — record that and clear the pending action so the transcript stays a
-// valid, alternating history.
-ChatTurn::clearDanglingPending($conversation);
-
 // Persist the user's message (complete on insert; content may be empty when the
 // turn is attachments-only). Protected chats seal the content afterward.
 $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);

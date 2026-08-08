@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.22.0
+ * @version 2.23.0
+ * @changelog 2.23.0 - fromDescriptor() renders a type 'array' descriptor entry carrying an options map as a checkbox list (posts name[], the stored array pre-checks entries); an array of objects stays unrendered
  * @changelog 2.21.0 - Every form emits a validation error summary container (.jy-error-summary) immediately before its first submit button (end of form when there is none); on a re-render carrying errors, PHP fills it with one linked item per failing field so an off-screen error is named where the person is looking. Form options: error_summary (default true), error_summary_title ({n} placeholder)
  * @changelog 2.20.0 - An input option this class never reads is refused rather than dropped: the known set is derived from the source of the writer and its parents, so a misspelled option (help_text for helptext) stops the page in debug instead of silently rendering a field without it
  * @changelog 2.19.0 - validateVisibilityRules() throws InvalidArgumentException instead of trigger_error(E_USER_ERROR), which PHP 8.4 deprecates; the failure is a caller mistake, so it still halts, but it is now catchable and carries a trace to the bad call
@@ -1193,6 +1194,16 @@ abstract class FormWriterV2Base {
                     break;
                 case 'date':
                     $this->dateinput($name, $label, $options);
+                    break;
+                case 'array':
+                    // A list field with an options map renders as a checkbox
+                    // list (posts name[]; the array value pre-checks its
+                    // entries). An array of objects has no generic widget and
+                    // is skipped like any unknown type.
+                    if (!empty($spec['options']) && is_array($spec['options'])) {
+                        $options['options'] = $spec['options'];
+                        $this->checkboxList($name, $label, $options);
+                    }
                     break;
                 default:
                     // Unknown type — skip so hand-added fields can coexist.

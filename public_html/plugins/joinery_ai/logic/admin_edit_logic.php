@@ -83,8 +83,8 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         // is presentation — the guarantee has to hold against the posted value,
         // because an edited hidden input is all it takes otherwise.
         //
-        // What flipping the job would do is not cosmetic. Both mail jobs take
-        // the same `mailbox_alias` config, so validation passes, and
+        // What flipping the job would do is not cosmetic. The mail jobs take
+        // the same `mailbox_aliases` config, so validation passes, and
         // aip_recipe_item_log is keyed per job — repoint a triage recipe at the
         // security scan and every already-triaged message reads as already
         // scanned, so the scan silently processes nothing. Flipping pipeline to
@@ -235,7 +235,7 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         }
         if ($taint_eval['tainted_capable'] && !$recipe->get('rcp_allow_tainted_writes')) {
             return LogicResult::error(
-                'Tainted-write opt-in required: ' . TaintGate::explain($taint_eval),
+                'Standing approval required: ' . TaintGate::explain($taint_eval),
                 ['recipe' => $recipe, 'session' => $session]
             );
         }

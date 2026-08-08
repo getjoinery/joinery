@@ -272,7 +272,7 @@ $enable_input = array(
 );
 $r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
 	'admin_joinery_ai_edit_logic', $enable_input);
-check($r->error && strpos((string)$r->error, 'Tainted-write opt-in required') === 0,
+check($r->error && strpos((string)$r->error, 'Standing approval required') === 0,
 	'enabling without the acknowledgment is refused', var_export($r->error, true));
 check($r->error && stripos((string)$r->error, 'one verdict for one item') !== false
 	&& stripos((string)$r->error, 'fixed field') !== false,
@@ -284,8 +284,8 @@ section('A saved recipe cannot change its shape');
 
 // The editor renders mode and job as static text once a recipe is saved, but
 // that is presentation. Editing the hidden input must be refused server-side,
-// because flipping the job is not cosmetic: both mail jobs take the same
-// mailbox_alias config so validation passes, and aip_recipe_item_log is keyed
+// because flipping the job is not cosmetic: the mail jobs take the same
+// mailbox_aliases config so validation passes, and aip_recipe_item_log is keyed
 // per job — repoint triage at the security scan and every already-triaged
 // message reads as already scanned, so the scan silently does nothing.
 $shape_input = array(
@@ -314,9 +314,8 @@ check($r->error && stripos((string)$r->error, 'cannot change its mode') !== fals
 	var_export($r->error, true));
 
 // Re-posting the SAME shape is not a change, so the lock must not fire — the
-// editor posts mode and job on every ordinary save. It gets past the shape
-// check and lands on the next real gate (this template is still unbound), which
-// is exactly how far it should get.
+// editor posts mode and job on every ordinary save. An unbound template is a
+// legal state (an empty mailbox list covers nothing), so the save completes.
 $same_input = $shape_input;
 $same_input['rcp_pipeline_job'] = 'email_triage';
 $r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
@@ -324,8 +323,9 @@ $r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
 check($r->error === null || stripos((string)$r->error, 'cannot change its') === false,
 	're-posting the unchanged shape is not treated as a change',
 	var_export($r->error, true));
-check($r->error && stripos((string)$r->error, 'mailbox_alias') !== false,
-	'it proceeds to the binding requirement instead', var_export($r->error, true));
+check($r->error === null,
+	'and the unbound save completes — an empty mailbox list is legal',
+	var_export($r->error, true));
 
 // -----------------------------------------------------------------------------
 section('Marking a recipe to ship');
@@ -349,7 +349,7 @@ $author->set('rcp_name', 'Shipped Test Author ' . $tag);
 $author->set('rcp_mode', Recipe::MODE_PIPELINE);
 $author->set('rcp_pipeline_job', 'email_triage');
 $author->set('rcp_prompt', '');
-$author->set('rcp_source_config', array('mailbox_alias' => 'someone@example.com'));
+$author->set('rcp_source_config', array('mailbox_aliases' => array('someone@example.com')));
 $author->set('rcp_model', 'claude-haiku-4-5');
 $author->set('rcp_enabled', true);
 $author->set('rcp_allow_tainted_writes', true);

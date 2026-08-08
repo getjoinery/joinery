@@ -2,13 +2,25 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 
 /**
  * Update allowlisted fields on an existing row. authenticate_write() runs
  * with the recipe owner's identity (admin reach). Idempotent — same input
  * produces the same end state. Safe to retry after error responses.
+ *
+ * Queueable: in a surface that defers writes, a call renders as an approval
+ * card built from these literal arguments (specs/implemented/ai_action_queue.md).
  */
-class UpdateModelTool implements RecipeToolInterface {
+class UpdateModelTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $lines = ['Update ' . ProposedActionFacts::scalar($input['model'] ?? '?')
+                . ' #' . ProposedActionFacts::scalar($input['key'] ?? '?')];
+        $fields = isset($input['fields']) && is_array($input['fields']) ? $input['fields'] : [];
+        return array_merge($lines, ProposedActionFacts::fieldLines($fields));
+    }
 
     public static function name(): string {
         return 'update_model';

@@ -535,7 +535,7 @@ if (empty($job_registry)) {
     }
 
     // Per-job config fields, field-name-prefixed so two jobs sharing a field
-    // name (e.g. "mailbox_alias") can't collide in $_POST — only the
+    // name (e.g. "mailbox_aliases") can't collide in $_POST — only the
     // selected job's prefix is read back on save (admin_edit_logic.php).
     // A settled recipe renders only its own job's fields; nothing can switch to
     // another job's group, so rendering them would just be dead hidden inputs.
@@ -616,7 +616,7 @@ if (!$is_new && $is_upgrade_server) {
     $formwriter->submitbutton('btn_ship_template', 'Ship with new installs', [
         'class'          => 'btn btn-outline-secondary ms-2',
         'onclick'        => "return confirm('Write this recipe into recipes.json so every new install gets it? "
-                          . "The owner, mailbox, model, enabled flag and tainted-writes flag are not included.');",
+                          . "The owner, mailbox, model, enabled flag and standing-approval flag are not included.');",
         'formnovalidate' => true,
     ]);
 }

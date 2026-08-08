@@ -53,6 +53,9 @@ class PipelineJobRegistry {
 
                 foreach (array_diff($declared_after, $declared_before) as $class) {
                     if (!is_subclass_of($class, 'PipelineJobInterface')) continue;
+                    // A job file may pull in a shared abstract base (e.g.
+                    // EmailPipelineJobBase); only concrete jobs register.
+                    if (!(new ReflectionClass($class))->isInstantiable()) continue;
                     $id = (new $class())->id();
                     if (isset(self::$jobs[$id])) {
                         // Duplicate — first scan order wins; warn via error log.

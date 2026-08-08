@@ -3,7 +3,7 @@
  * Joinery AI — chat poll endpoint (AJAX, JSON).
  * URL: /admin/joinery_ai/chat_poll?message_id=N
  *
- * The delivery channel for an asynchronous turn. chat_send / chat_confirm create
+ * The delivery channel for an asynchronous turn. chat_send creates
  * (or flip) an assistant row to RUNNING and run the turn off the request; the
  * page polls this owner-scoped endpoint until the row is COMPLETE (returns the
  * rendered bubble) or FAILED (returns the error). A row left RUNNING past the

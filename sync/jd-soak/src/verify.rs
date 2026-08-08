@@ -789,9 +789,31 @@ pub fn settle(
     };
     let missing = unaccounted(records, &recoverable);
     let mut never_looked_for = 0usize;
+    let mut blind = None;
     if !missing.is_empty() {
         match server::find_in_version_history(api, &server_tree, &missing, VERSION_LOOKUP_BUDGET) {
-            Ok((found, asked)) => {
+            Ok(search) => {
+                let (found, asked) = (search.found, search.asked);
+                // A version the server lists but will not identify is not a
+                // version that does not hold the content. Told apart here
+                // because the two are the same empty set, and reading one as
+                // the other turns every superseded version into a lost file.
+                if search.unidentified > 0 || search.unreadable > 0 {
+                    blind = Some(format!(
+                        "the server did not say what {} listed version(s) hold{}, so version \
+                         history could not be searched and whether anything was lost is UNKNOWN — \
+                         this is not a pass and not a loss list",
+                        search.unidentified,
+                        if search.unreadable > 0 {
+                            format!(
+                                " and {} file histor(ies) could not be read",
+                                search.unreadable
+                            )
+                        } else {
+                            String::new()
+                        }
+                    ));
+                }
                 if asked >= VERSION_LOOKUP_BUDGET && found.len() < missing.len() {
                     never_looked_for = missing.len() - found.len();
                     // Said out loud rather than reported as loss. A verifier that
@@ -812,6 +834,14 @@ pub fn settle(
         }
     }
     let (mut no_loss, losses) = check_no_loss(records, &recoverable, previously_on_server);
+    if let Some(why) = blind {
+        // Only when it would otherwise announce losses. A settle that found
+        // everything found it, and the fact that some other file's history was
+        // unreadable does not take that away.
+        if !no_loss.ok {
+            no_loss.detail = format!("{why} — what it would have reported: {}", no_loss.detail);
+        }
+    }
     if never_looked_for > 0 {
         // The warning above goes to stderr, which the evidence bundle does not
         // keep — so a truncated search reached the bundle looking like a clean

@@ -2,13 +2,23 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 
 /**
  * Soft-delete a row. authenticate_write() runs with the recipe owner's
  * identity. Idempotent — soft-deleting an already-deleted row is observably
  * a no-op. Safe to retry after error responses.
+ *
+ * Queueable: in a surface that defers writes, a call renders as an approval
+ * card built from these literal arguments (specs/implemented/ai_action_queue.md).
  */
-class DeleteModelTool implements RecipeToolInterface {
+class DeleteModelTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        return ['Delete ' . ProposedActionFacts::scalar($input['model'] ?? '?')
+              . ' #' . ProposedActionFacts::scalar($input['key'] ?? '?')];
+    }
 
     public static function name(): string {
         return 'delete_model';

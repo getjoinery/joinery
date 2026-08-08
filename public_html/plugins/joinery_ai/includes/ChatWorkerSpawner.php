@@ -11,13 +11,11 @@
 class ChatWorkerSpawner {
 
     /**
-     * Kick off run_chat_turn.php for $message_id. Pass a $decision
-     * (confirm|cancel) to resume a proposed action instead of running a fresh
-     * turn. Returns true when a worker was spawned, false when background
-     * execution isn't available (exec disabled) so the caller can fall back to
-     * running the turn synchronously.
+     * Kick off run_chat_turn.php for $message_id. Returns true when a worker
+     * was spawned, false when background execution isn't available (exec
+     * disabled) so the caller can fall back to running the turn synchronously.
      */
-    public static function spawn(int $message_id, ?string $decision = null): bool {
+    public static function spawn(int $message_id): bool {
         if (!function_exists('exec')) return false;
 
         $script = PathHelper::getIncludePath('plugins/joinery_ai/cli/run_chat_turn.php');
@@ -26,9 +24,6 @@ class ChatWorkerSpawner {
         $log = PathHelper::getSiteRoot() . '/logs/joinery_ai_worker.log';
 
         $cmd = escapeshellarg(self::phpBinary()) . ' ' . escapeshellarg($script) . ' ' . (int)$message_id;
-        if ($decision !== null && $decision !== '') {
-            $cmd .= ' ' . escapeshellarg($decision);
-        }
         // The trailing & detaches; redirecting stdio to the log keeps an audit
         // trail without blocking. Failures inside the worker still surface via
         // the assistant row's failed status + error.

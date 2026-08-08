@@ -41,7 +41,10 @@ class StubReadContext implements ToolContext {
     public function untrustedNonce(): string { return 'testnonce'; }
     public function allowedModels(): array { return array_keys(ModelRegistry::all()); }
     public function allowedActions(): array { return []; }
-    public function requiresConfirmation(): bool { return false; }
+    public function queuesWrites(): bool { return false; }
+    public function enqueueProposedAction(array $tool_use): array {
+        throw new LogicException('This fixture context does not queue writes.');
+    }
     public function ownerScopedReads(): bool { return $this->scoped; }
     public function shouldContinue(): ?array { return null; }
     public function shouldAbort(): bool { return false; }

@@ -2,6 +2,8 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionInvoker.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 
 /**
  * Call an action defined in a logic file. The full validation gauntlet
@@ -12,8 +14,17 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionInvok
  * The recipe's rcp_allowed_actions allow-list scopes which actions are
  * callable; describe_actions exposes the descriptors. invoke_action
  * refuses any name not on the list.
+ *
+ * Queueable: in a surface that defers writes, a call renders as an approval
+ * card built from these literal arguments (specs/implemented/ai_action_queue.md).
  */
-class InvokeActionTool implements RecipeToolInterface {
+class InvokeActionTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $lines = ["Run action '" . ProposedActionFacts::scalar($input['name'] ?? '?') . "'"];
+        $params = isset($input['input']) && is_array($input['input']) ? $input['input'] : [];
+        return array_merge($lines, ProposedActionFacts::fieldLines($params));
+    }
 
     public static function name(): string {
         return 'invoke_action';

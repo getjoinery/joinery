@@ -91,22 +91,24 @@ class RecipeWorkerSpawner {
         }
         // A worker is a command-line process, and a command-line process can
         // never hold a vault unlock window — the secret lives in APCu keyed to
-        // the browser session. A recipe whose job reads sealed content is
+        // the browser session. A recipe whose WHOLE binding is sealed is
         // therefore unspawnable by construction; it runs in slices inside its
-        // owner's own request instead (specs/in_window_deferred_work.md).
-        // Refusing here as well as in the dispatcher covers Run Now and the
-        // worker self-chain, not just the scheduled path.
-        return !self::requiresWindow($run);
+        // owner's own request instead (specs/in_window_deferred_work.md). A
+        // mixed binding spawns fine: the worker drains its standard mailboxes
+        // and the sealed remainder waits for the window. Refusing here as well
+        // as in the dispatcher covers Run Now and the worker self-chain, not
+        // just the scheduled path.
+        return self::cronRunnable($run);
     }
 
-    /** Does this run's recipe need an unlock window a worker cannot hold? */
-    private static function requiresWindow(RecipeRun $run): bool {
+    /** Can a CLI worker make progress on this run's recipe at all? */
+    private static function cronRunnable(RecipeRun $run): bool {
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
         $recipe = new Recipe((int)$run->get('rcr_rcp_recipe_id'), true);
         if (!$recipe->key) {
-            return false;   // a dangling run fails its own way in the runner
+            return true;   // a dangling run fails its own way in the runner
         }
-        return RecipeVaultScope::requiresWindow($recipe);
+        return RecipeVaultScope::cronRunnable($recipe);
     }
 
     /**

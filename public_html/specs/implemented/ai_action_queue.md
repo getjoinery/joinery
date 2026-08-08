@@ -150,7 +150,7 @@ doubles as recipe discovery.
 
 ## Where it appears
 
-- **The AI panel** (specs/ai_recipes_multi_mailbox_and_ai_panel.md) gains a
+- **The AI panel** (specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md) gains a
   **"Waiting for you"** section listing the area's pending actions, with
   approve/decline on each card, and the panel's AI button shows a pending
   count badge. Standing automations above, pending actions below, composer

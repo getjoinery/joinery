@@ -1249,3 +1249,13 @@
 	$migration['migration_file'] = 'migration_calendar_email_templates.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Email recipe bindings become a list: any stored rcp_source_config still
+	// carrying the legacy single mailbox_alias key is rewritten to a
+	// one-element mailbox_aliases list — the code reads only the new shape.
+	$migration = array();
+	$migration['database_version'] = '169';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'recipe_mailbox_alias_to_list.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

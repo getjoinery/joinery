@@ -50,6 +50,13 @@ class Recipe extends SystemBase {
         // already-seeded recipe from a new declaration, since rcp_name isn't
         // unique. See specs/implemented/joinery_ai_shipped_recipes.md.
         'rcp_declared_key'        => array('type'=>'varchar(100)', 'unique'=>true),
+        // The declaration a per-user instance was created from (the area AI
+        // panel's toggle-on of a template card). Deliberately non-unique and
+        // separate from rcp_declared_key: that column is the SEEDER's identity
+        // and unique, so widening it to (key, owner) would leave the old
+        // single-column constraint in place and still enforcing. Null on seeded
+        // rows and on anything an operator created by hand.
+        'rcp_template_key'        => array('type'=>'varchar(100)'),
         // When this recipe last emailed its owner about a failed run, for the
         // per-recipe throttle. Lives here rather than in stg_settings: it is
         // per-recipe state, and a setting keyed by recipe id can never be
@@ -146,6 +153,10 @@ class MultiRecipe extends SystemMultiBase {
 
         if (isset($this->options['declared_key'])) {
             $filters['rcp_declared_key'] = [$this->options['declared_key'], PDO::PARAM_STR];
+        }
+
+        if (isset($this->options['template_key'])) {
+            $filters['rcp_template_key'] = [$this->options['template_key'], PDO::PARAM_STR];
         }
 
         // include_deleted drops the delete filter entirely, so soft-deleted rows

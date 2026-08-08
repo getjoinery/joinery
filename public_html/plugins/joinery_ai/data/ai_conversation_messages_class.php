@@ -3,10 +3,9 @@ require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
 
 /**
- * One turn in an AiConversation — a user message or an assistant reply.
- * Assistant rows additionally carry the per-turn tool trace, token counts,
- * and any pending (proposed-but-unconfirmed) mutating tool call awaiting the
- * admin's sign-off.
+ * One turn in an AiConversation — a user message, an assistant reply, or a
+ * platform-written EVENT (a queued action's resolution). Assistant rows
+ * additionally carry the per-turn tool trace and token counts.
  *
  * The FK column follows the {prefix}_{source_prefix}_{entity}_id convention
  * (aim_aic_conversation_id → aic_conversations) so the deletion system
@@ -26,6 +25,10 @@ class AiConversationMessage extends SystemBase {
 
     const ROLE_USER      = 'user';
     const ROLE_ASSISTANT = 'assistant';
+    // A platform-written transcript fact, not a person speaking: how a queued
+    // action resolved (specs/implemented/ai_action_queue.md). Rendered as a neutral chip;
+    // the history builder feeds it to the model as user-side context.
+    const ROLE_EVENT     = 'event';
 
     // Turn lifecycle for asynchronous chat. A user row is COMPLETE on insert;
     // an assistant placeholder is RUNNING until the in-process turn finishes it
@@ -52,10 +55,9 @@ class AiConversationMessage extends SystemBase {
         // unseal path does the json_encode/json_decode around the ciphertext, and
         // every reader already tolerates a string (json_decodes it).
         'aim_tool_calls'          => array('type'=>'text'),
-        'aim_pending_action'      => array('type'=>'text'),
         // Sealed Vault consumer columns (docs/sealed_vault.md). aim_sealed_key is
         // the per-message DEK sealed to the owner's vault public key; the content
-        // columns (aim_content/aim_tool_calls/aim_pending_action/aim_error) seal
+        // columns (aim_content/aim_tool_calls/aim_error) seal
         // under it. aim_key_generation matches the vault generation (rotation);
         // aim_content_sealed marks a sealed row; aim_sealed_owner_user_id records
         // WHOSE vault the row seals to (the conversation owner) so decryption is
@@ -96,17 +98,17 @@ class AiConversationMessage extends SystemBase {
         'aim_delete_time'         => array('type'=>'timestamp(6)'),
     );
 
-    // aim_tool_calls / aim_pending_action were $json_vars (auto-encode/decode);
-    // they are plain 'text' now so a sealed turn can hold ciphertext (not valid
-    // JSON). The seal/unseal path json_encodes on write and readers json_decode.
+    // aim_tool_calls is plain 'text' (not $json_vars) so a sealed turn can hold
+    // ciphertext, which is not valid JSON. The seal/unseal path json_encodes on
+    // write and readers json_decode.
     public static $json_vars = array();
 
     // Sealed Vault generic read hook (docs/sealed_vault.md): SystemBase::get()
     // decrypts these automatically on a sealed row. aim_content is the user prompt
     // / assistant reply; aim_tool_calls the per-turn tool trace (names+args+
-    // results); aim_pending_action a proposed mutating call's args; aim_error may
-    // echo provider/content detail. All cleartext on a Standard conversation.
-    public static $sealed_fields = array('aim_content', 'aim_tool_calls', 'aim_pending_action', 'aim_error');
+    // results); aim_error may echo provider/content detail. All cleartext on a
+    // Standard conversation.
+    public static $sealed_fields = array('aim_content', 'aim_tool_calls', 'aim_error');
 
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 5) {
