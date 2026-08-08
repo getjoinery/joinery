@@ -503,6 +503,34 @@ pub fn capture(fleet: &Fleet, cycle: u64, verification: &Verification) -> std::i
         ));
     }
     std::fs::write(bundle.join("verdicts.txt"), verdicts)?;
+
+    // The verdict line names ten of them. Everything found missing goes here,
+    // because a campaign that reported twenty-three lost files and recorded the
+    // names of ten cannot be investigated afterwards — the other thirteen were
+    // in no artifact anywhere.
+    if !verification.losses.is_empty() {
+        let mut losses = String::new();
+        if !verification.losses.live.is_empty() {
+            losses.push_str(&format!(
+                "{} committed file(s) nowhere:\n",
+                verification.losses.live.len()
+            ));
+            for line in &verification.losses.live {
+                losses.push_str(&format!("  {line}\n"));
+            }
+        }
+        if !verification.losses.history.is_empty() {
+            losses.push_str(&format!(
+                "\n{} content(s) the server took and then lost:\n",
+                verification.losses.history.len()
+            ));
+            for sha in &verification.losses.history {
+                losses.push_str(&format!("  {sha}\n"));
+            }
+        }
+        std::fs::write(bundle.join("losses.txt"), losses)?;
+    }
+
     std::fs::write(bundle.join("timeline.txt"), timeline(fleet))?;
     let _ = fleet.save(&bundle.join("fleet.json"));
 
@@ -714,6 +742,7 @@ mod tests {
             samples: Vec::new(),
             convergence_ms: BTreeMap::new(),
             server_contents: Default::default(),
+            losses: Default::default(),
         };
         let bundle = capture(&fleet, 3, &verification).unwrap();
 
@@ -724,6 +753,39 @@ mod tests {
         assert!(timeline.contains("FAULT kill on device-a"), "{timeline}");
         let tree = std::fs::read_to_string(bundle.join("device-a/tree.txt")).unwrap();
         assert!(tree.contains("a.txt"), "{tree}");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    #[test]
+    fn a_bundle_names_every_lost_file_and_not_just_the_ten_the_verdict_shows() {
+        // A campaign reported twenty-three lost files. The verdict named ten,
+        // and nothing else in the bundle named any of them — so the other
+        // thirteen could not be chased at all, and the bundle read as though
+        // ten was the whole story.
+        let dir = tmp("losses");
+        let fleet = fleet(&dir);
+        std::fs::create_dir_all(&fleet.journal_dir).unwrap();
+
+        let live: Vec<String> = (0..23)
+            .map(|i| format!("doc-{i}.txt (sha {i:04x})"))
+            .collect();
+        let verification = Verification {
+            verdicts: vec![crate::Verdict::fail("no-loss", "23 committed file(s)")],
+            samples: Vec::new(),
+            convergence_ms: BTreeMap::new(),
+            server_contents: Default::default(),
+            losses: crate::verify::Losses {
+                live: live.clone(),
+                history: vec!["deadbeef".into()],
+            },
+        };
+        let bundle = capture(&fleet, 1, &verification).unwrap();
+
+        let losses = std::fs::read_to_string(bundle.join("losses.txt")).unwrap();
+        for name in &live {
+            assert!(losses.contains(name), "{name} is in no artifact: {losses}");
+        }
+        assert!(losses.contains("deadbeef"));
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -753,6 +815,7 @@ mod tests {
                 samples: Vec::new(),
                 convergence_ms: BTreeMap::new(),
                 server_contents: Default::default(),
+                losses: Default::default(),
             },
         )
         .unwrap();

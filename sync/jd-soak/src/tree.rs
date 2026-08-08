@@ -19,6 +19,7 @@ use std::path::Path;
 use jd_vfs::{comparison_key, is_internal, Personality};
 
 use crate::actor::hash_file;
+use crate::fleet::Device;
 use crate::server::ServerTree;
 
 /// One thing found on a disk.
@@ -265,6 +266,19 @@ pub fn diff(
 /// The engine never unlinks — a delete it got wrong has to be recoverable by the
 /// person it happened to — so the trash is part of the answer to "where did this
 /// file go", not evidence that it is gone.
+/// Everything recoverable from the trash of one device.
+///
+/// Takes the device rather than a path because there are two directories here
+/// that both get called "home", and the verifier reached for the wrong one for
+/// the whole life of the rig: `home` is `JOINERY_DRIVE_HOME` — config, state,
+/// spool — while the daemon runs as its own unix account and trashes into
+/// *that* account's freedesktop trash. Nothing is ever trashed under the drive
+/// home, so the search found an empty set every time and every correctly
+/// trashed file was reported permanently lost.
+pub fn device_trash_contents(device: &Device) -> BTreeSet<String> {
+    trash_contents(&device.trash_home(), &[device.root.as_path()])
+}
+
 pub fn trash_contents(home: &Path, roots: &[&Path]) -> BTreeSet<String> {
     let mut places = vec![home.join(".local/share/Trash/files")];
     if let Ok(data_home) = std::env::var("XDG_DATA_HOME") {
@@ -528,5 +542,29 @@ mod tests {
         bed.write("home/.local/share/Trash/files/deleted.txt", "recovered");
         let found = trash_contents(&bed.0.join("home"), &[]);
         assert!(found.contains(&sha_of("recovered")));
+    }
+
+    #[test]
+    fn a_devices_trash_is_looked_for_under_its_unix_account_not_its_drive_home() {
+        // The rig ran for twenty-two campaigns reading the drive home, where a
+        // trash cannot exist, so every file the engine correctly trashed was
+        // counted as gone for good. Two directories called "home", and the
+        // wrong one is silently empty rather than an error.
+        let bed = Bed::new("trash-home");
+        bed.mkdir("drive-home/config");
+        bed.write(
+            "account-home/.local/share/Trash/files/Projects/doc-28.txt",
+            "the last copy",
+        );
+        let device = Device {
+            name: "device-b".into(),
+            home: bed.0.join("drive-home"),
+            root: bed.0.join("root"),
+            container: None,
+            unix_home: Some(bed.0.join("account-home")),
+            unix_user: Some("soak-b".into()),
+            service: None,
+        };
+        assert!(device_trash_contents(&device).contains(&sha_of("the last copy")));
     }
 }

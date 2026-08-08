@@ -114,7 +114,10 @@ address whose domain has not opted in to AI processing keeps today's loud
 save-time refusal (`assertAiProcessingAllowed`) — every address on the list
 was chosen by name, so refusing by name is always right. A grant revoked
 *after* save drops that address out at resolve time; the run tally notes the
-dropped address so the gap is visible, not silent.
+dropped address so the gap is visible, not silent. A domain whose security
+posture changes after save gets the identical treatment: an address whose
+domain becomes sealed without the AI opt-in stops contributing at resolve
+time, and the run tally names it — a posture flip is never a silent drop.
 
 ### The one write door, per item
 
@@ -153,6 +156,11 @@ stable per-run prefix (cacheable) instead of rebuilding it per item.
   verdict fields are stored; the known sealed-egress defects (pipeline save()
   on sealed rows, `iem_ai_scan` stored unsealed, locality pin) belong to the
   sealed egress review spec and are neither fixed nor worsened here.
+- **Shared-mailbox overlap.** Two users each holding a grant on the same
+  mailbox can each run their own instance of the same job over it; the
+  processing log is per-recipe, so both process the same messages and both
+  apply labels. Labels are additive, so this is survivable — accepted, not
+  prevented.
 
 ---
 
@@ -172,16 +180,29 @@ right-side slide-over drawer. Inside, one card per relevant recipe:
 - When the recipe also covers other mailboxes, a quiet "also on N other
   mailboxes" line, linking (for superadmins) to the recipe on the dashboard.
 
-The toggle's semantics, chosen to match the user's mental model rather than the
-storage model:
+The toggle reflects exactly one thing: whether the current mailbox is on the
+recipe's list. The global kill switch (`rcp_enabled`) is dashboard-only — the
+panel never writes it:
 
-- **Turning ON**: add the current mailbox's address to the recipe's list — and
-  if the recipe is globally disabled (`rcp_enabled` false), enable it. If the recipe is
-  tainted-capable and has not yet accepted tainted writes, the panel shows the
-  same `TaintGate::explain()` text in a `<dialog>` confirm first; accepting
-  writes `rcp_allow_tainted_writes` — the panel is a full-fledged place to make
-  that acceptance, since "turn triage on for my inbox" is exactly the moment it
-  should be offered. Declining leaves everything off.
+- **Globally disabled recipe**: the toggle renders grayed out with a "Paused
+  from the recipes dashboard" status line; for a permission-10 viewer that
+  line links to the recipe on the dashboard. A member sees the paused state
+  without the link. The server enforces the same rule: `ai_panel_toggle`
+  against a globally disabled recipe is refused, so the grayed control is a
+  rendering of server truth, not just CSS. One deliberate consequence: the
+  superadmin's own seeded rows ship disabled, so they appear paused in the
+  panel until first enabled on the dashboard — first enablement (and its
+  taint acceptance) is a dashboard act for seeded instances.
+- **Turning ON**: add the current mailbox's address to the recipe's list. If
+  the recipe is tainted-capable and has not yet accepted tainted writes — the
+  template-instantiation case; an already-enabled tainted recipe has
+  necessarily made its acceptance — the panel shows the same
+  `TaintGate::explain()` text in a `<dialog>` confirm first; accepting writes
+  `rcp_allow_tainted_writes`, since "turn triage on for my inbox" is exactly
+  the moment that acceptance should be offered. Declining leaves everything
+  off. The confirm binds the address captured **at click time**: if the user
+  switches mailboxes in the rail while the dialog is open, accepting still
+  applies to the mailbox the toggle was clicked on, not the one now selected.
 - **Turning OFF**: remove the current mailbox's address from the recipe's
   list. The recipe keeps running on its other mailboxes; `rcp_enabled` is
   untouched. A recipe whose last mailbox is removed simply has an empty list —
@@ -192,9 +213,47 @@ in to AI processing, the toggle renders disabled with the domain-opt-in message
 — the same wording `assertAiProcessingAllowed` uses — instead of failing on
 click.
 
-A user who owns no recipes sees the panel's empty state: one line naming the
-recipes dashboard (superadmin) or nothing to configure (member). No explainer
-prose beyond that.
+A user with no recipes of their own still sees one card (off) per shipped
+template for the area, so on a stock install the panel is never empty — see
+"Templates and per-user instances" below. The true empty state — no templates
+exist for this area and the user owns nothing — is one quiet line, no
+explainer prose.
+
+### Templates and per-user instances
+
+A recipe runs **as its owner**: the mailbox grant check, the vault window for
+sealed mail, the tainted-writes acceptance and the monthly token cap are all
+the owner's. So a member "running" a shipped recipe cannot mean toggling the
+seeded row (which belongs to the install's first superadmin) — it means the
+member gets **their own instance** of it:
+
+- The seeder is untouched. Seeded rows remain the resolved superadmin's own
+  runnable instances, identified by the unique `rcp_declared_key` exactly as
+  today.
+- The panel shows the session user's own area recipes, **plus** one card (off)
+  for each shipped template whose job matches the area and which the user has
+  no instance of yet.
+- Toggle-ON on a template card creates the user's instance from the
+  declaration — owner = session user, created **enabled**, because the toggle
+  is itself the enablement choice and the taint acceptance rides the same
+  dialog (the seeder's inert-on-arrival posture exists because nobody chose a
+  seeded row; here somebody just did). It then binds the current mailbox.
+  Every later toggle edits that instance's list only; the seeded row is never
+  mutated by the panel.
+- Instance linkage: instances do **not** reuse `rcp_declared_key` (it is
+  unique, and it is the seeder's identity). They carry a new nullable,
+  non-unique column `rcp_template_key` naming the declaration they came from;
+  the panel matches user instances to template cards on it. Deliberately not
+  a compound unique on (declared_key, owner): widening a unique constraint
+  leaves the old single-column constraint in place and still enforcing.
+- Per-person safety falls out with no extra machinery: the member's own grants
+  gate what their instance reads, their own vault window gates sealed mail,
+  they make their own tainted-writes acceptance, and their instance carries
+  its own token cap.
+
+Members still cannot *create* recipes — the dashboard stays superadmin-only.
+What they can do is instantiate and steer the shipped ones, which is the whole
+member surface.
 
 ### The general component
 
@@ -213,10 +272,15 @@ The panel is owned by the joinery_ai plugin and mounted by host pages:
   });
   ```
 
-- The mailbox reader mounts it only when the joinery_ai plugin is active
-  (the mount include checks `PluginHelper`); with the plugin inactive the AI
-  button simply doesn't exist. Calendar and drive pages later call the same
-  `mount()` with their own area and context — no per-area panel code.
+- The **member mailbox page only** mounts it (`/profile/mailbox/mailbox`),
+  and only when the joinery_ai plugin is active (the mount checks
+  `PluginHelper`); with the plugin inactive the AI button simply doesn't
+  exist. The admin oversight reader does **not** mount the panel: its
+  all-access view spans mailboxes the viewer holds no grant on (so toggles
+  would fail the grant check), and the surface for overseeing other people's
+  mail should not offer one-click AI binding to it — admins manage recipes on
+  the dashboard. Calendar and drive pages later call the same `mount()` with
+  their own area and context — no per-area panel code.
 
 ### How recipes declare area relevance
 
@@ -251,12 +315,20 @@ new `/ajax/` endpoints):
 - **`ai_panel_state`** (read) — input `{area, context}`; returns, for each of
   the *signed-in user's* recipes whose job implements the interface with a
   matching area: recipe id, name, job label, covered-here flag, globally-enabled
-  flag, tainted-acceptance state, blocked reason (sealed opt-in missing, no
-  grant), other-mailbox count, last-run summary.
-- **`ai_panel_toggle`** (write) — input `{recipe_id, area, context, enabled,
-  accept_tainted_writes?}`. Owner-scoped: the recipe must belong to the session
+  flag, tainted-acceptance state, blocked reason (globally disabled, sealed
+  opt-in missing, no grant), other-mailbox count, last-run summary. Also returns a template card
+  (keyed by `template_key`) for each shipped declaration in the area the user
+  has no instance of.
+- **`ai_panel_toggle`** (write) — input `{recipe_id | template_key, area,
+  context, enabled, accept_tainted_writes?}`. A `template_key` first creates
+  the caller's instance (see "Templates and per-user instances"), then applies
+  the toggle to it. Owner-scoped: the recipe must belong to the session
   user. Applies the toggle semantics above via `bindContext()` +
-  `validateConfig()`; returns the refreshed row. Turning ON a tainted-capable
+  `validateConfig()`; returns the refreshed row. The list edit is atomic: the
+  toggle re-reads `rcp_source_config` inside its own transaction (or updates
+  the array in SQL) so a dashboard save racing a panel toggle can never
+  clobber an address the other surface just wrote — two surfaces, one list,
+  no lost updates. Turning ON a tainted-capable
   recipe without acceptance and without `accept_tainted_writes` returns the
   `TaintGate::explain()` text as a confirm-required response rather than an
   error, so the panel can render the dialog from server truth.
@@ -275,7 +347,10 @@ them; a member who owns none gets an empty list.
   refusal, empty list legal.
 - Panel logic actions: state shape, owner scoping (someone else's recipe id →
   refused), toggle round-trips including last-mailbox removal, taint confirm
-  handshake.
+  handshake, toggle against a globally disabled recipe refused server-side.
+- Template instantiation: first toggle on a template card creates a per-user
+  instance (`rcp_template_key` set, `rcp_declared_key` null, owner = caller)
+  and never mutates the seeded row; second toggle edits the same instance.
 - Shipped-template seeding still lands unbound with the new descriptor.
 
 All db tier alongside `shipped_recipes_test.php`.

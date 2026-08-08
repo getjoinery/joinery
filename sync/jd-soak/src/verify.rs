@@ -74,6 +74,28 @@ pub struct Verification {
     /// Everything the server was holding at this settle, for the next one to
     /// hold it to.
     pub server_contents: BTreeSet<String>,
+    /// Every lost content in full, because the verdict names only the first ten.
+    pub losses: Losses,
+}
+
+/// Everything a settle found missing, untruncated.
+///
+/// The verdict line names ten and says how many there were, which is right for
+/// something read on a terminal and wrong as the only record: a campaign that
+/// reported twenty-three lost files left no artifact naming more than ten of
+/// them, so the rest could not be chased afterwards at all.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Losses {
+    /// Live paths whose last committed content is nowhere, as named lines.
+    pub live: Vec<String>,
+    /// Contents the server was seen holding and then lost, as short hashes.
+    pub history: Vec<String>,
+}
+
+impl Losses {
+    pub fn is_empty(&self) -> bool {
+        self.live.is_empty() && self.history.is_empty()
+    }
 }
 
 impl Verification {
@@ -332,7 +354,7 @@ pub fn check_no_loss(
     records: &[Record],
     recoverable: &Recoverable,
     previously_on_server: &BTreeSet<String>,
-) -> Verdict {
+) -> (Verdict, Losses) {
     let latest = journal::last_committed(records);
     let mut lost_live: Vec<String> = Vec::new();
     for (path, claim) in &latest {
@@ -380,9 +402,12 @@ pub fn check_no_loss(
                 previously_on_server.len()
             )
         };
-        return Verdict::pass(
-            "no-loss",
-            format!("{} live paths findable; {history}", latest.len()),
+        return (
+            Verdict::pass(
+                "no-loss",
+                format!("{} live paths findable; {history}", latest.len()),
+            ),
+            Losses::default(),
         );
     }
 
@@ -411,7 +436,13 @@ pub fn check_no_loss(
                 .join(", ")
         ));
     }
-    Verdict::fail("no-loss", detail.join("; "))
+    (
+        Verdict::fail("no-loss", detail.join("; ")),
+        Losses {
+            live: lost_live,
+            history: lost_history,
+        },
+    )
 }
 
 // ---------------------------------------------------------------------------
@@ -709,7 +740,7 @@ pub fn settle(
                 eprintln!("warning: cannot walk {}: {e}", device.root.display());
             }
         }
-        local_trash.extend(tree::trash_contents(&device.home, &[device.root.as_path()]));
+        local_trash.extend(tree::device_trash_contents(device));
     }
 
     let mut verdicts = vec![convergence];
@@ -733,6 +764,7 @@ pub fn settle(
                 samples,
                 convergence_ms,
                 server_contents: BTreeSet::new(),
+                losses: Losses::default(),
             };
         }
     };
@@ -779,7 +811,7 @@ pub fn settle(
             )),
         }
     }
-    let mut no_loss = check_no_loss(records, &recoverable, previously_on_server);
+    let (mut no_loss, losses) = check_no_loss(records, &recoverable, previously_on_server);
     if never_looked_for > 0 {
         // The warning above goes to stderr, which the evidence bundle does not
         // keep — so a truncated search reached the bundle looking like a clean
@@ -811,6 +843,7 @@ pub fn settle(
         samples,
         convergence_ms,
         server_contents: server_tree.head_contents(),
+        losses,
     }
 }
 
@@ -857,7 +890,8 @@ mod tests {
     #[test]
     fn a_content_still_on_a_device_is_not_lost() {
         let records = vec![commit("a.txt", "aa", "write")];
-        let verdict = check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
+        let (verdict, _losses) =
+            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
         assert!(verdict.ok, "{}", verdict.detail);
     }
 
@@ -866,7 +900,11 @@ mod tests {
         // The normal state for anything the user deleted locally, or that has
         // not reached a second device yet.
         let records = vec![commit("a.txt", "aa", "write")];
-        assert!(check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new()).ok);
+        assert!(
+            check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new())
+                .0
+                .ok
+        );
     }
 
     #[test]
@@ -874,7 +912,11 @@ mod tests {
         // The engine never unlinks, so the trash is where a delete it got wrong
         // is recoverable from.
         let records = vec![commit("a.txt", "aa", "write")];
-        assert!(check_no_loss(&records, &recoverable(&[], &[], &["aa"]), &BTreeSet::new()).ok);
+        assert!(
+            check_no_loss(&records, &recoverable(&[], &[], &["aa"]), &BTreeSet::new())
+                .0
+                .ok
+        );
     }
 
     #[test]
@@ -882,7 +924,8 @@ mod tests {
         // The finding this whole rig exists to produce. It has to say which
         // file, who wrote it and when, or nobody can investigate it.
         let records = vec![commit("Projects/Report.docx", "abcdef0123456789", "write")];
-        let verdict = check_no_loss(&records, &recoverable(&[], &[], &[]), &BTreeSet::new());
+        let (verdict, _losses) =
+            check_no_loss(&records, &recoverable(&[], &[], &[]), &BTreeSet::new());
         assert!(!verdict.ok);
         assert!(
             verdict.detail.contains("Projects/Report.docx"),
@@ -907,7 +950,7 @@ mod tests {
         ];
         let taken: BTreeSet<String> = ["first".to_string()].into_iter().collect();
 
-        let gone = check_no_loss(&records, &recoverable(&["second"], &[], &[]), &taken);
+        let (gone, _losses) = check_no_loss(&records, &recoverable(&["second"], &[], &[]), &taken);
         assert!(!gone.ok);
         assert!(
             gone.detail.contains("disappeared from it"),
@@ -915,7 +958,7 @@ mod tests {
             gone.detail
         );
 
-        let still_there =
+        let (still_there, _l2) =
             check_no_loss(&records, &recoverable(&["second"], &["first"], &[]), &taken);
         assert!(still_there.ok, "{}", still_there.detail);
     }
@@ -925,7 +968,8 @@ mod tests {
         // "all 0 contents the server had taken are still there" reads as a check
         // that ran and found nothing wrong. On a first settle no check ran.
         let records = vec![commit("a.txt", "aa", "write")];
-        let verdict = check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
+        let (verdict, _losses) =
+            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
         assert!(verdict.ok);
         assert!(
             verdict.detail.contains("no earlier settle"),
@@ -946,7 +990,7 @@ mod tests {
             commit("a.txt", "first", "write"),
             commit("a.txt", "second", "write"),
         ];
-        let verdict = check_no_loss(
+        let (verdict, _losses) = check_no_loss(
             &records,
             &recoverable(&["second"], &[], &[]),
             &BTreeSet::new(),
@@ -973,7 +1017,8 @@ mod tests {
         ];
         // The content still has to be findable historically, but no live path
         // claims it.
-        let verdict = check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new());
+        let (verdict, _losses) =
+            check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new());
         assert!(verdict.ok, "{}", verdict.detail);
     }
 
@@ -1233,6 +1278,7 @@ mod tests {
             samples: Vec::new(),
             convergence_ms: BTreeMap::new(),
             server_contents: BTreeSet::new(),
+            losses: Default::default(),
         };
         assert!(v.violated());
         assert_eq!(v.failures().len(), 2);
