@@ -19,6 +19,7 @@
 #     target UNTOUCHED (the pre-destroy shape check)
 #   * mid-load failure AFTER the schema drop -> RESTORE_LOAD_FAILED + exit 6
 #     (the one path allowed to modify the database and then fail)
+#   * dump from a newer PostgreSQL -> RESTORE_SERVER_TOO_OLD, target UNTOUCHED
 #   * target database absent -> created and loaded
 #
 # The "untouched" assertions are the point: verify-before-destroy means a bad
@@ -146,6 +147,30 @@ chk "mid-load failure marker is RESTORE_LOAD_FAILED" "$M" "RESTORE_LOAD_FAILED"
 chk "mid-load failure exit code is 6" "$RC" "6"
 chk "mid-load failure did replace the schema (partial load visible)" \
     "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t" 2>/dev/null)" "1"
+
+# --- 7b: dump from a newer PostgreSQL -> refused BEFORE the schema drop --------
+# The version is written into the dump header, so this is knowable with nothing
+# yet destroyed. 99 rather than a real number keeps the assertion true whatever
+# major this box runs. Restoring an 18 dump into a 16 server is what found it:
+# the load died on SET transaction_timeout at line 13, target already emptied.
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+psql -U postgres -d "$DST" -q -c "CREATE TABLE t(id int primary key, v text);" >/dev/null 2>&1
+psql -U postgres -d "$DST" -q -c "INSERT INTO t VALUES (99997,'sentinel3');" >/dev/null 2>&1
+TOONEW="$WORK/toonew.sql"
+{
+    echo "--"
+    echo "-- PostgreSQL database dump"
+    echo "--"
+    echo ""
+    echo "-- Dumped from database version 99.1"
+    echo "-- Dumped by pg_dump version 99.1"
+    echo ""
+    echo "CREATE TABLE t(id int primary key, v text);"
+} > "$TOONEW"
+M=$(bash "$ENGINE" "$DST" "$TOONEW" --non-interactive --db-user postgres 2>/dev/null)
+chk "newer-dump marker is RESTORE_SERVER_TOO_OLD" "${M%% *}" "RESTORE_SERVER_TOO_OLD"
+chk "newer-dump left the target untouched" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t WHERE id=99997" 2>/dev/null)" "1"
 
 # --- 8: target database absent -> created and loaded ---------------------------
 dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1
