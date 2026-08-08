@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 /**
  * The security-critical send sequence shared by BOTH chat_send surfaces — the
  * /api/v1 action (logic/chat_send_logic.php) and the web AJAX endpoint
- * (views/admin/chat_send.php) — and the unlock-first gate the chat_confirm pair
+ * (views/admin/chat_send.php) — and the unlock-first gate that surface
  * shares too.
  *
  * These steps decide the security level, hold protected content out of the first

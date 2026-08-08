@@ -12,8 +12,10 @@
  *   - capability allowlists: which models and actions are in scope (a recipe's
  *     rcp_allowed_* or a conversation's aic_allowed_*);
  *   - the untrusted-input nonce used to wrap externally-authored text;
- *   - requiresConfirmation(): the interactive confirmation boundary — false
- *     for recipes, true for chat;
+ *   - queuesWrites() / enqueueProposedAction(): the deferred-write boundary —
+ *     an interactive surface queues every mutating call for the owner's
+ *     approval (specs/implemented/ai_action_queue.md); recipes answer false and keep
+ *     their own single write door (the verdict handler);
  *   - shouldContinue(): the per-iteration continuation guard (recipe: kill
  *     flag + wall clock; chat: per-turn timeout);
  *   - the begin/finish/append tool-call audit hooks (recipe persists each call
@@ -42,9 +44,18 @@ interface ToolContext {
     /** Action names in scope for invoke_action (decoded allowlist). */
     public function allowedActions(): array;
 
-    /** Does a mutating tool call need a live human sign-off before it runs?
-     *  False for autonomous recipes; true for the interactive chat. */
-    public function requiresConfirmation(): bool;
+    /** Does this surface defer AI-initiated writes to the owner's approval
+     *  queue? True for the interactive chat — a mutating tool call never
+     *  executes in the turn; it becomes a pending action the owner approves
+     *  or declines (specs/implemented/ai_action_queue.md). False for autonomous recipes,
+     *  whose one write door is their own verdict handler. */
+    public function queuesWrites(): bool;
+
+    /** Queue one mutating tool call for the owner's approval and return the
+     *  tool_result block the model sees ("queued for approval", or the
+     *  refusal when the call cannot be queued). Called only when
+     *  queuesWrites() is true. */
+    public function enqueueProposedAction(array $tool_use): array;
 
     /** Are reads contained to the acting user's own rows? True for a non-admin
      *  member caller (the read executor adds an owner filter and hides

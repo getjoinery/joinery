@@ -18,6 +18,16 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
  */
 interface PipelineJobInterface {
 
+    /**
+     * Posture subsets for hasWork()/countWork(). A binding can span sources
+     * with different security postures (the email jobs: sealed and standard
+     * mailboxes on one list), and the two schedulers each own one subset —
+     * cron drains what needs no vault window, the in-window drain handles the
+     * sealed remainder — so each asks about its own subset only.
+     */
+    const POSTURE_SEALED   = 'sealed';
+    const POSTURE_STANDARD = 'standard';
+
     /** Stable identifier stored in rcp_pipeline_job (snake_case, unique). */
     public function id(): string;
 
@@ -55,13 +65,26 @@ interface PipelineJobInterface {
      * binding and not another — the email jobs need one only when the mailbox
      * they point at is on a sealed domain.
      *
-     * A job returning non-null cannot run from cron AT ALL: the vault secret
-     * lives in APCu keyed to the browser session, so a command-line worker can
-     * never hold a window. Such a recipe is skipped by the dispatcher, refused
-     * by the spawner, and executed only in slices inside its owner's open
-     * window, via the VaultDeferredWork consumer.
+     * A job returning non-null cannot read its sealed sources from cron AT
+     * ALL: the vault secret lives in APCu keyed to the browser session, so a
+     * command-line worker can never hold a window. The sealed part of such a
+     * binding is executed only in slices inside its owner's open window, via
+     * the VaultDeferredWork consumer. Whether the recipe still runs from cron
+     * for the REST of its binding is hasUnsealedBinding()'s answer.
      */
     public function requiresVaultScope(array $config): ?string;
+
+    /**
+     * Can a cron worker make progress on this binding at all — is any part of
+     * it readable without a vault window?
+     *
+     * Only consulted when requiresVaultScope() is non-null: a mixed binding
+     * (sealed and standard sources on one list) is scheduled normally, and on
+     * a cron worker the sealed sources fail closed out of the candidate set
+     * while the standard remainder drains. A job with nothing sealed must
+     * return true.
+     */
+    public function hasUnsealedBinding(array $config): bool;
 
     /**
      * May this binding's content be sent to a model running off the box?
@@ -104,16 +127,32 @@ interface PipelineJobInterface {
      * construction, no model call. The vault heartbeat calls this for every
      * in-window recipe on every beat to decide whether a drain is worth firing
      * (specs/in_window_deferred_work.md).
+     *
+     * $posture narrows the question to one subset of the binding (the
+     * POSTURE_* constants); null asks about everything readable right now.
+     * The heartbeat asks POSTURE_SEALED — standard-source work belongs to
+     * cron's schedule, and answering for it here would turn every open window
+     * into a drain-on-arrival bypass of the recipe's schedule.
      */
-    public function hasWork(array $config, Recipe $recipe): bool;
+    public function hasWork(array $config, Recipe $recipe, ?string $posture = null): bool;
 
     /**
      * How many unhandled items remain. Separate from hasWork() because the two
      * have different costs and different callers: hasWork() is an EXISTS on the
      * heartbeat path, this is a COUNT used to tell someone how far behind they
-     * are. Never call this per beat.
+     * are. Never call this per beat. $posture as in hasWork().
      */
-    public function countWork(array $config, Recipe $recipe): int;
+    public function countWork(array $config, Recipe $recipe, ?string $posture = null): int;
+
+    /**
+     * Anything a run should say about what its binding does NOT cover right
+     * now — one plain-language line per gap, rendered into the run tally. The
+     * email jobs name a listed address that has stopped resolving (grant
+     * revoked, mailbox disabled) or whose domain sealed itself without the AI
+     * opt-in, so coverage never shrinks silently. Empty array when the whole
+     * binding is covered.
+     */
+    public function coverageNotes(array $config, Recipe $recipe): array;
 
     /**
      * The verdict contract, DescriptorValidator shape. The runner renders

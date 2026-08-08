@@ -122,14 +122,20 @@ class RecipeRunContext implements ToolContext {
     }
 
     /**
-     * Does a mutating tool call need a live human sign-off before it runs?
-     * Recipes are autonomous — the author signed off at save time via the
-     * taint gate — so the answer is always false here. The interactive chat
-     * surface (a future context) answers true and the shared AgentLoop then
-     * halts the turn with a pending action for the user to confirm.
+     * Recipes never defer writes to the approval queue: they are autonomous
+     * by design — the author gave the standing approval at save time via the
+     * taint gate — and their write surface is bounded by allow-lists (agent
+     * mode) or the single verdict handler (pipeline mode). The interactive
+     * chat context answers true and the shared AgentLoop then queues every
+     * mutating call for the owner (specs/implemented/ai_action_queue.md).
      */
-    public function requiresConfirmation(): bool {
+    public function queuesWrites(): bool {
         return false;
+    }
+
+    /** Never called — queuesWrites() is false. Kept loud, not silent. */
+    public function enqueueProposedAction(array $tool_use): array {
+        throw new LogicException('Recipe runs do not queue writes.');
     }
 
     /**

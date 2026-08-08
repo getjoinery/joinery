@@ -163,8 +163,6 @@ class RecipeRunner {
 
     /**
      * Map the shared AgentLoop result onto the recipe's terminal states.
-     * The recipe context never returns a pending_action (it doesn't require
-     * confirmation), so that branch is defensive only.
      */
     private static function finishFromResult(RecipeRun $run, Recipe $recipe, array $result, int $max_iterations): void {
         $in = (int)$result['input_tokens'];

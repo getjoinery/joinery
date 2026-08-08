@@ -76,7 +76,7 @@ $make_sealed = function (int $owner, string $title, string $body): AiConversatio
         $m->save();
         $m->load();
         harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$m->key);
-        $tcols = ChatSeal::turnColumns($c, (int)$m->key, $body, [], null);
+        $tcols = ChatSeal::turnColumns($c, (int)$m->key, $body, []);
         $tcols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
         AiConversationMessage::updateColumns((int)$m->key, $tcols);
     }

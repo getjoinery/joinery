@@ -10,8 +10,11 @@
  *   - enum: string[] (string/int/float fields — value must be one of these)
  *   - min / max: number bounds (int/float fields)
  *   - max_length: int (string/text fields)
- *   - items: field-descriptor map (type 'array' only — the shape of each
- *     element, recursively coerced the same way as a top-level schema)
+ *   - items: type 'array' only — the shape of each element. Either a
+ *     field-descriptor map (a list of objects, each recursively coerced the
+ *     same way as a top-level schema) or a single scalar field spec (its
+ *     'type' key holds a scalar type name — a list of strings/ints/…, each
+ *     element coerced and bounds-checked against that one spec)
  *   - max_items: int (type 'array' only)
  *
  * Returns a coerced value map. Throws InvalidArgumentException with a
@@ -24,7 +27,10 @@
  * The logic file's own validation still runs as the backstop — this is the
  * fast first-pass at the boundary, not a replacement.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - type 'array' also accepts a scalar `items` spec (a list of
+ *   strings/ints/…), used by list-shaped config fields like the email jobs'
+ *   mailbox_aliases.
  * @changelog 1.1 - Promoted to core includes/: consumed by the REST API
  *   action endpoint as well as joinery_ai.
  */
@@ -68,8 +74,11 @@ class DescriptorValidator {
     }
 
     /**
-     * type 'array' — a list of objects, each coerced against `items` (a
-     * nested field-descriptor map, same shape as a top-level `input` schema).
+     * type 'array' — a list, each element coerced against `items`. A scalar
+     * `items` spec (its 'type' key is a type NAME, e.g. ['type' => 'string'])
+     * coerces every element as that scalar; otherwise `items` is a nested
+     * field-descriptor map and every element must be an object, recursively
+     * coerced the same way as a top-level schema.
      */
     private static function coerceArray($value, array $spec, string $field, string $label): array {
         if (!is_array($value) || !array_is_list($value)) {
@@ -79,8 +88,15 @@ class DescriptorValidator {
             throw new InvalidArgumentException("$label ($field) must have at most {$spec['max_items']} items.");
         }
         $item_schema = isset($spec['items']) && is_array($spec['items']) ? $spec['items'] : [];
+        $scalar_items = isset($item_schema['type']) && is_string($item_schema['type']);
         $out = [];
         foreach ($value as $i => $item) {
+            if ($scalar_items) {
+                $coerced = self::coerceValue($item, $item_schema['type'], "{$field}[$i]", "$label #$i");
+                self::checkBounds($coerced, $item_schema, $item_schema['type'], "{$field}[$i]", "$label #$i");
+                $out[] = $coerced;
+                continue;
+            }
             if (!is_array($item)) {
                 throw new InvalidArgumentException("$label ($field)[$i] must be an object.");
             }
@@ -149,12 +165,16 @@ class DescriptorValidator {
         }
         if ($type === 'array') {
             $item_schema = isset($spec['items']) && is_array($spec['items']) ? $spec['items'] : [];
-            $item_bits = [];
-            foreach ($item_schema as $item_field => $item_spec) {
-                if (!is_array($item_spec)) continue;
-                $item_bits[] = $item_field . ': ' . self::describeField($item_spec);
+            if (isset($item_schema['type']) && is_string($item_schema['type'])) {
+                $bits[] = 'items: ' . self::describeField($item_schema);
+            } else {
+                $item_bits = [];
+                foreach ($item_schema as $item_field => $item_spec) {
+                    if (!is_array($item_spec)) continue;
+                    $item_bits[] = $item_field . ': ' . self::describeField($item_spec);
+                }
+                $bits[] = 'items {' . implode(', ', $item_bits) . '}';
             }
-            $bits[] = 'items {' . implode(', ', $item_bits) . '}';
             if (isset($spec['max_items'])) $bits[] = 'max_items ' . $spec['max_items'];
         }
         $desc = isset($spec['label']) ? ' — ' . $spec['label'] : '';

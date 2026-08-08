@@ -2,6 +2,8 @@
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteExecutor.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 
 /**
  * Create a new row in a model that opts into AI writes via a non-empty
@@ -12,8 +14,17 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelWriteE
  * failure. Success envelope includes the new row's key and creation time
  * so the LLM can recognize prior success from its conversation history
  * and not re-emit the call.
+ *
+ * Queueable: in a surface that defers writes, a call renders as an approval
+ * card built from these literal arguments (specs/implemented/ai_action_queue.md).
  */
-class CreateModelTool implements RecipeToolInterface {
+class CreateModelTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $lines = ['Create a ' . ProposedActionFacts::scalar($input['model'] ?? '?') . ' record'];
+        $fields = isset($input['fields']) && is_array($input['fields']) ? $input['fields'] : [];
+        return array_merge($lines, ProposedActionFacts::fieldLines($fields));
+    }
 
     public static function name(): string {
         return 'create_model';

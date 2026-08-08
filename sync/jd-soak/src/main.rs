@@ -27,7 +27,7 @@ use jd_proto::{Client, Credentials};
 use jd_soak::chaos::{Chaos, Fault, RealReach};
 use jd_soak::fleet::{Device, Fleet};
 use jd_soak::orchestrate::{self, Campaign};
-use jd_soak::{journal, persona, report, verify};
+use jd_soak::{journal, persona, report, server, verify};
 
 const USAGE: &str = "\
 usage: jd-soak init <fleet.json> --base DIR --server URL [--devices N]
@@ -359,6 +359,36 @@ fn cmd_orchestrate(rest: &[String]) -> Result<bool, String> {
         campaign.storm.as_secs(),
         campaign.settle_deadline.as_secs()
     );
+
+    // Before anything is written: can this server answer the question the
+    // campaign exists to ask?
+    match server::version_oracle(&api) {
+        Ok(server::VersionOracle::Answers) => {}
+        Ok(server::VersionOracle::NothingToAsk) => {
+            println!(
+                "note: no file on this server has a second version yet, so whether it will \
+                 identify version contents is still unknown"
+            );
+        }
+        Ok(server::VersionOracle::Anonymous) => {
+            if !args.has("ignore-blind-server") {
+                return Err(
+                    "this server lists file versions without saying what any of them holds, so \
+                     the no-loss invariant cannot be measured against it — every search of \
+                     version history will come back empty however much the server is keeping, \
+                     and content it holds safely will be reported as permanently lost. Upgrade \
+                     the server to one whose drive_versions carries content_sha256, or pass \
+                     --ignore-blind-server to run a campaign that cannot answer the question."
+                        .into(),
+                );
+            }
+            println!(
+                "WARNING: this server does not identify version contents. no-loss is NOT being \
+                 measured this campaign."
+            );
+        }
+        Err(e) => println!("note: could not establish whether the server identifies versions: {e}"),
+    }
 
     let reach = RealReach;
     let stop = AtomicBool::new(false);

@@ -62,16 +62,21 @@ class FixtureJudgeJob implements PipelineJobInterface {
     /** This fixture's items are plain in-memory strings — no vault needed. */
     public function requiresVaultScope(array $config): ?string { return null; }
 
+    /** Nothing sealed, so cron can always progress. */
+    public function hasUnsealedBinding(array $config): bool { return true; }
+
     /** No sealed source, so nothing to protect from a cloud model. */
     public function cloudProcessingAllowed(array $config): bool { return true; }
 
-    public function hasWork(array $config, Recipe $recipe): bool {
+    public function hasWork(array $config, Recipe $recipe, ?string $posture = null): bool {
         return $this->nextItem($config, $recipe) !== null;
     }
 
-    public function countWork(array $config, Recipe $recipe): int {
+    public function countWork(array $config, Recipe $recipe, ?string $posture = null): int {
         return $this->hasWork($config, $recipe) ? 1 : 0;
     }
+
+    public function coverageNotes(array $config, Recipe $recipe): array { return []; }
 
     public function nextItem(array $config, Recipe $recipe): ?array {
         $db = DbConnector::get_instance()->get_db_link();

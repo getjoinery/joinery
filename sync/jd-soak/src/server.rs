@@ -199,19 +199,35 @@ fn entity_from(item: &Value) -> Option<Entity> {
     })
 }
 
+/// What a file's saved history holds, and whether the server would say.
+///
+/// The second field is the whole point of this being a struct. A server that
+/// lists five versions and names the contents of none of them is not a server
+/// with no history — it is a server that cannot answer the question, and the
+/// two are indistinguishable from a list of hashes alone.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct History {
+    pub hashes: Vec<String>,
+    /// Version rows the server listed without saying what they hold.
+    pub unidentified: usize,
+}
+
 /// Every content hash in a file's saved version history.
-pub fn version_contents(api: &dyn DriveApi, file_id: i64) -> Result<Vec<String>, ProtoError> {
+pub fn version_contents(api: &dyn DriveApi, file_id: i64) -> Result<History, ProtoError> {
     let answer = api.action("drive_versions", json!({ "file_id": file_id }))?;
-    Ok(answer
+    let mut history = History::default();
+    for version in answer
         .get("versions")
         .and_then(Value::as_array)
-        .map(|list| {
-            list.iter()
-                .filter_map(|v| v.get("content_sha256").and_then(Value::as_str))
-                .map(str::to_string)
-                .collect()
-        })
-        .unwrap_or_default())
+        .cloned()
+        .unwrap_or_default()
+    {
+        match version.get("content_sha256").and_then(Value::as_str) {
+            Some(sha) => history.hashes.push(sha.to_string()),
+            None => history.unidentified += 1,
+        }
+    }
+    Ok(history)
 }
 
 /// Hunt through version history for contents that are not accounted for
@@ -232,30 +248,85 @@ pub fn find_in_version_history(
     tree: &ServerTree,
     wanted: &std::collections::BTreeSet<String>,
     budget: usize,
-) -> Result<(std::collections::BTreeSet<String>, usize), ProtoError> {
-    let mut found = std::collections::BTreeSet::new();
-    let mut asked = 0;
+) -> Result<Search, ProtoError> {
+    let mut search = Search::default();
     if wanted.is_empty() {
-        return Ok((found, asked));
+        return Ok(search);
     }
     for file in tree.files.values() {
-        if asked >= budget || found.len() == wanted.len() {
+        if search.asked >= budget || search.found.len() == wanted.len() {
             break;
         }
-        asked += 1;
+        search.asked += 1;
         // One file's history failing is not a reason to abandon the search —
         // the content might be in the next one, and reporting loss because a
         // single call errored would be a false violation.
-        let Ok(versions) = version_contents(api, file.id) else {
+        let Ok(history) = version_contents(api, file.id) else {
+            search.unreadable += 1;
             continue;
         };
-        for sha in versions {
+        search.unidentified += history.unidentified;
+        for sha in history.hashes {
             if wanted.contains(&sha) {
-                found.insert(sha);
+                search.found.insert(sha);
             }
         }
     }
-    Ok((found, asked))
+    Ok(search)
+}
+
+/// Whether this server can answer the question the no-loss invariant asks.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum VersionOracle {
+    /// It names the content of the versions it keeps. The invariant is
+    /// measurable.
+    Answers,
+    /// It lists versions and names the content of none of them. Every search of
+    /// version history will come back empty whatever the server is holding, so
+    /// no-loss cannot be measured at all.
+    Anonymous,
+    /// No file has a second version yet, so there was nothing to ask about.
+    /// Inconclusive rather than good news.
+    NothingToAsk,
+}
+
+/// Ask the server, before a campaign starts, whether it will identify the
+/// contents of a file's saved versions.
+///
+/// This exists because it did not, for twenty-three runs. The rig's own server
+/// predated `content_sha256` on `drive_versions`, so every history came back
+/// anonymous, every search returned the empty set, and files the server was
+/// holding safely were reported as permanently lost. Nothing about that was
+/// visible until somebody read the endpoint's source. Ten seconds up front
+/// beats two hours of a campaign that cannot measure its headline invariant.
+pub fn version_oracle(api: &dyn DriveApi) -> Result<VersionOracle, ProtoError> {
+    let tree = walk(api)?;
+    for file in tree.files.values() {
+        let history = version_contents(api, file.id)?;
+        if !history.hashes.is_empty() {
+            return Ok(VersionOracle::Answers);
+        }
+        if history.unidentified > 0 {
+            return Ok(VersionOracle::Anonymous);
+        }
+    }
+    Ok(VersionOracle::NothingToAsk)
+}
+
+/// What one pass through version history managed to establish.
+///
+/// `found` on its own cannot be read: an empty set means "the content is not in
+/// any history" only if the search could actually see the histories it walked.
+/// The other three fields are how far short of that it fell.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Search {
+    pub found: std::collections::BTreeSet<String>,
+    /// Files whose history was asked for.
+    pub asked: usize,
+    /// Version rows listed without a content identity, across every file asked.
+    pub unidentified: usize,
+    /// Files whose history could not be read at all.
+    pub unreadable: usize,
 }
 
 #[cfg(test)]
@@ -432,6 +503,47 @@ mod tests {
                 {"version_id": 1, "content_sha256": "first"},
             ]
         })]);
-        assert_eq!(version_contents(&api, 7).unwrap(), vec!["second", "first"]);
+        assert_eq!(
+            version_contents(&api, 7).unwrap(),
+            History {
+                hashes: vec!["second".into(), "first".into()],
+                unidentified: 0,
+            }
+        );
+    }
+
+    #[test]
+    fn a_version_the_server_will_not_identify_is_counted_not_ignored() {
+        // The failure this exists to stop, found in run 23 and present in every
+        // run before it: the soak server predates content_sha256 on
+        // drive_versions, so every version came back anonymous. Filtering them
+        // away made a full history read as no history, the search returned the
+        // empty set every time, and two files the server was holding as
+        // versions were reported permanently lost.
+        let api = canned(vec![json!({
+            "versions": [
+                {"version_id": 2, "version_number": 2, "size": 10},
+                {"version_id": 1, "version_number": 1, "size": 10},
+            ]
+        })]);
+        let history = version_contents(&api, 7).unwrap();
+        assert!(history.hashes.is_empty());
+        assert_eq!(history.unidentified, 2);
+    }
+
+    #[test]
+    fn a_search_of_anonymous_histories_reports_that_it_could_not_look() {
+        let api = canned(vec![
+            json!({"items": [file(1, "a.txt", None, "head", false)], "done": true}),
+            json!({"versions": [{"version_id": 1, "version_number": 1, "size": 10}]}),
+        ]);
+        let tree = walk(&api).unwrap();
+        let wanted = ["wanted".to_string()].into_iter().collect();
+        let search = find_in_version_history(&api, &tree, &wanted, 100).unwrap();
+        assert!(search.found.is_empty());
+        assert_eq!(search.asked, 1);
+        // The difference between "not there" and "could not look", which is the
+        // whole point: without this the caller cannot tell them apart.
+        assert_eq!(search.unidentified, 1);
     }
 }

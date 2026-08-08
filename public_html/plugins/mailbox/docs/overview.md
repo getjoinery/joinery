@@ -2209,6 +2209,16 @@ The mounts differ only in chrome and endpoint URLs (handed to the JS via
 `window.MAILBOX_READER`); the endpoints themselves scope every read and write
 via `MailboxViewer`.
 
+The **member mount only** also carries an **AI** button beside Actions when
+the joinery_ai plugin is active: it mounts that plugin's area AI panel
+(`JoineryAiPanel.mount`), a drawer where the signed-in user switches their AI
+recipes on or off for the mailbox open in the rail. The reader exposes the
+host surface the panel reads — `window.MailboxReader.currentAddress()` plus a
+`joineryareacontextchange` event on every rail switch. The admin mount
+deliberately does not carry the button: its all-access view spans mailboxes
+the viewer holds no grant on, and admins manage recipes on the dashboard. See
+`plugins/joinery_ai/docs/overview.md` § The area AI panel.
+
 ### Mailbox-per-address model
 
 **A mailbox IS an address (alias).** `beth@` and `legal@` are two mailboxes
@@ -3024,13 +3034,17 @@ their own `aip_recipe_item_log` rows, so either can run on a mailbox without
 the other, or both together.
 
 **`MailboxAliasConfig`** (`includes/MailboxAliasConfig.php`) is the shared
-mailbox-alias config helper both AI pipeline jobs bind through: the dropdown
+mailbox-alias config helper the AI pipeline jobs bind through: the option map
 of enabled, store-capable mailbox addresses (`aliasOptions()`), address
-resolution to an alias id (`resolveAliasId()`), the `mailbox_alias`
-descriptor field (`descriptorField()`), and the owner-grant check a recipe's
-`validateConfig()` runs at save time (`validateOwnerGrant()`). It lives in
-this plugin, not `joinery_ai`, because it is mailbox-domain knowledge — the
-dependency points this plugin → `joinery_ai`, never the reverse.
+resolution to an alias id (`resolveAliasId()` / `resolveActiveAliasId()`), the
+`mailbox_aliases` checkbox-list descriptor field (`descriptorListField()`),
+the normalized stored list (`listedAddresses()`), the live resolution of what
+a recipe covers right now (`resolveBoundAliases()` — grant held, alias
+enabled, domain enabled, re-checked on every read), and the owner-grant check
+a recipe's `validateConfig()` runs per listed address at save time
+(`validateOwnerGrant()`). It lives in this plugin, not `joinery_ai`, because
+it is mailbox-domain knowledge — the dependency points this plugin →
+`joinery_ai`, never the reverse.
 
 **Verdict fields**, written only by the job's `recordVerdict()`:
 

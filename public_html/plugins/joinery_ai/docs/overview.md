@@ -3,7 +3,7 @@
 The `joinery_ai` plugin runs LLM-driven work against the platform through two **admin-only** surfaces over one shared engine:
 
 - **Recipes** — scheduled or on-demand LLM work, executing with the recipe owner's identity, in one of two modes: **agent mode** (the model drives a tool loop and writes a final report) or **pipeline mode** (PHP drives item selection; the model judges one item at a time — see [Item pipeline recipes](#item-pipeline-recipes)).
-- **Chat** (`/admin/joinery_ai/chat`) — an interactive assistant that runs the same tool loop a turn at a time, executing as the acting admin, with consequential mutations held for a live confirmation.
+- **Chat** (`/admin/joinery_ai/chat`) — an interactive assistant that runs the same tool loop a turn at a time, executing as the acting admin, with every mutating call queued as a proposed action the owner approves or declines.
 
 Both surfaces drive the same `AgentLoop` over the same tools; what differs is reached through the run **context** (`ToolContext`).
 
@@ -35,11 +35,14 @@ plugins/joinery_ai/
     ChatTurnContext.php        # Chat turn context (ToolContext)
     ChatMemory.php             # Memory gate + two-layer automatic memory context
     ChatRender.php             # Transcript markup shared by view + AJAX endpoints
-    RiskHeuristic.php          # Inline-vs-confirm classifier for mutating calls
+    RiskHeuristic.php          # The is-this-call-mutating predicate for the deferred-write boundary
     RecipeToolInterface.php    # Tool contract
     RecipeToolRegistry.php     # Auto-discovers tools across plugins
     DescriptorValidator.php    # Coerces/validates input against a descriptor; renders the pipeline output instruction
-    TaintGate.php               # Tainted-write posture for both agent and pipeline mode
+    TaintGate.php               # Standing-approval (tainted-write) posture for both modes
+    ActionQueue.php             # The proposed-action queue — the one deferred write door
+    QueueableToolInterface.php  # Card-renderer opt-in a tool needs before it can be queued
+    ProposedActionFacts.php     # Shared literal-argument fact-line rendering
     llm/
       LlmProviderInterface.php   # Provider contract (createMessage / cost / models / isPrivate)
       LlmProviderException.php   # Base provider error; AnthropicException extends it
@@ -233,18 +236,23 @@ interface PipelineJobInterface {
     public function validateConfig(array $config, Recipe $recipe): void;
     public function untrustedDigest(): bool;
     public function requiresVaultScope(array $config): ?string;
+    public function hasUnsealedBinding(array $config): bool;
     public function nextItem(array $config, Recipe $recipe): ?array;
-    public function hasWork(array $config, Recipe $recipe): bool;
+    public function hasWork(array $config, Recipe $recipe, ?string $posture = null): bool;
+    public function countWork(array $config, Recipe $recipe, ?string $posture = null): int;
+    public function coverageNotes(array $config, Recipe $recipe): array;
     public function verdictDescriptor(): array;
     public function defaultPrompt(): string;
     public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void;
 }
 ```
 
-- **`configDescriptor()`** — the per-recipe binding config (which mailbox, which alias, …), in `DescriptorValidator` shape. Rendered on the edit form via FormWriter's `fromDescriptor()`; coerced and passed to `validateConfig()` at save time and again at each run.
+- **`configDescriptor()`** — the per-recipe binding config (which mailboxes, which alias, …), in `DescriptorValidator` shape. Rendered on the edit form via FormWriter's `fromDescriptor()`; coerced and passed to `validateConfig()` at save time and again at each run.
 - **`untrustedDigest()`** — whether item digests carry attacker-controlled text (an inbound email body, a user-submitted message). Drives the taint posture (below).
-- **`requiresVaultScope()`** — the vault scope this binding's items need, or null. Answered from `$config` because the same job can need a window for one binding and not another: the email jobs need one only when the mailbox they point at is on a domain that encrypts mail at rest. A job returning non-null puts the recipe on the in-window path described below.
-- **`hasWork()`** — the same question `nextItem()` answers, without building an item. It must stay a single indexed query: the vault heartbeat calls it for every in-window recipe on every beat.
+- **`requiresVaultScope()`** — the vault scope this binding's items need, or null. Answered from `$config` because the same job can need a window for one binding and not another: the email jobs need one only when an address on their list is on a domain that encrypts mail at rest. A job returning non-null puts the recipe's sealed subset on the in-window path described below.
+- **`hasUnsealedBinding()`** — whether any part of the binding is readable without a vault window, i.e. whether a cron worker can make progress at all. Only consulted when `requiresVaultScope()` is non-null; a job with nothing sealed returns true.
+- **`hasWork()` / `countWork()`** — the same question `nextItem()` answers, without building an item; `hasWork()` must stay a single indexed query, since the vault heartbeat calls it for every in-window recipe on every beat. The optional `$posture` (`POSTURE_SEALED` / `POSTURE_STANDARD`) narrows the answer to one subset of the binding — the heartbeat asks about the sealed subset only, so standard-mailbox backlogs stay on cron's schedule instead of draining on window-open.
+- **`coverageNotes()`** — one plain-language line per part of the binding the run cannot cover right now (a revoked grant, a disabled mailbox, a domain that sealed itself without the AI opt-in). Rendered on the run tally so coverage never shrinks silently.
 - **`nextItem()`** — the next unhandled item, oldest first, or `null` when the recipe is caught up. Returns `['item_key' => ..., 'digest' => ..., 'label' => ...]`. Must exclude items already in the processing log — `MultiAipRecipeItemLog::notExistsClause()` gives the NOT-EXISTS SQL fragment to splice into the job's own item-source query. The job owns the digest's size cap so it fits the smallest intended model's context.
 - **`verdictDescriptor()`** — the verdict contract, in the same descriptor shape `configDescriptor()` uses. The runner renders this into the model-facing output instruction and validates the model's answer against it, so the prompt half and the validator can't drift apart.
 - **`defaultPrompt()`** — the job's built-in instructions, used whenever the recipe's `rcp_prompt` is empty (the normal case — a non-technical admin creating a pipeline recipe touches only: job, the job's config fields, model, and schedule). A non-empty `rcp_prompt` replaces it entirely as a power-user override.
@@ -293,22 +301,44 @@ Pipeline mode is deliberately narrow. When a recipe idea doesn't fit, here's wha
 
 ### Registered jobs
 
-- **`email_security_scan`** (`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) — scores each inbound email on one configured mailbox for phishing/scam danger. Config is a single mailbox selector (`mailbox_alias`, the alias's full address); `validateConfig()` requires the recipe owner to hold a mailbox grant (`ieg_inbound_email_mailbox_grants`) on it. `nextItem()` selects the oldest non-spam, not-yet-logged message on that mailbox and renders it via `EmailSecurityDigest::build()` (see `plugins/mailbox/docs/overview.md`) — never raw MIME. The verdict is `score` (0-10), `verdict` (`safe` / `suspicious` / `dangerous`), `red_flags` (up to 12, each a checklist letter A-G plus a one-sentence finding), and `summary`; `validateVerdict()` rejects a verdict whose `verdict` disagrees with the score band (0-2 safe / 3-6 suspicious / 7-10 dangerous). `recordVerdict()` writes exactly three fields on the scanned message (`iem_ai_danger_score`, `iem_ai_scan`, `iem_ai_scan_time`) and refuses to write to a message outside the configured mailbox. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
-- **`email_triage`** (`plugins/joinery_ai/pipeline_jobs/EmailTriageJob.php`) — sorts each inbound email on one configured mailbox into the mailbox owner's existing labels and writes a one-line summary, so the inbox is triaged automatically. Config is the same single mailbox selector (`mailbox_alias`) as the security scan job, sharing its access check via `MailboxAliasConfig::validateOwnerGrant()` (`plugins/mailbox/includes/MailboxAliasConfig.php`, also shared with `email_security_scan`). `nextItem()` selects the oldest non-spam, non-sealed, not-yet-logged message on that mailbox — the same query shape as `email_security_scan`, a separate `aip_recipe_item_log` row so both jobs can run on one mailbox without clobbering each other — and renders it via `EmailSecurityDigest::build()` plus, when the message carries non-inline attachments, an appended `EmailAttachmentDigest::build()` section (metadata for every part; readable text for file-backed `text/plain` bodies and rendered `.ics` invites — see `plugins/mailbox/docs/overview.md`). The verdict is `label` (an enum of the mailbox owner's live label names plus the sentinel `none`, built fresh on every call so it never drifts from what labels actually exist — a label literally named `none` can never be applied, since the sentinel owns that string) and `summary` (one plain-language sentence, up to 280 characters). `recordVerdict()` applies the chosen label via `InboundLabelMember::apply()` (an *existing* label only — this job never creates one) and writes `iem_ai_summary`; it refuses to write to a message outside the configured mailbox, and silently skips the label application (summary still records) if the label was deleted between descriptor build and verdict. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
-- **`email_schedule`** (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) — reads each inbound email on one configured mailbox for a real, dated event (meeting, deadline, reservation, …) and puts it on the recipe owner's own calendar. Config and item selection are the same `mailbox_alias` shape as the other two email jobs, its own `aip_recipe_item_log` row, and the same `EmailSecurityDigest::build()` + `EmailAttachmentDigest::build()` digest as `email_triage`. When the digest's ATTACHMENTS section carries an ICS EVENT block, the prompt directs the model to take that invite's title/start/end/timezone verbatim as the authoritative statement of the event rather than deriving them from prose. The verdict is `event_found` (bool) plus, when true, `title`/`start_local`/`end_local`/`timezone`/`all_day`; `validateVerdict()` requires a well-formed `title` and `start_local` when `event_found` is true and rejects an `end_local` that isn't after `start_local`. `recordVerdict()` does **not** configure a write target — the calendar is always the recipe owner's own, fixed in code — and resolves a missing/invalid `timezone` to the owner's profile timezone before calling `CalendarEntryImporter::upsert()` (see [Calendar access](#calendar-access)) with `source = 'email'`, `source_ref` = the message id, so a log-row reset and re-run updates the same entry instead of duplicating it. `event_found = false` records nothing beyond the processing-log row. `untrustedDigest()` is `true` — the recipe is tainted-capable and needs `rcp_allow_tainted_writes`.
+All three email jobs extend `EmailPipelineJobBase` (`plugins/joinery_ai/includes/EmailPipelineJobBase.php`), which owns everything they share; each concrete job supplies only its identity, verdict contract, prompt, and what it does with a verdict. The shared spine:
+
+- **The mailbox list.** Config is `mailbox_aliases` — an explicit list of full addresses, rendered as a checkbox list of the stored mailboxes. The recipe covers exactly this list, nothing implicitly: there is deliberately no "all my mailboxes" mode, because the list is edited from two surfaces (the recipes dashboard and the mail page's AI panel) and that only stays comprehensible when both read and write the same explicit list. An empty list is legal — the recipe covers nothing and finds no candidates.
+- **Validation, per address.** `validateConfig()` holds every listed address to one rule: it must resolve to a real, enabled, store-capable mailbox; the recipe owner must hold a mailbox grant (`ieg_inbound_email_mailbox_grants`) on it, via `MailboxAliasConfig::validateOwnerGrant()` (`plugins/mailbox/includes/MailboxAliasConfig.php`); and a sealed domain must carry the AI-processing opt-in, refused loudly at save time by name.
+- **Live re-resolution.** What a run may actually read is re-resolved on every read through `MailboxAliasConfig::resolveBoundAliases()`: a grant revoked or a mailbox disabled after save drops that address out immediately, and the run tally names the gap via `coverageNotes()` — coverage never shrinks silently. Each sealed address contributes candidates only while the owner's vault window is open in that request and its domain keeps the AI opt-in; the standard addresses on the same list are unaffected.
+- **Union selection.** `nextItem()` selects the newest unread, parsed, non-spam, non-draft, not-yet-logged message **across the union** of the readable bound set — one query in `EmailJobCandidates`, shared by all three jobs so they cannot drift apart. Item keys are message ids, unique across mailboxes, so the per-recipe processing log needs no per-mailbox scoping.
+- **The write door, re-resolved.** Every `recordVerdict()` loads its message through the base's `loadJudgedMessage()`, which re-resolves the bound set and refuses a message on any mailbox the config doesn't cover right now — model output can never steer the one write door elsewhere.
+- **`untrustedDigest()` is `true`** for all three — the recipes are tainted-capable and need `rcp_allow_tainted_writes`.
+
+The jobs:
+
+- **`email_security_scan`** (`plugins/joinery_ai/pipeline_jobs/EmailSecurityScanJob.php`) — scores each inbound email on the bound mailboxes for phishing/scam danger, rendered via `EmailSecurityDigest::build()` (see `plugins/mailbox/docs/overview.md`) — never raw MIME, and no attachment digest: the scan judges envelope and body alone. The verdict is `score` (0-10), `verdict` (`safe` / `suspicious` / `dangerous`), `red_flags` (up to 12, each a checklist letter A-G plus a one-sentence finding), and `summary`; `validateVerdict()` rejects a verdict whose `verdict` disagrees with the score band (0-2 safe / 3-6 suspicious / 7-10 dangerous). `recordVerdict()` writes exactly three fields on the scanned message (`iem_ai_danger_score`, `iem_ai_scan`, `iem_ai_scan_time`).
+- **`email_triage`** (`plugins/joinery_ai/pipeline_jobs/EmailTriageJob.php`) — sorts each inbound email on the bound mailboxes into existing labels and writes a one-line summary, so the inbox is triaged automatically. Digest is `EmailSecurityDigest::build()` plus, when the message carries non-inline attachments, an appended `EmailAttachmentDigest::build()` section (metadata for every part; readable text for file-backed `text/plain` bodies and rendered `.ics` invites — see `plugins/mailbox/docs/overview.md`). The verdict is `label` (an enum of live label names plus the sentinel `none`, built fresh on every call so it never drifts from what labels actually exist — label names are one global namespace, so the enum covers every bound mailbox by construction; a label literally named `none` can never be applied, since the sentinel owns that string) and `summary` (one plain-language sentence, up to 280 characters). `recordVerdict()` applies the chosen label via `InboundLabelMember::apply()` (an *existing* label only — this job never creates one) and writes `iem_ai_summary`; it silently skips the label application (summary still records) if the label was deleted between descriptor build and verdict.
+- **`email_schedule`** (`plugins/joinery_ai/pipeline_jobs/EmailScheduleJob.php`) — reads each inbound email on the bound mailboxes for a real, dated event (meeting, deadline, reservation, …) and puts it on the recipe owner's own calendar. Same digest as `email_triage`; when the ATTACHMENTS section carries an ICS EVENT block, the prompt directs the model to take that invite's title/start/end/timezone verbatim as the authoritative statement of the event rather than deriving them from prose. The verdict is `event_found` (bool) plus, when true, `title`/`start_local`/`end_local`/`timezone`/`all_day`; `validateVerdict()` requires a well-formed `title` and `start_local` when `event_found` is true and rejects an `end_local` that isn't after `start_local`. `recordVerdict()` does **not** configure a write target — the calendar is always the recipe owner's own, fixed in code — and resolves a missing/invalid `timezone` to the owner's profile timezone before calling `CalendarEntryImporter::upsert()` (see [Calendar access](#calendar-access)) with `source = 'email'`, `source_ref` = the message id, so a log-row reset and re-run updates the same entry instead of duplicating it. `event_found = false` records nothing beyond the processing-log row.
 
 ### Recipes that run in the owner's unlock window
 
 A job whose `requiresVaultScope()` returns a scope reads content encrypted to
-one user, which changes how — and whether — its recipe can run at all.
+one user, which changes how — and whether — parts of its recipe can run at all.
 
-Such a recipe **never runs from cron**. The vault secret lives in APCu keyed to
-the browser session, so a CLI worker holds no window and would read nothing.
-`RecipeDispatcher` skips these recipes when scheduling, and
-`RecipeWorkerSpawner` refuses to spawn a worker for one — refusing in both
-places covers Run Now and the worker self-chain, not just the scheduled path.
+The sealed part of such a binding **never runs from cron**. The vault secret
+lives in APCu keyed to the browser session, so a CLI worker holds no window and
+would read nothing. The split is per subset, because one recipe's mailbox list
+can span both postures:
 
-They run through `RecipeVaultScope`, registered as a
+- A recipe with **no** standard address (`hasUnsealedBinding()` false —
+  `RecipeVaultScope::cronRunnable()`) is skipped by `RecipeDispatcher` when
+  scheduling, and `RecipeWorkerSpawner` refuses to spawn a worker for it —
+  refusing in both places covers Run Now and the worker self-chain, not just
+  the scheduled path.
+- A **mixed** binding is scheduled normally: on the CLI worker its sealed
+  addresses fail closed out of the candidate set and the run drains the
+  standard remainder. Run Now behaves the same way.
+- The vault heartbeat asks `hasWork(…, POSTURE_SEALED)`, so an open window
+  drains only the sealed subset — standard-mailbox backlogs stay on the
+  recipe's own schedule.
+
+The sealed subset runs through `RecipeVaultScope`, registered as a
 [deferred-work consumer](../../../docs/sealed_vault.md#deferred-work-in-the-window):
 in slices, inside the owner's own request, while their vault is open. Each slice
 creates an ordinary `RecipeRun` with `rcr_trigger = 'window'`, so run history,
@@ -325,6 +355,170 @@ acting user already *is* the owner — which is the only way a slice ever runs.
 
 Standard-tier bindings are unaffected: `requiresVaultScope()` returns null, and
 those recipes keep running unattended on their schedule.
+
+## The area AI panel
+
+An area page (the mail reader; the calendar and drive pages mount the same
+thing later) carries an **AI** button opening a slide-over drawer: one card per
+relevant recipe of the signed-in user, each with an on/off toggle meaning
+"runs on the context currently open" — the mailbox selected in the reader's
+rail. The drawer's layout reserves a pinned composer slot at its bottom edge
+for a future "ask AI to do something" strip; nothing renders there until that
+feature exists.
+
+**The component.** `plugins/joinery_ai/assets/ai_panel.js` + `ai_panel.css` —
+vanilla JS/CSS, jy-ui styling. Host contract:
+
+```js
+JoineryAiPanel.mount({
+    area: 'mailbox',                        // 'calendar', 'drive' later
+    getContext: function () {               // called on open and on refresh
+        return { mailbox: state.currentAddress };
+    },
+    anchor: headerElement                   // the AI button renders inside it
+});
+```
+
+Hosts dispatch `joineryareacontextchange` on `document` when their context
+moves (the reader's rail switching mailboxes); an open drawer refreshes.
+
+**Area relevance is a job opt-in.** A pipeline job appears in a panel only by
+implementing `AreaScopedJobInterface` (`area()`, `coversContext()`,
+`bindContext()`, `contextCount()`) — the panel never reads
+`rcp_source_config` itself; it asks the job whether the context is covered and
+for an updated config with the context bound or unbound, and every bind goes
+back through `validateConfig()`. The three email jobs implement it through
+`EmailPipelineJobBase` with `area() === 'mailbox'` and
+`$context = ['mailbox' => $address]`. Agent-mode recipes have no context
+binding and never appear.
+
+**Two API actions** (`plugins/joinery_ai/logic/`, called over `/api/v1` with
+the browser-session credential; both member-callable — ownership scoping is
+the authorization, there is no permission gate):
+
+- **`joinery_ai/ai_panel_state`** (read) — the caller's own area recipes as
+  server-rendered cards (covered flag, paused flag, blocked reason and
+  wording, other-mailbox count, last-run line; a dashboard link for
+  permission-10 viewers), plus one template card per shipped declaration the
+  caller has no instance of — so on a stock install the panel is never empty.
+- **`joinery_ai/ai_panel_toggle`** (write) — binds or unbinds the context on
+  the caller's recipe under a row lock (the stored list is re-read inside the
+  toggle's own transaction, so a dashboard save racing a panel toggle can
+  never clobber an address the other surface just wrote). Turning ON a
+  tainted-capable recipe before its owner has accepted tainted writes answers
+  `{confirm_required, confirm_text}` — the `TaintGate::explain()` wording — and
+  the panel renders a `<dialog>` and retries with `accept_tainted_writes`. A
+  toggle against a globally disabled recipe is refused: the kill switch
+  (`rcp_enabled`) is dashboard-only, and the panel's grayed "Paused from the
+  recipes dashboard" control is a rendering of that server truth.
+
+**Templates and per-user instances.** A recipe runs as its owner — the grant
+check, the vault window, the taint acceptance and the token cap are all the
+owner's — so a member "running" a shipped recipe means their **own instance**
+of it. First toggle-ON of a template card creates one from the declaration via
+`RecipeSeeder::instantiateForUser()`: owner = the caller, created *enabled*
+(the toggle is itself the enablement choice; the taint acceptance rode the
+same dialog), carrying `rcp_template_key` — non-unique, never the seeder's
+unique `rcp_declared_key` — and bound to the clicked mailbox. Every later
+toggle edits that instance; the seeded row is never mutated by the panel.
+Members still cannot *create* recipes — the dashboard stays superadmin-only;
+instantiating and steering the shipped ones is the whole member surface.
+
+The mounts: the member mailbox page (`/profile/mailbox/mailbox`) mounts the
+panel when the joinery_ai plugin is active. The admin oversight reader does
+not — its all-access view spans mailboxes the viewer holds no grant on, and
+admins manage recipes on the dashboard.
+
+**Waiting for you.** Below the recipe cards the drawer lists the user's
+pending queued actions ([Proposed actions](#proposed-actions)) with
+approve/decline on each, and the AI button carries a pending-count badge —
+the panel is the whole AI surface for the area: standing automations above,
+pending actions below, the composer slot at the bottom.
+
+## Proposed actions
+
+One rule, made structural (specs/implemented/ai_action_queue.md): **the AI never changes
+anything without either a standing rule you configured, or a yes you
+clicked.** Every AI-initiated write reaches the database or an outbound
+channel through exactly one of two doors:
+
+1. **A recipe's own write door** — `recordVerdict()` behind the owner's
+   standing approval (pipeline mode), or an agent recipe's allow-listed tools
+   behind the same save-time approval.
+2. **An approved queued action** — executed at the moment the owner approves
+   it, never before.
+
+There is no third door. In chat, a mutating tool call never executes in the
+turn: `AgentLoop` hands it to the context's `enqueueProposedAction()`, which
+stores it as a pending `aqa_ai_queued_actions` row and returns a "queued"
+tool result, so the conversation continues while the proposal waits. The
+model is told it must not retry or assume the outcome. A hostile message's
+best possible outcome drops to "proposed an action the owner saw and
+declined." This is the third leg of an existing pattern: `TaintGate` arms on
+untrusted reads, `SealedEgressGuard` refuses unprotected writes of sealed
+content — the queue **defers** an AI write to a human.
+
+**The object** (`data/ai_queued_actions_class.php`, `AiQueuedAction`): owner,
+area, source (`chat` now; `recipe` reserved), conversation, the tool name,
+the **literal structured arguments** of the call, status
+(`pending` / `approved` / `declined` / `expired` / `failed`), the execution
+result, and a 7-day expiry. Resolved rows are kept — the queue doubles as the
+audit trail of what the AI did and who approved it.
+
+**The one-card rule.** The card the owner approves is built by the platform
+from the tool name + arguments (`ActionQueue::factsFor()`), never from the
+model's description of what it wants to do — if the card showed model prose
+as its substance, injected instructions would simply move into the prose. A
+tool can be queued only if it implements `QueueableToolInterface`
+(`renderProposedAction(array $input): array` — literal fact lines); a
+mutating tool without a renderer is refused outright, so an unrenderable
+action is impossible, not just unlikely. The four write tools
+(`create_model`, `update_model`, `delete_model`, `invoke_action`) implement
+it via `ProposedActionFacts`. `aqa_model_note` is reserved for a
+model-authored reason and only ever renders as collapsed quotation, never as
+the card's facts.
+
+**Sealing — a declared sealed sink from day one.** A chat turn that has read
+sealed content is hot (`SealedEgressGuard`), and a proposal's arguments may
+quote it. A hot enqueue seals `aqa_arguments` / `aqa_model_note` /
+`aqa_result` to the owner's vault (per-row, same shape as the sealed
+idempotency cache) — and is **refused** when it cannot be sealed (no vault,
+or no single attributable owner), never stored in the clear. A sealed card
+renders locked until the owner's window is open — which approval always has,
+because resolving is an in-browser act.
+
+**Resolving** (`ActionQueue::resolve()`): **approve** executes the call in
+that request, as the owner, through `AgentLoop::executeApproved()` — the same
+audited path, so the tool re-runs every guard it always runs (allow-lists,
+opt-ins, `authenticate_write`, the logic gauntlet); a validation miss or
+execution error resolves the row `failed` with the reason on the card — an
+approved action never silently half-happens. **Decline** resolves the row and
+runs nothing. A pending action past `aqa_expires_time` resolves `expired` and
+can never execute. Either way the resolution is appended to the source
+conversation as an `event` message row, so the model knows on its next turn.
+There is deliberately **no approve-all** — rubber-stamping is the queue's
+failure mode; a category of action that lands constantly is the signal it
+should become a recipe.
+
+**Where it appears:** inline in the chat transcript (a "Waiting for you"
+block of cards below the messages) and in the area AI panel's Waiting list —
+one object, one server-rendered card shape, one resolve path.
+
+**API surface** (`plugins/joinery_ai/logic/`, member-callable over `/api/v1`;
+ownership is the authorization):
+
+- **`joinery_ai/ai_actions_list`** `{status?, area?, conversation_id?}` →
+  `{actions: [card], pending_count}`; sweeps overdue pending rows to
+  `expired` first.
+- **`joinery_ai/ai_action_resolve`** `{action_id, resolution: approve|decline}`
+  → `{card, pending_count}`; refuses a non-pending action (idempotent-safe).
+
+**UI vocabulary.** User-facing text speaks of **standing approvals** and
+**pending actions**, never "taint": `TaintGate::explain()` is written in that
+vocabulary and every surface that shows it (the recipes dashboard, the AI
+panel's confirm dialog) inherits it. Internal identifiers (`TaintGate`,
+`rcp_allow_tainted_writes`) keep their names — they are precise for
+developers.
 
 ## LLM providers
 
@@ -377,13 +571,13 @@ interface RecipeToolInterface {
 
 `execute()` returns either a string (becomes `tool_result.content`) or `['content' => string, 'is_error' => bool]` for explicit error reporting.
 
-Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-independent contract both run contexts implement. It exposes identity (`actingUserId()`, `ownerTimezone()`), the read-scope flag (`ownerScopedReads()` — true for a non-admin member, who reads only their own rows), the per-run/per-turn untrusted-input nonce (`untrustedNonce()`), the capability allowlists (`allowedModels()`, `allowedActions()`), and the continuation/confirmation/audit hooks below. Recipe-only concepts (the `Recipe` row, the workspace) stay off the interface — the three workspace/recent-output tools reach the concrete `RecipeRunContext` directly and are never listed in a chat conversation's tools.
+Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-independent contract both run contexts implement. It exposes identity (`actingUserId()`, `ownerTimezone()`), the read-scope flag (`ownerScopedReads()` — true for a non-admin member, who reads only their own rows), the per-run/per-turn untrusted-input nonce (`untrustedNonce()`), the capability allowlists (`allowedModels()`, `allowedActions()`), and the continuation/deferred-write/audit hooks below. Recipe-only concepts (the `Recipe` row, the workspace) stay off the interface — the three workspace/recent-output tools reach the concrete `RecipeRunContext` directly and are never listed in a chat conversation's tools.
 
 **`AgentLoop`** (`includes/AgentLoop.php`) is the bounded tool-use loop shared by every AI surface: build params → `provider->createMessageStreamed($params, [$context, 'emitText'])` → dispatch tool calls → feed results back, up to the per-turn iteration cap or token budget. `run()` also accepts the resolved `temperature`, `top_p`, and `thinking_level`; it folds `temperature`/`top_p` into `$params` only when set and always passes `thinking` (so each provider can act on `off`), then each provider translates them to its own wire format. `RecipeRunner` (recipes) and `ChatRunner` (chat) each assemble the provider, system prompt, and tool allow-list, hand them to `AgentLoop`, and map the returned result onto their own bookkeeping. The two surfaces share one prompt assembly too: `AiPromptBuilder::untrustedInputBlock()` and `systemBlocks()` build the untrusted-input contract and the cached-prefix/untrusted layout for both, and `LlmProviderException::classify()` maps a failure to a stable code for both. Surface-specific behavior is reached through the context rather than baked into the loop:
 
 - **`shouldContinue()`** — a per-iteration guard. For a recipe that's the mid-run kill flag and the hard wall-clock timeout; for a chat turn it's a per-turn wall clock. Returns a stop reason or null.
 - **`beginToolCall()` / `finishToolCall()`** — the durable per-call audit. The recipe context flushes a started-but-not-completed entry to `rcr_tool_calls` before each call (so the dispatcher reaper can name the last call a hung run started) and updates it after; the chat context accumulates the trace in memory and the endpoint saves it on the assistant message (`aim_tool_calls`), where there is no hang-and-reap path.
-- **`requiresConfirmation()`** — when true, a mutating call that the `RiskHeuristic` flags is held for a live human sign-off (returned as a `pending_action`) instead of running. Recipes answer **false** — they're signed off at save time by the taint gate — so this hook is inert for recipe runs and the loop executes every call. Chat answers **true** (see [Chat](#chat) below).
+- **`queuesWrites()` / `enqueueProposedAction()`** — the deferred-write boundary ([Proposed actions](#proposed-actions)). When `queuesWrites()` is true, every mutating call (`RiskHeuristic::isMutating()`) is handed to `enqueueProposedAction()`, which queues it for the owner's approval and returns the "queued" tool result — the turn continues, nothing executes. Recipes answer **false** — their author gave the standing approval at save time and their write surface is bounded by allow-lists or the verdict handler — so the hook is inert for recipe runs and the loop executes every call. Chat answers **true** (see [Chat](#chat) below).
 - **`emitText()`** — the streamed-text sink the loop hands the provider. The chat context forwards it to a throttled writer that streams partial answer text onto the assistant row; the recipe context no-ops it (a recipe produces a one-shot report, not a live transcript).
 
 `RecipeRunContext` additionally carries `$recipe` and `$run`; `ChatTurnContext` carries the `AiConversation`. `appendToolCall()` remains on both for one-shot trace notes.
@@ -392,29 +586,26 @@ Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-inde
 
 The interactive surface lives at `/admin/joinery_ai/chat` (permission 5). It is a two-pane page — conversation list + transcript/composer — built with plain `joai-chat-*` markup (the admin theme is not the `.jy-ui` kit). A turn runs over the same `AgentLoop` as a recipe; the differences are all in `ChatTurnContext`:
 
-- **`requiresConfirmation()` is true.** A mutating tool call the `RiskHeuristic` classifies `CONFIRM` is not executed — the loop ends the turn in a `pending_action` carrying a plain-language description, and the UI shows a Confirm/Cancel card. Inline-verdict calls (a self-owned create/update, an `auto` action) run without a card. See [Action exposure](#action-exposure-ai_agent) and the spec's risk-heuristic section.
+- **`queuesWrites()` is true.** A mutating tool call never executes in the turn — it is queued for the owner's approval and the model receives a "queued" tool result, so the conversation continues while the proposal waits ([Proposed actions](#proposed-actions)).
 - **The turn runs off the request** (see [Asynchronous turns](#asynchronous-turns)) — a slow local model never trips a proxy timeout.
 - **In-memory trace** flushed to `aim_tool_calls` on the assistant message by the endpoint.
 
 **Capability toggles.** A new conversation is a plain conversational assistant. Four independent per-chat switches (status strip) turn capabilities on:
 
-- **Data access** (`aic_data_access`) — the site-data tool group (`query_model`, `describe_models`, `create_model`, `update_model`, `delete_model`, `invoke_action`, `describe_actions`, `get_my_notes`, `save_note`) plus model scope (all `$ai_readable` models). Off → none of those tools exist and **no model information enters the prompt**. (Writes still pass the confirmation boundary regardless — this gates tool *availability*, not whether writes confirm.)
+- **Data access** (`aic_data_access`) — the site-data tool group (`query_model`, `describe_models`, `create_model`, `update_model`, `delete_model`, `invoke_action`, `describe_actions`, `get_my_notes`, `save_note`) plus model scope (all `$ai_readable` models). Off → none of those tools exist and **no model information enters the prompt**. (Writes still queue for the owner's approval regardless — this gates tool *availability*, not whether writes defer.)
 - **Web search** (`aic_web_search`) — the web group (`web_search`, `fetch_url`, `get_stock_data`). `web_search` additionally needs the global `joinery_ai_brave_search_api_key`; the toggle is disabled in the UI when the key is unset.
 - **History search** (`aic_history_access`) — the `search_conversations` tool, which searches the owner's **own past chat conversations** by keyword. Its own gate, deliberately not part of Data access: searching the ambient record of everything the user has discussed is broader and more sensitive than reading a business table, so it is opted into separately. Owner-scoped (user A never sees user B's threads). Protected (Private/Fortress) chats respect the encryption boundary — their decrypted content is surfaced **only** when the current turn runs on a local model with the owner's vault open; on a remote model or a locked vault the tool returns a fixed, query-independent, count-free note that protected history was skipped and how to include it, never the content and never a per-query count (which would leak keyword presence over sealed data). The standard-vs-protected split, the surface gate, and all ciphertext handling live behind `MultiAiConversation::searchForTool()`; see [Sealed Vault](../../../docs/sealed_vault.md) for the encryption model.
 - **Memory** (`aic_memory_access`) — the `remember` / `recall` / `forget` tools plus the two-layer automatic memory context (see [Memory](#memory)). Unlike the other three toggles (which default off), a new chat seeds this one from the `joinery_ai_memory_default_on` setting (ships `1`): memory only earns its keep when it's usually active, and one setting flips it off site-wide.
 
 `ChatRunner::resolveAllowedTools()` derives the effective tool list from the four flags; `ChatTurnContext::allowedModels()` / `allowedActions()` return all readable models / all agent-callable actions when Data access is on, `[]` when off. New chats carry their initial toggle state on the first `chat_send`; existing chats persist a flip via `chat_set_capabilities.php`.
 
-**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the four capability flags (`aic_data_access`, `aic_web_search`, `aic_history_access`, `aic_memory_access`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, any `aim_pending_action`, the turn lifecycle (`aim_status` = `running` → `complete` | `failed` | `cancelled`, with `aim_error` on failure), and the cross-process cancel signal `aim_cancel_requested`. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
+**Data model.** `AiConversation` (`aic_conversations`) is one thread — owner, model, the four capability flags (`aic_data_access`, `aic_web_search`, `aic_history_access`, `aic_memory_access`), and running token totals. `AiConversationMessage` (`aim_conversation_messages`) is one turn; assistant rows carry the tool trace, token counts, the turn lifecycle (`aim_status` = `running` → `complete` | `failed` | `cancelled`, with `aim_error` on failure), and the cross-process cancel signal `aim_cancel_requested`; `event` rows are platform-written transcript facts (how a queued action resolved), rendered as neutral chips and fed to the model as user-side context. (Named `Ai*` because core messaging already owns `Conversation` / `Message`.) Neither is `$ai_readable`.
 
-**Engine.** `ChatRunner` builds the system prompt + history and drives the loop:
+**Engine.** `ChatRunner` builds the system prompt + history and drives the loop — `runTurn()`: the user just sent a message (already persisted): build history, run `AgentLoop`, hand back the result + the turn's context. Mutating calls resolve out-of-band through the queue, so a turn is always one closed exchange and the transcript stays strictly alternating and replayable.
 
-- `runTurn()` — the user just sent a message (already persisted): build history, run `AgentLoop`, hand back the result + the turn's context.
-- `resumeTurn()` — the admin confirmed or cancelled a pending call: replay the transcript (minus the trailing pending-bearing assistant row), synthesize a self-consistent `tool_use`/`tool_result` pair (execute the approved call via `AgentLoop::executeApproved()`, or feed a "declined" result), then continue the loop. The endpoint updates the pending assistant message **in place**, so there is exactly one assistant row per user message and the transcript stays strictly alternating and replayable.
+Four AJAX endpoints back the page: `chat_send.php` (append the user message + an assistant placeholder, run the turn, finalize the placeholder), `chat_cancel.php` (stop an in-flight turn), `chat_poll.php` (deliver a finished turn to the page), and `chat_set_capabilities.php` (flip a toggle on an existing chat); queued actions list and resolve over the `/api/v1` queue actions ([Proposed actions](#proposed-actions)).
 
-Five AJAX endpoints back the page: `chat_send.php` (append the user message + an assistant placeholder, run the turn, finalize the placeholder), `chat_confirm.php` (resolve a pending action), `chat_cancel.php` (stop an in-flight turn), `chat_poll.php` (deliver a finished turn to the page), and `chat_set_capabilities.php` (flip a toggle on an existing chat).
-
-**System prompt.** `ChatRunner::buildSystemPrompt()` composes an editable voice block on top of system-managed scaffolding the voice block can never remove: the current date/time (always), tool rules (only when the turn exposes tools — the inspect/manage framing, the confirmation-before-mutating note, and the acting user_id / write-owner line when Data access is on), the model catalog (Data access on), and the untrusted-input contract after the cache breakpoint. The voice block resolves **most-specific-wins**: the chat's own `aic_instructions` → the `joinery_ai_chat_system_prompt` setting → `ChatRunner::DEFAULT_SYSTEM_PROMPT`. A plain chat with no tools gets just the voice block plus date/time. Recipes keep their own report-writer preamble.
+**System prompt.** `ChatRunner::buildSystemPrompt()` composes an editable voice block on top of system-managed scaffolding the voice block can never remove: the current date/time (always), tool rules (only when the turn exposes tools — the inspect/manage framing, the writes-are-queued-for-approval note, and the acting user_id / write-owner line when Data access is on), the model catalog (Data access on), and the untrusted-input contract after the cache breakpoint. The voice block resolves **most-specific-wins**: the chat's own `aic_instructions` → the `joinery_ai_chat_system_prompt` setting → `ChatRunner::DEFAULT_SYSTEM_PROMPT`. A plain chat with no tools gets just the voice block plus date/time. Recipes keep their own report-writer preamble.
 
 **Model controls.** Each chat carries per-conversation controls beside the capability toggles, all resolving row → plugin-setting default → floor (`AgentLoop::resolveFloat` / `resolveInt` / `resolveThinkingLevel`), and all editable from the chat status strip / its "⚙ Settings" disclosure (persisted via `chat_set_capabilities`; new chats seed them on the first `chat_send`, validated through `ChatControls`):
 
@@ -433,13 +624,13 @@ Five AJAX endpoints back the page: `chat_send.php` (append the user message + an
 A chat turn can run for minutes on a slow local model. Rather than hold the browser connection open for the whole turn — which trips the front proxy's idle ceiling — the turn runs **after the response is sent, in the same fpm process**:
 
 1. `chat_send` inserts the user message (`complete`) and an assistant placeholder (`running`), returns a poll handle (`{message_id, status: "running"}`), then calls `fastcgi_finish_request()` to release the browser and keeps executing.
-2. It runs `ChatRunner::runTurn()` and writes the result onto the placeholder — content, trace, pending action, token totals — setting `aim_status = complete` (or `failed` + `aim_error`).
+2. It runs `ChatRunner::runTurn()` and writes the result onto the placeholder — content, trace, token totals — setting `aim_status = complete` (or `failed` + `aim_error`).
 3. As the turn runs, it streams answer text onto the placeholder: the provider hands each fragment to `ChatTurnContext::emitText`, which a throttled sink (`ChatAsync::streamSink`, flushed at most every ~0.4s / 80 chars) writes to `aim_content` while the row stays `running`.
-4. The page polls `chat_poll.php?message_id=N` (owner-scoped) every ~0.6s. While `running` it gets `partial_text` plus `activity` (the runner's live stage label — "Waiting for {model}…", "Running tool: {name}…", "Writing…") and `running_seconds` (server-computed elapsed time), rendering them as a status line under the streaming text; the partial text shows in a live bubble as plain text; on `complete` it swaps in the final markdown bubble via `ChatRender::assistantBubble`; on `failed` the live bubble becomes an inline error card in the transcript — the classified `aim_error` text (set via `textContent`, never trusted as markup) with a **Retry** that replays the last submitted message. Turn failures are never a browser popup. `chat_confirm` resumes the same way (seeding the sink with the pending lead text), finalizing the pending row in place.
+4. The page polls `chat_poll.php?message_id=N` (owner-scoped) every ~0.6s. While `running` it gets `partial_text` plus `activity` (the runner's live stage label — "Waiting for {model}…", "Running tool: {name}…", "Writing…") and `running_seconds` (server-computed elapsed time), rendering them as a status line under the streaming text; the partial text shows in a live bubble as plain text; on `complete` it swaps in the final markdown bubble via `ChatRender::assistantBubble`; on `failed` the live bubble becomes an inline error card in the transcript — the classified `aim_error` text (set via `textContent`, never trusted as markup) with a **Retry** that replays the last submitted message. Turn failures are never a browser popup.
 
 Because the turn runs in the authenticated web process, no identity re-setup is needed and `fastcgi_finish_request` releases the connection but not the worker — **each in-flight turn occupies one fpm child for its duration**, so a multi-admin deployment should keep `pm.max_children` above expected concurrent turns plus normal traffic. `ChatAsync` owns the async pieces: `detach()` (the `fastcgi_finish_request` + `ignore_user_abort` + `set_time_limit(0)` sequence), `streamSink()` (the throttled partial-text writer), `staleCeilingSeconds()` (worst-case turn time, derived as `chat max_iterations × the provider HTTP timeout` plus margin, since `AgentLoop` bounds a turn by iterations and token budget, **not** elapsed time), and `sweepMessage()` (reaps a row left `running` past that ceiling — its worker died — to `failed`, run on poll). On a non-fpm SAPI `fastcgi_finish_request` is absent, so the endpoints run the turn synchronously (the sink is never set) and return the finished bubble in the same response (the page renders it without polling).
 
-**Cancelling a turn.** While a turn streams, the composer's Send button is morphed into a Cancel button; clicking it posts `chat_cancel` `{message_id}`, which sets `aim_cancel_requested = TRUE` on the running row and returns immediately. That flag is the cross-process signal — the worker runs in another process, so a Cancel button can't just abort a `fetch`. The running turn re-reads the flag (a fresh `SELECT`, bypassing its stale in-memory row) through one predicate surfaced at two points: `ChatTurnContext::shouldContinue()` catches a cancel that lands **between** tool steps at the `AgentLoop` iteration boundary, and `ChatTurnContext::shouldAbort()` — polled by the provider at most every ~0.4s per stream chunk — catches the common **mid-generation** case, breaking the stream read, closing the upstream model connection, and returning the partial text with `stop_reason` `aborted`. Both funnel to `stop_reason = cancelled`, which the finalizer writes as `aim_status = cancelled`, keeping whatever partial answer streamed and clearing the flag (also cleared on the complete/failed paths, so a cancel arriving just after a turn settles never leaves a stale flag). `chat_poll` surfaces `cancelled` alongside `complete`; the bubble renders the kept partial with a small "Cancelled" marker. The predicate lives on the shared `ToolContext` and streaming contract, so recipe runs inherit mid-generation abort too (`RecipeRunContext::shouldAbort()` reads the same kill flag its Stop button sets). Cancel targets `running` turns only; a turn parked on a pending tool confirmation is resolved through the confirm card, not Cancel.
+**Cancelling a turn.** While a turn streams, the composer's Send button is morphed into a Cancel button; clicking it posts `chat_cancel` `{message_id}`, which sets `aim_cancel_requested = TRUE` on the running row and returns immediately. That flag is the cross-process signal — the worker runs in another process, so a Cancel button can't just abort a `fetch`. The running turn re-reads the flag (a fresh `SELECT`, bypassing its stale in-memory row) through one predicate surfaced at two points: `ChatTurnContext::shouldContinue()` catches a cancel that lands **between** tool steps at the `AgentLoop` iteration boundary, and `ChatTurnContext::shouldAbort()` — polled by the provider at most every ~0.4s per stream chunk — catches the common **mid-generation** case, breaking the stream read, closing the upstream model connection, and returning the partial text with `stop_reason` `aborted`. Both funnel to `stop_reason = cancelled`, which the finalizer writes as `aim_status = cancelled`, keeping whatever partial answer streamed and clearing the flag (also cleared on the complete/failed paths, so a cancel arriving just after a turn settles never leaves a stale flag). `chat_poll` surfaces `cancelled` alongside `complete`; the bubble renders the kept partial with a small "Cancelled" marker. The predicate lives on the shared `ToolContext` and streaming contract, so recipe runs inherit mid-generation abort too (`RecipeRunContext::shouldAbort()` reads the same kill flag its Stop button sets). Cancel targets `running` turns only.
 
 Streaming is delivered over the poll channel, not a held-open connection: partial text is written to the row and the page picks it up on its next poll. Granularity is the poll interval, not per token. True token-by-token SSE straight to the browser is a possible later upgrade — it would require defeating php-fpm's stock `output_buffering = 4096` and holding the connection open for the turn — but is deliberately avoided so streaming costs nothing at the web-server/CDN layer and builds on the same detach-and-poll path.
 
@@ -464,16 +655,15 @@ A superadmin purge tool lives at `/admin/joinery_ai/deleted_conversations` (perm
 Native app clients speak the same chat over `/api/v1` actions (owner-scoped, member-accessible with the session key or the browser-session bridge), returning structured JSON turns rather than the page's HTML bubbles. `ChatSerializer` renders a conversation and its turns as data; `ChatTurn` holds the run / resume-and-finalize sequence both the web endpoints and these actions call, so a thread is identical whichever surface touched it last.
 
 - `joinery_ai/chat_list` `{search?}` → `{conversations: [{id, title, pinned, security_level, protected, locked?}], search_locked?}`. A locked protected chat's `title` is a placeholder and `locked` is set (see **Chat encryption**); `search_locked` marks a search that couldn't reach protected chats because the vault is locked.
-- `joinery_ai/chat_thread` `{conversation_id}` → `{conversation: {id, title, pinned, security_level, protected, model, usage_label}, messages: [turn]}`, where a turn is `{id, role, content (markdown), status, error, created_time (UTC), pending_action: {description} | null, attachments: [{file_id, name, category, image_url}], tool_calls: [{name, is_error, duration_ms}], usage: {input_tokens, output_tokens, cost_label}}`. A locked protected chat returns `{conversation, messages: [], locked: true}` — metadata only, no turns.
+- `joinery_ai/chat_thread` `{conversation_id}` → `{conversation: {id, title, pinned, security_level, protected, model, usage_label}, messages: [turn]}`, where a turn is `{id, role, content (markdown), status, error, created_time (UTC), attachments: [{file_id, name, category, image_url}], tool_calls: [{name, is_error, duration_ms}], usage: {input_tokens, output_tokens, cost_label}}`. A locked protected chat returns `{conversation, messages: [], locked: true}` — metadata only, no turns.
 - `joinery_ai/chat_send` `{message, conversation_id?, security_level?, data_access?, …seed fields, attachments[]}` → a poll handle `{conversation_id, message_id, is_new, title, status: "running", user_message}` (omitting `conversation_id` creates the conversation, seeded through `ChatControls`; `security_level` sets the new chat's level). `attachments[]` are multipart file uploads (see **Attachments** below); `message` may be empty when at least one file is attached. Sending to a protected chat while the vault is locked returns `{locked: true}` instead — the client unlocks and resends.
 - `joinery_ai/chat_poll` `{message_id}` → `{status}` plus `partial_text`, `activity`, and `running_seconds` while running (the stage label and elapsed seconds of the live turn — the runner stamps the label onto the row's `aim_activity` at each stage transition and nulls it at finalize), `{message, usage_label}` on complete (and on `cancelled`, with the kept partial), or `error` on failed. A `running` message serialized by `ChatSerializer::message()` (e.g. a thread loaded mid-turn) carries the same two fields.
-- `joinery_ai/chat_confirm` `{conversation_id, message_id, decision}` → resumes the pending row, polled like a send.
 - `joinery_ai/chat_cancel` `{message_id}` → sets `aim_cancel_requested` on the running row (a no-op `{already_settled: true}` if the turn already finished); the worker stops cooperatively and the poll settles to `cancelled`.
 - `joinery_ai/chat_turn_action` `{message_id, action: "delete"}` → `{deleted_ids}`; `joinery_ai/chat_thread_action` `{conversation_id, action: "pin" | "rename" | "delete", value?}`.
 - `joinery_ai/chat_controls` → `{models: [{id, label, private}], web_search_available, defaults: {model, thinking_level, temperature, top_p, max_tokens, web_search}}` — the catalog and defaults for the native settings sheet. `chat_thread`'s `conversation.controls` carries the per-chat stored values.
 - `joinery_ai/chat_set_capabilities` `{conversation_id, field, value}` (or the legacy `{conversation_id, capability, enabled}`) → sets one control through `ChatControls::validate`; a bad value is a 422. New chats seed their controls on the first `chat_send` instead. `field: "security_level"` changes the encryption level through `ChatLevel::changeLevel` (converging the stored content — see **Chat encryption**); a Fortress chat refuses a cloud `model`.
 
-**Async via a detached worker.** An `_logic_api()` action returns a value the framework serializes and flushes; it cannot hold the request open the way the web page's in-process `fastcgi_finish_request` detach does. So `chat_send` / `chat_confirm` persist the placeholder, return the poll handle, and spawn a CLI worker (`ChatWorkerSpawner` → `cli/run_chat_turn.php`) that runs the turn to completion — the same detached-worker model recipe runs use, decoupled from the fpm request lifecycle. The client polls `chat_poll` for the result exactly as the web page polls its endpoint. `ChatWorkerSpawner` resolves an absolute CLI-php path: php-fpm's `clear_env` defaults on, leaving the request environment without a `PATH`, so a bare `php` can't be found.
+**Async via a detached worker.** An `_logic_api()` action returns a value the framework serializes and flushes; it cannot hold the request open the way the web page's in-process `fastcgi_finish_request` detach does. So `chat_send` persists the placeholder, return the poll handle, and spawn a CLI worker (`ChatWorkerSpawner` → `cli/run_chat_turn.php`) that runs the turn to completion — the same detached-worker model recipe runs use, decoupled from the fpm request lifecycle. The client polls `chat_poll` for the result exactly as the web page polls its endpoint. `ChatWorkerSpawner` resolves an absolute CLI-php path: php-fpm's `clear_env` defaults on, leaving the request environment without a `PATH`, so a bare `php` can't be found.
 
 ### Attachments
 
@@ -504,7 +694,7 @@ Each conversation carries a **security level** (`aic_security_level`) that decid
 
 The unit is the **conversation** (`aic_conversations`); there is no grouping above it. A new chat takes the plugin-wide default (`joinery_ai_default_chat_level`, set on the Joinery AI settings page) unless the composer's Privacy control overrides it — a level whose prerequisites are missing (Private needs a set-up vault; Fortress also needs a configured local model) downgrades so a chat never claims a protection it can't deliver. `ChatLevel` owns those prerequisites and the resolution.
 
-**What seals vs. what stays cleartext.** On a protected conversation the content columns are sealed under per-item DEKs (via `ChatSeal`, using `VaultCrypto`): the message body (`aim_content`), the tool trace (`aim_tool_calls`), a proposed action's args (`aim_pending_action`), the error (`aim_error`), the auto-derived title (`aic_title`), the per-chat instructions (`aic_instructions`), each attachment's extracted text (`aia_extracted_text`), and the uploaded **File bytes**. A message's attachments seal under the owning message's DEK — resolved through the File decrypt hook (`fil_source = ai_chat_upload`) — so there is no per-attachment key. Operational metadata stays cleartext so the list renders and sorts while locked: `aim_role`, `aim_status`, token counts, `aim_activity` (a transient stage label, never a content fragment), `aic_owner_user_id`, `aic_model`, `aic_pinned`, the capability/sampling controls, times, and `aic_security_level` itself. Each sealed row records its per-item sealed key (`aim_sealed_key` / `aic_sealed_key`), the vault generation the key is sealed to (`aim_key_generation` / `aic_key_generation`, for rotation), and a sealed marker; the message row also records the owning user (`aim_sealed_owner_user_id`) so a turn decrypts self-contained. `aim_tool_calls` / `aim_pending_action` are `text` (not `jsonb`) so a sealed value — an AEAD blob, not valid JSON — fits; the seal path `json_encode`s around it and readers `json_decode`.
+**What seals vs. what stays cleartext.** On a protected conversation the content columns are sealed under per-item DEKs (via `ChatSeal`, using `VaultCrypto`): the message body (`aim_content`), the tool trace (`aim_tool_calls`), the error (`aim_error`), the auto-derived title (`aic_title`), the per-chat instructions (`aic_instructions`), each attachment's extracted text (`aia_extracted_text`), and the uploaded **File bytes**. A message's attachments seal under the owning message's DEK — resolved through the File decrypt hook (`fil_source = ai_chat_upload`) — so there is no per-attachment key. Operational metadata stays cleartext so the list renders and sorts while locked: `aim_role`, `aim_status`, token counts, `aim_activity` (a transient stage label, never a content fragment), `aic_owner_user_id`, `aic_model`, `aic_pinned`, the capability/sampling controls, times, and `aic_security_level` itself. Each sealed row records its per-item sealed key (`aim_sealed_key` / `aic_sealed_key`), the vault generation the key is sealed to (`aim_key_generation` / `aic_key_generation`, for rotation), and a sealed marker; the message row also records the owning user (`aim_sealed_owner_user_id`) so a turn decrypts self-contained. `aim_tool_calls` is `text` (not `jsonb`) so a sealed value — an AEAD blob, not valid JSON — fits; the seal path `json_encode`s around it and readers `json_decode`.
 
 The sealed-field model hook does the rest: `$sealed_fields` on `AiConversation` / `AiConversationMessage` / `AiMessageAttachment` makes `SystemBase::get()` decrypt transparently in-window, so every reader — the history build, `ChatSerializer`, `ChatRender`, the export, the search filter — reads plaintext without special-casing. Sealing needs only the vault **public key** (it works while the vault is locked); only reading needs the in-window secret.
 
@@ -633,7 +823,7 @@ System-prompt impact: the untrusted-input block is a separate text item *after* 
 Reads are scoped by **who is asking**, a property of the run context (`ToolContext::ownerScopedReads()`):
 
 - **Admins read cross-user.** An admin already sees every row through the admin UI, and admin recipes legitimately need cross-user views ("show me all unpaid orders", "find users at risk of churn"). For an admin caller `ModelQueryExecutor` injects no owner filter.
-- **A non-admin member reads only their own rows.** For a member caller the executor appends an owner `WHERE` clause from the model's resolved owner column(s), and a model whose ownership can't be resolved is refused outright (it is also absent from a member's `allowedModels()`). This closes the exfiltration-of-others'-data path — a member's reads can never cross into another member's rows, and a read has no confirmation step that could catch it after the fact.
+- **A non-admin member reads only their own rows.** For a member caller the executor appends an owner `WHERE` clause from the model's resolved owner column(s), and a model whose ownership can't be resolved is refused outright (it is also absent from a member's `allowedModels()`). This closes the exfiltration-of-others'-data path — a member's reads can never cross into another member's rows, and a read has no approval step that could catch it after the fact.
 
 How a model's owner column is resolved (`OwnerScopeResolver`, surfaced in `ModelRegistry`'s `owner_scope` metadata) is driven by an optional `$ai_owner_field` on the class:
 
@@ -679,10 +869,9 @@ Any write that needs cross-record invariants (capacity, payment effects, hooks, 
 A logic file becomes an AI-callable action by declaring a `*_logic_descriptor()` (see [Logic File Architecture](../../../docs/logic_architecture.md)). Exposure is **default-deny**: the action is reachable through `invoke_action` only if its descriptor declares an `ai_agent` key. `ActionInvoker` refuses any action without it — even one named on a recipe's allow-list.
 
 - **absent** — not agent-callable. A logic file that merely happens to define a descriptor is never silently exposed.
-- **`'confirm'`** — callable; a mutating call is held for a live human sign-off when the calling surface requires confirmation. The recipe surface does not (its sign-off is the save-time taint gate), so a recipe runs it directly. The right default for anything that writes or has side effects.
-- **`'auto'`** — callable and runs inline with no confirmation; the author's explicit assertion that the action is low-risk.
+- **present** (`'confirm'` or `'auto'`) — callable. What happens to a mutating call is decided by the calling surface, not the tier: an interactive surface queues every mutating action for the owner's approval ([Proposed actions](#proposed-actions), `RiskHeuristic::isMutating()` reads the descriptor's `mutates` flag), and a recipe runs it directly under its save-time standing approval. Read-only actions flow inline everywhere.
 
-`ActionRegistry::isAgentCallable()` / `agentTier()` expose this contract: the recipe edit page lists only agent-callable actions, the write-tool save path drops any non-exposed action from the allow-list, and `validate_php_file.php` surfaces a descriptor that omits the key (absent is a valid "keep it private" choice, so it's advisory). Which tier a mutating call lands in on an interactive surface is decided by `RiskHeuristic`.
+`ActionRegistry::isAgentCallable()` exposes this contract: the recipe edit page lists only agent-callable actions, the write-tool save path drops any non-exposed action from the allow-list, and `validate_php_file.php` surfaces a descriptor that omits the key (absent is a valid "keep it private" choice, so it's advisory).
 
 ### Calendar access
 

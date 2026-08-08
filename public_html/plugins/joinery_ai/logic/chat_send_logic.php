@@ -104,9 +104,6 @@ function chat_send_logic(array $input): LogicResult {
         return LogicResult::error('Joinery AI has reached its monthly token cap. Raise the cap in settings to continue.');
     }
 
-    // A prior unconfirmed proposal is abandoned by sending a new message.
-    ChatTurn::clearDanglingPending($conversation);
-
     // Persist the user's message (complete on insert; content may be empty when
     // the turn is attachments-only). Protected chats seal the content afterward.
     $user_msg = ChatSend::persistUserMessage($conversation, $protected, $message);

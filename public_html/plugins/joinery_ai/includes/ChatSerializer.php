@@ -97,11 +97,11 @@ class ChatSerializer {
     }
 
     /**
-     * One turn as structured data. `content` is raw markdown (assistant) or the
-     * user's text — the client renders it. A non-null `pending_action` carries
-     * the confirm-card description; `tool_calls` is the compact per-turn trace;
-     * `usage` is this turn's token/cost line. A running row additionally
-     * carries the live-status extras (see runningExtras()).
+     * One turn as structured data. `content` is raw markdown (assistant), the
+     * user's text, or an event row's resolution note — the client renders it.
+     * `tool_calls` is the compact per-turn trace; `usage` is this turn's
+     * token/cost line. A running row additionally carries the live-status
+     * extras (see runningExtras()).
      */
     public static function message(AiConversationMessage $msg, string $model = ''): array {
         $in  = (int)$msg->get('aim_input_tokens');
@@ -114,13 +114,6 @@ class ChatSerializer {
         $win_raw = $msg->get('aim_context_window');
         $window  = ($win_raw === null || $win_raw === '') ? null : (int)$win_raw;
 
-        $pending = $msg->get('aim_pending_action');
-        if (is_string($pending)) $pending = json_decode($pending, true);
-        $pending_out = null;
-        if (is_array($pending) && !empty($pending)) {
-            $pending_out = ['description' => (string)($pending['description'] ?? 'Run this action?')];
-        }
-
         return [
             'id'             => (int)$msg->key,
             'role'           => (string)$msg->get('aim_role'),
@@ -128,7 +121,6 @@ class ChatSerializer {
             'status'         => (string)$msg->get('aim_status'),
             'error'          => (string)$msg->get('aim_error'),
             'created_time'   => (string)$msg->get('aim_create_time'),
-            'pending_action' => $pending_out,
             'attachments'    => AiMessageAttachment::displayListForMessage((int)$msg->key),
             'tool_calls'     => self::toolCalls($msg->get('aim_tool_calls')),
             'usage'          => [

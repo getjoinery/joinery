@@ -77,7 +77,7 @@ class ChatSeal {
 
     /** Whether a message column stores JSON (tool trace / pending action). */
     public static function isJsonColumn(string $column): bool {
-        return $column === 'aim_tool_calls' || $column === 'aim_pending_action';
+        return $column === 'aim_tool_calls';
     }
 
     // ---------------------------------------------------------- vault resolution
@@ -154,15 +154,14 @@ class ChatSeal {
      * merged with the caller's operational columns (status/tokens/activity) and
      * persisted via updateColumns.
      */
-    public static function turnColumns(AiConversation $conv, int $message_id, string $content, $tool_calls, $pending): array {
+    public static function turnColumns(AiConversation $conv, int $message_id, string $content, $tool_calls): array {
         $tc = self::encodeJsonColumn($tool_calls);
-        $pa = self::encodeJsonColumn($pending);
         if (self::isProtectedLevel($conv->get('aic_security_level'))) {
             return self::sealMessageColumns($message_id, $conv, [
-                'aim_content' => $content, 'aim_tool_calls' => $tc, 'aim_pending_action' => $pa,
+                'aim_content' => $content, 'aim_tool_calls' => $tc,
             ]);
         }
-        return ['aim_content' => $content, 'aim_tool_calls' => $tc, 'aim_pending_action' => $pa];
+        return ['aim_content' => $content, 'aim_tool_calls' => $tc];
     }
 
     /** The content column(s) for a user message. */
@@ -349,12 +348,10 @@ class ChatSeal {
         if ($msg->get('aim_content_sealed')) return;
         $content = (string)$msg->get('aim_content');
         $tool    = (string)$msg->get('aim_tool_calls');       // plain JSON text
-        $pending = (string)$msg->get('aim_pending_action');
         $error   = (string)$msg->get('aim_error');
         $cols = self::sealMessageColumns((int)$msg->key, $conv, [
             'aim_content'        => $content,
             'aim_tool_calls'     => $tool !== '' ? $tool : null,
-            'aim_pending_action' => $pending !== '' ? $pending : null,
             'aim_error'          => $error !== '' ? $error : null,
         ]);
         AiConversationMessage::updateColumns((int)$msg->key, $cols);
@@ -369,12 +366,10 @@ class ChatSeal {
         self::unsealExistingAttachments($msg);   // uses the still-sealed message DEK
         $content = (string)$msg->get('aim_content');   // get() decrypts in-window
         $tool    = (string)$msg->get('aim_tool_calls');
-        $pending = (string)$msg->get('aim_pending_action');
         $error   = (string)$msg->get('aim_error');
         AiConversationMessage::updateColumns((int)$msg->key, [
             'aim_content'              => $content,
             'aim_tool_calls'           => $tool !== '' ? $tool : null,
-            'aim_pending_action'       => $pending !== '' ? $pending : null,
             'aim_error'                => $error !== '' ? $error : null,
             'aim_content_sealed'       => false,
             'aim_sealed_key'           => null,

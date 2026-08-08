@@ -165,7 +165,7 @@ try {
 	$fn = 'admin_joinery_ai_edit_logic';
 
 	$r = harness_call_logic($logic, $fn, $save_input('reject', false, WRITE_TOOL, UNTRUSTED_MODEL));
-	check($r->error && strpos((string)$r->error, 'Tainted-write opt-in required') === 0,
+	check($r->error && strpos((string)$r->error, 'Standing approval required') === 0,
 		'tainted-capable recipe without opt-in is rejected at save', 'error: ' . var_export($r->error, true));
 
 	$r = harness_call_logic($logic, $fn, $save_input('optin', true, WRITE_TOOL, UNTRUSTED_MODEL));

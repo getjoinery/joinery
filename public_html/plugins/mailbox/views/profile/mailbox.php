@@ -5,7 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -34,6 +34,16 @@ $hoptions['header_action'] = '<details class="jy-ui jy-actions-dropdown">'
 	. '<div class="jy-actions-menu">'
 	. '<a href="/profile/mailbox/import">Import old mail from another provider&hellip;</a>'
 	. '</div></details>';
+
+// The area AI panel (joinery_ai's general component): an AI button beside
+// Actions opening the recipes drawer for the mailbox open in the rail. Only
+// this member mount carries it — the admin oversight reader spans mailboxes
+// the viewer holds no grant on, so it deliberately does not. With the plugin
+// inactive the button simply doesn't exist.
+$ai_panel_active = PluginHelper::isPluginActive('joinery_ai');
+if ($ai_panel_active) {
+	$hoptions['header_action'] = '<span id="mbx-ai-panel-anchor"></span>' . $hoptions['header_action'];
+}
 echo PublicPage::BeginPage('Email', $hoptions);
 
 if (!$has_mailboxes) {
@@ -50,6 +60,26 @@ if (!$has_mailboxes) {
 		'attachment_url_base' => '/profile/mailbox/attachment',
 		'message_detail_base' => null,
 	));
+
+	if ($ai_panel_active) {
+		$aip_ver = function ($rel) {
+			$path = PathHelper::getIncludePath('plugins/joinery_ai/assets/' . $rel);
+			return '/plugins/joinery_ai/assets/' . $rel . '?v=' . (is_file($path) ? filemtime($path) : '1');
+		};
+		echo '<link rel="stylesheet" href="' . htmlspecialchars($aip_ver('ai_panel.css')) . '">';
+		echo '<script src="' . htmlspecialchars($aip_ver('ai_panel.js')) . '"></script>';
+		?>
+		<script>
+		JoineryAiPanel.mount({
+			area: 'mailbox',
+			getContext: function () {
+				return { mailbox: window.MailboxReader ? window.MailboxReader.currentAddress() : '' };
+			},
+			anchor: document.getElementById('mbx-ai-panel-anchor')
+		});
+		</script>
+		<?php
+	}
 }
 
 echo PublicPage::EndPage($hoptions);

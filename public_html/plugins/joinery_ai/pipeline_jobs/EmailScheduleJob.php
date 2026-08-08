@@ -1,19 +1,13 @@
 <?php
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasConfig.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailSecurityDigest.php'));
-require_once(PathHelper::getIncludePath('plugins/mailbox/includes/EmailAttachmentDigest.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item_log_class.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipelineJobBase.php'));
 require_once(PathHelper::getIncludePath('includes/calendar/CalendarEntryImporter.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 
 /**
  * Pipeline job (specs/joinery_ai_calendar_ai_surface.md § 5): reads every
- * inbound email on one configured mailbox for a real, dated event and puts
- * it on the recipe owner's own calendar, so a meeting confirmation or a
+ * inbound email on the recipe's bound mailboxes for a real, dated event and
+ * puts it on the recipe owner's own calendar, so a meeting confirmation or a
  * deadline notice buried in an inbox lands on the calendar automatically.
  * Reads the same deterministic EmailSecurityDigest the security scan and
  * triage jobs read (never raw MIME) — the item stays attacker-controlled
@@ -25,9 +19,13 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * fixed in code, never configured or model-supplied. Nothing is deleted,
  * moved, or forwarded here.
  *
- * @version 1.2
+ * The mailbox-list binding, candidate selection, scheduling posture, and AI
+ * panel contract all live in EmailPipelineJobBase, shared with the other two
+ * email jobs.
+ *
+ * @version 1.3
  */
-class EmailScheduleJob implements PipelineJobInterface {
+class EmailScheduleJob extends EmailPipelineJobBase {
 
     public function id(): string {
         return 'email_schedule';
@@ -37,97 +35,15 @@ class EmailScheduleJob implements PipelineJobInterface {
         return 'Inbound email schedule (calendar entries from dated events)';
     }
 
-    public function configDescriptor(): array {
-        return ['input' => [
-            'mailbox_alias' => MailboxAliasConfig::descriptorField(
-                'Mailbox to read',
-                'The stored mailbox this recipe scans for dated events. The recipe owner must hold a grant on it.'),
-        ]];
+    protected function mailboxFieldLabel(): string {
+        return 'Mailboxes to read';
     }
 
-    /**
-     * Confirms the address resolves to a real, enabled, store-capable
-     * mailbox AND that the recipe's owner holds an explicit grant on it —
-     * same as EmailTriageJob/EmailSecurityScanJob. The write target is not
-     * configured here: it is always the recipe owner's own calendar, fixed
-     * in recordVerdict().
-     */
-    public function validateConfig(array $config, Recipe $recipe): void {
-        $address = (string)($config['mailbox_alias'] ?? '');
-        MailboxAliasConfig::validateOwnerGrant($address, (int)$recipe->get('rcp_owner_user_id'));
-        // A sealed domain must have consented to AI reading its mail. Refusing
-        // at save time names the domain and the setting; refusing at run time
-        // would just look like a recipe that does nothing.
-        EmailJobCandidates::assertAiProcessingAllowed($address);
-    }
-
-    /** Email is attacker-controlled text — the recipe carries
-     *  rcp_allow_tainted_writes per the pipeline's taint posture. */
-    public function untrustedDigest(): bool {
-        return true;
-    }
-
-    /**
-     * Mail on a sealed domain can only be read inside the owner's unlock
-     * window, so such a recipe never runs from cron
-     * (specs/in_window_deferred_work.md). A standard-domain mailbox needs no
-     * window and keeps running on its schedule, unattended, as before.
-     */
-    public function requiresVaultScope(array $config): ?string {
-        return EmailJobCandidates::requiredVaultScope($config);
-    }
-
-    /** The domain's second consent: may its decrypted mail leave the box?
-     *  Standard domains have nothing sealed, so they always may. */
-    public function cloudProcessingAllowed(array $config): bool {
-        return MailboxAliasConfig::aiCloudAllowed((string)($config['mailbox_alias'] ?? ''));
-    }
-
-    /** Cheap existence check for the same pool nextItem() draws from. */
-    public function hasWork(array $config, Recipe $recipe): bool {
-        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
-        if ($alias_id === null) return false;
-        return EmailJobCandidates::hasCandidate(
-            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
-    }
-
-    /** How far behind this recipe is, for the mailbox catch-up prompt. */
-    public function countWork(array $config, Recipe $recipe): int {
-        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
-        if ($alias_id === null) return 0;
-        return EmailJobCandidates::countCandidates(
-            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
-    }
-
-    public function nextItem(array $config, Recipe $recipe): ?array {
-        $address = (string)($config['mailbox_alias'] ?? '');
-        $alias_id = MailboxAliasConfig::resolveAliasId($address);
-        // Config drift (the alias was renamed/disabled/removed after this
-        // recipe was saved) — nothing to read rather than a hard failure;
-        // re-saving the recipe re-validates and would catch it at edit time.
-        if ($alias_id === null) return null;
-
-        // Selection is shared across all three email jobs so they cannot drift
-        // apart — see EmailJobCandidates for the rules, including why drafts are
-        // never AI-read and why the processing log is scoped per recipe.
-        $id = EmailJobCandidates::nextId(
-            $alias_id, (int)$recipe->key, (int)$recipe->get('rcp_owner_user_id'));
-        if ($id === null) return null;
-
-        $msg = new InboundEmailMessage($id, TRUE);
-        if (!$msg->key) return null;
-
-        $subject = trim((string)$msg->get('iem_subject'));
-        $digest = EmailSecurityDigest::build($msg);
-        $attachments = EmailAttachmentDigest::build($msg);
-        if ($attachments !== '') {
-            $digest .= "\n\n" . $attachments;
-        }
-        return [
-            'item_key' => (string)$msg->key,
-            'digest'   => $digest,
-            'label'    => $subject !== '' ? $subject : '(no subject)',
-        ];
+    protected function mailboxFieldHelp(): string {
+        return 'The stored mailboxes this recipe scans for dated events — it covers exactly '
+             . 'the ones ticked here, nothing implicitly. The recipe owner must hold a grant '
+             . 'on each; entries land on the owner\'s own calendar. The mail page\'s AI panel '
+             . 'edits this same list.';
     }
 
     public function verdictDescriptor(): array {
@@ -177,18 +93,10 @@ class EmailScheduleJob implements PipelineJobInterface {
     }
 
     public function recordVerdict(string $item_key, array $verdict, Recipe $recipe, string $model): void {
-        $msg = new InboundEmailMessage((int)$item_key, TRUE);
-        if (!$msg->key) return; // deleted between selection and judging — nothing to record
-
-        // Defense in depth: nextItem() already scoped to the configured
-        // mailbox; re-check here so model output can never steer the one
-        // read door to a different message's mailbox than the admin
-        // configured.
-        $config = Recipe::decodeSourceConfig($recipe);
-        $alias_id = MailboxAliasConfig::resolveAliasId((string)($config['mailbox_alias'] ?? ''));
-        if ($alias_id === null || (int)$msg->get('iem_iea_inbound_email_alias_id') !== $alias_id) {
-            throw new InvalidArgumentException("Message $item_key is not on this recipe's configured mailbox.");
-        }
+        // Re-resolves the bound set so model output can never steer the one
+        // read door to a mailbox the config doesn't cover (see base class).
+        $msg = $this->loadJudgedMessage($item_key, $recipe);
+        if ($msg === null) return; // deleted between selection and judging — nothing to record
 
         if (empty($verdict['event_found'])) {
             // The aip_recipe_item_log row is the record that this email was

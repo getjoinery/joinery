@@ -1,22 +1,23 @@
 <?php
 /**
- * MailboxAliasConfig - shared mailbox-alias config machinery for joinery_ai
- * pipeline jobs (EmailSecurityScanJob, EmailTriageJob) that bind a recipe to
- * one stored mailbox alias.
+ * MailboxAliasConfig - shared mailbox-alias config machinery for the joinery_ai
+ * email pipeline jobs, which bind a recipe to a list of stored mailbox aliases
+ * (`mailbox_aliases` in rcp_source_config).
  *
  * Lives in the mailbox plugin (not joinery_ai) because it is mailbox-domain
  * knowledge, exactly like EmailSecurityDigest — the dependency points
  * mailbox <- joinery_ai, never the reverse, so this class takes plain values
- * (address strings, user ids) and never references Recipe or anything else
- * from joinery_ai.
+ * (address strings, user ids, config arrays) and never references Recipe or
+ * anything else from joinery_ai.
  *
- * See specs/implemented/joinery_ai_email_triage.md § 1a.
+ * See specs/implemented/joinery_ai_email_triage.md § 1a and
+ * specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md § Phase 1.
  *
  * It also answers the two security-posture questions a job needs before it can
  * read a mailbox at all (specs/in_window_deferred_work.md): whether the mail is
  * sealed at rest, and whether the domain has consented to AI reading it.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
@@ -64,24 +65,95 @@ class MailboxAliasConfig {
 		return $options;
 	}
 
-	/** The `mailbox_alias` select field array a job's configDescriptor()
-	 *  returns, with the caller's own label/help text. */
-	public static function descriptorField(string $label, string $help): array {
-		$options = self::aliasOptions();
-		// The placeholder is what keeps an unbound recipe unbound. A plain select
-		// pre-selects its first option, so a recipe that has never chosen a
-		// mailbox — a shipped template, or a half-filled new recipe — would post
-		// whichever address happened to sort first and silently bind to it. The
-		// placeholder is deliberately absent from `enum`, so submitting it fails
-		// the required check by name instead of validating as a real choice.
+	/**
+	 * The `mailbox_aliases` checkbox-list field array a job's
+	 * configDescriptor() returns, with the caller's own label/help text.
+	 *
+	 * Checkboxes carry no silent-default hazard — nothing is pre-checked, an
+	 * untouched form posts an empty list — so shipped templates naturally stay
+	 * unbound. An empty list is legal: the recipe covers nothing and finds no
+	 * candidates. The items deliberately carry no enum of current addresses:
+	 * membership is enforced by validateOwnerGrant() at save time, and the
+	 * run-time re-coercion must let a since-disabled address pass so it can be
+	 * DROPPED at resolve time with a coverage note instead of failing the run.
+	 */
+	public static function descriptorListField(string $label, string $help): array {
 		return [
-			'type'     => 'select',
-			'required' => true,
-			'label'    => $label,
-			'help'     => $help,
-			'options'  => ['' => '— select a mailbox —'] + $options,
-			'enum'     => array_keys($options),
+			'type'    => 'array',
+			'label'   => $label,
+			'help'    => $help,
+			'options' => self::aliasOptions(),
+			'items'   => ['type' => 'string', 'max_length' => 320],
 		];
+	}
+
+	/**
+	 * The addresses a config's `mailbox_aliases` list names — normalized
+	 * (lowercased, trimmed), de-duplicated, order preserved. Purely the stored
+	 * list: no liveness check, no grant check (resolveBoundAliases() is that).
+	 */
+	public static function listedAddresses(array $config): array {
+		$raw = $config['mailbox_aliases'] ?? [];
+		if (!is_array($raw)) return [];
+		$out = [];
+		foreach ($raw as $address) {
+			if (!is_string($address) && !is_numeric($address)) continue;
+			$address = strtolower(trim((string)$address));
+			if ($address !== '' && !in_array($address, $out, true)) {
+				$out[] = $address;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * What the recipe covers RIGHT NOW: [alias_id => address] for every listed
+	 * address that still resolves to an enabled, store-capable alias on an
+	 * enabled domain AND on which $owner_user_id still holds a grant.
+	 *
+	 * Live on purpose — a grant revoked or a mailbox disabled after the recipe
+	 * was saved drops that address out here, at every read, rather than the
+	 * recipe continuing on stale authority. The gap is reported by the jobs'
+	 * coverageNotes(), never silently.
+	 */
+	public static function resolveBoundAliases(array $config, int $owner_user_id): array {
+		$addresses = self::listedAddresses($config);
+		if (empty($addresses) || $owner_user_id <= 0) return [];
+
+		$granted = InboundEmailMailboxGrant::alias_ids_for_user($owner_user_id);
+		if (empty($granted)) return [];
+
+		$out = [];
+		foreach ($addresses as $address) {
+			$alias_id = self::resolveActiveAliasId($address);
+			if ($alias_id !== null && in_array($alias_id, $granted, true)) {
+				$out[$alias_id] = $address;
+			}
+		}
+		return $out;
+	}
+
+	/** address -> alias id like resolveAliasId(), but only for an alias that
+	 *  is enabled and store-capable on an enabled domain — the same liveness
+	 *  bar aliasOptions() applies when offering the address in the first place. */
+	public static function resolveActiveAliasId(string $address): ?int {
+		$address = strtolower(trim($address));
+		if ($address === '') return null;
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT a.iea_inbound_email_alias_id
+			   FROM iea_inbound_email_aliases a
+			   JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
+			  WHERE a.iea_delete_time IS NULL
+			    AND a.iea_is_enabled = true
+			    AND a.iea_delivery_mode IN ('store', 'forward_and_store')
+			    AND d.ied_is_enabled = true
+			    AND lower(a.iea_alias || '@' || d.ied_domain) = ?
+			  LIMIT 1");
+		$q->execute([$address]);
+		$id = $q->fetchColumn();
+		return $id !== false ? (int)$id : null;
 	}
 
 	/**

@@ -26,7 +26,11 @@ class RecipeSeederException extends Exception {}
  *
  * See specs/implemented/joinery_ai_shipped_recipes.md.
  *
- * @version 1.0
+ * A declaration also serves a second consumer: the area AI panel instantiates
+ * a member's own enabled copy of one via instantiateForUser() — same declared
+ * fields, different identity and arming posture.
+ *
+ * @version 1.1
  */
 class RecipeSeeder {
 
@@ -240,10 +244,61 @@ class RecipeSeeder {
      * cannot be lost by editing recipes.json.
      */
     private static function create(array $declaration, int $owner_id): Recipe {
+        $recipe = self::fromDeclaration($declaration, $owner_id);
+        $recipe->set('rcp_declared_key', $declaration['key']);
+        $recipe->set('rcp_enabled', false);
+        $recipe->set('rcp_allow_tainted_writes', false);
+
+        // No prepare() — a pipeline recipe with no mailbox bound cannot satisfy
+        // its job's config descriptor, and that unbound state is exactly what a
+        // template is. The edit form validates when the operator sets it up.
+        $recipe->save();
+        $recipe->load();
+        return $recipe;
+    }
+
+    /**
+     * A member's own runnable instance of a shipped declaration — the area AI
+     * panel's toggle-on of a template card (specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md
+     * § Templates and per-user instances). Unlike a seeded row it arrives
+     * ENABLED: the toggle is itself the enablement choice, and the tainted-
+     * writes acceptance rode the same dialog ($accepted_tainted_writes). It
+     * carries rcp_template_key (non-unique) rather than rcp_declared_key (the
+     * seeder's unique identity), so any number of members can instantiate the
+     * same declaration.
+     */
+    public static function instantiateForUser(array $declaration, int $owner_id,
+            bool $accepted_tainted_writes): Recipe {
+        $recipe = self::fromDeclaration($declaration, $owner_id);
+        $recipe->set('rcp_template_key', $declaration['key']);
+        $recipe->set('rcp_enabled', true);
+        $recipe->set('rcp_allow_tainted_writes', $accepted_tainted_writes);
+        $recipe->save();
+        $recipe->load();
+        return $recipe;
+    }
+
+    /** The shipped declaration with this key, or null. */
+    public static function declarationByKey(string $key): ?array {
+        try {
+            foreach (self::declarations() as $declaration) {
+                if ((string)$declaration['key'] === $key) {
+                    return $declaration;
+                }
+            }
+        } catch (RecipeSeederException $e) {
+            // Unreadable manifest — no declarations to offer.
+        }
+        return null;
+    }
+
+    /** The declared, travelling fields applied to a fresh unsaved Recipe —
+     *  shared by the seeder's inert template rows and the panel's per-user
+     *  instances, which differ only in identity and arming posture. */
+    private static function fromDeclaration(array $declaration, int $owner_id): Recipe {
         $job = trim((string)($declaration['pipeline_job'] ?? ''));
 
         $recipe = new Recipe(NULL);
-        $recipe->set('rcp_declared_key', $declaration['key']);
         $recipe->set('rcp_name', $declaration['name']);
         $recipe->set('rcp_prompt', (string)($declaration['prompt'] ?? ''));
         $recipe->set('rcp_mode', $job !== '' ? Recipe::MODE_PIPELINE : Recipe::MODE_AGENT);
@@ -257,8 +312,8 @@ class RecipeSeeder {
         $recipe->set('rcp_thinking_level', (string)($declaration['thinking_level'] ?? 'off'));
         $recipe->set('rcp_delivery_dashboard', true);
 
-        // The five that never travel. Temperature and top_p are left null too,
-        // so they fall back to whatever the destination tuned globally.
+        // The binding never travels; temperature and top_p are left null so
+        // they fall back to whatever this install tuned globally.
         $recipe->set('rcp_owner_user_id', $owner_id);
         $recipe->set('rcp_source_config', []);
         // Empty, not null: save() fills a null field from its declared column
@@ -266,14 +321,6 @@ class RecipeSeeder {
         // how a recipe says it has no model of its own, and the edit form
         // resolves the site's own default when it sees one.
         $recipe->set('rcp_model', '');
-        $recipe->set('rcp_enabled', false);
-        $recipe->set('rcp_allow_tainted_writes', false);
-
-        // No prepare() — a pipeline recipe with no mailbox bound cannot satisfy
-        // its job's config descriptor, and that unbound state is exactly what a
-        // template is. The edit form validates when the operator sets it up.
-        $recipe->save();
-        $recipe->load();
         return $recipe;
     }
 

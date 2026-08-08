@@ -15,7 +15,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *
  * Returns the same result shape AgentLoop::run() returns (assistant_text,
  * input_tokens, output_tokens, cache_write_tokens, cache_read_tokens,
- * messages, stop_reason, detail, pending_action) so RecipeRunner's existing
+ * messages, stop_reason, detail) so RecipeRunner's existing
  * finishFromResult() maps it onto the run's terminal state unchanged:
  *   end_turn / max_iterations -> success (assistant_text is always non-empty
  *     here, even with zero items, so this never falls into "incomplete")
@@ -51,6 +51,15 @@ class PipelineRunner {
         $verdict_descriptor = $job->verdictDescriptor();
         $system = self::buildSystem($recipe, $job, $ctx);
 
+        // What the binding does NOT cover right now (a revoked grant, a
+        // disabled mailbox) — rendered on the tally so coverage never shrinks
+        // silently. A note failure must not cost the run itself.
+        try {
+            $coverage_notes = $job->coverageNotes($config, $recipe);
+        } catch (\Throwable $e) {
+            $coverage_notes = [];
+        }
+
         $in = 0; $out = 0; $cw = 0; $cr = 0;
         $consecutive_errors = 0;
         $tally = [];
@@ -58,24 +67,24 @@ class PipelineRunner {
 
         while ($items_done < $max_iterations) {
             if ($ctx->isKillRequested()) {
-                return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
+                return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
                     'cancelled', 'cancelled by admin');
             }
             if ($out >= $token_budget) {
-                return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
+                return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
                     'token_budget', 'output token budget exhausted');
             }
             // In-window slice bound (specs/in_window_deferred_work.md). Checked
             // BEFORE starting an item, never inside one: an in-flight model call
             // cannot be cut off cleanly, so a slice may overrun by one item.
             if ($deadline !== null && microtime(true) >= $deadline) {
-                return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
+                return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
                     'deadline', 'slice ended at ' . $items_done . ' items; more remain');
             }
 
             $item = $job->nextItem($config, $recipe);
             if ($item === null) {
-                return self::result(self::renderTally($tally, true), $in, $out, $cw, $cr, 'end_turn', '');
+                return self::result(self::renderTally($tally, true, $coverage_notes), $in, $out, $cw, $cr, 'end_turn', '');
             }
 
             $item_key = (string)($item['item_key'] ?? '');
@@ -103,7 +112,7 @@ class PipelineRunner {
                 $tally[] = "- **$label** — error: $error";
 
                 if ($consecutive_errors >= self::CONSECUTIVE_ITEM_ERROR_LIMIT) {
-                    return self::result(self::renderTally($tally), $in, $out, $cw, $cr, 'tool_errors',
+                    return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr, 'tool_errors',
                         "consecutive_item_failures: aborting after $consecutive_errors items of invalid verdicts");
                 }
                 continue;
@@ -120,7 +129,7 @@ class PipelineRunner {
             $items_done++;
         }
 
-        return self::result(self::renderTally($tally), $in, $out, $cw, $cr,
+        return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
             'max_iterations', 'batch size reached at ' . $max_iterations . ' items');
     }
 
@@ -299,7 +308,7 @@ class PipelineRunner {
         return implode(', ', $parts);
     }
 
-    private static function renderTally(array $lines, bool $caught_up = false): string {
+    private static function renderTally(array $lines, bool $caught_up = false, array $coverage_notes = []): string {
         $count = count($lines);
         $header = '## Pipeline run — ' . $count . ' item' . ($count === 1 ? '' : 's') . ' processed';
         if (empty($lines)) {
@@ -307,7 +316,12 @@ class PipelineRunner {
         } else {
             $body = implode("\n", $lines);
         }
-        return $header . "\n\n" . $body;
+        $out = $header . "\n\n" . $body;
+        if (!empty($coverage_notes)) {
+            $out .= "\n\n**Not covered this run:**\n"
+                 . implode("\n", array_map(fn($n) => '- ' . $n, $coverage_notes));
+        }
+        return $out;
     }
 
     private static function result(string $text, int $in, int $out, int $cw, int $cr,
@@ -321,7 +335,6 @@ class PipelineRunner {
             'messages'           => [],
             'stop_reason'        => $stop_reason,
             'detail'             => $detail,
-            'pending_action'     => null,
         ];
     }
 

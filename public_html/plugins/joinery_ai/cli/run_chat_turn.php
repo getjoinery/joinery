@@ -2,15 +2,12 @@
 /**
  * CLI worker for a single Joinery AI chat turn.
  *
- * Spawned via `php run_chat_turn.php <message_id> [decision]` by the /api/v1
- * chat actions (ChatWorkerSpawner) so the request returns a poll handle
+ * Spawned via `php run_chat_turn.php <message_id>` by the /api/v1 chat
+ * actions (ChatWorkerSpawner) so the request returns a poll handle
  * immediately and the turn runs in its own process — the same detached-worker
  * mechanism recipe runs use. Loads the assistant placeholder row and its
  * conversation, then finalizes it in place (running → complete | failed) so the
  * client's chat_poll surfaces the result.
- *
- *   no decision       → run a fresh turn (ChatTurn::runAndFinalize)
- *   confirm | cancel   → resume from a proposed action (ChatTurn::resumeAndFinalize)
  *
  * CLI-only — bails immediately if invoked over HTTP.
  */
@@ -22,12 +19,11 @@ if (php_sapi_name() !== 'cli') {
 }
 
 if ($argc < 2) {
-    fwrite(STDERR, "Usage: php run_chat_turn.php <message_id> [decision]\n");
+    fwrite(STDERR, "Usage: php run_chat_turn.php <message_id>\n");
     exit(2);
 }
 
 $message_id = (int)$argv[1];
-$decision   = isset($argv[2]) ? (string)$argv[2] : '';
 if ($message_id <= 0) {
     fwrite(STDERR, "Invalid message_id: '$argv[1]'\n");
     exit(2);
@@ -56,18 +52,7 @@ set_time_limit(0);
 ignore_user_abort(true);
 
 try {
-    if ($decision === 'confirm' || $decision === 'cancel') {
-        $pending = $msg->get('aim_pending_action');
-        if (is_string($pending)) $pending = json_decode($pending, true);
-        if (empty($pending) || !is_array($pending)) {
-            ChatTurn::markFailed($msg, 'There is no pending action to resolve.');
-            exit(0);
-        }
-        $lead_text = (string)$msg->get('aim_content');
-        ChatTurn::resumeAndFinalize($conversation, $uid, $msg, $pending, $lead_text, $decision);
-    } else {
-        ChatTurn::runAndFinalize($conversation, $uid, $msg);
-    }
+    ChatTurn::runAndFinalize($conversation, $uid, $msg);
 } catch (Throwable $e) {
     // ChatAsync::log rather than error_log: the spawner redirects stdio to the same
     // file, but a direct CLI invocation has no such redirect and would lose this.

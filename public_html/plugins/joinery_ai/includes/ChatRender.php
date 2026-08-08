@@ -197,9 +197,9 @@ class ChatRender {
     }
 
     /**
-     * An assistant bubble for a stored message row: markdown body, optional
-     * collapsible tool trace, and — when the row still carries a pending
-     * action — the confirmation card.
+     * An assistant bubble for a stored message row: markdown body and an
+     * optional collapsible tool trace. (Proposed writes live on the approval
+     * queue, rendered by the queue-card JS, not inside the bubble.)
      */
     public static function assistantBubble(AiConversationMessage $msg, string $tz, string $model = ''): string {
         $time = LibraryFunctions::convert_time(
@@ -223,17 +223,6 @@ class ChatRender {
         $used = ($used_raw === null || $used_raw === '' || (int)$used_raw <= 0) ? $in : (int)$used_raw;
         $meta_extra = self::turnUsageParts($used, self::estimateCost($model, $in, $out), $window);
 
-        $pending = $msg->get('aim_pending_action');
-        if (is_string($pending)) $pending = json_decode($pending, true);
-        $card = '';
-        if (is_array($pending) && !empty($pending)) {
-            $card = self::pendingCardHtml(
-                $pending,
-                (int)$msg->get('aim_aic_conversation_id'),
-                (int)$msg->key
-            );
-        }
-
         // A turn the user stopped mid-flight keeps its partial answer and carries
         // a small "Cancelled" marker — persistent across reloads (keyed on the
         // stored status), not just in the live poll.
@@ -245,22 +234,17 @@ class ChatRender {
              . ' data-raw="' . htmlspecialchars($body_md, ENT_QUOTES, 'UTF-8') . '">'
              . '<div class="joai-chat-body">' . $body_html . '</div>'
              . $cancelled
-             . $card
              . self::footHtml($trace, $time, $meta_extra, true)
              . '</div>';
     }
 
-    /** The Confirm/Cancel card for a held mutating call. */
-    public static function pendingCardHtml(array $pending, int $conversation_id, int $message_id): string {
-        $desc = (string)($pending['description'] ?? 'Run this action?');
-        return '<div class="joai-chat-confirm" data-conversation-id="' . $conversation_id
-             . '" data-message-id="' . $message_id . '">'
-             . '<div class="joai-chat-confirm-desc">'
-             . htmlspecialchars($desc, ENT_QUOTES, 'UTF-8') . '</div>'
-             . '<div class="joai-chat-confirm-actions">'
-             . '<button type="button" class="joai-btn joai-btn-primary joai-chat-confirm-yes">Confirm</button> '
-             . '<button type="button" class="joai-btn joai-chat-confirm-no">Cancel</button>'
-             . '</div></div>';
+    /** A neutral transcript chip for an EVENT row — a queued action's
+     *  resolution. Platform-written fact, styled apart from both voices. */
+    public static function eventChip(string $content, string $time): string {
+        return '<div class="joai-chat-event">'
+             . '<span class="joai-chat-event-text">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</span>'
+             . '<span class="joai-chat-event-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</span>'
+             . '</div>';
     }
 
     /** Collapsible per-turn tool trace. Empty string when there were none. */

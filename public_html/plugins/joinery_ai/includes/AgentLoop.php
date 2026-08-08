@@ -13,17 +13,19 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  * Surface-specific behavior is reached through the context, never baked in:
  *   - shouldContinue(): per-iteration guard (recipe = kill-flag + wall clock;
  *     chat = per-turn timeout). Returns {stop_reason, detail} to halt or null.
- *   - requiresConfirmation(): when true, a mutating call that RiskHeuristic
- *     classes CONFIRM halts the turn with a pending_action instead of running
- *     — the interactive confirmation boundary. False for recipes, so the hook
- *     is inert and the loop behaves exactly as the recipe runner did.
+ *   - queuesWrites()/enqueueProposedAction(): the deferred-write boundary
+ *     (specs/implemented/ai_action_queue.md). On an interactive surface a mutating call
+ *     never executes in the turn — it is queued for the owner's approval and
+ *     the model receives a "queued" tool result, so the conversation
+ *     continues. False for recipes, so the hook is inert and every call runs
+ *     exactly as the recipe runner always has.
  *   - beginToolCall()/finishToolCall(): durable per-call audit.
  *
  * Returns an array:
  *   assistant_text, input_tokens, output_tokens, cache_write_tokens,
- *   cache_read_tokens, messages (updated), stop_reason, detail, pending_action.
+ *   cache_read_tokens, messages (updated), stop_reason, detail.
  * stop_reason is one of: end_turn, max_iterations, token_budget, refusal,
- *   tool_errors, pending_action, or any reason the context's shouldContinue()
+ *   tool_errors, or any reason the context's shouldContinue()
  *   returns (cancelled, wall_clock). 'cancelled' also arises mid-stream when the
  *   context's shouldAbort() halts a generation (the provider reports 'aborted',
  *   mapped to cancelled here) — one user-cancel signal, two stopping points.
@@ -118,7 +120,6 @@ class AgentLoop {
         $assistant_text = '';
         $stop_reason = 'max_iterations';
         $detail = 'iteration budget exhausted at ' . $max_iterations . ' iterations';
-        $pending_action = null;
 
         for ($iter = 0; $iter < $max_iterations; $iter++) {
             // Surface-specific continuation guard (recipe: kill flag, then
@@ -228,36 +229,24 @@ class AgentLoop {
             // object").
             $messages[] = ['role' => 'assistant', 'content' => self::normalizeAssistantContent($content)];
 
-            // Dispatch the batch. Read-only and inline-verdict calls run in
-            // order; the first CONFIRM-verdict mutating call (interactive
-            // contexts only) halts the turn with a pending action, and the
-            // rest of the batch is discarded — the model re-proposes them
-            // after the user resolves the confirmation. For recipes the hook
-            // is inert (requiresConfirmation() is false), so every call runs.
+            // Dispatch the batch. Read tools run in order; on a surface that
+            // defers writes (interactive chat) every mutating call is QUEUED
+            // for the owner's approval instead of executing — the model gets a
+            // "queued" tool result and the turn continues, so a hostile
+            // message's best possible outcome is a proposal the owner saw and
+            // declined (specs/implemented/ai_action_queue.md). For recipes the hook is
+            // inert (queuesWrites() is false), so every call runs.
             $tool_result_blocks = [];
             $iter_had_error = false;
-            $halted_for_confirm = false;
             foreach ($tool_uses as $tu) {
-                if ($context->requiresConfirmation()
-                        && RiskHeuristic::isMutating($tu)
-                        && RiskHeuristic::classify($tu, $context) === RiskHeuristic::CONFIRM) {
-                    $pending_action = [
-                        'tool'        => $tu['name'] ?? '',
-                        'tool_use_id' => $tu['id'] ?? '',
-                        'input'       => $tu['input'] ?? [],
-                        'description' => self::describePending($tu),
-                    ];
-                    $stop_reason = 'pending_action';
-                    $detail = 'awaiting user confirmation';
-                    $halted_for_confirm = true;
-                    break;
+                if ($context->queuesWrites() && RiskHeuristic::isMutating($tu)) {
+                    $tool_result_blocks[] = $context->enqueueProposedAction($tu);
+                    continue;
                 }
                 $result_block = self::executeToolUse($tu, $context);
                 $tool_result_blocks[] = $result_block;
                 if (!empty($result_block['is_error'])) $iter_had_error = true;
             }
-
-            if ($halted_for_confirm) break;
 
             if ($iter_had_error) {
                 $consecutive_tool_errors++;
@@ -284,7 +273,6 @@ class AgentLoop {
             'messages'           => $messages,
             'stop_reason'        => $stop_reason,
             'detail'             => $detail,
-            'pending_action'     => $pending_action,
             // The model's real context window, read from the host just after the
             // turn (model still loaded). Colors the per-reply context number by how
             // close it is to the limit. Best-effort, non-blocking — null for remote
@@ -305,27 +293,13 @@ class AgentLoop {
     }
 
     /**
-     * Execute a single tool call that an interactive surface has approved
-     * out-of-band (the chat confirmation flow), through the same audited path
-     * the loop uses. Returns the tool_result block (its tool_use_id echoes
-     * $tool_use['id']) for the caller to feed back into a resumed run.
+     * Execute a single tool call that the owner has approved out-of-band (an
+     * approved queued action — ActionQueue::resolve()), through the same
+     * audited path the loop uses, so approval re-runs every guard the tool
+     * always runs. Returns the tool_result block.
      */
     public static function executeApproved(array $tool_use, ToolContext $ctx): array {
         return self::executeToolUse($tool_use, $ctx);
-    }
-
-    /** Plain-language summary of a held call, for the confirmation card. */
-    public static function describePending(array $tool_use): string {
-        $name = $tool_use['name'] ?? '';
-        $input = isset($tool_use['input']) && is_array($tool_use['input']) ? $tool_use['input'] : [];
-        if ($name === 'invoke_action') {
-            return 'Run action "' . (string)($input['name'] ?? '?') . '"';
-        }
-        $verbs = ['create_model' => 'Create', 'update_model' => 'Update', 'delete_model' => 'Delete'];
-        if (isset($verbs[$name])) {
-            return $verbs[$name] . ' ' . (string)($input['model'] ?? '?');
-        }
-        return 'Run ' . $name;
     }
 
     private static function normalizeAssistantContent(array $content): array {

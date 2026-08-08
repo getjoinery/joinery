@@ -4,13 +4,15 @@
  * (specs/in_window_deferred_work.md § Feature 2).
  *
  * A pipeline job declares the vault scope its items need. When it declares one,
- * that recipe can never run from cron: the vault secret lives in APCu keyed to
- * the browser session, so a command-line worker holds no window and would read
- * nothing. Those recipes are skipped by the dispatcher, refused by the spawner,
- * and executed here instead — in slices, inside the owner's own request, while
- * their window is open.
+ * that recipe's sealed sources can never be read from cron: the vault secret
+ * lives in APCu keyed to the browser session, so a command-line worker holds no
+ * window and would read nothing. The sealed subset executes here instead — in
+ * slices, inside the owner's own request, while their window is open. A recipe
+ * whose ENTIRE binding is sealed (cronRunnable() false) is skipped by the
+ * dispatcher and refused by the spawner outright; a mixed binding still runs
+ * from cron for its standard remainder.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
@@ -114,9 +116,38 @@ class RecipeVaultScope {
 		return is_array($config) ? $config : array();
 	}
 
-	/** Convenience for the dispatcher and spawner. */
+	/** Does any part of this recipe's binding need an unlock window? */
 	public static function requiresWindow(Recipe $recipe): bool {
 		return self::forRecipe($recipe) !== null;
+	}
+
+	/**
+	 * May the dispatcher schedule this recipe and the spawner give it a CLI
+	 * worker? Yes unless NOTHING in its binding is readable without a window —
+	 * a mixed binding (sealed and standard mailboxes on one list) runs from
+	 * cron normally, where its sealed subset fails closed out of the candidate
+	 * set and the standard remainder drains
+	 * (specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md § the scheduling split).
+	 *
+	 * Failure direction matches forRecipe(): an unanswerable question resolves
+	 * to "runnable", because guessing "sealed-only" here would silently strand
+	 * a schedule, while a wrongly spawned run just reports itself caught up.
+	 */
+	public static function cronRunnable(Recipe $recipe): bool {
+		if (!self::requiresWindow($recipe)) {
+			return true;
+		}
+		$job = self::job($recipe);
+		if ($job === null) {
+			return true;
+		}
+		try {
+			return $job->hasUnsealedBinding(self::config($recipe));
+		} catch (\Throwable $e) {
+			error_log('RecipeVaultScope: unsealed-binding check failed for recipe '
+				. (int)$recipe->key . ': ' . $e->getMessage());
+			return true;
+		}
 	}
 
 	/**
@@ -215,7 +246,11 @@ class RecipeVaultScope {
 				continue;
 			}
 			try {
-				if ($job->hasWork(self::config($recipe), $recipe)) {
+				// The SEALED subset only: standard-mailbox work on a mixed
+				// binding belongs to cron's schedule — answering for it here
+				// would turn every open window into a drain-on-arrival bypass
+				// of the recipe's schedule.
+				if ($job->hasWork(self::config($recipe), $recipe, PipelineJobInterface::POSTURE_SEALED)) {
 					$pending[] = $recipe;
 				}
 			} catch (\Throwable $e) {
@@ -247,7 +282,7 @@ class RecipeVaultScope {
 				continue;
 			}
 			try {
-				$total += $job->countWork(self::config($recipe), $recipe);
+				$total += $job->countWork(self::config($recipe), $recipe, PipelineJobInterface::POSTURE_SEALED);
 			} catch (\Throwable $e) {
 				error_log('RecipeVaultScope: count failed for recipe '
 					. (int)$recipe->key . ': ' . $e->getMessage());

@@ -6,9 +6,10 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/ai_conversation
 
 /**
  * Run context for one interactive chat turn. The interactive counterpart to
- * RecipeRunContext: it answers requiresConfirmation() = true, so the shared
- * AgentLoop applies the risk heuristic and halts a CONFIRM-verdict mutating
- * call with a pending action instead of running it.
+ * RecipeRunContext: it answers queuesWrites() = true, so the shared AgentLoop
+ * queues every mutating call for the owner's approval instead of running it
+ * (specs/implemented/ai_action_queue.md) — the tool result says "queued" and the turn
+ * continues.
  *
  * Identity, timezone, and capability allowlists come from the conversation and
  * its owning admin. The tool-call audit accumulates in memory and is handed to
@@ -130,10 +131,53 @@ class ChatTurnContext implements ToolContext {
         return ActionRegistry::agentCallableActionNames();
     }
 
-    /** The interactive confirmation boundary: mutating calls the risk
-     *  heuristic flags are held for the admin's live sign-off. */
-    public function requiresConfirmation(): bool {
+    /** The deferred-write boundary: every mutating call in an interactive
+     *  chat is queued for the owner's approval, never executed in the turn. */
+    public function queuesWrites(): bool {
         return true;
+    }
+
+    /**
+     * Queue one proposed mutating call for the conversation owner's approval
+     * and hand the model its tool result. The owner — not the acting user —
+     * owns the queue entry: resolving is theirs alone. A call that cannot be
+     * queued (no renderer, unsealable protected content) is refused, never
+     * silently executed.
+     */
+    public function enqueueProposedAction(array $tool_use): array {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue.php'));
+        $name = (string)($tool_use['name'] ?? '');
+        $id   = (string)($tool_use['id'] ?? '');
+        $input = isset($tool_use['input']) && is_array($tool_use['input']) ? $tool_use['input'] : [];
+
+        try {
+            $row = ActionQueue::enqueue($this->conversationOwnerId(), $name, $input,
+                (int)$this->conversation->key);
+        } catch (ActionQueueException $e) {
+            $this->appendToolCall([
+                'name' => $name, 'input' => $input,
+                'started_time' => gmdate('Y-m-d H:i:s.u'),
+                'completed_time' => gmdate('Y-m-d H:i:s.u'),
+                'is_error' => true, 'output' => 'not queued: ' . $e->getMessage(),
+                'duration_ms' => 0,
+            ]);
+            return ['type' => 'tool_result', 'tool_use_id' => $id,
+                'content' => $e->getMessage(), 'is_error' => true];
+        }
+
+        $this->appendToolCall([
+            'name' => $name, 'input' => $input,
+            'started_time' => gmdate('Y-m-d H:i:s.u'),
+            'completed_time' => gmdate('Y-m-d H:i:s.u'),
+            'is_error' => false,
+            'output' => 'queued for the owner\'s approval as action #' . (int)$row->key,
+            'duration_ms' => 0,
+        ]);
+        return ['type' => 'tool_result', 'tool_use_id' => $id,
+            'content' => 'Queued for approval as pending action #' . (int)$row->key
+                . '. It has NOT run: the owner will approve or decline it from their '
+                . 'pending-actions list. Do not retry this call or assume its outcome — '
+                . 'tell the user it is waiting for their approval and continue.'];
     }
 
     /** A non-admin member's reads are contained to their own rows; an admin

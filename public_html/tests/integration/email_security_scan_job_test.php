@@ -94,7 +94,7 @@ ok('label is non-empty', trim((string)$job->label()) !== '');
 // --- 2. configDescriptor() lists the test alias -----------------------------
 section("2. configDescriptor");
 $descriptor = $job->configDescriptor();
-$options = $descriptor['input']['mailbox_alias']['options'] ?? [];
+$options = $descriptor['input']['mailbox_aliases']['options'] ?? [];
 ok('test alias appears in the option list', array_key_exists($address, $options));
 
 // --- 3. validateConfig(): grant required ------------------------------------
@@ -104,7 +104,7 @@ $recipe->set('rcp_name', "email-security-scan-test-{$suffix}");
 $recipe->set('rcp_mode', Recipe::MODE_PIPELINE);
 $recipe->set('rcp_pipeline_job', 'email_security_scan');
 $recipe->set('rcp_owner_user_id', $owner_uid);
-$recipe->set('rcp_source_config', ['mailbox_alias' => $address]);
+$recipe->set('rcp_source_config', ['mailbox_aliases' => [$address]]);
 $recipe->set('rcp_max_iterations', 5);
 $recipe->set('rcp_max_tokens', 5000);
 

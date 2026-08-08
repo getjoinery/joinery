@@ -73,34 +73,40 @@ class TaintGate {
     }
 
     /**
-     * Return a plain-language explanation of why a tainted-capable recipe
-     * was rejected. Names the offending tool(s) and which trigger fired.
+     * The plain-language text a person reads before giving a recipe its
+     * standing approval to act on other people's content. Every surface that
+     * shows the gate (the recipes dashboard, the AI panel's confirm dialog)
+     * renders this same wording. The UI vocabulary rule
+     * (specs/implemented/ai_action_queue.md § UI vocabulary): speak of standing approval
+     * and outside influence — the word "taint" never reaches a person.
      */
     public static function explain(array $eval): string {
         // Pipeline mode gets its own wording because the generic one overstates
-        // what the operator is agreeing to. In pipeline mode the model cannot
+        // what the person is agreeing to. In pipeline mode the model cannot
         // choose what to write: it returns one verdict for one item and the job
         // writes a fixed field on that same item. There is no tool belt to steer.
         if (in_array('record_verdict', $eval['write_tools'], true)) {
-            return 'This recipe reads text written by whoever sent the item — an email body, '
-                 . 'say — so a sender could try to write instructions into it. What that can '
-                 . 'affect is narrow: the model returns one verdict for one item and the recipe '
-                 . 'writes a fixed field on that same item. It cannot pick a different record, '
-                 . 'a different field, or a different action. Check \'Allow tainted writes\' to '
-                 . 'confirm you accept that, then save.';
+            return 'This recipe reads content written by other people — an email body, say — '
+                 . 'and a message could try to steer the AI. What that can affect is narrow: '
+                 . 'the model returns one verdict for one item from a fixed menu, and the '
+                 . 'recipe writes a fixed field on that same item. It cannot pick a different '
+                 . 'record, a different field, or a different action — the most a message can '
+                 . 'do is mis-pick from that menu. Agreeing here is your standing approval for '
+                 . 'exactly that.';
         }
 
         $tools = implode(', ', $eval['write_tools']);
         $reasons = [];
         if (!empty($eval['untrusted_models'])) {
-            $reasons[] = 'reads user-generated text from: ' . implode(', ', $eval['untrusted_models']);
+            $reasons[] = 'reads content written by other people (' . implode(', ', $eval['untrusted_models']) . ')';
         }
         if (!empty($eval['workspace_present'])) {
-            $reasons[] = 'has non-empty workspace from prior runs';
+            $reasons[] = 'carries notes from its own earlier runs';
         }
-        return "This recipe can perform writes ($tools) and " . implode(' and ', $reasons)
-             . ". Confirm the prompt is robust to injection from those sources, "
-             . "then check 'Allow tainted writes' to save.";
+        return "This recipe can change things ($tools) while it " . implode(' and ', $reasons)
+             . ', so outside text could try to steer what it changes. Agreeing here is your '
+             . 'standing approval for those writes — read what the recipe can reach before '
+             . 'giving it.';
     }
 
     /**

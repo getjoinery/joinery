@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.38
+ * No framework. @version 2.39
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -462,7 +462,24 @@
 		// previous mailbox's contacts on screen (they are a different store).
 		refreshContactsPanel();
 		loadThreads(true);
+		// Host surface for page-level components (the AI panel): the reader's
+		// context moved, so anything rendered against the open mailbox refreshes.
+		document.dispatchEvent(new CustomEvent('joineryareacontextchange'));
 	}
+
+	// The address of the mailbox currently open in the rail, or '' when the view
+	// is not one real mailbox (All mail, Drafts, an unmatched pseudo-box). The
+	// AI panel's getContext reads this — see JoineryAiPanel.mount in the member
+	// mount.
+	function currentMailboxAddress() {
+		if (!isRealMailbox(state.aliasId)) return '';
+		var address = '';
+		state.mailboxes.forEach(function (m) {
+			if (String(m.alias_id) === String(state.aliasId)) { address = m.address || ''; }
+		});
+		return address;
+	}
+	window.MailboxReader = { currentAddress: currentMailboxAddress };
 
 	// ---- setup banner ----
 	// The Setup tab's own verdict for the open mailbox, fetched once per mailbox

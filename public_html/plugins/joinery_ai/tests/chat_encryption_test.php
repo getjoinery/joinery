@@ -69,7 +69,7 @@ $msg->save();
 $msg->load();
 harness_register_row('aim_conversation_messages', 'aim_message_id', (int)$msg->key);
 $turn_cols = ChatSeal::turnColumns($conv, (int)$msg->key, 'The target is undervalued at 4x EBITDA.',
-    [['name' => 'query_model', 'is_error' => false]], null);
+    [['name' => 'query_model', 'is_error' => false]]);
 $turn_cols['aim_status'] = AiConversationMessage::STATUS_COMPLETE;
 AiConversationMessage::updateColumns((int)$msg->key, $turn_cols);
 
