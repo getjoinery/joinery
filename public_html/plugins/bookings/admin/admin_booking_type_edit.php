@@ -20,6 +20,18 @@ if (!empty($error)) {
 	echo '<div class="alert alert-danger">' . htmlspecialchars($error) . '</div>';
 }
 
+// This page turns transactional email on (confirmations, reminders), so it
+// surfaces the site-wide send verdict beside the switch — the standing rule
+// from docs/email_system.md § Machine sender.
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+$booking_send_blocker = EmailSender::transactionalSendBlocker();
+if ($booking_send_blocker !== null) {
+	echo '<div class="alert alert-danger"><strong>Booking emails cannot send right now.</strong> '
+		. htmlspecialchars($booking_send_blocker)
+		. ' Confirmations and reminders will be refused until this is fixed — the mailbox Setup tab\'s '
+		. 'Automated mail identity card walks the fix.</div>';
+}
+
 $formwriter = $page->getFormWriter('form1', array(
 	'model' => $type,
 	'edit_primary_key_value' => $type->key,

@@ -68,6 +68,20 @@
 			'heading_level' => 'h5',
 		));
 
+		// Can the system sender actually send? One check, the same predicates
+		// the runtime guard uses — rendered right beside the field that decides
+		// it, so a blocked sender is never a silent state.
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$sender_blocker = EmailSender::transactionalSendBlocker();
+		if ($sender_blocker !== null) {
+			echo '<div class="alert alert-danger">'
+				. '<strong>Automated mail from this site cannot send.</strong> '
+				. htmlspecialchars($sender_blocker)
+				. ' Every scheduled and transactional email (reminders, receipts, notifications) is refused '
+				. 'and logged until this is fixed. The mailbox Setup tab\'s Automated mail identity card '
+				. 'walks the fix.</div>';
+		}
+
 		// Mailing list provider, with its connection status beside it. Which
 		// provider's credentials are on screen follows the declared show_when,
 		// so adding a provider is a manifest change, not a page change.

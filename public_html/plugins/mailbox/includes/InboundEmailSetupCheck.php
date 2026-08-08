@@ -23,6 +23,11 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.38 - the automated mail identity (machine sender) card family
+ *                 (specs/mailbox_machine_sender_card.md): derived on/off, the
+ *                 incident red state, readiness rows for the ceremony, machine
+ *                 records in dnsPlan(), the protect ceremony's system-mail
+ *                 readiness row, and the Advanced homeless-blocker row
  * @version 1.37 - the nullable model parameter is declared nullable, so PHP 8.5
  *                 stops deprecating it
  * @version 1.36 - the protected plan carries the foreign signing key as a record
@@ -354,7 +359,7 @@ class InboundEmailSetupCheck {
 	 * instead; this flag exists for surfaces that need to SHOW the finished shape
 	 * (what it will become), not to write it.
 	 */
-	public function dnsPlan($domain, bool $force_protected = false) {
+	public function dnsPlan($domain, bool $force_protected = false, bool $machine_stage = false) {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
 		$domain = strtolower(trim((string)$domain));
 		$plan = new DnsRecordPlan($domain, 'mailbox');
@@ -452,6 +457,36 @@ class InboundEmailSetupCheck {
 			if (is_array($claim) && !empty($claim['txt_host']) && !empty($claim['txt_value'])) {
 				$this->planAdd($plan, 'TXT', (string)$claim['txt_host'], (string)$claim['txt_value'], null,
 					'Proves you own ' . $domain . ' to the hosted relay.');
+			}
+		}
+
+		// Machine sender records (specs/mailbox_machine_sender_card.md): the
+		// machine subdomain's SPF and provider DKIM live in this parent zone,
+		// so they join the same plan — computed from desired state, never
+		// harvested from failing check rows. Added when the machine sender is
+		// ON for this domain, or while its ceremony is open ($machine_stage);
+		// never otherwise, so an untouched domain pays no provider API call.
+		$machine = $this->machineSenderDomainFor($domain);
+		if ($machine === '' && $machine_stage) {
+			$machine = 'mail.' . $domain;
+		}
+		if ($machine !== '') {
+			$m_class = $this->activeProviderClass();
+			$m_label = ($m_class !== null) ? $m_class::getLabel() : 'the outbound provider';
+			$m_mech = $this->providerMechanism($m_class, $machine);
+			if ($m_mech !== '') {
+				$this->planAdd($plan, 'TXT', $machine, 'v=spf1 ' . $m_mech . ' -all', null,
+					'SPF for the machine sending identity — strict, so only ' . $m_label . ' may send as it.');
+			}
+			if ($m_class !== null && in_array('DkimRecordSource', class_implements($m_class) ?: array(), true)) {
+				$m_status = $this->providerDkimStatus($m_class, $machine);
+				if ($m_status['status'] === 'ok') {
+					foreach ((array)($m_status['records'] ?? array()) as $record) {
+						$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
+							(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
+							'DKIM for the machine sending identity — issued by ' . $m_label . '.');
+					}
+				}
 			}
 		}
 
@@ -1699,7 +1734,293 @@ class InboundEmailSetupCheck {
 			: $this->r('domain.mydestination', $domain, 'domain', 'No mydestination conflict', self::REQUIRED, self::PASS,
 				$domain . ' is not in Postfix mydestination.');
 
+		// Automated mail identity — the machine sender
+		// (specs/mailbox_machine_sender_card.md). Rows appear only where the
+		// site's system mail actually lives, so nine hosted domains never get
+		// nine nag cards.
+		foreach ($this->machineSenderRows($domain, $model) as $r) { $out[] = $r; }
+
 		return $out;
+	}
+
+	// ===================================================================
+	// Automated mail identity (machine sender)
+	// ===================================================================
+
+	/**
+	 * The machine sending domain for $parent when the machine sender is ON —
+	 * defaultemail's domain is a proper subdomain of $parent — or '' when it
+	 * is not. On/off is DERIVED from defaultemail, never a stored toggle: the
+	 * setting that controls where system mail sends from IS the switch, so
+	 * this answer can never disagree with what actually happens at send time.
+	 */
+	public function machineSenderDomainFor(string $parent): string {
+		require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
+		$from_domain = MailIdentityGuard::domainOf(trim((string)$this->settings->get_setting('defaultemail')));
+		$from_domain = rtrim($from_domain, '.');
+		$parent = strtolower(rtrim(trim($parent), '.'));
+		if ($from_domain === '' || $parent === '' || $from_domain === $parent) {
+			return '';
+		}
+		return (substr($from_domain, -(strlen($parent) + 1)) === '.' . $parent) ? $from_domain : '';
+	}
+
+	/**
+	 * The readiness rows for the machine sender ceremony: provider
+	 * registration, DKIM, and SPF for mail.$parent — checked before
+	 * defaultemail has flipped, so the ceremony can gate its final step on
+	 * them. The ceremony holds no state of its own; these rows ARE the
+	 * resume-after-reload story (the subdomain is fixed to mail.$parent, so
+	 * mid-flight progress is re-derived by probing, never stored).
+	 */
+	public function machineSenderReadiness(string $parent): array {
+		$parent = strtolower(rtrim(trim($parent), '.'));
+		return $this->machineSenderCheckRows($parent, 'mail.' . $parent, false, '');
+	}
+
+	/**
+	 * The card rows for one domain. Three states:
+	 *   - ON (defaultemail on a proper subdomain of $domain): the sub-checks,
+	 *     REQUIRED — on-but-misconfigured is red.
+	 *   - system mail sends as this bare domain: the incident row (red) when
+	 *     transactionalSendBlocker() reports it can never send, else the
+	 *     grey off-state offer. Suppressed when $domain is itself a subdomain
+	 *     of another registered domain — the parent's card owns the question.
+	 *   - unrelated domain: no rows.
+	 */
+	private function machineSenderRows($domain, $model): array {
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$default_from = trim((string)$this->settings->get_setting('defaultemail'));
+		$from_domain  = MailIdentityGuard::domainOf($default_from);
+
+		$machine = $this->machineSenderDomainFor($domain);
+		if ($machine !== '') {
+			return $this->machineSenderCheckRows($domain, $machine, true, $default_from);
+		}
+
+		if ($from_domain !== $domain) {
+			return array();   // system mail does not live on this domain
+		}
+		if ($this->isSubdomainOfRegisteredDomain($domain)) {
+			return array();   // the parent's card owns the machine-sender question
+		}
+
+		$ceremony_fix = null;
+		if ($model && $model->key) {
+			$ceremony_fix = array(
+				'text' => 'Set up a machine sender: automated mail moves to its own identity under mail.' . $domain
+					. ' while people keep sending as ' . $domain . '.',
+				'link' => array(
+					'url'   => '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$model->key
+						. '&machine_setup=1',
+					'label' => 'Set up the machine sender',
+				),
+			);
+		}
+
+		$blocker = EmailSender::transactionalSendBlocker($default_from);
+		if ($blocker !== null) {
+			// The incident state. The machine sender is "off", but this is not an
+			// unstarted option — it is a send path actively dropping mail, and
+			// nobody chose that (owner decision 2026-08-08: red, not grey).
+			return array($this->r('domain.machine_sender', $domain, 'domain', 'Automated mail identity',
+				self::REQUIRED, self::FAIL,
+				'Automated mail from this site cannot send. ' . $blocker,
+				'Scheduled and transactional mail (reminders, receipts, notifications) sends with nobody signed '
+				. 'in, and every such send is refused and logged (email_send_refused in the event log). At '
+				. 'runtime the refusal reads: "Refusing to send from a protected identity domain outside the '
+				. 'session-gated mailbox compose path."',
+				$ceremony_fix));
+		}
+
+		return array($this->r('domain.machine_sender', $domain, 'domain', 'Automated mail identity',
+			self::RECOMMENDED, self::OPTIONAL,
+			'System mail sends directly as ' . $default_from . '. That works — a separate machine identity '
+			. '(mail.' . $domain . ') is an optional refinement that keeps automated mail off the bare domain.',
+			'With automated mail on its own subdomain, the bare domain stays reserved for people — and can '
+			. 'later be protected (send protection) without breaking reminders and receipts.',
+			$ceremony_fix));
+	}
+
+	/**
+	 * The sub-checks for a machine identity $machine under $parent. $on says
+	 * whether defaultemail has actually flipped (the readiness variant runs
+	 * the same checks before it has). While on, rows are REQUIRED and a
+	 * missing record is a failure, not advice.
+	 */
+	private function machineSenderCheckRows(string $parent, string $machine, bool $on, string $default_from): array {
+		require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
+		$out = array();
+		$class = $this->activeProviderClass();
+		$label = ($class !== null) ? $class::getLabel() : 'the configured provider';
+		$source = ($class !== null) && in_array('DkimRecordSource', class_implements($class) ?: array(), true);
+		$severity = $on ? self::REQUIRED : self::RECOMMENDED;
+
+		$headline = $on
+			? 'System mail sends as ' . $default_from . ' — a machine identity under ' . $parent . '.'
+			: 'The machine identity ' . $machine . ' for automated mail.';
+
+		if (!$source) {
+			// v1 verifies providers that report their sending domains and DKIM
+			// records (DkimRecordSource). Anything else gets guidance, never a
+			// fabricated verdict — and severity does not escalate on rows that
+			// cannot be checked from here.
+			$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
+				self::RECOMMENDED, self::INFO,
+				$headline . ' ' . $label . ' cannot be verified from here — it does not report its sending '
+				. 'domains or DKIM records.',
+				'Confirm in the ' . $label . ' dashboard that ' . $machine . ' is registered as a sending '
+				. 'domain and its DNS records are published.');
+		} else {
+			$state = $this->machineSenderProviderState($class, $machine);
+			$registrar = in_array('SendingDomainRegistrar', class_implements($class) ?: array(), true);
+			if ($state === 'active') {
+				$fix = $on ? array('action' => array('action' => 'machine_test_send', 'domain' => $machine,
+					'label' => 'Send a test email')) : null;
+				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
+					$severity, self::PASS,
+					$headline . ' ' . $machine . ' is registered and active at ' . $label . '.',
+					'Ambient sends (cron, hooks, receipts) sign d=' . $machine . ', which aligns under any '
+					. 'DMARC policy ' . $parent . ' publishes.',
+					$fix);
+			} elseif ($state === 'not_registered') {
+				$fix = $registrar
+					? array('text' => 'Register ' . $machine . ' at ' . $label . ' — DKIM authority is kept on '
+						. 'the subdomain itself so its keys align strictly.',
+						'action' => array('action' => 'machine_register', 'domain' => $machine,
+							'label' => 'Register ' . $machine . ' at ' . $label))
+					: array('text' => 'Add ' . $machine . ' as a sending domain in the ' . $label
+						. ' dashboard, then re-check.');
+				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
+					$severity, $on ? self::FAIL : self::WARN,
+					$headline . ' But ' . $machine . ' is not registered as a sending domain at ' . $label
+					. ' — its mail is signed as another domain and fails DMARC alignment.',
+					'', $fix);
+			} elseif ($state === '') {
+				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
+					$severity, self::UNKNOWN,
+					'Could not reach ' . $label . ' to confirm the state of ' . $machine . ' — try again.');
+			} else {
+				// Registered but not usable — unverified, disabled. Registration
+				// existing is not registration working.
+				$out[] = $this->r('domain.machine_sender', $machine, 'domain', 'Automated mail identity',
+					$severity, $on ? self::FAIL : self::WARN,
+					$headline . ' ' . $machine . ' is registered at ' . $label . ' but its state there is "'
+					. $state . '" — mail will not send until it is active.',
+					'Usually this means the DNS records below are not published or have not been verified '
+					. 'at ' . $label . ' yet.');
+			}
+
+			if ($state !== 'not_registered' && $state !== '') {
+				foreach ($this->providerDkimRows($class, $label, $machine, 'domain.machine_sender.dkim') as $r) {
+					$r['severity'] = $severity;
+					if ($on && $r['status'] === self::WARN) { $r['status'] = self::FAIL; }
+					$out[] = $r;
+				}
+			}
+		}
+
+		$out[] = $this->machineSenderSpfRow($machine, $class, $label, $on, $severity);
+
+		// The machine domain must not ITSELF be a protected identity, or
+		// ambient sends are refused exactly as on the bare domain. Protection
+		// is exact-match on a registered domain, so this only fires when
+		// someone registered and protected the subdomain itself.
+		if (MailIdentityGuard::isProtectedDomain($machine)) {
+			$out[] = $this->r('domain.machine_sender.protected', $machine, 'domain', 'Machine identity can send',
+				self::REQUIRED, self::FAIL,
+				$machine . ' is itself a protected identity, so automated mail from it is refused exactly as '
+				. 'on the bare domain.',
+				'A machine sender exists to carry the mail a protected identity cannot. Turn send protection '
+				. 'off for ' . $machine . ', or use a different subdomain.');
+		}
+
+		if ($on) {
+			$replyto = trim((string)$this->settings->get_setting('defaultreplyto'));
+			$out[] = $replyto !== ''
+				? $this->r('domain.machine_sender.replyto', $machine, 'domain', 'Replies to automated mail',
+					self::RECOMMENDED, self::PASS,
+					'Replies land at ' . $replyto . ' (the defaultreplyto setting).')
+				: $this->r('domain.machine_sender.replyto', $machine, 'domain', 'Replies to automated mail',
+					self::RECOMMENDED, self::INFO,
+					'No Reply-To is set, so replies to automated mail dead-end at ' . $default_from . '.',
+					'Set the defaultreplyto setting to a mailbox somebody reads and replies land there instead.');
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The provider's usable-state answer for a machine sending domain:
+	 * 'active', 'not_registered', a provider-reported non-usable state
+	 * ('unverified', 'disabled', ...), or '' when the API did not answer.
+	 * Providers that report a domain state (Mailgun) are asked directly;
+	 * otherwise DkimRecordSource registration knowledge stands in — 'ok'
+	 * counts as active, because that provider reports no finer state.
+	 */
+	private function machineSenderProviderState(string $class, string $machine): string {
+		if (is_callable(array($class, 'getSendingDomainState'))) {
+			try {
+				return (string)$class::getSendingDomainState($machine);
+			} catch (\Throwable $e) {
+				return '';
+			}
+		}
+		$st = $this->providerDkimStatus($class, $machine);
+		if ($st['status'] === 'ok') { return 'active'; }
+		if ($st['status'] === 'not_registered') { return 'not_registered'; }
+		return '';
+	}
+
+	/** SPF on the machine domain: the provider's mechanism plus a strict -all
+	 *  terminal. Extra mechanisms the owner added alongside pass; a missing
+	 *  provider mechanism or a softer terminal fails (while on). */
+	private function machineSenderSpfRow(string $machine, ?string $class, string $label, bool $on, string $severity) {
+		$row_label = 'SPF record (machine identity)';
+		$bad = $on ? self::FAIL : self::WARN;
+		$mech = $this->providerMechanism($class, $machine);
+		$want = 'v=spf1 ' . ($mech !== '' ? $mech . ' ' : '') . '-all';
+		list($txt, $ok) = $this->dns(function () use ($machine) { return DnsResolver::getTxt($machine); });
+		if (!$ok) {
+			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, self::UNKNOWN,
+				'DNS TXT lookup for ' . $machine . ' failed — try again.');
+		}
+		$spf = $this->extractSpf($txt);
+		if ($spf === '') {
+			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, $bad,
+				$machine . ' has no SPF (v=spf1) record.', '', $this->dnsFix('TXT', $machine, $want));
+		}
+		if ($mech !== '' && !$this->spfCoversMechanism($spf, $mech)) {
+			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, $bad,
+				'The SPF record on ' . $machine . ' does not authorize ' . $label . ' (' . $mech . ').',
+				'Record: ' . $spf, $this->dnsFix('TXT', $machine, $want));
+		}
+		if (!preg_match('/-all\s*$/', trim($spf))) {
+			return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, $bad,
+				'The SPF record on ' . $machine . ' does not end with a strict -all.',
+				'Record: ' . $spf . ' — a softer terminal (~all, ?all) lets an unauthorized sender soft-pass.',
+				$this->dnsFix('TXT', $machine, $want));
+		}
+		return $this->r('domain.machine_sender.spf', $machine, 'domain', $row_label, $severity, self::PASS,
+			'SPF on ' . $machine . ' authorizes ' . $label . ' and ends with a strict -all.');
+	}
+
+	/** Is $domain itself a proper subdomain of another registered domain? */
+	private function isSubdomainOfRegisteredDomain(string $domain): bool {
+		try {
+			$all = new MultiInboundEmailDomain(array('deleted' => false));
+			$all->load();
+			foreach ($all as $d) {
+				$name = strtolower(trim((string)$d->get('ied_domain')));
+				if ($name !== '' && $name !== $domain
+						&& substr($domain, -(strlen($name) + 1)) === '.' . $name) {
+					return true;
+				}
+			}
+		} catch (\Throwable $e) {
+			// Lookup failure must not invent a card; treat as not a subdomain.
+		}
+		return false;
 	}
 
 	// ===================================================================
@@ -1708,6 +2029,22 @@ class InboundEmailSetupCheck {
 
 	private function checkPlugin() {
 		$out = array();
+
+		// Blockers with no domain to appear on (specs/mailbox_machine_sender_card.md):
+		// an empty or invalid defaultemail matches no focused domain, so its red
+		// card would render nowhere. It surfaces here — the Advanced server-wide
+		// view — so a blocked site always has at least one red surface. The
+		// protected-domain blocker is NOT emitted here: it has a domain home.
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$sys_from = trim((string)$this->settings->get_setting('defaultemail'));
+		if ($sys_from === '' || !filter_var($sys_from, FILTER_VALIDATE_EMAIL)) {
+			$out[] = $this->r('plugin.system_mail', '', 'plugin', 'System mail can send', self::REQUIRED, self::FAIL,
+				'Automated mail from this site cannot send. '
+				. (string)EmailSender::transactionalSendBlocker($sys_from),
+				'Every transactional send (reminders, receipts, notifications) needs a valid From address — '
+				. 'the defaultemail setting.',
+				array('link' => array('url' => '/admin/admin_settings', 'label' => 'Set the system sender address')));
+		}
 
 		$enabled = (string)$this->settings->get_setting('mailbox_enabled');
 		$out[] = ($enabled === '1')
@@ -2450,11 +2787,39 @@ class InboundEmailSetupCheck {
 	 */
 	public function signingReadinessChecks(InboundEmailDomain $model): array {
 		$domain = strtolower(trim((string)$model->get('ied_domain')));
-		return array(
+		$rows = array(
 			$this->protectedDkimResult($domain, $model),
 			$this->forwardingSubdomainSpfResult($model),
 			$this->forwardingSubdomainMxResult($model),
 		);
+
+		// System mail readiness (specs/mailbox_machine_sender_card.md § Prevention):
+		// the incident this prevents happened in exactly this order — defaultemail
+		// lived on the domain, then the domain was protected, and nothing said a
+		// word until cron mail started dropping. RECOMMENDED, so it warns rather
+		// than hard-blocks: an owner heading for a deferred posture, or accepting
+		// the gap knowingly, may proceed — but past an explicit warning, with the
+		// red card waiting on the other side.
+		require_once(PathHelper::getIncludePath('includes/MailIdentityGuard.php'));
+		$from = trim((string)$this->settings->get_setting('defaultemail'));
+		if (MailIdentityGuard::domainOf($from) === $domain) {
+			$fix = ($model->key) ? array(
+				'link' => array(
+					'url'   => '/plugins/mailbox/admin/admin_mailbox_setup?domain_id=' . (int)$model->key
+						. '&machine_setup=1',
+					'label' => 'Set up the machine sender first',
+				),
+			) : null;
+			$rows[] = $this->r('domain.system_mail_readiness', $domain, 'domain', 'System mail has somewhere to go',
+				self::RECOMMENDED, self::WARN,
+				'System mail still sends as ' . $from . ' — once send protection is on, every automated email '
+				. '(reminders, receipts, notifications) from this site will be refused.',
+				'Automated mail sends with nobody signed in, and a protected identity refuses exactly those '
+				. 'sends. Move system mail to a machine identity (mail.' . $domain . ') before turning '
+				. 'protection on, or accept that automated mail stops.',
+				$fix);
+		}
+		return $rows;
 	}
 
 	/**

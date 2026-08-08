@@ -110,6 +110,35 @@ ordinary domain (or an automated sending subdomain), never a protected identity
 domain. Core send code consults `MailIdentityGuard`; the mailbox plugin registers
 the predicate and signer. See [Mailbox Plugin → Outbound send protection](/plugins/mailbox/docs/overview.md#outbound-send-protection).
 
+**Machine sender doctrine.** Automated mail belongs on its own subdomain
+identity — `notifications@mail.<domain>` — so the bare domain stays reserved
+for people and can be protected without breaking reminders and receipts. The
+mailbox Setup tab's **Automated mail identity** card walks the setup (register
+the subdomain at the provider, publish its records, flip `defaultemail`) and
+verifies the result; see
+[Mailbox Plugin → The automated mail identity](/plugins/mailbox/docs/overview.md#the-automated-mail-identity-machine-sender).
+
+**Eligibility — one check, called everywhere.**
+`EmailSender::transactionalSendBlocker(?string $from = null)` answers why an
+address cannot carry ambient/transactional mail right now — no address
+configured, syntactically invalid, or a protected identity domain — or `null`
+when it can. `$from` defaults to `defaultemail`. Its predicates are the same
+calls the runtime guard in `send()` makes, so the config-time verdict never
+drifts from send-time behavior, and it is pure read (no DNS, no provider API)
+so any settings page can call it on render. **Standing rule: every UI that
+enables a transactional email feature calls it during configuration and
+renders the verdict beside the switch.** Current callers: the admin Email
+Settings page (beside `defaultemail`), the Setup tab's machine sender card,
+`/profile/calendar_settings`, and the booking type editor.
+
+**Refused sends land in the event log.** When `send()` refuses a
+protected-identity ambient send, it writes an `email_send_refused` row to
+`evl_event_logs` (`evl_was_success = false`, note carrying From, recipients,
+subject, and the reason) before throwing — deduped to once per From address
+per UTC day, since the event-log table carries no retention policy. The red
+Setup card, not the log, is the live signal; the log row is the durable
+record.
+
 ### EmailTemplate Class
 
 Focused on template processing:

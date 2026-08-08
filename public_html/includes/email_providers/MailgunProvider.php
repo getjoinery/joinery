@@ -14,8 +14,10 @@
  *
  * Implements DkimRecordSource: the domains API reports the DKIM records a
  * sending domain must publish, which drives the mailbox Setup tab's DKIM row.
+ * Implements SendingDomainRegistrar: the same API can create a sending domain,
+ * which is what makes the machine sender ceremony's register step a button.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -23,7 +25,7 @@ require_once(PathHelper::getIncludePath('includes/InboundEmailProvider.php'));
 
 use Mailgun\Mailgun;
 
-class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource {
+class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubmissionRelay, DkimRecordSource, SendingDomainRegistrar {
 
     /** @var array<string,string> Per-request cache: sending domain => account state ('' = not in account / lookup failed). */
     private static $sending_domain_state = [];
@@ -356,6 +358,60 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             ];
         }
         return ['status' => 'ok', 'records' => $records];
+    }
+
+    // ── SendingDomainRegistrar ──────────────────────────────────────────
+
+    /**
+     * Create $domain as a sending domain in the account. Idempotent — an
+     * existing registration is 'ok'. DKIM authority is forced to $domain
+     * itself so the keys are issued for the subdomain rather than inherited
+     * from its parent; inherited authority breaks strict DMARC alignment.
+     */
+    public static function createSendingDomain(string $domain): array {
+        try {
+            self::client()->domains()->show($domain);
+            return ['status' => 'ok']; // already registered
+        } catch (\Mailgun\Exception\HttpClientException $e) {
+            if ($e->getCode() !== 404) {
+                return ['status' => 'unreachable', 'error' => $e->getMessage()];
+            }
+            // 404 — not registered yet; fall through to create.
+        } catch (\Throwable $e) {
+            return ['status' => 'unreachable', 'error' => $e->getMessage()];
+        }
+        try {
+            self::client()->domains()->create($domain, null, null, null, true /* forceDkimAuthority */);
+            unset(self::$sending_domain_state[$domain]); // state cache is now stale
+            return ['status' => 'ok'];
+        } catch (\Throwable $e) {
+            error_log('[MailgunProvider] createSendingDomain(' . $domain . ') failed: ' . $e->getMessage());
+            return ['status' => 'error', 'error' => $e->getMessage()];
+        }
+    }
+
+    /**
+     * The account's reported state for a sending domain ('active',
+     * 'unverified', 'disabled', ...), 'not_registered' when the account does
+     * not have it, or '' when the API did not answer. Shares the per-request
+     * cache alignment lookups use.
+     */
+    public static function getSendingDomainState(string $domain): string {
+        if (!array_key_exists($domain, self::$sending_domain_state)) {
+            $state = '';
+            try {
+                $d = self::client()->domains()->show($domain)->getDomain();
+                $state = ($d && method_exists($d, 'getState')) ? strtolower((string)$d->getState()) : '';
+            } catch (\Mailgun\Exception\HttpClientException $e) {
+                if ($e->getCode() === 404) {
+                    $state = 'not_registered';
+                }
+            } catch (\Throwable $e) {
+                // API did not answer — leave ''.
+            }
+            self::$sending_domain_state[$domain] = $state;
+        }
+        return self::$sending_domain_state[$domain];
     }
 
     // ── Submission-domain alignment ─────────────────────────────────────

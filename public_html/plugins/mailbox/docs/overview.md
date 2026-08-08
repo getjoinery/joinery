@@ -95,6 +95,56 @@ check, along with one-click actions to enable the plugin or register a domain.
 The tab cannot create DNS records or set reverse DNS for you (those live with
 your registrar / VPS provider) — it detects, instructs, and verifies.
 
+#### The automated mail identity (machine sender)
+
+The site's automated mail — reminders, receipts, notifications, everything
+sent with nobody signed in — can send from its own subdomain identity
+(`mail.<domain>`) instead of the bare domain, keeping the bare domain reserved
+for people. The **Automated mail identity** card
+(`domain.machine_sender*`, in the Sending group and the domain-focused view)
+owns this:
+
+- **On/off is derived, never a toggle**: the machine sender is on when the
+  `defaultemail` setting's domain is a proper subdomain of the focused domain.
+  The setting that controls where system mail sends from IS the switch, so the
+  card can never disagree with what happens at send time.
+- **Off, and eligible**: a grey OPTIONAL card on the domain system mail sends
+  as, offering the setup. Other domains show nothing.
+- **Off, and blocked**: when `EmailSender::transactionalSendBlocker()` reports
+  the system sender can never send (a protected identity, typically), the card
+  is a REQUIRED FAIL — mail is being dropped and nobody chose that. An empty
+  or invalid `defaultemail` matches no domain view, so that blocker surfaces
+  as a `plugin.system_mail` row under Advanced instead.
+- **On**: the sub-checks are REQUIRED — provider registration in a *usable*
+  state (registered-but-unverified fails), the provider's DKIM records live in
+  DNS, SPF on the machine domain with the provider mechanism and a strict
+  `-all` terminal (extra mechanisms pass; a softer terminal fails), the
+  machine domain not itself protected, and an informational Reply-To row
+  (`defaultreplyto` unset is a hint, never red). A **Send a test email**
+  action proves the whole ambient path with one real send to the operator;
+  with `email_dry_run` on it says so instead of reporting a suppressed send
+  as proof.
+- v1 verifies providers that implement `DkimRecordSource` (Mailgun, SES);
+  other transports render guidance rather than fabricated verdicts.
+
+The card's **setup ceremony** (`?machine_setup=1`, opened from the card)
+walks: register `mail.<domain>` at the provider (one button when the provider
+implements `SendingDomainRegistrar` — DKIM authority stays on the subdomain so
+its keys align strictly), publish its DNS records (they join the domain's
+publish-box plan while the ceremony is open), then switch system mail — a
+local-part field (prefill `notifications`) plus `defaultreplyto` prefilled
+with the domain's primary mailbox and saved unless cleared. The switch is
+offered only once the earlier steps verify, and the action re-verifies
+server-side. The subdomain is fixed to `mail.<domain>`, which is what lets
+the ceremony hold no state: after any reload, progress is re-derived by
+probing the provider and DNS. A custom subdomain takes the manual path
+(register at the provider dashboard, point `defaultemail` at it).
+
+The send-protection ceremony's readiness rows include **System mail has
+somewhere to go**: a warning when `defaultemail` still sends as the domain
+being protected, since protection will refuse every automated send. It warns
+rather than blocks — proceeding past it is an explicit act.
+
 #### Topology-aware prescriptions
 
 Every prescription derives from the deployment's **receive topology**,

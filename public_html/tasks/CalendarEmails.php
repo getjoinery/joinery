@@ -9,7 +9,8 @@ require_once(PathHelper::getIncludePath('includes/calendar/CalendarEmailEngine.p
  * run record. Runs every cron tick — 5-minute leads need minute resolution —
  * and sends nothing until a member opts in on /profile/calendar_settings.
  *
- * @version 1.0
+ * @version 1.1 - delivery failures are reported as an error run with a
+ *                failed count, never as a clean "Sent 0"
  */
 class CalendarEmails implements ScheduledTaskInterface, ScheduledTaskDryRunnable {
 
@@ -18,13 +19,17 @@ class CalendarEmails implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		$result = $engine->run(false);
 
 		$sent = $result['reminders'] + $result['summaries'];
+		$failed = $result['failed'];
 		$message = 'Sent ' . $result['reminders'] . ' reminder(s) and ' . $result['summaries'] . ' summary email(s).';
-
-		if ($sent > 0) {
-			$this->logRun($message);
+		if ($failed > 0) {
+			$message .= ' ' . $failed . ' send(s) FAILED — see the email_send_refused event log and the error log.';
 		}
 
-		return array('status' => 'success', 'message' => $message);
+		if ($sent > 0 || $failed > 0) {
+			$this->logRun($message, $failed === 0);
+		}
+
+		return array('status' => $failed > 0 ? 'error' : 'success', 'message' => $message);
 	}
 
 	public function dryRun(array $config) {
@@ -46,13 +51,13 @@ class CalendarEmails implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 		return array('status' => 'success', 'message' => $message, 'html' => $html);
 	}
 
-	/** Run record in the generic event log — only when something was sent. */
-	private function logRun(string $note): void {
+	/** Run record in the generic event log — when something was sent or failed. */
+	private function logRun(string $note, bool $was_success = true): void {
 		try {
 			require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 			$log = new EventLog(NULL);
 			$log->set('evl_event', 'calendar_emails_run');
-			$log->set('evl_was_success', true);
+			$log->set('evl_was_success', $was_success);
 			$log->set('evl_note', $note);
 			$log->save();
 		} catch (Throwable $e) {

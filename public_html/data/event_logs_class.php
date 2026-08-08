@@ -71,6 +71,13 @@ class MultiEventLog extends SystemMultiBase {
             $filters['evl_event'] = [$this->options['event'], PDO::PARAM_STR];
         }
 
+        if (isset($this->options['created_since'])) {
+            $ts = $this->options['created_since'];
+            if (preg_match('/^\d{4}-\d{2}-\d{2}([ T]\d{2}:\d{2}:\d{2})?$/', $ts)) {
+                $filters['evl_create_time'] = ">= '" . str_replace("'", '', $ts) . "'";
+            }
+        }
+
         return $this->_get_resultsv2('evl_event_logs', $filters, $this->order_by, $only_count, $debug);
     }
 

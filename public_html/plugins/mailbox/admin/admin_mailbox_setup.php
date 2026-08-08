@@ -25,6 +25,9 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.12 - the machine sender ceremony (specs/mailbox_machine_sender_card.md):
+ *                 register mail.<domain>, publish its records, switch system
+ *                 mail — with the switch offered only once the checks verify
  * @version 3.11 - a ceremony step with nothing left to do says so instead of
  *                 offering to configure DNS that is already live
  * @version 3.10 - the ceremony states its two steps and publishes only step one:
@@ -439,6 +442,99 @@ if ($setup_open) {
 	$render_sending_identity();
 }
 
+// --- Machine sender ceremony (specs/mailbox_machine_sender_card.md) ---------
+// The guided path for moving automated mail onto its own subdomain identity
+// (mail.<domain>), so the bare domain stays reserved for people — and can be
+// protected without breaking reminders and receipts. Opened from the
+// Automated mail identity card; like the protect ceremony, the open task
+// renders at the top of the page.
+if (!empty($machine_setup) && $focus_domain !== '') {
+	$machine_leave_url = $adv_base;
+	$page->begin_box(array(
+		'title'   => 'Automated mail identity — ' . $focus_domain,
+		'variant' => 'focus',
+	));
+	if (!empty($machine_on)) {
+		echo '<p class="mb-2"><strong>The machine sender is set up.</strong> System mail sends as a machine '
+			. 'identity under ' . htmlspecialchars($focus_domain) . '; its health reads as cards below, and a '
+			. 'record that drifts fails its check there.</p>';
+		echo '<p class="mb-0"><a class="btn btn-sm btn-outline-secondary" href="'
+			. htmlspecialchars($machine_leave_url) . '">Back to the checks</a></p>';
+	} else {
+		echo '<p class="mb-2"><strong>Setting up a machine sender for ' . htmlspecialchars($focus_domain)
+			. '.</strong> Automated mail (reminders, receipts, notifications) moves to its own identity under '
+			. '<code>' . htmlspecialchars($machine_domain) . '</code>; people keep sending as '
+			. htmlspecialchars($focus_domain) . '. Nothing changes for your mail until the last step. '
+			. '<a href="' . htmlspecialchars($machine_leave_url) . '">Leave this for now</a></p>';
+
+		// Step 1 — register at the provider. A settled step is stated, not offered.
+		$machine_registered = false;
+		foreach ($machine_readiness as $r) {
+			if ($r['id'] === 'domain.machine_sender'
+					&& in_array($r['status'], array(InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO), true)) {
+				$machine_registered = true;
+			}
+		}
+		echo '<h5 class="mt-3 mb-2">Step 1 — register ' . htmlspecialchars($machine_domain) . '</h5>';
+		if ($machine_registered) {
+			echo '<p class="mb-2">Already done — ' . htmlspecialchars($machine_domain)
+				. ' is registered as a sending domain.</p>';
+		} elseif (!empty($machine_can_register)) {
+			echo '<form method="post" action="' . htmlspecialchars($self_url . (strpos($self_url, '?') !== false ? '&' : '?') . 'machine_setup=1') . '" class="mb-2">';
+			echo '<input type="hidden" name="action" value="machine_register">';
+			echo '<input type="hidden" name="domain" value="' . htmlspecialchars($machine_domain) . '">';
+			echo '<button type="submit" class="btn btn-sm btn-primary">Register '
+				. htmlspecialchars($machine_domain) . ' at ' . htmlspecialchars($machine_provider_label) . '</button>';
+			echo '</form>';
+			echo '<p class="text-muted small mb-2">One press. DKIM authority stays on the subdomain itself, so '
+				. 'its keys align strictly with mail it sends.</p>';
+		} else {
+			echo '<p class="mb-2">Your outbound provider'
+				. ($machine_provider_label !== '' ? ' (' . htmlspecialchars($machine_provider_label) . ')' : '')
+				. ' cannot register sending domains from here. Add <code>' . htmlspecialchars($machine_domain)
+				. '</code> as a sending domain in its dashboard, then reload this page.</p>';
+		}
+
+		// Step 2 — publish DNS. The page's publish box (below) carries the
+		// machine identity's records while this ceremony is open.
+		echo '<h5 class="mt-3 mb-2">Step 2 — publish its DNS records</h5>';
+		echo '<p class="text-muted small mb-2">The DNS publish box below includes '
+			. htmlspecialchars($machine_domain) . '\'s SPF and DKIM records while this setup is open — publish '
+			. 'from there, or copy the records from the checks below. DNS takes a while to travel.</p>';
+
+		if (!empty($machine_readiness)) {
+			echo '<h5 class="mt-3 mb-2">' . (!empty($machine_ready)
+				? 'Confirmed' : 'What has to verify before the switch') . '</h5>';
+			foreach ($machine_readiness as $r) { $render_check($r); }
+		}
+
+		// Step 3 — the switch. Offered only once 1–2 verify; the action
+		// re-checks server-side so a stale tab cannot flip early.
+		echo '<h5 class="mt-3 mb-2">Step 3 — switch system mail</h5>';
+		if (empty($machine_ready)) {
+			echo '<p class="text-muted mb-2">Offered once the checks above verify.</p>';
+		} else {
+			$ms_form = $page->getFormWriter('machine_switch_form', array(
+				'action' => $self_url . (strpos($self_url, '?') !== false ? '&' : '?') . 'machine_setup=1'));
+			echo $ms_form->begin_form();
+			$ms_form->hiddeninput('action', '', array('value' => 'machine_switch'));
+			$ms_form->hiddeninput('domain', '', array('value' => $focus_domain));
+			$ms_form->textinput('machine_local', 'Address name', array(
+				'value'    => 'notifications',
+				'helptext' => 'Automated mail will send as this name @ ' . $machine_domain . '.',
+			));
+			$ms_form->textinput('machine_replyto', 'Replies go to', array(
+				'value'    => $machine_replyto_prefill,
+				'helptext' => 'When someone replies to an automated email, it lands here instead of the '
+					. 'machine address. Clear it only if you want replies to dead-end.',
+			));
+			$ms_form->submitbutton('btn_machine_switch', 'Switch system mail to the machine identity');
+			echo $ms_form->end_form();
+		}
+	}
+	$page->end_box();
+}
+
 
 // =====================================================================
 // Scoped results for the chosen mailbox or domain
@@ -626,11 +722,13 @@ if ($domain_selected) {
 	}
 	$page->end_box();
 
-	$page->begin_box(array('title' => 'Mailboxes — ' . $focus_domain));
-	echo '<p class="mb-2">No mailbox on this domain yet. Receiving and forwarding are verified against a real '
-		. 'address, so those checks appear once you add one.</p>';
-	echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_accounts">Add a mailbox</a>';
-	$page->end_box();
+	if (empty($focus_domain_has_mailboxes)) {
+		$page->begin_box(array('title' => 'Mailboxes — ' . $focus_domain));
+		echo '<p class="mb-2">No mailbox on this domain yet. Receiving and forwarding are verified against a real '
+			. 'address, so those checks appear once you add one.</p>';
+		echo '<a class="btn btn-primary" href="/plugins/mailbox/admin/admin_mailbox_accounts">Add a mailbox</a>';
+		$page->end_box();
+	}
 }
 
 if ($selected) {

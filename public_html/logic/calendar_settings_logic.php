@@ -10,7 +10,10 @@
  * /api/v1/action/calendar_settings with action=save; the render branch feeds
  * the web view its current values.
  *
- * @version 1.0
+ * @version 1.1 - the read branch reports the site-wide send blocker
+ *                (EmailSender::transactionalSendBlocker), so the page can say
+ *                these emails cannot currently send instead of taking
+ *                preferences for a dead letterbox
  */
 
 require_once(__DIR__ . '/../includes/PathHelper.php');
@@ -50,11 +53,16 @@ function calendar_settings_logic(array $input): LogicResult {
 	}
 
 	// JSON-safe on purpose — this same branch answers the API read call.
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	$pref = CalendarPreference::get_for($user_id);
 	return LogicResult::render(array(
 		'summary_frequency'        => $pref->get('cpr_summary_frequency') ?: 'none',
 		'summary_hour'             => (int)$pref->get('cpr_summary_hour'),
 		'reminder_default_minutes' => (int)$pref->get('cpr_reminder_default_minutes'),
+		// Why calendar email cannot currently send site-wide, or null. The
+		// standing rule: every UI that enables transactional mail surfaces
+		// this verdict beside the switch.
+		'send_blocker'             => EmailSender::transactionalSendBlocker(),
 	));
 }
 

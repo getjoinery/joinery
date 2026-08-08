@@ -25,6 +25,9 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.15 - the machine sender ceremony (specs/mailbox_machine_sender_card.md):
+ *                 machine_setup view state, register/switch/test-send actions,
+ *                 machine records in the publish box while the ceremony is open
  * @version 2.14 - the ceremony's publish box renders only while a readiness row
  *                 is unmet; a settled step is stated, not offered
  * @version 2.13 - the send-protection ceremony shows the checks and offers the
@@ -35,6 +38,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
@@ -92,17 +96,25 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// nothing prescribes the protected DNS shape until they have asked.
 	$protect_setup = !empty($input['protect_setup']);
 
+	// Whether the machine sender ceremony is open for the focused domain
+	// (specs/mailbox_machine_sender_card.md). Pure view state, like
+	// $protect_setup: the ceremony itself holds nothing — mid-flight progress
+	// is re-derived by probing the provider and DNS for mail.<domain>.
+	$machine_setup = !empty($input['machine_setup']);
+
 	$state_qs = function (array $over = array()) use ($base, $selected_alias_id, $selected_domain_id,
-			$advanced, $protect_setup) {
+			$advanced, $protect_setup, $machine_setup) {
 		$alias  = array_key_exists('alias_id', $over)  ? $over['alias_id']  : $selected_alias_id;
 		$domain = array_key_exists('domain_id', $over) ? $over['domain_id'] : $selected_domain_id;
 		$adv    = array_key_exists('advanced', $over)  ? $over['advanced']  : $advanced;
 		$psetup = array_key_exists('protect_setup', $over) ? $over['protect_setup'] : $protect_setup;
+		$msetup = array_key_exists('machine_setup', $over) ? $over['machine_setup'] : $machine_setup;
 		$parts = array();
 		if ($alias)       { $parts[] = 'alias_id=' . (int)$alias; }
 		elseif ($domain)  { $parts[] = 'domain_id=' . (int)$domain; }
 		if ($adv)         { $parts[] = 'advanced=1'; }
 		if ($psetup)      { $parts[] = 'protect_setup=1'; }
+		if ($msetup)      { $parts[] = 'machine_setup=1'; }
 		return $base . ($parts ? '?' . implode('&', $parts) : '');
 	};
 	$redirect_url = $state_qs();
@@ -129,7 +141,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// setting saves below so a publish never also writes the hostname form.
 	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
 	$dns_redirect = DnsPublishBox::handle($input, function () use ($selected_alias_id, $selected_domain_id,
-			$protect_setup) {
+			$protect_setup, $machine_setup) {
 		// Inside the ceremony the records to publish are the SIGNING-STAGE ones —
 		// the same set its publish box rendered. Apply resolves the plan again
 		// rather than trusting the POST, so this branch has to agree with what was
@@ -143,8 +155,8 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			return _setup_dns_plan_for_domain($selected_domain_id, true);
 		}
 		return $selected_alias_id
-			? _setup_dns_plan_for_alias($selected_alias_id)
-			: _setup_dns_plan_for_domain($selected_domain_id);
+			? _setup_dns_plan_for_alias($selected_alias_id, $machine_setup)
+			: _setup_dns_plan_for_domain($selected_domain_id, false, $machine_setup);
 	}, $state_qs());
 	if ($dns_redirect !== null) {
 		return $dns_redirect;
@@ -210,6 +222,100 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			// domain should leave exactly the decisions that deserve a human,
 			// not a checklist to go and find.
 			return LogicResult::redirect(DnsPublishBox::urlWith($redirect_url, array('dns_show' => '1')));
+		}
+
+		// --- Machine sender ceremony (specs/mailbox_machine_sender_card.md) ---
+
+		// Step 1: register mail.<domain> at the outbound provider. Idempotent —
+		// re-pressing on a registered domain announces success and changes
+		// nothing. DKIM authority stays on the subdomain itself (the provider
+		// implementation guarantees it) so its keys align strictly.
+		if ($input['action'] === 'machine_register') {
+			$machine_domain = strtolower(trim($input['domain'] ?? ''));
+			$class = EmailSender::activeServiceKey() !== ''
+				? (EmailSender::getDiscoveredProviders()[EmailSender::activeServiceKey()] ?? null) : null;
+			if ($machine_domain === '' || !preg_match('/^[a-z0-9.-]+\.[a-z]{2,}$/', $machine_domain)) {
+				$announce('No valid machine domain to register.', 'Error');
+			} elseif ($class === null
+					|| !in_array('SendingDomainRegistrar', class_implements($class) ?: array(), true)) {
+				$announce('The configured outbound provider cannot register sending domains from here — '
+					. 'add ' . $machine_domain . ' in its dashboard instead.', 'Not available');
+			} else {
+				$result = $class::createSendingDomain($machine_domain);
+				if (($result['status'] ?? '') === 'ok') {
+					$announce($machine_domain . ' is registered at ' . $class::getLabel()
+						. '. Publish its DNS records next.', 'Registered');
+				} else {
+					$announce('Could not register ' . $machine_domain . ' at ' . $class::getLabel() . ': '
+						. ($result['error'] ?? $result['status'] ?? 'unknown error'), 'Error');
+				}
+			}
+			return LogicResult::redirect($redirect_url);
+		}
+
+		// Step 3: switch system mail to the machine identity. Offered by the
+		// view only once steps 1–2 verify, and re-checked here — a stale tab
+		// must not flip system mail onto an identity that stopped verifying.
+		if ($input['action'] === 'machine_switch') {
+			$parent = strtolower(trim($input['domain'] ?? ''));
+			$local  = strtolower(trim($input['machine_local'] ?? ''));
+			$replyto = trim($input['machine_replyto'] ?? '');
+			$machine_domain = 'mail.' . $parent;
+			if ($parent === '' || !preg_match('/^[a-z0-9](?:[a-z0-9._+-]*[a-z0-9])?$/', $local)) {
+				$announce('Enter a valid address name (letters, digits, dots, dashes).', 'Error');
+				return LogicResult::redirect($redirect_url);
+			}
+			if ($replyto !== '' && !filter_var($replyto, FILTER_VALIDATE_EMAIL)) {
+				$announce($replyto . ' is not a valid Reply-To address.', 'Error');
+				return LogicResult::redirect($redirect_url);
+			}
+			$readiness = (new InboundEmailSetupCheck())->machineSenderReadiness($parent);
+			foreach ($readiness as $row) {
+				if (!in_array($row['status'], array(InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO), true)) {
+					$announce('Not yet: ' . $row['label'] . ' has not verified (' . $row['summary'] . ') '
+						. '— flipping system mail now would move it onto an identity that cannot deliver.', 'Not yet');
+					return LogicResult::redirect($redirect_url);
+				}
+			}
+			mailbox_setup_write_setting('defaultemail', $local . '@' . $machine_domain);
+			// Saved as submitted, including cleared: an empty Reply-To is a
+			// deliberate act here, not an oversight (owner decision 2026-08-08).
+			mailbox_setup_write_setting('defaultreplyto', $replyto);
+			$announce('System mail now sends as ' . $local . '@' . $machine_domain
+				. ($replyto !== '' ? ', with replies going to ' . $replyto : '') . '.', 'Switched');
+			// The ceremony is complete — drop its flag so the page renders the
+			// finished (on) state rather than the setup steps.
+			return LogicResult::redirect($state_qs(array('machine_setup' => false)));
+		}
+
+		// Prove the whole ambient path — guard, provider, alignment — with one
+		// real send to the operator. The one sub-check that cannot be inferred.
+		if ($input['action'] === 'machine_test_send') {
+			require_once(PathHelper::getIncludePath('data/users_class.php'));
+			$acting = new User((int)$session->get_user_id(), TRUE);
+			$to = $acting->key ? trim((string)$acting->get('usr_email')) : '';
+			if ((string)$settings->get_setting('email_dry_run') === '1') {
+				$announce('Email dry run is on — a test send would be suppressed, which proves nothing. '
+					. 'Turn email_dry_run off first.', 'Dry run is on');
+				return LogicResult::redirect($redirect_url);
+			}
+			if ($to === '') {
+				$announce('Your account has no email address to send the test to.', 'Error');
+				return LogicResult::redirect($redirect_url);
+			}
+			try {
+				$ok = EmailSender::quickSend($to, 'Test: automated mail from this site',
+					'This is a test of the site\'s automated mail identity, sent from the Setup tab. '
+					. 'Check the From address and the authentication results (SPF, DKIM, DMARC) in the '
+					. 'message headers.');
+				$announce($ok
+					? 'Test email sent to ' . $to . '. Check its headers for SPF/DKIM/DMARC results.'
+					: 'The test email could not be sent — it was queued for retry. Check the Sending route '
+						. 'row under Advanced.', $ok ? 'Sent' : 'Queued');
+			} catch (Exception $e) {
+				$announce('The test send was refused: ' . $e->getMessage(), 'Refused');
+			}
+			return LogicResult::redirect($redirect_url);
 		}
 
 		// Destroy the ordinary on-disk signing key for a protected domain. Never
@@ -292,7 +398,18 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		$selected_alias_id = 0;
 	}
 	if (!isset($domain_options[$selected_domain_id])) {
-		$selected_domain_id = 0;
+		// The picker lists only mailbox-less domains, but the machine sender
+		// ceremony legitimately focuses ANY registered domain — its card links
+		// here with domain_id, and dropping the focus would dump the operator
+		// on the picker with no way back in. Keep it when the domain resolves.
+		$keep = false;
+		if ($machine_setup && $selected_domain_id > 0) {
+			$dm = new InboundEmailDomain($selected_domain_id, TRUE);
+			$keep = (bool)$dm->key && !$dm->get('ied_is_imap_source');
+		}
+		if (!$keep) {
+			$selected_domain_id = 0;
+		}
 	}
 
 	// One URL for every control on this page to post back to. The focus lives in
@@ -368,6 +485,16 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		}
 	}
 
+	// Whether the focused domain already has mailboxes — the "add a mailbox"
+	// box must not claim there is none when the ceremony focused a domain the
+	// picker would not have offered.
+	$focus_domain_has_mailboxes = false;
+	if ($focus_domain !== '') {
+		foreach ($mailbox_index as $mi) {
+			if ($mi['domain'] === $focus_domain) { $focus_domain_has_mailboxes = true; break; }
+		}
+	}
+
 	$focus_domain_model = null;
 	$security_level     = InboundEmailDomain::LEVEL_STANDARD;
 	$focus_domain_id    = 0;
@@ -431,9 +558,10 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// one the request arrived with — otherwise a page loaded without ?alias_id
 	// would post back without it and the handler would have no domain to plan for.
 	$dns_box = DnsPublishBox::build(
-		($focus_domain !== '' && $arrival !== 'imap') ? $checker->dnsPlan($focus_domain) : null,
+		($focus_domain !== '' && $arrival !== 'imap')
+			? $checker->dnsPlan($focus_domain, false, $machine_setup) : null,
 		$input,
-		$self_url
+		$machine_setup ? $state_qs() : $self_url
 	);
 
 	// Where the publish box belongs: up front while there is DNS to fix, behind
@@ -441,9 +569,66 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 	// not be led with an invitation to configure them — the page already knows
 	// they are correct, because the checks it just rendered say so. Asking for
 	// the diff explicitly always keeps the box in view, so pressing the button
-	// never makes it jump somewhere else.
+	// never makes it jump somewhere else. The machine sender ceremony keeps it
+	// in view too — its step 2 IS the publish box.
 	$dns_box_in_advanced = !_setup_has_dns_work($receiving_rows, $forwarding_rows, $domain_rows)
-		&& empty($input['dns_show']);
+		&& empty($input['dns_show']) && !$machine_setup;
+
+	// --- The machine sender ceremony, when the operator has opened it ----------
+	// The subdomain is fixed to mail.<domain> — the doctrine's conventional
+	// choice — which is what lets the ceremony hold no state: after any reload,
+	// mid-flight progress is re-derived by probing the provider and DNS.
+	$machine_domain           = '';
+	$machine_on               = false;
+	$machine_readiness        = array();
+	$machine_ready            = false;
+	$machine_can_register     = false;
+	$machine_provider_label   = '';
+	$machine_replyto_prefill  = '';
+	if ($machine_setup && $focus_domain !== '' && $arrival !== 'imap') {
+		$machine_on     = $checker->machineSenderDomainFor($focus_domain) !== '';
+		$machine_domain = $machine_on
+			? $checker->machineSenderDomainFor($focus_domain) : 'mail.' . $focus_domain;
+		if (!$machine_on) {
+			$machine_readiness = $checker->machineSenderReadiness($focus_domain);
+			// Ready for the flip when nothing is failing or unresolved. INFO
+			// counts as ready: it is the non-verifiable-provider case, where
+			// the operator vouched for the dashboard side themselves.
+			$machine_ready = true;
+			foreach ($machine_readiness as $row) {
+				if (!in_array($row['status'],
+						array(InboundEmailSetupCheck::PASS, InboundEmailSetupCheck::INFO), true)) {
+					$machine_ready = false;
+					break;
+				}
+			}
+			$active_key = EmailSender::activeServiceKey();
+			$active_class = $active_key !== ''
+				? (EmailSender::getDiscoveredProviders()[$active_key] ?? null) : null;
+			if ($active_class !== null) {
+				$machine_provider_label = $active_class::getLabel();
+				$machine_can_register = in_array('SendingDomainRegistrar',
+					class_implements($active_class) ?: array(), true);
+			}
+			// Reply-To prefill: the domain's primary mailbox — the first stored
+			// mailbox on the focused domain (owner decision 2026-08-08: prefilled
+			// and saved unless cleared, so replies work by default).
+			if ($focus_domain_id > 0) {
+				$stored = new MultiInboundEmailAlias(
+					array('domain_id' => $focus_domain_id, 'deleted' => false, 'enabled' => true),
+					array('iea_alias' => 'ASC'));
+				$stored->load();
+				foreach ($stored as $alias) {
+					$alias_mode = $alias->get('iea_delivery_mode') ?: InboundEmailAlias::MODE_FORWARD;
+					if (in_array($alias_mode,
+							array(InboundEmailAlias::MODE_STORE, InboundEmailAlias::MODE_FORWARD_AND_STORE), true)) {
+						$machine_replyto_prefill = strtolower($alias->get('iea_alias') . '@' . $focus_domain);
+						break;
+					}
+				}
+			}
+		}
+	}
 
 	// --- The send-protection ceremony, when the operator has opened it ---------
 	// Everything here costs DNS lookups, so none of it runs for the ordinary
@@ -521,6 +706,7 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'forwarding_rows'            => $forwarding_rows,
 		'selected_imap'              => $selected_imap,
 		// Level-guided setup (Phase 3)
+		'focus_domain_has_mailboxes' => $focus_domain_has_mailboxes,
 		'security_level'             => $security_level,
 		'focus_domain_id'            => $focus_domain_id,
 		'focus_is_protected'         => $focus_is_protected,
@@ -531,6 +717,15 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 		'protect_dns_box'            => $protect_dns_box,
 		'protect_signing_ready'      => $protect_signing_ready,
 		'protect_vault_unlocked'     => $protect_vault_unlocked,
+		// Machine sender ceremony (specs/mailbox_machine_sender_card.md)
+		'machine_setup'              => $machine_setup,
+		'machine_domain'             => $machine_domain,
+		'machine_on'                 => $machine_on,
+		'machine_readiness'          => $machine_readiness,
+		'machine_ready'              => $machine_ready,
+		'machine_can_register'       => $machine_can_register,
+		'machine_provider_label'     => $machine_provider_label,
+		'machine_replyto_prefill'    => $machine_replyto_prefill,
 		'domain_rows'                => $domain_rows,
 		// Advanced
 		'advanced'                   => $advanced,
@@ -587,7 +782,7 @@ function _setup_has_dns_work(array ...$groups): bool {
  * handler — which runs before the page has resolved anything and must not pay
  * for the whole mailbox index to find one domain.
  */
-function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
+function _setup_dns_plan_for_alias(int $alias_id, bool $machine_stage = false): ?DnsRecordPlan {
 	if ($alias_id <= 0) {
 		return null;
 	}
@@ -600,7 +795,7 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
 	if ($name === '' || $domain->get('ied_is_imap_source')) {
 		return null;   // an IMAP-pull mailbox has no MX/host stack to publish
 	}
-	return (new InboundEmailSetupCheck())->dnsPlan($name);
+	return (new InboundEmailSetupCheck())->dnsPlan($name, false, $machine_stage);
 }
 
 /**
@@ -615,7 +810,8 @@ function _setup_dns_plan_for_alias(int $alias_id): ?DnsRecordPlan {
  * handler that rebuilt a different plan would write records nobody had seen,
  * which is precisely what the publish rail exists to prevent.
  */
-function _setup_dns_plan_for_domain(int $domain_id, bool $signing_stage = false): ?DnsRecordPlan {
+function _setup_dns_plan_for_domain(int $domain_id, bool $signing_stage = false,
+		bool $machine_stage = false): ?DnsRecordPlan {
 	if ($domain_id <= 0) {
 		return null;
 	}
@@ -625,7 +821,8 @@ function _setup_dns_plan_for_domain(int $domain_id, bool $signing_stage = false)
 		return null;
 	}
 	$checker = new InboundEmailSetupCheck();
-	return $signing_stage ? $checker->signingReadinessPlan($name) : $checker->dnsPlan($name);
+	return $signing_stage ? $checker->signingReadinessPlan($name)
+		: $checker->dnsPlan($name, false, $machine_stage);
 }
 
 /**

@@ -172,6 +172,76 @@ class EmailSender {
         self::$providers = null;
     }
 
+    // ── Eligibility ─────────────────────────────────────────────────────
+
+    /**
+     * Why $from cannot carry ambient/transactional mail right now, or null
+     * when it can. $from defaults to the defaultemail setting.
+     *
+     * The predicates are the same calls the runtime guard in send() makes —
+     * a config-time verdict that could drift from send-time behavior would be
+     * worse than none. Pure read: no DNS, no provider API, cheap enough for
+     * every settings-page render. (Whether the mail *authenticates* once sent
+     * is the Setup tab's job; this answers only "will send() refuse it".)
+     *
+     * Every UI that enables a transactional email feature calls this during
+     * its configuration flow and renders the result.
+     *
+     * @return string|null Human-readable blocker, or null = eligible.
+     */
+    public static function transactionalSendBlocker(?string $from = null): ?string {
+        if ($from === null) {
+            $from = (string)Globalvars::get_instance()->get_setting('defaultemail');
+        }
+        $from = trim($from);
+        if ($from === '') {
+            return 'No system sender address is configured.';
+        }
+        if (!filter_var($from, FILTER_VALIDATE_EMAIL)) {
+            return $from . ' is not a valid email address.';
+        }
+        $domain = MailIdentityGuard::domainOf($from);
+        if (MailIdentityGuard::isProtectedDomain($domain)) {
+            return 'Automated mail from ' . $domain . ' is refused: it is a protected identity, '
+                . 'and only the session-gated mailbox compose path may send as it.';
+        }
+        return null;
+    }
+
+    /**
+     * Record a refused ambient send in the main event log, deduped to once
+     * per From-address per UTC day — evl_event_logs carries no retention
+     * policy, and a caller without a dedup ledger of its own could otherwise
+     * refuse once per cron minute forever. The day's first row is the record;
+     * the red Setup card, not the log, is the live signal.
+     *
+     * Never throws: the refusal exception behind it is the real event, and a
+     * logging hiccup must not mask it.
+     */
+    private static function logRefusedSend(string $from, string $to, string $subject, string $reason): void {
+        try {
+            require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
+            $today = new MultiEventLog([
+                'event' => 'email_send_refused',
+                'created_since' => gmdate('Y-m-d 00:00:00'),
+            ]);
+            $today->load();
+            $prefix = 'from=' . $from . ' ';
+            foreach ($today as $row) {
+                if (strpos((string)$row->get('evl_note'), $prefix) === 0) {
+                    return; // already recorded today
+                }
+            }
+            $log = new EventLog(NULL);
+            $log->set('evl_event', 'email_send_refused');
+            $log->set('evl_was_success', false);
+            $log->set('evl_note', $prefix . 'to=' . $to . ' subject=' . $subject . ' — ' . $reason);
+            $log->save();
+        } catch (Throwable $e) {
+            error_log('email_send_refused: could not write the event-log record — ' . $e->getMessage());
+        }
+    }
+
     // ── Sending ─────────────────────────────────────────────────────────
 
     /**
@@ -224,6 +294,10 @@ class EmailSender {
         // generator, which Phase 5 already moves off the protected domain.
         if ($transport === null
             && MailIdentityGuard::isProtectedDomain(MailIdentityGuard::domainOf((string)$message->getFrom()))) {
+            $recipients = array_column($message->getRecipients() ?: array(), 'email');
+            self::logRefusedSend((string)$message->getFrom(), implode(', ', $recipients),
+                (string)$message->getSubject(),
+                'protected identity domain outside the session-gated mailbox compose path');
             throw new Exception('Refusing to send from a protected identity domain outside the '
                 . 'session-gated mailbox compose path.');
         }
