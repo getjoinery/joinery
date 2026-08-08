@@ -17,6 +17,10 @@
  *                 but never erase it; the main (delete-capable) credential then stays on the
  *                 control plane. With no node credential configured, the main token is emitted
  *                 and nothing changes.
+ * @version 1.26 - every restore path reconciles the site to the machine it lands on and proves it
+ *                 (identity + served-over-HTTPS gates); the Apache choice is gone, the domain is a
+ *                 required parameter, and build_restore_chain() makes the fleet's actual backups —
+ *                 incremental chains — restorable from the dashboard for the first time
  * @version 1.24 - build_backup_run(): this control plane's own backup of a node, run by the node's
  *                 own engine with the bucket, a write-only credential and the recovery key supplied
  *                 per run and never stored there. Writing a node's own recovery key is retired —
@@ -997,9 +1001,15 @@ class JobCommandBuilder {
 	 *   filename      - display name of the archive (for logging)
 	 *   local_path    - /backups/*.tar.gz on the node, or null
 	 *   cloud_path    - remote object key in the bucket, or null
+	 *   domain        - REQUIRED. The domain the restored site is to answer to.
 	 *   skip_database - bool
 	 *   skip_files    - bool
-	 *   skip_apache   - bool
+	 *
+	 * There is no "restore the Apache config" choice. The captured virtualhost is
+	 * never installed, in any case: the restore regenerates the serving config
+	 * for this box from the platform's own templates and keeps a differing
+	 * capture beside it for review. Making that an operator choice made the
+	 * correct behaviour something you had to know to ask for.
 	 */
 	public static function build_restore_project($node, $params) {
 		$local_path = $params['local_path'] ?? null;
@@ -1008,11 +1018,12 @@ class JobCommandBuilder {
 
 		$skip_db     = !empty($params['skip_database']);
 		$skip_files  = !empty($params['skip_files']);
-		$skip_apache = !empty($params['skip_apache']);
 
-		if ($skip_db && $skip_files && $skip_apache) {
-			throw new Exception('At least one of project files, database, or Apache config must be restored.');
+		if ($skip_db && $skip_files) {
+			throw new Exception('At least one of project files or database must be restored.');
 		}
+
+		$domain = self::restore_domain($node, $params);
 
 		$web_root    = rtrim($node->get('mgn_web_root'), '/');
 		$project_dir = dirname($web_root);
@@ -1061,10 +1072,11 @@ class JobCommandBuilder {
 
 		// 4. Run restore_project.sh — --force activates non-interactive mode and
 		// cascades --non-interactive into the inner restore_database.sh call.
+		// The restore ends by reconciling the site to this machine (domain,
+		// deployment shape, regenerated virtualhost, armed certificate retry).
 		$skip_flags = '';
 		if ($skip_db)     $skip_flags .= ' --skip-database';
 		if ($skip_files)  $skip_flags .= ' --skip-files';
-		if ($skip_apache) $skip_flags .= ' --skip-apache';
 
 		// Resolve DB user + key path in this NON-sudo shell and pass them absolute
 		// into the sudo'd restore, which forwards them to the DB restore engine
@@ -1073,9 +1085,17 @@ class JobCommandBuilder {
 			. ' ' . escapeshellarg($project_name)
 			. ' ' . escapeshellarg($local_path)
 			. ' --force' . $skip_flags
+			. ' --domain ' . escapeshellarg($domain)
 			. ' --db-user "$DB_USER" --key-file "$KEY_PATH"';
 
 		$steps[] = ['type' => 'ssh', 'label' => 'Run project restore', 'cmd' => $restore_cmd, 'timeout' => 3600];
+
+		// A container's public face is the HOST's proxy virtualhost, which lives
+		// outside the container and therefore in no backup at all. The restore
+		// inside the container cannot write it; this step can.
+		foreach (self::steps_publish_container_domain($node, $domain) as $s) {
+			$steps[] = $s;
+		}
 
 		// 5. Verify. A directory listing always succeeds, so it confirms nothing —
 		// assert the restored web root actually holds a site, and that a restored
@@ -1094,6 +1114,317 @@ class JobCommandBuilder {
 			            . "{ echo 'VERIFY FAILED: the restored database has no tables'; exit 1; }";
 		}
 		$steps[] = ['type' => 'ssh', 'label' => 'Verify restore', 'cmd' => $verify_cmd];
+
+		$steps[] = self::step_verify_identity($node, $domain);
+		$steps[] = self::step_verify_served($node, $domain);
+
+		return $steps;
+	}
+
+	/**
+	 * The domain a restore job is to leave the site answering to.
+	 *
+	 * Required, never inferred. The correct answer depends on intent that is not
+	 * present in the data: a real rebuild keeps the site's own domain and cuts
+	 * DNS at the end, while a rehearsal must NOT claim it — the same backup and
+	 * the same target want opposite answers. The tempting rule "the node's
+	 * recorded URL wins when set" fails in exactly the case that matters most: a
+	 * node provisioned during an incident carries whatever hostname somebody
+	 * typed in a hurry, so the restore would adopt a throwaway name and the
+	 * mistake would surface only after DNS moved.
+	 *
+	 * The dashboard pre-fills the field from mgn_site_url. Requiring the value
+	 * costs one field and records the decision at the moment somebody knows it.
+	 */
+	private static function restore_domain($node, array $params) {
+		$domain = trim((string)($params['domain'] ?? ''));
+		if ($domain === '') {
+			throw new Exception(
+				'A restore must be told which domain the site is to answer to. It is not inferred: '
+				. 'a rebuild keeps the site\'s own domain while a rehearsal must not claim it, and the '
+				. 'backup looks identical either way.');
+		}
+		if (preg_match('/[^A-Za-z0-9.\-]/', $domain)) {
+			throw new Exception("'{$domain}' is not a valid domain name for a restore.");
+		}
+		return $domain;
+	}
+
+	/**
+	 * Publish a container site's domain on its HOST.
+	 *
+	 * In the container shape, TLS terminates on the host: the container serves
+	 * :80 under an internal ServerName and the host proxies to it. That proxy
+	 * virtualhost is outside the container's filesystem, so no backup contains
+	 * it and no in-container restore can write it. manage_domain.sh writes it,
+	 * is idempotent, and installs mod_proxy if the host lacks it.
+	 *
+	 * Empty for a bare-metal node (nothing to proxy) and for an IP or localhost
+	 * (a ServerName-based proxy needs a routable name).
+	 */
+	private static function steps_publish_container_domain($node, $domain) {
+		$container = trim((string)$node->get('mgn_container_name'));
+		if ($container === '') {
+			return [];
+		}
+		if ($domain === 'localhost' || preg_match('/^\d+\.\d+\.\d+\.\d+$/', $domain)) {
+			return [];
+		}
+
+		// maintenance_scripts is baked into the container image, not present on
+		// the host — so run the copy inside the container has no host effect.
+		// Read the script out of the container and run it on the host instead.
+		// manage_domain.sh identifies the site by its CONTAINER name (that is what
+		// it looks for in `docker ps` and what it proxies to), not by the node's
+		// slug, which is a control-plane label and need not match.
+		$c = escapeshellarg($container);
+		$d = escapeshellarg($domain);
+		$s = $c;
+		$scripts = self::get_scripts_path($node);
+		$md = escapeshellarg($scripts . '/sysadmin_tools/manage_domain.sh');
+
+		return [[
+			'type' => 'ssh', 'label' => 'Publish the domain on the container host', 'on_host' => true,
+			'cmd' => "TMP=\$(mktemp) && sudo docker exec {$c} cat {$md} > \"\$TMP\" && "
+			       . "sudo bash \"\$TMP\" set {$s} {$d} --no-ssl; RC=\$?; rm -f \"\$TMP\"; exit \$RC",
+			'timeout' => 600,
+			// A host that already proxies this name is the normal case on a
+			// re-restore, and manage_domain.sh says so rather than failing —
+			// but a host with no Apache at all should not sink the restore
+			// that already succeeded inside the container.
+			'continue_on_error' => true,
+		]];
+	}
+
+	/**
+	 * Prove the restored site AGREES with the machine it landed on.
+	 *
+	 * The rebuild drill passed every check it had and still produced a site that
+	 * believed it was in a container, at the old address, with a database
+	 * password from another box. Each of those is one grep away from being
+	 * caught, which is why this step exists.
+	 */
+	private static function step_verify_identity($node, $domain) {
+		$config = escapeshellarg(self::get_config_path($node));
+		$sudo   = self::sudo_prefix($node);
+		$is_docker = (bool)$node->get('mgn_container_name');
+		$want_env  = $is_docker ? 'docker' : 'baremetal';
+		$d = escapeshellarg($domain);
+		$creds = self::get_db_credentials_script($node);
+
+		$cmd = "CFG={$config}; "
+		     . "GOT_DOMAIN=\$({$sudo}grep \"settings\\['webDir'\\]\" \$CFG | head -1 | grep -oP \"'[^']*'\" | tail -1 | tr -d \"'\"); "
+		     . "GOT_ENV=\$({$sudo}grep \"settings\\['deployment_environment'\\]\" \$CFG | head -1 | grep -oP \"'[^']*'\" | tail -1 | tr -d \"'\"); "
+		     . "case \"\$GOT_ENV\" in bare-metal) GOT_ENV=baremetal ;; esac; "
+		     . "echo \"identity: webDir=\$GOT_DOMAIN deployment_environment=\$GOT_ENV\"; "
+		     . "test \"\$GOT_DOMAIN\" = {$d} || { echo \"VERIFY FAILED: the site still calls itself \$GOT_DOMAIN\"; exit 1; }; "
+		     . "test \"\$GOT_ENV\" = '{$want_env}' || { echo \"VERIFY FAILED: the site thinks it is running on \$GOT_ENV, not {$want_env}\"; exit 1; }; "
+		     . "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -tAc 'SELECT 1' > /dev/null || "
+		     . "{ echo 'VERIFY FAILED: the database will not open with this machine credentials'; exit 1; }; "
+		     . "echo 'identity verify: OK'";
+
+		return ['type' => 'ssh', 'label' => 'Verify the site agrees with this machine', 'cmd' => $cmd];
+	}
+
+	/**
+	 * Prove the site is actually being SERVED — over HTTPS when it can be.
+	 *
+	 * Called out separately because the drill's failure passed an HTTP-only
+	 * check comfortably: the site answered on :80 the whole time, under a
+	 * container's internal virtualhost, with a valid certificate sitting unused
+	 * on disk.
+	 *
+	 * HTTPS is required only once the domain resolves HERE. Restoring before the
+	 * DNS cutover is the normal shape of a rebuild, and the certificate arrives
+	 * on its own afterwards — so a name that does not point here yet reports
+	 * pending rather than failing.
+	 */
+	private static function step_verify_served($node, $domain) {
+		$d = escapeshellarg($domain);
+		$cmd = "DOM={$d}; "
+		     . "MYIP=\$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null); "
+		     . "DNSIP=\$(getent ahostsv4 \"\$DOM\" 2>/dev/null | awk '{print \$1; exit}'); "
+		     . "if [ -n \"\$DNSIP\" ] && [ \"\$DNSIP\" = \"\$MYIP\" ]; then "
+		     .   "CODE=\$(curl -sILo /dev/null -w '%{http_code}' --max-time 20 \"https://\$DOM/\" 2>/dev/null); "
+		     .   "echo \"served: https://\$DOM -> HTTP \$CODE\"; "
+		     .   "case \"\$CODE\" in 200|301|302|303) echo 'served verify: OK over HTTPS' ;; "
+		     .     "*) echo \"VERIFY FAILED: \$DOM resolves here but HTTPS answered \$CODE\"; exit 1 ;; esac; "
+		     . "else "
+		     .   "CODE=\$(curl -sILo /dev/null -w '%{http_code}' --max-time 20 -H \"Host: \$DOM\" 'http://127.0.0.1/' 2>/dev/null); "
+		     .   "echo \"served: \$DOM does not resolve to this server yet (DNS \${DNSIP:-none} vs \${MYIP:-unknown})\"; "
+		     .   "echo \"served: local HTTP answered \$CODE\"; "
+		     .   "echo 'served verify: certificate deferred — the retry timer issues it once DNS points here'; "
+		     . "fi";
+
+		return ['type' => 'ssh', 'label' => 'Verify the site is served', 'cmd' => $cmd,
+		        'on_host' => true, 'timeout' => 120];
+	}
+
+	/**
+	 * Restore a node from an incremental backup CHAIN.
+	 *
+	 * Chains are what the fleet actually produces — the manager backup profile
+	 * writes a full plus incrementals, not standalone archives — so without this
+	 * the backups every scheduled run uploads could not be restored from the
+	 * dashboard at all.
+	 *
+	 * The shape of the job:
+	 *   1. fetch the chain's manifest onto the node
+	 *   2. recover the chain data key from the manifest's envelope, using the
+	 *      node's OWN backup_site_key (every chain seals to the node as well as
+	 *      to the control plane's recovery key, so a node can always open its
+	 *      own backups without anybody's private key travelling)
+	 *   3. download every artifact the manifest names, up to the chosen run
+	 *   4. restore_chain.sh verifies each one against its recorded size and hash
+	 *      BEFORE writing anything, applies them in order, then reconciles
+	 *
+	 * $params:
+	 *   chain_id  - e.g. chain-20260807_231507 (required)
+	 *   seq       - restore as at this run; default the newest in the manifest
+	 *   domain    - REQUIRED, see restore_domain()
+	 *   skip_database - bool
+	 */
+	public static function build_restore_chain($node, $params) {
+		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+
+		$chain_id = trim((string)($params['chain_id'] ?? ''));
+		if ($chain_id === '' || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
+			throw new Exception('A chain restore needs the chain id (for example chain-20260807_231507).');
+		}
+		$seq    = isset($params['seq']) && $params['seq'] !== '' ? (int)$params['seq'] : null;
+		$domain = self::restore_domain($node, $params);
+		$skip_db = !empty($params['skip_database']);
+
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception('This node has no backup target, so there is no shelf to read a chain from.');
+		}
+
+		$slug = trim((string)$node->get('mgn_slug'));
+		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
+			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
+		}
+
+		$web_root     = rtrim((string)$node->get('mgn_web_root'), '/');
+		$project_dir  = dirname($web_root);
+		$project_name = basename($project_dir);
+		$scripts      = self::get_scripts_path($node);
+		$sudo         = self::sudo_prefix($node);
+		$creds        = self::get_db_credentials_script($node);
+
+		// {prefix}/{slug}/{profile}/{chain_id}/. The profile segment keeps two
+		// parties' backups apart — the site's own and this control plane's — so
+		// it is carried from the listing rather than assumed. A chain restore
+		// started from the dashboard is normally a manager-profile chain.
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
+		// normalize('') means the SITE profile, which is a different shelf — so an
+		// unset parameter defaults here rather than falling through to it.
+		$profile   = BackupProfile::normalize(
+			trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
+		$chain_key = BackupChainListHelper::chain_path($target, $slug, $profile, $chain_id);
+		$work      = '/backups/restore_' . $chain_id;
+
+		$uploader = self::build_node_uploader_script($target->get('bkt_bucket'), $target, 'download');
+		$eof      = '__JOINERY_UPLOADER_EOF__';
+
+		$steps = [];
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Prepare the restore workspace',
+			'cmd' => "{$sudo}mkdir -p " . escapeshellarg($work) . " && {$sudo}chmod 1777 /backups && "
+			       . "{$sudo}chmod 700 " . escapeshellarg($work) . " && echo WORKSPACE_READY"];
+
+		// The manifest first: it names every artifact, in order, with the size and
+		// hash each must match, and carries the sealed data keys. A bucket full of
+		// files-0003.tar.gz.enc without it is not a backup.
+		$manifest_remote = escapeshellarg($chain_key . '/manifest.json');
+		$manifest_local  = escapeshellarg($work . '/manifest.json');
+		$steps[] = ['type' => 'ssh', 'label' => 'Fetch the chain manifest',
+			'cmd' => "php -- download {$manifest_remote} {$manifest_local} <<'{$eof}'\n{$uploader}\n{$eof}",
+			'timeout' => 600];
+
+		// Recover the chain data key on the NODE, from the node's own site key.
+		// The control plane's recovery private key never travels: it is the key
+		// of last resort for a machine that no longer exists, and putting it in a
+		// job record would make every stored job a copy of it.
+		$envelope_tool = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
+		$site_key      = escapeshellarg($project_dir . '/config/backup_site_key');
+		$key_out       = escapeshellarg($work . '/chain.key');
+		$steps[] = ['type' => 'ssh', 'label' => 'Recover the chain key',
+			'cmd' => "{$sudo}test -f {$site_key} || { echo 'This node has no backup_site_key, so it cannot open its own chain.'; "
+			       . "echo 'Recover the key with backup_envelope.php open --sidecar manifest.json --private <recovery key> and restore from a shell.'; exit 1; }; "
+			       . "{$sudo}php {$envelope_tool} open --sidecar {$manifest_local} --private {$site_key} --key-out {$key_out} > /dev/null 2>&1 || "
+			       . "{ echo 'The chain envelope did not open with this node key — this chain was taken by a different machine.'; "
+			       . "echo 'Restore it from a shell with the recovery key: backup_envelope.php open --sidecar manifest.json --private <recovery key>'; exit 1; }; "
+			       . "{$sudo}chmod 600 {$key_out}; echo CHAIN_KEY_OK",
+			'timeout' => 300];
+
+		// Download exactly what the manifest names, in the run range asked for.
+		// Reading the manifest ON the node keeps the artifact list and the file
+		// list one thing — a control plane that computed names itself would be a
+		// second implementation of the chain layout, free to drift.
+		// `|| exit 1` rides the heredoc REDIRECT line, not the line after the
+		// terminator: anything placed after a terminator is a fresh statement, and
+		// putting the guard there both breaks the loop's syntax and (in the older
+		// form of this bug) got swallowed into the uploader's stdin.
+		$seq_arg = ($seq === null) ? '' : (string)$seq;
+		$fetch = "cd " . escapeshellarg($work) . " || exit 1\n"
+		       . "NAMES=\$(python3 - manifest.json " . escapeshellarg($seq_arg) . " <<'PYEOF'\n"
+		       . "import json,sys\n"
+		       . "m=json.load(open(sys.argv[1]))\n"
+		       . "runs=m.get('runs') or []\n"
+		       . "want=sys.argv[2]\n"
+		       . "seq=(len(runs)-1) if want=='' else int(want)\n"
+		       . "if seq<0 or seq>=len(runs): sys.exit('this chain has no run %s' % want)\n"
+		       . "names=[runs[i]['artifacts']['files']['name'] for i in range(seq+1)]\n"
+		       . "last=runs[seq].get('artifacts') or {}\n"
+		       . "for kind in ('db','meta'):\n"
+		       . "    if kind in last: names.append(last[kind]['name'])\n"
+		       . "print('\\n'.join(names))\n"
+		       . "PYEOF\n"
+		       . ") || exit 1\n"
+		       . "test -n \"\$NAMES\" || { echo 'the manifest names no artifacts'; exit 1; }\n"
+		       . "for N in \$NAMES; do\n"
+		       . "  echo \"fetching \$N\"\n"
+		       . "  php -- download " . escapeshellarg($chain_key) . "/\"\$N\" \"\$N\" <<'{$eof}' || exit 1\n"
+		       . "{$uploader}\n"
+		       . "{$eof}\n"
+		       . "done\n"
+		       . "echo CHAIN_ARTIFACTS_FETCHED";
+		$steps[] = ['type' => 'ssh', 'label' => 'Download the chain artifacts',
+			'cmd' => $fetch, 'timeout' => S3Signer::transfer_budget_seconds() + 3600];
+
+		// Pre-restore snapshot, same as every other restore path.
+		if (!$skip_db) {
+			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
+				'cmd' => "{$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_chain_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
+				'timeout' => 3600];
+		}
+
+		$restore = "{$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_chain.sh")
+			. ' ' . escapeshellarg($project_name)
+			. ' --artifacts ' . escapeshellarg($work)
+			. ' --key-file ' . $key_out
+			. ' --domain ' . escapeshellarg($domain)
+			. ' --force';
+		if ($seq !== null)  { $restore .= ' --seq ' . escapeshellarg((string)$seq); }
+		if ($skip_db)       { $restore .= ' --skip-database'; }
+
+		// The key is shredded whatever the outcome, without eating the exit code.
+		// A usable decryption key must not outlive the restore that needed it.
+		$steps[] = ['type' => 'ssh', 'label' => 'Restore the chain',
+			'cmd' => $restore . "; RC=\$?; {$sudo}rm -f {$key_out}; exit \$RC",
+			'timeout' => 7200];
+
+		foreach (self::steps_publish_container_domain($node, $domain) as $s) {
+			$steps[] = $s;
+		}
+
+		$steps[] = self::step_verify_identity($node, $domain);
+		$steps[] = self::step_verify_served($node, $domain);
+
+		$steps[] = ['type' => 'ssh', 'label' => 'Clean up the restore workspace',
+			'cmd' => "{$sudo}rm -rf " . escapeshellarg($work),
+			'teardown' => true, 'continue_on_error' => true, 'timeout' => 300];
 
 		return $steps;
 	}
@@ -2514,29 +2845,36 @@ class JobCommandBuilder {
 				'cmd' => "bash /var/www/html/{$sitename}/maintenance_scripts/install_tools/fix_permissions.sh {$sitename}",
 				'continue_on_error' => true]);
 
-			// Post-restore domain fixup: the source site's domain was set during install.sh
-			// and in the restored DB. Update both to the target node's domain.
+			// The clone now carries the SOURCE site's identity — its domain in the
+			// restored database, its idea of what machine it is on — while sitting
+			// on this one. Reconciliation settles that, and it is the same step
+			// every other restore path ends with, so a clone and a rebuild cannot
+			// drift apart in what they fix up.
+			//
+			// It is a gate, not a fixup: it refuses if the restored database will
+			// not open with this machine's credentials, which is the failure that
+			// otherwise shows up as SQLSTATE[08006] on every page of a clone that
+			// reported success.
 			$target_domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
 			if ($target_domain) {
-				$target_domain_esc = escapeshellarg($target_domain);
-				$source_domain_esc = escapeshellarg($domain); // $domain = source domain in from_backup mode
+				$reconcile = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/reconcile_site.sh";
+				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Reconcile the clone to this machine',
+					'cmd' => 'bash ' . escapeshellarg($reconcile)
+					       . ' ' . escapeshellarg($sitename)
+					       . ' --domain ' . escapeshellarg($target_domain),
+					'timeout' => 600]);
 
-				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Update webDir in database',
-					'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"UPDATE stg_settings SET stg_value = {$target_domain_esc} WHERE stg_name = 'webDir'\"",
-					'continue_on_error' => true]);
-
-				$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Update webDir in config file',
-					'cmd' => "sed -i \"s|settings\['webDir'\] = '[^']*'|settings['webDir'] = '{$target_domain}'|\" /var/www/html/{$sitename}/config/Globalvars_site.php",
-					'continue_on_error' => true]);
-
-				$apache_conf = "/etc/apache2/sites-available/{$sitename}.conf";
-				$apache_reload = $is_docker_install ? 'apache2ctl graceful' : 'systemctl reload apache2';
-				$steps[] = array_merge(
-					$is_docker_install ? $step_base : ['on_host' => true],
-					['type' => 'ssh', 'label' => 'Update Apache ServerName',
-					 'cmd' => "[ -f {$apache_conf} ] && sed -i \"s/ServerName {$domain}/ServerName {$target_domain}/\" {$apache_conf} && {$apache_reload} || true",
-					 'continue_on_error' => true]
-				);
+				// A container's public name is served by the HOST's proxy, which is
+				// outside the container and so outside everything above.
+				if ($is_docker_install && $target_domain !== 'localhost'
+				    && !preg_match('/^\d+\.\d+\.\d+\.\d+$/', $target_domain)) {
+					$manage_domain_host = "{$remote_install_dir}/maintenance_scripts/sysadmin_tools/manage_domain.sh";
+					$steps[] = ['type' => 'ssh', 'label' => 'Publish the clone domain on the host',
+						'on_host' => true,
+						'cmd' => 'sudo bash ' . escapeshellarg($manage_domain_host) . ' set '
+						       . escapeshellarg($sitename) . ' ' . escapeshellarg($target_domain) . ' --no-ssl',
+						'timeout' => 300, 'continue_on_error' => true];
+				}
 			}
 
 			$teardown[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Clean up restore artifacts on target',

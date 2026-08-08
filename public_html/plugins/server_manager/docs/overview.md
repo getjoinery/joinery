@@ -174,7 +174,7 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | Tab | Purpose |
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
-| **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive |
+| **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain |
 | **Database** | Copy database from another node to this one, restore from backup file |
 | **Updates** | Version comparison (node vs control plane), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
@@ -248,7 +248,8 @@ Health dot colors reflect actual server health, not check recency:
 | `delete_backup` | Delete backup files from local, cloud, or both | **Yes** |
 | `copy_database` | Dump source DB, transfer, restore on target | **Yes** |
 | `restore_database` | Restore a backup file on a node | **Yes** |
-| `restore_project` | Restore a full project `.tar.gz` (files + DB + Apache config) in place on an existing node. Runs `restore_project.sh --force`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
+| `restore_project` | Restore a full project `.tar.gz` (files + DB) in place on an existing node, then reconcile it to that machine. Runs `restore_project.sh --force --domain <domain>`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
+| `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
 | `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
@@ -274,7 +275,7 @@ Destructive operations auto-backup the target database before proceeding. The UI
 Two install types:
 
 - **Fresh**: empty Joinery site with default schema. Admin picks the domain. The admin login is `admin@example.com` with a password generated for that site alone — there is no shared default. Like the generated Postgres password, it stays on the node rather than in the control plane: read it at `/var/www/html/{sitename}/config/admin_credentials.txt` (root only), or set a new one with `maintenance_scripts/sysadmin_tools/reset_admin_password.php`. `usr_force_password_change=true`, so the first sign-in forces a new password.
-- **From Backup**: fresh install + restore of a source node's DB and project files. Target inherits the source's domain — admin cuts over DNS after install. Use source admin credentials to log in.
+- **From Backup**: fresh install + restore of a source node's DB and project files, then reconciliation to the new node — its own domain (the node's recorded URL), its own deployment shape, its own paths. Use source admin credentials to log in; cut DNS over when ready and the certificate is issued on its own.
 
 The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the control plane, and pushed to the target after install.
 
@@ -283,7 +284,9 @@ leading path components stripped, taking only the `project_files/` subtree —
 `backup_project.sh` writes archives as `{backup_name}/project_files/{public_html,
 uploads,config,...}` with the archive's own metadata (`apache_config/`,
 `backup_info.txt`, the `.sql` dump) as siblings. The target keeps its own
-`Globalvars_site.php`. A verification step then requires every regular file the
+`Globalvars_site.php` (it holds this machine's database password and
+`secret_box_key`) and mints its own `backup_site_key` rather than inheriting the
+source's identity as a backup recipient. A verification step then requires every regular file the
 archive carries to exist at the site root and fails the job otherwise, because a
 clone whose files did not land still serves pages: the fresh install ran first
 and the database restore succeeded, so the only symptom is uploaded files
@@ -499,6 +502,19 @@ The **Backups** tab on each node includes a file browser that lists backup files
 - **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the control plane would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
+- **Restore points (incremental chains)** — a second table listing each chain on the node's shelf with its runs, size and newest restore point, read from the chain's own `manifest.json` by `BackupChainListHelper`. Restoring picks a run: the full, then every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all
+
+### What a restore asks, and what it decides
+
+Every restore form asks one thing and decides the rest.
+
+**It asks for the domain**, pre-filled from the node's recorded URL. This is the one value a restore cannot work out for itself: a rebuild keeps the site's own domain and cuts DNS afterwards, while a rehearsal must not claim it, and the same backup on the same node wants opposite answers. A node provisioned during an incident carries whatever hostname somebody typed in a hurry, so adopting it silently is a mistake that surfaces only after DNS moves.
+
+**It decides the serving config.** There is no Apache choice on the form. The restore regenerates the virtualhost for this machine from the platform's own templates and never installs the one the backup carries; a differing capture is preserved as `{site}.conf.from-backup` and named in the job output. On a container node a further step publishes the domain on the **host** with `manage_domain.sh`, because the host's proxy virtualhost is outside the container and therefore in no backup.
+
+Every restore job ends with two gates: the site's identity must match the machine (domain, deployment shape, and a database that opens with this machine's credentials) and the site must actually be served — over **HTTPS** when the domain already resolves here, or reported as certificate-deferred when it does not. The HTTPS gate is explicit because an HTTP-only check passes comfortably while a site serves under a container's internal virtualhost with a valid certificate sitting unused on disk.
+
+What gets reconciled, and why each item is on the list, is in [Backups](../../../docs/backups.md#what-a-restore-reconciles).
 
 Cloud listings are fetched live via `TargetLister` on every page render (one SigV4 HTTP GET, ~200–500ms). The local listing comes from the most recent completed `list_backups` job; both the Backups and Database tabs auto-trigger a refresh on page load when that scan is more than 60 seconds stale, so the listing is effectively always current. Both the merge logic and the staleness window are owned by `BackupListHelper::get_for_node()`.
 

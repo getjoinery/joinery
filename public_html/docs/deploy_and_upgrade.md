@@ -628,6 +628,34 @@ Every site installed by `install.sh` has the same Apache vhost shape, regardless
 
 **Enabling origin SSL later** (e.g. after dropping a CF API token in place to switch a CF zone to Full strict): `sudo /var/www/html/<site>/maintenance_scripts/sysadmin_tools/setup_ssl.sh <domain>`. The script re-enters the decision tree; the `:443` vhost begins serving on the next Apache reload because the `<IfFile>` guard sees the new cert.
 
+**A certificate deferred at install time arrives on its own.** When DNS is not pointing at the box yet, `arm_ssl_retry.sh` installs `joinery-ssl-retry@<domain>.timer`: every five minutes it checks whether the domain resolves to this server, does nothing until it does, then issues once and disables itself. A self-signed placeholder does not count as done. The DNS gate is what makes an indefinite retry safe — Let's Encrypt counts failed validations, not failed lookups. A restore that lands the site on a different domain re-arms the timer for the new name and disarms the old one.
+
+---
+
+## Rebuilding a site on new hardware
+
+A backup does not carry `config/Globalvars_site.php` — that file holds the machine's database password and its `secret_box_key`, and both belong to the machine. So a rebuild is **install, then restore onto the installed site**:
+
+```bash
+# 1. On the new box: server prerequisites, then the site
+sudo ./install.sh -y server
+sudo ./install.sh -y site --bare-metal <site> --password-file=/root/.joinery_postgres_password <domain>
+
+# 2. Bring the backup down and restore onto it
+bash maintenance_scripts/sysadmin_tools/restore_project.sh <site> <archive> --domain <domain> --force
+#    or, for a chain:
+bash maintenance_scripts/sysadmin_tools/restore_chain.sh <site> \
+     --artifacts <chain dir> --key-file /tmp/k --domain <domain> --force
+```
+
+The restore reconciles the result to the new box: the domain, the deployment shape (`docker` vs `baremetal`), the paths, a regenerated virtualhost, and an armed certificate retry. It **refuses** if the restored database will not open with the new machine's credentials, rather than leaving that to show up as `SQLSTATE[08006]` on every page. What it reconciles and why is in [Backups](backups.md#what-a-restore-reconciles).
+
+Cross-shape rebuilds work in both directions with no extra step: a container backup landing on a plain server, or the reverse. Neither installs the virtualhost the backup carries — see the same section.
+
+**From the dashboard**, the equivalent is a Server Manager **install_node** job in From-Backup mode (a fresh install plus the source's data, cloned in one job), or a **restore_project** / **restore_chain** job against a node that already has a site. Both reconcile identically.
+
+**A PostgreSQL major-version jump needs nothing special.** The dump-and-restore path crosses it: a PG 16 dump restores onto PG 18 as an ordinary restore.
+
 ---
 
 ## Configuration

@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.4 - incremental chains are listed and restorable (they are what the schedule actually
+ *                produces); every restore asks which domain the site is to answer to; the Apache
+ *                choice is gone, because the serving config is always regenerated for this machine
  * @version 1.3 - per-file "Upload to cloud" action for a backup sitting local-only, with a poller that
  *                reports the job's real verdict (a failed transfer must not read as done)
  * @version 1.2 - forced encryption is read from JobCommandBuilder::get_target(), the same source the
@@ -334,6 +337,59 @@
 
 	$page->end_box();
 
+	// ── Restore points held as incremental chains ──
+	//
+	// This is what the schedule actually produces. Each chain is ONE restore
+	// point per run: the full, then every incremental up to the run chosen,
+	// applied in order. It cannot be represented in the flat list above, which
+	// is why the list above leaves chain artifacts out.
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
+	$chain_list = BackupChainListHelper::for_node($node);
+
+	if ($chain_list['error'] || !empty($chain_list['chains'])) {
+		$pageoptions = ['title' => 'Restore points (incremental chains)'];
+		$page->begin_box($pageoptions);
+
+		if ($chain_list['error']) {
+			echo '<div class="alert alert-warning mb-0">Could not read the chain listing: '
+			   . htmlspecialchars($chain_list['error']) . '</div>';
+		} else {
+			echo '<table class="table table-striped table-sm">';
+			echo '<thead><tr><th>Chain</th><th>Taken by</th><th>Restore points</th><th>Newest</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
+			$profile_labels = ['manager' => 'This control plane', 'site' => 'The site itself'];
+			foreach ($chain_list['chains'] as $c) {
+				$runs = $c['runs'];
+				$last = end($runs);
+				echo '<tr>';
+				echo '<td><small><code>' . htmlspecialchars($c['chain_id']) . '</code></small></td>';
+				echo '<td><small>' . htmlspecialchars($profile_labels[$c['profile']] ?? $c['profile']) . '</small></td>';
+				echo '<td>' . count($runs) . '</td>';
+				echo '<td><small>' . htmlspecialchars($last ? substr((string)$last['time'], 0, 16) . ' UTC' : '-') . '</small></td>';
+				echo '<td>' . htmlspecialchars(BackupChainListHelper::format_size($c['bytes'])) . '</td>';
+				echo '<td>';
+				$ca = htmlspecialchars(json_encode($c['chain_id'])) . ', '
+				    . htmlspecialchars(json_encode($c['profile'])) . ', '
+				    . htmlspecialchars(json_encode(array_map(function ($r) {
+						return ['seq' => $r['seq'], 'level' => $r['level'], 'time' => substr((string)$r['time'], 0, 16)];
+					}, $runs)));
+				echo '<button type="button" class="btn btn-outline-warning btn-sm" onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
+				echo '</td></tr>';
+			}
+			echo '</tbody></table>';
+			echo '<p class="text-muted small mb-0">A chain restores as at one of its runs: the full, then every '
+			   . 'incremental up to that run, in order. Each artifact is checked against its recorded size and '
+			   . 'hash before anything is written.</p>';
+		}
+
+		$page->end_box();
+	}
+
+	// The domain every restore form pre-fills with. It is the node's recorded
+	// URL, offered rather than assumed: a rebuild keeps the site's own domain
+	// while a rehearsal must not claim it, and the backup looks identical
+	// either way — so the value is confirmed at the moment somebody knows it.
+	$prefill_domain = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
+
 	// ── Shared Restore modal (used by per-row Restore buttons above) ──
 ?>
 	<dialog id="restoreModal">
@@ -354,22 +410,79 @@
 			A pre-restore snapshot of the current database and project files is written to
 			<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
 		</p>
+		<?php
+		// Asked, never assumed. This is the one thing a restore cannot work out
+		// for itself, and the answer decides whether the rebuilt site claims the
+		// live domain or stays out of its way.
+		echo '<div id="rm_domain_wrap">';
+		$fw_restore->textinput('restore_domain', 'Domain the restored site will answer to', [
+			'value'    => $prefill_domain,
+			'id'       => 'rm_domain',
+			// Deliberately not `required`: this field is hidden for a
+			// database-only restore, and a hidden required control blocks
+			// submission from anything that runs constraint validation.
+			// The check is in submitRestoreModal(), and the job builder
+			// refuses an empty domain server-side regardless.
+			'helptext' => 'The site is set to this name, its serving config is regenerated for it, and its '
+			            . 'certificate is issued once DNS points here. Change it for a rehearsal that must not '
+			            . 'claim the live domain.',
+		]);
+		echo '</div>';
+		?>
 		<label class="form-label">What to restore</label>
 		<?php
 		echo '<div id="rm_files_wrap">';
 		$fw_restore->checkboxinput('restore_files', 'Project files (<code>' . htmlspecialchars($node->get('mgn_web_root')) . '</code>)', ['checked' => true, 'id' => 'rm_files']);
 		echo '</div>';
 		$fw_restore->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'rm_database']);
-		echo '<div id="rm_apache_wrap">';
-		$fw_restore->checkboxinput('restore_apache', 'Apache config', ['checked' => true, 'id' => 'rm_apache']);
-		echo '</div>';
 		?>
+		<p class="text-muted small mt-2">
+			The serving config is always regenerated for this machine from the platform's own templates —
+			the virtualhost inside the backup is never installed. If it differs, it is kept beside the live
+			one as <code>.conf.from-backup</code> and named in the job output.
+		</p>
 		<div id="rm_component_error" class="text-danger small mt-2" hidden>Select at least one component.</div>
 		<div class="dialog-actions">
 			<button type="button" class="dialog-btn-cancel" onclick="closeRestoreModal();">Cancel</button>
 			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitRestoreModal();">Restore</button>
 		</div>
 		<?php $fw_restore->end_form(); ?>
+	</dialog>
+
+	<dialog id="chainRestoreModal">
+		<?php
+		$fw_chain = $page->getFormWriter('chainRestoreForm');
+		$fw_chain->begin_form();
+		$fw_chain->hiddeninput('action', '', ['value' => 'restore_chain']);
+		$fw_chain->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
+		$fw_chain->hiddeninput('chain_id', '', ['id' => 'cm_chain_id', 'value' => '']);
+		$fw_chain->hiddeninput('chain_profile', '', ['id' => 'cm_profile', 'value' => '']);
+		?>
+		<div class="svm-modal-head">
+			<h5 class="svm-m0">Restore from <code id="cm_title"></code></h5>
+			<button type="button" aria-label="Close" onclick="closeChainRestoreModal();" class="svm-modal-close">&times;</button>
+		</div>
+		<p class="text-muted small">
+			Every artifact is checked against its recorded size and hash before anything is written, and a
+			pre-restore snapshot of the database is taken first.
+		</p>
+		<?php
+		// The run picker is filled in by openChainRestoreModal from the manifest —
+		// restoring "as at" a run is the whole point of keeping a chain, so it is a
+		// choice on the form rather than an assumption of "the newest".
+		$fw_chain->dropinput('chain_seq', 'Restore as at', ['options' => [], 'id' => 'cm_seq']);
+		$fw_chain->textinput('restore_domain', 'Domain the restored site will answer to', [
+			'value'    => $prefill_domain,
+			'id'       => 'cm_domain',
+			'required' => true,
+		]);
+		$fw_chain->checkboxinput('restore_database', 'Database', ['checked' => true, 'id' => 'cm_database']);
+		?>
+		<div class="dialog-actions">
+			<button type="button" class="dialog-btn-cancel" onclick="closeChainRestoreModal();">Cancel</button>
+			<button type="button" class="dialog-btn-confirm dialog-btn-danger" onclick="submitChainRestoreModal();">Restore</button>
+		</div>
+		<?php $fw_chain->end_form(); ?>
 	</dialog>
 
 <script>
@@ -469,18 +582,60 @@ function openRestoreModal(type, filename, localPath, cloudPath) {
 	document.getElementById('rm_action').value = isProject ? 'restore_project' : 'restore_database';
 
 	// Show/hide components based on backup type
-	document.getElementById('rm_files_wrap').style.display    = isProject ? '' : 'none';
-	document.getElementById('rm_apache_wrap').style.display   = isProject ? '' : 'none';
+	document.getElementById('rm_files_wrap').style.display  = isProject ? '' : 'none';
+	// The domain is a property of the SITE, so it is only settled by a project
+	// restore. A database-only restore leaves the machine's identity alone.
+	document.getElementById('rm_domain_wrap').style.display = isProject ? '' : 'none';
 	// Database is always available
 	document.getElementById('rm_files').checked    = isProject;
 	document.getElementById('rm_database').checked = true;
-	document.getElementById('rm_apache').checked   = isProject;
 
 	document.getElementById('restoreModal').showModal();
 }
 
 function closeRestoreModal() {
 	document.getElementById('restoreModal').close();
+}
+
+// Chain restore. The runs come from the chain's own manifest, so the picker can
+// only ever offer restore points that exist.
+function openChainRestoreModal(chainId, profile, runs) {
+	document.getElementById('cm_chain_id').value = chainId;
+	document.getElementById('cm_profile').value = profile;
+	document.getElementById('cm_title').textContent = chainId;
+
+	var sel = document.getElementById('cm_seq');
+	sel.innerHTML = '';
+	for (var i = runs.length - 1; i >= 0; i--) {
+		var r = runs[i];
+		var opt = document.createElement('option');
+		opt.value = r.seq;
+		opt.textContent = 'Run ' + r.seq + ' — ' + (r.time || 'unknown time') + ' UTC'
+			+ (r.level === 0 ? ' (full)' : '')
+			+ (i === runs.length - 1 ? ' — newest' : '');
+		sel.appendChild(opt);
+	}
+
+	document.getElementById('chainRestoreModal').showModal();
+}
+
+function closeChainRestoreModal() {
+	document.getElementById('chainRestoreModal').close();
+}
+
+function submitChainRestoreModal() {
+	var chainId = document.getElementById('cm_chain_id').value;
+	var seq     = document.getElementById('cm_seq').value;
+	var domain  = (document.getElementById('cm_domain').value || '').trim();
+	if (!domain) {
+		alert('Enter the domain the restored site is to answer to.');
+		return;
+	}
+	JoineryModal.confirm('Restore ' + chainId + ' as at run ' + seq + ', serving ' + domain
+		+ '? Files deleted since the full backup are deleted here too. A pre-restore snapshot is written first.',
+		function() {
+			document.getElementById('chainRestoreForm').submit();
+		});
 }
 
 function submitRestoreModal() {
@@ -495,11 +650,16 @@ function submitRestoreModal() {
 			return;
 		}
 		err.style.display = 'none';
+		var domain = (document.getElementById('rm_domain').value || '').trim();
+		if (!domain) {
+			alert('Enter the domain the restored site is to answer to.');
+			return;
+		}
 		var parts = [];
 		if (document.getElementById('rm_files').checked)    parts.push('project files');
 		if (document.getElementById('rm_database').checked) parts.push('database');
-		if (document.getElementById('rm_apache').checked)   parts.push('Apache config');
-		JoineryModal.confirm('Restore ' + parts.join(', ') + ' from ' + fn + '? This will overwrite the current site. A pre-restore snapshot is written to /backups/ first.', function() {
+		JoineryModal.confirm('Restore ' + parts.join(', ') + ' from ' + fn + ', serving ' + domain
+			+ '? This will overwrite the current site. A pre-restore snapshot is written to /backups/ first.', function() {
 			document.getElementById('restoreForm').submit();
 		});
 		return;

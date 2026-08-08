@@ -1,5 +1,9 @@
 #!/usr/bin/env bash
 # _site_init.sh - Internal site initialization
+# VERSION: 2.8 - a database that cannot be created, or a schema that cannot be
+#                loaded, reports what PostgreSQL actually said. Both calls sent
+#                stderr to /dev/null, so an authentication failure surfaced only
+#                as "Failed to load database schema" with no cause anywhere.
 # VERSION: 2.7 - creates the cache directory the code actually reads
 #                ({site root}/cache/static_pages, not public_html/cache), and
 #                writes the scheduled-task cron file only on bare metal — in a
@@ -367,13 +371,28 @@ elif [ "$DB_EXISTS" = false ]; then
 
     # Create database (ignore error if already exists)
     log "Creating PostgreSQL database '$SITENAME'..."
-    createdb -T template0 "$SITENAME" -U postgres 2>/dev/null || true
+    # An existing database is the ordinary idempotent case. Anything else is the
+    # reason the schema load below is about to fail, so it is reported here
+    # rather than discarded — a create that failed on authentication used to
+    # surface two lines later as "Failed to load database schema", which names
+    # the symptom and hides the cause.
+    CREATEDB_ERR=$(createdb -T template0 "$SITENAME" -U postgres 2>&1) || {
+        if printf '%s' "$CREATEDB_ERR" | grep -qi "already exists"; then
+            log "Database '$SITENAME' already exists - reusing it."
+        else
+            log_error "Could not create database '$SITENAME': $CREATEDB_ERR"
+            exit 1
+        fi
+    }
 
     # Load SQL restore
     log "Loading database schema..."
     if [ -f "$SQL_RESTORE" ]; then
-        gunzip -c "$SQL_RESTORE" | psql -U postgres -d "$SITENAME" -q 2>/dev/null || {
+        SCHEMA_ERR=$(gunzip -c "$SQL_RESTORE" | psql -U postgres -d "$SITENAME" -q 2>&1 >/dev/null) || {
             log_error "Failed to load database schema from $SQL_RESTORE"
+            if [ -n "$SCHEMA_ERR" ]; then
+                log_error "psql said: $(printf '%s' "$SCHEMA_ERR" | head -3 | tr '\n' ' ')"
+            fi
             exit 1
         }
         log "Database '$SITENAME' loaded successfully."

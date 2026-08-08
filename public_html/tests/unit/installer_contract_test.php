@@ -270,14 +270,26 @@ section('A deferred certificate finishes on its own');
 // path has no control plane.
 check(strpos($install_src, 'install_ssl_retry_timer') !== false,
     'a deferred certificate installs a retry timer');
-check(strpos($install_src, 'joinery-ssl-retry@.timer') !== false,
+
+// The timer itself is armed by a shared script, because a RESTORE that lands a
+// site on a different domain has to arm exactly the same machinery for its new
+// name — and two copies of a retry loop that talks to a rate-limited CA is one
+// copy too many.
+$armer_path = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/arm_ssl_retry.sh';
+$armer_src  = is_file($armer_path) ? (string)file_get_contents($armer_path) : '';
+check($armer_src !== '', 'the retry timer has one implementation, in arm_ssl_retry.sh', $armer_path);
+check(strpos($install_src, 'arm_ssl_retry.sh') !== false,
+    'install.sh arms it through that script rather than carrying its own copy');
+check(strpos($armer_src, 'joinery-ssl-retry@.timer') !== false,
     'the timer is templated per domain, so a multi-site box gets one each');
+check(strpos($armer_src, '--disarm') !== false,
+    'it can also stop watching a domain, so a restore that changes the name leaves no orphan timer');
 
 // The DNS lookup before certbot is what makes an indefinite retry safe: Let's
 // Encrypt counts five failed validations per hostname per hour, and a failed
 // lookup counts for nothing.
 $retry_block = '';
-if (preg_match('/install_ssl_retry_timer\(\) \{.*?\nRETRY_EOF/s', $install_src, $m)) {
+if (preg_match('/RETRY_EOF.*?\nRETRY_EOF/s', $armer_src, $m)) {
     $retry_block = $m[0];
 }
 check($retry_block !== '', 'the retry script is findable');

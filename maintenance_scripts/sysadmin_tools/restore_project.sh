@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.4.1 - extraction stages beside the archive, not in /tmp (a RAM-sized tmpfs on
+#                  26.04 made a good archive report itself corrupt); the encryption sniff
+#                  no longer warns about null bytes on every plaintext restore
+# Version: 1.4.0 - the restore reconciles the backup to the machine it lands on: the target's
+#                  own config and site key are kept (a backup's database password belongs to
+#                  the machine it came from), the captured virtualhost is never installed, and
+#                  reconcile_site.sh regenerates the serving config and settles the identity
 # Version: 1.3.1 - SCRIPT_VERSION is read from this header rather than restated
 #                  further down, where a second copy drifts unnoticed
 # Version: 1.3.0 - Encrypted archives (.tar.gz.enc) are opened by reading the openssl
@@ -18,7 +25,13 @@
 #   Extracts and restores:
 #   - PostgreSQL database (using restore_database.sh)
 #   - Project files to /var/www/html/PROJECT/
-#   - Apache virtualhost configuration
+#   - Then RECONCILES the result to this machine (reconcile_site.sh): the domain,
+#     the deployment shape, and a freshly generated virtualhost.
+#
+#   Two files in the archive are never written over the target's own:
+#   config/Globalvars_site.php (it holds THIS machine's database password and
+#   secret_box_key) and config/backup_site_key (it identifies one machine as a
+#   recipient of its own backups; two machines must not share one).
 #
 # Dependencies:
 #   - restore_database.sh (must be in same directory)
@@ -102,9 +115,11 @@ show_help() {
     echo "  BACKUP_FILE               Path to the backup tar.gz file (required)"
     echo "  --dry-run, -n            Verify archive contents without restoring"
     echo "  --force, -f              Skip confirmation prompts"
+    echo "  --domain DOMAIN          The domain this site is to answer to after the restore."
+    echo "                           Defaults to the domain the TARGET's config already names."
     echo "  --skip-database          Skip database restoration"
     echo "  --skip-files             Skip project files restoration"
-    echo "  --skip-apache            Skip Apache config restoration"
+    echo "  --skip-apache            Do not regenerate the serving config or arm SSL"
     echo "  --help, -h               Show this help message"
     echo ""
     echo "Examples:"
@@ -130,6 +145,7 @@ SKIP_FILES=false
 SKIP_APACHE=false
 KEY_FILE=""
 DB_USER=""
+DOMAIN=""
 
 while [[ $# -gt 0 ]]; do
     case $1 in
@@ -167,6 +183,14 @@ while [[ $# -gt 0 ]]; do
             ;;
         --skip-apache)
             SKIP_APACHE=true
+            shift
+            ;;
+        --domain)
+            DOMAIN="$2"
+            shift 2
+            ;;
+        --domain=*)
+            DOMAIN="${1#*=}"
             shift
             ;;
         --help|-h)
@@ -213,8 +237,19 @@ BACKUP_FILE=$(readlink -f "$BACKUP_FILE")
 # Project directory
 PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
 
-# Create temporary directory for extraction
-TEMP_DIR=$(mktemp -d)
+# Create the extraction directory, beside the ARCHIVE rather than in /tmp.
+#
+# The whole site is unpacked here before anything is copied into place. On
+# Ubuntu 26.04 /tmp is a tmpfs sized from RAM, so extracting there fails with
+# "Failed to extract archive. File may be corrupted." for any site larger than
+# it — which is a lie: the archive is fine, the disk is not. Wherever the
+# archive itself is sitting is real disk by definition.
+TEMP_DIR=$(mktemp -d "$(dirname "$BACKUP_FILE")/.restore_XXXXXX" 2>/dev/null) || TEMP_DIR=""
+if [ -z "$TEMP_DIR" ] || [ ! -d "$TEMP_DIR" ]; then
+    print_warning "Could not stage beside the archive; falling back to \$TMPDIR."
+    print_warning "On a box where /tmp is a tmpfs, a site larger than it will not fit."
+    TEMP_DIR=$(mktemp -d)
+fi
 if [ ! -d "$TEMP_DIR" ]; then
     print_error "Failed to create temporary directory"
     exit 1
@@ -241,7 +276,11 @@ ARCHIVE_KEY_FILE=""
 # restores, and a plaintext one is never fed through a decrypt that would only
 # fail confusingly.
 archive_is_encrypted() {
-    [ "$(head -c 8 "$1" 2>/dev/null)" = "Salted__" ]
+    # Compared with cmp rather than through $( ). A gzip header contains null
+    # bytes, and command substitution strips them with a warning on every
+    # plaintext restore — noise in the one operation whose output has to be
+    # readable when something has gone wrong.
+    printf 'Salted__' | cmp -s -n 8 - "$1" 2>/dev/null
 }
 
 # Key sources, in order: the envelope sidecar beside the archive, opened with
@@ -373,17 +412,25 @@ verify_archive() {
         fi
     fi
 
-    # Check for Apache config
-    if [ "$SKIP_APACHE" = false ]; then
-        if [ -d "$backup_dir/apache_config" ]; then
-            local apache_conf=$(find "$backup_dir/apache_config" -name "*.conf" 2>/dev/null | head -1)
-            if [ -n "$apache_conf" ] && [ -f "$apache_conf" ]; then
-                print_success "✓ Apache config found: $(basename "$apache_conf")"
-            else
-                print_warning "⚠ No Apache config file found"
-            fi
-        else
-            print_warning "⚠ Apache config directory not found"
+    # What shape did this backup come off? An archive taken before shape.json
+    # existed simply does not say, which the restore handles — it reconciles
+    # against the target either way.
+    if [ -f "$backup_dir/shape.json" ]; then
+        local src_env
+        src_env=$(grep -o '"deployment_environment"[[:space:]]*:[[:space:]]*"[^"]*"' "$backup_dir/shape.json" \
+                  | sed 's/.*"\([^"]*\)"$/\1/')
+        print_success "✓ Shape recorded: taken on ${src_env:-unknown}"
+    else
+        print_info "This backup does not record its shape (taken before shape.json) — reconciling against this machine."
+    fi
+
+    # The captured virtualhost travels for REFERENCE. It is never installed:
+    # the restore regenerates the serving config for this box, and keeps this
+    # copy beside the live file only when the two differ.
+    if [ -d "$backup_dir/apache_config" ]; then
+        local apache_conf=$(find "$backup_dir/apache_config" -name "*.conf" 2>/dev/null | head -1)
+        if [ -n "$apache_conf" ] && [ -f "$apache_conf" ]; then
+            print_info "Archive carries a virtualhost ($(basename "$apache_conf")) — kept for reference, not installed"
         fi
     fi
 
@@ -507,6 +554,38 @@ perform_restore() {
             fi
         fi
 
+        # Two files are the MACHINE's, not the backup's, and are dropped from the
+        # staged copy before anything is written.
+        #
+        # config/Globalvars_site.php holds this machine's database password and
+        # its secret_box_key. Restoring the source's copy is what makes every
+        # page log SQLSTATE[08006] after an otherwise clean rebuild — the
+        # database came back fine, but the password in the config belongs to a
+        # PostgreSQL on another box. It bites a same-shape rebuild exactly as
+        # hard as a cross-shape one, so it is not a shape problem at all.
+        #
+        # config/backup_site_key identifies ONE machine as a recipient of its own
+        # backups. Two machines sharing it means one machine's key opens the
+        # other's archives and the envelope stops saying who made a backup.
+        # backup_envelope.php mints a fresh one on first use, so absent is the
+        # correct state, not a gap.
+        for keepmine in config/Globalvars_site.php config/backup_site_key; do
+            if [ -f "$PROJECT_DIR/$keepmine" ]; then
+                if [ -f "$backup_dir/project_files/$keepmine" ]; then
+                    rm -f "$backup_dir/project_files/$keepmine"
+                    print_info "Keeping this machine's own $keepmine"
+                fi
+            elif [ -f "$backup_dir/project_files/$keepmine" ]; then
+                if [ "$keepmine" = "config/backup_site_key" ]; then
+                    rm -f "$backup_dir/project_files/$keepmine"
+                    print_info "Not restoring config/backup_site_key — a fresh one is minted on first use"
+                else
+                    print_warning "This machine has no site config of its own, so the backup's is being used."
+                    print_warning "Its database password is the SOURCE machine's — expect the reconcile step to refuse."
+                fi
+            fi
+        done
+
         # Copy files from backup to project directory.
         #
         # The trailing /. copies the directory's contents, dotfiles included, in a
@@ -553,68 +632,47 @@ perform_restore() {
         print_success "Project files restored and verified ($restored_count files): $PROJECT_DIR"
     fi
 
-    # Step 3: Restore Apache configuration
-    if [ "$SKIP_APACHE" = false ] && [ -d "$backup_dir/apache_config" ]; then
-        print_info "Restoring Apache configuration..."
+    # Step 3: Reconcile the restored site to THIS machine.
+    #
+    # The captured virtualhost is not installed, in any case, same shape or not.
+    # It is the one file the installer has just written correctly for this box,
+    # this domain and this shape — and the template keeps improving, so
+    # installing an old capture quietly reverts whatever arrived since. What the
+    # backup carries is passed in as reference: a capture that differs from the
+    # generated file is preserved beside it and named, never applied unattended.
+    local reconcile="${SCRIPT_DIR}/reconcile_site.sh"
+    if [ ! -f "$reconcile" ]; then
+        print_error "reconcile_site.sh is not beside this script — the restored site would be left"
+        print_error "pointing at the source machine's domain, shape and serving config."
+        return 1
+    fi
 
-        local apache_conf=$(find "$backup_dir/apache_config" -name "*.conf" 2>/dev/null | head -1)
-
-        if [ -n "$apache_conf" ] && [ -f "$apache_conf" ]; then
-            local conf_name=$(basename "$apache_conf")
-            local target_conf="/etc/apache2/sites-available/$conf_name"
-
-            # Check if config already exists
-            if [ -f "$target_conf" ] && [ "$FORCE" = false ]; then
-                print_warning "Apache config already exists: $target_conf"
-                read -p "Replace existing Apache configuration? (y/N): " -n 1 -r
-                echo
-                if [[ ! $REPLY =~ ^[Yy]$ ]]; then
-                    print_info "Skipping Apache config restore"
-                    return 0
-                fi
-
-                # Backup existing config
-                sudo cp "$target_conf" "${target_conf}.backup.$(date +%Y%m%d_%H%M%S)"
-                print_info "Existing config backed up"
-            fi
-
-            # Copy Apache config
-            if sudo cp "$apache_conf" "$target_conf"; then
-                print_success "Apache config restored: $target_conf"
-
-                # Enable the site
-                local site_name="${conf_name%.conf}"
-                print_info "Enabling Apache site: $site_name"
-
-                if sudo a2ensite "$site_name" 2>/dev/null; then
-                    print_success "Site enabled successfully"
-
-                    # Test Apache configuration
-                    if sudo apache2ctl configtest 2>/dev/null; then
-                        print_success "Apache configuration test passed"
-
-                        # Reload Apache
-                        if [ "$DRY_RUN" = false ]; then
-                            print_info "Reloading Apache..."
-                            if sudo systemctl reload apache2; then
-                                print_success "Apache reloaded successfully"
-                            else
-                                print_warning "Failed to reload Apache - please reload manually"
-                            fi
-                        fi
-                    else
-                        print_warning "Apache configuration test failed - please check configuration"
-                    fi
-                else
-                    print_warning "Failed to enable site - please enable manually"
-                fi
-            else
-                print_error "Failed to copy Apache configuration"
-                return 1
-            fi
-        else
-            print_warning "No Apache configuration found to restore"
+    # The domain is the target's own unless the caller named one. A restore run
+    # by hand on the box has an operator present and "leave this machine's
+    # identity alone" is the right default; a restore run as a JOB requires the
+    # value, because there is nobody there to notice a wrong answer.
+    local use_domain="$DOMAIN"
+    if [ -z "$use_domain" ]; then
+        use_domain=$(sed -n "s/^[[:space:]]*\$this->settings\['webDir'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" \
+            "$PROJECT_DIR/config/Globalvars_site.php" 2>/dev/null | head -1)
+        if [ -z "$use_domain" ]; then
+            print_error "No --domain was given and this machine's config names none."
+            return 1
         fi
+        print_info "No --domain given; keeping this machine's own domain: $use_domain"
+    fi
+
+    local reconcile_args=("$PROJECT_NAME" --domain "$use_domain" --backup-meta "$backup_dir")
+    if [ "$SKIP_APACHE" = true ]; then
+        reconcile_args+=(--skip-web-config --skip-ssl)
+        print_info "--skip-apache given: the serving config is left exactly as it is."
+    fi
+
+    print_info "Reconciling the restored site to this machine..."
+    if ! bash "$reconcile" "${reconcile_args[@]}"; then
+        print_error "Reconciliation failed. The files and database are restored, but the site does"
+        print_error "not yet agree with this machine — see the RECONCILE_ lines above."
+        return 1
     fi
 
     return 0

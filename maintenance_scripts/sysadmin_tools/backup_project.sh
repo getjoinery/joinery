@@ -1,6 +1,12 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.6.0 - the backup stages beside its output rather than in /tmp, which on Ubuntu
+#                  26.04 is a RAM-sized tmpfs: any site bigger than it failed part-way with
+#                  No space left on device, after the database dump had already succeeded
+# Version: 2.5.0 - the archive carries shape.json: the machine-readable record of what
+#                  this site was running on, which is what lets a restore reconcile a
+#                  container backup onto a plain server without an operator
 # Version: 2.4.1 - SCRIPT_VERSION is read from this header rather than restated
 #                  further down, where a second copy drifts unnoticed
 # Version: 2.4.0
@@ -285,8 +291,20 @@ else
     print_success "Found virtualhost config: $VHOST_FILE"
 fi
 
-# Create temporary directory for backup
-TEMP_DIR=$(mktemp -d)
+# Create the staging directory for the backup.
+#
+# Beside the OUTPUT, not in /tmp. A whole copy of the site passes through here,
+# and on Ubuntu 26.04 /tmp is a tmpfs sized from RAM — so staging there fails
+# with "No space left on device" for any site larger than about half the box's
+# memory, part-way through, after the database dump has already succeeded.
+# The output directory is on real disk by definition: it is where a backup
+# several times this size is about to be written.
+TEMP_DIR=$(mktemp -d "${BACKUP_DIR}/.staging_XXXXXX" 2>/dev/null) || TEMP_DIR=""
+if [ -z "$TEMP_DIR" ] || [ ! -d "$TEMP_DIR" ]; then
+    print_warning "Could not stage beside the output directory; falling back to \$TMPDIR."
+    print_warning "On a box where /tmp is a tmpfs, a site larger than it will not fit."
+    TEMP_DIR=$(mktemp -d)
+fi
 if [ ! -d "$TEMP_DIR" ]; then
     print_error "Failed to create temporary directory"
     exit 1
@@ -454,6 +472,24 @@ if [ -n "$VHOST_FILE" ]; then
     fi
 else
     print_info "Skipping Apache config backup (not applicable for Docker)"
+fi
+
+# Step 3b: Record the site's SHAPE — the facts a restore has to reconcile
+#
+# backup_info.txt says the same things in prose, for a human reading the archive.
+# This is the copy a restore reads, from the same generator the chain path uses,
+# so the two can never describe a site differently.
+SHAPER="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)/reconcile_site.sh"
+if [ -f "$SHAPER" ]; then
+    if bash "$SHAPER" "$PROJECT_NAME" --print-shape --site-dir "$PROJECT_DIR" \
+            --vhost-captured "$(if [ -n "$VHOST_FILE" ]; then echo yes; else echo no; fi)" \
+            --out "${TEMP_DIR}/${BACKUP_NAME}/shape.json" 2>/dev/null; then
+        print_success "Site shape recorded"
+    else
+        # An archive with no shape is still restorable — the restore treats it as
+        # shape-unknown and reconciles against the target anyway.
+        print_warning "Could not record the site shape; continuing without it"
+    fi
 fi
 
 # Step 4: Create metadata file

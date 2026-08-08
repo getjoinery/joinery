@@ -7,12 +7,17 @@
  * TargetLister call against the configured BackupTarget. The two are merged
  * by filename so that a file present in both locations reports `location: both`.
  *
+ * Chain artifacts are deliberately absent: a chain is one restore point made of
+ * many files, and BackupChainListHelper lists those as chains.
+ *
+ * @version 1.1 - chain artifacts are excluded from the flat list
  * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 require_once(PathHelper::getIncludePath('includes/TargetLister.php'));
+require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
 
 class BackupListHelper {
 
@@ -61,6 +66,11 @@ class BackupListHelper {
 						foreach ($listing['files'] as $f) {
 							// Only include files under this node's slug.
 							if (strpos($f['key'], $node_prefix) !== 0) continue;
+							// A chain's artifacts are not standalone backups. Listed
+							// flat they invite a restore of one incremental with no
+							// full under it, which restores nothing at all — chains
+							// are offered as chains, by BackupChainListHelper.
+							if (BackupChainListHelper::is_chain_object($f['key'])) continue;
 							$filename = basename($f['key']);
 							$mtime = $f['modified'] ? strtotime($f['modified']) : 0;
 							$cloud_files[$filename] = [
