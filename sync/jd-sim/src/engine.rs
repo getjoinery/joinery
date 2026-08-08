@@ -24,6 +24,10 @@ use crate::server::MockServer;
 use crate::vfs::MemFs;
 
 /// One computer in a scenario.
+/// Builds the name a rescued copy is kept under, given the original name and
+/// the suffix that disambiguates repeats within one day.
+type ConflictNamer = Box<dyn Fn(&str, u32) -> String + Send + Sync>;
+
 pub struct Device {
     pub name: String,
     pub fs: MemFs,
@@ -34,7 +38,7 @@ pub struct Device {
     clock: SimClock,
     keys: RefCell<SimRng>,
     /// How this device names a copy it had to keep out of the way.
-    namer: Box<dyn Fn(&str) -> String + Send + Sync>,
+    namer: ConflictNamer,
     /// The key for encrypted folders, if this device was linked with them. A
     /// device without one is the ordinary case and gets simulated as such.
     vault: Option<Vault>,
@@ -89,7 +93,9 @@ impl Device {
             keys: RefCell::new(SimRng::new(seed ^ 0x5EED)),
             namer: {
                 let device = name.to_string();
-                Box::new(move |n: &str| jd_vfs::conflict_copy_name(n, "2026-07-31", &device, 1))
+                Box::new(move |n: &str, suffix: u32| {
+                    jd_vfs::conflict_copy_name(n, "2026-07-31", &device, suffix)
+                })
             },
             vault: None,
         }

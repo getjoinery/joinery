@@ -302,7 +302,12 @@ pub const STUCK_STATES: &[&str] = &["unsyncable", "pending_key"];
 ///
 /// A ceiling rather than a target: the search stops as soon as everything it was
 /// looking for turns up, and in a healthy settle it is never entered at all.
-pub const VERSION_LOOKUP_BUDGET: usize = 500;
+///
+/// It was 500, chosen when the instance's rate limit was 1,000 requests an hour.
+/// The limit is 500,000 now, and 500 was being hit with over a thousand contents
+/// still unlooked-for — so the no-loss verdict was describing how far the search
+/// got. A ceiling only does its job if reaching it is rare.
+pub const VERSION_LOOKUP_BUDGET: usize = 5_000;
 
 /// Committed contents that are not findable anywhere cheap.
 ///
@@ -751,18 +756,19 @@ pub fn settle(
         local_trash,
     };
     let missing = unaccounted(records, &recoverable);
+    let mut never_looked_for = 0usize;
     if !missing.is_empty() {
         match server::find_in_version_history(api, &server_tree, &missing, VERSION_LOOKUP_BUDGET) {
             Ok((found, asked)) => {
                 if asked >= VERSION_LOOKUP_BUDGET && found.len() < missing.len() {
+                    never_looked_for = missing.len() - found.len();
                     // Said out loud rather than reported as loss. A verifier that
                     // ran out of budget and then announced missing files would
                     // manufacture violations out of its own thrift.
                     eprintln!(
                         "warning: stopped looking through version history after {asked} files with \
-                         {} content(s) still unaccounted for — the no-loss verdict below may be \
-                         reporting the search rather than the truth",
-                        missing.len() - found.len()
+                         {never_looked_for} content(s) still unaccounted for — the no-loss verdict \
+                         below may be reporting the search rather than the truth"
                     );
                 }
                 recoverable.server.extend(found);
@@ -773,7 +779,20 @@ pub fn settle(
             )),
         }
     }
-    verdicts.push(check_no_loss(records, &recoverable, previously_on_server));
+    let mut no_loss = check_no_loss(records, &recoverable, previously_on_server);
+    if never_looked_for > 0 {
+        // The warning above goes to stderr, which the evidence bundle does not
+        // keep — so a truncated search reached the bundle looking like a clean
+        // list of lost files, and was read that way days later. The caveat
+        // belongs on the verdict itself, where it is read.
+        no_loss.detail = format!(
+            "SEARCH TRUNCATED at {VERSION_LOOKUP_BUDGET} files with {never_looked_for} \
+             content(s) never looked for, so treat what follows as a floor and not a \
+             measurement — {}",
+            no_loss.detail
+        );
+    }
+    verdicts.push(no_loss);
 
     verdicts.push(check_no_ciphertext(&server_tree, &trees, &statuses));
     verdicts.push(check_issues_honest(&statuses));

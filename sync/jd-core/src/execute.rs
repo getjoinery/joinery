@@ -136,7 +136,10 @@ pub struct ExecEnv<'a> {
     /// already sitting where it has to go — something nobody has uploaded and
     /// nothing is tracking. It is never overwritten; it is moved aside under a
     /// name that says what it is, and picked up as a new file next pass.
-    pub conflict_name: &'a dyn Fn(&str) -> String,
+    /// Builds the name a rescued copy is kept under. Takes the suffix that
+    /// disambiguates repeats, because the same file conflicting twice in one day
+    /// must not produce the same name twice — see `free_conflict_path`.
+    pub conflict_name: &'a dyn Fn(&str, u32) -> String,
     /// The key for encrypted folders, if this device was given one.
     ///
     /// `None` is an ordinary state, not a degraded one: an account with no
@@ -632,6 +635,35 @@ impl std::io::Seek for Source<'_> {
 /// Identical content is not in the way — replacing bytes with the same bytes
 /// loses nothing, and treating it as a conflict would litter the folder with
 /// copies of things that already agree.
+/// A conflict-copy path nothing is at yet.
+///
+/// `conflict_copy_name` takes a suffix precisely so that repeats within one day
+/// can be told apart, and for a long time nobody passed anything but 1. The
+/// result was that every conflicted copy of one file, on one day, from one
+/// device, was handed the identical name — and both places that rescue a file
+/// land it with a plain rename, which silently destroys whatever is already
+/// there. The two functions whose whole purpose is not losing the user's work
+/// were overwriting the copy they had rescued an hour earlier.
+///
+/// So the name is chosen against the disk rather than computed and hoped for.
+fn free_conflict_path(
+    env: &ExecEnv,
+    beside: &std::path::Path,
+    name: &str,
+) -> Result<PathBuf, ExecError> {
+    // Bounded so a directory that somehow defeats this cannot spin forever;
+    // a thousand conflicted copies of one file in one day is already a story.
+    for suffix in 1..=1000 {
+        let candidate = beside.with_file_name((env.conflict_name)(name, suffix));
+        if env.vfs.fingerprint(&candidate)?.is_none() {
+            return Ok(candidate);
+        }
+    }
+    Err(ExecError::Contract(format!(
+        "no free conflict-copy name for {name} after a thousand tries"
+    )))
+}
+
 fn make_room(
     env: &ExecEnv,
     path: &std::path::Path,
@@ -651,7 +683,7 @@ fn make_room(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let aside = path.with_file_name((env.conflict_name)(&name));
+    let aside = free_conflict_path(env, path, &name)?;
     env.vfs.rename(path, &aside)?;
     env.store.raise_issue(
         None,
@@ -1232,6 +1264,14 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
             "the local copy is no longer there".into(),
         ));
     }
+    // The name came from the plan, which cannot see the disk. If something is
+    // already there it is an earlier rescue of this same file, and renaming
+    // over it would destroy the copy that rescue was for.
+    let to = if env.vfs.fingerprint(&to)?.is_some() {
+        free_conflict_path(env, &to, &entry.remote.name)?
+    } else {
+        to
+    };
     env.vfs.rename(&from, &to)?;
 
     // The rescued copy is a new entry with its own identity: it has never

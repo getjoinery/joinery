@@ -240,7 +240,7 @@ impl Daemon {
         let namer = {
             let device = self.config.device_name.clone();
             let date = today();
-            move |name: &str| jd_vfs::conflict_copy_name(name, &date, &device, 1)
+            move |name: &str, suffix: u32| jd_vfs::conflict_copy_name(name, &date, &device, suffix)
         };
         let now = now_ms;
         let env = ExecEnv {
@@ -277,7 +277,7 @@ impl Daemon {
     }
 
     fn recover(&mut self) {
-        let namer = |name: &str| name.to_string();
+        let namer = |name: &str, _suffix: u32| name.to_string();
         let now = now_ms;
         let env = ExecEnv {
             store: &self.store,
