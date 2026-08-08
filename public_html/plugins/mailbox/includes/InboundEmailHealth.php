@@ -20,6 +20,9 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.15 - checkRelayMapFresh() grades a differing map: pending
+ *                 (ProvisioningCheckPending) while the reconcile task is
+ *                 alive and succeeding, failed only when it will not converge
  * @version 1.14
  */
 
@@ -428,6 +431,13 @@ class InboundEmailHealth {
      * The relay's alias map is fresh: the map the relay is running matches what the
      * current domains/aliases would produce. A stale map risks bouncing newly
      * created aliases (reject_unmatched). No-op on colocated deployments.
+     *
+     * A differing map is TWO different situations, graded apart: every change
+     * to domains, aliases, or the system sender passes through a stale window
+     * of up to one reconcile tick, and that is the system working — pending
+     * (ProvisioningCheckPending), not failed. It is a failure only when the
+     * reconcile task cannot be counted on to converge it: never ran, errored
+     * on its last run, or has not run inside the pending window.
      */
     public static function checkRelayMapFresh() {
         $relay = self::activeRelay();
@@ -440,11 +450,77 @@ class InboundEmailHealth {
         } catch (\Throwable $e) {
             throw new ProvisioningCheckFailed('Could not build the relay alias map to check freshness: ' . $e->getMessage());
         }
-        if (RelayMapSync::contentHash($artifacts) !== (string)$relay->get('mrl_map_content_hash')) {
-            throw new ProvisioningCheckFailed(
-                'The relay alias map is out of date — the relay reconcile task has not pushed the latest domains/aliases yet.'
+        if (RelayMapSync::contentHash($artifacts) === (string)$relay->get('mrl_map_content_hash')) {
+            return;
+        }
+
+        $reconcile = self::relayReconcileTaskState();
+        if (self::relayMapConverging($reconcile['last_run_time'], $reconcile['last_run_status'])) {
+            throw new ProvisioningCheckPending(
+                'Address changes are queued — the relay reconcile task pushes them within a few minutes.'
             );
         }
+        throw new ProvisioningCheckFailed(
+            'The relay alias map is out of date and the relay reconcile task will not converge it: '
+            . $reconcile['problem'] . ' A stale map can bounce newly created addresses.'
+        );
+    }
+
+    /**
+     * Is a differing relay map merely waiting on the next reconcile tick?
+     * True when the task's last run succeeded within the pending window — the
+     * task reports a failed push as an error run, so recent success means the
+     * push machinery works and convergence is one tick away. Pure, so the
+     * grading rule is testable without a relay.
+     *
+     * @param string|null $last_run_time  UTC 'Y-m-d H:i:s' (or null = never ran)
+     * @param string|null $last_run_status
+     * @param string|null $now_utc        Injectable clock for tests.
+     */
+    public static function relayMapConverging(?string $last_run_time, ?string $last_run_status,
+            ?string $now_utc = null): bool {
+        if ($last_run_time === null || $last_run_time === '' || $last_run_status !== 'success') {
+            return false;
+        }
+        $now = $now_utc ?: gmdate('Y-m-d H:i:s');
+        $window_start = gmdate('Y-m-d H:i:s', strtotime($now . ' UTC') - self::RELAY_MAP_PENDING_SECONDS);
+        return substr($last_run_time, 0, 19) >= $window_start;
+    }
+
+    /** How long a differing map may ride on "the task will get it" before it
+     *  is a fault. Three reconcile ticks at the usual 5-minute cron cadence. */
+    const RELAY_MAP_PENDING_SECONDS = 900;
+
+    /**
+     * The reconcile task's standing, plus a human phrase for the failure case.
+     * @return array{last_run_time:?string,last_run_status:?string,problem:string}
+     */
+    private static function relayReconcileTaskState(): array {
+        $last_time = null;
+        $last_status = null;
+        try {
+            require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
+            $tasks = new MultiScheduledTask(array('task_class' => 'MailboxRelayReconcile', 'deleted' => false));
+            $tasks->load();
+            foreach ($tasks as $task) {
+                $last_time = $task->get('sct_last_run_time') ?: null;
+                $last_status = $task->get('sct_last_run_status') ?: null;
+                break;
+            }
+        } catch (\Throwable $e) {
+            return array('last_run_time' => null, 'last_run_status' => null,
+                'problem' => 'the task\'s state could not be read (' . $e->getMessage() . ').');
+        }
+        if ($last_time === null) {
+            $problem = 'the task has never run — check that cron is running scheduled tasks.';
+        } elseif ($last_status !== 'success') {
+            $problem = 'its last run (' . substr((string)$last_time, 0, 16) . ' UTC) did not succeed — '
+                . 'see the scheduled task log.';
+        } else {
+            $problem = 'it last ran ' . substr((string)$last_time, 0, 16) . ' UTC and has not run since — '
+                . 'check that cron is running scheduled tasks.';
+        }
+        return array('last_run_time' => $last_time, 'last_run_status' => $last_status, 'problem' => $problem);
     }
 
     /**

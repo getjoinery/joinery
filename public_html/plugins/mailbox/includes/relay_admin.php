@@ -13,6 +13,9 @@
  * battery, DNS rows, reconciles). The local-listener decommission machinery
  * lives in listener_admin.php; its actions and view vars are folded in here.
  *
+ * @version 2.1 - the health battery carries a pending grade
+ *                (ProvisioningCheckPending): a converging alias map renders as
+ *                an amber wait on the relay card, not a red failure
  * @version 2.0 - relay_upgrade action + per-relay upgrade standing; Rebuild is
  *                gated on a managed node that actually resolves
  *                (specs/mailbox_relay_upgrade_without_server_manager.md)
@@ -974,14 +977,19 @@ function admin_mailbox_relay_health(): array {
 	}
 	$out = array();
 	foreach ($run as $method => $label) {
-		$ok = true; $message = '';
+		$ok = true; $pending = false; $message = '';
 		try {
 			InboundEmailHealth::$method();
+		} catch (ProvisioningCheckPending $e) {
+			// Unmet but converging — the machinery that fixes it is alive and
+			// one tick away. Rendered as a wait, never as a failure.
+			$pending = true;
+			$message = $e->getMessage();
 		} catch (\Throwable $e) {
 			$ok = false;
 			$message = $e->getMessage();
 		}
-		$out[$method] = array('label' => $label, 'ok' => $ok, 'message' => $message);
+		$out[$method] = array('label' => $label, 'ok' => $ok, 'pending' => $pending, 'message' => $message);
 	}
 	return $out;
 }
@@ -1073,10 +1081,14 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 			return null;   // nothing on this side applies to the chosen mode
 		}
 		$failing = array();
+		$waiting = array();
 		$labels  = array();
 		foreach ($dots as $dot) {
-			$labels[] = ($dot['ok'] ? '✓ ' : '✗ ') . $dot['label'];
-			if (!$dot['ok']) {
+			$is_pending = !empty($dot['pending']);
+			$labels[] = ($is_pending ? '… ' : ($dot['ok'] ? '✓ ' : '✗ ')) . $dot['label'];
+			if ($is_pending) {
+				$waiting[] = $dot['label'] . ($dot['message'] !== '' ? ' — ' . $dot['message'] : '');
+			} elseif (!$dot['ok']) {
 				$failing[] = $dot['label'] . ($dot['message'] !== '' ? ' — ' . $dot['message'] : '');
 			}
 		}
@@ -1087,6 +1099,13 @@ function admin_mailbox_relay_check_rows(string $advanced_url = ''): array {
 					? $name . ': ' . $failing[0]
 					: $name . ': ' . count($failing) . ' checks are failing.',
 				$detail . ($failing ? '  ' . implode('  ', $failing) : ''), $setup_link);
+		}
+		// Converging, not broken: a recent change is queued and the machinery
+		// that applies it is alive. A wait, so amber — red here cries wolf at
+		// every domain/alias/sender change for one reconcile tick.
+		if (!empty($waiting)) {
+			return $row($id, 'Relay', InboundEmailSetupCheck::WARN,
+				$name . ': ' . $waiting[0], $detail, $setup_link);
 		}
 		// A disabled relay passes its checks but is not doing its job — the
 		// emergency stop left on is worth saying out loud, not colouring green.
