@@ -184,6 +184,18 @@ fn refuse(status: u16, errortype: &'static str, message: impl Into<String>) -> A
     }
 }
 
+/// A refusal a client can act on: the name is taken, and the marker says so in
+/// a field rather than in English. Matches what the real endpoints return, so
+/// the engine meets the same shape here as on a live server.
+fn name_taken(message: &'static str) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: message.into(),
+        data: serde_json::json!({ "reason": "name_taken" }),
+    }
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -1329,6 +1341,22 @@ impl MockServer {
                 id
             }
             None => {
+                // A live file of that name in that folder already exists. The
+                // real server refuses this (`DriveHelper::file_name_taken`), and
+                // for most of this rig's life neither did — so two devices that
+                // conflicted on one file both uploaded the same conflicted-copy
+                // name, the server took both, and every device could then
+                // materialize only one of them. A soak campaign ended with 55
+                // duplicate names, 91 files no device could place, and a fleet
+                // that never converged again. Trashed siblings do not count,
+                // exactly as there.
+                if st
+                    .files
+                    .values()
+                    .any(|f| !f.trashed && f.folder == folder && f.name == name)
+                {
+                    return Err(name_taken("A file with that name already exists here."));
+                }
                 st.next_file_id += 1;
                 st.next_file_id
             }

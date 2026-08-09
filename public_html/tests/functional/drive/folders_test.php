@@ -211,4 +211,94 @@ try {
 }
 check($rethrown, 'a failure that is not a name clash is rethrown');
 
+// -------------------------------------------------------------------------
+section('Two live files may not share a name in one folder');
+// The soak rig found the cost of not enforcing this. Two devices that conflict
+// on one file both pick the same conflicted-copy name, each having checked only
+// its own disk; without a rule the server takes both, and every device can then
+// materialize only one of them. One campaign ended with 55 duplicate names and
+// 91 files no device could ever place.
+
+// The folder is part of the creation, exactly as the upload path does it: a
+// file made at the root and moved afterwards would occupy the root's namespace
+// on the way past, and collide with a root file it has nothing to do with.
+function mk_drive_file($title, $folder_id, $owner_id) {
+	global $made_files;
+	$f = File::createFromBytes('dup-' . bin2hex(random_bytes(6)), $title, 'text/plain', $owner_id,
+		array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE,
+		      'fil_fol_folder_id' => $folder_id ?: null));
+	$made_files[] = $f->key;
+	return $f;
+}
+
+$dupDir = mk_folder('DupHome');
+$dup_dir_id = (int)$dupDir->data['folder']['id'];
+$first = mk_drive_file('report.txt', $dup_dir_id, $owner->key);
+check((bool)$first->key, 'the first file is created');
+
+check(DriveHelper::file_name_taken((int)$owner->key, $dup_dir_id, 'report.txt'),
+	'the name reads as taken');
+check(!DriveHelper::file_name_taken((int)$owner->key, $dup_dir_id, 'report.txt', (int)$first->key),
+	'and not taken when the holder itself is excluded');
+check(!DriveHelper::file_name_taken((int)$owner->key, 0, 'report.txt'),
+	'a name taken in a folder is free at the root');
+
+// The database is the backstop, not the check above.
+$loser_file = File::createFromBytes('dup-' . bin2hex(random_bytes(6)), 'report.txt', 'text/plain',
+	$owner->key, array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $loser_file->key;
+$loser_file->set('fil_fol_folder_id', $dup_dir_id); // into the folder that already has one
+$file_threw = null;
+$file_saved = null;
+try {
+	$file_saved = DriveHelper::save_file_unless_name_taken($loser_file);
+} catch (Exception $e) {
+	$file_threw = $e->getMessage();
+}
+check($file_threw === null, 'a lost file-name race does not escape as an exception'
+	. ($file_threw === null ? '' : " (got: $file_threw)"));
+check($file_saved === false, 'the helper reports the file name as taken rather than saving');
+
+// Renaming onto a taken name is refused, and says so in a way a client can act
+// on without reading English.
+$other = mk_drive_file('notes.txt', $dup_dir_id, $owner->key);
+$rDupRename = drive_rename_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$other->key, 'name' => 'report.txt'));
+check(res_err($rDupRename), 'renaming a file onto a sibling name is refused');
+check(isset($rDupRename->data['reason']) && $rDupRename->data['reason'] === 'name_taken',
+	'and the refusal carries the name_taken marker a sync client branches on');
+$other_after = new File((int)$other->key, true);
+check($other_after->get('fil_title') === 'notes.txt', 'the file keeps its own name');
+
+// Moving onto a taken name is refused the same way, and the file does not move.
+// The refused file above is still sitting at the root under its own name, which
+// is exactly the case: a real file, a real name, a destination that has one.
+$elsewhere = new File((int)$loser_file->key, true);
+check($elsewhere->get('fil_title') === 'report.txt' && !$elsewhere->get('fil_fol_folder_id'),
+	'the refused file stayed at the root with its name');
+$rDupMove = drive_move_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$elsewhere->key, 'parent_id' => $dup_dir_id));
+check(res_err($rDupMove), 'moving a file into a folder that has that name is refused');
+check(isset($rDupMove->data['reason']) && $rDupMove->data['reason'] === 'name_taken',
+	'the move refusal carries the marker too');
+$elsewhere_after = new File((int)$elsewhere->key, true);
+check($elsewhere_after->get('fil_fol_folder_id') === null
+	|| (int)$elsewhere_after->get('fil_fol_folder_id') === 0,
+	'and the file stayed where it was');
+
+// Restoring onto a name taken while the file sat in the trash keeps the file
+// and changes the name — the user asked for their file back, and a name is a
+// smaller thing to change than the answer.
+$rTrashDup = drive_trash_logic(array('entity_type' => 'file', 'entity_id' => (int)$first->key));
+check(res_ok($rTrashDup), 'trash the original report.txt');
+$replacement = mk_drive_file('report.txt', $dup_dir_id, $owner->key);
+check((bool)$replacement->key, 'a new report.txt takes the freed name');
+$rRestoreDup = drive_restore_logic(array('entity_type' => 'file', 'entity_id' => (int)$first->key));
+check(res_ok($rRestoreDup), 'restoring the original still succeeds');
+$restored = new File((int)$first->key, true);
+check($restored->get('fil_delete_time') === null, 'the restored file is live again');
+check($restored->get('fil_title') === 'report (restored).txt',
+	'and came back suffixed before its extension, not on the end: '
+	. $restored->get('fil_title'));
+
 harness_finish();

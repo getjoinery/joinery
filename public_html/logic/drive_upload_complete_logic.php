@@ -173,6 +173,14 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		}
 	}
 
+	// A new file cannot take a name a live sibling already holds. Asked before
+	// any bytes are admitted, so the cheap answer costs nothing; the save below
+	// re-asks it, because this check is a fast path and not a guarantee.
+	if (!$target_file && DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+		$up->discard();
+		return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+	}
+
 	// Quota is enforced HERE, where bytes are admitted to storage — the init
 	// check is only a fast-fail. Serialized per owner so uploads opened while
 	// under quota cannot all land past it. The pending row is kept on rejection
@@ -272,42 +280,56 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		}
 
 		// New file — owned by the folder's owner (or the actor at root).
+		//
+		// The destination folder is part of the creation, not a move afterwards.
+		// Creating at the root and relocating would put every upload briefly in
+		// the root's namespace, where it can collide with a root file of the
+		// same name that has nothing to do with it — and would leave a homeless
+		// row behind if the relocation failed.
 		$restrictions = array(
 			'fil_private' => true,
 			'fil_source'  => File::SOURCE_DRIVE,
 			'fil_protection_level' => $level,
+			'fil_fol_folder_id' => $folder_id ?: null,
 		);
 		if ($encrypted) {
 			$restrictions['fil_encrypted_metadata'] = $enc_metadata;
 		}
-		if ($sealed) {
-			// Server custody: the bytes are sealed on the way into the blob, so
-			// the plaintext never lands in the file store at all. The type is
-			// sniffed from the plaintext first (sniffing a container would read
-			// application/octet-stream forever), and the thumbnail is rendered
-			// while the plaintext is still on disk.
-			require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
-			try {
+		if (!$encrypted && $modified_time !== null) {
+			$restrictions['fil_content_modified_time'] = $modified_time;
+		}
+		try {
+			if ($sealed) {
+				// Server custody: the bytes are sealed on the way into the blob, so
+				// the plaintext never lands in the file store at all. The type is
+				// sniffed from the plaintext first (sniffing a container would read
+				// application/octet-stream forever), and the thumbnail is rendered
+				// while the plaintext is still on disk.
+				require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
 				$file = DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
-			} catch (DriveSealedException $e) {
-				$up->discard();
-				return LogicResult::error($e->getMessage());
+			} else {
+				$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
 			}
-		} else {
-			$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
+		} catch (DriveSealedException $e) {
+			$up->discard();
+			return LogicResult::error($e->getMessage());
+		} catch (Exception $e) {
+			// The check above is a fast path: two uploads can both pass it and
+			// both reach the insert, where the partial unique index refuses the
+			// loser. Answered as the name clash it is rather than as a database
+			// fault — a sync client knows what to do with the first and retries
+			// the second forever. Anything else is somebody else's problem and
+			// travels on untouched.
+			if (strpos($e->getMessage(), '23505') === false
+				|| !DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+				throw $e;
+			}
+			$up->discard();
+			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
 		}
 		if (!$file || !$file->key) {
 			$up->discard();
 			return LogicResult::error('The file could not be stored.');
-		}
-		if ($folder_id) {
-			$file->set('fil_fol_folder_id', $folder_id);
-		}
-		if (!$encrypted && $modified_time !== null) {
-			$file->set('fil_content_modified_time', $modified_time);
-		}
-		if ($folder_id || (!$encrypted && $modified_time !== null)) {
-			$file->save();
 		}
 		if ($encrypted) {
 			// One key grant per reader (validated above): the file key sealed to

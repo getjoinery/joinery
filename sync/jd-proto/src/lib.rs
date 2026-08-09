@@ -61,6 +61,22 @@ impl ProtoError {
             _ => None,
         }
     }
+
+    /// Whether the server refused this because a live sibling already holds the
+    /// name.
+    ///
+    /// Read off a marker in the error's data rather than its prose, for the
+    /// same reason `chunk_resync_offset` is: the message is written for a
+    /// person and may be reworded at any time, and a client branching on
+    /// English would go quietly wrong the day somebody improved the wording.
+    pub fn name_taken(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => {
+                data.get("reason").and_then(Value::as_str) == Some("name_taken")
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

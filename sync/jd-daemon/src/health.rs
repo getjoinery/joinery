@@ -264,6 +264,14 @@ fn unsyncable_summary(detail: &str) -> String {
             "Cannot be saved here: the name matches \u{201c}{with}\u{201d} once accents are normalized. Rename one of them."
         );
     }
+    if let Some(with) = between(detail, "DuplicateName", "with: \"", "\"") {
+        // The one name refusal the user cannot act on: there is a second item
+        // called \u{201c}{with}\u{201d} on the server and no way to see it from
+        // here, so asking them to rename it would be asking the impossible.
+        return format!(
+            "Cannot be saved here: the server has two items in this folder both called \u{201c}{with}\u{201d}, so only one of them can be put on this disk. Rename one of them on the web."
+        );
+    }
     if detail.starts_with("NameTooLong") {
         return "The name is too long for this disk. Shorten it.".into();
     }
@@ -532,6 +540,21 @@ mod tests {
         assert!(name.contains("Shorten"));
         assert!(path.contains("shallower"));
         assert_ne!(name, path);
+    }
+
+    #[test]
+    fn a_duplicate_name_does_not_tell_the_user_to_rename_something_they_cannot_see() {
+        // Every other name refusal ends by asking them to rename a file. This
+        // one must not point at the disk: the second item is on the server and
+        // has no path here to be seen at, so the only place to act is the web.
+        let duplicate = unsyncable_summary("DuplicateName { with: \"app.db-wal\" }");
+        let unicode = unsyncable_summary("UnicodeClash { with: \"café.txt\" }");
+        assert!(duplicate.contains("app.db-wal"));
+        assert!(duplicate.contains("on the web"));
+        // And it is not the unicode advice, which would send them looking for a
+        // spelling difference that is not there.
+        assert!(!duplicate.contains("accents"));
+        assert!(unicode.contains("accents"));
     }
 
     #[test]

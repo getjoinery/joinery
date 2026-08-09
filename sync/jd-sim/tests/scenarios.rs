@@ -325,7 +325,7 @@ fn two_computers_making_the_same_folder_both_end_up_with_it() {
 /// is holding **two entries describing one directory**. Name resolution treats
 /// them as rival siblings; `resolution_order` ranks a provisional as
 /// materialized, so the provisional wins the name and the real folder is marked
-/// `Unsyncable(UnicodeClash)` — against a name identical to its own. Unsyncable
+/// `Unsyncable(DuplicateName)` — against a name identical to its own. Unsyncable
 /// means it never materializes, so it never occupies the path, so the
 /// provisional is never superseded, so it re-plans its create every pass. Live:
 /// 611 refused creates per folder, the queue flat for fifteen minutes, issues
@@ -1489,6 +1489,69 @@ fn a_second_conflict_on_one_file_does_not_overwrite_the_first_rescue() {
     assert!(
         rescues >= 2,
         "each conflict keeps its own copy; found {rescues} in {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert_invariants(&world, &committed);
+}
+
+#[test]
+fn a_rescued_copy_is_recorded_under_the_name_it_actually_landed_on() {
+    // preserve_local_as takes its name from the plan, and the plan cannot see
+    // the disk — so when that path is already taken by an earlier rescue it
+    // picks another one. For a long time it renamed the file to the new path and
+    // then recorded the entry under the PLANNED name, which by then belonged to
+    // the earlier rescue's file on the server. That entry uploaded under a name
+    // the server already had, and a server without a uniqueness rule took it:
+    // two live files, one name, and no device able to materialize both. It is
+    // where the soak rig's 55 duplicate names came from.
+    //
+    // The assertion is not "it settles" — it is that no name is claimed twice.
+    let world = World::new(66, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    world.device("laptop").fs.user_write("doc.txt", b"original");
+    committed.note("doc.txt", b"original");
+    assert!(world.settle().is_some());
+
+    // Two conflicts on one file on one day, which is what forces the second
+    // rescue onto a path the first one already holds.
+    for (mine, theirs) in [
+        (&b"laptop one"[..], &b"desktop one"[..]),
+        (&b"laptop two"[..], &b"desktop two"[..]),
+    ] {
+        world.device("laptop").fs.user_write("doc.txt", mine);
+        world.device("desktop").fs.user_write("doc.txt", theirs);
+        committed.note("doc.txt", mine);
+        committed.note("doc.txt", theirs);
+        assert!(world.settle().is_some(), "it should settle");
+    }
+
+    for name in ["laptop", "desktop"] {
+        let device = world.device(name);
+        let mut claimed: Vec<String> = Vec::new();
+        for entry in device.store.every_entry().unwrap() {
+            // A trashed entry is not claiming a name any more.
+            if entry.remote_deleted {
+                continue;
+            }
+            let claim = format!("{:?}/{}", entry.remote.parent, entry.remote.name);
+            assert!(
+                !claimed.contains(&claim),
+                "{name} has two entries both claiming {claim}"
+            );
+            claimed.push(claim);
+        }
+    }
+
+    // And the server took each of them exactly once. `tree()` is keyed by path,
+    // so a duplicate would be invisible here — the count is what shows it.
+    let tree = world.server.tree();
+    let (folders, files) = world.server.live_counts();
+    assert_eq!(
+        tree.len(),
+        folders + files,
+        "the server holds more live entities than it has distinct paths, so two \
+         of them share one: {:?}",
         tree.keys().collect::<Vec<_>>()
     );
     assert_invariants(&world, &committed);

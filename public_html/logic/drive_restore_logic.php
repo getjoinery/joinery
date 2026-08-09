@@ -67,14 +67,52 @@ function drive_restore_logic(array $input): LogicResult {
 			$folder = DriveHelper::load_folder($folder_id);
 			if ($folder && $folder->get('fol_delete_time') !== null && $folder->get('fol_delete_time') !== '') {
 				$entity->set('fil_fol_folder_id', null);
+				$folder_id = 0;
 			}
 		}
-		$entity->undelete();
+		// Asked wherever it lands, not only when it is re-rooted: while this file
+		// sat in the trash somebody may have made a new one by the same name in
+		// the same folder, and coming back on top of it is not a restore.
+		// Suffixed rather than refused — the user asked for their file back, and
+		// a name is a smaller thing to change than the answer.
+		$owner_id = (int)$entity->get('fil_usr_user_id');
+		$title    = $entity->get('fil_title');
+		if (DriveHelper::file_name_taken($owner_id, $folder_id, $title, (int)$entity->key)) {
+			$base = _drive_restore_suffixed($title, ' (restored)');
+			$name = $base;
+			for ($i = 2; DriveHelper::file_name_taken($owner_id, $folder_id, $name, (int)$entity->key) && $i < 100; $i++) {
+				$name = _drive_restore_suffixed($title, ' (restored) ' . $i);
+			}
+			$entity->set('fil_title', $name);
+		}
+		$entity->set('fil_delete_time', null);
+		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+			// Something else claimed the free name between the search above and
+			// here. The file is still safely in the trash.
+			return LogicResult::error('That name was taken while restoring. Try again.');
+		}
 	}
 
 	FileChange::record(FileChange::KIND_RESTORED, $entity_type, $entity_id, $user_id, $user_id);
 
 	return LogicResult::render(array('ok' => true));
+}
+
+/**
+ * Put a suffix on a file name before its extension, so a restored `report.docx`
+ * comes back as `report (restored).docx` and still opens in the thing that made
+ * it. Trimmed to the column width from the front of the stem, never the suffix
+ * — a name cut to `report (restor` would collide all over again.
+ */
+function _drive_restore_suffixed($title, $suffix) {
+	$dot  = strrpos($title, '.');
+	$stem = ($dot === false || $dot === 0) ? $title : substr($title, 0, $dot);
+	$ext  = ($dot === false || $dot === 0) ? ''     : substr($title, $dot);
+	$room = 255 - strlen($suffix) - strlen($ext);
+	if ($room < 1) {
+		return substr($suffix . $ext, 0, 255);
+	}
+	return substr($stem, 0, $room) . $suffix . $ext;
 }
 
 function drive_restore_logic_descriptor(): array {

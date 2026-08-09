@@ -201,6 +201,19 @@ clashing pair in different orders keep different members of it. Both remain on
 the server and both devices report the clash. An entry recovers by itself, with
 no user action, as soon as the clash clears.
 
+Three reasons, and they are told apart because the fixes differ:
+
+| Reason | What happened | What the user does |
+|---|---|---|
+| `case_clash` | Two names differ only by capitalization, on a disk that cannot tell them apart | Rename one |
+| `unicode_clash` | Two names are different bytes that normalize to one form — `café` typed two ways | Pick one spelling |
+| `duplicate_name` | The server is holding two live items in one folder under the *same* name | Nothing they can do from here — the second item has no path to be seen at, so the message points them at the web |
+
+`duplicate_name` should not arise: the server refuses a name a live sibling
+already holds. It is reported rather than folded into `unicode_clash` because a
+name like `app.db-wal` has no spelling to argue about, and reading it as a
+Unicode problem sends whoever investigates to the wrong place entirely.
+
 ### Encrypted files and folders
 
 This section is about **Fortress** folders — the client-custody level, where the
