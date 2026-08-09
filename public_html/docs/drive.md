@@ -33,6 +33,40 @@ $file = File::createFromBytes($bytes, $display_name, $mime, $owner_id, $restrict
 `$restrictions` is an array of visibility columns set at creation, e.g.
 `['fil_private' => true]` or `['fil_min_permission' => 5, 'fil_source' => File::SOURCE_ENTITY_PHOTO]`.
 
+## Origin tags — where a file came from
+
+Every file carries `fil_source`, a short key naming the subsystem that created it
+(`File::SOURCE_*`; NULL means a legacy row from before the tags). **Stamp one when
+you store a file**, and declare it in `File::source_catalog()` — the one place that
+says what each tag *is*:
+
+| Field | Meaning |
+|---|---|
+| `label` | Human name. Listing filters and pickers show this. |
+| `internal` | A file the system made for its own use. Browse surfaces must not list it. |
+| `default_view` | Included when a listing opens with nothing picked. |
+
+The helpers read from it: `File::internal_sources()` (feed to `MultiFile`'s
+`sources_not`), `File::default_view_sources()`, `File::source_label()`,
+`File::source_is_listable()`. An **undeclared** tag counts as listable — a
+subsystem that forgets to declare itself shows up in an admin listing where
+someone notices, rather than having its files quietly disappear.
+
+**`internal` is not a permission.** It means "don't list this", never "this is
+secret" — `File::is_viewable()` alone decides who may read any file's bytes.
+
+Classification lives on the source rather than on the row because it is a property
+of *what created the file*: every sealed search index is internal, and there is no
+user-visible one. So the tag stamped at creation already carries the answer, with
+no per-row column for a writer to get wrong.
+
+`MultiFile` filters on origin three ways, and they resolve to exactly one SQL
+condition: `sources` (allowlist), `sources_not` (blocklist), `source_not` (its
+single-value form). An allowlist combined with a blocklist is the allowlist minus
+the blocked entries. NULL rows survive a blocklist — they are not what it names —
+and can only enter a result through an explicit `File::SOURCE_UNCLASSIFIED` in the
+allowlist, because `fil_source IN (...)` never matches NULL.
+
 Both route through `FileBlob::createFromPath()`, which:
 
 1. Hashes the bytes (sha256) and measures the size.
@@ -49,9 +83,25 @@ blob's `fbb_stored_name` (physical identity). They diverge only under dedup and
 versioning: a deduped file gets its own unique `fil_name` but points at the
 shared blob, and the serving path resolves the physical bytes through the blob.
 
-Image variants are **not** generated automatically — call `$file->resize()` when
-you want them (it delegates to the blob; variants live at `<size>/<stored_name>`
-and are shared by every referencing file).
+Image variants live at `<size>/<stored_name>` and are shared by every file
+referencing the blob. Ingestion does not make them: call `$file->resize()` to
+build every registered size up front, which is what a path that knows its images
+will be browsed immediately should do.
+
+Nothing else has to. A variant that does not exist yet is generated **the first
+time it is requested**, and only the one size asked for: `/uploads/<size>/<name>`
+resolves the file, applies the normal `is_viewable()` gate, and then calls
+`$file->ensure_variant($size)` before serving. So a subsystem can store an image
+without thinking about sizes at all — an inbound mail attachment, a chat upload —
+and `get_url('avatar')` still resolves, while an 80px listing never causes a
+1920px copy to be written. Generation sits behind the gate on purpose: resizing
+is real CPU and the requested name comes from the URL, so a caller who may not
+view the file cannot spend it.
+
+The on-demand path is for **local** blobs; a cloud variant means download, resize
+and re-upload, which does not belong inside a page request. Sealed and
+client-encrypted files are skipped either way — their stored bytes are a
+container, so resizing them would produce garbage.
 
 ## Reference counting and deletion
 

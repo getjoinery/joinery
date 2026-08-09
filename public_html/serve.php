@@ -404,6 +404,26 @@ $routes = [
                 }
             }
 
+            // The original is here but this variant was never generated: make
+            // it now, and only it. Variants are opt-in at ingestion, so any
+            // subsystem that stores an image without asking for them (an
+            // inbound mail attachment, a chat upload) has bytes whose variant
+            // URLs point at nothing. Building the one size that was requested
+            // is what keeps those URLs honest, without writing every registered
+            // size for files nobody ever opens.
+            //
+            // Authorize BEFORE generating. Resizing is real CPU, and the
+            // requested name is attacker-chosen, so an anonymous caller must
+            // not be able to spend it on files it may not even see. A viewer
+            // who fails the check falls through to the same 404 as always.
+            if ($file === null && $file_obj && $size_key !== 'original'
+                && ($signed_ok || $file_obj->is_viewable($session))) {
+                $generated = $file_obj->ensure_variant($size_key);
+                if ($generated !== false) {
+                    $file = $generated;
+                }
+            }
+
             if($file){
                 if(!$file_obj){
                     $file_obj = File::get_by_name($basename);

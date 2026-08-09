@@ -1,6 +1,8 @@
 # Admin File Browser — Sources, Default Listing, and an Explorer View
 
-**Status: ACTIVE.** Part 0 is built and live; Parts 1–3 are the work.
+**Status: BUILT.** Parts 0–3 are implemented and verified on dev. Docs updated.
+Remaining before this moves to `implemented/`: the `db` tier, and the open items
+below, which are judgement calls on a real site rather than unfinished work.
 
 **Which page this is.** `/admin/admin_files` (`adm/admin_files.php`) — the platform-wide
 file listing, not the member Drive at `/drive`. Drive already scopes itself to
@@ -284,6 +286,28 @@ Two consequences worth deciding on:
   nicer bucketing of files that are already reachable. Recommend not doing it, and letting
   the classification apply going forward.
 
+## Found while building
+
+Two defects the work walked into, both pre-existing and neither caused by it:
+
+- **The listing crashed on any file with no owner.** `admin_files.php` built
+  `new User($file->get('fil_usr_user_id'), TRUE)` unconditionally, and loading a
+  User with no key throws — killing the page mid-render. Six live rows have no
+  owner. It never showed before because the old default opened newest-first on
+  mail attachments, which all have one; the new default view walks straight into
+  the legacy rows. Now guarded, rendering an em dash for the owner.
+- **`header_action` was silently dropped on the card layout.** The option existed
+  only in `BeginPageNoCard`, so passing it from a card-based page did nothing at
+  all. Added to `BeginPage` as the same two lines — a missing branch in the shared
+  component, not a caller error.
+
+And one defect introduced and caught during the build, worth recording because the
+shape will recur: `sources` and `sources_not` both wrote the split-parenthesis key
+`'(fil_source'`, and since `$filters` is an array the second silently replaced the
+first — quietly widening a listing that had asked to be narrowed. They now resolve
+to one condition by set subtraction. **Any two filters that emit a grouped
+condition on the same column will collide this way.**
+
 ## Open items
 
 - **Does `entity_photo` belong in the default view?** Included above on the grounds that
@@ -296,3 +320,8 @@ Two consequences worth deciding on:
 - **`ai_chat_upload` sits oddly.** A user did upload it, but into a conversation, and it is
   arguably as much plumbing as a mail import archive. Left visible and non-default; worth a
   second look once there are more than one of them.
+- **Origin and Kind can't be combined.** One `filter` parameter holds one pick, so
+  "Images only" widens back to every non-internal origin — there is no way to ask
+  for "mail attachments that are images". Combining them needs a second parameter
+  and a second control. Left as-is because it matches the existing toolbar and
+  nothing has asked for the combination yet.

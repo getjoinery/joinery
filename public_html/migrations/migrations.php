@@ -1259,3 +1259,16 @@
 	$migration['migration_file'] = 'recipe_mailbox_alias_to_list.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// Files stored before fil_source existed carry NULL, so a site with history
+	// shows one large Unclassified bucket that is really uploads, photos and mail
+	// attachments mixed together. Classifies only what a foreign key proves and
+	// leaves the rest NULL — Unclassified is a listed bucket, and a guess from
+	// filename or MIME would be a confident wrong label. Never overwrites an
+	// existing tag, so it is safe to re-run.
+	$migration = array();
+	$migration['database_version'] = '170';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'backfill_file_source_from_references.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

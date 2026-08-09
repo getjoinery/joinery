@@ -418,6 +418,46 @@ These don't need their own pattern — they're composed from the basics above:
 
 ## Advanced Patterns
 
+### Grouped Filter Dropdowns
+
+`filteroptions` is `label => value`. When a **value is itself an array**, the key
+labels an `<optgroup>` and the array is its options:
+
+```php
+'filteroptions' => array(
+    'Origin' => array('Uploaded files' => 'default', 'All files' => 'all'),
+    'Kind'   => array('Images only' => 'images', 'Files only' => 'files'),
+),
+```
+
+Use it when a listing filters on more than one *kind* of question, so the picks
+don't read as one flat list of alternatives. One `filter` parameter still holds
+one pick, so options in different groups replace each other rather than combining
+— grouping shows that they ask different questions, not that they stack.
+
+### Page-level Header Actions
+
+`header_action` puts raw HTML at the right edge of the page header, above the
+card — the place for a control that acts on the whole page rather than on one
+table (a view toggle, an export button):
+
+```php
+$page->admin_header(array(
+    /* … */
+    'header_action' => $view_toggle_html,
+));
+```
+
+### Listing Files
+
+A page that lists files filters on origin through `File`'s catalog rather than
+naming sources itself — see [Drive § Origin tags](drive.md#origin-tags--where-a-file-came-from).
+Pass `File::internal_sources()` to `MultiFile`'s `sources_not` so files the system
+made for its own use never appear, and build filter options by iterating
+`File::source_catalog()` so a newly declared source needs no edit here. Render
+thumbnails with `File::thumbnail_html()`, which falls back to a file-type icon
+when there is no thumbnail to show.
+
 ### Settings Tabs
 
 The settings pages are siblings sharing one tab strip. Every one of them renders

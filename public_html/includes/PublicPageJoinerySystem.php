@@ -169,6 +169,13 @@ class PublicPageJoinerySystem extends PublicPageBase {
                 $output .= '</ol>';
             }
             $output .= '</div>';
+            // Same option, same place, as the no-card layout: a page-level control
+            // sits at the header's right edge. Without this the option is accepted
+            // and silently dropped on the card layout, which reads as the caller's
+            // bug rather than a missing branch here.
+            if (!empty($options['header_action'])) {
+                $output .= '<div>' . $options['header_action'] . '</div>';
+            }
             $output .= '</div>';
         }
         $output .= '<div class="card mb-3">';
@@ -345,10 +352,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
             echo $pager->url_vars_as_hidden_input(['filter']);
             echo '<label style="font-size:0.8125rem;color:var(--muted);">Show:</label>';
             echo '<select name="' . $pager->prefix() . 'filter" class="form-control form-control-sm" style="width:auto;">';
-            foreach ($filter_data as $key => $value) {
-                $sel = $pager->get_filter() == $value ? ' selected' : '';
-                echo '<option value="' . htmlspecialchars($value) . '"' . $sel . '>' . htmlspecialchars($key) . '</option>';
-            }
+            $this->renderFilterOptions($filter_data, $pager->get_filter());
             echo '</select>';
             foreach ($pager->url_vars() as $k => $v) echo '<input type="hidden" name="' . htmlspecialchars($k) . '" value="' . htmlspecialchars($v) . '">';
             echo '<button type="submit" class="btn btn-sm btn-soft-default">Go</button></form>';
@@ -707,6 +711,7 @@ class PublicPageJoinerySystem extends PublicPageBase {
   </div><!-- .admin-layout -->
 
   <script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
+  <script src="/assets/js/file-thumb.js?v=<?php echo $this->asset_mtime('assets/js/file-thumb.js'); ?>"></script>
   <!-- Shared kit JS (JoineryModal etc.); admin provides its own CSS but uses the kit's JS -->
   <script defer src="/assets/js/base.js?v=<?php echo $this->asset_mtime('assets/js/base.js'); ?>"></script>
   <?php $_js_js_sys = PathHelper::getThemeFilePath('script.js', 'assets/js', 'system', 'joinery-system'); ?>

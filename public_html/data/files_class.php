@@ -77,10 +77,9 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	);
 
 	// Origin tags for fil_source: a short, self-describing key saying where a file
-	// came from, stamped by whatever code created it. Opaque to File — it stores and
-	// filters on the string but attaches no behavior to any value. NULL means
-	// "unspecified / legacy." Subsystems that create files stamp one of these; a new
-	// creation site adds its own constant here.
+	// came from, stamped by whatever code created it. NULL means "unspecified /
+	// legacy." Subsystems that create files stamp one of these; a new creation site
+	// adds its own constant here AND a row in source_catalog() below.
 	const SOURCE_USER_UPLOAD      = 'user_upload';       // deliberate admin/user file upload
 	const SOURCE_ENTITY_PHOTO     = 'entity_photo';      // avatar / event / location / gallery photo
 	const SOURCE_EMAIL_ATTACHMENT = 'email_attachment';  // inbound-email attachment
@@ -88,6 +87,114 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_DRIVE            = 'drive';             // member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag
 	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
 	const SOURCE_MAIL_IMPORT_ARCHIVE  = 'mail_import_archive';  // mbox/zip/tar uploaded to be imported into a mailbox — held for the life of the run, not a Drive item
+
+	/** The catalog key standing in for "no origin tag" (legacy rows). */
+	const SOURCE_UNCLASSIFIED = '_none';
+
+	/**
+	 * What each origin tag IS — one declaration, read by every surface that lists
+	 * files. Keyed by the tag; SOURCE_UNCLASSIFIED covers NULL/legacy rows.
+	 *
+	 *   label        Human name. Listing filters and pickers show this.
+	 *   internal     A file the system made for its own use. Browse surfaces must
+	 *                not list it at all.
+	 *   default_view Included when a listing opens with no filter chosen.
+	 *
+	 * INTERNAL IS NOT A PERMISSION. It means "don't list this", never "this is
+	 * secret" — is_viewable() alone decides who may read any file's bytes, and
+	 * nothing here widens or narrows that. A caller reaching for this to answer an
+	 * access question is asking the wrong method.
+	 *
+	 * Classification belongs to the SOURCE, not the row: whether a file should be
+	 * listed is a property of what created it, not of the file itself. Every sealed
+	 * search index is internal — there is no user-visible one — so the tag already
+	 * stamped at creation carries the answer, with no per-row column for a writer to
+	 * get wrong and no backfill for rows that already exist.
+	 *
+	 * @return array<string,array{label:string,internal:bool,default_view:bool}>
+	 */
+	public static function source_catalog() {
+		return array(
+			// Legacy rows predate the origin tags. They are the site's actual
+			// history, so they stay visible and stay in the default view —
+			// excluding them would empty the listing on any deployment older
+			// than the tags themselves.
+			self::SOURCE_UNCLASSIFIED       => array('label' => 'Unclassified',         'internal' => false, 'default_view' => true),
+			self::SOURCE_USER_UPLOAD        => array('label' => 'Uploads',              'internal' => false, 'default_view' => true),
+			self::SOURCE_ENTITY_PHOTO       => array('label' => 'Photos',               'internal' => false, 'default_view' => true),
+			self::SOURCE_EMAIL_ATTACHMENT   => array('label' => 'Mail attachments',     'internal' => false, 'default_view' => false),
+			self::SOURCE_AI_CHAT_UPLOAD     => array('label' => 'AI chat uploads',      'internal' => false, 'default_view' => false),
+			self::SOURCE_DRIVE              => array('label' => 'Drive',                'internal' => false, 'default_view' => false),
+			// Not internal on purpose: someone uploaded this mbox deliberately.
+			// Either the import run cleans it up or it is sitting there consuming
+			// space, and whoever pays for the space has to be able to see it.
+			// Hiding it would turn a storage leak into an invisible one.
+			self::SOURCE_MAIL_IMPORT_ARCHIVE => array('label' => 'Mail import archives', 'internal' => false, 'default_view' => false),
+			// Machine-owned: a sealed FTS5 blob read server-side and never streamed.
+			self::SOURCE_MAILBOX_SEARCH_INDEX => array('label' => 'Search index',        'internal' => true,  'default_view' => false),
+		);
+	}
+
+	/**
+	 * Tags whose files no browse surface should list. Feed to MultiFile's
+	 * 'sources_not', which preserves NULL-source rows.
+	 *
+	 * @return string[]
+	 */
+	public static function internal_sources() {
+		$out = array();
+		foreach (self::source_catalog() as $key => $spec) {
+			if (!empty($spec['internal']) && $key !== self::SOURCE_UNCLASSIFIED) {
+				$out[] = $key;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Tags a listing shows when nothing has been picked. SOURCE_UNCLASSIFIED may be
+	 * in here, and it means NULL — a caller filtering on these has to handle that
+	 * (see MultiFile's 'sources', which maps it to an IS NULL branch).
+	 *
+	 * @return string[]
+	 */
+	public static function default_view_sources() {
+		$out = array();
+		foreach (self::source_catalog() as $key => $spec) {
+			if (!empty($spec['default_view'])) {
+				$out[] = $key;
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Human name for an origin tag. An unregistered tag gets its own key back, so a
+	 * source someone forgot to declare reads as itself rather than as nothing.
+	 *
+	 * @param string|null $source NULL/'' means the unclassified bucket
+	 * @return string
+	 */
+	public static function source_label($source) {
+		$key = ($source === null || $source === '') ? self::SOURCE_UNCLASSIFIED : (string)$source;
+		$catalog = self::source_catalog();
+		return isset($catalog[$key]) ? $catalog[$key]['label'] : $key;
+	}
+
+	/**
+	 * Is this tag one a browse surface may list? An unregistered tag answers TRUE:
+	 * a subsystem that forgets to declare itself surfaces in an admin listing where
+	 * someone notices and classifies it, rather than having its files silently
+	 * vanish.
+	 *
+	 * @param string|null $source
+	 * @return bool
+	 */
+	public static function source_is_listable($source) {
+		$key = ($source === null || $source === '') ? self::SOURCE_UNCLASSIFIED : (string)$source;
+		$catalog = self::source_catalog();
+		return isset($catalog[$key]) ? empty($catalog[$key]['internal']) : true;
+	}
 
 	// MIME types safe to render inline in the browser. Only raster image
 	// formats that cannot carry executable script belong here. SVG is
@@ -628,6 +735,76 @@ public static function get_by_name($name, $search_deleted = false) {
 	 * @param string $mime
 	 * @return bool
 	 */
+	/**
+	 * The icon that stands in for this file when its own bytes can't be shown —
+	 * no thumbnail was ever made, the variant can't be produced (a cloud blob),
+	 * or the file isn't an image at all.
+	 *
+	 * One place decides what a file type looks like, so a listing, a picker and
+	 * a detail page can't drift into three different answers. Keyed on the MIME
+	 * type first (set from the bytes at ingestion, so it's trustworthy) and only
+	 * then on the filename, which is the caller's word for it.
+	 *
+	 * @return string URL of an 80px icon asset
+	 */
+	public function type_icon_url() {
+		$mime = strtolower(trim((string)$this->get('fil_type')));
+		$semi = strpos($mime, ';');
+		if ($semi !== false) {
+			$mime = trim(substr($mime, 0, $semi));
+		}
+		$name = strtolower((string)$this->get('fil_name'));
+
+		if ($mime === 'application/pdf' || substr($name, -4) === '.pdf') {
+			return '/assets/images/pdf_icon_80px.png';
+		}
+		if ($mime === 'application/msword'
+			|| strpos($mime, 'wordprocessingml.document') !== false
+			|| substr($name, -4) === '.doc' || substr($name, -5) === '.docx') {
+			return '/assets/images/microsoft_word_icon_80px.png';
+		}
+		if ($mime === 'application/vnd.ms-excel'
+			|| strpos($mime, 'spreadsheetml.sheet') !== false
+			|| substr($name, -4) === '.xls' || substr($name, -5) === '.xlsx') {
+			return '/assets/images/excel_icon_80px.png';
+		}
+		if (strpos($mime, 'image/') === 0) {
+			// An image we can't show a thumbnail of — say "image", not "file".
+			return '/assets/images/image_icon_80px.svg';
+		}
+		return '/assets/images/file_icon_80px.svg';
+	}
+
+	/**
+	 * Thumbnail markup for a listing: the real thumbnail when there is one to
+	 * ask for, otherwise this file's type icon — and the icon again if the
+	 * thumbnail turns out not to load.
+	 *
+	 * The fallback has to be client-side because "is there a variant" is not a
+	 * question the server can answer cheaply for every row: on a cloud blob it
+	 * would be a HEAD per image per page. assets/js/file-thumb.js swaps in
+	 * data-thumb-fallback on error, so a missing size degrades to an icon
+	 * instead of a broken-image glyph, whatever the reason for the miss.
+	 *
+	 * @param string $size_key Registered ImageSizeRegistry size
+	 * @param string $css_class Optional class for the <img>
+	 * @return string HTML
+	 */
+	public function thumbnail_html($size_key = 'avatar', $css_class = '') {
+		$icon  = htmlspecialchars($this->type_icon_url());
+		$class = $css_class !== '' ? ' class="' . htmlspecialchars($css_class) . '"' : '';
+
+		if (!$this->is_image()) {
+			// Carries jy-thumb-icon from the start: it is already the icon, and
+			// an icon should look the same however it got on the page.
+			$icon_class = trim($css_class . ' jy-thumb-icon');
+			return '<img loading="lazy" src="' . $icon . '" alt=""'
+				. ' class="' . htmlspecialchars($icon_class) . '">';
+		}
+		return '<img loading="lazy" src="' . htmlspecialchars($this->get_url($size_key)) . '"'
+			. ' data-thumb-fallback="' . $icon . '" alt=""' . $class . '>';
+	}
+
 	public static function is_inline_safe_type($mime) {
 		$mime = strtolower(trim((string)$mime));
 		$semi = strpos($mime, ';');
@@ -1528,6 +1705,24 @@ public static function get_by_name($name, $search_deleted = false) {
 	}
 
 	/**
+	 * Make sure one variant exists, generating just that size on demand —
+	 * delegated to the blob. Returns the path, or false if it cannot be made.
+	 *
+	 * This is what lets get_url('avatar') stay truthful for a file whose
+	 * ingestion path never called resize(): the thumbnail is produced the first
+	 * time someone actually looks at it, and no other size is written.
+	 */
+	function ensure_variant($size_key){
+		if ($this->is_encrypted() || $this->is_sealed()) {
+			// Same skip-list as resize(): the stored bytes are a container, so
+			// resizing them would produce a garbage variant.
+			return false;
+		}
+		$blob = $this->_blob();
+		return $blob ? $blob->ensure_variant($size_key) : false;
+	}
+
+	/**
 	 * Delete resized variants — delegated to the blob.
 	 */
 	function delete_resized($size_key = 'all'){
@@ -1800,26 +1995,76 @@ class MultiFile extends SystemMultiBase {
 			$filters['fil_source'] = [$this->options['source'], PDO::PARAM_STR];
 		}
 
-		// Origin filter across SEVERAL sources — for a surface that spans more than
-		// one origin, e.g. a picker offering Drive items alongside files a subsystem
-		// stored for its own use. An empty list matches nothing rather than
-		// everything, so a caller that computed no sources gets no rows.
-		if (isset($this->options['sources'])) {
-			$dblink = DbConnector::get_instance()->get_db_link();
-			$quoted = array();
-			foreach ((array)$this->options['sources'] as $source) {
-				$quoted[] = $dblink->quote((string)$source);
-			}
-			$filters['fil_source'] = empty($quoted) ? 'IN (NULL)' : 'IN (' . implode(',', $quoted) . ')';
-		}
-
-		// Origin exclude: everything except one source. NULL (legacy/unspecified)
-		// files must survive an exclude, so the OR is parenthesized as its own group
-		// (split-parenthesis filter form) to keep precedence against other AND filters.
+		// ------------------------------------------------------------------
+		// Origin filters across SEVERAL sources, emitted as exactly ONE condition.
+		//
+		//   'sources'      allowlist — only these origins
+		//   'sources_not'  blocklist — everything but these (e.g. a browse surface
+		//                  passing File::internal_sources())
+		//   'source_not'   the single-value form of the blocklist
+		//
+		// They MUST resolve to one filter entry. A grouped condition is written under
+		// the split-parenthesis key '(fil_source', and $filters is an array — so two
+		// of them would collide on that key and the later one would silently replace
+		// the earlier, quietly widening a listing that asked to be narrowed.
+		//
+		// Combining them is a set operation, not a second SQL clause: an allowlist
+		// with a blocklist is just the allowlist minus the blocked entries. NULL
+		// (legacy/untagged) rows are never what a blocklist is naming, so they
+		// survive an exclude — and they can only ENTER a result through an explicit
+		// File::SOURCE_UNCLASSIFIED in the allowlist, because `fil_source IN (...)`
+		// never matches NULL.
+		// ------------------------------------------------------------------
+		$exclude_sources = array();
 		if (isset($this->options['source_not'])) {
+			$exclude_sources[] = (string)$this->options['source_not'];
+		}
+		if (isset($this->options['sources_not'])) {
+			foreach ((array)$this->options['sources_not'] as $source) {
+				$exclude_sources[] = (string)$source;
+			}
+		}
+		$exclude_sources = array_unique($exclude_sources);
+
+		$has_include = isset($this->options['sources']);
+		if ($has_include || !empty($exclude_sources)) {
 			$dblink = DbConnector::get_instance()->get_db_link();
-			$filters['(fil_source'] = "!= " . $dblink->quote($this->options['source_not']) .
-			                          " OR fil_source IS NULL)";
+
+			if ($has_include) {
+				// Allowlist, with any blocked entries subtracted from it.
+				$want_null = false;
+				$names = array();
+				foreach ((array)$this->options['sources'] as $source) {
+					$source = (string)$source;
+					if ($source === File::SOURCE_UNCLASSIFIED) {
+						$want_null = true;
+						continue;
+					}
+					if (!in_array($source, $exclude_sources, true)) {
+						$names[] = $source;
+					}
+				}
+				$quoted = array();
+				foreach (array_unique($names) as $source) {
+					$quoted[] = $dblink->quote($source);
+				}
+				if (empty($quoted)) {
+					// An empty allowlist matches nothing rather than everything, so a
+					// caller that computed no sources gets no rows.
+					$filters['fil_source'] = $want_null ? 'IS NULL' : 'IN (NULL)';
+				} elseif ($want_null) {
+					$filters['(fil_source'] = 'IN (' . implode(',', $quoted) . ') OR fil_source IS NULL)';
+				} else {
+					$filters['fil_source'] = 'IN (' . implode(',', $quoted) . ')';
+				}
+			} else {
+				// Blocklist only.
+				$quoted = array();
+				foreach ($exclude_sources as $source) {
+					$quoted[] = $dblink->quote($source);
+				}
+				$filters['(fil_source'] = 'NOT IN (' . implode(',', $quoted) . ') OR fil_source IS NULL)';
+			}
 		}
 
 		return $this->_get_resultsv2('fil_files', $filters, $this->order_by, $only_count, $debug);

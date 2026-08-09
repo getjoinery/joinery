@@ -668,6 +668,7 @@ class PublicPageFalcon extends PublicPageBase {
     <!-- ===============================================-->
 	
 	<script src="/assets/js/joinery-validate.js?v=<?php echo $this->asset_mtime('assets/js/joinery-validate.js'); ?>"></script>
+	<script src="/assets/js/file-thumb.js?v=<?php echo $this->asset_mtime('assets/js/file-thumb.js'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('popper.min.js', 'assets/vendors/popper', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('bootstrap.min.js', 'assets/vendors/bootstrap', 'web', 'falcon'); ?>"></script>
 	<script src="<?php echo PathHelper::getThemeFilePath('all.min.js', 'assets/vendors/fontawesome', 'web', 'falcon'); ?>"></script>
@@ -852,13 +853,7 @@ class PublicPageFalcon extends PublicPageBase {
 			printf('<form method="get" ACTION="%s">', $pager->base_url());
 			echo $pager->url_vars_as_hidden_input(array('filter'));
 			echo '<label for="'.$pager->prefix().'filter'.'">Show: </label><select name="'.$pager->prefix().'filter'.'">';
-			foreach ($filter_data as $key => $value) {
-				if($pager->get_filter() == $value){
-					echo "<option value='$value' selected=selected>$key";
-				} else {
-					echo "<option value='$value'>$key";
-				}
-			}
+			$this->renderFilterOptions($filter_data, $pager->get_filter());
 			echo '</select>';
 
 			foreach($pager->url_vars() as $key=>$value){

@@ -1741,6 +1741,26 @@ $routes = [
 - View resolution caching prevents repeated file system checks
 - Framework-specific optimizations in theme implementations
 
+## Storing Uploaded Files
+
+A plugin that stores bytes goes through `File::createFromUpload()` /
+`File::createFromBytes()` and **stamps its own `fil_source`**, then declares that
+tag in `File::source_catalog()` (`data/files_class.php`) saying whether it is a
+file people browse or one the system keeps for itself:
+
+```php
+$file = File::createFromBytes($bytes, $name, $mime, $owner_id, array(
+    'fil_private' => true,
+    'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
+));
+```
+
+An undeclared tag is treated as a normal, listable file, so a plugin that skips
+the declaration has its files appear in the admin Files listing rather than
+vanish. Declaring one `internal` is what keeps a machine-owned artifact — a search
+index, a scratch blob — out of every browse surface at once. See
+[Drive § Origin tags](drive.md#origin-tags--where-a-file-came-from).
+
 ## File Loading in Plugins and Themes
 
 **Two methods for including files:**
