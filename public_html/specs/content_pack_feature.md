@@ -2,12 +2,16 @@
 # Content Pack Feature
 
 **Status: deferred** (owner, 2026-07-16) — kept on the roadmap; other work
-took priority. Two facts to reconcile at build time: the original triggering
-use case (preserving getjoinery content through the site pivot) was since
-handled by `utils/seed_getjoinery_content.php` + `utils/clone_export.php`
-(full-site encrypted clone — heavier and different in kind from a portable
-content pack, so this spec is not superseded by it); and the spec's own note
-stands that packs get more valuable as the page/post system matures.
+took priority. **Field notes added 2026-08-09** after building getjoinery.com's
+pages with throwaway seeder scripts: five ways a pack could apply cleanly and
+still leave the target wrong. Read them before implementing.
+
+The original triggering use case (preserving getjoinery content through the site
+pivot) was handled instead by hand-rolled seeder scripts, which now live at
+`{site root}/content_packs/getjoinery/` — deliberately outside `public_html` so
+no release archive carries one site's copy to another's install. They are what
+this spec would replace. `utils/clone_export.php` is not: a full-site encrypted
+clone is heavier and different in kind from a portable content pack.
 
 ## Problem
 
@@ -426,6 +430,84 @@ credentials, identified only by `stg_name`. The required `settings_include` allo
 are excluded automatically; new credential keys added to the platform later can't sneak
 into the next export.
 
+## Field notes from doing this by hand (2026-08-09)
+
+getjoinery.com's marketing site was rebuilt as eleven CMS pages composed of component
+blocks, plus header navigation and redirects, using throwaway seeder scripts in place of
+the pack tooling this spec describes. That exercise surfaced five things the spec above
+does not yet account for. They are recorded here because each one is a way a pack could
+apply "successfully" and still leave the target wrong.
+
+**1. References hide inside JSON columns, and the FK walk cannot see them.**
+A page's block layout is `pag_pages.pag_component_layout` — a JSON array of
+`pac_page_content_id` values. It is not an FK column, so the export-time FK walk
+described above skips it and the array travels verbatim. On the target those integers
+address whatever rows happen to hold those ids, so the page renders somebody else's
+blocks, in the wrong order, with no error anywhere. This is worse than a broken import:
+it is a silently wrong page.
+
+A pack format that carries pages must let the manifest declare reference-bearing JSON
+paths, so the importer can remap them through the same `{_export_id → target_pk}` map it
+already builds — something like `json_refs: {"pag_pages.pag_component_layout": "pac_page_contents"}`.
+Any table with an ordered list of child ids in a column has this problem; page layout is
+just the first instance.
+
+**2. Blocks depend on component *types*, which are not content and do not travel.**
+Each block row names a `com_type_key` in `com_components`. Those rows are created by
+theme sync, from the JSON definitions in the *active* theme's `views/components/`
+directory. Import a pack of block-built pages onto a site whose theme does not provide
+those types and every page renders empty — again with no error, because the rows import
+cleanly.
+
+So a pack has a **theme dependency**: the block template is a theme file, the block
+content is a DB row, and a pack only carries the second half. `pack.json` should declare
+the component type keys it needs (and the theme that supplies them), and apply should
+refuse up front when the target cannot satisfy them. The hand-rolled seeder did exactly
+this and it earned its place immediately — the first run on a fresh site failed with
+"these component types are not registered: app_map, prose, ..." instead of producing
+eleven blank pages.
+
+**3. Hash-dedup answers "unchanged", not "updated".**
+The apply rules skip a row whose content hash matches an existing row. That covers
+re-applying an *unchanged* pack. It does not cover the common case: shipping v2 of a pack
+whose copy has been edited. The hash differs precisely because the content changed, so
+the row is inserted rather than updated, and the target ends up with both versions.
+
+Re-apply therefore needs a **stable natural key per row, declared per table**, not a
+per-export random `_export_id`. The seeder gave every block a deterministic location name
+(`gj-{page}--{block}`) purely so a second run could find and update the right row rather
+than duplicate it. Without an equivalent, "apply an updated pack" is not a supported
+operation and the spec should say so plainly rather than leave operators to discover it.
+
+**4. Drift is immediate, so dry-run is not a v1 nicety.**
+The moment content lands in the database, the admin page editor is where people edit it —
+and the pack becomes a stale second source of truth within hours. When the seeder's
+`--check` was first run against getjoinery.com it reported two pages as differing; both
+had been hand-edited live, and a blind apply would have destroyed that work.
+
+Two consequences for v1. A **diff/dry-run before apply** is what prevents data loss, not a
+convenience to defer. And **partial apply** — naming which pages to overwrite and leaving
+the rest — was load-bearing for the same reason; the seeder grew an `--only` flag on the
+same afternoon for exactly this.
+
+**5. Navigation rows need identity, and labels are not it.**
+The nav seeder matched menu rows by their visible name and pruned anything unmanaged.
+Two rows legitimately shared the label "Apps", so the prune kept one and the header
+rendered duplicate items pointing at dead URLs. Menus are a table where the human-readable
+field is emphatically not a key; identity has to be the row.
+
+Two smaller notes:
+
+- **`url_urls` (redirects) belongs in content scope.** The section above lists settings,
+  pages, products and nav. Redirects are the same kind of thing — they encode a site's URL
+  history — and they were part of this build.
+- **Where packs must not live, proven the hard way.** The seeders were written into
+  `public_html/utils/`, which is copied wholesale into the release archive, so one site's
+  marketing copy shipped to every Joinery install for four releases. This spec already says
+  packs are "not part of the application repo"; that is now enforced by
+  `tests/unit/shipped_tree_hygiene_test.php`, which fails if a script named after a
+  deployment reappears under `public_html/`.
+
 ### Deferred for v1
 
 Capabilities considered and deferred to keep v1 lean. Each is reachable later without
@@ -612,8 +694,10 @@ what's in the pack — curate carefully.
 2. **Plugin content** — plugins can declare their own settings. Should plugin-owned settings be
    exportable in a pack, or is that the plugin's responsibility?
 
-3. **Page/post system** — the current platform has minimal CMS-style page storage. Content packs
-   may be more valuable once that system is more developed.
+3. **Page/post system** — no longer minimal. As of 2026-08-09 getjoinery.com's entire
+   marketing site is CMS pages assembled from component blocks, so pages are now the
+   most valuable thing a pack could carry, and the most intricate — see the field notes
+   above on layout arrays, component-type dependencies and re-apply identity.
 
 4. **Hosted starter kits** — longer term, could getjoinery.com list downloadable starter packs
    (org starter, developer framework starter, etc.)? This feature would enable that.
