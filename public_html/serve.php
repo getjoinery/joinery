@@ -243,7 +243,12 @@ $routes = [
                 } else if($first_segment === 'page'){
                     if($session->is_logged_in() || $settings->get_setting('page_contents_active')){
                         require_once(PathHelper::getIncludePath('data/pages_class.php'));
-                        $page = Page::get_by_link($page_pieces[2] ?? '', true);
+                        // views/page.php resolves the page itself, from the slug
+                        // in $params — the same way the /page/{slug} route feeds
+                        // it. Without this the homepage lookup runs with no slug
+                        // and the alternate homepage 404s.
+                        $params['slug'] = $page_pieces[2] ?? '';
+                        $page = Page::get_by_link($params['slug'], true);
                         $template_file = $template_directory.'/views/page.php';
                         $base_file = PathHelper::getIncludePath('views/page.php');
                     }
