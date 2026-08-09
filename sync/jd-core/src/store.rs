@@ -451,6 +451,97 @@ impl Store {
         }
     }
 
+    /// Fold a provisional file into the real one that turned out to be the same
+    /// file, and forget the provisional.
+    ///
+    /// The file counterpart of [`Store::merge_folder`], and it exists for the
+    /// same reason: a device can end up holding **two entries for one path**,
+    /// one provisional and one real, and nothing downstream can resolve that.
+    /// Naming treats them as rival siblings and ranks the provisional as
+    /// materialized, so the real entry is refused as clashing with a name
+    /// identical to its own; a pass skips an unsyncable entry entirely, so it
+    /// never materializes, never occupies the path, and never supersedes the
+    /// provisional — which re-plans its doomed upload every pass. The soak rig
+    /// found it as the whole of run 25's residue: 12 of device-a's 13 unsyncable
+    /// entries and 17 of device-b's 18, and in every single case it was the
+    /// **real** entry wearing the `duplicate_name` reason.
+    ///
+    /// Merging is what makes the deadlock unreachable however it arose, which
+    /// matters more than the genesis: whatever mints the second record, the next
+    /// pass folds it.
+    ///
+    /// **What makes this safe for files is new.** The folder version leans on
+    /// the server permitting one name per parent, so a local directory and a
+    /// remote folder at one path cannot be different things. Files only gained
+    /// that guarantee with the uniqueness rule on `fil_files`; before it, two
+    /// live files really could share a name and folding them would have been a
+    /// guess. It is the same rule the refusal here comes from.
+    ///
+    /// **The agreement is left exactly as the real entry recorded it**, and that
+    /// is the whole delicacy of this function. Clearing it would read the local
+    /// file as a fresh creation meeting a fresh remote one, and every merge
+    /// would manufacture a conflicted copy of a file nobody conflicted over.
+    /// Kept, an ordinary scan compares the disk against it and calls an edit an
+    /// edit. Where there is no agreement to keep, the entry stays a download and
+    /// `make_room` preserves whatever is on the disk — a spare copy, which is
+    /// the cheap direction to be wrong in.
+    ///
+    /// The provisional contributes only what it alone holds: its `local_index`
+    /// rows, so the inode mapping and hash cache survive and a rescan does not
+    /// re-read every byte. Its queued operations are **dropped**, not moved —
+    /// the only one that can be outstanding is the upload the server will refuse
+    /// for as long as the name is taken, which is forever.
+    pub fn merge_file(&self, from: EntityId, to: EntityId) -> StoreResult<()> {
+        if from == to || from.entity_type != EntityType::File || to.entity_type != EntityType::File
+        {
+            return Ok(());
+        }
+        let t = EntityType::File.to_string();
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            let Some(real) = self.get_entry(to)? else {
+                return Ok(());
+            };
+            // Unsyncable is the state the deadlock parks it in, and a pass skips
+            // an unsyncable entry, so leaving it would fold the rival away and
+            // still never look at the survivor. What it goes back to is decided
+            // by whether anything was ever agreed about it, which is the same
+            // question the scanner asks.
+            if matches!(real.status, LocalStatus::Unsyncable(_)) {
+                let status = if real.synced_placement.is_some() {
+                    LocalStatus::Synced
+                } else {
+                    LocalStatus::PendingDownload
+                };
+                self.put_entry(&Entry { status, ..real })?;
+            }
+            self.conn.execute(
+                "UPDATE local_index SET server_id = ?3
+                  WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id, to.server_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM ops WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id],
+            )?;
+            self.conn.execute(
+                "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
+                params![t, from.server_id],
+            )?;
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
     /// Forget an entry and everything underneath it.
     ///
     /// This drops the *record*, never a file. Anything still on the disk is
