@@ -1,22 +1,12 @@
 <?php
-$label = $component_config['label'] ?? 'Everything You Need';
-$heading = $component_config['heading'] ?? 'One platform, no duct tape';
+// A block with no configuration renders nothing rather than someone else's
+// marketing copy. Content belongs to the page, never to the theme.
+$label = $component_config['label'] ?? '';
+$heading = $component_config['heading'] ?? '';
 $subheading = $component_config['subheading'] ?? '';
 $features = $component_config['features'] ?? [];
 $link_text = $component_config['link_text'] ?? '';
-$link_url = $component_config['link_url'] ?? '/features';
-
-// Default features if none configured
-if (empty($features)) {
-    $features = [
-        ['icon' => 'members', 'title' => 'Member Management', 'description' => 'Profiles, permissions, subscription tiers, and groups. Everything you need to organize your people.'],
-        ['icon' => 'calendar', 'title' => 'Events & Registration', 'description' => 'Create events, manage signups, handle waitlists. Supports recurring schedules and custom questions.'],
-        ['icon' => 'payments', 'title' => 'Payments & E-Commerce', 'description' => 'Stripe and PayPal built in. Sell memberships, products, and event tickets with zero platform fees.'],
-        ['icon' => 'email', 'title' => 'Email & Communications', 'description' => 'Newsletters, mailing lists, and notifications. Works with Mailgun or self-hosted — your choice.'],
-        ['icon' => 'plugins', 'title' => 'Plugins & Themes', 'description' => 'Extend with plugins, customize with themes. Full theme override system supports Bootstrap, Tailwind, or zero-dependency HTML5.'],
-        ['icon' => 'shield', 'title' => 'Your Data, Your Rules', 'description' => 'Self-host anytime. Export everything. No lock-in, no data selling. Source available for full transparency.'],
-    ];
-}
+$link_url = $component_config['link_url'] ?? '';
 
 $icons = [
     'members' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',

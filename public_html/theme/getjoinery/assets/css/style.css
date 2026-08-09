@@ -1,5 +1,5 @@
 /* ==========================================================================
-   Get Joinery Marketing Theme — Style Sheet v1.2.0
+   Get Joinery Marketing Theme — Style Sheet v1.3.0
    Warm stone palette with amber accents (Variant M)
    ========================================================================== */
 
@@ -1035,6 +1035,7 @@ p:last-child { margin-bottom: 0; }
     line-height: 1.6;
     margin: 1rem 0;
 }
+pre.code-block { white-space: pre; }
 .code-block .comment { color: #6b7280; }
 .code-block .string { color: #fbbf24; }
 .code-block .keyword { color: #818cf8; }
@@ -1278,12 +1279,382 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     margin-top: 1.75rem;
 }
 
+/* ==========================================================================
+   Repositioning shapes — app-vs-incumbent map, install ladder, FAQ, lanes
+   ========================================================================== */
+
+/* ---------- App grid mapped to the thing it replaces ---------- */
+.app-map {
+    display: grid;
+    grid-template-columns: repeat(4, 1fr);
+    gap: 1.25rem;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+.app-map-card {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.5rem;
+    transition: border-color var(--transition), transform var(--transition);
+}
+.app-map-card:hover { border-color: var(--accent); transform: translateY(-2px); }
+.app-map-card h3 { font-size: 1.1rem; margin-bottom: 0.15rem; }
+.app-map-card .replaces {
+    font-family: var(--font-heading);
+    font-size: 0.75rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    margin-bottom: 0.6rem;
+}
+.app-map-card p {
+    font-size: 0.9rem;
+    color: var(--text-muted);
+    line-height: 1.6;
+}
+.app-map.app-map-secondary { grid-template-columns: repeat(5, 1fr); margin-top: 1.25rem; }
+.app-map.app-map-secondary .app-map-card { padding: 1.1rem; background: transparent; }
+.app-map.app-map-secondary h3 { font-size: 0.95rem; }
+.app-map.app-map-secondary p { font-size: 0.82rem; }
+
+/* ---------- Maturity / paid labels ---------- */
+.tag {
+    display: inline-block;
+    font-family: var(--font-heading);
+    font-size: 0.65rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.08em;
+    padding: 0.15rem 0.5rem;
+    border-radius: var(--radius-pill);
+    vertical-align: middle;
+    margin-left: 0.4rem;
+    border: 1px solid var(--border);
+    color: var(--text-muted);
+    background: var(--bg-alt);
+}
+.tag-paid { color: var(--accent); border-color: rgba(180,83,9,0.3); background: var(--accent-bg); }
+.tag-beta { color: #0369a1; border-color: rgba(3,105,161,0.25); background: #f0f9ff; }
+
+/* ---------- Install ladder ---------- */
+.install-ladder {
+    display: flex;
+    flex-direction: column;
+    gap: 1.5rem;
+    max-width: 880px;
+    margin: 0 auto;
+}
+.install-option {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+    display: grid;
+    grid-template-columns: 3.5rem 1fr;
+    gap: 1.5rem;
+}
+.install-option.featured {
+    border-color: var(--accent);
+    box-shadow: 0 8px 30px rgba(180,83,9,0.08);
+}
+.install-rank {
+    font-family: var(--font-heading);
+    font-size: 1.5rem;
+    font-weight: 800;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border-radius: var(--radius);
+    height: 3.5rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.install-option-head {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 1rem;
+    flex-wrap: wrap;
+    margin-bottom: 0.5rem;
+}
+.install-option-head h3 { font-size: 1.35rem; }
+.install-price {
+    font-family: var(--font-heading);
+    font-weight: 800;
+    font-size: 1.35rem;
+    color: var(--primary-dark);
+    white-space: nowrap;
+}
+.install-price span { font-size: 0.8rem; font-weight: 500; color: var(--text-muted); }
+/* A grid item defaults to min-width:auto, so the un-wrapped install command
+   inside would widen the whole page instead of scrolling in its own box. */
+.install-body { min-width: 0; }
+.install-body p { font-size: 0.95rem; color: var(--text-muted); line-height: 1.7; }
+.install-body ul {
+    list-style: none;
+    padding: 0;
+    margin: 1rem 0;
+}
+.install-body ul li {
+    padding: 0.3rem 0 0.3rem 1.4rem;
+    position: relative;
+    font-size: 0.9rem;
+    color: var(--text-muted);
+}
+.install-body ul li::before {
+    content: "";
+    position: absolute;
+    left: 0;
+    top: 0.95rem;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--accent);
+}
+.install-body .code-block { margin: 1.25rem 0; }
+.install-meta {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    border-top: 1px solid var(--border);
+    padding-top: 0.9rem;
+    margin-top: 1.25rem;
+}
+
+/* ---------- Calm callout (honest notes, disclosures) ---------- */
+.note {
+    max-width: 760px;
+    margin: 2rem auto 0;
+    padding: 1.1rem 1.4rem;
+    background: var(--accent-bg);
+    border-left: 3px solid var(--accent);
+    border-radius: 0 var(--radius) var(--radius) 0;
+    font-size: 0.92rem;
+    color: var(--text);
+    line-height: 1.7;
+}
+.note-plain {
+    background: var(--bg-alt);
+    border-left-color: var(--border);
+}
+
+/* ---------- Numbered checklist (migration steps) ---------- */
+.checklist {
+    max-width: 760px;
+    margin: 0 auto;
+    counter-reset: step;
+    list-style: none;
+    padding: 0;
+}
+.checklist li {
+    counter-increment: step;
+    position: relative;
+    padding: 0 0 1.5rem 3.25rem;
+    border-left: 2px solid var(--border);
+    margin-left: 1rem;
+}
+.checklist li:last-child { border-left-color: transparent; padding-bottom: 0; }
+.checklist li::before {
+    content: counter(step);
+    position: absolute;
+    left: -1rem;
+    top: -0.2rem;
+    width: 2rem;
+    height: 2rem;
+    border-radius: 50%;
+    background: var(--accent);
+    color: white;
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 0.85rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.checklist li h4 { margin-bottom: 0.25rem; }
+.checklist li p { font-size: 0.92rem; color: var(--text-muted); }
+
+/* ---------- FAQ ---------- */
+.faq-list {
+    max-width: 760px;
+    margin: 0 auto;
+}
+.faq-item {
+    border-bottom: 1px solid var(--border);
+}
+.faq-item summary {
+    font-family: var(--font-heading);
+    font-weight: 700;
+    font-size: 1rem;
+    color: var(--primary-dark);
+    padding: 1.1rem 2rem 1.1rem 0;
+    cursor: pointer;
+    list-style: none;
+    position: relative;
+}
+.faq-item summary::-webkit-details-marker { display: none; }
+.faq-item summary::after {
+    content: "+";
+    position: absolute;
+    right: 0.25rem;
+    top: 50%;
+    transform: translateY(-50%);
+    font-size: 1.4rem;
+    font-weight: 500;
+    color: var(--accent);
+    line-height: 1;
+}
+.faq-item[open] summary::after { content: "\2013"; }
+.faq-item summary:hover { color: var(--accent); }
+.faq-answer {
+    padding: 0 0 1.25rem;
+    font-size: 0.94rem;
+    color: var(--text-muted);
+    line-height: 1.75;
+}
+.faq-answer p + p { margin-top: 0.75rem; }
+
+/* ---------- Pricing lanes ---------- */
+.lane-header {
+    margin: 0 auto 2rem;
+    padding-bottom: 1rem;
+    border-bottom: 1px solid var(--border);
+}
+.lane-header h2 { font-size: 1.9rem; margin-bottom: 0.4rem; }
+.lane-header p { color: var(--text-muted); font-size: 1rem; }
+.founder-counter {
+    display: inline-block;
+    font-family: var(--font-heading);
+    font-size: 0.8rem;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.06em;
+    color: var(--accent);
+    background: var(--accent-bg);
+    border: 1px solid rgba(180,83,9,0.25);
+    padding: 0.3rem 0.9rem;
+    border-radius: var(--radius-pill);
+    margin-bottom: 1rem;
+}
+.price-tag {
+    font-family: var(--font-heading);
+    font-size: 2.25rem;
+    font-weight: 800;
+    color: var(--primary-dark);
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 0.75rem;
+}
+
+/* ---------- Wide content scrolls in its own box, never the page ---------- */
+.table-scroll {
+    max-width: 900px;
+    margin: 0 auto;
+    overflow-x: auto;
+    -webkit-overflow-scrolling: touch;
+}
+.table-scroll .comparison-table { min-width: 640px; }
+
+/* ---------- Pricing teaser (three options at a glance) ---------- */
+.pricing-teaser {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.25rem;
+    max-width: 900px;
+    margin: 0 auto;
+}
+.pricing-teaser-tier {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 1.75rem 1.5rem;
+    text-align: center;
+}
+.pricing-teaser-tier.featured {
+    border-color: var(--accent);
+    box-shadow: 0 8px 30px rgba(180,83,9,0.08);
+}
+.pricing-teaser-tier .tier-name {
+    font-family: var(--font-heading);
+    font-size: 0.95rem;
+    font-weight: 700;
+    color: var(--primary-dark);
+    margin-bottom: 0.5rem;
+}
+.pricing-teaser-tier .tier-price {
+    font-family: var(--font-heading);
+    font-size: 2rem;
+    font-weight: 800;
+    color: var(--primary-dark);
+    letter-spacing: -0.03em;
+    line-height: 1;
+    margin-bottom: 0.5rem;
+}
+.pricing-teaser-tier .tier-price span {
+    font-size: 0.85rem;
+    font-weight: 500;
+    color: var(--text-muted);
+    font-family: var(--font-body);
+}
+.pricing-teaser-tier .tier-note {
+    font-size: 0.85rem;
+    color: var(--text-muted);
+    line-height: 1.5;
+}
+
+/* ---------- Ownership tiles ---------- */
+.tile-row {
+    display: grid;
+    grid-template-columns: repeat(3, 1fr);
+    gap: 1.5rem;
+    max-width: 1000px;
+    margin: 0 auto;
+}
+.tile {
+    background: white;
+    border: 1px solid var(--border);
+    border-radius: var(--radius-lg);
+    padding: 2rem;
+}
+.section-dark .tile {
+    background: rgba(255,255,255,0.04);
+    border-color: rgba(255,255,255,0.12);
+}
+.tile-row-2 { grid-template-columns: repeat(2, 1fr); max-width: 860px; }
+.tile h3 { font-size: 1.15rem; margin-bottom: 0.6rem; }
+.tile p { font-size: 0.94rem; color: var(--text-muted); line-height: 1.7; }
+.section-dark .tile p { color: rgba(255,255,255,0.62); }
+
+/* ---------- Prose block (centred body copy) ---------- */
+.prose {
+    max-width: 720px;
+    margin: 0 auto;
+    font-size: 1.02rem;
+    line-height: 1.8;
+    color: var(--text-muted);
+}
+.prose h3 {
+    color: var(--primary-dark);
+    font-size: 1.3rem;
+    margin: 2.5rem 0 0.75rem;
+}
+.prose h3:first-child { margin-top: 0; }
+.prose strong { color: var(--text); font-weight: 600; }
+.prose ul { margin: 1rem 0 1rem 1.25rem; }
+.prose li { margin-bottom: 0.5rem; }
+
 /* ---------- Responsive ---------- */
 @media (max-width: 1024px) {
     .feature-grid { grid-template-columns: repeat(2, 1fr); }
     .audience-grid { grid-template-columns: repeat(2, 1fr); }
     .pricing-grid { grid-template-columns: repeat(2, 1fr); }
     .arch-grid { grid-template-columns: repeat(2, 1fr); }
+    .app-map { grid-template-columns: repeat(2, 1fr); }
+    .app-map.app-map-secondary { grid-template-columns: repeat(3, 1fr); }
+    .tile-row, .tile-row-2 { grid-template-columns: 1fr; }
+    .pricing-teaser { grid-template-columns: 1fr; }
+    .audience-grid-3 { grid-template-columns: repeat(2, 1fr); }
 }
 
 @media (max-width: 768px) {
@@ -1332,7 +1703,7 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     /* Grids */
     .feature-grid { grid-template-columns: 1fr; }
     .diff-cards { grid-template-columns: 1fr; }
-    .audience-grid { grid-template-columns: 1fr; }
+    .audience-grid, .audience-grid-3 { grid-template-columns: 1fr; }
     .pricing-cards { flex-direction: column; }
     .pricing-grid { grid-template-columns: 1fr; }
     .self-host-options { grid-template-columns: 1fr; }
@@ -1353,6 +1724,13 @@ table.table td { font-size: 0.9rem; color: var(--text-muted); }
     /* Hero */
     .hero { padding: 4rem 1.5rem 3rem; }
     .hero h1 { font-size: 2.25rem; }
+
+    /* Repositioning shapes */
+    .app-map, .app-map.app-map-secondary { grid-template-columns: 1fr; }
+    .install-option { grid-template-columns: 1fr; gap: 1rem; padding: 1.5rem; }
+    .install-rank { width: 2.75rem; height: 2.75rem; font-size: 1.2rem; }
+    .install-option-head { flex-direction: column; align-items: flex-start; gap: 0.25rem; }
+    .checklist li { padding-left: 2.75rem; }
 }
 
 @media (max-width: 480px) {

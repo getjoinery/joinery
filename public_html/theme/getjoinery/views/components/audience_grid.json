@@ -4,16 +4,58 @@
     "category": "features",
     "config_schema": {
         "fields": [
-            {"name": "heading", "label": "Heading", "type": "textinput", "default": "Built for real organizations"},
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput"
+            },
+            {
+                "name": "subheading",
+                "label": "Subheading",
+                "type": "textarea"
+            },
             {
                 "name": "audiences",
                 "label": "Audiences",
                 "type": "repeater",
                 "fields": [
-                    {"name": "icon", "label": "Icon Key", "type": "textinput"},
-                    {"name": "title", "label": "Title", "type": "textinput"},
-                    {"name": "description", "label": "Description", "type": "textarea"}
+                    {
+                        "name": "icon",
+                        "label": "Icon Key",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "title",
+                        "label": "Title",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "description",
+                        "label": "Description",
+                        "type": "textarea"
+                    },
+                    {
+                        "name": "link_text",
+                        "label": "Link Text",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "link_url",
+                        "label": "Link URL",
+                        "type": "textinput"
+                    }
                 ]
+            },
+            {
+                "name": "columns",
+                "label": "Columns",
+                "type": "select",
+                "options": {
+                    "4": "Four",
+                    "3": "Three"
+                },
+                "default": "4",
+                "advanced": true
             }
         ]
     }

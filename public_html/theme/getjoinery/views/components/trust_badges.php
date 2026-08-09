@@ -1,16 +1,7 @@
 <?php
 $badges = $component_config['badges'] ?? [];
 
-// Default badges if none configured
-if (empty($badges)) {
-    $badges = [
-        ['icon' => 'shield', 'text' => 'Source Available'],
-        ['icon' => 'check', 'text' => '0% Transaction Fees'],
-        ['icon' => 'lock', 'text' => 'Self-Host Option'],
-        ['icon' => 'download', 'text' => 'Full Data Export'],
-        ['icon' => 'heart', 'text' => 'Free for Personal Use'],
-    ];
-}
+// No sample content: an unconfigured block renders nothing.
 
 $icons = [
     'shield' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/></svg>',
