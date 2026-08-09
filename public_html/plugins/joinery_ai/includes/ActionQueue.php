@@ -26,7 +26,7 @@ class ActionQueueException extends Exception {}
  * the conversation through the resolution event row, where the next turn can
  * reason over it.
  *
- * @version 1.1
+ * @version 1.2
  */
 class ActionQueue {
 
@@ -388,14 +388,24 @@ class ActionQueue {
 
             $facts = self::factsFor($row);
             $headline = $facts !== null && $facts !== [] ? $facts[0] : ('Action ' . (string)$row->get('aqa_tool'));
-            $text = '[Queued action #' . (int)$row->key . ' — ' . $headline . ' — '
-                  . ($outcome === 'approved' ? 'the owner approved it and it ran'
-                    : ($outcome === 'failed' ? 'the owner approved it but it failed'
-                    : 'the owner declined it; do not retry it')) . '.'
-                  . ($summary !== null && trim($summary) !== ''
-                        ? ' Result: ' . self::boundResult($summary, $verbatim)
-                        : '')
-                  . ']';
+            $outcome_phrase = $outcome === 'approved' ? 'the owner approved it and it ran'
+                : ($outcome === 'failed' ? 'the owner approved it but it failed'
+                : 'the owner declined it; do not retry it');
+            $open = '[Queued action #' . (int)$row->key . ' — ' . $headline . ' — ' . $outcome_phrase;
+            $has_result = $summary !== null && trim($summary) !== '';
+            if (!$has_result) {
+                $text = $open . '.]';
+            } elseif ($verbatim) {
+                // Egress: the fetched content is the value. Carry it AFTER the
+                // narration, past a separator, so the history builder frames it as
+                // untrusted and windows it while the narration stays trusted. On a
+                // protected conversation the whole row seals; the confinement rule
+                // means a standard conversation never reaches this branch hot.
+                $text = $open . '.]' . AiConversationMessage::EVENT_RESULT_SEP
+                      . self::boundResult($summary, true);
+            } else {
+                $text = $open . '. Result: ' . self::boundResult($summary, false) . ']';
+            }
 
             $msg = new AiConversationMessage(NULL);
             $msg->set('aim_aic_conversation_id', $conv_id);

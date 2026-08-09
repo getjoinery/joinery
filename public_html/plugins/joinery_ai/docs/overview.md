@@ -483,12 +483,20 @@ touches sealed content. A conversation that has never touched sealed content
 is unaffected — its web lookups run inline.
 
 On a **recipe run** there is no one to approve, so a hot egress call is
-refused with an error result and the run continues. Unlike a write, a
-fetch's value is its content: an approved egress action's full result
-(bounded by `ActionQueue::EVENT_RESULT_MAX`) is carried back into the
-conversation in the resolution event row, where the next turn can reason
-over it — the transcript chip shows its head and collapses the rest behind a
-toggle.
+refused with an error result and the run continues.
+
+Unlike a write, a fetch's value is its content, so an approved egress result
+is carried back for the model to reason over — but only on a **protected**
+conversation. Sealed content is opened only in a protected chat (a standard
+chat's read executor excludes sealed rows, so it never goes hot; see
+[Sealed Vault](../../../docs/sealed_vault.md#the-hot-turn-rule)), and only there
+does the transcript seal to hold the result. The result is stored on the
+resolution event row after `AiConversationMessage::EVENT_RESULT_SEP`, which
+separates the trusted platform narration from the untrusted fetched bytes.
+`ChatRunner::buildHistoryMessages` splits on it to **frame** the result in the
+turn's `<<UNTRUSTED_nonce>>` markers and to **window** it — only the most recent
+carried result is sent in full; older ones collapse to a short prefix so a fetch
+reasoned over once stops re-bloating every later turn.
 
 **The object** (`data/ai_queued_actions_class.php`, `AiQueuedAction`): owner,
 area, source (`chat` now; `recipe` reserved), conversation, the tool name,

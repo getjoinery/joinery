@@ -177,7 +177,7 @@ class ModelQueryExecutor {
         $q = $db->prepare($sql);
         $q->execute($params);
         $rows = $q->fetchAll(PDO::FETCH_ASSOC);
-        $rows = self::decryptSealedFields($rows, $class);
+        $rows = self::decryptSealedFields($rows, $class, $ctx->sealedReadsAllowed());
 
         return self::wrapUntrustedFields($rows, $info, $select_fields, $ctx);
     }
@@ -204,7 +204,7 @@ class ModelQueryExecutor {
      * next unlock. The count of dropped rows is surfaced so the model knows the
      * result set is partial.
      */
-    private static function decryptSealedFields(array $rows, string $class): array {
+    private static function decryptSealedFields(array $rows, string $class, bool $reads_allowed = true): array {
         self::$last_locked_excluded = 0;
         $sealed = $class::$sealed_fields;
         if (empty($sealed)) return $rows;
@@ -215,6 +215,13 @@ class ModelQueryExecutor {
             $locked = false;
             foreach ($sealed as $field) {
                 if (!array_key_exists($field, $row) || $row[$field] === null) continue;
+                // Surface confined to protected contexts (a standard chat): never
+                // open actually-sealed content. Exclude the row exactly as a locked
+                // vault does, so the turn never goes hot and no plaintext escapes.
+                if (!$reads_allowed && strpos((string)$row[$field], 'v1.aead.') === 0) {
+                    $locked = true;
+                    break;
+                }
                 try {
                     $row[$field] = $class::decryptSealedFieldStatic($field, $row[$field], $row);
                 } catch (VaultLockedException $e) {

@@ -159,6 +159,13 @@ class RecipeRunContext implements ToolContext {
      * Entry shape: { name, input, started_time, completed_time, is_error,
      * output, duration_ms } with the completion fields null until finish.
      */
+    /** Recipes read sealed content by design — the sealed-run machinery reads and
+     *  re-seals under the owner's window. (Confinement to protected contexts is a
+     *  chat concern; a recipe's whole run is the protected unit.) */
+    public function sealedReadsAllowed(): bool {
+        return true;
+    }
+
     public function beginToolCall(array $entry): void {
         $this->appendToolCall($entry);
         $this->flushToolCalls();

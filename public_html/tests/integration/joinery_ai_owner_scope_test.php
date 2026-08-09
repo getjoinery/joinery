@@ -46,6 +46,7 @@ class StubReadContext implements ToolContext {
         throw new LogicException('This fixture context does not queue writes.');
     }
     public function ownerScopedReads(): bool { return $this->scoped; }
+    public function sealedReadsAllowed(): bool { return true; }   // this fixture tests owner-scoping, not the sealed-content confinement
     public function shouldContinue(): ?array { return null; }
     public function shouldAbort(): bool { return false; }
     public function beginToolCall(array $entry): void {}

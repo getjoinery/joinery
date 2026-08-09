@@ -485,6 +485,18 @@ shows the complete outbound argument, and on an autonomous recipe run it is
 refused — see the hot-turn egress passage in
 `plugins/joinery_ai/docs/overview.md#proposed-actions`.
 
+**Sealed content is opened only in a protected chat.** Protection is a
+conversation-level property, so a standard chat that opened sealed content would
+be hot but plaintext — unable to persist its next reply or protect what it read.
+Rather than patch that, the AI simply does not open sealed content in a standard
+chat: `ToolContext::sealedReadsAllowed()` is true for a protected chat and for a
+recipe (its whole run is the protected unit), false for a standard chat, and the
+read executor excludes an actually-sealed row when it is false — the same
+exclusion a locked vault triggers. A standard turn therefore never goes hot, and
+an approved fetch's result only ever rides back into a protected conversation,
+where the transcript seals. A backstop fails a standard turn cleanly (pointing to
+a private chat) if some other path decrypts anyway.
+
 Egress reads a wider predicate than the write-guard, `SealedEgressGuard::
 egressGated()`: the process is hot, **or** the conversation is durably
 egress-restricted. The hot flag alone is a per-process signal, but a chat

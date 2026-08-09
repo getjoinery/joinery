@@ -104,6 +104,20 @@ class ChatTurnContext implements ToolContext {
         return $this->nonce;
     }
 
+    /** Sealed content is confined to protected chats (see ToolContext). A standard
+     *  conversation cannot open protected mail / sealed drive: the read executor
+     *  excludes those rows instead of decrypting them, so the turn never goes hot. */
+    public function sealedReadsAllowed(): bool {
+        return $this->conversation->isProtected();
+    }
+
+    /** Set when this turn's history carries an approved web-fetch result, so the
+     *  system prompt emits the untrusted-input contract for it (framed content
+     *  the model must treat as data). */
+    private $has_carried_result = false;
+    public function noteCarriedResult(): void { $this->has_carried_result = true; }
+    public function hasCarriedResult(): bool { return $this->has_carried_result; }
+
     /** Data access on → every readable model in scope; off → none. For a member
      *  caller (owner-scoped), models with ambiguous or undeclared ownership are
      *  dropped — a member never sees a model the read fence can't contain. */

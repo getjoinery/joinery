@@ -30,9 +30,15 @@
  *  - The autonomous arm: a surface that cannot queue refuses hot egress with
  *    an error result, before any validator or HTTP client is touched.
  *
+ *  - Confinement: sealed content is only opened in a protected chat. A standard
+ *    chat's read executor excludes sealed rows (it never goes hot), so the
+ *    standard-conversation manifestations of the cold-start and swallowed-event
+ *    findings cannot arise; the egress result-carry then only happens on
+ *    protected conversations, framed untrusted and windowed at history-build.
+ *
  * Run: php tests/run.php db --only=plugins/joinery_ai/tests/ai_hot_turn_egress_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
@@ -45,6 +51,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionQueue
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RiskHeuristic.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
@@ -178,6 +186,36 @@ AiConversation::updateColumns((int)$conversation->key, ['aic_egress_restricted' 
 $conversation->load();
 
 // -----------------------------------------------------------------------------
+section('Sealed reads are confined to protected chats');
+
+$std_ctx = new ChatTurnContext($conversation, $owner_id);
+check(!$std_ctx->sealedReadsAllowed(),
+	'a standard chat may not open sealed content');
+$conversation->set('aic_security_level', ChatSeal::LEVEL_PRIVATE);   // in-memory flip for the predicate
+$prot_ctx = new ChatTurnContext($conversation, $owner_id);
+check($prot_ctx->sealedReadsAllowed(),
+	'a protected chat may');
+$conversation->set('aic_security_level', ChatSeal::LEVEL_STANDARD);
+
+// The read executor excludes actually-sealed rows when the surface may not open
+// them — the same exclusion a locked vault triggers — so a standard turn never
+// decrypts (never goes hot), yet still reads ordinary plaintext fields.
+$decrypt = new ReflectionMethod('ModelQueryExecutor', 'decryptSealedFields');
+$decrypt->setAccessible(true);
+$sealed_row = ['aim_message_id' => 1, 'aim_content' => 'v1.aead.' . str_repeat('x', 40),
+	'aim_content_sealed' => true, 'aim_sealed_owner_user_id' => $owner_id, 'aim_sealed_key' => 'k'];
+$plain_row  = ['aim_message_id' => 2, 'aim_content' => 'ordinary plaintext', 'aim_content_sealed' => false];
+$kept = $decrypt->invoke(null, [$sealed_row, $plain_row], 'AiConversationMessage', false);
+check(count($kept) === 1 && (int)($kept[0]['aim_message_id'] ?? 0) === 2
+		&& ModelQueryExecutor::lastLockedExcluded() === 1,
+	'the sealed row is excluded, the plaintext row still read', json_encode(array_column($kept, 'aim_message_id')));
+
+// Recipes are the protected unit themselves, so they may open sealed content.
+$exec_src = file_get_contents(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelQueryExecutor.php'));
+check(strpos($exec_src, 'sealedReadsAllowed()') !== false,
+	'the read executor gates decryption on the surface being allowed to open sealed content');
+
+// -----------------------------------------------------------------------------
 section('Renderers: the card shows the complete outbound argument');
 
 foreach (['fetch_url', 'web_search', 'get_stock_data'] as $tool_name) {
@@ -221,6 +259,8 @@ check(strpos($event, 'Source: https://dev.getjoinery.com') !== false,
 check(mb_strlen($event) > 500,
 	'verbatim, past the write path\'s one-line bound — the next turn can reason over it',
 	'event length ' . mb_strlen($event));
+check(strpos($event, 'fetched result') !== false,
+	'the carried result rides after the separator so history-build can frame + window it');
 
 $card = ActionQueue::card($resolved);
 check($card['result'] !== null && mb_strlen($card['result']) <= 500,
@@ -297,6 +337,7 @@ $stub_ctx = new class implements ToolContext {
 		throw new LogicException('autonomous surfaces never queue');
 	}
 	public function ownerScopedReads(): bool { return true; }
+	public function sealedReadsAllowed(): bool { return false; }
 	public function shouldContinue(): ?array { return null; }
 	public function shouldAbort(): bool { return false; }
 	// Model the real contexts: begin records a started entry, finish reconciles
