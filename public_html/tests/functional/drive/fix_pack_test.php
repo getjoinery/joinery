@@ -328,4 +328,44 @@ $rSync = drive_share_sync_logic(array(
 check(($rSync->data['granted_count'] ?? -1) === 1, 'granted_count counts only applied grants');
 check(($rSync->data['skipped'] ?? array()) === array('nobody-here@invalid.example'), 'unresolvable email is reported as skipped');
 
+// ---------------------------------------------------------------------------
+section('the dedup short-circuit obeys the sibling-name rule and creates in place');
+
+// This path creates the File itself and never reaches upload_complete, so it
+// needs the name rule of its own. Untested, it answered a taken name with a raw
+// SQLSTATE[23505] the sync client could only withdraw the work over — 779 of
+// them in one soak campaign. It also created at the root and moved the row
+// afterwards, so an upload could collide with an unrelated root file.
+$session->clear_api_user();
+$session->set_api_user($ownerA->key);
+$rDedupDir = drive_folder_create_logic(array('name' => 'FixDedup_' . bin2hex(random_bytes(3))));
+$dedup_dir = (int)$rDedupDir->data['folder']['id']; $made_folders[] = $dedup_dir;
+
+$twin = 'fixpack-twin-' . bin2hex(random_bytes(16));
+$twin_sha = hash('sha256', $twin);
+$held = fixpack_file($twin, 'twin.bin', $ownerA->key, $dedup_dir);
+check((int)$held->get('fil_fol_folder_id') === $dedup_dir, 'the twin is held in the folder');
+
+// A second file of the same name in the same folder is refused as the name
+// clash it is, with the marker a client acts on.
+$rTaken = drive_upload_init_logic(array(
+	'name' => 'twin.bin', 'size_bytes' => strlen($twin), 'sha256' => $twin_sha, 'folder_id' => $dedup_dir,
+));
+check($rTaken->error !== null, 'a dedup init onto a taken name is refused');
+check(($rTaken->data['reason'] ?? '') === 'name_taken',
+	'and answers name_taken rather than a database fault: ' . substr((string)$rTaken->error, 0, 80));
+if (!empty($rTaken->data['file']['id'])) { $made_files[] = (int)$rTaken->data['file']['id']; }
+
+// A free name dedups, and lands in the folder it was asked for — never at the
+// root on the way past.
+$rFree = drive_upload_init_logic(array(
+	'name' => 'twin-copy.bin', 'size_bytes' => strlen($twin), 'sha256' => $twin_sha, 'folder_id' => $dedup_dir,
+));
+check(($rFree->data['deduped'] ?? false) === true, 'a free name still dedups');
+$free_id = (int)($rFree->data['file']['id'] ?? 0);
+if ($free_id) { $made_files[] = $free_id; }
+$free_file = new File($free_id, true);
+check((int)$free_file->get('fil_fol_folder_id') === $dedup_dir,
+	'the deduped file is created in its destination folder, not at the root');
+
 harness_finish();

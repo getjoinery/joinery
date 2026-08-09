@@ -209,6 +209,15 @@ through `DriveHelper::save_folder_unless_name_taken()` or
 question again and, if the name is now taken, return `false` for the caller to
 answer exactly as it would have a moment earlier; anything else is rethrown.
 
+A file arriving by upload is created rather than saved, so the two upload paths
+carry the rule themselves: they ask `file_name_taken()` first and translate a
+`23505` from the insert into the same refusal. There are two of them, and both
+matter — `drive_upload_complete` for a transferred file, and the dedup
+short-circuit in `drive_upload_init`, which creates the file itself when the
+account already holds identical bytes and never reaches completion at all. Both
+put the destination folder in the creation, so an upload never occupies the
+root's namespace on its way to where it was going.
+
 A file refusal carries `reason: name_taken` in the error data. Sync clients
 branch on that marker rather than on the message, and treat it as a state that
 resolves rather than a failure: the sibling holding the name is something the
