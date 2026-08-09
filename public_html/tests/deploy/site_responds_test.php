@@ -42,12 +42,10 @@ section('The deployed site answers over HTTP');
 
 // webDir is the site's own name, set in Globalvars_site.php at install time and
 // therefore present on every deployment. It is documented as a bare domain, but
-// sites exist that carry a full URL in it, and site_url is populated on some
-// installs and not others — so take the first of the three that yields a
-// hostname and normalize rather than trusting any one of them to be well-formed.
+// sites exist that carry a full URL in it, so normalize rather than trusting it
+// to be well-formed.
 $candidates = array(
 	trim((string)$settings->get_setting('webDir')),
-	trim((string)$settings->get_setting('site_url')),
 );
 
 $host = '';

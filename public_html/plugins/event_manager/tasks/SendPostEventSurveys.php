@@ -6,9 +6,13 @@
  * with evt_survey_display = 'after_event' once the event has ended.
  * Only sends to registrants where evr_survey_completed is false.
  *
+ * @version 1.1 - the survey link is absolute. It was built from a setting
+ *                nothing declares, so it resolved to '' and every survey email
+ *                carried a bare '/survey?...' with no scheme or host.
  * @version 1.0
  */
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 
 class SendPostEventSurveys implements ScheduledTaskInterface {
 
@@ -58,7 +62,8 @@ class SendPostEventSurveys implements ScheduledTaskInterface {
                 if (!$user || !$user->get('usr_email')) continue;
 
                 // Send survey email
-                $survey_url = $settings->get_setting('site_url') . '/survey?survey_id=' . $survey_id . '&event_id=' . $event_id;
+                $survey_url = LibraryFunctions::get_absolute_url(
+                    '/survey?survey_id=' . $survey_id . '&event_id=' . $event_id);
                 $email_fill = array(
                     'event_name' => $event_row['evt_name'],
                     'survey_url' => $survey_url,

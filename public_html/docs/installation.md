@@ -454,7 +454,6 @@ sudo ./install.sh site newsite newdomain.com \
 |-------------------------|------------------------------------------------|
 | Database (all tables)   | Exact copy from source                         |
 | All settings            | Exact copy from source                         |
-| `site_url` setting      | Updated to the target domain                   |
 | Uploads directory       | Exact copy from source                         |
 | User accounts           | Preserved from source                          |
 | `clone_export_key`      | Removed on the new site                        |

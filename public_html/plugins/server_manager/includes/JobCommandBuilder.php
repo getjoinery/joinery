@@ -2421,7 +2421,8 @@ class JobCommandBuilder {
 	/**
 	 * Build steps for one-click node install (fresh or from-backup).
 	 *
-	 * Target is assumed to be a bare Ubuntu 24.04 host with SSH root access.
+	 * Target is assumed to be a bare host running an Ubuntu LTS the installer
+	 * supports (26.04 or 24.04), with SSH root access.
 	 * The flow bootstraps whichever prereqs (Docker or Apache/PHP/Postgres)
 	 * are needed based on the admin's choice, then creates the site.
 	 *

@@ -16,6 +16,7 @@
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql.gz (default)
  *   /var/www/html/SITENAME/uploads/joinery-install-VERSION.sql (with --no-compress)
  *
+ * @version 1.2 - the database name comes from the dbname bootstrap key
  * @version 1.1
  */
 
@@ -103,8 +104,8 @@ try {
         die("ERROR: Could not connect to database or retrieve version\n");
     }
 
-    // Get database name from settings
-    $db_name = $settings->get_setting('database_name') ?: 'joinerytest';
+    // dbname is the bootstrap key every site's Globalvars_site.php carries.
+    $db_name = $settings->get_setting('dbname');
     echo "   Connected to database '$db_name'\n";
 
 } catch (Exception $e) {

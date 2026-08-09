@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.16.9",
+  "version": "1.16.10",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -195,8 +195,8 @@
     },
     {
       "name": "server_manager_customer_cloud_image",
-      "default": "linode/ubuntu24.04",
-      "helptext": "OS image for customer-cloud instances. Must be an Ubuntu LTS the installer supports.",
+      "default": "linode/ubuntu26.04",
+      "helptext": "OS image for customer-cloud instances. Must be an Ubuntu LTS the installer supports (26.04 or 24.04).",
       "group": "provisioning",
       "label": "Customer cloud image",
       "type": "text"

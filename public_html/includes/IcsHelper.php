@@ -4,6 +4,9 @@
  *
  * Generates .ics files for single event downloads and multi-event calendar feeds.
  *
+ * @version 1.1 - the calendar name reads site_name, the declared setting. It
+ *                read siteName, which nothing declares, so every feed was
+ *                titled with the "Events" fallback.
  * @version 1.0
  */
 
@@ -93,7 +96,7 @@ class IcsHelper {
 
 		if ($include_calname) {
 			$settings = Globalvars::get_instance();
-			$site_name = $settings->get_setting('siteName') ?: 'Events';
+			$site_name = $settings->get_setting('site_name') ?: 'Events';
 			$lines[] = 'X-WR-CALNAME:' . self::escapeText($site_name);
 		}
 

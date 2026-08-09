@@ -331,12 +331,11 @@ if [ -n "$CLONE_FROM" ]; then
         fi
     fi
 
-    # Update site URL in settings
     log "Updating site settings for new domain..."
 
-    psql -U postgres -d "$SITENAME" -q -c \
-        "UPDATE stg_settings SET stg_value = 'https://${DOMAIN}' WHERE stg_name = 'site_url';" \
-        2>/dev/null || true
+    # The cloned site's host comes from webDir in config/Globalvars_site.php,
+    # written with the new domain further up. Nothing in the database names the
+    # host, so there is no settings row to repoint here.
 
     # Disable clone export key on the new site (security)
     psql -U postgres -d "$SITENAME" -q -c \

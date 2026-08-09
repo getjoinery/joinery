@@ -128,7 +128,7 @@ function booking_manage_logic(array $input): LogicResult {
 
 /** Notify the other party when a booking is canceled, with a rebook link for invitees. */
 function booking_notify_cancellation($booking, $type, $host, $client, $settings, $by) {
-	$base = rtrim($settings->get_setting('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')), '/');
+	$base = rtrim(LibraryFunctions::get_absolute_url(''), '/');
 	$rebook = $base . '/book/' . $type->get('bkt_slug');
 
 	// Tell the host when the invitee cancels; tell the invitee when the host/admin cancels.

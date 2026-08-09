@@ -185,7 +185,7 @@ function booking_save_survey_answers($survey_id, $user_id, $input) {
 function booking_send_confirmation($booking, $type, $host, $client, $settings) {
 	if (!$type->get('bkt_send_native_emails')) { return; }
 
-	$base = rtrim($settings->get_setting('site_url') ?: ('https://' . ($_SERVER['HTTP_HOST'] ?? 'localhost')), '/');
+	$base = rtrim(LibraryFunctions::get_absolute_url(''), '/');
 	$manage_url = $base . '/booking/manage?token=' . $booking->get('bkn_action_token');
 
 	$client_tz = $client->get('usr_timezone') ?: 'UTC';

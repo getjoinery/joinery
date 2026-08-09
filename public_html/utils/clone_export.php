@@ -18,6 +18,7 @@
  * - themes: Streams tar.gz archive of themes directory
  * - plugins: Streams tar.gz archive of plugins directory
  *
+ * @version 1.4 - connects to 127.0.0.1 outright, matching DbConnector
  * @version 1.3 - Fixed uploads path (was incorrectly looking in public_html/uploads instead of uploads/)
  */
 
@@ -238,7 +239,9 @@ function handle_database_export($settings, $client_ip, $clone_key) {
     $db_name = $settings->get_setting('dbname');
     $db_password = $settings->get_setting('dbpassword');
     $db_user = $settings->get_setting('dbusername') ?: 'postgres';
-    $db_host = $settings->get_setting('dbhost') ?: '127.0.0.1';
+    // Matches DbConnector, which connects to localhost unconditionally. Nothing
+    // supplies a host setting, so reading one only invented a second answer.
+    $db_host = '127.0.0.1';
 
     // Set headers for streaming download
     header('Content-Type: application/octet-stream');

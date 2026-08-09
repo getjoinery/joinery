@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#VERSION 1.0 - First-boot install driver for the Linode StackScript path.
+#VERSION 1.1 - First-boot install driver for the Linode StackScript path.
 #
 # linode_stackscript.sh — turn a blank Linode into a running Joinery site.
 #
@@ -44,9 +44,11 @@
 # /var/log/stackscript.log, and the remedy is to destroy the instance and
 # redeploy with the offending field corrected.
 #
-# There is no OS check here. install.sh server hard-fails off Ubuntu 24.04 a
-# few lines down, and a second copy of that check would be a second place to
-# update when a newer LTS is supported.
+# There is no OS check here. install.sh server hard-fails off the supported
+# Ubuntu LTS releases a few lines down, and a second copy of that check would be
+# a second place to update when the supported set changes. Nothing here names a
+# release or a PHP version for the same reason — install.sh detects the PHP the
+# release ships and derives every package, service and config path from it.
 
 set -euo pipefail
 set +H
