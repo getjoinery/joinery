@@ -30,6 +30,15 @@ class AiConversationMessage extends SystemBase {
     // the history builder feeds it to the model as user-side context.
     const ROLE_EVENT     = 'event';
 
+    // Boundary inside an EVENT row's content between the trusted platform
+    // narration ("[Queued action #N approved and ran.]") and an approved web
+    // action's fetched result carried after it. The history builder splits here
+    // to frame the result as untrusted and to window it (only the most recent
+    // carried result is sent in full). Only egress-result events use it; write
+    // events keep their short summary inline. The narration never contains it,
+    // so a first-occurrence split is exact regardless of the result's bytes.
+    const EVENT_RESULT_SEP = "\n\u{2500}\u{2500} fetched result \u{2500}\u{2500}\n";
+
     // Turn lifecycle for asynchronous chat. A user row is COMPLETE on insert;
     // an assistant placeholder is RUNNING until the in-process turn finishes it
     // (COMPLETE) or it errors / is reaped (FAILED). CANCELLED is a terminal state

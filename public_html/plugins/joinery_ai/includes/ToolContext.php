@@ -62,6 +62,16 @@ interface ToolContext {
      *  ambiguously-owned models); false for an admin, who reads cross-user. */
     public function ownerScopedReads(): bool;
 
+    /** May this surface open sealed content (protected mail, sealed drive)? A
+     *  standard chat answers FALSE: pulling sealed content into a plaintext
+     *  transcript would make the turn hot, and a hot standard turn can neither
+     *  persist its next reply nor keep the content protected — so sealed content
+     *  is confined to protected chats, where the whole conversation seals. A
+     *  protected chat answers true; recipes answer true (their sealed-run
+     *  machinery is built to read and re-seal). The read executor excludes
+     *  sealed rows when this is false, exactly as it does for a locked vault. */
+    public function sealedReadsAllowed(): bool;
+
     /** Per-iteration continuation guard. Returns {stop_reason, detail} to halt
      *  the turn, or null to continue. */
     public function shouldContinue(): ?array;

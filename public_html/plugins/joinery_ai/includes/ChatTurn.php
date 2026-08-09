@@ -5,6 +5,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatRunner.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderException.php'));
+require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 
 /**
  * The turn-execution half of chat: run one turn onto the assistant
@@ -52,6 +53,19 @@ class ChatTurn {
         $result = $turn['result'];
         $ctx    = $turn['context'];
 
+        // Confinement backstop. Sealed content is only meant to be opened in a
+        // protected chat (the read executor excludes sealed rows otherwise), but a
+        // residual vector — an action that itself decrypts — could still turn a
+        // standard turn hot. A hot turn on a non-protected conversation cannot
+        // persist the plaintext reply the guard would refuse, so fail it cleanly
+        // with guidance rather than crashing or writing a half-sealed transcript.
+        // Message kept short (< the guard's 64-char plaintext threshold) so the
+        // failure itself writes even while hot.
+        if (!$sealed && SealedEgressGuard::isHot()) {
+            self::markFailed($assistant_msg, 'Protected content needs a private chat.');
+            return;
+        }
+
         // Content columns: json-encode the trace and seal every content column when
         // protected (Standard stores plaintext). Persist via a targeted raw UPDATE
         // — a sealed row must never be save()d (that would decrypt-and-rewrite,
@@ -76,7 +90,16 @@ class ChatTurn {
         // Clear the request flag on every finalize path so a cancel that arrived
         // just after the turn settled never leaves a stale "please stop" on the row.
         $cols['aim_cancel_requested'] = false;
-        AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
+        try {
+            AiConversationMessage::updateColumns((int)$assistant_msg->key, $cols);
+        } catch (Throwable $e) {
+            // Defensive: a content write the egress write-guard refuses (a hot turn
+            // that slipped past the backstop above) must not surface as a 500.
+            ChatAsync::log('[chat] finalize write refused on message #'
+                . (int)$assistant_msg->key . ': ' . $e->getMessage());
+            self::markFailed($assistant_msg, 'Could not save this turn.');
+            return;
+        }
         ChatAsync::clearScratch((int)$assistant_msg->key);   // the sealed content now lives in aim_content
 
         self::rollupUsage($conversation, (int)$result['input_tokens'], (int)$result['output_tokens']);
