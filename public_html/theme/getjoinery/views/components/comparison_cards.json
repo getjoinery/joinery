@@ -4,15 +4,62 @@
     "category": "features",
     "config_schema": {
         "fields": [
-            {"name": "heading", "label": "Heading", "type": "textinput", "default": "How Joinery is different"},
+            {
+                "name": "heading",
+                "label": "Heading",
+                "type": "textinput"
+            },
             {
                 "name": "comparisons",
                 "label": "Comparisons",
                 "type": "repeater",
                 "fields": [
-                    {"name": "ours", "label": "Our Advantage", "type": "textinput"},
-                    {"name": "theirs", "label": "Their Approach", "type": "textinput"}
+                    {
+                        "name": "ours",
+                        "label": "Our Advantage",
+                        "type": "textinput"
+                    },
+                    {
+                        "name": "theirs",
+                        "label": "Their Approach",
+                        "type": "textinput"
+                    }
                 ]
+            },
+            {
+                "name": "subheading",
+                "label": "Subheading",
+                "type": "textarea"
+            },
+            {
+                "name": "link_text",
+                "label": "Bottom Link Text",
+                "type": "textinput",
+                "advanced": true
+            },
+            {
+                "name": "link_url",
+                "label": "Bottom Link URL",
+                "type": "textinput",
+                "advanced": true
+            },
+            {
+                "name": "show_tick",
+                "label": "Show tick icon",
+                "type": "checkbox",
+                "default": true,
+                "advanced": true
+            },
+            {
+                "name": "background",
+                "label": "Background",
+                "type": "select",
+                "options": {
+                    "alt": "Alternate",
+                    "plain": "Default"
+                },
+                "default": "alt",
+                "advanced": true
             }
         ]
     }

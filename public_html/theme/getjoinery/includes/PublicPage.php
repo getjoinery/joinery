@@ -129,21 +129,36 @@ class PublicPage extends PublicPageBase {
 
         <div class="nav-cluster">
             <div class="nav-links" id="nav-links">
-                <a href="/features"<?php echo $request_path === '/features' ? ' class="active"' : ''; ?>>Features</a>
-                <a href="/pricing"<?php echo $request_path === '/pricing' ? ' class="active"' : ''; ?>>Pricing</a>
+                <?php
+                // Header navigation comes from the site's public menu, so the
+                // items and their order are the site's data rather than this
+                // theme's opinion. A submenu renders as a dropdown.
+                foreach (($menu_data['main_menu'] ?? []) as $nav_item):
+                    $nav_link = (string)($nav_item['link'] ?? '');
+                    $nav_name = (string)($nav_item['name'] ?? '');
+                    $nav_children = $nav_item['submenu'] ?? [];
+                    $nav_active = !empty($nav_item['is_active']);
+                    if ($nav_name === '') { continue; }
+
+                    if (empty($nav_children)):
+                ?>
+                <a href="<?php echo htmlspecialchars($nav_link, ENT_QUOTES, 'UTF-8'); ?>"<?php echo $nav_active ? ' class="active"' : ''; ?>><?php echo htmlspecialchars($nav_name, ENT_QUOTES, 'UTF-8'); ?></a>
+                <?php else:
+                    $child_active = $nav_active;
+                    foreach ($nav_children as $child) { if (!empty($child['is_active'])) { $child_active = TRUE; } }
+                ?>
                 <div class="nav-dropdown">
-                    <button class="nav-dropdown-toggle<?php echo in_array($request_path, ['/developers', '/documentation']) ? ' active' : ''; ?>" aria-haspopup="true" aria-expanded="false">
-                        Developers
+                    <button class="nav-dropdown-toggle<?php echo $child_active ? ' active' : ''; ?>" aria-haspopup="true" aria-expanded="false">
+                        <?php echo htmlspecialchars($nav_name, ENT_QUOTES, 'UTF-8'); ?>
                         <svg class="nav-dropdown-chevron" viewBox="0 0 10 6" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="1,1 5,5 9,1"/></svg>
                     </button>
                     <div class="nav-dropdown-menu">
-                        <a href="/developers"<?php echo $request_path === '/developers' ? ' class="active"' : ''; ?>>Overview</a>
-                        <a href="/documentation"<?php echo $request_path === '/documentation' ? ' class="active"' : ''; ?>>Documentation</a>
+                        <?php foreach ($nav_children as $child): ?>
+                        <a href="<?php echo htmlspecialchars((string)($child['link'] ?? ''), ENT_QUOTES, 'UTF-8'); ?>"<?php echo !empty($child['is_active']) ? ' class="active"' : ''; ?>><?php echo htmlspecialchars((string)($child['name'] ?? ''), ENT_QUOTES, 'UTF-8'); ?></a>
+                        <?php endforeach; ?>
                     </div>
                 </div>
-                <a href="/showcase"<?php echo $request_path === '/showcase' ? ' class="active"' : ''; ?>>Showcase</a>
-                <a href="/philosophy"<?php echo $request_path === '/philosophy' ? ' class="active"' : ''; ?>>Philosophy</a>
-                <a href="/about"<?php echo $request_path === '/about' ? ' class="active"' : ''; ?>>About</a>
+                <?php endif; endforeach; ?>
             </div>
 
             <div class="nav-user">
@@ -205,23 +220,32 @@ class PublicPage extends PublicPageBase {
         $settings = Globalvars::get_instance();
         $session = SessionControl::get_instance();
         $session->clear_clearable_messages();
+
+        // The footer carries the wider link set — the audience landing pages the
+        // header deliberately leaves out, so the top of the site tells one
+        // story. It is this theme's markup rather than site data: the header
+        // nav is editable in the admin, the footer is a design decision.
+        $footer_links = [
+            '/page/apps'                  => 'Apps',
+            '/page/install'               => 'Install',
+            '/page/pricing'               => 'Pricing',
+            '/page/leave-gmail'           => 'Leave Gmail',
+            '/page/nextcloud-alternative' => 'Nextcloud Alternative',
+            '/page/families'              => 'For Families',
+            '/page/why'                   => 'Why Joinery',
+            '/page/about'                 => 'About',
+        ];
     ?>
 
 <?php if ($this->show_site_chrome()): ?>
 <footer class="site-footer">
     <div class="container">
         <div class="footer-links">
-            <a href="/features">Features</a>
-            <a href="/pricing">Pricing</a>
-            <a href="/developers">Developers</a>
-            <a href="/showcase">Showcase</a>
-            <a href="/philosophy">Philosophy</a>
-            <a href="/about">About</a>
-            <a href="/documentation">Docs</a>
+<?php foreach ($footer_links as $footer_url => $footer_label): ?>
+            <a href="<?php echo htmlspecialchars($footer_url, ENT_QUOTES, 'UTF-8'); ?>"><?php echo htmlspecialchars($footer_label, ENT_QUOTES, 'UTF-8'); ?></a>
+<?php endforeach; ?>
 <?php if ($settings->get_setting('social_github_link')): ?>
-            <a href="<?php echo htmlspecialchars($settings->get_setting('social_github_link')); ?>" target="_blank">GitHub</a>
-<?php else: ?>
-            <a href="https://github.com/getjoinery/joinery" target="_blank">GitHub</a>
+            <a href="<?php echo htmlspecialchars($settings->get_setting('social_github_link')); ?>" target="_blank" rel="noopener">GitHub</a>
 <?php endif; ?>
         </div>
         <div class="footer-bottom">

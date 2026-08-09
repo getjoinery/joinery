@@ -1,15 +1,10 @@
 <?php
-$heading = $component_config['heading'] ?? 'Built for real organizations';
+$heading = $component_config['heading'] ?? '';
+$subheading = $component_config['subheading'] ?? '';
+$columns = (string)($component_config['columns'] ?? '4');
 $audiences = $component_config['audiences'] ?? [];
 
-if (empty($audiences)) {
-    $audiences = [
-        ['icon' => 'members', 'title' => 'Clubs & Associations', 'description' => 'Manage members, collect dues, and organize events for your community.'],
-        ['icon' => 'heart', 'title' => 'Nonprofits', 'description' => 'Track supporters, run fundraisers, and communicate with donors and volunteers.'],
-        ['icon' => 'globe', 'title' => 'Community Groups', 'description' => 'Build your community on your terms, not someone else\'s platform.'],
-        ['icon' => 'briefcase', 'title' => 'Small Businesses', 'description' => 'Membership programs, subscriptions, and customer management without enterprise pricing.'],
-    ];
-}
+// No sample content: an unconfigured block renders nothing.
 
 $icons = [
     'members' => '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M23 21v-2a4 4 0 0 0-3-3.87"/><path d="M16 3.13a4 4 0 0 1 0 7.75"/></svg>',
@@ -21,8 +16,9 @@ $icons = [
 
 <section class="section">
     <div class="container">
-        <h2 class="section-title"><?= htmlspecialchars($heading) ?></h2>
-        <div class="audience-grid">
+        <?php if ($heading): ?><h2 class="section-title"><?= htmlspecialchars($heading) ?></h2><?php endif; ?>
+        <?php if ($subheading): ?><p class="section-subtitle"><?= htmlspecialchars($subheading) ?></p><?php endif; ?>
+        <div class="audience-grid<?= $columns === '3' ? ' audience-grid-3' : '' ?>">
             <?php foreach ($audiences as $aud): ?>
                 <div class="audience-card">
                     <div class="audience-icon">
@@ -30,11 +26,16 @@ $icons = [
                         $icon_key = $aud['icon'] ?? '';
                         if (isset($icons[$icon_key])) {
                             echo $icons[$icon_key];
+                        } elseif (strpos($icon_key, '<svg') !== false) {
+                            echo $icon_key;
                         }
                         ?>
                     </div>
                     <h3><?= htmlspecialchars($aud['title'] ?? '') ?></h3>
                     <p><?= htmlspecialchars($aud['description'] ?? '') ?></p>
+                    <?php if (!empty($aud['link_text']) && !empty($aud['link_url'])): ?>
+                        <p style="margin-top: 0.75rem;"><a href="<?= htmlspecialchars($aud['link_url']) ?>" class="link-arrow"><?= htmlspecialchars($aud['link_text']) ?> &rarr;</a></p>
+                    <?php endif; ?>
                 </div>
             <?php endforeach; ?>
         </div>
