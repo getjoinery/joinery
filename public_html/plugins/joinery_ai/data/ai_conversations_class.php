@@ -63,6 +63,15 @@ class AiConversation extends SystemBase {
         'aic_sealed_key'         => array('type'=>'text', 'is_nullable'=>true),
         'aic_key_generation'     => array('type'=>'int4', 'is_nullable'=>false, 'default'=>0),
         'aic_content_sealed'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+        // Durable egress posture. Set true the first time any turn in this
+        // conversation opens sealed content — a tool reading protected mail/drive,
+        // or (on a protected conversation) decrypting its own sealed history. Once
+        // set it never clears: the transcript now holds sealed-derived context, so
+        // a later cold-start turn in a fresh process could otherwise smuggle it out
+        // inside an outbound URL/query. Every later turn arms egress restriction
+        // from this flag, gating the web tools behind the owner's approval.
+        // See specs/ai_hot_turn_egress_approval.md and docs/sealed_vault.md.
+        'aic_egress_restricted'  => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
         // Pinned threads sort above the rest in the chat list. Non-nullable so the
         // ORDER BY aic_pinned DESC is clean (NULL would sort ahead of true).
         'aic_pinned'             => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),

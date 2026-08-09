@@ -1,6 +1,7 @@
 # Hot-turn web egress approval
 
-**Status:** Draft — not built.
+**Status:** Built 2026-08-09 — dedicated test suite green (26 checks);
+awaiting commit.
 **Depends on:** `specs/implemented/ai_action_queue.md` (the queue and its
 card/renderer machinery). The AI panel composer spec
 (`specs/ai_panel_composer.md`) depends on THIS for its exemplar 3
@@ -28,17 +29,20 @@ The channel is any tool whose *arguments* leave the box:
 **Once a turn is hot, web-egress tool calls stop executing inline and
 queue for approval, exactly as mutating calls do.** The user sees a card
 with the literal outbound arguments — the exact URL, the exact query —
-before any network is touched. Cold turns are unchanged.
+before any network is touched. A conversation that has never touched sealed
+content is unchanged; its web lookups run inline.
 
 One rule, two doors, same shape as writes: inline when harmless, a human
 click when it matters.
 
-- Hotness is `SealedEgressGuard::isHot()` — already process-sticky (set
-  when any sealed plaintext is opened, never clears within the run) and
-  already consulted by the queue for sealing. No new state.
+- The egress predicate is `SealedEgressGuard::egressGated()` — true when the
+  process is hot (`isHot()`, set when any sealed plaintext is opened, never
+  clears within the run) OR the conversation is durably egress-restricted
+  (see Cross-turn restriction below). Kept distinct from `isHot()` so arming
+  it never arms the write-guard.
 - The gate extends the existing dispatch test in `AgentLoop`: queue when
   the context queues writes AND (the call is mutating OR the call is
-  web-egress on a hot turn). Web-egress tool names come from a small
+  web-egress under `egressGated()`). Web-egress tool names come from a small
   constant beside the mutating list in `RiskHeuristic`
   (`isHotEgress(array $tool_use): bool`).
 - The three web tools implement `QueueableToolInterface`.
@@ -48,6 +52,29 @@ click when it matters.
 - The model's tool_result mirrors the write-queue wording: queued as
   pending action #N, has NOT run, do not retry, tell the user it awaits
   approval.
+
+## Cross-turn restriction (cold-start)
+
+`isHot()` is per-process, but a chat conversation carries sealed-derived
+context across turns in its transcript, and each turn is a fresh process. A
+standard conversation stores that transcript in plaintext, so a short secret
+(at or under the write-guard's 64-char threshold) that a hot turn quoted into
+a reply survives as cleartext; the next turn rebuilds history cold and could
+fetch it out inline. Process hotness alone cannot see that.
+
+So egress restriction is also **durable per conversation**. The first turn to
+open sealed content marks `aic_egress_restricted` on the conversation; every
+later turn arms `SealedEgressGuard::restrictEgress()` from that mark before
+dispatch, so `egressGated()` holds even in a cold process. The mark never
+clears — the transcript's contamination is permanent — and a protected
+conversation acquires it on turn one (its history decrypts every turn), while
+a standard conversation acquires it only after it actually touches sealed
+content. Restriction arms the egress gate only, never the write-guard, so an
+ordinary standard conversation keeps writing its plaintext transcript.
+
+The set/read points are in `ChatRunner::drive`: read the mark and
+`restrictEgress()` before `AgentLoop::run`, and persist the mark (a boolean, so
+the write passes the hot guard) after a turn that ended hot.
 
 ## Result return
 

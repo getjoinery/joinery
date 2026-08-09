@@ -478,6 +478,29 @@ An asserted send is attempted **once** — the retry queue stores bodies in the
 clear, so a hot process never queues one, whatever the message contains. A
 transport failure on a hot send is logged and final.
 
+**AI web egress defers to the owner.** The AI web tools' arguments (a URL, a
+search query) leave the box verbatim, so when sealed content is in play they
+stop executing inline: in chat the call queues as a pending action whose card
+shows the complete outbound argument, and on an autonomous recipe run it is
+refused — see the hot-turn egress passage in
+`plugins/joinery_ai/docs/overview.md#proposed-actions`.
+
+Egress reads a wider predicate than the write-guard, `SealedEgressGuard::
+egressGated()`: the process is hot, **or** the conversation is durably
+egress-restricted. The hot flag alone is a per-process signal, but a chat
+conversation carries sealed-derived context across turns in its transcript, and
+each turn is a fresh process. So the first time any turn in a conversation opens
+sealed content — a tool reading protected mail or drive, or (on a protected
+conversation) decrypting its own sealed history — the conversation is marked
+`aic_egress_restricted`, and every later turn arms `restrictEgress()` from that
+mark before dispatch. The mark never clears: once the transcript holds
+sealed-derived context, a later cold turn could otherwise smuggle it out inside
+an outbound URL, so web tools gate behind the owner's approval for the life of
+the conversation. A protected conversation gates from its first turn; a standard
+conversation gates only after it actually touches sealed content, and never
+before. Arming restriction does not arm the write-guard, so an ordinary standard
+conversation keeps writing its plaintext transcript normally.
+
 **Units of work.** `SealedEgressGuard::isolate()` runs one independent unit with
 its own hot state and restores the caller's afterwards, so a process that does
 several unrelated things in a row — a drain slice working through one user's

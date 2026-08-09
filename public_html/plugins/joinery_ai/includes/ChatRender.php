@@ -238,12 +238,33 @@ class ChatRender {
              . '</div>';
     }
 
+    /** Above this, an event chip collapses its tail behind a details toggle —
+     *  an approved fetch carries its whole result in the event row. */
+    const EVENT_CHIP_INLINE_MAX = 400;
+
     /** A neutral transcript chip for an EVENT row — a queued action's
-     *  resolution. Platform-written fact, styled apart from both voices. */
+     *  resolution. Platform-written fact, styled apart from both voices.
+     *  Long content (an approved egress action's carried result) shows its
+     *  head inline and the rest behind a toggle. */
     public static function eventChip(string $content, string $time): string {
+        $time_html = '<span class="joai-chat-event-time">'
+            . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</span>';
+
+        if (mb_strlen($content) <= self::EVENT_CHIP_INLINE_MAX) {
+            return '<div class="joai-chat-event">'
+                 . '<span class="joai-chat-event-text">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</span>'
+                 . $time_html
+                 . '</div>';
+        }
+
+        $head = mb_substr($content, 0, self::EVENT_CHIP_INLINE_MAX);
         return '<div class="joai-chat-event">'
-             . '<span class="joai-chat-event-text">' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</span>'
-             . '<span class="joai-chat-event-time">' . htmlspecialchars($time, ENT_QUOTES, 'UTF-8') . '</span>'
+             . '<span class="joai-chat-event-text">' . htmlspecialchars($head, ENT_QUOTES, 'UTF-8') . '…</span>'
+             . $time_html
+             . '<details class="joai-chat-event-more"><summary>Show all '
+             . number_format(mb_strlen($content)) . ' characters</summary>'
+             . '<pre>' . htmlspecialchars($content, ENT_QUOTES, 'UTF-8') . '</pre>'
+             . '</details>'
              . '</div>';
     }
 

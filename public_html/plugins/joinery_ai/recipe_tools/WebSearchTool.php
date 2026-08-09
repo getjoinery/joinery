@@ -1,6 +1,8 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 require_once(PathHelper::getComposerAutoloadPath());
 
 use GuzzleHttp\Client;
@@ -11,8 +13,19 @@ use GuzzleHttp\Exception\RequestException;
  *
  * Brave was picked for v1 per spec — abstracted via WebSearchProvider would be
  * future-proofing for one provider. Swap by editing this file.
+ *
+ * Queueable (hot-turn egress approval): the query text goes to the search
+ * provider verbatim, so on a hot turn the call queues and the card shows the
+ * complete literal query.
  */
-class WebSearchTool implements RecipeToolInterface {
+class WebSearchTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        return array_merge(
+            ['Search the web'],
+            ProposedActionFacts::verbatim('Query', (string)($input['query'] ?? ''))
+        );
+    }
 
     const ENDPOINT = 'https://api.search.brave.com/res/v1/web/search';
     const MAX_RESULTS = 10;

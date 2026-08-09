@@ -253,6 +253,15 @@ select.joai-chat-control { cursor: pointer; }
 .joai-chat-event { margin: 0.75rem auto; max-width: 85%; text-align: center;
                    font-size: 0.8rem; color: #777; }
 .joai-chat-event-time { margin-left: 0.5rem; color: #aaa; font-size: 0.72rem; }
+/* Long event content (an approved fetch carries its whole result): head shown
+   inline, the rest behind a toggle, scrolling in place. */
+.joai-chat-event-more { margin-top: 0.35rem; text-align: left; }
+.joai-chat-event-more summary { cursor: pointer; color: #999; font-size: 0.75rem;
+                                text-align: center; }
+.joai-chat-event-more pre { max-height: 20rem; overflow: auto; margin: 0.35rem 0 0;
+                            padding: 0.5rem; background: #f7f7f7; border-radius: 6px;
+                            font-size: 0.75rem; white-space: pre-wrap;
+                            word-break: break-word; color: #555; }
 .joai-chat-thinking { padding: 0 1rem 0.5rem; font-size: 0.82rem; color: #888; font-style: italic; }
 .joai-chat-composer { display: flex; gap: 0.5rem; padding: 0.75rem; border-top: 1px solid #eee;
                       align-items: flex-end; }
