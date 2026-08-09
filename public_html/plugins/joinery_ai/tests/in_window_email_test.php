@@ -306,7 +306,7 @@ try {
 	$scan_job = PipelineJobRegistry::get('email_security_scan');
 	$scan_recipe = iw_recipe($owner_id, 'email_security_scan', $address);
 	$scan_job->recordVerdict((string)$older, array(
-		'score' => 42, 'verdict' => 'suspicious',
+		'score' => 42, 'verdict' => 'caution',
 		'red_flags' => array(array('finding' => 'quotes the body verbatim here')),
 		'summary' => 'A scan summary.',
 	), $scan_recipe, 'test-model');
@@ -322,7 +322,7 @@ try {
 
 	$reread = new InboundEmailMessage($older, TRUE);
 	$decoded = json_decode((string)$reread->get('iem_ai_scan'), true);
-	check(is_array($decoded) && ($decoded['verdict'] ?? '') === 'suspicious',
+	check(is_array($decoded) && ($decoded['verdict'] ?? '') === 'caution',
 		'and decodes back to the verdict through the sealed reader');
 
 	// -----------------------------------------------------------------------
@@ -477,7 +477,7 @@ try {
 		'Standard-era subject', 'Standard-era body.', $late_address, '-10');
 
 	$ai_summary = 'A summary written while the domain was still Standard.';
-	$ai_scan = json_encode(array('verdict' => 'suspicious',
+	$ai_scan = json_encode(array('verdict' => 'caution',
 		'red_flags' => array(array('finding' => 'quotes the body: Standard-era body.'))));
 	// Both values are literals a few lines up, not anything this process
 	// decrypted, so building the fixture is its own unit of work. Without the

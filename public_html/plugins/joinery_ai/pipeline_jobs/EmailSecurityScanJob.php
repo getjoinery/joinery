@@ -20,7 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipeli
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.3
+ * @version 1.4
  */
 class EmailSecurityScanJob extends EmailPipelineJobBase {
 
@@ -55,7 +55,7 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
             ],
             'verdict' => [
                 'type' => 'string', 'required' => true,
-                'enum' => ['safe', 'suspicious', 'dangerous'],
+                'enum' => ['safe', 'caution', 'dangerous'],
                 'label' => 'Verdict',
             ],
             'red_flags' => [
@@ -80,7 +80,7 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
     }
 
     /**
-     * The verdict must agree with the score band (0-2 safe / 3-6 suspicious /
+     * The verdict must agree with the score band (0-4 safe / 5-6 caution /
      * 7-10 dangerous) — a schema-valid but internally inconsistent verdict
      * (e.g. score 9, verdict "safe") is rejected here, which the runner
      * treats exactly like a schema failure: one retry, then the item is
@@ -93,7 +93,7 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
         if ($verdict_label !== $expected) {
             throw new InvalidArgumentException(
                 "verdict ('$verdict_label') does not match the required band for score $score "
-                . "('$expected'). 0-2=safe, 3-6=suspicious, 7-10=dangerous.");
+                . "('$expected'). 0-4=safe, 5-6=caution, 7-10=dangerous.");
         }
     }
 
@@ -201,15 +201,15 @@ SCORING — derive the score from the flags you found:
   trick + action demand + deadline, or hidden text + account-access alarm) —
   definite phishing, regardless of authentication results.
 
-verdict mapping: 0-2 safe, 3-6 suspicious, 7-10 dangerous. Each red_flags
+verdict mapping: 0-4 safe, 5-6 caution, 7-10 dangerous. Each red_flags
 finding is one sentence quoting the specific evidence. The summary is 1-2
 plain-language sentences telling the recipient what to do.
 PROMPT;
     }
 
     private static function bandFor(int $score): string {
-        if ($score <= 2) return 'safe';
-        if ($score <= 6) return 'suspicious';
+        if ($score <= 4) return 'safe';
+        if ($score <= 6) return 'caution';
         return 'dangerous';
     }
 

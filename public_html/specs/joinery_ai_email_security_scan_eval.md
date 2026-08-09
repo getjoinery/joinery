@@ -137,6 +137,15 @@ The reader badge should fire only on `≥7`; the spec's amber 3–6 band should 
 suppressed or the bands recalibrated. (Feeds back into
 `joinery_ai_email_security_scan.md` § reader surface.)
 
+**Resolved (2026-08-09) — bands recalibrated.** `0–4` safe (green, no badge on
+the thread list at all), `5–6` caution (amber), `7–10` dangerous (red). The
+break at 4|5 is the rubric's own: 3–4 is "minor flags only", 5–6 is "one strong
+flag". The scoring rubric itself is untouched, so the corpus numbers above still
+hold — only the label attached to a band moved, and the `suspicious` verdict
+word became `caution`. The reader takes its tier from the score rather than the
+stored verdict word, so rows scanned under the old mapping render under the new
+one without a re-score.
+
 ## Failure analysis of the gemma run → prompt/digest v1.1 (2026-07-06)
 
 Reading gemma's per-message verdicts off the eval messages showed one root
@@ -298,9 +307,11 @@ stripped-auth sets to actually measure.
 - [ ] Labeling decision from the partial run: reclassify phish-shaped
       promotions (698 sweepstakes, 708-style deals) vs. accept an FP floor
       on that class.
-- [ ] Recalibrate/suppress the amber 3–6 reader badge (the ≥3 band is ~85%
-      false positives) — feeds `joinery_ai_email_security_scan.md § reader
-      surface`.
+- [x] Recalibrate the amber reader badge (the ≥3 band was ~85% false
+      positives): bands are now 0–4 safe / 5–6 caution / 7–10 dangerous, the
+      list badge is silent below 5, and the verdict word `suspicious` became
+      `caution`. Scoring rubric untouched, so the corpus numbers still hold.
+      See the resolution note under Results.
 - [ ] Set the scan recipe `rcp_model` to `gemma2:9b`; record the decision in
       `joinery_ai_email_security_scan.md`.
 - [ ] Close the corpus gap: a source of modern transactional hard negatives.
