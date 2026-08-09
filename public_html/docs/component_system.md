@@ -339,6 +339,20 @@ Templates are PHP files in `views/components/` that render component output.
 
 Templates follow the standard theme override chain via `PathHelper::getThemeFilePath()`.
 
+### Templates carry no content
+
+A block template supplies markup and styling; the words come from the instance's config. Do not put sample copy in `?? 'default'` fallbacks or in `"default"` values in the JSON schema — a schema default becomes the starting text in the admin editor, so one site's marketing copy ends up seeded into another site's new pages, and an unconfigured block renders content nobody wrote.
+
+Prefer an empty default and skip the element when the value is empty:
+
+```php
+$heading = $component_config['heading'] ?? '';
+...
+<?php if ($heading): ?><h2 class="section-title"><?= htmlspecialchars($heading) ?></h2><?php endif; ?>
+```
+
+Defaults that describe *behaviour* rather than content — a column count, a background choice, a price suffix — are fine and belong in the schema.
+
 ### Available Variables
 
 Inside a component template, these variables are available:
