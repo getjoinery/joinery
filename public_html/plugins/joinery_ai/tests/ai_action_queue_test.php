@@ -132,7 +132,9 @@ check(strpos($joined, 'rcn_title: Queued note title') !== false,
 
 $refused = '';
 try {
-	ActionQueue::enqueue($owner_id, 'web_search', ['query' => 'x'], intval($conversation->key));
+	// query_model is real but read-only — it declares no card renderer
+	// (the web tools all do now: hot-turn egress approval).
+	ActionQueue::enqueue($owner_id, 'query_model', ['model' => 'RecipeNote'], intval($conversation->key));
 } catch (ActionQueueException $e) {
 	$refused = $e->getMessage();
 }

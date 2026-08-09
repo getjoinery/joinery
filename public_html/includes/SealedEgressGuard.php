@@ -48,7 +48,15 @@
  * This is the confidentiality twin of joinery_ai's TaintGate, which tracks
  * injection provenance through the same predicate-at-a-choke-point shape.
  *
- * @version 1.0
+ * Egress has a second, durable arm: restrictEgress()/egressGated(). A per-turn
+ * hot flag is the right proxy for the write-guard (this process holds
+ * plaintext) but the wrong one for outbound egress across turns — a chat
+ * conversation's transcript carries sealed-derived context into later,
+ * possibly cold, processes. The egress-approval gate therefore asks
+ * egressGated() (hot OR a caller-declared durable restriction), while the
+ * write-guard keeps asking isHot() alone.
+ *
+ * @version 1.1
  */
 
 if (!class_exists('SealedContentEgressException')) {
@@ -93,6 +101,18 @@ class SealedEgressGuard {
 	/** @var bool has this process opened sealed content? */
 	private static $hot = false;
 
+	/**
+	 * @var bool is outbound egress restricted for a reason OTHER than this
+	 * process being hot? Set by a caller that knows the surrounding context is
+	 * sealed-derived and durable even though this particular process may be cold
+	 * — the case a chat conversation makes when an earlier turn (a different
+	 * process) opened sealed content and left it in the transcript. Deliberately
+	 * separate from $hot: arming egress restriction must NOT arm the write-guard,
+	 * or a standard conversation's ordinary plaintext writes would start being
+	 * refused on a turn that only inherits restriction from its history.
+	 */
+	private static $egress_restricted = false;
+
 	/** @var array<int,bool> user ids whose vault scope has been opened */
 	private static $scope_owners = array();
 
@@ -135,6 +155,36 @@ class SealedEgressGuard {
 
 	public static function isHot(): bool {
 		return self::$hot && self::$armed;
+	}
+
+	/**
+	 * Declare that outbound egress is restricted for this process for a durable,
+	 * context-level reason — not because the process is hot. The one caller is
+	 * interactive chat: when a conversation carries the durable "has opened
+	 * sealed content" mark, it arms this at the start of every later turn so a
+	 * fresh (cold) process cannot fetch inline using sealed-derived context that
+	 * is sitting in the transcript. Does NOT set $hot, so the write-guard is
+	 * untouched and ordinary plaintext writes still pass.
+	 */
+	public static function restrictEgress(string $source = ''): void {
+		self::$egress_restricted = true;
+		if ($source !== '' && count(self::$sources) < 50) {
+			self::$sources[$source] = true;
+		}
+	}
+
+	public static function isEgressRestricted(): bool {
+		return self::$egress_restricted && self::$armed;
+	}
+
+	/**
+	 * The predicate the egress-approval gate asks: is sealed content in play for
+	 * outbound purposes, for EITHER reason — this process opened it (isHot), or a
+	 * caller declared the surrounding context sealed-derived (restrictEgress)?
+	 * The write-guard keeps asking isHot() alone; only egress consults this.
+	 */
+	public static function egressGated(): bool {
+		return self::isHot() || self::isEgressRestricted();
 	}
 
 	/**
@@ -190,15 +240,18 @@ class SealedEgressGuard {
 		$was_hot = self::$hot;
 		$was_owners = self::$scope_owners;
 		$was_sources = self::$sources;
+		$was_restricted = self::$egress_restricted;
 		self::$hot = false;
 		self::$scope_owners = array();
 		self::$sources = array();
+		self::$egress_restricted = false;
 		try {
 			return $unit();
 		} finally {
 			self::$hot = $was_hot;
 			self::$scope_owners = $was_owners;
 			self::$sources = $was_sources;
+			self::$egress_restricted = $was_restricted;
 		}
 	}
 
@@ -207,6 +260,7 @@ class SealedEgressGuard {
 		self::$hot = false;
 		self::$scope_owners = array();
 		self::$sources = array();
+		self::$egress_restricted = false;
 		self::$armed = true;
 	}
 

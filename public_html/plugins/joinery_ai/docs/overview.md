@@ -458,6 +458,38 @@ declined." This is the third leg of an existing pattern: `TaintGate` arms on
 untrusted reads, `SealedEgressGuard` refuses unprotected writes of sealed
 content — the queue **defers** an AI write to a human.
 
+**Hot-turn web egress queues the same way.** The web tools' arguments leave
+the box verbatim — a URL, a search query, a ticker symbol all reach an
+external host — so a call to `fetch_url`, `web_search`, or `get_stock_data`
+(`RiskHeuristic::WEB_EGRESS_TOOLS`, `isHotEgress()`) does not execute inline
+whenever sealed content is in play for egress (`SealedEgressGuard::
+egressGated()`). In chat it queues like a write, and the card shows the
+**complete** outbound argument — the URL wrapped across lines, never
+truncated, because smuggled data would sit in the cut-off tail; whitespace
+is revealed rather than collapsed, so a payload hidden in spacing shows on
+the card. This closes the injection-exfiltration channel: a hostile email
+or fetched page steering the model into sending sealed data out inside a URL
+produces a card the owner reads first.
+
+`egressGated()` is true for either reason: the process is hot (`isHot()` —
+sealed plaintext opened in this process), or the conversation is durably
+egress-restricted. The second arm matters because each chat turn is a fresh
+process while the transcript carries sealed-derived context forward. The
+first turn to open sealed content marks the conversation
+`aic_egress_restricted`, and every later turn — cold or not — gates its web
+tools from that mark ([Sealed Vault](../../../docs/sealed_vault.md#the-hot-turn-rule)):
+a protected conversation from its first turn, a standard one only after it
+touches sealed content. A conversation that has never touched sealed content
+is unaffected — its web lookups run inline.
+
+On a **recipe run** there is no one to approve, so a hot egress call is
+refused with an error result and the run continues. Unlike a write, a
+fetch's value is its content: an approved egress action's full result
+(bounded by `ActionQueue::EVENT_RESULT_MAX`) is carried back into the
+conversation in the resolution event row, where the next turn can reason
+over it — the transcript chip shows its head and collapses the rest behind a
+toggle.
+
 **The object** (`data/ai_queued_actions_class.php`, `AiQueuedAction`): owner,
 area, source (`chat` now; `recipe` reserved), conversation, the tool name,
 the **literal structured arguments** of the call, status
@@ -577,7 +609,7 @@ Tools type-hint **`ToolContext`** (`includes/ToolContext.php`), the surface-inde
 
 - **`shouldContinue()`** — a per-iteration guard. For a recipe that's the mid-run kill flag and the hard wall-clock timeout; for a chat turn it's a per-turn wall clock. Returns a stop reason or null.
 - **`beginToolCall()` / `finishToolCall()`** — the durable per-call audit. The recipe context flushes a started-but-not-completed entry to `rcr_tool_calls` before each call (so the dispatcher reaper can name the last call a hung run started) and updates it after; the chat context accumulates the trace in memory and the endpoint saves it on the assistant message (`aim_tool_calls`), where there is no hang-and-reap path.
-- **`queuesWrites()` / `enqueueProposedAction()`** — the deferred-write boundary ([Proposed actions](#proposed-actions)). When `queuesWrites()` is true, every mutating call (`RiskHeuristic::isMutating()`) is handed to `enqueueProposedAction()`, which queues it for the owner's approval and returns the "queued" tool result — the turn continues, nothing executes. Recipes answer **false** — their author gave the standing approval at save time and their write surface is bounded by allow-lists or the verdict handler — so the hook is inert for recipe runs and the loop executes every call. Chat answers **true** (see [Chat](#chat) below).
+- **`queuesWrites()` / `enqueueProposedAction()`** — the deferred boundary ([Proposed actions](#proposed-actions)). When `queuesWrites()` is true, every mutating call (`RiskHeuristic::isMutating()`) — and every hot-turn web-egress call (`RiskHeuristic::isHotEgress()`) — is handed to `enqueueProposedAction()`, which queues it for the owner's approval and returns the "queued" tool result — the turn continues, nothing executes. Recipes answer **false** — their author gave the standing approval at save time and their write surface is bounded by allow-lists or the verdict handler — so the queue hook is inert for recipe runs; writes execute as always, and a hot-turn egress call (which no one is present to approve) is refused with an error result instead. Chat answers **true** (see [Chat](#chat) below).
 - **`emitText()`** — the streamed-text sink the loop hands the provider. The chat context forwards it to a throttled writer that streams partial answer text onto the assistant row; the recipe context no-ops it (a recipe produces a one-shot report, not a live transcript).
 
 `RecipeRunContext` additionally carries `$recipe` and `$run`; `ChatTurnContext` carries the `AiConversation`. `appendToolCall()` remains on both for one-shot trace notes.

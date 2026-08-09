@@ -1,6 +1,8 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 require_once(PathHelper::getIncludePath('includes/UrlSafetyValidator.php'));
 require_once(PathHelper::getComposerAutoloadPath());
 
@@ -15,8 +17,27 @@ use GuzzleHttp\Exception\RequestException;
  * validator handles SSRF, Guzzle is configured with timeouts and a response
  * size cap, and we manually walk redirects (5 hops max) so the validator can
  * re-check each one.
+ *
+ * Queueable (hot-turn egress approval): on a hot turn the URL itself is the
+ * egress channel, so the call queues and the card shows the COMPLETE literal
+ * URL — wrapped, never truncated, because smuggled data would sit in the
+ * cut-off tail.
  */
-class FetchUrlTool implements RecipeToolInterface {
+class FetchUrlTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        $url = trim((string)($input['url'] ?? ''));
+        $host = '';
+        if ($url !== '') {
+            $parts = @parse_url($url);
+            $host = is_array($parts) ? (string)($parts['host'] ?? '') : '';
+        }
+        $lines = ['Fetch a web page from ' . ($host !== '' ? $host : '(no host)')];
+        $lines = array_merge($lines, ProposedActionFacts::verbatim('URL', $url));
+        $mode = strtolower(trim((string)($input['mode'] ?? '')));
+        if ($mode === 'full') $lines[] = 'Mode: full page text';
+        return $lines;
+    }
 
     const MAX_REDIRECTS = 5;
     const MAX_BODY_BYTES = 2 * 1024 * 1024;     // 2 MB raw download cap

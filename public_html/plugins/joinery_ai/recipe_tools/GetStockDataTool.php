@@ -1,6 +1,8 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunContext.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/QueueableToolInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ProposedActionFacts.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/MarketDataProviderInterface.php'));
 
 /**
@@ -11,8 +13,19 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/MarketDataP
  * No "top movers" call here on free-tier providers — the LLM should pair
  * web_search ("biggest stock gainers today") with this tool's per-ticker
  * deep-dive to build the stock-research recipe.
+ *
+ * Queueable (hot-turn egress approval): the symbol string reaches the
+ * market-data provider verbatim — an arbitrary-text channel like any other —
+ * so on a hot turn the call queues and the card shows it literally.
  */
-class GetStockDataTool implements RecipeToolInterface {
+class GetStockDataTool implements RecipeToolInterface, QueueableToolInterface {
+
+    public function renderProposedAction(array $input): array {
+        return array_merge(
+            ['Look up market data'],
+            ProposedActionFacts::verbatim('Symbol', (string)($input['symbol'] ?? ''))
+        );
+    }
 
     public static function name(): string {
         return 'get_stock_data';

@@ -6,6 +6,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiAttachmen
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatTurnContext.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AgentLoop.php'));
+require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelSchemaBuilder.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPromptBuilder.php'));
@@ -123,9 +124,30 @@ class ChatRunner {
         $thinking     = AgentLoop::resolveThinkingLevel($conversation->get('aic_thinking_level'),
             $settings->get_setting('joinery_ai_default_thinking_level'));
 
+        // Egress restriction is durable per conversation. If an earlier turn
+        // opened sealed content, restrict web egress for THIS turn too — even
+        // though this process may be cold — so a fresh-process cold-start cannot
+        // fetch inline using sealed-derived context sitting in the transcript.
+        // Arms only the egress gate, never the write-guard (a standard chat's
+        // ordinary plaintext writes still pass). Protected conversations also
+        // go hot from history decryption in buildHistoryMessages, so they gate
+        // regardless; this covers the standard-conversation cold-start case.
+        if ($conversation->get('aic_egress_restricted')) {
+            SealedEgressGuard::restrictEgress('conv:' . (int)$conversation->key);
+        }
+
         $result = AgentLoop::run($provider, $model, $system, $messages,
             $allowed_tools, $ctx, $max_iterations, $token_budget,
             $temperature, $top_p, $thinking);
+
+        // If this turn opened sealed content — a sealed tool read, or decrypting
+        // protected history — the conversation is sealed-derived for good. Persist
+        // the durable restriction so every later turn, in any process, gates
+        // egress. The flag is a boolean, so writing it from a hot process is
+        // allowed by the egress write-guard. Set once; never cleared.
+        if (SealedEgressGuard::isHot() && !$conversation->get('aic_egress_restricted')) {
+            AiConversation::updateColumns((int)$conversation->key, ['aic_egress_restricted' => true]);
+        }
 
         return ['result' => $result, 'context' => $ctx, 'model' => $model];
     }

@@ -20,12 +20,23 @@ class ActionQueueException extends Exception {}
  * Every card fact is rendered from the stored literal arguments
  * (QueueableToolInterface::renderProposedAction()), never from model prose.
  *
- * @version 1.0
+ * Queued web-egress calls (the hot-turn egress rule) differ from writes in
+ * one way only: a write's value is its side effect, a fetch's value is its
+ * content — so an approved egress action's full result is carried back into
+ * the conversation through the resolution event row, where the next turn can
+ * reason over it.
+ *
+ * @version 1.1
  */
 class ActionQueue {
 
     /** Longest rendered fact line — literal values, but bounded for the card. */
     const FACT_LINE_MAX = 200;
+
+    /** Ceiling on a verbatim result carried in an event row. Above the web
+     *  tools' own 50k output caps, so in practice nothing is cut; a hard
+     *  bound so a misbehaving tool cannot balloon the transcript. */
+    const EVENT_RESULT_MAX = 60000;
 
     /**
      * Queue one proposed tool call for $owner_id. Returns the created row.
@@ -206,8 +217,13 @@ class ActionQueue {
             $is_error ? AiQueuedAction::STATUS_FAILED : AiQueuedAction::STATUS_APPROVED,
             $result);
         $row->load();
+        // A queued egress call's result IS the content the model asked for —
+        // carry it back verbatim, not as a one-line summary.
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RiskHeuristic.php'));
+        $verbatim = !$is_error && in_array((string)$row->get('aqa_tool'),
+            RiskHeuristic::WEB_EGRESS_TOOLS, true);
         self::appendResolutionEvent($row, $is_error ? 'failed' : 'approved',
-            self::resultLine($result));
+            self::resultLine($result), $verbatim);
         return $row;
     }
 
@@ -357,9 +373,13 @@ class ActionQueue {
      * the transcript shows as a neutral chip and the model reads on its next
      * turn. Sealed like any other content on a protected conversation; a
      * failure to append never un-resolves the action.
+     *
+     * $verbatim carries the result at full length (bounded by
+     * EVENT_RESULT_MAX) instead of the one-line 400-char summary — the
+     * approved-egress path, where the result is the content itself.
      */
     private static function appendResolutionEvent(AiQueuedAction $row, string $outcome,
-            ?string $summary): void {
+            ?string $summary, bool $verbatim = false): void {
         $conv_id = (int)$row->get('aqa_aic_conversation_id');
         if ($conv_id <= 0) return;
         try {
@@ -373,7 +393,7 @@ class ActionQueue {
                     : ($outcome === 'failed' ? 'the owner approved it but it failed'
                     : 'the owner declined it; do not retry it')) . '.'
                   . ($summary !== null && trim($summary) !== ''
-                        ? ' Result: ' . (mb_strlen($summary) > 400 ? mb_substr($summary, 0, 399) . '…' : $summary)
+                        ? ' Result: ' . self::boundResult($summary, $verbatim)
                         : '')
                   . ']';
 
@@ -395,6 +415,14 @@ class ActionQueue {
             error_log('ActionQueue: could not append resolution event for action '
                 . (int)$row->key . ': ' . $e->getMessage());
         }
+    }
+
+    /** The event row's result text: a one-line summary for writes, the full
+     *  content (up to EVENT_RESULT_MAX) for approved egress. */
+    private static function boundResult(string $summary, bool $verbatim): string {
+        $max = $verbatim ? self::EVENT_RESULT_MAX : 400;
+        return mb_strlen($summary) > $max
+            ? mb_substr($summary, 0, $max - 1) . '…' : $summary;
     }
 
 }

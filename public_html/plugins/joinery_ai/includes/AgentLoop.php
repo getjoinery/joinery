@@ -230,17 +230,39 @@ class AgentLoop {
             $messages[] = ['role' => 'assistant', 'content' => self::normalizeAssistantContent($content)];
 
             // Dispatch the batch. Read tools run in order; on a surface that
-            // defers writes (interactive chat) every mutating call is QUEUED
-            // for the owner's approval instead of executing — the model gets a
-            // "queued" tool result and the turn continues, so a hostile
-            // message's best possible outcome is a proposal the owner saw and
-            // declined (specs/implemented/ai_action_queue.md). For recipes the hook is
-            // inert (queuesWrites() is false), so every call runs.
+            // defers writes (interactive chat) every mutating call — and, once
+            // the turn is hot, every web-egress call — is QUEUED for the
+            // owner's approval instead of executing: the model gets a "queued"
+            // tool result and the turn continues, so a hostile message's best
+            // possible outcome is a proposal the owner saw and declined
+            // (specs/implemented/ai_action_queue.md, the hot-turn egress
+            // approval spec). For recipes the queue hook is inert
+            // (queuesWrites() is false): writes run through the recipe's own
+            // standing-approval door as always, but hot egress has no one to
+            // approve it, so it is refused outright.
             $tool_result_blocks = [];
             $iter_had_error = false;
             foreach ($tool_uses as $tu) {
-                if ($context->queuesWrites() && RiskHeuristic::isMutating($tu)) {
-                    $tool_result_blocks[] = $context->enqueueProposedAction($tu);
+                $hot_egress = RiskHeuristic::isHotEgress($tu);
+                if ($context->queuesWrites() && ($hot_egress || RiskHeuristic::isMutating($tu))) {
+                    // Queued for the owner's approval. A SUCCESSFUL enqueue is
+                    // not an error, but a FAILED one (e.g. no vault to seal the
+                    // proposal to) comes back is_error and must count toward the
+                    // abort limit exactly like an execution failure — otherwise
+                    // a model retrying an unqueueable call spins for the whole
+                    // iteration budget instead of aborting after a few tries.
+                    $result_block = $context->enqueueProposedAction($tu);
+                    $tool_result_blocks[] = $result_block;
+                    if (!empty($result_block['is_error'])) $iter_had_error = true;
+                    continue;
+                }
+                if ($hot_egress) {
+                    // Policy refusal on an autonomous run. The block carries
+                    // is_error so the model stops retrying, but this is NOT a
+                    // tool failure: it must not feed the consecutive-error abort,
+                    // or a run that legitimately continues "with the data already
+                    // available" would be killed after three refusals.
+                    $tool_result_blocks[] = self::refuseHotEgress($tu, $context);
                     continue;
                 }
                 $result_block = self::executeToolUse($tu, $context);
@@ -300,6 +322,48 @@ class AgentLoop {
      */
     public static function executeApproved(array $tool_use, ToolContext $ctx): array {
         return self::executeToolUse($tool_use, $ctx);
+    }
+
+    /**
+     * The autonomous-surface arm of the hot-turn egress rule: this run has
+     * opened sealed plaintext and there is no user present to approve an
+     * outbound call, so nothing may leave — the call is refused before any
+     * validator or HTTP client is touched, and the run continues. Audited
+     * like every other call outcome.
+     */
+    private static function refuseHotEgress(array $tool_use, ToolContext $ctx): array {
+        $name = $tool_use['name'] ?? '';
+        $msg = "'$name' is not available for the rest of this run: protected (sealed) "
+             . 'content has been read, and on an autonomous run nothing may be sent '
+             . 'out afterward (hot-turn egress rule). Do not retry it; continue with '
+             . 'the data already available.';
+        // Audit through the begin/finish lifecycle, not a one-shot appendToolCall:
+        // on a recipe run those methods flush rcr_tool_calls immediately, so an
+        // attempted exfiltration is durably recorded before the next provider
+        // call. appendToolCall() only buffers in memory — a run OOM-killed right
+        // after the refusal would leave no trace of the exact event this audit
+        // trail exists to capture.
+        $started = gmdate('Y-m-d H:i:s.u');
+        $ctx->beginToolCall([
+            'name'           => $name,
+            'input'          => $tool_use['input'] ?? [],
+            'started_time'   => $started,
+            'completed_time' => null,
+            'is_error'       => false,
+            'output'         => null,
+            'duration_ms'    => null,
+        ]);
+        $ctx->finishToolCall([
+            'name'           => $name,
+            'input'          => $tool_use['input'] ?? [],
+            'started_time'   => $started,
+            'completed_time' => gmdate('Y-m-d H:i:s.u'),
+            'is_error'       => true,
+            'output'         => 'refused: hot-turn egress on an autonomous run',
+            'duration_ms'    => 0,
+        ]);
+        return ['type' => 'tool_result', 'tool_use_id' => $tool_use['id'] ?? '',
+            'content' => $msg, 'is_error' => true];
     }
 
     private static function normalizeAssistantContent(array $content): array {
