@@ -131,6 +131,15 @@ function drive_upload_init_logic(array $input): LogicResult {
 		return LogicResult::error('That upload would exceed the storage quota.');
 	}
 
+	// A new file cannot take a name a live sibling already holds, and the
+	// question is asked HERE as well as at completion — before a byte is sent,
+	// rather than after the whole file has crossed the wire only to be refused.
+	// The dedup branch below needs it for a second reason: it creates the file
+	// itself and never reaches the completion path at all.
+	if (!$target_file && DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+		return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+	}
+
 	// Dedup short-circuit: identical private bytes the ACTOR already possesses
 	// (their own files/versions only — a client-claimed hash is not proof of
 	// possession, so a foreign hash+size must never match; see find_dedup).
@@ -160,12 +169,34 @@ function drive_upload_init_logic(array $input): LogicResult {
 					return LogicResult::render(array('ok' => true, 'deduped' => true, 'file' => DriveHelper::file_export($fresh)));
 				}
 			} else {
-				$restrictions = array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE);
-				$file = File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+				// The destination folder is part of the creation, exactly as it is
+				// on the completion path. Creating at the root and relocating would
+				// put the file briefly in the root's namespace, where it can collide
+				// with an unrelated root file of the same name — and the sibling-name
+				// rule would refuse it there for a reason that has nothing to do with
+				// where the user put it.
+				$restrictions = array(
+					'fil_private' => true,
+					'fil_source'  => File::SOURCE_DRIVE,
+					'fil_fol_folder_id' => $folder_id ?: null,
+				);
+				if ($modified_time !== null) {
+					$restrictions['fil_content_modified_time'] = $modified_time;
+				}
+				try {
+					$file = File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+				} catch (Exception $e) {
+					// The check above is a fast path: two uploads can both pass it and
+					// both reach the insert, where the partial unique index refuses the
+					// loser. Answered as the name clash it is rather than as a database
+					// fault, so a sync client retries instead of withdrawing the work.
+					if (strpos($e->getMessage(), '23505') === false
+						|| !DriveHelper::file_name_taken($owner_id, $folder_id, $name)) {
+						throw $e;
+					}
+					return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+				}
 				if ($file && $file->key) {
-					if ($folder_id) { $file->set('fil_fol_folder_id', $folder_id); }
-					if ($modified_time !== null) { $file->set('fil_content_modified_time', $modified_time); }
-					if ($folder_id || $modified_time !== null) { $file->save(); }
 					DriveUsage::recompute($owner_id);
 					FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FILE, $file->key, $owner_id, $user_id);
 					DriveHelper::forget_sync_meta($file->key);
