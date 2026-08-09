@@ -64,3 +64,9 @@ public_html/tests/fixtures/email_security_corpus/
 # Site config dir: per-environment secrets (Globalvars_site.php, SSH identities,
 # provisioning keys) - nothing in it is ever committed
 /config/
+
+# Site-specific content seeders (content_pack_feature.md, deferred). These build
+# one deployment's pages, menus and redirects in its database. They are operator
+# tools on the same plane as backup files: never committed, and outside
+# public_html so no release archive can carry one site's copy to another's install.
+/content_packs/
