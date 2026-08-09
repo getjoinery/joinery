@@ -611,8 +611,8 @@ class PaypalHelper{
 	public function verify_webhook_signature($headers, $body) {
 		$settings = Globalvars::get_instance();
 		$webhook_id = StripeHelper::isTestMode()
-			? $settings->get_setting('paypal_webhook_id_test')
-			: $settings->get_setting('paypal_webhook_id');
+			? $settings->get_setting('store_paypal_webhook_id_test')
+			: $settings->get_setting('store_paypal_webhook_id');
 
 		if (!$webhook_id) {
 			error_log("PayPal webhook ID not configured");

@@ -42,8 +42,8 @@ try {
 
     $settings = Globalvars::get_instance();
     $webhook_id = StripeHelper::isTestMode()
-        ? $settings->get_setting('paypal_webhook_id_test')
-        : $settings->get_setting('paypal_webhook_id');
+        ? $settings->get_setting('store_paypal_webhook_id_test')
+        : $settings->get_setting('store_paypal_webhook_id');
 
     // Reject if webhook ID is not configured — verification cannot be skipped
     if (!$webhook_id) {

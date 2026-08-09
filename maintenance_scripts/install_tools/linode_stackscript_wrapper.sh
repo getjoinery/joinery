@@ -1,5 +1,5 @@
 #!/bin/bash
-#VERSION 1.0
+#VERSION 1.1
 #
 # THIS FILE IS NOT RUN FROM THE REPOSITORY.
 #
@@ -22,10 +22,13 @@
 # kept out of the deployment log — only if its name contains "password", which
 # is why the API token is named the way it is.
 #
-# Target Images: linode/ubuntu24.04 (declared in the StackScript settings, not
-# here). At least one is required and the deploy form offers only what is
-# listed, so an incompatible image cannot be selected. install.sh hard-fails on
-# anything else regardless.
+# Target Images: linode/ubuntu26.04 and linode/ubuntu24.04 (declared in the
+# StackScript settings, not here). At least one is required and the deploy form
+# offers only what is listed, so an incompatible image cannot be selected.
+# install.sh hard-fails on anything else regardless. List 26.04 first: Linode
+# preselects the first entry, and 26.04 is the release the platform is built
+# against (PHP 8.5, PostgreSQL 18). 24.04 stays listed so a deployer who has a
+# reason to match an existing 24.04 box still can.
 
 # <UDF name="JOINERY_ADMIN_EMAIL" label="Admin email address" example="you@example.com" />
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />

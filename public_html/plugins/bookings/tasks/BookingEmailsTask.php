@@ -116,7 +116,11 @@ class BookingEmailsTask implements ScheduledTaskInterface {
 	}
 
 	private function baseUrl() {
-		$settings = Globalvars::get_instance();
-		return rtrim($settings->get_setting('site_url') ?: 'https://dev.getjoinery.com', '/');
+		// get_absolute_url is the one place that knows how to build a link
+		// outside a request: webDir for the host, protocol_mode (or the
+		// observed scheme) for the protocol. Both are set on every deployment,
+		// which is what this needs — a scheduled task has no HTTP_HOST to fall
+		// back on, so a wrong answer here mails a dead link to a customer.
+		return rtrim(LibraryFunctions::get_absolute_url(''), '/');
 	}
 }

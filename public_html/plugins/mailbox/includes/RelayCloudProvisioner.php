@@ -19,6 +19,9 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
+ * @version 1.7 - the instance image is the INSTANCE_IMAGE constant. It was read
+ *                from a setting no manifest declared, so no admin could reach
+ *                it and the fallback was the only value it ever had.
  * @version 1.6 - the 'upgrade' kind: drain the relay, rebuild the instance in
  *                place (address preserved), rebuild it from the same script. A
  *                failed upgrade never destroys the instance — it is the
@@ -41,6 +44,14 @@ class RelayCloudProvisioner {
 	// still filling after this many passes is not draining, and the run stops
 	// rather than wiping mail it never collected.
 	const DRAIN_MAX_PASSES = 12;
+	// The OS image every relay is built from. Deliberately a constant and not a
+	// setting: which release the relay runs is a property of what
+	// provisioning/provision_relay.sh is known to produce, not a per-deployment
+	// preference. When a newer image is qualified, changing it here moves every
+	// deployment's next relay at once — a setting would let each one drift, and
+	// a relay built from an unqualified image fails half an hour later as
+	// "provision_relay.sh did not complete" with no hint that the image was why.
+	const INSTANCE_IMAGE = 'linode/ubuntu26.04';
 
 	/** @var callable|null fn(RelayCloudProvision): CloudComputeProvider — test seam. */
 	public static $driver_factory = null;
@@ -122,7 +133,7 @@ class RelayCloudProvisioner {
 					(string)$run->get('rcp_mail_hostname'), intval($run->key)),
 				'region'          => (string)$run->get('rcp_region'),
 				'type'            => (string)$run->get('rcp_instance_type'),
-				'image'           => $this->imageId(),
+				'image'           => self::INSTANCE_IMAGE,
 				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)), // never stored
 				'authorized_keys' => array((string)$run->get('rcp_ssh_public_key')),
 			));
@@ -269,7 +280,7 @@ class RelayCloudProvisioner {
 
 		try {
 			$instance = $this->driverFor($run)->rebuildInstance($instance_id, array(
-				'image'           => $this->imageId(),
+				'image'           => self::INSTANCE_IMAGE,
 				'root_pass'       => 'Aa1!' . bin2hex(random_bytes(20)), // never stored
 				'authorized_keys' => array((string)$run->get('rcp_ssh_public_key')),
 			));
@@ -630,11 +641,6 @@ class RelayCloudProvisioner {
 			throw new RelayCloudProvisionException('ssh-keygen produced an empty keypair.');
 		}
 		return array($private, $public);
-	}
-
-	private function imageId(): string {
-		$image = trim((string)Globalvars::get_instance()->get_setting('mailbox_relay_cloud_image'));
-		return $image !== '' ? $image : 'linode/ubuntu24.04';
 	}
 
 	private function extractMarker(string $output, string $marker): string {

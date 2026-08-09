@@ -108,7 +108,7 @@ class ProvisionCustomerCloud {
 		$settings = Globalvars::get_instance();
 		$region = $provision->get('cvp_region')        ?: ($settings->get_setting('server_manager_customer_cloud_region') ?: 'us-southeast');
 		$type   = $provision->get('cvp_instance_type') ?: ($settings->get_setting('server_manager_customer_cloud_type')   ?: 'g6-nanode-1');
-		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu24.04';
+		$image  = $settings->get_setting('server_manager_customer_cloud_image') ?: 'linode/ubuntu26.04';
 
 		$pubkey = trim((string)file_get_contents($key_path . '.pub'));
 

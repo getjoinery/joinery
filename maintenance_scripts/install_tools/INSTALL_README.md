@@ -310,7 +310,7 @@ sudo certbot --apache -d mysite.example.com
   - `maintenance_scripts/sysadmin_tools/` - Backup, restore, and maintenance utilities
 
 ### Server Requirements
-- Fresh Ubuntu 24.04 LTS installation
+- Fresh Ubuntu 26.04 or 24.04 LTS installation (`install.sh server` refuses anything else)
 - Root access
 - At least 1GB RAM
 - At least 3GB disk space
@@ -657,7 +657,6 @@ DELETE FROM stg_settings WHERE stg_name = 'clone_export_key';
 |------|----------|
 | Database (all tables) | **Cloned** - exact copy from source |
 | All settings | **Cloned** - exact copy from source |
-| `site_url` setting | **Updated** - set to target domain |
 | Uploads directory | **Cloned** - exact copy from source |
 | User accounts | **Cloned** - source users preserved |
 | `clone_export_key` | **Removed** - disabled on new site |
@@ -1201,7 +1200,7 @@ For Full (Strict) mode:
 
 - **Guide Version:** 3.8
 - **install.sh Version:** 2.7
-- **Tested With:** Ubuntu 24.04, Docker 29.1.5
+- **Tested With:** Ubuntu 26.04 (PHP 8.5, PostgreSQL 18) and Ubuntu 24.04 (PHP 8.3, PostgreSQL 16), Docker 29.1.5
 - **Last Updated:** 2026-01-27
 
 ### Changes in Version 3.8
