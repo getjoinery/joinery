@@ -389,6 +389,112 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
     assert_eq!(world.server.live_counts(), (1, 1));
 }
 
+/// The deadlock the soak rig was left holding once duplicate names stopped
+/// being possible on the server, reduced to the exact state it was found in.
+///
+/// Run 25, 2026-08-09. Making the server refuse a duplicate file name stopped
+/// the corruption — 55 duplicate name groups became none — and turned what had
+/// been a silent second file into a stuck pair: a provisional entry and the real
+/// entry for one path. Naming ranks a provisional as materialized, so it takes
+/// the name and the real entry is parked `Unsyncable(DuplicateName)` against a
+/// name identical to its own; a pass skips an unsyncable entry, so it never
+/// materializes, never occupies the path, and never supersedes the provisional,
+/// whose upload the server refuses for as long as the name is taken. Nothing
+/// downstream could resolve it — 12 of one device's 13 stuck entries and 17 of
+/// the other's 18 were this, and in every case it was the **real** entry
+/// wearing the reason.
+///
+/// `pass::merge_duplicate_files` folds them before naming can make them rivals,
+/// exactly as `merge_duplicate_folders` has done for directories since run 3.
+/// The local edit below is the part worth protecting: the fix must break the
+/// deadlock *and* still send work that only this computer has.
+#[test]
+fn a_file_that_lost_a_naming_race_still_converges() {
+    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+
+    let world = World::new(98, &["laptop"]);
+    let device = world.device("laptop");
+    let mut committed = Committed::default();
+
+    // An ordinary file, synced the ordinary way, so the entry carries a real
+    // agreement — which is what the rig's stuck entries had.
+    let file_id = world
+        .server
+        .seed_file(None, "notes.txt", b"from the other computer");
+    assert!(world.settle().is_some());
+
+    // Now the state the race leaves behind: the entry refused against its own
+    // name, and a provisional claiming the same path.
+    let real = device
+        .store
+        .get_entry(EntityId::file(file_id))
+        .unwrap()
+        .expect("the seeded file should have reached the device");
+    device
+        .store
+        .put_entry(&Entry {
+            status: LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::DuplicateName {
+                with: "notes.txt".into(),
+            }),
+            ..real
+        })
+        .unwrap();
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&Entry {
+            id,
+            remote: Placement {
+                parent: None,
+                name: "notes.txt".into(),
+            },
+            remote_content: None,
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: LocalStatus::PendingUpload,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    // Work that exists nowhere else, written while the entry was stuck.
+    let mine = b"edited here while the entry was stuck";
+    device.fs.user_write("notes.txt", mine);
+    committed.note("notes.txt", mine);
+
+    assert!(
+        world.settle().is_some(),
+        "the computer never stops trying: its provisional holds the name, so the \
+         server's real file is refused as clashing with itself, so it never \
+         materializes and the provisional is never superseded"
+    );
+    assert_nothing_lost(&world, &committed);
+
+    // One file, not two. The whole point of the server's uniqueness rule is that
+    // a second live file with this name cannot exist, and the repair must not
+    // reach for one to get unstuck.
+    assert_eq!(world.server.live_counts(), (0, 1));
+
+    // And nothing is left parked. An entry that survives as unsyncable here is
+    // the deadlock wearing a different hat.
+    let stuck: Vec<_> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|e| matches!(e.status, LocalStatus::Unsyncable(_)))
+        .map(|e| format!("{:?} {}", e.id, e.remote.name))
+        .collect();
+    assert!(stuck.is_empty(), "still stuck: {stuck:?}");
+}
+
 #[test]
 fn two_computers_editing_the_same_file_both_keep_their_work() {
     // The case people actually hit. Neither edit may be discarded, and both

@@ -135,11 +135,12 @@ pub fn run_pass(
         }
     }
 
-    // ---- one directory, one entry -------------------------------------------
+    // ---- one directory, one entry; one file, one entry ----------------------
     //
     // Before naming, because naming is what turns this into a deadlock: it sees
     // two entries claiming one name and refuses the real one.
     merge_duplicate_folders(env)?;
+    merge_duplicate_files(env)?;
 
     // ---- what each entry is called here -------------------------------------
     //
@@ -1100,6 +1101,50 @@ fn merge_duplicate_folders(env: &ExecEnv) -> Result<usize, ExecError> {
         merged += this_round;
         if this_round == 0 {
             break;
+        }
+    }
+    Ok(merged)
+}
+
+/// Fold away any provisional file that turns out to be a real one.
+///
+/// The file half of [`merge_duplicate_folders`], and the same deadlock: a
+/// provisional entry and a real entry describing one path, which naming turns
+/// into rivals and can never separate. The provisional outranks the real entry,
+/// so the real one is parked `Unsyncable(DuplicateName)`; a pass skips an
+/// unsyncable entry, so it never materializes, never takes the path, and never
+/// supersedes the provisional — whose upload the server refuses for exactly as
+/// long as the name is taken.
+///
+/// This is what the soak rig's run 25 was left holding once duplicate names
+/// stopped being possible on the server. Every one of the 29 stuck entries
+/// across the fleet was this pair, and none of them could ever have resolved:
+/// the retry the client answers a `name_taken` refusal with is premised on the
+/// sibling holding the name arriving on a later index walk, and here it had
+/// already arrived — it was the other row.
+///
+/// Matching on exact name and parent, like the folder version, and for the same
+/// reason: this repairs two records of one file, and folding together two files
+/// a filesystem merely cannot tell apart is naming's decision to make.
+///
+/// Not iterated. Merging a file re-points nothing, so one pass over the pairs
+/// finds all of them.
+fn merge_duplicate_files(env: &ExecEnv) -> Result<usize, ExecError> {
+    let entries = all_entries(env)?;
+    let mut real: HashMap<(Option<i64>, String), i64> = HashMap::new();
+    for e in &entries {
+        if e.id.entity_type == EntityType::File && !e.id.is_provisional() && !e.remote_deleted {
+            real.insert((e.remote.parent, e.remote.name.clone()), e.id.server_id);
+        }
+    }
+    let mut merged = 0;
+    for e in &entries {
+        if e.id.entity_type != EntityType::File || !e.id.is_provisional() {
+            continue;
+        }
+        if let Some(&id) = real.get(&(e.remote.parent, e.remote.name.clone())) {
+            env.store.merge_file(e.id, EntityId::file(id))?;
+            merged += 1;
         }
     }
     Ok(merged)

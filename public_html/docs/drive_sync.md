@@ -209,10 +209,22 @@ Three reasons, and they are told apart because the fixes differ:
 | `unicode_clash` | Two names are different bytes that normalize to one form — `café` typed two ways | Pick one spelling |
 | `duplicate_name` | The server is holding two live items in one folder under the *same* name | Nothing they can do from here — the second item has no path to be seen at, so the message points them at the web |
 
-`duplicate_name` should not arise: the server refuses a name a live sibling
+`duplicate_name` should be rare: the server refuses a name a live sibling
 already holds. It is reported rather than folded into `unicode_clash` because a
 name like `app.db-wal` has no spelling to argue about, and reading it as a
 Unicode problem sends whoever investigates to the wrong place entirely.
+
+One shape of it is the client's own bookkeeping rather than anything the user
+can act on, and is repaired without being shown. A device that creates a file or
+folder gives it a provisional identity before the server has named it; if the
+name is taken in the meantime the create is refused, and the real item then
+arrives from the change feed as a second record of the same path. Left alone the
+two are rivals — the provisional holds the name, the real one is refused against
+a name identical to its own, and neither can ever supersede the other. The pass
+folds a provisional into the real item at the same placement before naming runs,
+so the pair resolves itself. What survives is the real identity, with whatever
+was last agreed about it left intact, so an ordinary edit stays an edit instead
+of becoming a conflicted copy.
 
 ### Encrypted files and folders
 
