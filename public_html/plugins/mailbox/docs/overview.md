@@ -3013,13 +3013,15 @@ All three are `NULL` until a pipeline recipe scans the message. Re-scoring
 after a mis-score is an admin deleting the recipe's `aip_recipe_item_log` row
 for that message — the run picks it up again on the next pass.
 
-**Reader surface.** The thread list shows a compact badge — amber for a
-danger score of 3-6, red for 7-10 — silent below 3 since an unremarkable
-inbox is the common case (`danger_score` is the max across the thread's
-messages). The message view shows a banner with the score, the summary, and
-the red-flags findings, styled by verdict (`safe` / `suspicious` /
-`dangerous`); it renders as a sibling of the message body (not inside it) so
-it stays visible even when the message is collapsed.
+**Reader surface.** The thread list shows a compact badge — amber "Caution"
+for a danger score of 5-6, red "Danger" for 7-10 — silent below 5 since an
+unremarkable inbox is the common case (`danger_score` is the max across the
+thread's messages). The message view shows a banner with the score, the
+summary, and the red-flags findings, in a green `safe`, amber `caution`, or
+red `dangerous` tier taken from the score itself rather than the stored
+verdict word, so a message scanned under an earlier band mapping still reads
+under the current one. It renders as a sibling of the message body (not
+inside it) so it stays visible even when the message is collapsed.
 
 ## Email triage
 

@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.39
+ * No framework. @version 2.40
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -1118,10 +1118,12 @@
 			mid.appendChild(el('span', 'mbx-thread-count', String(t.msg_count)));
 		}
 		// AI security scan badge (specs/joinery_ai_email_security_scan.md):
-		// silent below 3 -- an unremarkable inbox is the common case.
-		if (t.danger_score !== null && t.danger_score !== undefined && t.danger_score >= 3) {
-			var tier = t.danger_score >= 7 ? 'red' : 'amber';
-			mid.appendChild(el('span', 'mbx-danger-badge ' + tier, 'Danger ' + t.danger_score + '/10'));
+		// silent below 5 -- an unremarkable inbox is the common case, and the
+		// low band is where ordinary bulk mail lands.
+		if (t.danger_score !== null && t.danger_score !== undefined && t.danger_score >= 5) {
+			var red = t.danger_score >= 7;
+			mid.appendChild(el('span', 'mbx-danger-badge ' + (red ? 'red' : 'amber'),
+				(red ? 'Danger ' : 'Caution ') + t.danger_score + '/10'));
 		}
 		// AI triage summary (specs/implemented/joinery_ai_email_triage.md) replaces
 		// the body snippet as the preview when the message has been triaged -- it
@@ -1503,17 +1505,19 @@
 	}
 
 	// AI security scan (specs/joinery_ai_email_security_scan.md). ai_scan is
-	// null until a pipeline recipe judges the message. verdict maps directly
-	// to the CSS tier (safe/suspicious/dangerous); the safe tier renders as a
-	// small, low-key line rather than a full alert box -- a clean verdict is
-	// reassurance, not a warning.
+	// null until a pipeline recipe judges the message. The score is the source
+	// of truth for the tier, not the stored verdict word -- a row scanned under
+	// an earlier band mapping still renders under the current one. safe renders
+	// as a small, low-key green line rather than a full alert box: a clean
+	// verdict is reassurance, not a warning.
 	function dangerBanner(m) {
 		if (m.ai_danger_score === null || m.ai_danger_score === undefined || !m.ai_scan) return null;
 		var scan = m.ai_scan;
-		var tier = scan.verdict || (m.ai_danger_score >= 7 ? 'dangerous' : (m.ai_danger_score >= 3 ? 'suspicious' : 'safe'));
+		var tier = m.ai_danger_score >= 7 ? 'dangerous' : (m.ai_danger_score >= 5 ? 'caution' : 'safe');
+		var head = tier === 'dangerous' ? 'Danger' : (tier === 'caution' ? 'Caution' : 'Security scan');
 
 		var banner = el('div', 'mbx-danger-banner ' + tier);
-		banner.appendChild(el('div', 'mbx-danger-banner-head', 'Danger score: ' + m.ai_danger_score + '/10'));
+		banner.appendChild(el('div', 'mbx-danger-banner-head', head + ': ' + m.ai_danger_score + '/10'));
 		if (scan.summary) banner.appendChild(el('div', null, scan.summary));
 		if (tier !== 'safe' && Array.isArray(scan.red_flags) && scan.red_flags.length) {
 			var list = el('ul', 'mbx-danger-banner-flags');

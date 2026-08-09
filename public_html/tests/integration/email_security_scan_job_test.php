@@ -22,7 +22,7 @@
  * alias, so nothing here can select real mail). Run:
  *   php tests/integration/email_security_scan_job_test.php
  *
- * @version 1.1
+ * @version 1.2
  */
 /** @joinery-test
  * name: email_security_scan_job
@@ -209,6 +209,18 @@ ok('mismatched band (score 9, verdict safe) is rejected',
 $band_ok = true;
 try { $job->validateVerdict(['score' => 9, 'verdict' => 'dangerous']); } catch (InvalidArgumentException $e) { $band_ok = false; }
 ok('agreeing band (score 9, verdict dangerous) passes', $band_ok);
+
+// The 4|5 boundary is the one the reader hangs its badge on: 0-4 is green and
+// silent in the thread list, 5-6 is the amber caution band.
+$edge_ok = true;
+try {
+    $job->validateVerdict(['score' => 4, 'verdict' => 'safe']);
+    $job->validateVerdict(['score' => 5, 'verdict' => 'caution']);
+    $job->validateVerdict(['score' => 6, 'verdict' => 'caution']);
+} catch (InvalidArgumentException $e) { $edge_ok = false; }
+ok('the 4|5 boundary holds (4=safe, 5-6=caution)', $edge_ok);
+ok('score 5 is not safe', throws_invalid(fn() => $job->validateVerdict(['score' => 5, 'verdict' => 'safe'])));
+ok('score 4 is not caution', throws_invalid(fn() => $job->validateVerdict(['score' => 4, 'verdict' => 'caution'])));
 
 // --- 6. recordVerdict(): writes the fields; refuses a wrong-mailbox message -
 section("6. recordVerdict");
