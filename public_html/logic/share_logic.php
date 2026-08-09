@@ -150,7 +150,9 @@ function share_logic(array $input): LogicResult {
 	foreach ($subfolders as $sf) {
 		$items[] = array('type' => 'folder', 'id' => (int)$sf->key, 'name' => $sf->get('fol_name'));
 	}
-	$files = new MultiFile(array('folder_id' => $current_id, 'deleted' => false, 'source_not' => File::SOURCE_MAILBOX_SEARCH_INDEX), array('fil_title' => 'ASC'));
+	// Files the system made for itself are never listed — one declared set, so this
+	// surface and the admin listing can't drift apart on what counts as internal.
+	$files = new MultiFile(array('folder_id' => $current_id, 'deleted' => false, 'sources_not' => File::internal_sources()), array('fil_title' => 'ASC'));
 	$files->load();
 	foreach ($files as $f) {
 		$items[] = array(

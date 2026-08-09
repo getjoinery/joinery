@@ -34,7 +34,11 @@
 					<h5 class="mb-0">File Preview</h5>
 				</div>
 				<div class="card-body text-center">
-					<img src="<?php echo htmlspecialchars($file->get_url('content')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
+					<!-- The original, not a 'content' variant: this is one image on a
+					     page an admin opens occasionally, and asking for a variant
+					     would write an 800px copy of every attachment anyone ever
+					     looks at. The browser scales it to the box below. -->
+					<img src="<?php echo htmlspecialchars($file->get_url('original')); ?>" alt="File Preview" class="img-fluid rounded" style="max-height: 400px;">
 				</div>
 			</div>
 			<?php endif; ?>

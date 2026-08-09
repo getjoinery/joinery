@@ -998,7 +998,7 @@ class FileBlob extends SystemBase {
 
 		if ($this->get('fbb_storage_driver') === 'cloud') {
 			$this->_resize_cloud($size_key, $sizes);
-			return;
+			return true;
 		}
 
 		$old_path = $this->filesystem_path('original');
@@ -1028,6 +1028,52 @@ class FileBlob extends SystemBase {
 			$new_path = $base_dir . '/' . $key . '/' . $this->get('fbb_stored_name');
 			$this->_generate_resized($old_path, $new_path, $config['width'], $config['height'], $config['crop'], $config['quality']);
 		}
+		return true;
+	}
+
+	/**
+	 * Make sure one variant exists on disk, generating just that size if it does
+	 * not, and return its path (false if it cannot be produced).
+	 *
+	 * Variants are opt-in at ingestion — only a caller that knows it wants them
+	 * calls resize() — so a subsystem that stores an image without asking (an
+	 * inbound mail attachment, a chat upload) has bytes but no variants, while
+	 * File::get_url() will still mint variant URLs for it. This is what makes
+	 * those URLs honest, and it writes the ONE size that was asked for rather
+	 * than every registered size, so a mailbox full of attachments does not grow
+	 * four unwanted copies of every image.
+	 *
+	 * Local blobs only: producing a cloud variant means download, resize and
+	 * re-upload, which does not belong inside a page request.
+	 *
+	 * @param string $size_key A registered ImageSizeRegistry key ('original' is not a variant)
+	 * @return string|false Path to the variant, or false
+	 */
+	public function ensure_variant($size_key) {
+		if ($size_key === 'original' || !$this->is_image()) {
+			return false;
+		}
+		if ($this->get('fbb_storage_driver') !== 'local') {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('includes/ImageSizeRegistry.php'));
+		$sizes = ImageSizeRegistry::get_sizes();
+		if (!isset($sizes[$size_key])) {
+			return false;
+		}
+
+		$path = $this->filesystem_path($size_key);
+		if (file_exists($path)) {
+			return $path;
+		}
+		if (!file_exists($this->filesystem_path('original'))) {
+			return false;
+		}
+
+		$this->resize($size_key);
+
+		$path = $this->filesystem_path($size_key);
+		return file_exists($path) ? $path : false;
 	}
 
 	private function _resize_cloud($size_key, $sizes) {
@@ -1201,7 +1247,21 @@ class FileBlob extends SystemBase {
 				}
 			}
 
-			self::gd_write($dst, $new_path, $type, $quality);
+			// Write to a private temp name in the same directory, then rename
+			// into place — rename is atomic within a filesystem, so a reader
+			// never sees a half-written variant. On-demand generation makes
+			// that concurrency real: one listing page fires a thumb request per
+			// row, and dedup siblings share a stored name, so several requests
+			// can race to produce the very same variant file.
+			$tmp_path = $new_path . '.tmp' . getmypid() . '_' . LibraryFunctions::random_string(6);
+			self::gd_write($dst, $tmp_path, $type, $quality);
+			if (file_exists($tmp_path)) {
+				@chmod($tmp_path, 0666);
+				if (!@rename($tmp_path, $new_path)) {
+					@unlink($tmp_path);
+					error_log('FileBlob resize: could not place variant ' . $new_path);
+				}
+			}
 
 		} catch (\Throwable $e) {
 			error_log('FileBlob resize generation failed for ' . basename($new_path) . ': ' . $e->getMessage());

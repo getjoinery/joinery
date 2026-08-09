@@ -1211,10 +1211,38 @@ abstract class PublicPageBase {
 	 * Override in subclasses for framework-specific markup
 	 *
 	 * @param array|null $sort_data Sort options (display_name => column)
-	 * @param array|null $filter_data Filter options (display_name => value)
+	 * @param array|null $filter_data Filter options (display_name => value); a value
+	 *        that is itself an array becomes an <optgroup> — see renderFilterOptions
 	 * @param bool|null $search_on Whether to show search
 	 * @param Pager $pager Pager instance
 	 */
+
+	/**
+	 * Emit the <option> list for a filter select.
+	 *
+	 * A filter map is display_name => value. When a value is an ARRAY, the key
+	 * labels an <optgroup> and the array is its options — which is how a listing
+	 * that filters on two unrelated questions (where a file came from, and what
+	 * kind of file it is) keeps them from reading as one flat list of alternatives.
+	 * Nesting stops there, because that is where <select> stops.
+	 *
+	 * @param array $filter_data display_name => value, or display_name => array
+	 * @param mixed $selected The currently applied filter value
+	 */
+	protected function renderFilterOptions($filter_data, $selected) {
+		foreach ($filter_data as $label => $value) {
+			if (is_array($value)) {
+				echo '<optgroup label="' . htmlspecialchars($label) . '">';
+				$this->renderFilterOptions($value, $selected);
+				echo '</optgroup>';
+				continue;
+			}
+			$is_selected = ((string)$selected === (string)$value) ? ' selected' : '';
+			echo '<option value="' . htmlspecialchars($value) . '"' . $is_selected . '>'
+				. htmlspecialchars($label) . '</option>';
+		}
+	}
+
 	protected function renderToolbar($sort_data, $filter_data, $search_on, $pager) {
 		if (!$sort_data && !$filter_data && !$search_on) return;
 
@@ -1250,10 +1278,7 @@ abstract class PublicPageBase {
 			echo $pager->url_vars_as_hidden_input(array('filter'));
 			echo '<label for="'.$pager->prefix().'filter">Show: </label>';
 			echo '<select name="'.$pager->prefix().'filter">';
-			foreach ($filter_data as $key => $value) {
-				$selected = ($pager->get_filter() == $value) ? ' selected' : '';
-				echo '<option value="' . htmlspecialchars($value) . '"' . $selected . '>' . htmlspecialchars($key) . '</option>';
-			}
+			$this->renderFilterOptions($filter_data, $pager->get_filter());
 			echo '</select>';
 
 			foreach($pager->url_vars() as $key=>$value){
