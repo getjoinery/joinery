@@ -309,6 +309,18 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 /// entity is the second, and retrying it forever is how a client ends up busy
 /// and useless.
 fn classify(e: &ExecError) -> OpOutcome {
+    // A refused name is not a broken operation, and it is not something to give
+    // up on and tell somebody about: the server is holding a live sibling with
+    // this name, this device will be told about that sibling on the next index
+    // walk, and landing it is what moves our copy aside and frees the name. The
+    // thing that resolves this is already on its way.
+    if let ExecError::Proto(p) = e {
+        if p.name_taken() {
+            return OpOutcome::Retry(
+                "something here is already using that name; waiting to be told what it is".into(),
+            );
+        }
+    }
     match e {
         ExecError::Proto(ProtoError::Transport(m)) => OpOutcome::Retry(m.clone()),
         ExecError::Proto(ProtoError::Io(m)) => OpOutcome::Retry(m.to_string()),
@@ -1273,6 +1285,22 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         to
     };
     env.vfs.rename(&from, &to)?;
+
+    // Where it actually went, which is not always where the plan said. When the
+    // planned path was occupied the search above picked another one, and an
+    // entry recorded under the planned name would claim a name that is already
+    // somebody else's — the earlier rescue's, which by now is a real file on the
+    // server. It then uploads under that name forever: a second live file with
+    // one name, which no device can ever fully materialize. That is where the
+    // soak rig's duplicate names came from, and a permissive server took every
+    // one of them without complaint.
+    let kept = Placement {
+        parent: entry.remote.parent,
+        name: to
+            .file_name()
+            .map(|n| n.to_string_lossy().to_string())
+            .unwrap_or(kept.name),
+    };
 
     // The rescued copy is a new entry with its own identity: it has never
     // agreed with anything, so it uploads as a creation on the next round.

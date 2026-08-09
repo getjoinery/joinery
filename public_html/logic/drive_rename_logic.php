@@ -71,9 +71,16 @@ function drive_rename_logic(array $input): LogicResult {
 		$entity->save();
 		$owner = (int)$entity->get('fil_usr_user_id');
 	} else {
+		$folder_id = (int)$entity->get('fil_fol_folder_id');
+		$owner_id  = (int)$entity->get('fil_usr_user_id');
+		if (DriveHelper::file_name_taken($owner_id, $folder_id, $name, (int)$entity->key)) {
+			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+		}
 		$entity->set('fil_title', $name);
-		$entity->save();
-		$owner = (int)$entity->get('fil_usr_user_id');
+		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+			return LogicResult::error('A file with that name already exists here.', array('reason' => 'name_taken'));
+		}
+		$owner = $owner_id;
 	}
 
 	FileChange::record(FileChange::KIND_RENAMED, $entity_type, $entity_id, $owner, $user_id);

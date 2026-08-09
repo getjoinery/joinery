@@ -1035,6 +1035,7 @@ fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
     match reason {
         R::CaseClash { with } => format!("case_clash:{with}"),
         R::UnicodeClash { with } => format!("unicode_clash:{with}"),
+        R::DuplicateName { with } => format!("duplicate_name:{with}"),
         R::NameTooLong { bytes, limit } => format!("name_too_long:{bytes}:{limit}"),
         R::PathTooLong { bytes, limit } => format!("path_too_long:{bytes}:{limit}"),
         R::Empty => "empty".into(),
@@ -1050,6 +1051,7 @@ fn decode_reason(raw: &str) -> Option<jd_vfs::UnsyncableReason> {
         // A filename may contain colons, so the name takes the whole remainder.
         "case_clash" => Some(R::CaseClash { with: rest.into() }),
         "unicode_clash" => Some(R::UnicodeClash { with: rest.into() }),
+        "duplicate_name" => Some(R::DuplicateName { with: rest.into() }),
         "name_too_long" | "path_too_long" => {
             let (bytes, limit) = rest.split_once(':')?;
             let bytes = bytes.parse().ok()?;

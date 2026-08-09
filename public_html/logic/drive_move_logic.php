@@ -134,6 +134,13 @@ function drive_move_logic(array $input): LogicResult {
 		}
 		$owner = $owner_id;
 	} else {
+		$owner_id = (int)$entity->get('fil_usr_user_id');
+		// Asked before any conversion runs. Sealing or unsealing a file is byte
+		// work, and doing it only to refuse the move afterwards would spend it
+		// for nothing.
+		if (DriveHelper::file_name_taken($owner_id, $parent_id, $entity->get('fil_title'), $entity_id)) {
+			return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
+		}
 		// Convert before the move lands, so a failure leaves the file where it was
 		// at the level it was, rather than in a folder whose promise it breaks.
 		if ($convert_file_to !== null) {
@@ -152,8 +159,10 @@ function drive_move_logic(array $input): LogicResult {
 			$entity = DriveHelper::load_file($entity_id);
 		}
 		$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
-		$entity->save();
-		$owner = (int)$entity->get('fil_usr_user_id');
+		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+			return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
+		}
+		$owner = $owner_id;
 	}
 
 	FileChange::record(FileChange::KIND_MOVED, $entity_type, $entity_id, $owner, $user_id);

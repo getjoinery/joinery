@@ -46,8 +46,19 @@ pub enum UnsyncableReason {
     /// them apart. Materializing a mangled sibling would leak the mangling back
     /// as a rename the next time the user touched it, so the second one waits.
     CaseClash { with: String },
-    /// Normalizes to the same NFC form as a sibling.
+    /// Normalizes to the same NFC form as a sibling. Different bytes, one name
+    /// as far as the disk is concerned — `café` typed two ways.
     UnicodeClash { with: String },
+    /// Byte-for-byte the same name as a sibling. Nothing about the filesystem
+    /// or the spelling is at fault: the server is holding two live items in one
+    /// folder with one name, which it should not be.
+    ///
+    /// Told apart from the two clashes above because it is a different problem
+    /// with a different fix, and calling it a unicode clash sent three separate
+    /// investigations looking at NFC and NFD for a name like `app.db-wal` that
+    /// has nothing but ASCII in it. The user cannot resolve this one either —
+    /// they cannot see the second item to rename it.
+    DuplicateName { with: String },
     /// Too long for this filesystem once encoded.
     NameTooLong { bytes: usize, limit: usize },
     /// The name is fine; the folder it sits in is too deep for this
@@ -198,7 +209,12 @@ pub struct Resolved {
 /// state rebuild — an unstable order would make two machines disagree about
 /// which sibling is real.
 pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolved> {
-    let mut claimed: Vec<(String, String)> = Vec::new(); // (key, winner remote name)
+    // (key, winner's local name, winner's name as the server gave it). The
+    // server's name is kept as well as the local one because the two answer
+    // different questions: the local name says what the disk would have called
+    // it, and the server's says whether these are genuinely the same name or
+    // two spellings that a normalizing disk brought together.
+    let mut claimed: Vec<(String, String, String)> = Vec::new();
     let mut out = Vec::with_capacity(remote_names.len());
 
     for name in remote_names {
@@ -216,7 +232,7 @@ pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolve
         };
 
         let key = comparison_key(&local, p);
-        if let Some((_, winner)) = claimed.iter().find(|(k, _)| *k == key) {
+        if let Some((_, winner, winner_remote)) = claimed.iter().find(|(k, _, _)| *k == key) {
             // Distinguish "same letters, different case" from "different bytes,
             // same normalized form" — the user needs to know which, because the
             // fixes are different (rename one, or pick one spelling).
@@ -233,7 +249,17 @@ pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolve
                     ..*p
                 },
             );
-            let reason = if p.case_insensitive && case_only {
+            let reason = if name == winner_remote {
+                // The SERVER's two names are byte-identical, so neither the
+                // filesystem nor the spelling is involved and neither clash
+                // describes it. Compared here rather than on the local names,
+                // which is not the same question: a disk that normalizes turns
+                // two spellings of `café` into one local name, and calling that
+                // a duplicate would hide the only thing the user can act on.
+                UnsyncableReason::DuplicateName {
+                    with: winner.clone(),
+                }
+            } else if p.case_insensitive && case_only {
                 UnsyncableReason::CaseClash {
                     with: winner.clone(),
                 }
@@ -249,7 +275,7 @@ pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolve
             continue;
         }
 
-        claimed.push((key, local));
+        claimed.push((key, local, name.clone()));
         out.push(Resolved {
             remote_name: name.clone(),
             outcome,
@@ -413,6 +439,21 @@ mod tests {
         assert!(matches!(
             &out[1].outcome,
             LocalName::Unsyncable(UnsyncableReason::UnicodeClash { .. })
+        ));
+    }
+
+    #[test]
+    fn two_identical_names_are_a_duplicate_and_not_a_unicode_clash() {
+        // What the server hands over when it has taken two live files with one
+        // name in one folder. Reported as a unicode clash for most of this
+        // engine's life, which sent every investigation looking at NFC and NFD
+        // for names like `app.db-wal` that hold nothing but ASCII.
+        let names = vec!["app.db-wal".to_string(), "app.db-wal".to_string()];
+        let out = resolve_siblings(&names, &Personality::linux());
+        assert!(matches!(out[0].outcome, LocalName::AsIs(_)));
+        assert!(matches!(
+            &out[1].outcome,
+            LocalName::Unsyncable(UnsyncableReason::DuplicateName { with }) if with == "app.db-wal"
         ));
     }
 

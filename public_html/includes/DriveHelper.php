@@ -739,7 +739,7 @@ class DriveHelper {
 	}
 
 	// ------------------------------------------------------------------
-	// Sibling-name uniqueness (folders only; files may share names)
+	// Sibling-name uniqueness
 	// ------------------------------------------------------------------
 
 	/**
@@ -798,6 +798,72 @@ class DriveHelper {
 				(int)$folder->get('fol_parent_folder_id'),
 				$folder->get('fol_name'),
 				(int)$folder->key
+			);
+			if ($taken) {
+				return false;
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * Is there a live sibling FILE owned by $user_id in $folder_id already titled
+	 * $title (excluding $exclude_id)? `$folder_id` 0 means the drive root.
+	 *
+	 * Drive files only. fil_files is platform-wide and every other subsystem is
+	 * entitled to duplicate titles.
+	 */
+	public static function file_name_taken($user_id, $folder_id, $title, $exclude_id = 0) {
+		self::require_classes();
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT fil_file_id FROM fil_files
+		         WHERE fil_usr_user_id = :uid
+		           AND COALESCE(fil_fol_folder_id, 0) = :fid
+		           AND fil_title = :title
+		           AND fil_source = 'drive'
+		           AND fil_delete_time IS NULL
+		           AND fil_file_id <> :exclude
+		         LIMIT 1";
+		$q = $dblink->prepare($sql);
+		$q->execute(array(
+			':uid'     => (int)$user_id,
+			':fid'     => (int)$folder_id,
+			':title'   => $title,
+			':exclude' => (int)$exclude_id,
+		));
+		return $q->fetchColumn() !== false;
+	}
+
+	/**
+	 * Save a file whose sibling name has just been checked, telling a lost name
+	 * race apart from a genuine failure. The file counterpart of
+	 * save_folder_unless_name_taken(), and the same reasoning applies: the check
+	 * is a fast path, not a guarantee, so the answer is re-derived by asking the
+	 * question again rather than by reading the driver's error text.
+	 *
+	 * This matters most to a sync client, and the soak rig showed why. Two
+	 * devices that conflict on one file both pick the same conflicted-copy name
+	 * — each verified it was free on its own disk — and without a constraint the
+	 * server took both. Every device could then materialize only one of them, so
+	 * the rest sat unsyncable forever: 55 duplicate names and 91 files no device
+	 * could ever place, and a fleet that never converged again.
+	 *
+	 * Returns TRUE when the file saved, FALSE when the name was taken meanwhile.
+	 */
+	public static function save_file_unless_name_taken($file) {
+		self::require_classes();
+		try {
+			$file->save();
+			return true;
+		} catch (Exception $e) {
+			if (strpos($e->getMessage(), '23505') === false) {
+				throw $e; // not a uniqueness refusal — nothing here explains it
+			}
+			$taken = self::file_name_taken(
+				(int)$file->get('fil_usr_user_id'),
+				(int)$file->get('fil_fol_folder_id'),
+				$file->get('fil_title'),
+				(int)$file->key
 			);
 			if ($taken) {
 				return false;

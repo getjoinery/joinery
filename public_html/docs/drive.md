@@ -133,6 +133,7 @@ model of its own:
 | Model | Table | Role |
 |-------|-------|------|
 | `Folder` | `fol_folders` | A node in a user's tree. Sibling-name uniqueness among live rows is a partial unique index on `(owner, COALESCE(parent,0), name) WHERE delete_time IS NULL`. Save folders through `DriveHelper::save_folder_unless_name_taken()` — see below. |
+| `File` | `fil_files` | Platform-wide, so Drive's own rows are `fil_source = 'drive'`. Sibling-name uniqueness among live Drive rows is a partial unique index on `(owner, COALESCE(folder,0), title) WHERE delete_time IS NULL AND fil_source = 'drive'`. Save through `DriveHelper::save_file_unless_name_taken()` — see below. |
 | `DriveUsage` | `dru_drive_usage` | One recomputed byte total per user (the quota gate + storage meter). |
 | `FileVersion` | `fvr_file_versions` | Prior content of a file — one row pins one historical blob. |
 | `FileAccessGrant` | `fga_file_access_grants` | A share of a file/folder to another member (`viewer` / `editor`). |
@@ -144,15 +145,34 @@ Access and tree logic lives in `includes/DriveHelper.php`; the verbs are `drive_
 API actions (`logic/drive_*_logic.php`, each with a `_logic_descriptor()`), which
 page JavaScript (`assets/js/drive.js`) calls with the browser-session credential.
 
-**Two folders may not share a name under one parent, and the index is what
-enforces it.** `DriveHelper::folder_name_taken()` is a fast path that gives a
-clean answer before any work is done, but two requests can both pass it and both
-reach the insert — so every create, rename, move and restore saves through
-`DriveHelper::save_folder_unless_name_taken()`. On a uniqueness refusal it asks
-the same question again and, if the name is now taken, returns `false` for the
-caller to answer exactly as it would have a moment earlier; anything else is
-rethrown. Sync clients depend on this: a name that is taken is something they
-know how to resolve, while a raw database error is a failure they retry forever.
+**No two live items may share a name in one folder — folders or files — and a
+partial unique index is what enforces it.** Files are scoped to
+`fil_source = 'drive'`, because `fil_files` is platform-wide and an avatar, a
+store image and a mail attachment all sit at folder `NULL` where duplicate
+titles are ordinary.
+
+`DriveHelper::folder_name_taken()` and `file_name_taken()` are fast paths that
+give a clean answer before any work is done, but two requests can both pass one
+and both reach the insert — so every create, rename, move and restore saves
+through `DriveHelper::save_folder_unless_name_taken()` or
+`save_file_unless_name_taken()`. On a uniqueness refusal these ask the same
+question again and, if the name is now taken, return `false` for the caller to
+answer exactly as it would have a moment earlier; anything else is rethrown.
+
+A file refusal carries `reason: name_taken` in the error data. Sync clients
+branch on that marker rather than on the message, and treat it as a state that
+resolves rather than a failure: the sibling holding the name is something the
+next index walk will tell them about, and landing it is what frees the name.
+Without the rule, two devices that conflict on one file both upload the same
+conflicted-copy name, the server takes both, and every device can then
+materialize only one of them — leaving the rest unsyncable forever with nothing
+the user can do about it, since they cannot see the second file to rename it.
+
+One case the rule cannot reach, stated honestly: a Fortress file's `fil_title`
+is an opaque `enc-…` identifier and its real name lives inside encrypted
+metadata the server cannot read, so two client-encrypted files can share a real
+name and differ here. That is the price of the server not being able to see the
+name, and noticing it is the client's job.
 
 ## Protection levels
 

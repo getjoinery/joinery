@@ -184,6 +184,32 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	    'fil_content_modified_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
+	// Sibling-name uniqueness inside a Drive folder, among live rows — the same
+	// rule fol_folders has, and for the same reason: two items a user cannot
+	// tell apart cannot both live at one path.
+	//
+	// Scoped to fil_source = 'drive' because fil_files is platform-wide. An
+	// avatar, a store image and a mail attachment all sit at folder NULL, and
+	// duplicate titles among them are ordinary — a rule written for Drive must
+	// not reach into subsystems that never asked for it.
+	//
+	// NULL folder is the drive root, so it coalesces to 0 the way the folder
+	// index does; without that, root files would be exempt from the very rule
+	// this exists to enforce.
+	//
+	// What it cannot catch, honestly: a fortress file's fil_title is an opaque
+	// enc-… identifier and its real name lives inside encrypted metadata the
+	// server cannot read. Two client-encrypted files can therefore share a real
+	// name and differ here. That is the price of the server not being able to
+	// see the name, and it is the client's job to notice.
+	public static $index_specifications = array(
+		array(
+			'columns' => array('fil_usr_user_id', 'COALESCE(fil_fol_folder_id, 0)', 'fil_title'),
+			'unique'  => true,
+			'where'   => "fil_delete_time IS NULL AND fil_source = 'drive'",
+		),
+	);
+
 public static function get_by_name($name, $search_deleted = false) {
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
