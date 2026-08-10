@@ -1,12 +1,14 @@
 # Linode StackScript — Self-Installing Joinery on Akamai Cloud
 
-**Status:** Built 2026-07-30, awaiting the live gates.
+**Status:** Built 2026-07-30. The StackScript is live and private in the
+account (2185451); awaiting the live gates.
 
 Phases 0, 1 and 2 are implemented; Gaps 3, 4, 5, 6 and 7 are closed in code, as
 are the timezone, bundle, admin-email and email-default items. `safe` tier green
-(71/71); `tests/unit/installer_contract_test.php` grew 45 checks covering every
-decision here. What is left is what only a real instance can answer: live gates
-A, B and C below, and Phase 3, which is a publishing action rather than code.
+(98/98); `tests/unit/installer_contract_test.php` covers every decision here.
+What is left is what only a real instance can answer: live gates A, B and C
+below, and Phase 3 — flipping the script public, which is a publishing action
+rather than code.
 
 Two things were verified by construction rather than by running them, and are
 called out so nobody assumes otherwise. The retry timer's units were never
@@ -646,11 +648,34 @@ Where each landed:
 the same defect for the same reason, and leaving it at `smtp` would have meant
 the unconfigured branch never fired on a fresh site.
 
-**Phase 1 — private StackScript. DONE (code).** New
+**Phase 1 — private StackScript. DONE.** New
 `maintenance_scripts/install_tools/linode_stackscript.sh` (the handoff) and
-`linode_stackscript_wrapper.sh` (the body to paste at Linode, kept in the repo
-so what was pasted stays reviewable). Not yet deployed in our own account —
-that is live gate A.
+`linode_stackscript_wrapper.sh` (the body pasted at Linode, kept in the repo
+so what was pasted stays reviewable).
+
+Live in the account as **StackScript 2185451, "Joinery Personal Cloud"**,
+private, images `linode/ubuntu24.04` and `linode/ubuntu26.04`, all five fields
+parsed. Deploy form:
+`https://cloud.linode.com/linodes/create?type=StackScripts&stackScriptID=2185451`.
+It was uploaded through the API rather than pasted, so the body can be fetched
+back and hashed against the repo file — the two are byte-identical today, and
+that equality is the only thing that makes the repo copy meaningful.
+
+Two platform constraints reject the upload outright, and neither is visible
+from reading the script or running it locally. Both are now pinned by
+`installer_contract_test.php`:
+
+- **The body must be plain ASCII.** One non-ASCII byte fails the whole create
+  call, reported as a character offset with no other context. Em dashes in the
+  comments were enough.
+- **Every occurrence of the field tag is parsed, comments included.** Prose that
+  spelled the tag out to explain it was read as a sixth field carrying neither
+  name nor label, and rejected as malformed. The wrapper's comments now describe
+  the fields without naming the tag.
+
+The image order is not ours to choose: the platform stores the set sorted and
+returns `24.04` first whatever order it is sent, so both images have to work
+rather than one being the preferred default.
 
 **Phase 2 — SSL automation. DONE.** Gap 3. The timer is core, gated on
 `SSL_DEFERRED`, installed by `print_ssl_deferred_notice` so it lands from
