@@ -688,11 +688,23 @@ builds a real population using the script before any listing review reads it.
   `--set-email=` behaviour both need a real database and a real install to
   exercise end to end; asserting them from the outside would only re-check the
   text the safe tier already pins.
-- Live gate A: a fresh Linode from the StackScript with DNS pointed *before*
-  create, reaching HTTPS and a forced password change with no console access
-  used.
-- Live gate B: the same with DNS pointed *after* create, proving the SSL retry
-  timer.
+- Live gate A: an instance whose domain already resolves to it by the time
+  certbot runs, reaching HTTPS and a forced password change with no console
+  access used. An A record cannot exist before create — the IP is assigned by
+  the create — so there are exactly two ways to reach this state, and both are
+  worth running:
+  - **A1, the hands-off path:** supply the domain and a Linode API token for an
+    account that already holds the zone. The handoff script creates the A
+    record itself during first boot, before `install.sh` reaches certbot. This
+    is the path a real deployer takes, and the only one available on a first
+    create.
+  - **A2, the isolated path:** deploy once, point the A record at the IP by
+    hand, then *Rebuild* the same instance with the StackScript. A rebuild
+    keeps the IPv4, so the record already resolves when the script runs. This
+    exercises the certificate path with the record-creation step removed, which
+    is what separates an SSL failure from a Linode API failure.
+- Live gate B: the same with no DNS at create and no token, proving the SSL
+  retry timer issues a real certificate once the record is pointed afterwards.
 - Live gate C: the instance makes no outbound call other than fetching the
   release archive and its declared dependencies — verified from the node, not
   assumed. This is the standalone guarantee, and it is the kind of promise
