@@ -196,6 +196,20 @@ fn name_taken(message: &'static str) -> ApiRefusal {
     }
 }
 
+/// The destination folder is in the trash, so nothing new may go into it. The
+/// real server refuses this (`DriveHelper::folder_is_trashed`) at every verb
+/// that places an item; without it here the mock would take the write and hold
+/// a live item under a folder no listing shows, which is exactly the state that
+/// went unnoticed on a real box until the rig grew this refusal.
+fn parent_trashed() -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: "That folder is in the trash.".into(),
+        data: serde_json::json!({ "reason": "parent_trashed" }),
+    }
+}
+
 pub fn sha256_hex(bytes: &[u8]) -> String {
     let mut h = Sha256::new();
     h.update(bytes);
@@ -291,6 +305,72 @@ impl MockServer {
             st.folders.values().filter(|f| !f.trashed).count(),
             st.files.values().filter(|f| !f.trashed).count(),
         )
+    }
+
+    /// Destroy one folder outright, whatever state it is in. The single-entity
+    /// form of [`purge_trashed`](Self::purge_trashed).
+    pub fn forget_folder(&self, id: i64) -> bool {
+        self.state.lock().unwrap().folders.remove(&id).is_some()
+    }
+
+    /// Destroy trashed entities outright, the way the retention purge does on a
+    /// real server.
+    ///
+    /// Not an API action — no client asks for this, it happens to them. It is
+    /// the only way to reach the state where a client holds a record of
+    /// something the server's index cannot account for at all, which is
+    /// different from the item merely being in the trash, and which the engine
+    /// has to survive without deciding its own store is broken.
+    pub fn purge_trashed(&self) -> usize {
+        let mut st = self.state.lock().unwrap();
+        let folders: Vec<i64> = st
+            .folders
+            .values()
+            .filter(|f| f.trashed)
+            .map(|f| f.id)
+            .collect();
+        let files: Vec<i64> = st
+            .files
+            .values()
+            .filter(|f| f.trashed)
+            .map(|f| f.id)
+            .collect();
+        for id in &folders {
+            st.folders.remove(id);
+        }
+        for id in &files {
+            st.files.remove(id);
+        }
+        folders.len() + files.len()
+    }
+
+    /// Live items whose parent folder is trashed or absent, described for a
+    /// failure message.
+    ///
+    /// Such an item is owned, undeleted and unreachable: no listing walks into
+    /// a trashed folder, so no client can be told where it lives, and it sits
+    /// on the server forever costing quota nobody can account for. One live
+    /// account had eighty-three, every one of them created after its parent
+    /// went to the trash.
+    pub fn live_orphans(&self) -> Vec<String> {
+        let st = self.state.lock().unwrap();
+        let mut out = Vec::new();
+        let dead = |parent: Option<i64>| match parent {
+            None => false, // the root is always a place
+            Some(p) => st.folders.get(&p).map(|f| f.trashed).unwrap_or(true),
+        };
+        for f in st.folders.values() {
+            if !f.trashed && dead(f.parent) {
+                out.push(format!("folder {} ({}) under {:?}", f.id, f.name, f.parent));
+            }
+        }
+        for f in st.files.values() {
+            if !f.trashed && dead(f.folder) {
+                out.push(format!("file {} ({}) under {:?}", f.id, f.name, f.folder));
+            }
+        }
+        out.sort();
+        out
     }
 
     /// A flat picture of the live tree, as `path -> content hash` (folders map
@@ -721,8 +801,10 @@ impl MockServer {
         let parent = body.get("parent_id").and_then(Value::as_i64);
         let mut st = self.state.lock().unwrap();
         if let Some(p) = parent {
-            if !st.folders.contains_key(&p) {
-                return Err(refuse(404, "NotFound", "That folder does not exist."));
+            match st.folders.get(&p) {
+                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                Some(f) if f.trashed => return Err(parent_trashed()),
+                Some(_) => {}
             }
         }
         // A live folder of that name in that parent already exists. The real
@@ -825,8 +907,10 @@ impl MockServer {
         let dest = body.get("folder_id").and_then(Value::as_i64);
         let mut st = self.state.lock().unwrap();
         if let Some(d) = dest {
-            if !st.folders.contains_key(&d) {
-                return Err(refuse(404, "NotFound", "That folder does not exist."));
+            match st.folders.get(&d) {
+                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                Some(f) if f.trashed => return Err(parent_trashed()),
+                Some(_) => {}
             }
         }
         if t == "folder" {
@@ -967,8 +1051,10 @@ impl MockServer {
 
         let mut st = self.state.lock().unwrap();
         if let Some(f) = folder {
-            if !st.folders.contains_key(&f) {
-                return Err(refuse(404, "NotFound", "That folder does not exist."));
+            match st.folders.get(&f) {
+                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                Some(fo) if fo.trashed => return Err(parent_trashed()),
+                Some(_) => {}
             }
         }
         // Whether this upload is encrypted is the DESTINATION's property, never

@@ -77,6 +77,18 @@ impl ProtoError {
             _ => false,
         }
     }
+
+    /// Whether the server refused this because the destination folder is in its
+    /// trash. Read off the marker rather than the prose, for the reason
+    /// `name_taken` is.
+    pub fn parent_trashed(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => {
+                data.get("reason").and_then(Value::as_str) == Some("parent_trashed")
+            }
+            _ => false,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

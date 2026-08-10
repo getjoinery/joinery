@@ -98,6 +98,9 @@ function drive_upload_init_logic(array $input): LogicResult {
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $folder, $user_id, $session->get_permission())) {
 			return LogicResult::error('You do not have access to that folder.');
 		}
+		if (DriveHelper::folder_is_trashed($folder)) {
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
 		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
 		$level = DriveHelper::folder_level($folder);

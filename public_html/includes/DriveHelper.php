@@ -47,6 +47,24 @@ class DriveHelper {
 	}
 
 	/**
+	 * Is this folder in the trash?
+	 *
+	 * `load_folder()` resolves trashed folders on purpose — listing the trash
+	 * and restoring out of it both need them. Every verb that puts something
+	 * *into* a folder has to ask this question itself, because a trashed folder
+	 * is not a place anything new can go: its contents are hidden from every
+	 * listing, so the new item would be live, owned, and invisible, with no way
+	 * for any client to work out where it belongs.
+	 */
+	public static function folder_is_trashed($folder) {
+		if (!$folder) {
+			return false;
+		}
+		$t = $folder->get('fol_delete_time');
+		return $t !== null && $t !== '';
+	}
+
+	/**
 	 * Load a File by id, or null when missing. Only Drive files
 	 * (fil_source='drive') resolve — every Drive verb goes through here, so
 	 * Drive can never list, trash, restore, share, or purge a file another
