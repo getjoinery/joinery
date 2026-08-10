@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.29 - the publish-upgrade step cds to the running site's web root
+ *                 instead of the path of the machine it was written on
  * @version 1.28 - fetch_status_via_api returns the curl errno alongside reason 'transport',
  *                 so a caller can tell an unreachable node from an unresolvable name
  * @version 1.27 - a node that names no backup target falls back to the control
@@ -1539,9 +1541,13 @@ class JobCommandBuilder {
 			$version = intval($params['major']) . '.' . intval($params['minor']) . '.' . intval($params['patch']);
 			$version_arg = escapeshellarg($version) . ' ';
 		}
+		// The publish runs on whichever site is building the release, which is not
+		// always the one this was written on: getjoinery publishes too, and its web
+		// root is its own. Ask for the running site's path rather than naming one.
+		$web_root = escapeshellarg(PathHelper::getRootDir());
 		return [
 			['type' => 'local', 'label' => 'Publish upgrade',
-			 'cmd' => "cd /var/www/html/joinerytest/public_html && php plugins/server_manager/includes/publish_upgrade.php {$version_arg}{$notes}"],
+			 'cmd' => "cd {$web_root} && php plugins/server_manager/includes/publish_upgrade.php {$version_arg}{$notes}"],
 		];
 	}
 

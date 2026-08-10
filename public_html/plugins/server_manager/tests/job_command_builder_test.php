@@ -1068,6 +1068,13 @@ foreach ($pub_steps as $step) {
 }
 check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archives are the deliverable');
 
+// The step runs on whichever control plane builds the release. getjoinery
+// publishes as well as dev, so a path from the machine this was written on is a
+// job that fails at `cd` on every other site.
+$pub_cmd = isset($pub_steps[0]['cmd']) ? $pub_steps[0]['cmd'] : '';
+check(strpos($pub_cmd, 'cd ' . escapeshellarg(PathHelper::getRootDir()) . ' ') === 0,
+      'publish_upgrade cds to the running site web root, not a hardcoded one');
+
 // Rule 1 (policy deletions): the local-cleanup that follows a successful upload
 // is folded INTO the upload step (chained with && after the upload command), so
 // it deletes exactly the file it just uploaded and can never run on an upload
