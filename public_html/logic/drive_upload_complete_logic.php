@@ -105,6 +105,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			$up->discard();
 			return LogicResult::error('You can no longer upload into that folder.');
 		}
+		if (DriveHelper::folder_is_trashed($folder)) {
+			// Trashed while the bytes were in flight. Discard the staged upload
+			// rather than leave it to expire: the destination is gone and this
+			// transfer has nowhere left to land.
+			$up->discard();
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
 		$level = DriveHelper::folder_level($folder);
 	}

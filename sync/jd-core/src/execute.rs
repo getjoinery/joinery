@@ -320,6 +320,15 @@ fn classify(e: &ExecError) -> OpOutcome {
                 "something here is already using that name; waiting to be told what it is".into(),
             );
         }
+        // The destination went to the server's trash while we were working
+        // towards it, so this op was overtaken by somebody else's delete rather
+        // than failing. Saying so is what stops it being retried against a
+        // folder that is never coming back: the same index walk that carries
+        // the delete will trash our copy of the folder, and anything of ours
+        // inside it that the server never took is rescued on the way out.
+        if p.parent_trashed() {
+            return OpOutcome::Overtaken("the folder it was going into is in the trash".into());
+        }
     }
     match e {
         ExecError::Proto(ProtoError::Transport(m)) => OpOutcome::Retry(m.clone()),

@@ -368,4 +368,50 @@ $free_file = new File($free_id, true);
 check((int)$free_file->get('fil_fol_folder_id') === $dedup_dir,
 	'the deduped file is created in its destination folder, not at the root');
 
+// ---------------------------------------------------------------------------
+section('nothing new may be placed into a trashed folder');
+
+// Two devices race: one puts a folder in the trash while the other is still
+// putting things into it. Whichever arrives second, the server must refuse —
+// a live item under a trashed parent appears in no listing, so no client can
+// ever be told where it belongs and it stays there costing quota forever.
+$rDoomed = drive_folder_create_logic(array('name' => 'FixDoomed_' . bin2hex(random_bytes(3))));
+$doomed = (int)$rDoomed->data['folder']['id']; $made_folders[] = $doomed;
+$rBystander = drive_folder_create_logic(array('name' => 'FixBystander_' . bin2hex(random_bytes(3))));
+$bystander = (int)$rBystander->data['folder']['id']; $made_folders[] = $bystander;
+$mover = fixpack_file('mover-' . bin2hex(random_bytes(6)), 'mover.bin', $ownerA->key, $bystander);
+
+drive_trash_logic(array('entity_type' => 'folder', 'entity_id' => $doomed));
+
+$rSub = drive_folder_create_logic(array('name' => 'TooLate', 'parent_id' => $doomed));
+check($rSub->error !== null, 'a subfolder cannot be created in a trashed folder');
+check(($rSub->data['reason'] ?? '') === 'parent_trashed',
+	'and the refusal is marked parent_trashed, so a sync client can act on it');
+
+$late = 'late-' . bin2hex(random_bytes(6));
+$rLate = drive_upload_init_logic(array(
+	'name' => 'late.bin', 'size_bytes' => strlen($late),
+	'sha256' => hash('sha256', $late), 'folder_id' => $doomed,
+));
+check($rLate->error !== null, 'an upload cannot be started into a trashed folder');
+check(($rLate->data['reason'] ?? '') === 'parent_trashed', 'the upload refusal is marked too');
+if (!empty($rLate->data['file']['id'])) { $made_files[] = (int)$rLate->data['file']['id']; }
+
+$rMoveIn = drive_move_logic(array(
+	'entity_type' => 'file', 'entity_id' => (int)$mover->key, 'parent_id' => $doomed,
+));
+check($rMoveIn->error !== null, 'an item cannot be moved into a trashed folder');
+check(($rMoveIn->data['reason'] ?? '') === 'parent_trashed', 'the move refusal is marked too');
+$mover->load();
+check((int)$mover->get('fil_fol_folder_id') === $bystander,
+	'and the refused move left the item where it was');
+
+// The whole point, stated as the invariant rather than as three refusals:
+// nothing live is sitting under the trashed folder.
+$orphans = (int)$dblink->query(
+	"SELECT (SELECT COUNT(*) FROM fil_files WHERE fil_fol_folder_id = $doomed AND fil_delete_time IS NULL)
+	      + (SELECT COUNT(*) FROM fol_folders WHERE fol_parent_folder_id = $doomed AND fol_delete_time IS NULL)"
+)->fetchColumn();
+check($orphans === 0, 'no live item is left hidden under the trashed folder');
+
 harness_finish();

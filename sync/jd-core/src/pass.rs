@@ -1036,6 +1036,23 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
         .collect();
     let mut real_stranded = 0;
     for entry in &all {
+        // A record of something the server has deleted cannot be stranded.
+        // There is no path to resolve for it and no work to plan against it, so
+        // counting it as a hole in the picture starts a walk that can only find
+        // it again: `drive_index` returns trashed entities on purpose, marked
+        // deleted, so the walk re-absorbs the very tombstone that provoked it,
+        // its parent is still gone, and the next pass does the same. That loop
+        // ran a full index walk every pass for the life of the client and told
+        // the user items needed attention when every one of them was already
+        // deleted.
+        //
+        // Note this skips *counting*, not keeping. Discarding these records was
+        // tried once and cost seven files — they are what ties a local file to
+        // what the server holds. They stay; they just stop being read as a
+        // fault.
+        if entry.remote_deleted {
+            continue;
+        }
         let Some(parent) = entry.local_placement().parent else {
             continue;
         };

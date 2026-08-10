@@ -452,6 +452,23 @@ which leads with *nothing has been deleted*. A server message that is plainly
 not written for a person — anything carrying a `SQLSTATE` — is replaced rather
 than shown; the original stays in the issue's detail for diagnosis.
 
+**A record of something the server has deleted is never a fault.** An entry with
+no way back to the root normally means this device has lost its record of a
+folder that still exists, which is a hole in the store's picture: the engine
+re-derives from the index, and says so as `store_inconsistent` if the index
+cannot account for the parent either. Entries carrying `remote_deleted` are
+excluded from that count. There is no path to resolve for them and no work to
+plan against them, and counting them starts a loop rather than a repair —
+`drive_index` returns trashed entities on purpose, so the walk re-absorbs the
+tombstone that provoked it and the next pass finds it stranded again, walking
+every entity on every pass for the life of the client and standing on a claim
+that items need attention when all of them are already deleted.
+
+The records themselves are kept. Discarding them was tried once and the soak run
+that followed lost seven files where the run before it lost none — they are what
+ties a local file to what the server already holds. They stop being counted, not
+stored.
+
 **Stopping work is not the same as raising an issue.** An operation that cannot
 proceed ends one of two ways. It is *withdrawn* when the server refused it in a
 way another attempt will not change, and that is raised: somebody has to decide
@@ -463,6 +480,14 @@ pass plans afresh from what is actually there. Deleting a file you had just
 saved is an ordinary thing to do and must not leave an item asking you to look
 at it. Where an overtaken operation ran into something the user *does* need to
 know about — a conflict, say — that thing reports itself in its own words.
+
+A `parent_trashed` refusal is read as overtaken for exactly that reason. The
+destination folder went to the server's trash while this device was working
+towards it, which is somebody else's delete arriving rather than anything wrong
+here: the same index walk that carries the delete trashes this device's copy of
+the folder, and work inside it the server never took is rescued out first and
+raised as `rescued_from_trash`. Reading the refusal as a failure instead would
+retry it forever against a folder that is not coming back.
 
 The server side of the same promise is `sde_last_seen_time`: the security page
 shows when each device last synced, so a stalled device is visible from every

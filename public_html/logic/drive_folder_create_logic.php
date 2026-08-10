@@ -51,6 +51,9 @@ function drive_folder_create_logic(array $input): LogicResult {
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $parent, $user_id, $session->get_permission())) {
 			return LogicResult::error('You do not have access to that folder.');
 		}
+		if (DriveHelper::folder_is_trashed($parent)) {
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+		}
 		if (DriveHelper::depth($parent_id) + 1 > DriveHelper::max_depth()) {
 			return LogicResult::error('Maximum folder depth reached.');
 		}

@@ -395,6 +395,27 @@ pub fn assert_invariants(world: &World, committed: &Committed) {
     assert_nothing_lost(world, committed);
     assert_converged(world);
     assert_no_entry_is_stranded(world);
+    assert_no_live_orphan_on_the_server(world);
+}
+
+/// The server may not hold a live item under a folder that is in its trash.
+///
+/// The counterpart to [`assert_no_entry_is_stranded`], one level up: that one
+/// catches a client losing track of a parent, this one catches the server
+/// accepting a placement into a folder that is no longer a place. It is the
+/// same race either way — one device puts something into a folder while another
+/// deletes it — and the server taking the write is what makes it permanent.
+///
+/// Checked after every scenario for the same reason as its sibling: nothing
+/// visible goes wrong. Every device reports itself busy, the item is never
+/// listed, and only counting rows finds it.
+pub fn assert_no_live_orphan_on_the_server(world: &World) {
+    let orphans = world.server.live_orphans();
+    assert!(
+        orphans.is_empty(),
+        "the server is holding live items under trashed folders, where no \
+         listing will ever show them and no client can place them: {orphans:?}"
+    );
 }
 
 /// No entry may name a parent that is not in the store.

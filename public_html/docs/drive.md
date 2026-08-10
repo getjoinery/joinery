@@ -227,6 +227,31 @@ conflicted-copy name, the server takes both, and every device can then
 materialize only one of them — leaving the rest unsyncable forever with nothing
 the user can do about it, since they cannot see the second file to rename it.
 
+### A trashed folder is not a place
+
+Nothing new may be placed into a folder that is in the trash. Every verb that
+puts an item somewhere — `drive_folder_create`, `drive_upload_init`,
+`drive_upload_complete` and `drive_move` — asks `DriveHelper::folder_is_trashed()`
+about its destination and refuses with `reason: parent_trashed`.
+`load_folder()` resolves trashed folders on purpose, since listing the trash and
+restoring out of it both need them, so the check belongs at each placement site
+rather than in the loader.
+
+The refusal exists because a live item under a trashed parent is invisible and
+permanent: no listing walks into a trashed folder, so no client can be told
+where the item lives, no user can see it to move or delete it, and it holds
+quota nobody can account for. The state arises from an ordinary two-device race
+— one device writes into a folder while another deletes it — and once the write
+is taken there is nothing to repair it. Sync clients treat the marker as
+`Overtaken` rather than a failure: the index walk carrying the delete also
+trashes their copy of the folder, and anything inside it the server never took
+is rescued out on the way.
+
+`drive_upload_complete` discards the staged upload as it refuses, rather than
+leaving it to expire — the destination is gone and the transfer has nowhere
+left to land. `drive_restore` is not subject to the rule; restoring into a
+still-trashed parent re-roots the item instead.
+
 One case the rule cannot reach, stated honestly: a Fortress file's `fil_title`
 is an opaque `enc-…` identifier and its real name lives inside encrypted
 metadata the server cannot read, so two client-encrypted files can share a real

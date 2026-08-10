@@ -41,6 +41,12 @@ function drive_move_logic(array $input): LogicResult {
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FOLDER, $target, $user_id, $session->get_permission())) {
 			return LogicResult::error('You do not have access to the destination folder.');
 		}
+		if (DriveHelper::folder_is_trashed($target)) {
+			// Moving something into the trash is what drive_trash is for, and it
+			// records the move so a restore can undo it. Landing an item here
+			// instead would hide it with no record of where it came from.
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+		}
 		// Single-owner-tree rule: an item may only live under a folder owned by
 		// the item's owner. Without this, the destination owner's trash /
 		// delete-forever cascades (which select by folder) would operate on

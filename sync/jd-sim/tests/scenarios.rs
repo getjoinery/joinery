@@ -1741,3 +1741,153 @@ fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
     assert_nothing_lost(&world, &committed);
     assert_converged(&world);
 }
+
+#[test]
+fn work_landing_in_a_folder_another_device_just_deleted_is_not_left_on_the_server() {
+    // The delete/create race, from the server's side. One device writes into a
+    // folder while another puts that folder in the trash, and whichever order
+    // the two requests arrive in, the server must not end up holding the new
+    // item live underneath a trashed parent. Run 27 of the soak rig ended with
+    // seventeen entries per device stuck pending_download forever because of
+    // exactly this, and the account behind it had accumulated eighty-three live
+    // orphans over four days — every one of them created after its parent had
+    // already gone to the trash.
+    let world = World::new(71, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    world.device("laptop").fs.user_mkdir("Projects");
+    world
+        .device("laptop")
+        .fs
+        .user_write("Projects/plan.txt", b"already agreed");
+    committed.note("Projects/plan.txt", b"already agreed");
+    assert!(world.settle().is_some());
+
+    // The laptop goes quiet and keeps working inside Projects: a new file and a
+    // new subfolder, neither of which the server has heard about.
+    let laptop = world.device("laptop");
+    laptop.net.set_faults(NetFaults {
+        drop_before: u64::MAX,
+        ..NetFaults::none()
+    });
+    laptop.fs.user_mkdir("Projects/Drafts");
+    laptop
+        .fs
+        .user_write("Projects/late.txt", b"written into a doomed folder");
+    committed.note("Projects/late.txt", b"written into a doomed folder");
+    world.pass(laptop);
+
+    // Meanwhile the desktop deletes the whole folder.
+    let desktop = world.device("desktop");
+    desktop.fs.user_remove("Projects/plan.txt");
+    desktop.fs.user_remove("Projects");
+    world.pass(desktop);
+
+    // The laptop comes back and tries to land its work into a folder that is
+    // now in the server's trash.
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it should settle");
+
+    // The point of the test: the server refused, so there is nothing live
+    // hidden under the trashed folder. assert_invariants checks this too now,
+    // but naming it here says which failure this scenario is about.
+    let orphans = world.server.live_orphans();
+    assert!(
+        orphans.is_empty(),
+        "the server took a write into a trashed folder: {orphans:?}"
+    );
+
+    // And the refusal must not have cost the user the file. It never reached
+    // the server, so the rescue is the only thing keeping it.
+    let tree = disk_tree(laptop);
+    let late = jd_sim::sha256_hex(b"written into a doomed folder");
+    assert!(
+        tree.values().any(|h| h.as_deref() == Some(late.as_str())),
+        "work refused by the server must still be on the disk that made it; \
+         disk holds {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn tombstones_for_a_deleted_subtree_do_not_keep_the_store_looking_broken() {
+    use jd_core::model::Entry;
+    // A record of something the server has deleted, whose parent record is gone
+    // from the store and gone from the server's index too, was counted as a
+    // hole in the store. That count starts a full index walk, the walk cannot
+    // supply a parent the server no longer has, and the next pass counts it
+    // again — a full walk of every entity, every pass, for the life of the
+    // client, plus a standing claim that items need the user's attention when
+    // every one of them is already deleted.
+    //
+    // Run 28 of the soak rig ended with both devices there: five complaints on
+    // one and three on the other, and every entry behind them carrying
+    // remote_deleted.
+    let world = World::new(73, &["laptop"]);
+    let mut committed = Committed::default();
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Projects");
+    laptop
+        .fs
+        .user_write("Projects/doc.txt", b"deep in a subtree");
+    laptop.fs.user_write("keep.txt", b"survives all this");
+    committed.note("keep.txt", b"survives all this");
+    assert!(world.settle().is_some());
+
+    // Find the folder and the file under it, then force the shape the rig hit:
+    // the file's record marked deleted, and the folder's record gone entirely.
+    // Reaching it through the front door needs a purge racing a walk; the state
+    // is what this test is about, not the route to it.
+    let entries = laptop.store.every_entry().unwrap();
+    let folder = entries
+        .iter()
+        .find(|e| e.id.entity_type == jd_core::EntityType::Folder && e.remote.name == "Projects")
+        .expect("the folder should be tracked")
+        .id;
+    let file = entries
+        .iter()
+        .find(|e| e.id.entity_type == jd_core::EntityType::File && e.remote.name == "doc.txt")
+        .expect("the file should be tracked")
+        .clone();
+
+    laptop
+        .store
+        .put_entry(&Entry {
+            remote_deleted: true,
+            ..file
+        })
+        .unwrap();
+    laptop.store.delete_entry(folder).unwrap();
+
+    // And the server forgets them completely, the way the retention purge does
+    // once something has been in the trash long enough. This is what makes the
+    // record unaccountable rather than merely trashed: no index walk can bring
+    // the parent back, so nothing the engine does resolves it.
+    assert!(
+        world.server.forget_folder(folder.server_id),
+        "the server should have had this folder to forget"
+    );
+
+    // Now run passes and watch for a device that keeps calling itself broken.
+    for _ in 0..4 {
+        world.pass(laptop);
+    }
+
+    let complaints: Vec<_> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "store_inconsistent")
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        complaints.is_empty(),
+        "the device calls its own store broken over a record of something the \
+         server deleted, and will do so on every pass forever: {complaints:?}"
+    );
+
+    // And the file that had nothing to do with any of this is still fine.
+    assert_nothing_lost(&world, &committed);
+}
