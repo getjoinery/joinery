@@ -18,7 +18,7 @@
  * different row and decrypt successfully — VaultCrypto enforces nothing about
  * the AD's shape, it just always requires one.
  *
- * @version 1.2
+ * @version 1.3
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
@@ -26,6 +26,12 @@ require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
 class VaultCrypto {
 
 	const DEK_BYTES = 32;
+
+	/** Cap on the memo below — see openItemDek(). */
+	const DEK_MEMO_MAX = 2000;
+
+	/** @var array<string,string> unwrapped DEKs, keyed by secret+blob. Process-lived. */
+	private static $dek_memo = array();
 
 	/** @var SealedBox */
 	private $box;
@@ -45,9 +51,47 @@ class VaultCrypto {
 	}
 
 	/** Open a sealed per-item DEK with the in-window vault secret key (the
-	 *  matching public key is derived from it — see SealedBox::openDek()). */
+	 *  matching public key is derived from it — see SealedBox::openDek()).
+	 *
+	 *  Memoized for the life of the process, because a row's wrapped key is
+	 *  opened once per SEALED COLUMN and always yields the same DEK. A mail row
+	 *  carries five (sender, subject, body_plain, body_html, ai_summary) and a
+	 *  chat row several more, so reading a 50-thread list ran ~240 identical
+	 *  X25519 unseals to read ~58 rows. Unwrapping is per row now; opening
+	 *  content stays per column, so openField() — where the hot-turn rule arms —
+	 *  fires exactly as often as it did.
+	 *
+	 *  Safe to memoize because this is a pure function: the same blob under the
+	 *  same secret has exactly one answer, and rotation rewrites the blob, so a
+	 *  rotated row cannot hit a stale entry. The cache keys on both inputs, so a
+	 *  blob never opens under a secret that did not actually open it — a wrong
+	 *  secret still reaches openDek() and still throws. */
 	public function openItemDek(string $sealed, string $secret_key): string {
-		return $this->box->openDek($sealed, $secret_key);
+		$ck = hash('sha256', $secret_key . "\0" . $sealed);
+		if (isset(self::$dek_memo[$ck])) {
+			return self::$dek_memo[$ck];
+		}
+		$dek = $this->box->openDek($sealed, $secret_key);
+		// Bounded so a bulk export cannot grow this without limit. Dropping the
+		// whole map rather than evicting one entry keeps it simple: the reader
+		// pages this exists for hold far fewer rows than the cap.
+		if (count(self::$dek_memo) >= self::DEK_MEMO_MAX) {
+			self::$dek_memo = array();
+		}
+		self::$dek_memo[$ck] = $dek;
+		return $dek;
+	}
+
+	/**
+	 * Drop every memoized DEK. Called when a vault window closes
+	 * (VaultUnlock::lock()) so keys unwrapped under a window cannot outlive it.
+	 *
+	 * Key rotation needs no call here: it rewraps each item under a new public
+	 * key, so post-rotation reads present a different blob AND a different
+	 * secret, and cannot collide with an entry cached under the old pair.
+	 */
+	public static function forgetItemDeks(): void {
+		self::$dek_memo = array();
 	}
 
 	/** Seal plaintext content under a (now-open) per-item DEK, bound to the consumer's AD. */

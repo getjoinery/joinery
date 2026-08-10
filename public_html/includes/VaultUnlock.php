@@ -19,7 +19,9 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - lock() drops VaultCrypto's memoized item DEKs, so keys
+ *   unwrapped under a window cannot outlive it.
  * @changelog 1.4 - offerableCredentialIds(): which passkeys a scope's vault
  *   ceremony offers — the ones holding a wrapping, else all but the incapable.
  */
@@ -329,6 +331,13 @@ class VaultUnlock {
 	public static function lock(int $user_id, string $session_id, string $scope = 'user'): void {
 		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
 		apcu_delete(self::metaKey($session_id, $user_id, $scope));
+		// Wiping the window has to take the DEKs unwrapped under it as well, or a
+		// process that locked mid-request would still hold keys that open content.
+		// Cleared wholesale, not per user: this runs once at lock, and rebuilding
+		// another owner's entries costs one unwrap per row.
+		if (class_exists('VaultCrypto', false)) {
+			VaultCrypto::forgetItemDeks();
+		}
 		self::runWipeCallbacks($user_id, $scope);
 	}
 

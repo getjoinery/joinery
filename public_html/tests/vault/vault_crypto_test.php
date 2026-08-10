@@ -53,5 +53,31 @@ $threw = false;
 try { $crypto->openItemDek($sealed_a, $box->generateKeypair()['secret']); } catch (Exception $e) { $threw = true; }
 check($threw, 'a sealed DEK never opens under a different vault key');
 
+section('DEK unwrapping is memoized without changing what opens');
+// openItemDek() caches, because a row's wrapped key is unwrapped once per
+// sealed COLUMN and always yields the same DEK. The cache must be invisible:
+// same answer repeated, different blobs still distinct, and a wrong secret
+// still refused rather than served from a neighbouring entry.
+check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'repeat unwrap returns the same DEK');
+check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'and again, from the memo');
+check($crypto->openItemDek($sealed_b, $kp['secret']) === $dek_b, 'a different blob still unwraps to its own DEK');
+check($dek_a !== $dek_b, 'the two DEKs were never conflated');
+
+// A second vault whose secret cannot open this blob must still throw AFTER the
+// blob has been cached under the right secret — the memo keys on both inputs,
+// so a wrong secret can never be answered from an entry it did not earn.
+$other = $box->generateKeypair();
+$threw = false;
+try { $crypto->openItemDek($sealed_a, $other['secret']); } catch (Exception $e) { $threw = true; }
+check($threw, 'a cached blob still refuses the wrong secret');
+
+// A fresh instance shares the memo (it is process-lived, not per object), and
+// forgetItemDeks() drops it — that is what VaultUnlock::lock() relies on so
+// keys unwrapped under a window cannot outlive it.
+$crypto2 = new VaultCrypto();
+check($crypto2->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'a second instance opens the same DEK');
+VaultCrypto::forgetItemDeks();
+check($crypto->openItemDek($sealed_a, $kp['secret']) === $dek_a, 'unwrapping still works after the memo is dropped');
+
 harness_finish();
 ?>
