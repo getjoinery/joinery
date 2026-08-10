@@ -481,6 +481,28 @@ check(preg_match('/UDF name="JOINERY_ADMIN_PASSWORD"/', $wrapper_src) === 1,
 check(preg_match('/UDF name="JOINERY_LINODE_TOKEN_PASSWORD"/', $wrapper_src) === 1,
     'and so is the API token');
 
+// Both of these are Linode-side constraints that reject the upload outright, so
+// a wrapper that breaks either one is a file that can never become a
+// StackScript. Neither is visible from reading the script or running it here.
+check(preg_match('/[^\x00-\x7F]/', $wrapper_src) === 0,
+    'the wrapper is plain ASCII',
+    'the create API rejects the whole body on the first non-ASCII byte, naming only its offset');
+
+// The platform parses every occurrence of the opening tag, comments included,
+// and a mention without a name and label attached is a malformed field.
+$udf_mentions = preg_match_all('/<UDF\b[^>]*>/', $wrapper_src, $udf_matches);
+$bare_udf = [];
+foreach ($udf_matches[0] as $tag) {
+    if (strpos($tag, 'name=') === false || strpos($tag, 'label=') === false) {
+        $bare_udf[] = $tag;
+    }
+}
+check(empty($bare_udf),
+    'every field tag in the wrapper carries a name and a label',
+    empty($bare_udf)
+        ? $udf_mentions . ' declared, none bare'
+        : 'prose mentions the tag literally: ' . implode(', ', $bare_udf));
+
 // The deployment log is readable by the deployer and outlives the install.
 check(!preg_match('/echo[^\n]*\$\{?JOINERY_ADMIN_PASSWORD/', $handoff_src),
     'the handoff script never echoes the password');
@@ -1437,6 +1459,55 @@ foreach (['apt-get install', 'apt install', 'apt-get update', 'apt update'] as $
 check($dfe_pos !== false, 'install.sh exports DEBIAN_FRONTEND=noninteractive globally');
 check($first_apt !== null && $dfe_pos !== false && $dfe_pos < $first_apt,
     'and does so before the first apt call');
+
+
+section('A request that matches no vhost reaches nothing');
+
+// Apache answers anything no vhost claims from the main server, whose built-in
+// DocumentRoot is /var/www/html — the directory holding every site's logs,
+// config and maintenance scripts. That is reachable in practice, not in theory:
+// mod_ssl is enabled from the start so the box listens on 443 immediately,
+// while the site's :443 vhost exists only once a certificate does.
+// specs/apache_no_cert_443_exposure.md.
+check(strpos($install_src, 'DocumentRoot /var/www/unmatched') !== false,
+    'the main server serves from a directory of its own',
+    'not /var/www/html, which contains every site on the box');
+check(preg_match('/<Directory \/var\/www\/unmatched>.*?Require all denied.*?<\/Directory>/s', $install_src) === 1,
+    'and that directory denies everything',
+    'an empty directory today is not a guarantee about tomorrow');
+check(strpos($install_src, 'mkdir -p /var/www/unmatched') !== false,
+    'the directory is created before Apache is told to use it',
+    'a missing DocumentRoot is a startup failure, not a fallback');
+
+// Appended to a config file that survives re-runs of `install.sh server`.
+check(strpos($install_src, "grep -q 'BEGIN joinery unmatched-request root'") !== false,
+    'the block is written once however often server setup re-runs');
+
+// Ubuntu's stock default IS a vhost, rooted at /var/www/html. While it is
+// enabled it catches unmatched requests before the main server is reached, so
+// the empty DocumentRoot would protect nothing. _site_init.sh disables it when
+// a site is created; server setup has to disable it too, or a box that has had
+// `install.sh server` run and no site yet is exposed in the gap.
+check(preg_match('/a2dissite 000-default\.conf/', $install_src) === 1,
+    'server setup disables the stock default vhost',
+    'otherwise it, not the main server, answers unmatched requests');
+
+// The two rejected alternatives, pinned so a later edit does not quietly adopt
+// one: disabling 000-default does not help (the main server is not a vhost),
+// and deferring the module means a certificate arriving later stops Apache from
+// starting on an unknown SSLEngine directive.
+check(preg_match('/^\s*a2enmod ssl\s*$/m', $install_src) === 1,
+    'mod_ssl is still enabled unconditionally',
+    'the fix is where the request lands, not whether the port is open');
+
+// Comments that describe a fallback nobody implements are worse than no
+// comments: this one is why the missing :443 vhost went unquestioned.
+$ssl_srcs = $install_src
+    . (is_file($site_root . '/maintenance_scripts/sysadmin_tools/setup_ssl.sh')
+        ? file_get_contents($site_root . '/maintenance_scripts/sysadmin_tools/setup_ssl.sh') : '');
+check(!preg_match('/falls back to (a )?self-signed|self-signed fallback/i', $ssl_srcs),
+    'nothing claims a self-signed fallback that provision_origin_cert does not perform',
+    'it tries HTTP-01, then DNS-01, then returns having issued nothing');
 
 
 harness_finish();

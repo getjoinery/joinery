@@ -126,10 +126,11 @@ give_up() {
     exit 0
 }
 
-# A certificate signed by somebody else is the finish line. The provisioner
-# falls back to a self-signed certificate rather than failing, so "a file exists
-# at the cert path" would end the retries on the first run and never issue a
-# real one. Self-signed means issuer equals subject.
+# A certificate signed by somebody else is the finish line. "A file exists at
+# the cert path" is not: an operator, or an origin-certificate flow in front of
+# this box, can put a self-signed certificate there, and stopping on that would
+# retire the timer without ever issuing a real one. Self-signed means issuer
+# equals subject.
 have_real_cert() {
     local pem="/etc/letsencrypt/live/${DOMAIN}/fullchain.pem"
     [ -f "$pem" ] || return 1

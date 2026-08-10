@@ -1,4 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 2.50 - Unmatched requests reach an empty directory, not the tree that
+#              holds every site. Apache's main server answers anything no vhost
+#              claims, and its built-in DocumentRoot is /var/www/html — the
+#              parent of every site's logs, config and scripts. mod_ssl is on
+#              from the start so the box listens on 443 immediately, while the
+#              :443 vhost only exists once a certificate does; until then every
+#              request on that port fell through and the tree was readable in
+#              cleartext. See specs/apache_no_cert_443_exposure.md.
 #VERSION 2.49 - The deferred-certificate retry timer is installed by
 #              sysadmin_tools/arm_ssl_retry.sh rather than written out here. A
 #              restore that lands a site on a different domain has to arm the
@@ -659,8 +667,10 @@ check_dns_points_here() {
 # Set up SSL for bare-metal site.
 # The bare-metal vhost template (default_virtualhost.conf v2+) already declares
 # the :443 vhost pointing at /etc/letsencrypt/live/${domain}/. We just need a
-# cert at that path. provision_origin_cert handles all three cases (LE HTTP-01,
-# LE DNS-01, self-signed fallback) and never fails the install.
+# cert at that path. provision_origin_cert tries LE HTTP-01 then LE DNS-01, and
+# never fails the install: if neither path is available it returns having issued
+# nothing, the <IfFile> guard stays unsatisfied, and the site serves HTTP until
+# the retry timer succeeds.
 setup_ssl_baremetal() {
     local domain="$1"
 
@@ -682,8 +692,9 @@ setup_ssl_baremetal() {
 # Every site installed by install.sh ends up with the same Apache vhost shape:
 # port 80 with a CF-Visitor-guarded HTTP->HTTPS redirect, port 443 with SSL
 # pointing at a fixed cert path. Whatever cert exists at that path (LE via
-# HTTP challenge, LE via DNS challenge, or self-signed fallback) makes the
-# vhost load cleanly. See specs/implemented/universal_apache_vhost.md.
+# HTTP challenge or LE via DNS challenge) makes the vhost load cleanly. With no
+# cert the :443 block is skipped entirely, which is why the main server must not
+# be able to serve anything. See specs/implemented/universal_apache_vhost.md.
 #==============================================================================
 
 # Emit the universal vhost into a named conf file by sed-substituting one of
@@ -877,8 +888,8 @@ setup_ssl_docker_proxy() {
     apache2ctl configtest > /dev/null 2>&1 || true
     systemctl reload apache2 2>/dev/null || true
 
-    # Provision the cert — never fails the install; falls back to self-signed if
-    # neither HTTP-01 nor DNS-01 work.
+    # Provision the cert — never fails the install; issues nothing if neither
+    # HTTP-01 nor DNS-01 is available, leaving the site on HTTP.
     provision_origin_cert "$domain"
 
     if apache2ctl configtest > /dev/null 2>&1; then
@@ -2102,6 +2113,47 @@ do_server_setup() {
     Require all granted
 </Directory>
 EOF
+
+    # A request that matches no vhost is served by the main server, and Apache's
+    # built-in DocumentRoot is /var/www/html -- the directory that *contains*
+    # every site, including each one's logs, config and maintenance scripts.
+    # That is not hypothetical: mod_ssl is enabled unconditionally, so the box
+    # listens on 443 from the start, while the site's :443 vhost only exists
+    # once a certificate does. Between install and the first certificate,
+    # nothing claims 443 and every request on it falls through to the main
+    # server. Point it somewhere with nothing in it and keep it unreadable, so
+    # a fall-through -- from this cause or any later one, on any port -- reaches
+    # an empty room instead of the fleet's private files.
+    #
+    # The main server is consulted only for a port that no vhost claims at all:
+    # where vhosts exist, the first one is that port's default and catches
+    # everything unmatched. So this reaches exactly the broken case and nothing
+    # that works today. Not solved instead by deferring a2enmod ssl -- a
+    # certificate arriving while the module is off stops Apache from starting.
+    #
+    # Ubuntu's 000-default has to go with it. That one IS a vhost, rooted at
+    # /var/www/html, so while it is enabled it answers unmatched requests before
+    # the main server is reached and hands out the same tree. _site_init.sh
+    # disables it when a site is created; doing it here too covers the gap on a
+    # box that has had server setup run and holds no site yet.
+    a2dissite 000-default.conf > /dev/null 2>&1 || true
+
+    mkdir -p /var/www/unmatched
+    chmod 755 /var/www/unmatched
+
+    if ! grep -q 'BEGIN joinery unmatched-request root' /etc/apache2/apache2.conf; then
+        cat >> /etc/apache2/apache2.conf << 'EOF'
+
+# BEGIN joinery unmatched-request root
+DocumentRoot /var/www/unmatched
+<Directory /var/www/unmatched>
+    Options -Indexes -FollowSymLinks
+    AllowOverride None
+    Require all denied
+</Directory>
+# END joinery unmatched-request root
+EOF
+    fi
 
     # Right-size the event MPM for low-traffic sites. PHP work happens in the
     # fpm pool, so Apache threads only shuttle requests and static files.

@@ -2,11 +2,12 @@
 #
 # setup_ssl.sh — (re-)provision the origin SSL cert for a single domain.
 #
-# Wraps install.sh's `provision_origin_cert` function so an operator can
-# upgrade a self-signed fallback to Let's Encrypt later (after dropping a
-# DNS-API credential file in place), or re-issue when something changes.
+# Wraps install.sh's `provision_origin_cert` function so an operator can issue a
+# certificate later — once DNS points here, or after dropping a DNS-API
+# credential file in place — or re-issue when something changes.
 #
-# Always leaves a working cert at /etc/letsencrypt/live/<domain>/.
+# It never fails the caller. If neither challenge path is available it issues
+# nothing and the site stays on HTTP, which is the same state the install left.
 #
 # Usage:
 #   sudo ./setup_ssl.sh <domain>
