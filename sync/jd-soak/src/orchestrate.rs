@@ -186,6 +186,7 @@ pub fn run(
                 spool_bytes: sample.spool_bytes,
                 store_bytes: sample.store_bytes,
                 pending_ops: sample.pending_ops,
+                tracked: sample.tracked,
                 convergence_ms: verification.convergence_ms.get(&sample.device).copied(),
                 ts_ms: now_ms(),
             })?;

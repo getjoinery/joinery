@@ -1891,3 +1891,80 @@ fn tombstones_for_a_deleted_subtree_do_not_keep_the_store_looking_broken() {
     // And the file that had nothing to do with any of this is still fine.
     assert_nothing_lost(&world, &committed);
 }
+
+#[test]
+fn an_issue_about_a_state_is_withdrawn_when_the_state_ends() {
+    use jd_core::model::Entry;
+
+    // An issue that reports a *state* — this name cannot be held here, these
+    // items have no way back to the root — stops being true when the state
+    // ends, and the pass that re-derives the state is the thing that knows.
+    // Nothing else withdraws it: until this, the only way an issue ever cleared
+    // was the user waving it away by hand, one row at a time. Run 28 of the
+    // soak rig finished with a device reporting an unsyncable name while no
+    // entry on it was unsyncable at all, and run 29 with a device insisting
+    // items were stranded when none were.
+    let world = World::new(79, &["laptop"]);
+    let mut committed = Committed::default();
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Projects");
+    laptop
+        .fs
+        .user_write("Projects/doc.txt", b"ordinary content");
+    laptop.fs.user_write("keep.txt", b"survives all this");
+    committed.note("keep.txt", b"survives all this");
+    committed.note("Projects/doc.txt", b"ordinary content");
+    assert!(world.settle().is_some());
+
+    // Force the stranded state, exactly as the tombstone scenario does, and let
+    // a pass notice it.
+    let entries = laptop.store.every_entry().unwrap();
+    let folder = entries
+        .iter()
+        .find(|e| e.id.entity_type == jd_core::EntityType::Folder && e.remote.name == "Projects")
+        .expect("the folder should be tracked")
+        .id;
+    let file = entries
+        .iter()
+        .find(|e| e.id.entity_type == jd_core::EntityType::File && e.remote.name == "doc.txt")
+        .expect("the file should be tracked")
+        .clone();
+    let file_id = file.id;
+    laptop.store.put_entry(&Entry { ..file }).unwrap();
+    laptop.store.delete_entry(folder).unwrap();
+    assert!(world.server.forget_folder(folder.server_id));
+
+    world.pass(laptop);
+    let complained = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .iter()
+        .any(|i| i.kind == "store_inconsistent");
+    assert!(
+        complained,
+        "the device should say so while items really are stranded"
+    );
+
+    // Now put the store back in order: the entry that had nowhere to go is
+    // gone, so nothing is stranded any more.
+    laptop.store.delete_entry(file_id).unwrap();
+    world.pass(laptop);
+
+    let stale: Vec<_> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "store_inconsistent")
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "the complaint outlived the state it described, and only the user could \
+         have cleared it: {stale:?}"
+    );
+
+    assert_nothing_lost(&world, &committed);
+}

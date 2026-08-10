@@ -118,6 +118,8 @@ pub enum Record {
         spool_bytes: u64,
         store_bytes: u64,
         pending_ops: u64,
+        #[serde(default)]
+        tracked: u64,
         /// Absent when the device never settled at all.
         #[serde(default, skip_serializing_if = "Option::is_none")]
         convergence_ms: Option<u64>,
@@ -314,9 +316,17 @@ pub fn read_file(path: &Path) -> Result<Vec<Record>> {
 /// real answer if this keeps costing.
 pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, Committed> {
     let mut out: std::collections::BTreeMap<String, Committed> = std::collections::BTreeMap::new();
-    // A rename journals its source and then its destination, in that order.
-    // This holds the source until the destination arrives.
-    let mut renamed_from: Option<String> = None;
+    // A rename journals its source and then its destination, in that order —
+    // but only within one actor's own stream. These records are every actor on
+    // every device merged by timestamp, so another actor writing a file in the
+    // same millisecond lands between the two halves, and a single pending slot
+    // would be cleared before the destination arrived. The rename would then do
+    // nothing, every claim under the old folder would keep its old key forever,
+    // and each one becomes a path nothing is at — reported as a loss for the
+    // rest of the campaign. One campaign spent four cycles reporting a file the
+    // user had simply overwritten seven seconds after renaming its folder.
+    let mut renamed_from: std::collections::HashMap<String, String> =
+        std::collections::HashMap::new();
     for record in records {
         if let Record::ActorCommit {
             actor,
@@ -334,21 +344,22 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                 // so its absence everywhere is correct rather than loss. For a
                 // directory that means everything inside it, which went too.
                 "remove" | "remove_dir" | "trash" => {
-                    renamed_from = None;
+                    renamed_from.remove(actor);
                     out.remove(path);
                     for key in under(&out, path) {
                         out.remove(&key);
                     }
                 }
-                // The source of a rename holds nothing any more. What was inside
-                // it is not gone though — it is at the destination, which
-                // arrives in the very next record.
+                // The source of a rename holds nothing any more. What was
+                // inside it is not gone though — it is at the destination,
+                // which arrives in this actor's next record, though not
+                // necessarily in the next record overall.
                 "rename" => {
                     out.remove(path);
-                    renamed_from = Some(path.clone());
+                    renamed_from.insert(actor.clone(), path.clone());
                 }
                 "rename_into" => {
-                    if let Some(from) = renamed_from.take() {
+                    if let Some(from) = renamed_from.remove(actor) {
                         for key in under(&out, &from) {
                             let Some(mut claim) = out.remove(&key) else {
                                 continue;
@@ -361,7 +372,7 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                     insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
                 _ => {
-                    renamed_from = None;
+                    renamed_from.remove(actor);
                     insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
             }
@@ -453,6 +464,93 @@ mod tests {
             mtime_ms: Some(ts),
             ts_ms: ts,
         }
+    }
+
+    fn commit_by(
+        seq: u64,
+        actor: &str,
+        op: &str,
+        path: &str,
+        sha: Option<&str>,
+        ts: u64,
+    ) -> Record {
+        Record::ActorCommit {
+            seq,
+            actor: actor.into(),
+            persona: "messy-human".into(),
+            op: op.into(),
+            path: path.into(),
+            sha256: sha.map(String::from),
+            size: 10,
+            mtime_ms: Some(ts),
+            ts_ms: ts,
+        }
+    }
+
+    #[test]
+    fn a_rename_still_pairs_when_another_actor_writes_between_its_halves() {
+        // These records are every actor on every device merged by timestamp, so
+        // the two halves of one actor's rename are routinely not adjacent. If
+        // the pairing is lost, every claim under the old folder keeps its old
+        // key, becomes a path nothing is at, and is reported as a loss for the
+        // rest of the campaign. That is a rig fault reported as data loss, which
+        // is the most expensive kind of wrong this program can be.
+        let records = vec![
+            commit_by(
+                1,
+                "device-b/messy",
+                "write",
+                "Projects/doc.txt",
+                Some("aa"),
+                10,
+            ),
+            commit_by(2, "device-b/messy", "rename", "Projects", None, 20),
+            // Another actor, in between, exactly as the merged timeline gives it.
+            commit_by(
+                3,
+                "device-b/editor",
+                "atomic_write",
+                "notes.txt",
+                Some("bb"),
+                21,
+            ),
+            commit_by(
+                4,
+                "device-b/messy",
+                "rename_into",
+                "Projects (18)",
+                None,
+                22,
+            ),
+        ];
+        let out = last_committed(&records);
+        let keys: Vec<&String> = out.keys().collect();
+        assert!(
+            out.contains_key("Projects (18)/doc.txt"),
+            "the claim should have followed the folder: {keys:?}"
+        );
+        assert!(
+            !out.contains_key("Projects/doc.txt"),
+            "and must not be left behind at a path that no longer exists: {keys:?}"
+        );
+    }
+
+    #[test]
+    fn one_actors_rename_does_not_consume_anothers() {
+        // Two actors renaming at once must not cross wires: each destination
+        // belongs to the source its own actor journaled.
+        let records = vec![
+            commit_by(1, "device-a/one", "write", "A/x.txt", Some("aa"), 10),
+            commit_by(2, "device-b/two", "write", "B/y.txt", Some("bb"), 11),
+            commit_by(3, "device-a/one", "rename", "A", None, 20),
+            commit_by(4, "device-b/two", "rename", "B", None, 21),
+            commit_by(5, "device-a/one", "rename_into", "A2", None, 22),
+            commit_by(6, "device-b/two", "rename_into", "B2", None, 23),
+        ];
+        let out = last_committed(&records);
+        let keys: Vec<&String> = out.keys().collect();
+        assert!(out.contains_key("A2/x.txt"), "{keys:?}");
+        assert!(out.contains_key("B2/y.txt"), "{keys:?}");
     }
 
     fn tmp(tag: &str) -> PathBuf {

@@ -1059,6 +1059,28 @@ impl Store {
         Ok(())
     }
 
+    /// Withdraw every open issue of a kind.
+    ///
+    /// Some issues report an *event* — something was moved aside, something was
+    /// rescued, a piece of work was given up on. Those stay until the user
+    /// waves them away, because they happened and no later state makes them
+    /// untrue.
+    ///
+    /// Others report a *state*: this name cannot be held here, these items have
+    /// no way back to the root. When the state ends, the sentence is simply
+    /// false, and leaving it standing means the user is told to look at
+    /// something that is no longer there — and can only clear it by hand, one
+    /// row at a time. The pass that re-derives the state is the thing that
+    /// knows, so it withdraws them.
+    ///
+    /// Returns how many were withdrawn.
+    pub fn withdraw_issues(&self, kind: &str) -> StoreResult<usize> {
+        Ok(self.conn.execute(
+            "UPDATE issues SET dismissed = 1 WHERE dismissed = 0 AND kind = ?1",
+            params![kind],
+        )?)
+    }
+
     /// Run a closure inside a transaction, so a step that touches several
     /// tables either lands completely or not at all.
     pub fn transaction<T>(

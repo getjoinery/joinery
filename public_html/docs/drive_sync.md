@@ -452,6 +452,21 @@ which leads with *nothing has been deleted*. A server message that is plainly
 not written for a person — anything carrying a `SQLSTATE` — is replaced rather
 than shown; the original stays in the issue's detail for diagnosis.
 
+**An issue about a state is withdrawn when the state ends.** Most issues report
+an *event* — something was moved aside, something was rescued, a piece of work
+was given up on — and those stand until the user waves them away, because they
+happened and no later state makes them untrue. Two report a *state* instead:
+`unsyncable` (this disk cannot hold that name) and `store_inconsistent` (these
+items have no way back to the root). Both are re-derived every pass, and both
+are withdrawn the moment they stop being true. Otherwise the user carries a
+permanent warning about a file that is now perfectly fine, clearable only by
+hand, and it inflates the attention count the tray reads from.
+
+What decides is the entry's own `LocalStatus`, not the naming pass's report of
+what it just did: an entry already settled as unsyncable is not re-reported each
+pass, so reading that report as the full set withdraws a complaint that is still
+true.
+
 **A record of something the server has deleted is never a fault.** An entry with
 no way back to the root normally means this device has lost its record of a
 folder that still exists, which is a hole in the store's picture: the engine

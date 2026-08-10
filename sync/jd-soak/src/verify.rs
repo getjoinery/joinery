@@ -118,6 +118,11 @@ pub struct Sample {
     pub spool_bytes: u64,
     pub store_bytes: u64,
     pub pending_ops: u64,
+    /// How many entities this device is tracking. The denominator for RSS: a
+    /// client holds a bounded amount of memory per entity, so a campaign that
+    /// only ever adds files makes RSS rise at every settle no matter how
+    /// healthy it is.
+    pub tracked: u64,
 }
 
 // ---------------------------------------------------------------------------
@@ -577,14 +582,42 @@ pub fn sample(device: &Device, status: Option<&Status>) -> Sample {
             .map(|m| m.len())
             .unwrap_or(0),
         pending_ops: status.map(|s| s.pending_ops).unwrap_or(0),
+        tracked: status.map(|s| s.tracked).unwrap_or(0),
     }
 }
+
+/// The most memory a healthy client spends on one newly tracked entity, in
+/// bytes, with room to spare.
+///
+/// Measured at about 5 kB and flat across an order of magnitude
+/// (`jd-sim/tests/leak.rs`). The ceiling sits an order of magnitude above that,
+/// because the job here is to tell "the tree grew" from "memory went somewhere
+/// the tree cannot explain", not to police an allocator.
+const MEMORY_PER_ENTITY_CEILING: u64 = 64 * 1024;
 
 /// Has anything grown monotonically across every settle in the window?
 ///
 /// Monotonic across the whole window rather than "bigger than it was", because a
 /// store that grows with the tree is doing its job. What is not fine is a number
-/// that has never once come down over a day of storms and settles.
+/// that has never once come down over a day of storms and settles. That is the
+/// whole test for file descriptors and spool files, which have no reason to
+/// scale with the tree.
+///
+/// **Resident memory is priced, not counted.** A client holds a bounded amount
+/// of memory per tracked entity, and a campaign only ever adds files, so RSS
+/// rises at every settle in a perfectly healthy run — which is what it did in
+/// runs 21, 25, 26, 28 and 29 before anyone measured that 500 passes over an
+/// unchanging tree move it by nothing at all. So RSS is reported only when it
+/// rose at every settle *and* every increment bought more than
+/// [`MEMORY_PER_ENTITY_CEILING`] per newly tracked entity.
+///
+/// A ceiling rather than a trend, because a steady leak has a perfectly flat
+/// cost; requiring the cost to *rise* would miss the plainest case there is.
+/// The cost is measured on increments rather than as `rss / tracked`, because
+/// the latter is dominated by the process's fixed baseline and falls as the
+/// tree grows. A settle that added memory but no entities divides by one, so it
+/// scores as its whole increment — the sharpest form of the signal, not an
+/// exclusion.
 pub fn check_leaks(history: &[Vec<Sample>], window: usize) -> Verdict {
     if history.len() < window {
         return Verdict::pass(
@@ -610,15 +643,55 @@ pub fn check_leaks(history: &[Vec<Sample>], window: usize) -> Verdict {
         if series.len() < window {
             continue;
         }
+        // Memory bought by each newly tracked entity, settle over settle.
+        //
+        // Deltas rather than rss/tracked, because a process carries a fixed
+        // baseline of about 16 MB: dividing the total by the entity count is
+        // dominated by that baseline, falls as the tree grows, and would hide
+        // the very thing this is looking for. The increments have no baseline
+        // in them at all.
+        //
+        // A settle that added no entities but did add memory is the sharpest
+        // form of the signal, so it scores as the whole increment rather than
+        // being skipped.
+        let cost: Vec<u64> = series
+            .windows(2)
+            .map(|w| {
+                let d_rss = w[1].rss_kb.saturating_sub(w[0].rss_kb);
+                let d_tracked = w[1].tracked.saturating_sub(w[0].tracked);
+                d_rss * 1024 / std::cmp::max(d_tracked, 1)
+            })
+            .collect();
+        let rss_climbed = series.iter().all(|s| s.rss_kb > 0)
+            && series.windows(2).all(|w| w[1].rss_kb > w[0].rss_kb);
+        // Every settle bought memory the tree cannot account for. Not "the cost
+        // rose" — a steady leak has a perfectly flat cost — but "the cost was
+        // never plausible".
+        let unexplained =
+            rss_climbed && !cost.is_empty() && cost.iter().all(|&c| c > MEMORY_PER_ENTITY_CEILING);
         for (label, values) in [
-            ("rss", series.iter().map(|s| s.rss_kb).collect::<Vec<_>>()),
+            (
+                "rss, and the tree does not account for it — bytes per newly tracked entity",
+                if unexplained { cost } else { Vec::new() },
+            ),
             ("fds", series.iter().map(|s| s.fd_count).collect::<Vec<_>>()),
             (
                 "spool files",
                 series.iter().map(|s| s.spool_files).collect::<Vec<_>>(),
             ),
         ] {
-            if values.iter().all(|&v| v > 0) && values.windows(2).all(|w| w[1] > w[0]) {
+            // `!is_empty` matters: every `all` below is vacuously true on an
+            // empty series, so a metric deliberately not flagged this round
+            // would otherwise report itself as a leak.
+            //
+            // The rss series arrives already judged and is passed through; fds
+            // and spool files have no reason to scale with the tree, so for
+            // those a rise at every settle is the whole test.
+            let already_judged = label.starts_with("rss");
+            if !values.is_empty()
+                && values.iter().all(|&v| v > 0)
+                && (already_judged || values.windows(2).all(|w| w[1] > w[0]))
+            {
                 growing.push(format!(
                     "{device} {label} rose every settle: {}",
                     values
@@ -1216,6 +1289,12 @@ mod tests {
     }
 
     fn sample_of(device: &str, rss: u64, fds: u64, spool: u64) -> Sample {
+        // A fixed tree, so these read as "RSS moved and the tree did not" —
+        // which is the only shape that should ever be called a leak.
+        sample_tracking(device, rss, fds, spool, 1_000)
+    }
+
+    fn sample_tracking(device: &str, rss: u64, fds: u64, spool: u64, tracked: u64) -> Sample {
         Sample {
             device: device.into(),
             rss_kb: rss,
@@ -1224,7 +1303,52 @@ mod tests {
             spool_bytes: 0,
             store_bytes: 0,
             pending_ops: 0,
+            tracked,
         }
+    }
+
+    #[test]
+    fn memory_that_grows_with_the_tree_is_not_a_leak() {
+        // The shape of every real campaign: a storm adds files, the client
+        // tracks them, and RSS rises at every single settle because it holds a
+        // bounded amount per entity. Raw RSS called this a leak in runs 21, 25,
+        // 26, 28 and 29; 500 passes over an unchanging tree move it by nothing.
+        // device-a's real series from run 29, with the entity counts that
+        // produced it: 3.6 kB per new entity, against a measured 5 and a
+        // ceiling of 64.
+        let rss = [17_112, 17_692, 18_548, 18_784, 19_152, 19_652];
+        let tracked = [120, 300, 480, 600, 700, 817];
+        let history: Vec<Vec<Sample>> = rss
+            .iter()
+            .zip(tracked.iter())
+            .map(|(&r, &t)| vec![sample_tracking("device-a", r, 40, 0, t)])
+            .collect();
+        let verdict = check_leaks(&history, 6);
+        assert!(
+            verdict.ok,
+            "memory rising in step with the tree is a working client: {}",
+            verdict.detail
+        );
+    }
+
+    #[test]
+    fn memory_outrunning_the_tree_is_a_leak() {
+        // The same rising RSS, but the tree barely moves — so the cost per
+        // entity climbs every settle, and that is memory nothing accounts for.
+        let rss = [17_112, 18_692, 20_548, 22_784, 25_152, 28_652];
+        let tracked = [800, 802, 805, 807, 810, 812];
+        let history: Vec<Vec<Sample>> = rss
+            .iter()
+            .zip(tracked.iter())
+            .map(|(&r, &t)| vec![sample_tracking("device-a", r, 40, 0, t)])
+            .collect();
+        let verdict = check_leaks(&history, 6);
+        assert!(!verdict.ok, "{}", verdict.detail);
+        assert!(
+            verdict.detail.contains("per newly tracked entity"),
+            "{}",
+            verdict.detail
+        );
     }
 
     #[test]
