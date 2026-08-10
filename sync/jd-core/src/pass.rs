@@ -98,6 +98,11 @@ pub fn run_pass(
     //
     // First, because everything below finds entries by walking down from the
     // root and so cannot see these at all.
+    // Re-derived every pass, and withdrawn the moment it stops being true: this
+    // issue describes a state rather than an event, so leaving a stale one
+    // standing tells the user to look at something that has already resolved,
+    // and the only way they could clear it is by hand.
+    let mut still_stranded = false;
     if sweep_stranded_entries(env)? > 0 {
         // An entry the server knows about, with no way back to the root, is a
         // hole in this store's picture rather than a wrong entry: the folder it
@@ -115,6 +120,7 @@ pub fn run_pass(
         }
         out.reset = true;
         let left = sweep_stranded_entries(env)?;
+        still_stranded = left > 0;
         if left > 0 {
             // The server's index does not have the ancestor either. Say so and
             // leave it: the walk above will run again next pass, which is waste
@@ -133,6 +139,9 @@ pub fn run_pass(
                 (env.now_ms)() as i64,
             )?;
         }
+    }
+    if !still_stranded {
+        env.store.withdraw_issues("store_inconsistent")?;
     }
 
     // ---- one directory, one entry; one file, one entry ----------------------
@@ -161,6 +170,32 @@ pub fn run_pass(
             &format!("{reason:?}"),
             (env.now_ms)() as i64,
         )?;
+    }
+    // A name this disk cannot hold is a state, and states end: the rival gets
+    // renamed, the clash clears, the entry goes away. The complaint has to end
+    // with it, or the user is left with a permanent warning about a file that
+    // is now perfectly fine and no way to clear it but by hand.
+    //
+    // The entry's own status is what says so — NOT `out.naming.unsyncable`,
+    // which is only what this pass decided just now. An entry already settled as
+    // unsyncable is not re-reported every pass, so reading that list as the full
+    // set withdraws a complaint that is still true. A Mac holding one of two
+    // case-clashing siblings caught exactly that.
+    {
+        let unsyncable_now: std::collections::HashSet<EntityId> = all_entries(env)?
+            .into_iter()
+            .filter(|e| matches!(e.status, LocalStatus::Unsyncable(_)))
+            .map(|e| e.id)
+            .collect();
+        for issue in env.store.open_issues()? {
+            if issue.kind != "unsyncable" {
+                continue;
+            }
+            let Some(id) = issue.entity else { continue };
+            if !unsyncable_now.contains(&id) {
+                env.store.dismiss_issue(issue.issue_id)?;
+            }
+        }
     }
 
     // ---- what this computer did --------------------------------------------

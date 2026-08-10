@@ -703,11 +703,28 @@ scenario pins the conflict wording so this cannot quietly become silence.
 
 ## The first long campaign — six cycles, and three things only length reveals
 
-**A memory leak, and the assertion built for it finally ran.** Leak-watch needs
-six settles to call a trend and had never once had them: every campaign before
-this died in its first or second. Device-a's resident set rose at every single
-settle — 16852 → 17904 → 17936 → 19900 → 19912 → 20140 KB. Monotonic across
-six samples is the shape the assertion exists to catch.
+**A suspected memory leak, and the assertion built for it finally ran.**
+Leak-watch needs six settles to call a trend and had never once had them: every
+campaign before this died in its first or second. Device-a's resident set rose
+at every single settle — 16852 → 17904 → 17936 → 19900 → 19912 → 20140 KB —
+and it went on doing so in runs 25, 26, 28 and 29.
+
+**It is not a leak, and the assertion was reading a working client as a broken
+one.** Two measurements settled it. Five hundred passes over a tree that never
+changes move resident memory by *nothing at all* — zero KB, in the engine
+(`jd-sim/tests/leak.rs`) and on the real box, where two idle daemons held
+byte-identical readings across forty samples over twenty minutes — one distinct
+value each, not a drift that averaged out. Memory instead tracks the
+number of tracked entities: about 5 kB each, flat across an order of magnitude,
+and matching run 29's real growth of 3.6 kB per new entity. A campaign only ever
+adds files, so a healthy client's resident set must rise at every settle.
+
+Leak-watch now prices the growth instead of counting it: resident memory is
+flagged only when it rose at every settle *and* every increment bought more than
+64 kB per newly tracked entity — memory the tree cannot account for. A steady
+leak has a flat cost, not a rising one, so the test is a ceiling rather than a
+trend. File descriptors and spool files keep the plain monotonic test, having no
+reason to scale with the tree.
 
 **The client degrades over a campaign rather than reaching a steady state.**
 Items needing attention per settle: 26 → 56 → 95 → 141 → 165 → 189. A single

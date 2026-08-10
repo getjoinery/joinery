@@ -199,6 +199,25 @@ fn the_refused_sibling_appears_by_itself_once_the_clash_is_resolved() {
         2,
         "the file that was waiting materializes without anyone asking"
     );
+
+    // And the warning goes with it. An issue about a name this disk cannot hold
+    // describes a state, so when the state ends the sentence is false; leaving
+    // it standing means a permanent warning about a file that is now perfectly
+    // fine, clearable only by hand.
+    let stale: Vec<_> = world
+        .device("mac")
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "unsyncable")
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        stale.is_empty(),
+        "the clash cleared but the mac still warns about it: {stale:?}"
+    );
+
     assert_converged(&world);
 }
 
