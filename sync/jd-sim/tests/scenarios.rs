@@ -496,6 +496,85 @@ fn a_file_that_lost_a_naming_race_still_converges() {
 }
 
 #[test]
+fn work_whose_folder_is_no_longer_tracked_stops_instead_of_retrying_forever() {
+    use jd_core::model::{EntityId, Entry, Placement};
+
+    // An entry has no path for two unrelated reasons: the sync folder is not
+    // there, or a folder between it and the root has gone from the store. They
+    // want opposite treatment. The first is worth waiting for — a drive gets
+    // plugged back in. The second is not, because no number of attempts puts a
+    // missing folder back, and the next round will plan against the tree as it
+    // actually is.
+    //
+    // Reporting both as the first is what the soak rig kept finding: operations
+    // sitting on ten to seventeen attempts saying the sync folder was
+    // unavailable while it sat plainly on disk, holding convergence open for
+    // whole campaigns. A user would have been told their files had gone.
+    let world = World::new(113, &["laptop"]);
+    let device = world.device("laptop");
+
+    let folder = world.server.seed_folder(None, "Papers");
+    let file = world
+        .server
+        .seed_file(Some(folder), "notes.txt", b"already here");
+    assert!(world.settle().is_some());
+
+    // The hole itself, in the shape the rig produced it: the agreement names a
+    // provisional folder that is not in the store. A real folder would be no
+    // good here — the next index walk would fetch it back and the entry would
+    // resolve again, proving nothing.
+    let real = device
+        .store
+        .get_entry(EntityId::file(file))
+        .unwrap()
+        .expect("the seeded file should have reached the device");
+    device
+        .store
+        .put_entry(&Entry {
+            synced_placement: Some(Placement {
+                parent: Some(-685),
+                name: "notes.txt".into(),
+            }),
+            ..real
+        })
+        .unwrap();
+
+    // Work planned before the folder went. That is the only way an operation
+    // reaches the executor in this state, because a planner cannot reach an
+    // entry it is unable to resolve in the first place.
+    device
+        .store
+        .queue_op("download", EntityId::file(file), "{}", "stranded-download")
+        .unwrap();
+
+    // Deliberately not asserting that the world settles. A tracked entry with a
+    // missing ancestor makes every pass re-walk the whole index by design, so
+    // this device cannot go quiet while the hole is there — that is a separate
+    // cost, written down in `pass.rs`, and it would mask what is being tested.
+    // What matters here is the fate of the one operation.
+    for _ in 0..5 {
+        world.pass(device);
+    }
+
+    // Only this operation's fate is asserted. The disk copy stops being claimed
+    // by an entry that can no longer be resolved, so the scan offers it up as
+    // something new — real behaviour, a different question, and not this test's.
+    let stuck: Vec<_> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.kind == "download" && op.entity == EntityId::file(file))
+        .map(|op| format!("{} attempts={}", op.kind, op.attempts))
+        .collect();
+    assert!(
+        stuck.is_empty(),
+        "the download should have been dropped as overtaken rather than parked \
+         for a retry that can never come good: {stuck:?}"
+    );
+}
+
+#[test]
 fn two_computers_editing_the_same_file_both_keep_their_work() {
     // The case people actually hit. Neither edit may be discarded, and both
     // computers must end up seeing the same two files.
