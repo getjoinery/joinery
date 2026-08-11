@@ -705,9 +705,13 @@ pub fn check_leaks(history: &[Vec<Sample>], window: usize) -> Verdict {
     }
 
     if growing.is_empty() {
+        // Not "nothing grew monotonically" — memory usually does, because a
+        // campaign only ever adds files, and saying otherwise next to samples
+        // that plainly climbed reads as an oracle that cannot see. What passed
+        // is the judgement, not the absence of growth.
         Verdict::pass(
             "leak-watch",
-            format!("nothing grew monotonically across {window} settles"),
+            format!("no growth across {window} settles that the tree does not account for"),
         )
     } else {
         Verdict::fail("leak-watch", growing.join("; "))
