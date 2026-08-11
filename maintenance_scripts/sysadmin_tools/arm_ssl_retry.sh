@@ -144,19 +144,34 @@ have_real_cert && give_up "A CA-issued certificate is already in place for $DOMA
 
 # The cheap check, before spending an attempt. Let's Encrypt counts failed
 # validations, not failed lookups.
-SERVER_IP=$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null)
-DNS_IP=$(dig +short "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+#
+# Ask for each family explicitly, and compare like with like. A bare
+# `curl ifconfig.me` answers with whichever address the host prefers, and every
+# Linode is dual-stack and prefers IPv6 -- so it reports an IPv6 address, the
+# domain has only an A record, the two never match, and a box that was entitled
+# to a certificate waits for one forever while saying it is still waiting. That
+# is not hypothetical: it is what this script did on its first deferred install.
+# provision_origin_cert already asks per family for the same reason; this is the
+# same check, and it has to agree with it.
+SERVER_IP4=$(curl -4 -s --max-time 5 ifconfig.me 2>/dev/null || curl -4 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+SERVER_IP6=$(curl -6 -s --max-time 5 ifconfig.me 2>/dev/null || curl -6 -s --max-time 5 icanhazip.com 2>/dev/null || true)
+DNS_IP4=$(dig +short A "$DOMAIN" 2>/dev/null | grep -E '^[0-9.]+$' | head -1)
+DNS_IP6=$(dig +short AAAA "$DOMAIN" 2>/dev/null | grep -E '^[0-9a-fA-F:]+$' | head -1)
 
-if [ -z "$DNS_IP" ]; then
+if [ -z "$DNS_IP4" ] && [ -z "$DNS_IP6" ]; then
     echo "$DOMAIN does not resolve yet — waiting."
     exit 0
 fi
-if [ -z "$SERVER_IP" ]; then
+if [ -z "$SERVER_IP4" ] && [ -z "$SERVER_IP6" ]; then
     echo "Could not determine this server's public IP — waiting."
     exit 0
 fi
-if [ "$DNS_IP" != "$SERVER_IP" ]; then
-    echo "$DOMAIN resolves to $DNS_IP, this server is $SERVER_IP — waiting."
+
+# Either family arriving here is enough: certbot only needs the challenge to
+# reach this box, not to reach it over both protocols.
+if ! { [ -n "$SERVER_IP4" ] && [ "$SERVER_IP4" = "$DNS_IP4" ]; } \
+   && ! { [ -n "$SERVER_IP6" ] && [ "$SERVER_IP6" = "$DNS_IP6" ]; }; then
+    echo "$DOMAIN resolves to ${DNS_IP4:-none}/${DNS_IP6:-none}, this server is ${SERVER_IP4:-none}/${SERVER_IP6:-none} — waiting."
     exit 0
 fi
 
