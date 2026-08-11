@@ -1,5 +1,5 @@
 #!/bin/bash
-#VERSION 1.2
+#VERSION 1.4
 #
 # THIS FILE IS NOT RUN FROM THE REPOSITORY.
 #
@@ -26,19 +26,34 @@
 # out - a mention with no name and label attached is rejected as a malformed
 # field.
 #
-# Target Images: linode/ubuntu26.04 and linode/ubuntu24.04 (declared in the
-# StackScript settings, not here). At least one is required and the deploy form
-# offers only what is listed, so an incompatible image cannot be selected.
-# install.sh hard-fails on anything else regardless. 26.04 is the release the
-# platform is built against (PHP 8.5, PostgreSQL 18); 24.04 stays listed so a
-# deployer who has a reason to match an existing 24.04 box still can. The order
-# they are listed in is not ours to choose - the platform stores the set sorted,
-# so which one the deploy form offers first is its decision, and both have to
-# work.
+# A field is required when it declares no default, and optional when it
+# declares one. The domain is required on purpose. A site with no domain runs
+# on a bare IP: no certificate is possible, every canonical URL and link points
+# at an address rather than a name, and moving to a real domain later means
+# reconfiguring rather than deploying. That state is worth passing through
+# during setup and not worth living in, so the form does not offer it -- and
+# a deployer who reads "Site domain" with an empty box next to it cannot tell
+# whether leaving it blank is allowed, which is how a placeholder that never
+# resolves ends up naming somebody's site.
+#
+# Target Images: linode/ubuntu26.04 only (declared in the StackScript settings,
+# not here). At least one is required and the deploy form offers only what is
+# listed, so an incompatible image cannot be selected. install.sh hard-fails on
+# anything else regardless.
+#
+# 24.04 was listed and then removed 2026-08-11: it is a supported install target
+# but it had never been deployed through this path, and both failures found
+# while gating this script were properties of the image rather than the code - a
+# debconf answer corrupted at image build time, and a phased package update that
+# lands on some machines and not others. Offering an image nobody has deployed
+# means the first person to pick it does the testing. 26.04 is what the platform
+# is built against (PHP 8.5, PostgreSQL 18) and what every gate ran on. A
+# deployer who needs 24.04 can still install by hand, where they are at a
+# terminal and can see what happens.
 
 # <UDF name="JOINERY_ADMIN_EMAIL" label="Admin email address" example="you@example.com" />
 # <UDF name="JOINERY_ADMIN_PASSWORD" label="Admin password" example="Choose a strong password" />
-# <UDF name="JOINERY_DOMAIN" label="Site domain" default="" example="example.com" optional="true" />
+# <UDF name="JOINERY_DOMAIN" label="Site domain (point its DNS at this server for automatic HTTPS)" example="example.com" />
 # <UDF name="JOINERY_SSH_KEY" label="SSH public key for this server" default="" optional="true" />
 # <UDF name="JOINERY_LINODE_TOKEN_PASSWORD" label="Linode API token (only if your DNS is at Linode)" default="" optional="true" />
 

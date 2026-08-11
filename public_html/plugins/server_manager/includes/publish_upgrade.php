@@ -61,7 +61,35 @@
 		if ($cli_major === null || $cli_minor === null || $cli_patch === null) {
 			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 			$current = LibraryFunctions::get_joinery_version();
-			if ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
+
+			// Publishing means two different things. On the site where the code was
+			// written it means "give this new work a number". On a relay -- a site
+			// that upgrades itself from upstream and republishes so it only ever
+			// serves what it runs -- it means "serve what I received, under the
+			// number it already has". Bumping on a relay invents a number for code
+			// it did not author, and the authoring site later mints that same
+			// number from a different tree. Nothing catches it afterwards: the
+			// duplicate check reads the local upg_upgrades table, and neither site
+			// has ever seen the other's row.
+			//
+			// The tell is that the running version is exactly what arrived from
+			// upstream. It cannot be read from upgrade_source -- dev's points at
+			// getjoinery, so that setting records where a site was installed from,
+			// not who authors its code.
+			$received = (string)Globalvars::get_instance()->get_setting('upgrade_received_version');
+			if ($received !== '' && $current !== '' && $received === $current
+			    && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $rm)) {
+				// Plain echo, not publish_output: this runs inside the CLI argument
+				// block, which is above both the function's definition and
+				// PublishLog::start(). A nested function is not hoisted, so calling
+				// it here is a fatal -- on the relay path, the only path that
+				// reaches this branch.
+				echo "Republishing {$current} — this tree is what upstream delivered, not new work.\n";
+				echo "Pass a version explicitly to override.\n";
+				$cli_major = $cli_major ?? $rm[1];
+				$cli_minor = $cli_minor ?? $rm[2];
+				$cli_patch = $cli_patch ?? $rm[3];
+			} elseif ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
 				$cli_major = $cli_major ?? $m[1];
 				$cli_minor = $cli_minor ?? $m[2];
 				$cli_patch = $cli_patch ?? ($m[3] + 1);
@@ -218,6 +246,62 @@
 			exit;
 		}
 		publish_output("License present at {$license_source}");
+
+		// =====================================================
+		// Guard: a release must be able to deliver its default bundles
+		// =====================================================
+		// install_bundles.json names the plugins a fresh install turns on, and a
+		// fresh install downloads them from this site's published archives. The
+		// promise and the delivery lived in two files that never checked each
+		// other, so a bundle could name a plugin this site had never heard of and
+		// every install from the release would come up without it, silently.
+		//
+		// Checked here, beside the license check and before anything is written,
+		// for the same reason: a publish that cannot keep its promise should stop
+		// while stopping is still free. The condition tested is the one that
+		// decides whether an archive gets built at all -- present on disk, not
+		// excluded, not deprecated. specs/publish_delivers_what_it_promises.md
+		$bundles_file = $full_site_dir . '/public_html/install_bundles.json';
+		if (is_readable($bundles_file)) {
+			$bundle_data = json_decode((string)file_get_contents($bundles_file), true);
+			$undeliverable = [];
+
+			if (is_array($bundle_data)) {
+				foreach ($bundle_data as $bundle_name => $definition) {
+					// Underscore keys are notes to whoever edits the file.
+					if (strpos((string)$bundle_name, '_') === 0 || !is_array($definition)) {
+						continue;
+					}
+					foreach (($definition['plugins'] ?? []) as $wanted_plugin) {
+						$manifest_path = $full_site_dir . '/public_html/plugins/' . $wanted_plugin . '/plugin.json';
+						if (!is_readable($manifest_path)) {
+							$undeliverable[] = "{$bundle_name} needs {$wanted_plugin}, which is not on this site";
+							continue;
+						}
+						$manifest = json_decode((string)file_get_contents($manifest_path), true);
+						if (!is_array($manifest)) {
+							$undeliverable[] = "{$bundle_name} needs {$wanted_plugin}, whose plugin.json is unreadable";
+						} elseif (($manifest['included_in_publish'] ?? true) === false) {
+							$undeliverable[] = "{$bundle_name} needs {$wanted_plugin}, which sets included_in_publish=false";
+						} elseif (!empty($manifest['deprecated'])) {
+							$undeliverable[] = "{$bundle_name} needs {$wanted_plugin}, which is marked deprecated";
+						}
+					}
+				}
+			}
+
+			if (!empty($undeliverable)) {
+				publish_output("\nRefusing to publish {$version} — a default bundle names a plugin this release cannot carry:");
+				foreach ($undeliverable as $gap) {
+					publish_output("  - {$gap}");
+				}
+				publish_output("\nEvery install from this release would come up without it.");
+				publish_output("Put the plugin directory in public_html/plugins/ here and publish again; it does");
+				publish_output("not need to be installed or activated on this site, only present.");
+				publish_output("Nothing has been written.");
+				exit;
+			}
+		}
 
 		// =====================================================
 		// Bundle the management agent artifact (release channel)

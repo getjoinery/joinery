@@ -2,10 +2,13 @@
 /**
  * install_bundle.php — turn on a named set of plugins on a fresh site.
  *
- * A new install ends up with every plugin's *files* on disk and nothing
- * installed or activated, so out of the box it is the bare platform. Which
- * plugins a deployment should start with is a product decision, not a
- * property of any one plugin, so it lives in `install_bundles.json` at the
+ * A published core archive ships an empty plugins directory — plugins are
+ * distributed as their own archives — so a new install has no plugin files at
+ * all and nothing installed or activated. This tool therefore does two things:
+ * it downloads any of the bundle's plugins that are not on disk, from the same
+ * published-archives manifest an upgrade uses, and then installs and activates
+ * them. Which plugins a deployment should start with is a product decision, not
+ * a property of any one plugin, so it lives in `install_bundles.json` at the
  * public_html root — beside admin_menus.json and settings.json, where the
  * platform already keeps its declarative sets.
  *
@@ -34,7 +37,7 @@
  * Validate with `php -l` only — never the file validator, which executes the
  * file it is checking.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 if (PHP_SAPI !== 'cli') {
@@ -46,8 +49,97 @@ require_once(__DIR__ . '/../../public_html/includes/PathHelper.php');
 require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
+require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
 const IB_DEFAULT_BUNDLE = 'personal';
+
+/**
+ * Fetch any of the wanted plugins that are not on disk.
+ *
+ * A published core archive ships an empty plugins directory -- plugins are
+ * distributed as their own archives -- so on a fresh install the bundle's files
+ * do not exist yet and there is nothing to activate. They come from the same
+ * place an upgrade gets them: the upgrade source's published-archives manifest,
+ * which answers anonymous callers, exactly as the core archive fetch does.
+ *
+ * Returns ['errors' => [name => why], 'planned' => [names]]. 'errors' names the
+ * plugins that could not be fetched; 'planned' is only populated on a dry run,
+ * and names the ones a real run would have downloaded, so the caller can report
+ * them as arriving rather than as missing.
+ */
+function ib_fetch_missing(array $wanted, $dry_run = false) {
+    $missing = [];
+    foreach ($wanted as $name) {
+        if (!is_dir(PathHelper::getIncludePath('plugins/' . $name))) {
+            $missing[] = $name;
+        }
+    }
+    if (empty($missing)) {
+        return ['errors' => [], 'planned' => []];
+    }
+
+    $settings = Globalvars::get_instance();
+    $source = rtrim((string)$settings->get_setting('upgrade_source'), '/');
+    if ($source === '') {
+        return [
+            'errors'  => array_fill_keys($missing, 'no upgrade_source is configured, so there is nowhere to fetch from'),
+            'planned' => [],
+        ];
+    }
+
+    fwrite(STDOUT, "Fetching from {$source}: " . implode(', ', $missing) . "\n");
+
+    $manifest_url = $source . '/utils/upgrade?serve-upgrade=1';
+    $raw = @file_get_contents($manifest_url);
+    $manifest = $raw === false ? null : json_decode((string)$raw, true);
+    if (!is_array($manifest)) {
+        return [
+            'errors'  => array_fill_keys($missing, "could not read the published-archives manifest at {$manifest_url}"),
+            'planned' => [],
+        ];
+    }
+
+    // published_plugins is [{name, version, url}, ...]; url is absolute.
+    $url_by_name = [];
+    foreach ($manifest['published_plugins'] ?? [] as $entry) {
+        if (!empty($entry['name']) && !empty($entry['url'])) {
+            $url_by_name[$entry['name']] = $entry['url'];
+        }
+    }
+
+    $errors = [];
+    $planned = [];
+    foreach ($missing as $name) {
+        if (!isset($url_by_name[$name])) {
+            // The release site does not publish it. Nothing the deployer can do
+            // about this, so say where the gap is rather than what they should try.
+            $errors[$name] = "{$source} does not publish a {$name} archive";
+            continue;
+        }
+        if ($dry_run) {
+            fwrite(STDOUT, "  {$name}: would download {$url_by_name[$name]}\n");
+            $planned[] = $name;
+            continue;
+        }
+
+        // Archives unpack as plugins/<name>/..., so the target is the parent.
+        $result = DeploymentHelper::downloadAndExtract(
+            $url_by_name[$name],
+            PathHelper::getIncludePath('plugins') . '/',
+            $name
+        );
+        if (!$result['success']) {
+            $errors[$name] = $result['error'];
+            continue;
+        }
+        if (!is_dir(PathHelper::getIncludePath('plugins/' . $name))) {
+            $errors[$name] = "archive unpacked but no plugins/{$name} directory appeared";
+            continue;
+        }
+        fwrite(STDOUT, "  {$name}: downloaded\n");
+    }
+    return ['errors' => $errors, 'planned' => $planned];
+}
 
 /** Minimal --flag / --flag=value parser. */
 function ib_opts(array $argv) {
@@ -150,6 +242,14 @@ if (empty($wanted)) {
 fwrite(STDOUT, "Installing {$source}: " . implode(', ', $wanted) . "\n");
 
 // ---------------------------------------------------------------------------
+// Fetch whatever is not here yet
+// ---------------------------------------------------------------------------
+
+$fetch = ib_fetch_missing($wanted, $dry_run);
+$fetch_errors = $fetch['errors'];
+$fetch_planned = $fetch['planned'];
+
+// ---------------------------------------------------------------------------
 // Install and activate
 // ---------------------------------------------------------------------------
 
@@ -159,7 +259,15 @@ $failed = [];
 foreach ($wanted as $name) {
     $path = PathHelper::getIncludePath('plugins/' . $name);
     if (!is_dir($path)) {
-        fwrite(STDERR, "  {$name}: no plugin directory on disk — skipped\n");
+        // On a dry run the download did not happen, so a plugin the fetch would
+        // have brought down is on its way, not missing. Reporting it as missing
+        // would make a healthy dry run look like the failure it is meant to rule out.
+        if ($dry_run && in_array($name, $fetch_planned, TRUE)) {
+            fwrite(STDOUT, "  {$name}: would download, install and activate\n");
+            continue;
+        }
+        $why = $fetch_errors[$name] ?? 'no plugin directory on disk';
+        fwrite(STDERR, "  {$name}: {$why} — skipped\n");
         $failed[] = $name;
         continue;
     }

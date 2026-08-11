@@ -2,6 +2,13 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.16 - dbconfig-no-thanks is installed alongside opendmarc, which
+#                depends on `dbconfig-mysql | dbconfig-no-thanks`. Left to
+#                choose, apt takes the first: a MySQL client stack lands on a
+#                PostgreSQL-only box and dbconfig-common fails trying to reach a
+#                MySQL server that was never there, printing two ERROR lines into
+#                every install log. Only the report tooling wants that database
+#                and nothing here runs it
 # Version: 2.15 - The sqlite3 package is named for the PHP actually on the box,
 #                not pinned to 8.3, so provisioning on any other PHP stops asking
 #                apt for a package that does not exist there
@@ -190,7 +197,21 @@ if [[ -z "${PHP_VERSION}" ]]; then
     echo "ERROR: could not read a version from ${PHP_BIN}; cannot name the sqlite3 package." >&2
     exit 1
 fi
-PACKAGES=(postfix postfix-pgsql opendkim opendkim-tools opendmarc "php${PHP_VERSION}-sqlite3")
+# dbconfig-no-thanks is listed ahead of opendmarc on purpose. opendmarc depends
+# on `dbconfig-mysql | dbconfig-no-thanks`, and an unresolved alternative is
+# satisfied by the first option — so apt installs MySQL client packages onto a
+# PostgreSQL-only box, then dbconfig-common tries to provision a database
+# against a MySQL server that is not there and fails:
+#
+#   ERROR 2002 (HY000): Can't connect to local MySQL server through socket ...
+#   dbconfig-common: opendmarc configure: noninteractive fail.
+#
+# Nothing breaks — that database only feeds opendmarc-import/opendmarc-reports,
+# which nothing here runs, and the milter stamps Authentication-Results without
+# it — but every install ends up with two ERROR lines in a log whose whole
+# contract is that errors mean something, plus a MySQL client stack it will
+# never use. Naming the other alternative resolves the dependency honestly.
+PACKAGES=(postfix postfix-pgsql dbconfig-no-thanks opendkim opendkim-tools opendmarc "php${PHP_VERSION}-sqlite3")
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then

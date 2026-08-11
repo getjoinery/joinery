@@ -1437,6 +1437,17 @@
 				        ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value";
 				$q = $dblink->prepare($sql);
 				$q->execute([':version' => $decode_response['system_version']]);
+
+				// Remember that this version arrived from somewhere else rather than
+				// being authored here. A site that republishes what it received --
+				// getjoinery serves releases by upgrading itself and publishing --
+				// must reuse this number instead of minting a new one, or two sites
+				// mint the same number from different trees. Which is what happened:
+				// see specs/publish_delivers_what_it_promises.md.
+				$sql = "INSERT INTO stg_settings (stg_name, stg_value) VALUES ('upgrade_received_version', :version)
+				        ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value";
+				$q = $dblink->prepare($sql);
+				$q->execute([':version' => $decode_response['system_version']]);
 				if($verbose){
 					echo 'System version now ' . htmlspecialchars($decode_response['system_version']) . "<br>\n";
 				}
@@ -1903,7 +1914,7 @@
 			}
 			upgrade_echo("Downloading {$type}: {$name}...");
 			flush();
-			$result = download_and_extract($url, $stage_directory . '/' . $target_subdir . '/');
+			$result = DeploymentHelper::downloadAndExtract($url, $stage_directory . '/' . $target_subdir . '/', $name);
 			if ($result['success']) {
 				upgrade_echo(" ✓<br>");
 				$count++;
@@ -1974,62 +1985,9 @@
 		}
 	}
 
-	/**
-	 * Download and extract a tar.gz archive to a target directory
-	 */
-	function download_and_extract($url, $target_dir, $item_name = null) {
-		// Create temp file for download
-		$temp_file = tempnam(sys_get_temp_dir(), 'joinery_dl_');
-
-		// Download the file
-		$ch = curl_init();
-		$fp = fopen($temp_file, 'w');
-		curl_setopt_array($ch, [
-			CURLOPT_URL => $url,
-			CURLOPT_FILE => $fp,
-			CURLOPT_TIMEOUT => 120,
-			CURLOPT_CONNECTTIMEOUT => 30,
-			CURLOPT_FOLLOWLOCATION => true,
-		]);
-		$success = curl_exec($ch);
-		$error = curl_error($ch);
-		$http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-		fclose($fp);
-
-		if (!$success || $http_code !== 200) {
-			@unlink($temp_file);
-			return ['success' => false, 'error' => "Download failed: $error (HTTP $http_code)"];
-		}
-
-		// Verify file size
-		if (filesize($temp_file) < 100) {
-			@unlink($temp_file);
-			return ['success' => false, 'error' => 'Downloaded file too small'];
-		}
-
-		// Create target directory if needed
-		if (!is_dir($target_dir)) {
-			mkdir($target_dir, 0755, true);
-		}
-
-		// Extract the archive
-		$tar_cmd = sprintf(
-			'tar -xzf %s -C %s 2>&1',
-			escapeshellarg($temp_file),
-			escapeshellarg($target_dir)
-		);
-		$output = [];
-		$exit_code = 0;
-		exec($tar_cmd, $output, $exit_code);
-
-		// Clean up temp file
-		@unlink($temp_file);
-
-		if ($exit_code !== 0) {
-			return ['success' => false, 'error' => 'Extract failed: ' . implode("\n", $output)];
-		}
-
-		return ['success' => true];
-	}
+	// download_and_extract moved to DeploymentHelper::downloadAndExtract so
+	// install_bundle.php can fetch a fresh site's default plugins through the
+	// same code. This file cannot be included to borrow a function from it --
+	// requiring it runs an upgrade.
 
 ?>

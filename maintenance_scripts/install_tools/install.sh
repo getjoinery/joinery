@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#VERSION 2.51 - A corrupt grub-pc answer in the Linode image no longer kills the
+#              install. The image ships grub-pc/install_devices holding the
+#              literal string "multiselect" -- the template type, not a value --
+#              so the first grub-pc upgrade tries to install a bootloader to
+#              /multiselect, fails, and takes the whole unattended install with
+#              it. The value is cleared before apt upgrade runs. Setting
+#              install_devices_empty alone does not work: the postinst reads it
+#              only when the device list is empty, and a bogus string is not
+#              empty. See specs/publish_delivers_what_it_promises.md.
 #VERSION 2.50 - Unmatched requests reach an empty directory, not the tree that
 #              holds every site. Apache's main server answers anything no vhost
 #              claims, and its built-in DocumentRoot is /var/www/html — the
@@ -1952,6 +1961,47 @@ do_server_setup() {
 
     # Update system packages
     print_step "Updating system packages..."
+
+    # A maintainer script that needs an answer nobody gave will fail the whole
+    # upgrade, and with it the whole install. DEBIAN_FRONTEND=noninteractive
+    # stops the prompt; it does not supply the answer.
+    #
+    # grub-pc is the one that bites here. Linode's disks carry no partition
+    # table -- /dev/sda *is* the filesystem -- so there is no boot sector to
+    # write and grub-pc/install_devices was never answered at image build time.
+    # On upgrade its postinst reads the unanswered question, gets the template
+    # type back instead of a value, and tries to install the bootloader to a
+    # device literally named /multiselect:
+    #
+    #   grub-pc: Running grub-install ...
+    #   /multiselect does not exist, so cannot grub-install to it!
+    #
+    # Setting install_devices_empty alone does NOT fix it -- verified on a
+    # failed box. The postinst consults that flag only when the device list is
+    # empty, and here the list is not empty: it holds the bogus string. The
+    # value has to be cleared first, and then the flag says "nowhere, and that
+    # is deliberate" -- which is the truth, because the host boots this guest.
+    #
+    # Only the exact literal is treated as corrupt. A real answer is a device
+    # path, or several separated by commas, and none of those can equal the
+    # word "multiselect" -- so a box that was partitioned and answered properly
+    # keeps its own setting instead of being told to stop installing its
+    # bootloader.
+    if command -v debconf-communicate > /dev/null 2>&1; then
+        grub_devices=$(echo 'get grub-pc/install_devices' | debconf-communicate 2>/dev/null | cut -d' ' -f2-)
+        grub_devices=$(echo "$grub_devices" | tr -d '[:space:]')
+
+        if [ "$grub_devices" = "multiselect" ]; then
+            echo 'set grub-pc/install_devices ' | debconf-communicate > /dev/null 2>&1 || true
+            grub_devices=''
+            print_info "Cleared a corrupt grub-pc install device ('multiselect') baked into the image."
+        fi
+
+        if [ -z "$grub_devices" ]; then
+            echo 'grub-pc grub-pc/install_devices_empty boolean true' | debconf-set-selections 2>/dev/null || true
+        fi
+    fi
+
     apt update && apt upgrade -y
 
     # Install essential packages

@@ -481,6 +481,22 @@ check(preg_match('/UDF name="JOINERY_ADMIN_PASSWORD"/', $wrapper_src) === 1,
 check(preg_match('/UDF name="JOINERY_LINODE_TOKEN_PASSWORD"/', $wrapper_src) === 1,
     'and so is the API token');
 
+// A field is required when it declares no default. The domain is required
+// because a site with no domain can get no certificate, and every link and
+// canonical URL it emits names an IP address. Blank is a state worth passing
+// through during setup, not one worth deploying into — and an empty box beside
+// "Site domain" reads as optional, which is how a placeholder that never
+// resolves ends up naming somebody's site.
+$domain_udf = '';
+if (preg_match('/<UDF name="JOINERY_DOMAIN"[^>]*>/', $wrapper_src, $dm)) {
+    $domain_udf = $dm[0];
+}
+check($domain_udf !== '', 'the wrapper declares a domain field');
+check($domain_udf !== '' && strpos($domain_udf, 'default=') === false
+    && strpos($domain_udf, 'optional=') === false,
+    'and the domain is required, not optional',
+    'a default or an optional flag makes the form accept a blank domain');
+
 // Both of these are Linode-side constraints that reject the upload outright, so
 // a wrapper that breaks either one is a file that can never become a
 // StackScript. Neither is visible from reading the script or running it here.
@@ -1459,6 +1475,35 @@ foreach (['apt-get install', 'apt install', 'apt-get update', 'apt update'] as $
 check($dfe_pos !== false, 'install.sh exports DEBIAN_FRONTEND=noninteractive globally');
 check($first_apt !== null && $dfe_pos !== false && $dfe_pos < $first_apt,
     'and does so before the first apt call');
+
+
+section('A package prompt cannot kill an unattended install');
+
+// The Linode Ubuntu image ships grub-pc/install_devices holding the literal
+// string "multiselect" — the debconf template type where a device path belongs.
+// The first grub-pc upgrade then tries to install a bootloader to /multiselect,
+// fails, and aborts the whole install. DEBIAN_FRONTEND=noninteractive does not
+// help: it suppresses the prompt, it does not supply the answer.
+$grub_pos   = strpos($install_src, "grub-pc/install_devices");
+$upgrade_pos = strpos($install_src, 'apt update && apt upgrade -y');
+check($grub_pos !== false, 'install.sh handles the grub-pc device answer');
+check($grub_pos !== false && $upgrade_pos !== false && $grub_pos < $upgrade_pos,
+    'and does so before the upgrade that would trip over it',
+    'after the upgrade is after the failure');
+
+// Clearing the bogus value is the part that works. install_devices_empty alone
+// does not: the postinst consults it only when the list is empty, and the
+// corrupt string is not empty. Verified on a box in the failed state.
+check(strpos($install_src, "set grub-pc/install_devices ' | debconf-communicate") !== false,
+    'by clearing the corrupt value, not only setting install_devices_empty');
+check(strpos($install_src, 'install_devices_empty boolean true') !== false,
+    'then recording that nowhere is the intended answer',
+    'the host boots this guest; the guest has no boot sector to write');
+
+// A real answer is a device path. Matching only the exact literal keeps a
+// properly-partitioned box from being told to stop installing its bootloader.
+check(strpos($install_src, '[ "$grub_devices" = "multiselect" ]') !== false,
+    'and only when the value is exactly the leaked template type');
 
 
 section('A request that matches no vhost reaches nothing');

@@ -1,7 +1,17 @@
 # A publish must deliver what it promises
 
-**Status:** Open. Both defects found 2026-08-11 while gating the Linode
-StackScript.
+**Status:** Implemented 2026-08-11, published in 0.8.263, verified on real
+instances. Both defects were found while gating the Linode StackScript.
+
+Both halves are live and were exercised rather than asserted. A fresh StackScript
+instance now downloads `mailbox` and `joinery_ai` from the published-archives
+manifest, installs and activates them — confirmed twice, with rows in
+`plg_plugins` and `plg_active = 1`. The publish guard was proven by attempting a
+real publish of a release naming a plugin that did not exist: it refused, before
+writing anything, and `VERSION` was untouched afterwards. The version guard has
+since republished 0.8.261, 0.8.262 and 0.8.263 from getjoinery on a bare command
+with no version argument — the exact invocation that minted the colliding
+0.8.259.
 
 Two failures in the publish pipeline, unrelated in mechanism and identical in
 shape: **a publish states something it does not deliver, and nothing checks.**

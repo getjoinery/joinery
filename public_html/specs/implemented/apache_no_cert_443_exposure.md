@@ -1,8 +1,8 @@
 # When there is no certificate, Apache serves the whole site tree
 
-**Status:** Fixed in `install.sh` 2.50, **published in 0.8.260** and served by
-`getjoinery.com/utils/latest_release`, so every new install carries it. Awaiting
-the live re-gate. Found 2026-08-10 on the first StackScript instance
+**Status:** Implemented 2026-08-11. Fixed in `install.sh` 2.50, published in
+0.8.260, and verified on a real box that holds no certificate and never will —
+see the re-run at the end. Found 2026-08-10 on the first StackScript instance
 (50.116.60.22), deployed with a domain that does not resolve. Confirmed by
 direct probe, root cause identified, fleet swept.
 
@@ -278,12 +278,30 @@ stays as it is. The two boxes carrying the legacy `000-default` are a scratch
 box and the dev box; neither is a customer install, and both get the fix the
 next time server setup runs.
 
-## Still to do
+## Verified on a real box, 2026-08-11
 
-- Rebuild a no-certificate instance from the StackScript and re-run the probe.
-  The static checks cannot see this — only a real box can. Published in 0.8.260
-  and verified present in the archive the StackScript fetches, so a new deploy
-  builds with the fix.
-- Destroy 50.116.60.22, or keep it as the before-picture until the re-gate and
-  destroy it after. It is serving an empty log file and its own copy of
-  `install.sh`, on a box holding no data.
+Re-run on a StackScript instance (198.74.58.214) built from 0.8.263 with a
+domain that does not resolve — so it holds no certificate and never will. That
+is the vulnerable condition made permanent rather than a few minutes of
+provisioning, which is the strongest form this test can take:
+
+```
+port 443 open, no vhost claims it
+cleartext to 443, unmatched Host          -> 403 Forbidden
+/sdfa/logs/error.log                      -> 403 on 443, 404 on 80
+/sdfa/config/Globalvars_site.php          -> 403 on 443, 404 on 80
+/sdfa/maintenance_scripts/.../install.sh  -> 403 on 443, 404 on 80
+the site itself over HTTP                 -> 200
+```
+
+Before the fix the first of those returned `200` with Apache's default page and
+the error log returned its contents. `sites-enabled` holds only the site vhost,
+and `/var/www/unmatched` is present and empty.
+
+The transition was also watched live on an earlier build: mid-install, before
+Apache reloaded onto the new config, an unmatched-Host request on `:80` returned
+`200` with the stock default page; after the reload the same request returned
+`403`. Same box, same request, the reload being the only difference.
+
+**Nothing outstanding.** The remaining cleanup — destroying the boxes used as
+before-pictures — is housekeeping, not spec work.
