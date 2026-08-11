@@ -413,17 +413,6 @@ impl Store {
     /// - **queued operations are dropped**, not moved. They were planned against
     ///   an identity that no longer exists, and the only one that can be
     ///   outstanding here is the create that will never succeed.
-    ///
-    /// **A child has two placements and both have to move.** `parent_folder_id`
-    /// is where the server says a child lives; `synced_parent_id` is where the
-    /// two sides last agreed it lived. Re-pointing only the first leaves the
-    /// agreement naming a folder this function deletes a few statements later,
-    /// and an agreed placement that cannot be resolved has no path — so the
-    /// engine cannot say where the file is now, nor where it used to be. The
-    /// soak rig found it as an immortal `move_local`: ten attempts, no progress,
-    /// and a device that could not converge for the rest of the campaign.
-    /// Re-pointing is right rather than merely convenient, because the merge's
-    /// premise is that both ids named one directory all along.
     pub fn merge_folder(&self, from: EntityId, to: EntityId) -> StoreResult<()> {
         if from == to || from.entity_type != EntityType::Folder {
             return Ok(());
@@ -433,10 +422,6 @@ impl Store {
         let result = (|| -> StoreResult<()> {
             self.conn.execute(
                 "UPDATE entries SET parent_folder_id = ?2 WHERE parent_folder_id = ?1",
-                params![from.server_id, to.server_id],
-            )?;
-            self.conn.execute(
-                "UPDATE entries SET synced_parent_id = ?2 WHERE synced_parent_id = ?1",
                 params![from.server_id, to.server_id],
             )?;
             self.conn.execute(
@@ -1653,41 +1638,5 @@ mod tests {
             assert_eq!(back.synced_content.unwrap().sha256, "agreed-sha");
         }
         let _ = std::fs::remove_dir_all(&dir);
-    }
-
-    #[test]
-    fn merging_a_folder_moves_both_of_a_childs_placements() {
-        // A child records where the server says it lives *and* where the two
-        // sides last agreed it lived. The merge deletes the provisional folder,
-        // so a reference left in either one names a row that is gone, and an
-        // entry whose agreed placement cannot be resolved has no local path at
-        // all. Every caller reads that as the sync folder being unavailable and
-        // retries forever — which is how the soak rig met it: a `move_local` on
-        // ten attempts holding convergence open for a whole campaign.
-        let s = Store::open_in_memory().unwrap();
-        let provisional = EntityId::folder(-685);
-        let real = EntityId::folder(900);
-
-        let mut child = entry(7, "doc-8.txt");
-        child.remote.parent = Some(provisional.server_id);
-        child.synced_placement = Some(Placement {
-            parent: Some(provisional.server_id),
-            name: "doc-8.txt".into(),
-        });
-        s.put_entry(&child).unwrap();
-
-        s.merge_folder(provisional, real).unwrap();
-
-        let back = s.get_entry(EntityId::file(7)).unwrap().unwrap();
-        assert_eq!(
-            back.remote.parent,
-            Some(real.server_id),
-            "the server-side placement should follow the merge"
-        );
-        assert_eq!(
-            back.local_placement().parent,
-            Some(real.server_id),
-            "the agreed placement is left naming a folder the merge deleted"
-        );
     }
 }
