@@ -2311,6 +2311,12 @@
       "helptext": "Release version of the deployed code. Written by the upgrade process."
     },
     {
+      "name": "upgrade_received_version",
+      "default": "",
+      "managed": true,
+      "helptext": "The version this site last received from its upgrade source. Written by the upgrade process. When it equals system_version the running code was delivered rather than written here, so publishing republishes that number instead of minting a new one."
+    },
+    {
       "name": "scheduled_tasks_last_cron_run",
       "default": "",
       "managed": true,

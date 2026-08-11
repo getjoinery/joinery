@@ -1282,6 +1282,80 @@ class DeploymentHelper {
 
         return $result;
     }
+
+    // ============================================
+    // COMPONENT ARCHIVE FETCH
+    // ============================================
+
+    /**
+     * Download a .tar.gz and unpack it into a directory.
+     *
+     * Used by two callers with nothing else in common: upgrade.php pulling
+     * theme and plugin archives onto an existing site, and install_bundle.php
+     * fetching a fresh site's default plugins. It lives here because the
+     * alternative was a second copy of curl-and-tar that would drift from this
+     * one the first time either grew a timeout, a redirect limit or a checksum.
+     *
+     * Never throws: returns ['success' => bool, 'error' => string] so a caller
+     * mid-install can decide for itself whether a failed fetch is fatal.
+     *
+     * @param string      $url        Absolute URL of the archive.
+     * @param string      $target_dir Directory to unpack into; created if absent.
+     * @param string|null $item_name  Name for messages, when the URL is unhelpful.
+     * @return array{success: bool, error?: string}
+     */
+    public static function downloadAndExtract($url, $target_dir, $item_name = null) {
+        $label = $item_name !== null ? $item_name : basename(parse_url($url, PHP_URL_PATH) ?: $url);
+        $temp_file = tempnam(sys_get_temp_dir(), 'joinery_dl_');
+
+        $ch = curl_init();
+        $fp = fopen($temp_file, 'w');
+        curl_setopt_array($ch, [
+            CURLOPT_URL => $url,
+            CURLOPT_FILE => $fp,
+            CURLOPT_TIMEOUT => 120,
+            CURLOPT_CONNECTTIMEOUT => 30,
+            CURLOPT_FOLLOWLOCATION => true,
+        ]);
+        $success = curl_exec($ch);
+        $error = curl_error($ch);
+        $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
+        curl_close($ch);
+        fclose($fp);
+
+        if (!$success || $http_code !== 200) {
+            @unlink($temp_file);
+            return ['success' => false, 'error' => "Download of {$label} failed: {$error} (HTTP {$http_code})"];
+        }
+
+        // A redirect to an HTML error page is still a 200. Anything this small
+        // is not an archive, and tar's complaint about it is unreadable.
+        if (filesize($temp_file) < 100) {
+            @unlink($temp_file);
+            return ['success' => false, 'error' => "Downloaded {$label} is too small to be an archive"];
+        }
+
+        if (!is_dir($target_dir)) {
+            mkdir($target_dir, 0755, true);
+        }
+
+        $tar_cmd = sprintf(
+            'tar -xzf %s -C %s 2>&1',
+            escapeshellarg($temp_file),
+            escapeshellarg($target_dir)
+        );
+        $output = [];
+        $exit_code = 0;
+        exec($tar_cmd, $output, $exit_code);
+
+        @unlink($temp_file);
+
+        if ($exit_code !== 0) {
+            return ['success' => false, 'error' => "Extract of {$label} failed: " . implode("\n", $output)];
+        }
+
+        return ['success' => true];
+    }
 }
 
 ?>
