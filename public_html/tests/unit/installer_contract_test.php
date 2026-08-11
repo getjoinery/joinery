@@ -297,7 +297,27 @@ check($retry_block !== '' && strpos($retry_block, 'dig +short') !== false,
     'it resolves the domain before spending a validation attempt');
 check($retry_block !== '' && strpos($retry_block, 'have_real_cert') !== false,
     'it disables itself on a CA-issued certificate, not on any file at the cert path',
-    'provision_origin_cert falls back to self-signed, so file-exists would end the retries at once');
+    'an operator or an origin-cert flow can place a self-signed cert there, so file-exists is not a finish line');
+
+// Every Linode is dual-stack and prefers IPv6, so a bare `curl ifconfig.me`
+// reports an IPv6 address. Compared against an A record it never matches, and
+// the box waits for a certificate forever while reporting that it is waiting —
+// which is exactly what happened on the first deferred install. Ask per family
+// and compare like with like, the same way provision_origin_cert already does.
+check($retry_block !== '' && preg_match('/curl -4 [^\n]*ifconfig\.me/', $retry_block) === 1
+    && preg_match('/curl -6 [^\n]*ifconfig\.me/', $retry_block) === 1,
+    'it asks for its own address per family, not whichever the host prefers');
+check($retry_block !== '' && strpos($retry_block, 'dig +short A ') !== false
+    && strpos($retry_block, 'dig +short AAAA ') !== false,
+    'and resolves both A and AAAA to compare like with like');
+check($retry_block !== '' && !preg_match('/\$\(curl -s --max-time 5 ifconfig\.me/', $retry_block),
+    'with no bare curl left to reintroduce the mismatch');
+
+// The same comparison exists in install.sh. Two checks that must agree, and
+// only one of them was fixed the first time.
+check(strpos($install_src, 'curl -4 -s') !== false && strpos($install_src, 'curl -6 -s') !== false,
+    'provision_origin_cert makes the same per-family comparison',
+    'the retry timer and the installer must agree on whether DNS points here');
 
 
 section('An upgrade proves the code it just installed');
@@ -1475,6 +1495,40 @@ foreach (['apt-get install', 'apt install', 'apt-get update', 'apt update'] as $
 check($dfe_pos !== false, 'install.sh exports DEBIAN_FRONTEND=noninteractive globally');
 check($first_apt !== null && $dfe_pos !== false && $dfe_pos < $first_apt,
     'and does so before the first apt call');
+
+
+section('Upgrading a request to HTTPS does not throw away what was typed');
+
+// A 301 or 302 makes the browser re-issue a redirected POST as a GET and drop
+// the body, so a form submitted at the moment the scheme upgrade appears is
+// swallowed in flight: no error, no action, back to the same page. It happened
+// for real — a deferred certificate was issued between a login page loading
+// over http and its form being submitted, and the credentials never arrived.
+// 308 keeps the method and the body, with the same permanent semantics.
+foreach ([
+    'default_virtualhost.conf' => $site_root . '/maintenance_scripts/install_tools/default_virtualhost.conf',
+    'default_proxy_vhost.conf' => $site_root . '/maintenance_scripts/install_tools/default_proxy_vhost.conf',
+] as $label => $path) {
+    $vhost_src = is_file($path) ? file_get_contents($path) : '';
+    check($vhost_src !== '', "{$label} exists", $path);
+
+    // Every scheme upgrade in the file, whatever its shape.
+    $upgrades = [];
+    if (preg_match_all('/RewriteRule[^\n]*https:\/\/[^\n]*/', $vhost_src, $rm)) {
+        $upgrades = $rm[0];
+    }
+    check(!empty($upgrades), "{$label} redirects http to https");
+
+    $body_losing = array_filter($upgrades, function ($rule) {
+        return strpos($rule, 'R=301') !== false
+            || strpos($rule, 'R=302') !== false
+            || strpos($rule, 'R=permanent') !== false
+            || strpos($rule, 'R=temp') !== false;
+    });
+    check(empty($body_losing),
+        "{$label} upgrades the scheme without discarding a POST",
+        empty($body_losing) ? 'all use 308' : 'body-losing rule: ' . implode(' | ', $body_losing));
+}
 
 
 section('A package prompt cannot kill an unattended install');

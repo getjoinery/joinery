@@ -1,22 +1,24 @@
 # Linode StackScript — Self-Installing Joinery on Akamai Cloud
 
-**Status:** Built 2026-07-30. The StackScript is live and private in the
-account (2185451); awaiting the live gates.
+**Status:** Implemented 2026-08-11. **Public** as StackScript 2185451 —
+`https://cloud.linode.com/stackscripts/2185451` — targeting `linode/ubuntu26.04`
+only, with the domain field required. Gates A2, B and C pass; **A1 has never
+been run** and went public untested (owner's call), so the hands-off
+record-creation path is the one place a stranger can go somewhere nobody has
+been. Linode treats publication as one-way: a public StackScript cannot be made
+private again, though it can still be edited or deleted.
 
 Phases 0, 1 and 2 are implemented; Gaps 3, 4, 5, 6 and 7 are closed in code, as
 are the timezone, bundle, admin-email and email-default items. `safe` tier green
-(98/98); `tests/unit/installer_contract_test.php` covers every decision here.
-What is left is what only a real instance can answer: live gates A, B and C
-below, and Phase 3 — flipping the script public, which is a publishing action
-rather than code.
+(100 tests, 3012 checks); `tests/unit/installer_contract_test.php` covers every
+decision here.
 
-Two things were verified by construction rather than by running them, and are
-called out so nobody assumes otherwise. The retry timer's units were never
-installed on a live box — the retry script itself was extracted and exercised,
-including both directions of the self-signed-versus-CA check that decides when
-it stops. And `install_bundle.php` was run only in `--dry-run` here, because
-dev's `mailbox` and `joinery_ai` rows are `stale` and a real run would have
-changed their status.
+Everything previously verified by construction has since been verified by
+running it. The retry timer's units are installed and were watched issuing a
+certificate on a live box and disarming themselves afterwards; `install_bundle.php`
+has run for real on four instances, downloading and activating the bundle rather
+than dry-running it. Four rounds of live deployment found four defects that no
+amount of reading would have — see the gate results below.
 **Companion:** `specs/linode_quick_deploy_app.md` turns this into a public
 Marketplace listing. That spec depends on this one; this one stands alone and
 is worth building even if the listing never happens.
@@ -685,7 +687,11 @@ Linode DNS record creation lives in the handoff script and talks to the Linode
 API directly — the platform's DNS driver is not reachable before the site
 exists.
 
-**Phase 3 — publish the StackScript publicly.** Not started; gated on A and B.
+**Phase 3 — publish the StackScript publicly. DONE 2026-08-11.** `is_public`
+flipped on StackScript 2185451 after A2, B and C passed; A1 was knowingly left
+unrun. The body at Linode hashes identical to
+`linode_stackscript_wrapper.sh` in this repo, which is the only thing that makes
+the repo copy meaningful.
 Any Linode customer can then select it from the StackScripts tab. No submission,
 no review, no approval — this is distribution without the Marketplace, and it
 builds a real population using the script before any listing review reads it.
@@ -734,6 +740,38 @@ builds a real population using the script before any listing review reads it.
   release archive and its declared dependencies — verified from the node, not
   assumed. This is the standalone guarantee, and it is the kind of promise
   that erodes silently if nothing checks it.
+
+### Gate results, 2026-08-11
+
+**A2 — PASSED.** `sscript.getjoinery.com`, record pointed before the run,
+certificate issued first pass over HTTP-01. Sign-in with the deploy-form
+password confirmed by the owner, reaching the forced password change. No console
+used at any point.
+
+**A1 — NOT RUN.** No deploy has supplied a Linode API token, so the hands-off
+record creation has never executed. It is the only path available on a first
+create, so it is the one a stranger takes.
+
+**B — PASSED, on released code.** `asdf.getjoinery.com`, deployed against a name
+with no A record. The record was pointed afterwards and the timer did the rest
+untouched: `[OK] Issued LE certificate for asdf.getjoinery.com (HTTP-01)`,
+followed by `Certificate issued. Retry timer disabled.`
+
+**C — PASSED.** Audited from the node: no agent, no node key, no monitoring or
+telemetry endpoint, no infrastructure credential, no scheduled task that
+contacts us, and no established outbound connection. The only host of ours the
+install touched is `getjoinery.com`, twice, for the release archive and the
+plugin archives. Two honest limits: this was a post-hoc audit rather than a
+packet capture during install, and the box does make ordinary Ubuntu calls on
+timers (`apt-daily`, `fwupd-refresh`, certbot renewal). "No outbound calls" would
+be false; "none to us beyond the release channel" is true.
+
+Three defects were found by running these gates rather than by reading code, and
+each is fixed and published: a corrupt `grub-pc` debconf answer in the Linode
+image that aborted the install; the retry timer comparing an IPv6 address
+against an A record, so a dual-stack box waited forever for a certificate it was
+entitled to; and a 301 scheme upgrade discarding a POST body, which silently ate
+a login submitted in the second after a deferred certificate arrived.
 
 ## Documentation
 

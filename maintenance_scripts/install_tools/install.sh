@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.52 - The deferred-certificate retry timer compares addresses per
+#              family. Every Linode is dual-stack and prefers IPv6, so a bare
+#              curl ifconfig.me reported an IPv6 address, the domain had only an
+#              A record, and the comparison never matched: a box entitled to a
+#              certificate waited for one forever while saying it was waiting.
+#              provision_origin_cert already asked per family; arm_ssl_retry.sh
+#              was written later and did not
 #VERSION 2.51 - A corrupt grub-pc answer in the Linode image no longer kills the
 #              install. The image ships grub-pc/install_devices holding the
 #              literal string "multiselect" -- the template type, not a value --
