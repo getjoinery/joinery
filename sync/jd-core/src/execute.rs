@@ -414,15 +414,74 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 // Paths
 // ---------------------------------------------------------------------------
 
+/// Why something has no path on this computer.
+///
+/// These are two unrelated conditions and they want opposite treatment, so they
+/// are kept apart all the way to the caller. They used to arrive as one bare
+/// `None` and every caller reported the first of them: the soak rig met it as a
+/// `move_local` retrying ten times against a sync folder that was plainly on
+/// disk the whole time, holding a device open for the rest of the campaign. A
+/// user would have been told their sync folder had gone missing.
+enum Unplaced {
+    /// The sync folder itself is not there — an unplugged drive, a folder moved
+    /// while the daemon ran. Waiting is right, because it may well come back,
+    /// and treating an absent volume as a mass delete would be the single worst
+    /// bug this program could have.
+    SyncFolderGone,
+    /// A folder between here and the root is not in the store, so there is no
+    /// chain left to build a path out of. Trying again cannot put it back; the
+    /// next round plans afresh against the tree as it actually is.
+    AncestorMissing,
+}
+
+impl Unplaced {
+    /// What an operation should do about it.
+    fn outcome(self) -> OpOutcome {
+        match self {
+            Unplaced::SyncFolderGone => OpOutcome::Retry("the sync folder is not available".into()),
+            // Deliberately quiet. Nothing here is the user's problem, and an
+            // item asking them to look at a folder the engine has simply
+            // stopped tracking would be noise they cannot act on.
+            Unplaced::AncestorMissing => {
+                OpOutcome::Overtaken("the folder it was in is no longer tracked".into())
+            }
+        }
+    }
+}
+
+/// Where an entry lives on this computer, or why it cannot be said.
+enum Placed {
+    At(PathBuf),
+    Not(Unplaced),
+}
+
+impl Placed {
+    /// The path, for callers weighing one candidate against another.
+    fn path(&self) -> Option<&PathBuf> {
+        match self {
+            Placed::At(p) => Some(p),
+            Placed::Not(_) => None,
+        }
+    }
+
+    /// The reason there is no path, if there is none.
+    fn reason(self) -> Option<Unplaced> {
+        match self {
+            Placed::At(_) => None,
+            Placed::Not(why) => Some(why),
+        }
+    }
+}
+
 /// Where an entry lives on this computer.
 ///
 /// Built by walking parents, because the store keys by identity and the
 /// filesystem addresses by path. A missing link in that chain is not an error
 /// worth retrying — it means the tree changed underneath us and the next round
 /// will produce a plan that fits the tree as it now is.
-fn local_path(env: &ExecEnv, entry: &Entry) -> Result<Option<PathBuf>, ExecError> {
+fn local_path(env: &ExecEnv, entry: &Entry) -> Result<Placed, ExecError> {
     let Some(root) = env.vfs.root() else {
-        return Ok(None);
+        return Ok(Placed::Not(Unplaced::SyncFolderGone));
     };
     let mut parts = vec![entry.effective_local_name().to_string()];
     let mut parent = entry.local_placement().parent;
@@ -433,7 +492,7 @@ fn local_path(env: &ExecEnv, entry: &Entry) -> Result<Option<PathBuf>, ExecError
             return Err(ExecError::Contract("folder tree has a loop in it".into()));
         }
         let Some(folder) = env.store.get_entry(EntityId::folder(id))? else {
-            return Ok(None);
+            return Ok(Placed::Not(Unplaced::AncestorMissing));
         };
         parts.push(folder.effective_local_name().to_string());
         parent = folder.local_placement().parent;
@@ -442,11 +501,11 @@ fn local_path(env: &ExecEnv, entry: &Entry) -> Result<Option<PathBuf>, ExecError
     for part in parts.iter().rev() {
         path.push(part);
     }
-    Ok(Some(path))
+    Ok(Placed::At(path))
 }
 
 /// Where a placement would put something.
-fn path_for(env: &ExecEnv, p: &Placement) -> Result<Option<PathBuf>, ExecError> {
+fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
     let probe = Entry {
         id: EntityId::file(0),
         remote: p.clone(),
@@ -741,8 +800,9 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             "the entry is no longer tracked".into(),
         ));
     };
-    let Some(path) = local_path(env, &entry)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let path = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
 
     // A signed link is minted here rather than remembered, because a link that
@@ -912,8 +972,9 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             "the entry is no longer tracked".into(),
         ));
     };
-    let Some(path) = local_path(env, &entry)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let path = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
         return Ok(OpOutcome::Overtaken(
@@ -1270,15 +1331,17 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         .and_then(Value::as_str)
         .ok_or_else(|| ExecError::UnknownOp("no conflict-copy name".into()))?
         .to_string();
-    let Some(from) = local_path(env, &entry)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let from = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     let kept = Placement {
         parent: entry.remote.parent,
         name: name.clone(),
     };
-    let Some(to) = path_for(env, &kept)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let to = match path_for(env, &kept)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     if env.vfs.fingerprint(&from)?.is_none() {
         return Ok(OpOutcome::Overtaken(
@@ -1413,8 +1476,9 @@ fn create_local_folder(
     op: &Op,
     placement: Placement,
 ) -> Result<OpOutcome, ExecError> {
-    let Some(path) = path_for(env, &placement)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let path = match path_for(env, &placement)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     match env.vfs.create_dir(&path) {
         Ok(()) => {}
@@ -1524,21 +1588,33 @@ fn move_local(
     };
     let agreed = local_path(env, &entry)?;
     let planned = match &source {
-        Some(p) => path_for(env, p)?,
+        Some(p) => Some(path_for(env, p)?),
         None => None,
     };
     // Prefer whichever candidate a file is actually at. Either can be stale,
     // and trusting one blindly is how a move retries against a path nothing has
     // been at for hours.
-    let from = match (&planned, &agreed) {
-        (Some(p), _) if env.vfs.fingerprint(p)?.is_some() => p.clone(),
-        (_, Some(a)) if env.vfs.fingerprint(a)?.is_some() => a.clone(),
-        (Some(p), _) => p.clone(),
-        (_, Some(a)) => a.clone(),
-        _ => return Ok(OpOutcome::Retry("the sync folder is not available".into())),
+    let planned_at = planned.as_ref().and_then(Placed::path).cloned();
+    let agreed_at = agreed.path().cloned();
+    let from = match (planned_at, agreed_at) {
+        (Some(p), _) if env.vfs.fingerprint(&p)?.is_some() => p,
+        (_, Some(a)) if env.vfs.fingerprint(&a)?.is_some() => a,
+        (Some(p), _) => p,
+        (_, Some(a)) => a,
+        // Neither candidate can be placed, so say which condition stopped us.
+        // Assuming the volume is gone is how an untracked ancestor came to be
+        // retried forever against something no retry can mend.
+        _ => {
+            let why = planned
+                .and_then(Placed::reason)
+                .or_else(|| agreed.reason())
+                .unwrap_or(Unplaced::SyncFolderGone);
+            return Ok(why.outcome());
+        }
     };
-    let Some(dest) = path_for(env, &to)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let dest = match path_for(env, &to)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     if from != dest {
         // A rename lands on top of whatever is at the destination. If that is
@@ -1665,8 +1741,9 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             "the entry is no longer tracked".into(),
         ));
     };
-    let Some(path) = local_path(env, &entry)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let path = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     if op.entity.entity_type == EntityType::Folder {
         if let Some(parent) = path.parent() {
@@ -1747,8 +1824,9 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         return Ok(OpOutcome::Done);
     }
 
-    let Some(path) = local_path(env, &entry)? else {
-        return Ok(OpOutcome::Retry("the sync folder is not available".into()));
+    let path = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
     };
     let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
         return Ok(OpOutcome::Overtaken(
