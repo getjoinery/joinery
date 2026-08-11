@@ -45,7 +45,7 @@ written into the spec but does not gate starting the build.
 
 ## F1 — Attacker-controlled SRV target and port (SSRF) — HIGH, BLOCKING
 
-**What the spec claims.** The send decision looks up `_joinery-mail._tcp.<recipient-domain>`
+**What the spec claims.** The send decision looks up `_joinery._tcp.<recipient-domain>`
 and POSTs the preflight to "the advertised host and port," with port "advertised, never
 hardcoded; the default is 443" (spec §The send decision, §The capability record).
 
@@ -85,7 +85,20 @@ request, which is why it stands apart. The fix is a shared safe HTTP client rath
 port/redirect policy is decision **D1** there. Resolving F1 = pick the port policy and
 adopt that client for the Direct transport.
 
-**Resolution:** _pending — port policy (D1 in `safe_http_client.md`) still open._
+**Resolution:** Resolved. **Port policy (D1): the sender follows an SRV to port 443 or
+any port ≥ 1024; privileged ports < 1024 (other than 443) are refused.** 443-only was
+rejected because the Direct design deliberately keeps non-443 dedicated listeners open as
+a future ("What the advertised port keeps open"); any-port was rejected as too loose. The
+≥1024 rule blocks the SSH/SMTP/DNS-class targets while preserving that future, and
+mandatory TLS verification is the load-bearing control at any allowed port (a raw
+Redis/SSH port cannot present a valid cert, so it never connects). Full sender-side guard,
+now folded into `joinery_direct_mail.md` (it was absent — the omission this finding
+flagged): resolve the SRV target through the SSRF-safe client (`safe_http_client.md`),
+block private/reserved/loopback/link-local IPs, pin the connection to a validated public
+IP, restrict the port as above, verify TLS against the SRV hostname, **never follow
+redirects**, and fall back to SMTP on any failure. Added to §The capability record (SRV
+bullet), §The send decision (new SSRF-guard paragraph), Acceptance #32, and an *Attacks
+considered* bullet. D1 also marked RESOLVED in `safe_http_client.md`.
 
 ---
 
@@ -123,7 +136,24 @@ skip-if-held). Confirm the instance signature covers the full manifest including
 hashes. Decide hash function and whether hashes are over ciphertext or plaintext (over
 the sealed bytes is simplest and still binds).
 
-**Resolution:** _pending._
+**Resolution:** Accepted. Per-part hashes go back into the *signed* manifest, over the
+**sealed ciphertext bytes**, as **BLAKE2b-256**. The instance signature is defined to
+cover the envelope + full manifest (hashes included) and is computed in the preflight,
+so it commits to the exact content before any of it is sent. The receiver hashes each
+delivered part at receive time and rejects the whole message on any mismatch; it never
+uses a hash to skip, short-circuit, or differentially handle a part (no skip-if-held).
+This binds the delivered bytes to the signature without reopening the possession
+oracle, because the anti-oracle invariant — *always take the full transfer, then
+decide* — is exactly what integrity checking does anyway. Hashing the ciphertext (not
+the plaintext) keeps the check runnable at receive time even when a Fortress vault is
+locked; the Ed25519 signature authenticates the plaintext transitively at unseal.
+Folded into `joinery_direct_mail.md` §Vocabulary (Manifest + Instance signature) and
+§Message transfer, which also resolves a pre-existing contradiction — Vocabulary said
+"content hash," §Message transfer said "not content hashes." Replay of an intact
+{manifest + matching ciphertext} is out of scope here and handled by **F6**.
+**Ordering correction (see F10):** the signed sealed-byte hashes travel with the
+*content transfer*, not the preflight, because sealing is post-accept — the security
+property is unchanged, only the location of the hash. See F10's cross-finding note.
 
 ---
 
@@ -156,14 +186,25 @@ trust-on-first-use / key-continuity check on the recipient key, or (c) accept th
 and state plainly in §Encryption that sealing protects against middleboxes, not against
 recipient-DNS compromise. Pick one and record why.
 
-**Resolution:** _pending._
+**Resolution:** Accepted (c). §Encryption now scopes the claim honestly: sealing is
+"better against an in-path reader," not "strictly better," and a new paragraph states
+that under a recipient-DNS hijack Direct is *no worse than SMTP* but not an
+unconditional upgrade — the bar rises from "sit anywhere in the path" to "control the
+recipient's DNS." (a) rejected as a hard requirement (mandating DNSSEC makes Direct
+unavailable to the DNSSEC-less majority) but recorded as an *ambient* benefit: a
+recipient running DNSSEC closes the redirect for free via a validating resolver, and
+Direct honors it without requiring or re-implementing it. (b) rejected for v1 in its
+key-caching form because it collides head-on with the spec's deliberate
+never-cache-the-key rule (a key cached across a rotation seals unopenable messages);
+TOFU on *box identity* (not the key) is noted as possible later hardening. No code
+change — wording only. Folded into `joinery_direct_mail.md` §Encryption.
 
 ---
 
 ## F4 — Contact sealing is per-vault, not per-tier; the Standard live-gate premise is false — HIGH, BLOCKING
 
 **What the spec claims.** "At Standard the gate runs live, so a non-contact gets
-`use-smtp` on the wire" and "(The live two-answer gate … applies at Standard, where
+`declined` on the wire" and "(The live two-answer gate … applies at Standard, where
 contacts are cleartext and the gate runs at receive.)" (spec §Security levels). The whole
 Standard-vs-Fortress split rests on *contacts being cleartext at Standard*.
 
@@ -178,8 +219,8 @@ closed (`MailboxContacts.php:231`).
 **Why it matters.** For a vault-holding user at Standard/Private with the vault locked,
 the live contact gate cannot run at receive time. Both escapes are bad:
 - Defer like Fortress — but the spec gives Standard no deferred-ingest path.
-- Fall back to `use-smtp` when locked — which **reintroduces the exact lock-state
-  oracle** the Fortress design worked to close (locked → `use-smtp`, unlocked+contact →
+- Fall back to `declined` when locked — which **reintroduces the exact lock-state
+  oracle** the Fortress design worked to close (locked → `declined`, unlocked+contact →
   `accept`), now observable at Standard/Private.
 
 As written, the spec's tier model and the code contradict each other, and the resolution
@@ -191,14 +232,32 @@ everywhere the vault is locked), (b) redefine the tiers so the live gate is only
 when contacts are genuinely readable, or (c) something else. Whichever, the lock-state
 oracle must not reappear at Standard/Private.
 
-**Resolution:** _pending._
+**Resolution:** Accepted via option (b), realized as: **contact sealing gates on the
+same condition as mail sealing** — `vault present AND $domain->seals_content()` —
+instead of vault-possession alone. This makes contacts genuinely readable at Standard
+(the live gate always runs; no locked-contacts case exists there) and sealed only at
+Private/Fortress (which already always accept-and-file-locally, so no live `declined`
+answer and no lock-state oracle). Option (a) was rejected: it would preserve a
+"plaintext mail + sealed contacts" state that secures nothing — every correspondent is
+already exposed by the plaintext mail — at the cost of a new deferred-gate path and a
+tolerated lock-state flip at Standard. Aligning the two axes onto one posture switch
+removes the incoherence instead of adding machinery.
+
+**Build item (code, not just spec).** The contacts path currently seals whenever
+`$vault !== null` (`MailboxContacts::upsertOne`/`sealContact`, and the address-hash
+selection in `addressHash()`/the data class). It must additionally require
+`$domain->seals_content()` for the mailbox the contact belongs to, mirroring
+`InboundEmailRouter.php:448`. At Standard a vault holder's contact rows then store like
+a no-vault user's: `imc_content_sealed=false`, plaintext columns, plain-SHA-256 index —
+a state the schema already supports. No data migration (pre-launch). Folded into
+`joinery_direct_mail.md` §Security levels.
 
 ---
 
 ## F5 — Block list and ingest rate-limiter are claimed as existing but do not exist — MED, SHOULD SCOPE
 
 **What the spec claims.** "Mark as spam / block = remove the contact *and* add the sender
-to the block list," blocked senders get an indistinguishable `use-smtp`, and "the
+to the block list," blocked senders get an indistinguishable `declined`, and "the
 endpoint rate-limits by sending instance and drops early once a signature identifies a
 blocked sender" (spec §Abuse, §The receive decision).
 
@@ -221,7 +280,22 @@ existing filter engine (a sender-criteria `mark_spam` rule, or a first-class blo
 store), and define the ingest rate-limit key (sending instance identity from the
 verified signature) and its bounds.
 
-**Resolution:** _pending._
+**Resolution:** Scoped. **Block = reuse the filter engine, no new store:** "block
+sender X" is remove-the-contact **+** a sender-matched `mark_spam` inbound filter
+(`inbound_email_filter`: `fil_match_from`, `fil_action_mark_spam`). Because blocking
+removes the contact, a blocked sender is already a non-contact at the Direct gate and
+gets the same `declined` — no separate gate branch, no gate-time block lookup. The block
+is a post-storage disposition (the filter engine runs `matches()`/`applyActions()`
+against a stored message), which is exactly the "filed to spam at unlock" behavior
+§Security levels already settled. This also resolved an **internal contradiction**: the
+old "endpoint drops early once a signature identifies a blocked sender" claim required
+the very locked-readable block index §Security levels rejects — that clause is removed.
+**Rate limiter = build item:** key on the *verified sending-instance identity* (not the
+individual sender, so no per-recipient block state and no locked-index problem), applied
+to preflights at the endpoint / at the relay under Fortress. Default policy: token
+bucket, **60 preflights/min per instance, burst 120**, as a declared setting (tunable).
+Folded into `joinery_direct_mail.md` §The receive decision (step 3 Blocked bullet),
+§Abuse (both bullets), and cross-referenced by F7's spam-cap wording.
 
 ---
 
@@ -243,7 +317,20 @@ unstated, Direct will inherit the same omission by default.
 replay cache (nonce or envelope-id dedup) in the receive path. Specify the window and the
 cache lifetime.
 
-**Resolution:** _pending._
+**Resolution:** Accepted. The envelope carries a **signed timestamp** and a **random
+per-delivery nonce (≥128 bits)**, both under the instance signature (which F2 already
+extended to cover the full envelope + manifest). Receive step 2 (new, before the contact
+gate) refuses a timestamp older than **5 min** or more than **1 min** in the future, and
+refuses a nonce already seen. The nonce cache TTL is **10 min** — longer than the
+acceptance window on purpose, so the freshness check and the cache compose with no gap
+(a replay that aged out of the cache is already too stale to pass freshness). Chosen
+properties: the cache stores only opaque nonces + expiries (no sealed data), so it dedups
+while a Fortress vault is locked; and a replay failure is a request-level refusal in the
+same bucket as an invalid signature — not one of the two contact-gate answers — so it
+adds no oracle (only a replayer, who already holds the message, triggers it). Send step 2
+notes the sender generates a fresh timestamp+nonce per attempt, so benign retries never
+collide. Folded into `joinery_direct_mail.md` §The send decision (step 2) and §The
+receive decision (step 2, with 3/4 renumbered).
 
 ---
 
@@ -269,7 +356,15 @@ limiter.
 mail reaches the *inbox*," acknowledge the bounded storage cost at locked Fortress, and
 point at the rate limiter as the cap. No design change required beyond F5.
 
-**Resolution:** _pending._
+**Resolution:** Accepted, wording only. §Why there is no spam problem now leads with "no
+unsolicited mail reaches the *inbox*" (not "spam is structurally impossible"), then adds
+an explicit paragraph: the one asterisk is *storage, not inbox, and only at locked
+Fortress*, where a signed message is spooled before the gate can run and filed at
+unlock — no worse than SMTP-at-locked-Fortress and bounded by the F5 per-instance
+preflight rate limiter. The intro's absolute "nothing unrequested can arrive on it" is
+narrowed to "…can reach your inbox on it," with a pointer to the bounded nuance. No
+design change beyond F5. Folded into `joinery_direct_mail.md` (intro + §Why there is no
+spam problem).
 
 ---
 
@@ -294,7 +389,16 @@ indistinguishable from a plausible real one, and decide whether the residual
 rotation-timing distinguisher is acceptable (likely yes, given the cost of probing) —
 record the reasoning either way.
 
-**Resolution:** _pending._
+**Resolution:** Accepted. A decoy reports **generation 1** — the value a never-rotated
+vault carries (`uev_key_generation` default = 1) and the modal real answer, so seeing
+generation 1 discloses nothing and the decoy stays deterministic. The residual
+distinguisher (a *rotated* address reports generation > 1, and a real key advances across
+a rotation while a decoy stands still) is **accepted on the record**: it is one-sided
+(confirms existence only, never denies), fires only for an address the attacker already
+guessed *and* whose owner has rotated (a rare event), and closing it fully would require
+the decoy to forge a believable per-address rotation history — complexity not worth it
+against a probe that must first guess a low-entropy address. Wording only, no code.
+Folded into `joinery_direct_mail.md` §Encryption (decoy section).
 
 ---
 
@@ -312,7 +416,18 @@ DNS-amplification / forced-outbound lever.
 short-circuit preflights whose sender domain fails to resolve, so an attacker cannot pin
 the receiver to unbounded outbound DNS.
 
-**Resolution:** _pending._
+**Resolution:** Accepted. §The receive decision (step 1 + new *Resolving the sender's
+capability record*) now mandates three bounds: **cache** the capability record by
+domain/key-id honoring DNS TTL (with a single, rate-limited refresh on an unseen key id
+so rotations are still picked up); **negative-cache** no-record/NXDOMAIN/SERVFAIL as "no
+Direct"; and **rate-limit by connecting peer** — the pre-verification limiter, since
+instance identity (F5's key) isn't known until after the lookup. Scoped explicitly as a
+*lookup-volume* concern via the system resolver, not the `safe_http_client.md` SSRF
+surface (DNS, not HTTP). Also added Build-plan wording (resolver helper caches +
+rate-limits), Acceptance #29, and an *Attacks considered* bullet. **Incidental fix:** the
+*Attacks considered* "manifest hash as a possession oracle" bullet was stale from F2
+(claimed "manifest carries size and type only, not hashes") and is corrected to the
+integrity-hash-but-never-skip resolution. Folded into `joinery_direct_mail.md`.
 
 ---
 
@@ -335,7 +450,24 @@ exists. This affects the F2/F3 trust story (what the relay can and cannot do).
 custody, new exposure to reason about) or on the box like DKIM (relay originates the
 connection but does not sign). Align the §Security levels text with the choice.
 
-**Resolution:** _pending._
+**Resolution:** Accepted — **box signs, relay transports**, mirroring the existing DKIM
+custody exactly (`MailboxDkimSigner` unwraps in-window on the box and zeroes; the relay
+carries an app-signed message it cannot alter, per `OutboundTransport`). The instance
+signing key never moves to the relay; relay-holds-key is rejected as a new, more-exposed
+custody model that contradicts the "relay is a pure forwarder" posture. §Security levels
+"Send-side key custody" rewritten. Wording only, no code.
+
+**Cross-finding correction (F2 ordering).** Grounding F10's "who signs when" exposed that
+F2's fold-in had the per-part **ciphertext hashes in the preflight manifest** and claimed
+the signature "commits to content before a byte crosses" — but sealing is *post-accept*
+(the key rides the accept; step 4), so the sealed bytes do not exist at preflight time.
+Corrected: the signed per-part sealed-byte hashes travel **with the content transfer**
+(a second box signature, bound to the preflight nonce), verified by the receiving box
+against the delivered ciphertext *without unsealing* (so a locked Fortress box still
+rejects a relay substitution at receive). Ciphertext hashing retained. Updated
+`joinery_direct_mail.md` §Vocabulary (Manifest, Instance signature), §The send decision
+(step 4), §Message transfer, the *Attacks considered* bullet, and Acceptance #30–#31. F2
+above remains resolved; this only fixes where the integrity hash lives.
 
 ---
 

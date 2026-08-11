@@ -129,7 +129,7 @@ operator-fixed.
 |---|---|---|
 | `utils/cache_benchmark.php:25` | `$_GET['url']` (live request param) | `allowed_ports=[80,443]`, `allow_redirects=true` (it benchmarks a real fetch), read-back stays |
 | `adm/admin_static_cache.php:170` → `includes/StaticPageCache.php:943` | `diagnose_url` request param | same; strong read-back (headers+body) is the whole point, so pinning matters most here |
-| **Direct Mail outbound preflight** (per `joinery_direct_mail.md`) | SRV target host+port for a recipient domain, chosen by a remote party | `allowed_ports=[443]` (or 443 + explicit allowlist — decide in F1), `allow_redirects=false` |
+| **Direct Mail outbound preflight** (per `joinery_direct_mail.md`) | SRV target host+port for a recipient domain, chosen by a remote party | port = 443 or ≥ 1024 (D1, resolved), `allow_redirects=false` |
 
 The two admin tools are permission-8/9 gated, so this is authenticated-admin SSRF, not
 open — but the destination is a **live parameter**, so a CSRF or reflected-XSS against an
@@ -217,9 +217,17 @@ Plus a regression assertion for the two migrated admin tools: a `diagnose_url` /
 
 ## Open decisions
 
-- **D1 — Port policy for Direct Mail.** 443-only, 443 + explicit allowlist, or any-port
-  with private-range blocking? Resolve in review F1; this client just enforces whatever
-  is chosen.
+- **D1 — Port policy for Direct Mail. RESOLVED:** the Direct transport permits **443 or
+  any port ≥ 1024**; privileged ports below 1024 (other than 443) are refused. Rationale:
+  the Direct design deliberately allows a deployment to run a dedicated listener on a
+  non-443 port later (`joinery_direct_mail.md` → *The capability record*, "What the
+  advertised port keeps open"), so 443-only would foreclose a stated goal; blocking
+  privileged ports removes the SSH/SMTP/DNS-class SSRF targets at no cost to legitimate
+  listeners; and mandatory TLS verification neutralizes cross-protocol abuse at any
+  allowed port. Redirects off, IP-pinned, private/reserved blocked, as for every caller.
+  The client expresses this as `allowed_ports` allowing 443 plus a ≥ 1024 floor (a list
+  cannot enumerate an open range, so the port policy accepts a `{allow: [443], min:
+  1024}`-style form as well as a plain list).
 - **D2 — One shared instance or per-caller construction?** Leaning per-caller
   construction (policy varies: redirects on for the admin tools, off for Direct Mail), no
   singleton.
