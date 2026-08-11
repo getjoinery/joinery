@@ -72,7 +72,20 @@ validated IP, and constrains the allowed port set. Decide the port policy: 443-o
 443 + an explicit allowlist, or full range with private-range blocking. Decide redirect
 policy (Direct should never follow redirects).
 
-**Resolution:** _pending._
+**Broader than this feature.** Verifying F1 surfaced that the weakness is platform-wide,
+not specific to Direct Mail: there is exactly one SSRF guard (`UrlSafetyValidator`) wired
+into two callers, and ~30 other outbound-request callsites hand-roll curl /
+`file_get_contents` / `fsockopen` with no guard. None is an *unauthenticated* open SSRF
+today (the two live-parameter ones — `utils/cache_benchmark.php`,
+`adm/admin_static_cache.php` — are permission-8/9 gated; the SES/SNS fetch is
+signature-gated and host-pinned; the rest are superadmin-configured or hardcoded vendor
+endpoints). Direct Mail's F1 would add the **first externally-triggerable** outbound
+request, which is why it stands apart. The fix is a shared safe HTTP client rather than
+30 point patches. That is specified separately in **`specs/safe_http_client.md`**; F1's
+port/redirect policy is decision **D1** there. Resolving F1 = pick the port policy and
+adopt that client for the Direct transport.
+
+**Resolution:** _pending — port policy (D1 in `safe_http_client.md`) still open._
 
 ---
 

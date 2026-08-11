@@ -1,9 +1,10 @@
 # When there is no certificate, Apache serves the whole site tree
 
-**Status:** Fixed in `install.sh` 2.50, awaiting publish and a live re-gate.
-Found 2026-08-10 on the first StackScript instance (50.116.60.22), deployed with
-a domain that does not resolve. Confirmed by direct probe, root cause
-identified, fleet swept.
+**Status:** Fixed in `install.sh` 2.50, **published in 0.8.260** and served by
+`getjoinery.com/utils/latest_release`, so every new install carries it. Awaiting
+the live re-gate. Found 2026-08-10 on the first StackScript instance
+(50.116.60.22), deployed with a domain that does not resolve. Confirmed by
+direct probe, root cause identified, fleet swept.
 
 **The fix is one change:** the main server's `DocumentRoot` moves off
 `/var/www/html` to an empty `/var/www/unmatched` that denies everything. HTTP
@@ -279,8 +280,10 @@ next time server setup runs.
 
 ## Still to do
 
-- Publish, then rebuild a no-certificate instance from the StackScript and
-  re-run the probe. The static checks cannot see this — only a real box can.
+- Rebuild a no-certificate instance from the StackScript and re-run the probe.
+  The static checks cannot see this — only a real box can. Published in 0.8.260
+  and verified present in the archive the StackScript fetches, so a new deploy
+  builds with the fix.
 - Destroy 50.116.60.22, or keep it as the before-picture until the re-gate and
   destroy it after. It is serving an empty log file and its own copy of
   `install.sh`, on a box holding no data.
