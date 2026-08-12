@@ -835,7 +835,14 @@ Each domain also has a **catch-all mode** (`ied_catch_all_mode`):
 ## Local Mailbox
 
 The **Mailboxes** tab (`Emails > Mailbox > Mailboxes`) is the default landing
-tab — a Gmail-style reader over locally-stored inbound messages. Each message
+tab — a Gmail-style reader over locally-stored inbound messages. The
+conversation list updates in place after mutations
+(`specs/implemented/mailbox_reader_list_persistence.md`): an action that takes rows out of
+the current view (delete, restore, spam, archive-from-Inbox) removes exactly
+those rows, and anything else (read/unread, star, folder moves) re-reads the
+same view without blanking it first — scroll position and still-applicable
+checkbox selections survive, and only mailbox/view switches and searches
+rebuild the list from scratch. Each message
 shows the parsed plain-text body, a sandboxed iframe rendering of the HTML body
 (no scripts, no top-nav), and a per-attachment download. Each attachment is a
 private `File`, streamed through a single gated endpoint for every transport (see
