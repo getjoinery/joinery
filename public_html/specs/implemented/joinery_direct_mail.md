@@ -1,6 +1,10 @@
 # Joinery Direct Mail
 
-**Status:** UNBUILT — experimental. Design settled, no open decisions; not yet built.
+**Status:** BUILT and verified 2026-08-12 — the channel, the mail kind, the Fortress
+relay, and SRV on every DNS driver. A post-build multi-agent review (A1–A5
+architecture + B1–B19 bugs) is resolved with tests; that review, and its four
+deferred residuals, live in `specs/joinery_direct_mail_remediation.md`.
+`joinery_direct_enabled` defaults 0 (pre-launch).
 
 **Scope note:** v1 covers all tiers including Fortress, so it spans this repository
 *and* a relay version bump with a fleet upgrade. See *Build plan*.
