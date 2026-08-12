@@ -536,7 +536,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
         if ($type === 'SubscriptionConfirmation') {
             $url = (string)($message['SubscribeURL'] ?? '');
             if ($url !== '' && self::isAwsSnsUrl($url)) {
-                @file_get_contents($url);
+                @file_get_contents($url, false, self::noRedirectContext());
                 error_log('[SesProvider] confirmed SNS subscription');
             }
             // Nothing to route — the dispatcher will answer 406; SNS treats the
@@ -620,7 +620,7 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
             return false;
         }
 
-        $cert = @file_get_contents($cert_url);
+        $cert = @file_get_contents($cert_url, false, self::noRedirectContext());
         if ($cert === false || $cert === '') {
             error_log('[SesProvider] could not fetch SNS signing certificate');
             return false;
@@ -673,6 +673,20 @@ class SesProvider implements EmailServiceProvider, InboundEmailProvider, ApiSubm
             return false;
         }
         return (bool)preg_match('/^sns\.[a-z0-9-]+\.amazonaws\.com(\.cn)?$/i', $parts['host']);
+    }
+
+    /**
+     * A stream context that does NOT follow redirects. The two SNS fetches are
+     * host-pinned to sns.<region>.amazonaws.com and signature-gated, so they are
+     * not a live SSRF — but an open redirect on a genuine SNS host would escape
+     * that pin. file_get_contents follows redirects by default; this turns that
+     * off (specs/safe_http_client.md — SES hardening).
+     */
+    private static function noRedirectContext()
+    {
+        return stream_context_create([
+            'http' => ['follow_location' => 0, 'max_redirects' => 0, 'timeout' => 10],
+        ]);
     }
 
     /**

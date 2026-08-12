@@ -1,9 +1,25 @@
 # SafeHttpClient — one SSRF-safe outbound HTTP path
 
-**Status:** OPEN — proposed. Grew out of the Joinery Direct Mail review (finding F1),
-but stands on its own: the platform's outbound-request surface is broad and its one
-SSRF guard is used in two places. This spec makes "the safe fetch" the easy default
-instead of a per-callsite discipline nobody keeps.
+**Status:** BUILT and COMPLETE (2026-08-12). `SafeHttpClient` wraps the validator,
+does the IP-pin + redirect walk, and is the default safe outbound path; the two
+MIGRATE-NOW admin callsites and the Joinery Direct client run through it, the SES
+SNS fetches got their redirect-follow hardening, tests cover the surface
+(`tests/security/safe_http_client_test.php`), and `docs/safe_http_client.md`
+documents it. **The MIGRATE-OPPORTUNISTICALLY tier resolved to "leave" on
+inspection, not "migrate later":** every one of those callsites targets TRUSTED
+INTERNAL infrastructure on a private/loopback/self-signed endpoint (loopback
+rspamd, DNS resolver nodes that may be loopback, node-health checks that skip TLS
+for self-signed certs, a raw `fsockopen` port probe, S3 streaming PUT/DELETE) —
+destinations SafeHttpClient is designed to REFUSE. Routing them through it would
+break internal control-plane traffic, not harden it; they correctly keep their own
+transport. Going forward, any NEW fetch whose destination is chosen below the
+trusted-operator line uses SafeHttpClient by default (see the doc).
+
+*(Original framing below, kept for the design record.)* Grew out of the Joinery
+Direct Mail review (finding F1), but stands on its own: the platform's
+outbound-request surface is broad and its one SSRF guard is used in two places.
+This spec makes "the safe fetch" the easy default instead of a per-callsite
+discipline nobody keeps.
 
 **Relationship to other specs:** `specs/joinery_direct_mail_review.md` F1 references this
 document. The Joinery Direct client (`JoineryDirect` — the kind-independent send side
