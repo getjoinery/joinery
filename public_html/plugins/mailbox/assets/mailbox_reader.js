@@ -1,6 +1,13 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.41
+ * No framework. @version 2.42
+ *
+ * The conversation list updates in place after mutations
+ * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
+ * the current view remove exactly those rows (removeThreadRows), everything
+ * else re-reads the same view without blanking it first (refreshThreads).
+ * Blank-and-rebuild (loadThreads(true)) is reserved for context changes —
+ * mailbox/view switches and searches — where the old rows are different mail.
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -656,7 +663,7 @@
 				Promise.all(threads.map(function (t) {
 					return joineryApi.post(CFG.draftDeleteUrl, { draft_id: String(t.latest_id) })
 						.catch(function () { });
-				})).then(afterBulk);
+				})).then(function () { afterBulk(keys); });
 			}));
 			return;
 		}
@@ -706,18 +713,35 @@
 		}
 	}
 
-	// Fire one action over the whole selection, then put the list back the way any
-	// other mutation does — the rows that moved are gone, so the selection goes too.
+	// Fire one action over the whole selection. Actions that take their rows out
+	// of the current view remove exactly those rows; anything else re-reads the
+	// same view in place, keeping the ticks that still apply
+	// (specs/implemented/mailbox_reader_list_persistence.md).
 	function bulkAction(action) {
 		var keys = selectedKeys();
 		if (!keys.length) return;
-		apiAction({ action: action, threadKeys: keys, aliasId: state.aliasId }).then(afterBulk);
+		var removes = bulkRemoves(action);
+		apiAction({ action: action, threadKeys: keys, aliasId: state.aliasId })
+			.then(function () { afterBulk(removes ? keys : null); });
 	}
 
-	function afterBulk() {
-		clearSelection();
+	// Whether this action removes the acted rows from the CURRENT view.
+	function bulkRemoves(action) {
+		switch (action) {
+			case 'delete': case 'purge': case 'restore':
+			case 'mark_spam': case 'mark_not_spam':
+				return true;
+			case 'archive':
+				return state.inboxView;   // in All Mail an archived row stays put
+			default:
+				return false;             // unarchive, read/unread, folder ops
+		}
+	}
+
+	function afterBulk(removedKeys) {
 		refreshMailboxes();
-		loadThreads(true);
+		if (removedKeys && removedKeys.length) { removeThreadRows(removedKeys); }
+		else { refreshThreads(); }
 	}
 
 	/**
@@ -749,7 +773,7 @@
 				item.addEventListener('click', function () {
 					panel.hidden = true;
 					apiAction({ action: 'set_membership', threadKeys: keys, aliasId: state.aliasId,
-						folderId: f.id, present: true }).then(afterBulk);
+						folderId: f.id, present: true }).then(function () { afterBulk(null); });
 				});
 				panel.appendChild(item);
 			} else {
@@ -761,7 +785,7 @@
 						folderId: f.id, present: cb.checked })
 						.then(function () {
 							refreshMailboxes();
-							if (state.folderId != null) { afterBulk(); }  // a filtered view may change
+							if (state.folderId != null) { refreshThreads(); }  // a filtered view may change
 						});
 				});
 				lab.appendChild(cb);
@@ -787,7 +811,7 @@
 					if (!resp || !resp.folder) { alert('Could not create the label.'); return; }
 					input.value = '';
 					panel.hidden = true;
-					afterBulk();
+					afterBulk(null);
 				});
 		};
 		addBtn.addEventListener('click', submit);
@@ -851,10 +875,22 @@
 	// Gmail-style section labels, keyed by the server-provided `section` bucket.
 	var SECTION_LABELS = { unread: 'Unread', starred: 'Starred', other: 'Everything else' };
 
-	function loadThreads(reset) {
+	// In-place list updates (specs/implemented/mailbox_reader_list_persistence.md): a hard
+	// load (loadThreads) is for context changes — the old rows are different
+	// mail, so blank first. A soft refresh (refreshThreads) is for mutations in
+	// the SAME view: the rows stay on screen until the response arrives, then
+	// swap in one synchronous pass — no flash, scroll kept, surviving ticks kept.
+	// One token covers every list load so a stale response never paints over a
+	// newer one.
+	var listSeq = 0;
+
+	function loadThreads(reset) { listLoad(reset, false); }
+	function refreshThreads() { listLoad(true, true); }
+
+	function listLoad(reset, soft) {
 		if (reset) { state.page = 1; state.lastSection = null; }
 		var listEl = $('#mbx-threads');
-		if (reset) {
+		if (reset && !soft) {
 			// A rebuilt list is different mail — a selection made against the old rows
 			// must not survive into it. "Load more" appends, so it keeps its ticks.
 			state.selected = {};
@@ -862,7 +898,17 @@
 			listEl.innerHTML = '';
 			listEl.appendChild(loadingRow());
 		}
+		var seq = ++listSeq;
 		apiGet(buildListQuery()).then(function (data) {
+			if (seq !== listSeq) { return; }   // superseded by a newer load
+			if (soft) {
+				// Keep only the ticks the refreshed list still shows — rows re-tick
+				// themselves from state.selected as they render.
+				var present = {};
+				(data.threads || []).forEach(function (t) { present[t.thread_key] = true; });
+				selectedKeys().forEach(function (k) { if (!present[k]) { delete state.selected[k]; } });
+				if (state.lastCheckedKey && !present[state.lastCheckedKey]) { state.lastCheckedKey = null; }
+			}
 			if (reset) { listEl.innerHTML = ''; state.lastSection = null; }
 			(data.threads || []).forEach(function (t) {
 				// The list arrives ordered by section, so emit a header each time the
@@ -883,7 +929,7 @@
 				sbtn.type = 'button';
 				sbtn.addEventListener('click', async function () {
 					sbtn.disabled = true;
-					if (await unlockVault()) { loadThreads(true); } else { sbtn.disabled = false; }
+					if (await unlockVault()) { refreshThreads(); } else { sbtn.disabled = false; }
 				});
 				row.appendChild(sbtn);
 				listEl.insertBefore(row, listEl.firstChild);
@@ -905,12 +951,26 @@
 			$('#mbx-more').hidden = !state.hasMore;
 			syncSelectionUI();
 		}).catch(function (err) {
+			if (seq !== listSeq) { return; }
 			// The read failed. Say that — an unanswered request must never render
-			// as an empty mailbox. "Load more" leaves the rows it already has.
+			// as an empty mailbox. "Load more" leaves the rows it already has, and a
+			// soft refresh keeps everything on screen: a list that has mail is never
+			// blanked because a refresh failed.
+			if (soft) {
+				var prior = listEl.querySelector('.mbx-list-refresh-error');
+				if (prior) { prior.remove(); }
+				var notice = errorRow(
+					'Could not refresh this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
+					function () { refreshThreads(); });
+				notice.classList.add('mbx-list-refresh-error');
+				listEl.insertBefore(notice, listEl.firstChild);
+				syncSelectionUI();
+				return;
+			}
 			if (reset) { listEl.innerHTML = ''; }
 			listEl.appendChild(errorRow(
 				'Could not load this mailbox' + (err && err.status ? ' (' + err.status + ')' : '') + '.',
-				function () { loadThreads(reset); }));
+				function () { listLoad(reset, soft); }));
 			$('#mbx-more').hidden = true;
 			syncSelectionUI();
 		});
@@ -936,7 +996,40 @@
 	}
 
 	function sectionHeader(section) {
-		return el('li', 'mbx-section', SECTION_LABELS[section] || section);
+		var li = el('li', 'mbx-section', SECTION_LABELS[section] || section);
+		li.dataset.section = section;   // removal recomputes the append cursor from this
+		return li;
+	}
+
+	// Surgical update (specs/implemented/mailbox_reader_list_persistence.md): an action whose
+	// only effect on the current view is that rows leave it takes them out of the
+	// DOM directly — no refetch, no flash, scroll and the remaining ticks intact.
+	function removeThreadRows(keys) {
+		var listEl = $('#mbx-threads');
+		keys.forEach(function (k) {
+			delete state.selected[k];
+			if (state.lastCheckedKey === k) { state.lastCheckedKey = null; }
+			var rows = renderedRows();
+			for (var i = 0; i < rows.length; i++) {
+				if (rows[i]._thread && rows[i]._thread.thread_key === k) { rows[i].remove(); break; }
+			}
+		});
+		// A header with no rows under it labels nothing. Banners and notes sit
+		// above the first header, so "next sibling isn't a thread row" is exact.
+		Array.prototype.forEach.call(listEl.querySelectorAll('.mbx-section'), function (h) {
+			var n = h.nextElementSibling;
+			if (!n || !n.classList.contains('mbx-thread-item')) { h.remove(); }
+		});
+		// Keep the "Load more" append cursor honest about the last section shown.
+		var headers = listEl.querySelectorAll('.mbx-section');
+		state.lastSection = headers.length ? headers[headers.length - 1].dataset.section : null;
+		if (!listEl.querySelector('.mbx-thread-item')) {
+			if (state.hasMore) { refreshThreads(); }
+			else if (!listEl.querySelector('.mbx-loading')) {
+				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.' : 'No conversations.'));
+			}
+		}
+		syncSelectionUI();
 	}
 
 	function loadingRow() { var li = el('li', 'mbx-loading', 'Loading…'); return li; }
@@ -1066,7 +1159,12 @@
 		// the row rather than opening it, and shift-click takes the run from the
 		// last box touched.
 		if (selectionAvailable()) {
-			if (state.selected[t.thread_key]) { li.classList.add('selected'); }
+			if (state.selected[t.thread_key]) {
+				li.classList.add('selected');
+				// A soft refresh re-renders a still-ticked row from fresh data; the
+				// toolbar must read the same fresh payload, not the tick-time one.
+				state.selected[t.thread_key] = t;
+			}
 			var check = el('span', 'mbx-thread-check');
 			var cb = document.createElement('input');
 			cb.type = 'checkbox';
@@ -1284,11 +1382,11 @@
 			// here, so offering them would be offering nothing.
 			actions.appendChild(actionBtn('Restore', false, function () {
 				apiAction({ action: 'restore', threadKey: t.thread_key, aliasId: state.aliasId })
-					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+					.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 			}));
 			actions.appendChild(actionBtn('Delete forever', true, function () {
 				apiAction({ action: 'purge', threadKey: t.thread_key, aliasId: state.aliasId })
-					.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+					.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 			}));
 			header.appendChild(actions);
 			pane.appendChild(header);
@@ -1297,16 +1395,16 @@
 		}
 		actions.appendChild(actionBtn('Mark unread', false, function () {
 			apiAction({ action: 'mark_unread', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { refreshMailboxes(); loadThreads(true); });
+				.then(function () { refreshMailboxes(); refreshThreads(); });
 		}));
 		actions.appendChild(actionBtn(t.any_starred ? 'Unstar' : 'Star', false, function () {
 			var turnOn = !t.any_starred;
 			apiAction({ action: turnOn ? 'star' : 'unstar', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { t.any_starred = turnOn; refreshMailboxes(); loadThreads(true); });
+				.then(function () { t.any_starred = turnOn; refreshMailboxes(); refreshThreads(); });
 		}));
 		actions.appendChild(actionBtn('Delete', true, function () {
 			apiAction({ action: 'delete', threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 		}));
 		// Archive ("Skip the Inbox") / Move to Inbox — symmetric with star/spam, which
 		// also have manual + filter-driven paths. Hidden in the Spam view (a spam
@@ -1315,14 +1413,22 @@
 			var archived = !!t.any_archived;
 			actions.appendChild(actionBtn(archived ? 'Move to Inbox' : 'Archive', false, function () {
 				apiAction({ action: archived ? 'unarchive' : 'archive', threadKey: t.thread_key, aliasId: state.aliasId })
-					.then(function () { t.any_archived = !archived; closeThread(); refreshMailboxes(); loadThreads(true); });
+					.then(function () {
+						t.any_archived = !archived;
+						closeThread();
+						refreshMailboxes();
+						// Archiving from the Inbox removes the row; everywhere else
+						// (All Mail, a folder, unarchive) the row stays — re-read in place.
+						if (!archived && state.inboxView) { removeThreadRows([t.thread_key]); }
+						else { refreshThreads(); }
+					});
 			}));
 		}
 		// Spam correction: in the Spam view, restore to the inbox; elsewhere, mark spam.
 		actions.appendChild(actionBtn(state.spamView ? 'Not spam' : 'Mark as spam', false, function () {
 			apiAction({ action: state.spamView ? 'mark_not_spam' : 'mark_spam',
 				threadKey: t.thread_key, aliasId: state.aliasId })
-				.then(function () { closeThread(); refreshMailboxes(); loadThreads(true); });
+				.then(function () { closeThread(); refreshMailboxes(); removeThreadRows([t.thread_key]); });
 		}));
 		// Move (exclusive feed) / Labels (non-exclusive) — drives membership sync.
 		var threadAlias = null;
@@ -1405,7 +1511,7 @@
 				item.addEventListener('click', function () {
 					apiAction({ action: 'set_membership', threadKey: t.thread_key, aliasId: state.aliasId,
 						folderId: f.id, present: true })
-						.then(function () { panel.hidden = true; closeThread(); refreshMailboxes(); loadThreads(true); });
+						.then(function () { panel.hidden = true; closeThread(); refreshMailboxes(); refreshThreads(); });
 				});
 				panel.appendChild(item);
 			} else {
@@ -1419,7 +1525,7 @@
 						.then(function () {
 							current[String(f.id)] = cb.checked;
 							refreshMailboxes();
-							if (state.folderId != null) { loadThreads(true); } // a filtered view may change
+							if (state.folderId != null) { refreshThreads(); } // a filtered view may change
 						});
 				});
 				lab.appendChild(cb);
@@ -2886,14 +2992,14 @@
 			if (state.draftId) {
 				var did = state.draftId;
 				joineryApi.post(CFG.draftDeleteUrl, { draft_id: String(did) })
-					.then(function () { refreshMailboxes(); if (state.draftsView) loadThreads(true); })
+					.then(function () { refreshMailboxes(); if (state.draftsView) refreshThreads(); })
 					.catch(function () {});
 			}
 			resetDraftState();
 		} else if (state.draftDirty && hasComposeContent()) {
 			autosaveDraft(false, function () {
 				refreshMailboxes();
-				if (state.draftsView) loadThreads(true);
+				if (state.draftsView) refreshThreads();
 			});
 			resetDraftState();
 		} else {
@@ -2982,14 +3088,14 @@
 				if (wasDrafts) {
 					// Sent from the Drafts view — return to the (now shorter) list.
 					closeThread();
-					loadThreads(true);
+					refreshThreads();
 				} else if (state.threadKey != null) {
 					// Re-open the thread so the new outbound row renders in the dialog.
 					reopenCurrentThread();
 				} else {
 					// New message: no thread was open — refresh the list so the new
 					// conversation appears without a manual reload.
-					loadThreads(true);
+					refreshThreads();
 				}
 				refreshMailboxes();
 			} else if (data.locked) {
@@ -3160,7 +3266,7 @@
 		document.addEventListener('joinery:vault-locked', function () {
 			stopHeartbeat();
 			refreshMailboxes();
-			loadThreads(true);
+			refreshThreads();
 			// Collapse any open sealed thread back to placeholders.
 			if (state.threadKey) {
 				var open = state.openThread || { thread_key: state.threadKey, subject: '' };
@@ -3174,7 +3280,7 @@
 		document.addEventListener('joinery:vault-unlocked', function () {
 			if (selfUnlocking) { return; }
 			refreshMailboxes();
-			loadThreads(true);
+			refreshThreads();
 		});
 
 		var newMsgBtn = $('#mbx-new-message');
