@@ -100,7 +100,14 @@ class VaultUnlock {
 	 * sealed by core code, so there is no plugin whose bootstrap could carry the
 	 * hooks. Paths are relative to public_html.
 	 */
-	const CONSUMER_CORE_FILES = array('includes/DriveSealed.php');
+	const CONSUMER_CORE_FILES = array(
+		'includes/DriveSealed.php',
+		// The Joinery Direct spool: deliveries accepted at a sealed tier wait
+		// here for the recipient's unlock, because the contact list that
+		// authorizes them is sealed. Core rather than plugin — the spool is
+		// kind-independent and holds chat and any future kind alongside mail.
+		'includes/joinery_direct/DirectSpoolDrain.php',
+	);
 
 	/**
 	 * Load each active consumer's bootstrap file — lazy, once per request, called

@@ -84,7 +84,7 @@
  * senderDisplayString() owns the decode-and-sanitize; the IMAP and archive paths get
  * the same shape from Horde's envelope.
  *
- * @version 1.28
+ * @version 1.29
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -759,6 +759,280 @@ class InboundEmailRouter {
 			}
 			throw $e;
 		}
+	}
+
+	/**
+	 * Store a message that arrived over Joinery Direct (docs/joinery_direct.md).
+	 *
+	 * Direct receives PARTS, not a MIME document, so this is deliberately not a
+	 * detour through raw assembly: the body text, the HTML alternative and each
+	 * attachment already arrive in the shape the database wants them, and
+	 * reassembling a blob only to take it apart again would throw that away —
+	 * along with the property that makes sender-side sealing worth having. Each
+	 * part was sealed SEPARATELY to the same recipient key, so unlike PGP/MIME
+	 * (which encrypts the whole tree into one opaque object) the structure
+	 * survives encryption: attachments land as individual rows, listable and
+	 * previewable, without anything having been readable in transit.
+	 *
+	 * $verified_direct is the gate's outcome, and it decides ELEVATION ONLY,
+	 * never placement. A contact's message is elevated past content scoring —
+	 * that is what the address book buys. A non-contact's is spam-scored and
+	 * filter-sorted exactly as if it had arrived over SMTP, so the direct path
+	 * bypasses the spam apparatus for no one; it is simply filed, never bounced
+	 * and never returned to the sender.
+	 *
+	 * $vault_secret_key is present only on the deferred path (the sealed tiers,
+	 * at unlock), where it opens the sealed parts. On the live path the parts
+	 * arrived plaintext under TLS and it is null.
+	 *
+	 * @param array $meta  sender, subject, recipient, message_id, references,
+	 *                     in_reply_to, received_time
+	 * @param array $parts ['body_plain'=>string, 'body_html'=>string,
+	 *                      'attachments'=>[['filename','content_type','content_id',
+	 *                                       'is_inline','bytes']]]
+	 * @return array{message:?InboundEmailMessage,dedup:bool}
+	 */
+	public function storeDirectMessage(array $meta, array $parts, $alias, $domain, string $envelope_recipient,
+			bool $verified_direct): array {
+		$sender = substr(trim((string)($meta['sender'] ?? '')), 0, 500);
+		$subject = substr((string)($meta['subject'] ?? ''), 0, 4000);
+		$body_plain = (string)($parts['body_plain'] ?? '');
+		$body_html  = (string)($parts['body_html'] ?? '');
+		$attachments = is_array($parts['attachments'] ?? null) ? $parts['attachments'] : array();
+
+		$message_id_header = trim((string)($meta['message_id'] ?? ''));
+		$message_id_header = ($message_id_header === '') ? null : substr($message_id_header, 0, 255);
+		$thread_key = $this->computeThreadKey(array('headers' => array(
+			'references'  => (string)($meta['references'] ?? ''),
+			'in-reply-to' => (string)($meta['in_reply_to'] ?? ''),
+		)), $message_id_header);
+
+		// The instance signature IS the authentication here, and it is stronger
+		// than DKIM/SPF: mandatory, over the exact bytes, and verified against a
+		// key the sending domain publishes. The legacy verdict columns have
+		// nothing honest to say about a message that never crossed SMTP, so they
+		// record 'unverified' and the SOURCE names what actually vouched.
+		$auth = array('dkim'=>'unverified', 'spf'=>'unverified', 'dmarc'=>'unverified', 'source'=>'joinery_direct');
+
+		// Consent elevates past scoring; anything else is scored exactly as SMTP
+		// mail would be. Sender-sealed content carries no relay-stamped verdict —
+		// no machine in the path could read it — so this local scan is the first
+		// moment the content is readable, which is inherent to the guarantee.
+		$content_spam = $verified_direct
+			? array('signal' => 'none', 'score' => null)
+			: $this->resolveContentSpam($this->synthesizeRawForScan($meta, $body_plain, $body_html));
+
+		$owner_id = $this->attachmentOwnerId($alias);
+		$seal_owner_id = InboundEmailMessage::sealOwnerUserId(
+			($alias && $alias->key) ? intval($alias->key) : null,
+			($domain && $domain->key) ? intval($domain->key) : null);
+		$vault = ($seal_owner_id !== null) ? $this->loadOwnerVault($seal_owner_id) : null;
+		$sealing = ($vault !== null && $domain->seals_content());
+
+		$size_bytes = strlen($body_plain) + strlen($body_html);
+		foreach ($attachments as $attachment) {
+			$size_bytes += strlen((string)($attachment['bytes'] ?? ''));
+		}
+
+		$row = array(
+			'iem_ied_inbound_email_domain_id' => $domain->key,
+			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
+			'iem_sender'      => $sealing ? '' : $sender,
+			'iem_recipient'   => substr(strtolower($envelope_recipient), 0, 500),
+			'iem_subject'     => $sealing ? '' : $subject,
+			'iem_body_plain'  => $sealing ? '' : $body_plain,
+			'iem_body_html'   => $sealing ? '' : $body_html,
+			'iem_raw_message' => '',
+			'iem_message_id_header' => $message_id_header,
+			'iem_thread_key'  => $thread_key,
+			'iem_direction'   => 'inbound',
+			'iem_dkim_result'  => $auth['dkim'],
+			'iem_spf_result'   => $auth['spf'],
+			'iem_dmarc_result' => $auth['dmarc'],
+			'iem_auth_source'  => $auth['source'],
+			'iem_spam_verdict' => $this->classifySpam($auth, $content_spam['signal']),
+			'iem_spam_score'   => $content_spam['score'],
+			'iem_size_bytes'   => $size_bytes,
+			'iem_transport'    => 'joinery_direct',
+			// The mark is applied by the RECEIVER from verified transport plus
+			// contact membership, never from anything in the message, which is
+			// what makes it unforgeable from content.
+			'iem_direct_verified' => $verified_direct,
+			'iem_received_time' => (string)($meta['received_time'] ?? '') !== ''
+				? $meta['received_time'] : gmdate('Y-m-d H:i:s'),
+		);
+
+		// One transaction, exactly as the SMTP store uses: a committed row always
+		// carries its attachments, so a dedup hit genuinely means "fully stored".
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) {
+			$db->beginTransaction();
+		}
+
+		try {
+			$msg = InboundEmailMessage::CreateEntry($row);
+		} catch (\Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			if ($this->isUniqueViolation($e)
+					|| $this->duplicateMessageExists($message_id_header, $row['iem_recipient'], 'inbound')) {
+				$this->logTransaction(array('from' => $sealing ? '' : $sender), $alias,
+					InboundEmailLog::STATUS_STORED, $envelope_recipient,
+					'duplicate (Message-ID already stored)', null, $domain->key);
+				return array('message' => null, 'dedup' => true);
+			}
+			throw $e;
+		}
+
+		try {
+			$dek = null;
+			if ($sealing) {
+				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $body_plain, $body_html);
+			}
+			$this->storeDirectAttachments(intval($msg->key), $attachments, $owner_id, $dek);
+			if ($owns_tx) {
+				$db->commit();
+			}
+		} catch (\Throwable $e) {
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+
+		// Filters match on the plaintext in hand, never on the row's now-sealed
+		// columns — ingest runs with no unlock window on the live path.
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_filter_class.php'));
+			InboundEmailFilter::runForMessage($msg, array('headers' => array(), 'from' => $sender), $alias, array(
+				'sender' => $sender, 'subject' => $subject,
+				'body_plain' => $body_plain, 'body_html' => $body_html,
+			));
+		} catch (\Throwable $e) {
+			error_log('InboundEmailRouter: Direct filter run failed for message ' . $msg->key . ': ' . $e->getMessage());
+		}
+
+		// A Direct delivery was invisible on the Logs tab; log it exactly as an
+		// SMTP store does. The stored MESSAGE ROW is what the per-domain volume cap
+		// counts (countStoresInWindow), so a Direct delivery already counts toward
+		// that cap; this row makes the delivery itself auditable. The sender is kept
+		// out of the log for a sealed message, matching the sealed row.
+		$this->logTransaction(array('from' => $sealing ? '' : $sender), $alias,
+			InboundEmailLog::STATUS_STORED, $envelope_recipient, null, null, $domain->key);
+
+		return array('message' => $msg, 'dedup' => false);
+	}
+
+	/**
+	 * Write one attachment row per delivered part, minting a private File for
+	 * each — the same lean-record shape the MIME split produces, reached without
+	 * a MIME document to split.
+	 *
+	 * $dek is the message's per-item DEK, non-null only when the body was
+	 * sealed; attachments seal under the SAME key, exactly as on the SMTP path.
+	 */
+	private function storeDirectAttachments(int $message_id, array $attachments, int $owner_id, ?string $dek): void {
+		if (empty($attachments)) {
+			return;
+		}
+		$crypto = null;
+		if ($dek !== null) {
+			require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+			$crypto = new VaultCrypto();
+		}
+
+		$created_files = array();
+		$rows = array();
+		try {
+			foreach (array_values($attachments) as $index => $attachment) {
+				$bytes = (string)($attachment['bytes'] ?? '');
+				$name  = trim((string)($attachment['filename'] ?? ''));
+				$name  = $name !== '' ? substr($name, 0, 500) : null;
+				$type  = trim((string)($attachment['content_type'] ?? '')) ?: 'application/octet-stream';
+				$cid   = trim((string)($attachment['content_id'] ?? ''));
+				// The manifest carries a part index rather than a MIME section
+				// number; it is the same job — naming which part a row describes.
+				$mime_part = 'direct.' . $index;
+
+				$original_size = strlen($bytes);
+				if ($crypto !== null) {
+					$bytes = $crypto->sealField($bytes, $dek, InboundEmailMessage::attachmentAd($message_id, $mime_part));
+				}
+
+				$file = File::createFromBytes(
+					$bytes,
+					$name !== null ? $name : 'attachment',
+					$type,
+					$owner_id,
+					array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT)
+				);
+				if ($crypto !== null) {
+					// The on-disk bytes are ciphertext, so type detection saw noise —
+					// restore the real content type for the reader.
+					$file->set('fil_type', substr($type, 0, 128));
+					$file->save();
+				}
+				$created_files[] = $file;
+
+				$rows[] = array(
+					'ima_iem_inbound_email_message_id' => $message_id,
+					'ima_filename'     => $name,
+					'ima_content_type' => substr($type, 0, 255),
+					'ima_size_bytes'   => $original_size,
+					'ima_mime_part'    => substr($mime_part, 0, 40),
+					'ima_encoding'     => 'binary', // no base64: parts transfer as bytes
+					'ima_content_id'   => $cid !== '' ? substr(trim($cid, '<>'), 0, 255) : null,
+					'ima_is_inline'    => !empty($attachment['is_inline']),
+					'ima_fil_file_id'  => intval($file->key),
+					'ima_is_sealed'    => ($crypto !== null),
+				);
+			}
+
+			foreach ($rows as $row) {
+				InboundMessageAttachment::CreateEntry($row);
+			}
+		} catch (\Throwable $e) {
+			foreach ($created_files as $file) {
+				try { $file->permanent_delete(); } catch (\Throwable $ignore) {}
+			}
+			$this->deleteManifestRows($message_id);
+			throw $e;
+		}
+	}
+
+	/**
+	 * A minimal RFC 5322 rendering of a Direct message, for the content spam
+	 * scanner only.
+	 *
+	 * The scanner wants a message; Direct never had one. Nothing here is stored
+	 * — the row's fields come from the parts themselves.
+	 */
+	private function synthesizeRawForScan(array $meta, string $body_plain, string $body_html): string {
+		$headers = "From: " . (string)($meta['sender'] ?? '') . "\r\n"
+			. "To: " . (string)($meta['recipient'] ?? '') . "\r\n"
+			. "Subject: " . (string)($meta['subject'] ?? '') . "\r\n"
+			. "MIME-Version: 1.0\r\n";
+
+		// Both bodies must reach the scanner. Spam routinely rides in the HTML —
+		// hidden text, link farms, tracking URLs — behind an innocuous plain part,
+		// so scanning only the plain body when one exists is an evasion the scanner
+		// never gets to see. Present the message as the scanner would receive it off
+		// the wire: multipart/alternative with BOTH parts, or the single part that
+		// exists, HTML kept as HTML (rspamd reads its structure) rather than flattened.
+		if ($body_html !== '' && $body_plain !== '') {
+			$boundary = '=_jdscan_' . bin2hex(random_bytes(12));
+			return $headers
+				. "Content-Type: multipart/alternative; boundary=\"" . $boundary . "\"\r\n\r\n"
+				. "--" . $boundary . "\r\nContent-Type: text/plain; charset=utf-8\r\n\r\n" . $body_plain . "\r\n"
+				. "--" . $boundary . "\r\nContent-Type: text/html; charset=utf-8\r\n\r\n" . $body_html . "\r\n"
+				. "--" . $boundary . "--\r\n";
+		}
+		if ($body_html !== '') {
+			return $headers . "Content-Type: text/html; charset=utf-8\r\n\r\n" . $body_html;
+		}
+		return $headers . "Content-Type: text/plain; charset=utf-8\r\n\r\n" . $body_plain;
 	}
 
 	/**
@@ -1611,6 +1885,13 @@ class InboundEmailRouter {
 			$raw = null; // sealed raw and no open window — treated as unavailable below
 		}
 		if ($raw === null || $raw === '') {
+			// A Joinery Direct delivery never became a MIME document (and a lean
+			// record retains no raw), so there is nothing to relay verbatim.
+			// Synthesize a forward-quality raw from the message's own content so a
+			// filter "Forward to" is not silently dropped for a Direct sender.
+			$raw = $this->synthesizeRawForForward($msg);
+		}
+		if ($raw === null || $raw === '') {
 			error_log('InboundEmailRouter::forwardStoredMessage: no raw available for message ' . $msg->key);
 			return array();
 		}
@@ -1634,6 +1915,120 @@ class InboundEmailRouter {
 			$raw, $parsed, $domain, (string)$msg->get('iem_recipient'));
 
 		return $this->relay($raw_mime, $envelope_sender, $destinations);
+	}
+
+	/**
+	 * Build a forward-quality raw MIME for a message that retains none — a Joinery
+	 * Direct delivery, which never crossed the wire as a MIME document, or a lean
+	 * record whose raw was not kept. Rebuilt from the message's OWN content
+	 * (subject, bodies, attachment Files), which reads through the same in-window
+	 * Sealed Vault getters every other content read uses.
+	 *
+	 * Returns null when the content cannot be read RIGHT NOW — a sealed message
+	 * with no open unlock window. That is not new behaviour for Direct: a sealed
+	 * SMTP message's forward is the identical no-op, because you cannot forward what
+	 * you cannot read, and the caller already logs the miss. The tractable win is
+	 * the common case — an unencrypted mailbox (a group alias, a vaultless owner)
+	 * whose columns are plaintext.
+	 */
+	private function synthesizeRawForForward(InboundEmailMessage $msg): ?string {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+
+		try {
+			$sender    = (string)$msg->get('iem_sender');
+			$recipient = (string)$msg->get('iem_recipient');
+			$subject   = (string)$msg->get('iem_subject');
+			$plain     = (string)$msg->get('iem_body_plain');
+			$html      = (string)$msg->get('iem_body_html');
+			$messageId = (string)$msg->get('iem_message_id_header');
+		} catch (VaultLockedException $e) {
+			return null; // sealed, no window — the same no-op a sealed SMTP forward hits
+		}
+
+		require_once(PathHelper::getComposerAutoloadPath());
+
+		// Build the MIME tree directly and serialize it. Horde_Mime_Mail::getRaw()
+		// only works after a send() has populated its base part, so the raw is
+		// assembled the way getRaw() does internally — a base Horde_Mime_Part plus a
+		// Horde_Mime_Headers, rendered with toString().
+		$body = new Horde_Mime_Part();
+		if ($html !== '') {
+			$body->setType('text/html');
+			$body->setContents($html);
+		} else {
+			$body->setType('text/plain');
+			$body->setContents($plain);
+		}
+		$body->setCharset('UTF-8');
+
+		$att_parts = array();
+		$attachments = new MultiInboundMessageAttachment(array('message_id' => intval($msg->key)));
+		$attachments->load();
+		foreach ($attachments as $att) {
+			if (!$att->get('ima_fil_file_id')) {
+				continue; // a 'remote' (IMAP) part, fetched on demand — not file-backed here
+			}
+			$file = new File(intval($att->get('ima_fil_file_id')), TRUE);
+			if (!$file->key) {
+				continue;
+			}
+			$bytes = $file->read_bytes('original');
+			if ($bytes === null) {
+				continue;
+			}
+			try {
+				// Decrypts a sealed attachment in-window; returns bytes as-is for an
+				// unsealed one. A sealed attachment we cannot open aborts the whole
+				// synthesis rather than forwarding a message missing a part.
+				$bytes = InboundEmailMessage::openSealedAttachment($msg, $att, $bytes);
+			} catch (VaultLockedException $e) {
+				return null;
+			}
+			$part = new Horde_Mime_Part();
+			$part->setType((string)$att->get('ima_content_type') ?: 'application/octet-stream');
+			$part->setContents($bytes);
+			$part->setName((string)$att->get('ima_filename') ?: 'attachment');
+			$part->setDisposition($att->get('ima_is_inline') ? 'inline' : 'attachment');
+			if ((string)$att->get('ima_content_id') !== '') {
+				$part->setContentId((string)$att->get('ima_content_id'));
+			}
+			$att_parts[] = $part;
+		}
+
+		if (empty($att_parts)) {
+			$base = $body;
+		} else {
+			$base = new Horde_Mime_Part();
+			$base->setType('multipart/mixed');
+			$base->addPart($body);
+			foreach ($att_parts as $part) {
+				$base->addPart($part);
+			}
+		}
+
+		$headers = new Horde_Mime_Headers();
+		$headers->addHeader('From', $sender !== '' ? $sender : ('postmaster@' . $this->hostDomainOf($recipient)));
+		if ($recipient !== '') {
+			$headers->addHeader('To', $recipient);
+		}
+		$headers->addHeader('Subject', $subject);
+		$headers->addHeader('Date', gmdate('r'));
+		if ($messageId !== '') {
+			$headers->addHeader('Message-ID', $messageId);
+		}
+
+		$raw = $base->toString(array(
+			'headers' => $headers,
+			'encode'  => Horde_Mime_Part::ENCODE_7BIT | Horde_Mime_Part::ENCODE_8BIT | Horde_Mime_Part::ENCODE_BINARY,
+		));
+		return (is_string($raw) && $raw !== '') ? $raw : null;
+	}
+
+	/** The domain part of an address, for a synthesized From fallback. */
+	private function hostDomainOf(string $address): string {
+		$at = strrpos($address, '@');
+		return $at === false ? 'localhost' : substr($address, $at + 1);
 	}
 
 	/**

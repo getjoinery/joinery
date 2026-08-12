@@ -12,6 +12,7 @@
  * between the platform's flat record and Azure's shape lives in
  * azureRecords()/valuesFromProperties().
  *
+ * @version 1.1 - SRV set-value reads back with the absolute target the base writes
  * @version 1.0
  */
 
@@ -29,6 +30,7 @@ class AzureDnsDriver extends DnsRrsetDriverBase {
 
 	public static function getKey(): string { return 'azure_dns'; }
 	public static function getLabel(): string { return 'Azure DNS'; }
+
 
 	public static function credentialMode(): string { return self::CREDENTIAL_OAUTH2; }
 	public static function oauthProviderKey(): string { return 'microsoft'; }
@@ -155,6 +157,17 @@ class AzureDnsDriver extends DnsRrsetDriverBase {
 						(string)($r['tag'] ?? 'issue'), (string)($r['value'] ?? ''));
 				}
 				break;
+			case DnsRecord::TYPE_SRV:
+				// Azure models SRV as the four fields it actually has, so the
+				// canonical RDATA is assembled rather than read from a string. The
+				// trailing dot is what the shared set-value carries (see
+				// DnsRrsetDriverBase::rrsetValue), so read and write match as strings
+				// even though Azure decomposes and the dot never reaches its wire.
+				foreach ((array)($props['SRVRecords'] ?? $props['srvRecords'] ?? array()) as $r) {
+					$out[] = self::formatSrv((int)($r['priority'] ?? 0), (int)($r['weight'] ?? 0),
+						(int)($r['port'] ?? 0), (string)($r['target'] ?? '')) . '.';
+				}
+				break;
 		}
 		return array_values(array_filter($out, function ($v) { return $v !== ''; }));
 	}
@@ -185,6 +198,11 @@ class AzureDnsDriver extends DnsRrsetDriverBase {
 					$caa = self::parseCaa($value);
 					$records[] = array('flags' => $caa['flags'], 'tag' => $caa['tag'], 'value' => $caa['value']);
 					break;
+				case DnsRecord::TYPE_SRV:
+					$srv = self::parseSrv($value);
+					$records[] = array('priority' => $srv['priority'], 'weight' => $srv['weight'],
+						'port' => $srv['port'], 'target' => $srv['target']);
+					break;
 			}
 		}
 		$key = array(
@@ -193,6 +211,7 @@ class AzureDnsDriver extends DnsRrsetDriverBase {
 			DnsRecord::TYPE_MX   => 'MXRecords',
 			DnsRecord::TYPE_TXT  => 'TXTRecords',
 			DnsRecord::TYPE_CAA  => 'caaRecords',
+			DnsRecord::TYPE_SRV  => 'SRVRecords',
 		);
 		return isset($key[$type]) ? array($key[$type] => $records) : array();
 	}

@@ -10,6 +10,17 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
+# Version: 2.5 - the relay serves JOINERY DIRECT for its tenants (docs/joinery_direct.md).
+#                At Fortress the relay IS the Direct endpoint, because an SRV record
+#                pointing at the origin box would advertise the address the relay
+#                exists to conceal. Adds: the joinery-direct service (the same sealer
+#                binary in direct-serve mode, TLS terminated in-process over
+#                TLS-ALPN-01 — no web server, no certbot), 443 in the firewall, a
+#                tunnel-only egress listener so a tenant's box-signed request leaves
+#                from the relay's address, and Direct health in joinery-ping. The
+#                relay stays KIND-BLIND: served kinds, caps and the decoy secret all
+#                arrive as relay-map data, so a new kind is a map update rather than
+#                a fleet upgrade.
 # Version: 2.4 - joinery-ping answers "sole": is the asking tenant the only one on
 #                this relay? An upgrade replaces every byte on the machine, and the
 #                deployment asking can only see its own tenancy — so the relay has
@@ -66,7 +77,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="2.4"
+RELAY_VERSION="2.6"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -500,6 +511,15 @@ case "${TOK[0]}" in
     # machine and the Postfix queue with it, so a self-hosted operator has to be
     # able to see what a wipe would cost (specs/mailbox_relay_upgrade_without_server_manager.md).
     svc() { local s; s="$(systemctl is-active "$1" 2>/dev/null || true)"; [[ -n "${s}" ]] || s="unknown"; printf '%s' "${s}"; }
+    # Joinery Direct's endpoint is invisible from a tenant's side when it is
+    # down: the tenant's own sends still work (they go out through egress) and
+    # inbound deliveries simply fail at the far end, which every sender reads as
+    # "not reachable" and downgrades to SMTP. Mail keeps flowing, nothing is
+    # marked verified, nobody notices. So the relay has to be asked. Service
+    # state is not tenant data, so this leaks nothing per-tenant.
+    DIRECT_STATE_SVC="$(svc joinery-direct)"
+    DIRECT_CERT="false"
+    if compgen -G "/opt/joinery-relay/acme/*" >/dev/null 2>&1; then DIRECT_CERT="true"; fi
     MILTERS="$(postconf -h smtpd_milters 2>/dev/null || true)"
     wired() { case "${MILTERS}" in *":$1"*) printf 'true';; *) printf 'false';; esac; }
     # The header contract by HASH: provisioning writes these two rspamd configs
@@ -551,9 +571,10 @@ case "${TOK[0]}" in
         [[ "${QN}" =~ ^[0-9]+$ ]] && QUEUE_JSON=",\"queue\":${QN}"
       fi
     fi
-    printf '{"status":"ok","services":{"rspamd":"%s","opendkim":"%s","opendmarc":"%s"},"milters":{"opendkim":%s,"opendmarc":%s,"rspamd":%s},"contract":%s,"provisioned":"%s","slug":"%s","sole":%s%s}\n' \
-      "$(svc rspamd)" "$(svc opendkim)" "$(svc opendmarc)" \
+    printf '{"status":"ok","services":{"rspamd":"%s","opendkim":"%s","opendmarc":"%s","joinery_direct":"%s"},"milters":{"opendkim":%s,"opendmarc":%s,"rspamd":%s},"direct":{"certificate":%s},"contract":%s,"provisioned":"%s","slug":"%s","sole":%s%s}\n' \
+      "$(svc rspamd)" "$(svc opendkim)" "$(svc opendmarc)" "${DIRECT_STATE_SVC}" \
       "$(wired 8891)" "$(wired 8893)" "$(wired 11332)" \
+      "${DIRECT_CERT}" \
       "${CONTRACT}" "${PROVISIONED}" "${SLUG}" "${SOLE}" "${QUEUE_JSON}"
     ;;
   *)
@@ -856,6 +877,73 @@ fi
 systemctl enable "wg-quick@${WG_IF}" >/dev/null 2>&1 || true
 systemctl restart "wg-quick@${WG_IF}" 2>/dev/null || echo "WARN: bring up wg-quick@${WG_IF} manually once a peer is added" >&2
 
+# --- 7b. Joinery Direct endpoint ---------------------------------------------
+# At Fortress the relay IS the Direct endpoint (docs/joinery_direct.md): an SRV
+# record pointing at the origin box would advertise in public DNS exactly the
+# address this relay exists to conceal. So the same binary that seals mail also
+# serves the channel — one more mode, not one more package.
+#
+# TLS is terminated in-process with an ACME certificate obtained over
+# TLS-ALPN-01 on the port it already listens on. That is deliberate: adding
+# nginx plus certbot to obtain one certificate would roughly double the software
+# on a machine whose smallness IS the security property.
+#
+# The service runs as the unprivileged relay user, so it needs an explicit
+# capability to bind 443 — granted to the service, not to the binary on disk.
+DIRECT_STATE="${RELAY_HOME}/direct"
+DIRECT_ACME="${RELAY_HOME}/acme"
+mkdir -p "${DIRECT_STATE}" "${DIRECT_ACME}"
+chown -R "${RELAY_USER}:${RELAY_USER}" "${DIRECT_STATE}" "${DIRECT_ACME}"
+chmod 700 "${DIRECT_STATE}" "${DIRECT_ACME}"
+
+cat > /etc/systemd/system/joinery-direct.service <<DIRECTUNIT
+[Unit]
+Description=Joinery Direct endpoint (relay)
+Documentation=https://github.com/getjoinery/joinery/blob/main/public_html/docs/joinery_direct.md
+After=network-online.target wg-quick@${WG_IF}.service
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=${RELAY_USER}
+Group=${RELAY_USER}
+ExecStart=${SEALER_BIN} direct-serve --hostname ${MAIL_HOSTNAME} \\
+    --routing ${RELAY_HOME}/routing.json \\
+    --spool ${SPOOL_ROOT} \\
+    --cert-cache ${DIRECT_ACME} \\
+    --state ${DIRECT_STATE} \\
+    --tunnel ${WG_ADDR%/*}
+Restart=always
+RestartSec=5
+# Binding 443 as an unprivileged user, and nothing else.
+AmbientCapabilities=CAP_NET_BIND_SERVICE
+CapabilityBoundingSet=CAP_NET_BIND_SERVICE
+NoNewPrivileges=yes
+PrivateTmp=yes
+ProtectSystem=strict
+ProtectHome=yes
+ReadWritePaths=${DIRECT_STATE} ${DIRECT_ACME} ${SPOOL_ROOT}
+ProtectKernelTunables=yes
+ProtectKernelModules=yes
+ProtectControlGroups=yes
+RestrictAddressFamilies=AF_INET AF_INET6
+RestrictNamespaces=yes
+LockPersonality=yes
+MemoryDenyWriteExecute=yes
+
+[Install]
+WantedBy=multi-user.target
+DIRECTUNIT
+
+# The spool is setgid to each tenant's group and the sealer writes as the relay
+# user, so the Direct service writing there needs the same group membership the
+# pipe transport already has.
+systemctl daemon-reload >/dev/null 2>&1 || true
+systemctl enable joinery-direct >/dev/null 2>&1 || true
+systemctl restart joinery-direct 2>/dev/null \
+    || echo "WARN: joinery-direct did not start; it will retry (certificate needs 443 reachable)" >&2
+echo "Joinery Direct: endpoint enabled on 443 for ${MAIL_HOSTNAME} (certificate obtained on first request)"
+
 # --- 8. hardening ------------------------------------------------------------
 # Unattended security upgrades.
 if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
@@ -881,8 +969,14 @@ ufw default allow outgoing >/dev/null 2>&1 || true
 ufw allow 25/tcp        >/dev/null 2>&1 || true
 ufw allow "${WG_PORT}/udp" >/dev/null 2>&1 || true
 ufw allow 22/tcp        >/dev/null 2>&1 || true
+# 443 is Joinery Direct's endpoint AND the port its certificate is obtained on
+# (TLS-ALPN-01, in-process — no web server and no certbot on this machine).
+# Opened unconditionally: the listener refuses everything except the one Direct
+# path, and a tenant that has not enabled Direct has no capability record
+# published, so nothing sends here.
+ufw allow 443/tcp       >/dev/null 2>&1 || true
 ufw --force enable      >/dev/null 2>&1 || true
-echo "firewall: default-deny; allow 25/tcp, ${WG_PORT}/udp, 22/tcp"
+echo "firewall: default-deny; allow 25/tcp, 443/tcp, ${WG_PORT}/udp, 22/tcp"
 
 # --- 9. validate + restart Postfix -------------------------------------------
 if postfix check; then
@@ -903,6 +997,7 @@ echo "  Relay public IP   : ${PUBLIC_IP}"
 echo "  WireGuard pubkey  : ${WG_PUB}"
 echo "  WireGuard endpoint: ${PUBLIC_IP}:${WG_PORT}"
 echo "  Relay tunnel IP   : ${WG_ADDR%/*}"
+echo "  Joinery Direct    : https://${MAIL_HOSTNAME}:443 (SRV target for Fortress tenants)"
 echo "  Tenants           : $(tenant_count) (add with: sudo bash provision_relay.sh add-tenant <slug> ...)"
 echo
 echo "Next:"
@@ -911,4 +1006,6 @@ echo "         --pull-pubkey '<tenant pull key>' --wg-pubkey '<tenant WG key>' [
 echo "     (the provisioning job does this automatically for a self-hosted relay)"
 echo "  2. Point the MX + A records for each tenant's hosted domains at ${PUBLIC_IP}."
 echo "  3. Set the relay's PTR record to ${MAIL_HOSTNAME} at your VPS provider."
+echo "  4. For Joinery Direct, publish each tenant's capability record LAST —"
+echo "     _joinery._tcp -> ${MAIL_HOSTNAME}:443 — once this relay answers there."
 echo "========================================================"

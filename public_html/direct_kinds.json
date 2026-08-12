@@ -1,0 +1,3 @@
+{
+  "_comment": "Core Joinery Direct kinds, in the same shape a plugin declares under 'directKinds' in plugin.json. The registry is instance configuration: it answers 'does this instance serve kind X' without loading handler code, so an unserved kind refuses at request level before anything runs. Mail is not here — it belongs to the mailbox plugin and is declared there, which is what makes deactivating that plugin remove the kind from the served set. See docs/joinery_direct.md § Serving a kind."
+}

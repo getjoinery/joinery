@@ -125,6 +125,25 @@ class EmailSender {
     }
 
     /**
+     * @var callable|null fn(EmailMessage): array{remaining:string[],delivered:string[]}
+     *
+     * The Joinery Direct attempt, registered by the mailbox plugin at bootstrap
+     * so core send code never names a plugin symbol — the same discipline
+     * MailIdentityGuard and File::resolve_decrypt_hook() set. With nothing
+     * registered, send() behaves exactly as it did before Direct existed.
+     */
+    private static $direct_attempt = null;
+
+    /**
+     * Register the Direct-first attempt. It returns which recipients Direct
+     * delivered and which remain for the ordinary transport, and it must never
+     * throw: a failure of the fast lane is a downgrade, never a lost message.
+     */
+    public static function registerDirectAttempt(callable $fn): void {
+        self::$direct_attempt = $fn;
+    }
+
+    /**
      * The platform's active outbound provider instance, or null when none is
      * configured or the configured key resolves to no provider. Exposed so the
      * hidden-origin compose path (RawRelayComposeTransport) can reach the same
@@ -320,6 +339,36 @@ class EmailSender {
                 . ' — subject: ' . $message->getSubject(),
                 'dry-run');
             return true;
+        }
+
+        // Joinery Direct, before any transport is chosen: when both ends are
+        // Joinery instances and the recipient has already affirmed this sender,
+        // the message goes straight there over a signed, sealed channel and
+        // never touches SMTP or a paid sender.
+        //
+        // It sits here — after validation and the dry-run guard, above BOTH
+        // transport branches — because it applies to every send, injected
+        // transport or configured provider alike, and because the fallback has
+        // to be the path the message would otherwise have taken. Recipients
+        // Direct delivered are dropped from the message so the send below is
+        // never a duplicate for them; if it delivered them all, there is nothing
+        // left to send.
+        if (self::$direct_attempt !== null) {
+            try {
+                $direct = call_user_func(self::$direct_attempt, $message);
+                if (!empty($direct['delivered'])) {
+                    $this->logEmailDebug('Delivered over Joinery Direct to '
+                        . implode(', ', $direct['delivered']), 'joinery-direct');
+                    if (empty($direct['remaining'])) {
+                        return true;
+                    }
+                    $message->keepOnlyRecipients($direct['remaining']);
+                }
+            } catch (\Throwable $e) {
+                // A broken fast lane must never cost a message. Log and continue
+                // down the path this send would have taken anyway.
+                error_log('EmailSender: Joinery Direct attempt failed, falling back: ' . $e->getMessage());
+            }
         }
 
         // Injected transport: send through it directly, no provider fallback.

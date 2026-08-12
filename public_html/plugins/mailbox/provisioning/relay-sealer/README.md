@@ -30,6 +30,51 @@ Environment:
   map (default `/var/spool/joinery-relay`); the per-tenant spool directory
   comes from the tenant's block in the routing map
 
+## What it writes for a Direct delivery
+
+- `<spoolid>.direct` — a JSON container: the envelope, the VERIFIED sending
+  domain (not what the envelope claimed), and every part exactly as it arrived —
+  sealed by the SENDER to the recipient's vault key, so the relay forwards a blob
+  it cannot read.
+- `<spoolid>.meta` — the same cleartext sidecar shape mail uses, with
+  `artifact: "direct"` and the payload kind, so one listing serves both and the
+  pull consumer knows which framework to hand it to.
+
+## Joinery Direct endpoint
+
+```
+relay-sealer direct-serve --hostname <mail hostname>
+```
+
+The relay's third mode, and its only long-running one. At Fortress the relay
+**is** the Joinery Direct endpoint (`docs/joinery_direct.md`): an SRV record
+pointing at the origin box would advertise in public DNS exactly the address the
+relay exists to conceal, so `_joinery._tcp` targets the relay, the same posture
+MX already takes.
+
+Two listeners:
+
+- **Public, `:443`** — `POST /.well-known/joinery-direct`, the three-step
+  exchange (preflight → one request per part → commit). TLS is terminated
+  in-process with an ACME certificate obtained over TLS-ALPN-01 on that same
+  port; there is no web server and no certbot on this machine.
+- **Tunnel-only egress** — `POST /egress` on the WireGuard address. A tenant's
+  box signs a fully-formed request and the relay makes it, so the recipient sees
+  the relay's address and never the box's. **The relay never holds the instance
+  signing key and never signs** — it transports an app-signed request it cannot
+  alter, the same division `OutboundTransport` enforces for mail.
+
+The split is **relay authenticates, box authorizes**: signature verification is
+stateless crypto needing no vault, so forged senders are dropped at the edge;
+the contact gate needs the sealed contact list, so it runs on the box at unlock.
+A verified delivery is written to the tenant's spool as a `.direct` container
+plus the usual `.meta` sidecar, and travels the WireGuard pull that already
+exists — no new transport and no new credential.
+
+The relay is **kind-blind**. Served kinds, rate limits, spool caps and the decoy
+secret all arrive as relay-map data, so a new payload kind — core or plugin —
+reaches the fleet as a map update and never as a relay release.
+
 ## Merge unit
 
 The same binary is the shard's map merge unit:
@@ -128,7 +173,20 @@ main box) and re-injected through the relay's own Postfix via `sendmail`.
 ```bash
 bash build.sh                 # produce ./relay-sealer (static, CGO off)
 bash roundtrip_test.sh        # go vet + go test + PHP openDek wire round-trip
+bash direct_wire_gate.sh      # PHP and Go sign the SAME BYTES
 ```
 
-`roundtrip_test.sh` is the CI gate: it seals a message with the Go binary and
-opens it with PHP `SealedBox::openDek`, proving wire compatibility end to end.
+`roundtrip_test.sh` is the CI gate for sealing: it seals a message with the Go
+binary and opens it with PHP `SealedBox::openDek`, proving wire compatibility end
+to end.
+
+`direct_wire_gate.sh` is the CI gate for Direct, and it guards the one drift
+nothing else would catch. A signature is only worth anything if both ends agree
+byte for byte on what was covered, and a divergence between
+`DirectProtocol.php` and `direct_protocol.go` would not throw anywhere — every
+delivery from a Joinery box would simply fail verification here, which a sender
+reads as "peer unreachable" and downgrades to SMTP. Mail keeps flowing, nothing
+is marked verified, nobody notices. The gate has PHP emit the signing bytes and
+Go emit them for the same awkward fixture (mixed case, `&` and `/` in a
+filename, non-ASCII, an empty manifest entry) and diffs them, then verifies a
+PHP-made signature in Go over both byte-forms.

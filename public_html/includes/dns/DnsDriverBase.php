@@ -17,6 +17,8 @@
  *    cannot leak into a session, a log line or an error report. There is no
  *    persistence path in this code at all.
  *
+ * @version 1.3 - srvNameFromParts() reassembles a whole SRV name from split labels
+ * @version 1.2 - SRV decomposition helpers for providers that split the RDATA
  * @version 1.1 - rate limiting (429) is retried on reads, never on writes, and
  *                reported to a person; every vendor failure is logged with its
  *                status, trace id and Retry-After, and never the credential
@@ -90,6 +92,13 @@ abstract class DnsDriverBase implements DnsProvider {
 	// ------------------------------------------------------------------
 	// Capability defaults — a driver overrides only what differs
 	// ------------------------------------------------------------------
+
+	/**
+	 * Every type, unless a driver narrows it. A driver that models a type as
+	 * separate vendor-named fields and has not had that mapping verified says
+	 * false rather than guessing at the field names.
+	 */
+	public static function supportsType(string $type): bool { return true; }
 
 	public static function credentialMode(): string { return self::CREDENTIAL_API; }
 	public static function oauthProviderKey(): string { return ''; }
@@ -191,6 +200,88 @@ abstract class DnsDriverBase implements DnsProvider {
 	/** The inverse of parseCaa(), in the platform's canonical spelling. */
 	public static function formatCaa(int $flags, string $tag, string $value): string {
 		return $flags . ' ' . strtolower($tag) . ' "' . trim($value, '"') . '"';
+	}
+
+	/**
+	 * Decompose an SRV value ("0 5 443 direct.example.com") into the four fields
+	 * most APIs model separately.
+	 *
+	 * The platform stores SRV's whole RDATA in the record value, because a plan
+	 * compares one string and a driver that already passes a value through then
+	 * needs no special case at all. Providers that DO split the fields call this
+	 * — the four numbers are the same everywhere even where the field names are
+	 * not.
+	 *
+	 * @return array{priority:int,weight:int,port:int,target:string}
+	 */
+	public static function parseSrv(string $value): array {
+		$parts = preg_split('/\s+/', trim($value));
+		if (count($parts) >= 4) {
+			return array(
+				'priority' => (int)$parts[0],
+				'weight'   => (int)$parts[1],
+				'port'     => (int)$parts[2],
+				'target'   => rtrim(strtolower($parts[3]), '.'),
+			);
+		}
+		// A value that is only a target is still a usable record; the defaults
+		// are what a single-endpoint service publishes anyway.
+		return array('priority' => 0, 'weight' => 5, 'port' => 443,
+			'target' => rtrim(strtolower(trim($value)), '.'));
+	}
+
+	/** The inverse of parseSrv(), in the platform's canonical spelling. */
+	public static function formatSrv(int $priority, int $weight, int $port, string $target): string {
+		return $priority . ' ' . $weight . ' ' . $port . ' ' . rtrim(strtolower(trim($target)), '.');
+	}
+
+	/**
+	 * The "weight port target" half of an SRV value, for the several vendors
+	 * that model SRV exactly as they model MX: the priority in its own numeric
+	 * field and the REST of the RDATA in the content string.
+	 *
+	 * Verified against working implementations for Vultr, DNSimple, Porkbun and
+	 * name.com, which all take this shape. Naming it once means a fifth vendor
+	 * on the same pattern is a two-line driver change rather than a fresh guess.
+	 */
+	public static function srvContent(string $value): string {
+		$srv = self::parseSrv($value);
+		return $srv['weight'] . ' ' . $srv['port'] . ' ' . $srv['target'];
+	}
+
+	/** The inverse: rebuild the canonical RDATA from that split representation. */
+	public static function srvFromContent(string $content, int $priority): string {
+		$parts = preg_split('/\s+/', trim($content));
+		if (count($parts) >= 3) {
+			return self::formatSrv($priority, (int)$parts[0], (int)$parts[1], $parts[2]);
+		}
+		// A vendor that handed back something else is not a record we can
+		// compare; return it as-is so the diff shows a difference rather than
+		// silently agreeing with a value nobody can parse.
+		return trim($content);
+	}
+
+	/**
+	 * Rebuild an SRV record's whole name from a vendor's separate service and
+	 * protocol labels plus an optional sub-host. The platform compares whole
+	 * names, so `_joinery._tcp.example.com` has to be reassembled from the three
+	 * pieces the fully-decomposed vendors (GoDaddy, Linode, Namecheap) store it
+	 * as. Labels are accepted with or without their leading underscore — vendors
+	 * disagree on whether they return it — and normalized to exactly one.
+	 */
+	public static function srvNameFromParts(string $service, string $protocol, string $host, string $zone): string {
+		$labels = array();
+		foreach (array($service, $protocol) as $label) {
+			$label = trim($label);
+			if ($label !== '') {
+				$labels[] = (substr($label, 0, 1) === '_') ? $label : '_' . $label;
+			}
+		}
+		$host = trim($host);
+		if ($host !== '' && $host !== '@') {
+			$labels[] = $host;
+		}
+		return self::absoluteName(implode('.', $labels) ?: '@', $zone);
 	}
 
 	/**

@@ -103,6 +103,24 @@ class EmailMessage {
         return $this;
     }
     
+    /**
+     * Narrow the To list to $emails, keeping each entry's display name.
+     *
+     * Written for a path that delivers SOME recipients by another route and
+     * must then send to only the rest: Joinery Direct addresses one person at a
+     * time, so a message to three people may go direct to two and take the
+     * ordinary transport for the third. Dropping the already-delivered
+     * addresses here is what stops that third send from being a duplicate for
+     * the other two.
+     */
+    public function keepOnlyRecipients(array $emails) {
+        $keep = array_map('strtolower', array_map('strval', $emails));
+        $this->recipients = array_values(array_filter($this->recipients, function ($r) use ($keep) {
+            return in_array(strtolower((string)$r['email']), $keep, true);
+        }));
+        return $this;
+    }
+
     public function cc($email, $name = null) {
         $this->ccRecipients[] = ['email' => $email, 'name' => $name];
         return $this;

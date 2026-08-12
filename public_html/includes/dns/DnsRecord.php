@@ -3,8 +3,8 @@
  * DnsRecord - one record a subsystem wants published, or one record a provider
  * currently holds.
  *
- * The vocabulary is deliberately small: A, AAAA, CNAME, MX, TXT and CAA. NS and
- * SOA are never expressible — the platform holds record state, it never becomes
+ * The vocabulary is deliberately small: A, AAAA, CNAME, MX, TXT, CAA and SRV.
+ * NS and SOA are never expressible — the platform holds record state, it never becomes
  * a nameserver, and a plan that could rewrite delegation would be able to take a
  * zone away from its owner.
  *
@@ -23,7 +23,7 @@
  * is finished is the failure this subsystem exists to end, so absence is part of
  * desired state rather than a hand-edit at the provider.
  *
- * @version 1.1 - a record can be required to be absent
+ * @version 1.2 - SRV joins the vocabulary (Joinery Direct's capability record)
  */
 
 class DnsRecordException extends Exception {}
@@ -36,10 +36,18 @@ class DnsRecord {
 	const TYPE_MX    = 'MX';
 	const TYPE_TXT   = 'TXT';
 	const TYPE_CAA   = 'CAA';
+	/**
+	 * SRV carries three numbers and a target rather than a bare value, so its
+	 * whole RDATA — "priority weight port target" — travels in the value, the
+	 * way CAA's does. Baking the numbers into the value rather than adding two
+	 * more optional columns keeps every driver that already passes a value
+	 * through working unchanged, and keeps comparison to one string.
+	 */
+	const TYPE_SRV   = 'SRV';
 
-	/** The whole vocabulary. Anything else — NS, SOA, SRV — is refused. */
+	/** The whole vocabulary. Anything else — NS, SOA — is refused. */
 	const TYPES = array(self::TYPE_A, self::TYPE_AAAA, self::TYPE_CNAME,
-		self::TYPE_MX, self::TYPE_TXT, self::TYPE_CAA);
+		self::TYPE_MX, self::TYPE_TXT, self::TYPE_CAA, self::TYPE_SRV);
 
 	/**
 	 * Absent-record value meaning "whatever is published at this name".
@@ -171,6 +179,12 @@ class DnsRecord {
 				// "0 issue \"letsencrypt.org\"" — collapse whitespace so a
 				// provider's re-spacing is not a difference.
 				return preg_replace('/\s+/', ' ', $value);
+			case self::TYPE_SRV:
+				// "0 5 443 direct.example.com" — collapse whitespace, drop the
+				// target's trailing dot and case, so a provider that re-spaces or
+				// re-qualifies the target is not a permanent diff.
+				$value = strtolower(preg_replace('/\s+/', ' ', $value));
+				return preg_replace('/\.$/', '', $value);
 		}
 		return $value;
 	}

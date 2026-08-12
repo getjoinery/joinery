@@ -128,6 +128,10 @@ class DigitalOceanDnsDriver extends DnsDriverBase {
 		if ($type === DnsRecord::TYPE_CAA) {
 			$value = self::formatCaa((int)($row['flags'] ?? 0), (string)($row['tag'] ?? 'issue'), $value);
 		}
+		if ($type === DnsRecord::TYPE_SRV) {
+			$value = self::formatSrv((int)($row['priority'] ?? 0), (int)($row['weight'] ?? 0),
+				(int)($row['port'] ?? 0), $value);
+		}
 		$ttl = (int)($row['ttl'] ?? 0);
 		$record = new DnsRecord(
 			$type,
@@ -154,6 +158,13 @@ class DigitalOceanDnsDriver extends DnsDriverBase {
 				break;
 			case DnsRecord::TYPE_TXT:
 				$body['data'] = $this->txtWireValue($record->value);
+				break;
+			case DnsRecord::TYPE_SRV:
+				$srv = self::parseSrv($record->value);
+				$body['data']     = $srv['target'] . '.';
+				$body['priority'] = $srv['priority'];
+				$body['weight']   = $srv['weight'];
+				$body['port']     = $srv['port'];
 				break;
 			case DnsRecord::TYPE_CNAME:
 			case DnsRecord::TYPE_MX:

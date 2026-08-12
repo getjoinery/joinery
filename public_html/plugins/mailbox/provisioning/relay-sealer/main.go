@@ -29,6 +29,14 @@
 // runs the fragment validation + merge (root only, triggered via sudo by the
 // tenant shell or the provisioning job — never a resident daemon). See merge.go.
 //
+// And it serves JOINERY DIRECT for the relay's tenants:
+//
+//	relay-sealer direct-serve --hostname <mail hostname>
+//
+// terminates the public HTTPS endpoint other Joinery instances deliver to, and
+// a tunnel-only egress listener that sends a tenant's own box-signed requests
+// out from the relay's address. See direct_serve.go.
+//
 // Exit codes follow Postfix pipe conventions:
 //
 //	0  = delivered / accepted (sealed + spooled, or forwarded, or silently discarded)
@@ -62,6 +70,15 @@ func main() {
 	// passed relay_domains + check_recipient_access, never a bare word.
 	if len(os.Args) > 1 && os.Args[1] == "merge-maps" {
 		os.Exit(runMerge())
+	}
+	// Joinery Direct's endpoint (docs/joinery_direct.md). A resident service
+	// rather than a pipe invocation, and the only long-running mode this binary
+	// has: at Fortress the relay IS the Direct endpoint, because an SRV record
+	// pointing at the origin box would advertise the address the relay exists
+	// to conceal. Dispatched on a literal first argument for the same reason
+	// merge-maps is — an SMTP recipient is always an address, never a bare word.
+	if len(os.Args) > 1 && os.Args[1] == "direct-serve" {
+		os.Exit(runDirectServe())
 	}
 	os.Exit(run())
 }

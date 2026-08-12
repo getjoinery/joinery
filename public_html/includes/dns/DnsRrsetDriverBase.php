@@ -19,6 +19,7 @@
  * vendor's own wire spelling (quoted TXT, "10 mail.example.com" for MX);
  * rrsetValue() and recordFromValue() are the one place that translation happens.
  *
+ * @version 1.1 - an SRV set-value carries an absolute (dotted) target
  * @version 1.0
  */
 
@@ -106,6 +107,15 @@ abstract class DnsRrsetDriverBase extends DnsDriverBase {
 				return ($record->priority !== null ? (int)$record->priority : 10) . ' ' . $record->value . '.';
 			case DnsRecord::TYPE_CNAME:
 				return $record->value . '.';
+			case DnsRecord::TYPE_SRV:
+				// The RDATA's target is a hostname, and a set-based vendor that takes
+				// the RDATA verbatim reads a target without a trailing dot as relative
+				// to the zone — Gandi re-appends it (direct.example.com.example.com),
+				// deSEC and Google Cloud reject it. Absolute it here, like MX and
+				// CNAME, so the one set-value form is correct on the wire and matches
+				// what those vendors store and hand back for delete/replace.
+				$srv = self::parseSrv($record->value);
+				return $srv['priority'] . ' ' . $srv['weight'] . ' ' . $srv['port'] . ' ' . $srv['target'] . '.';
 			default:
 				return $record->value;
 		}

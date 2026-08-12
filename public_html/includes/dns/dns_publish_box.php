@@ -124,6 +124,7 @@ function dns_publish_box_headline(array $vars): string {
 		DnsReconciler::DIFFERS   => 'change',
 		DnsReconciler::CONFLICTS => 'replace',
 		DnsReconciler::REMAINS   => 'remove',
+		DnsReconciler::UNSUPPORTED => 'add by hand',
 	) as $outcome => $verb) {
 		$n = (int)($counts[$outcome] ?? 0);
 		if ($n > 0) {
@@ -548,6 +549,12 @@ function dns_publish_box_consequence(array $row): string {
 			return 'Left alone unless you tick it below — this record was not created here.';
 		case DnsReconciler::REMAINS:
 			return 'Deleted, and nothing takes its place. Left alone unless you tick it below.';
+		case DnsReconciler::UNSUPPORTED:
+			// Named as work for a person, because that is what it is: everything
+			// else on this page publishes with the button, and this one record
+			// has to be pasted in at the provider.
+			return 'This provider cannot write this record type through its API. '
+				. 'Copy it in at the provider by hand.';
 		default:
 			return 'Not checked. The resolver did not answer, so nothing is claimed either way.';
 	}

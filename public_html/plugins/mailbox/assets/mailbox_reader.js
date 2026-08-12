@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.40
+ * No framework. @version 2.41
  *
  * Two-pane layout: the main pane swaps between the conversation list and an
  * opened conversation (toggled by the `reading` class on #mbx-reader); a back
@@ -1103,6 +1103,20 @@
 		});
 		li.appendChild(star);
 
+		// Verified-direct mark (docs/joinery_direct.md § The social signal): our
+		// own small glyph beside the sender, deliberately NOT a borrowed blue
+		// check (devalued) and NOT a coloured banner (reads as promo, or worse as
+		// a phishing tell). Restraint and consistency are what signal trust;
+		// saturation signals the opposite. It asserts exactly two things: the
+		// sending instance was cryptographically verified, and this sender is in
+		// your contacts.
+		if (t.direct_verified) {
+			var mark = el('span', 'mbx-direct-mark', '\u2726');
+			mark.title = 'Delivered directly from a verified Joinery instance — and this sender is in your contacts.';
+			mark.setAttribute('aria-label', 'Delivered directly, verified');
+			li.appendChild(mark);
+		}
+
 		// Sender name (address hidden), fixed left column.
 		var from = el('span', 'mbx-thread-from', senderName(t.sender || t.senders));
 		// Hover keeps the address reachable without widening the column. Ingest
@@ -1538,6 +1552,16 @@
 		var from = el('div', 'mbx-message-from', senderFull(m.sender));
 		if (outbound) from.appendChild(el('span', 'mbx-sent-tag', 'Sent'));
 		left.appendChild(from);
+		// A subtle accent and one plain-language line, never a loud coloured
+		// block. A direct message is only ever rendered in a Joinery inbox, so
+		// the mark can be tasteful and consistent — and it is applied from
+		// verified transport plus contact membership, so message content cannot
+		// reproduce it.
+		if (!outbound && m.direct_verified) {
+			wrap.classList.add('mbx-message-direct');
+			left.appendChild(el('div', 'mbx-message-meta mbx-direct-line',
+				'\u2726 Delivered directly from ' + senderName(m.sender) + ' — verified, no third party'));
+		}
 		left.appendChild(el('div', 'mbx-message-meta', 'to ' + (m.recipient || '')));
 		// Bcc line: only your own Sent copy carries it (its own sealed column).
 		if (outbound && m.bcc) left.appendChild(el('div', 'mbx-message-meta', 'Bcc: ' + m.bcc));
@@ -1711,6 +1735,47 @@
 		Array.prototype.forEach.call(document.querySelectorAll('.mbx-kebab-menu'), function (mn) {
 			mn.hidden = true;
 		});
+	}
+
+	// ---- compose-time direct indicator (docs/joinery_direct.md § The social signal) ----
+	//
+	// This is iMessage's blue/green compose field, and it is the part that
+	// actually drives behaviour: you see the good path is available before you
+	// send, so you want it. It states only what a sender can honestly know —
+	// that the recipient's domain speaks the channel. Whether that person
+	// accepts a direct delivery from you is theirs to answer live and is
+	// deliberately not queryable, so the hint promises "can", never "will".
+	var directHintTimer = null;
+	function queueDirectHint() {
+		if (!CFG.directStatusUrl) return;
+		clearTimeout(directHintTimer);
+		directHintTimer = setTimeout(refreshDirectHint, 400);
+	}
+	function refreshDirectHint() {
+		var hint = document.getElementById('mbx-direct-hint');
+		var field = document.getElementById('mbx_to');
+		if (!hint || !field) return;
+		var to = field.value.trim();
+		if (!to) { hint.hidden = true; return; }
+
+		joineryApi.post(CFG.directStatusUrl, { to: to }).then(function (data) {
+			var map = (data && data.addresses) || {};
+			var names = Object.keys(map);
+			if (!names.length) { hint.hidden = true; return; }
+			var capable = names.filter(function (a) { return map[a]; });
+			if (!capable.length) {
+				// Silence rather than a green-bubble counterpart: telling someone
+				// their ordinary email is ordinary every time they address a
+				// message is noise, and the absence of the mark is the signal.
+				hint.hidden = true;
+				return;
+			}
+			hint.hidden = false;
+			hint.textContent = (capable.length === names.length)
+				? '\u2726 Goes directly — no third party in the middle.'
+				: '\u2726 ' + capable.length + ' of ' + names.length
+					+ ' can go directly; the rest go as ordinary email.';
+		}).catch(function () { hint.hidden = true; });
 	}
 
 	// ---- compose attachments (AI chat pattern: paperclip, chips, drag-and-drop) ----
@@ -3134,6 +3199,8 @@
 			var f = document.getElementById(id);
 			if (f) f.addEventListener('input', markDraftDirty);
 		});
+		var toField = document.getElementById('mbx_to');
+		if (toField) toField.addEventListener('input', queueDirectHint);
 		var aliasSel = document.getElementById('mbx_alias_id');
 		if (aliasSel) aliasSel.addEventListener('change', function () {
 			state.draftAlias = aliasSel.value;

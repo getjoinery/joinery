@@ -24,6 +24,7 @@ class DnsimpleDnsDriver extends DnsDriverBase {
 	public static function getKey(): string { return 'dnsimple'; }
 	public static function getLabel(): string { return 'DNSimple'; }
 
+
 	public static function credentialMode(): string { return self::CREDENTIAL_OAUTH2; }
 	public static function oauthProviderKey(): string { return 'dnsimple'; }
 	public static function oauthScopes(): array { return array(); }
@@ -141,10 +142,17 @@ class DnsimpleDnsDriver extends DnsDriverBase {
 			return null;
 		}
 		$ttl = (int)($row['ttl'] ?? 0);
+		$value = (string)($row['content'] ?? '');
+		if ($type === DnsRecord::TYPE_SRV) {
+			// SRV is modelled exactly as MX here: the priority in its own numeric
+			// field and "weight port target" in the content string. Rebuild the
+			// canonical RDATA so the plan compares one value.
+			$value = self::srvFromContent($value, (int)($row['priority'] ?? 0));
+		}
 		$record = new DnsRecord(
 			$type,
 			self::absoluteName((string)($row['name'] ?? ''), $zone),
-			(string)($row['content'] ?? ''),
+			$value,
 			$ttl > 0 ? $ttl : null,
 			$type === DnsRecord::TYPE_MX ? (int)($row['priority'] ?? 0) : null
 		);
@@ -161,6 +169,11 @@ class DnsimpleDnsDriver extends DnsDriverBase {
 		);
 		if ($record->type === DnsRecord::TYPE_MX) {
 			$body['priority'] = $record->priority !== null ? (int)$record->priority : 10;
+		}
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			$srv = self::parseSrv($record->value);
+			$body['content']  = self::srvContent($record->value);
+			$body['priority'] = $srv['priority'];
 		}
 		if ($record->ttl !== null) {
 			$body['ttl'] = (int)$record->ttl;

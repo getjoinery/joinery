@@ -12,15 +12,17 @@
  * one place: VaultCrypto::openField(). That only protects anything if code
  * cannot quietly decrypt sealed content some other way, so this test walks the
  * whole tree and asserts that the low-level SealedBox decrypt primitives
- * (openDek / aeadDecrypt) are called from a closed, named set of files:
+ * (openDek / openBinary / aeadDecrypt) are called from a closed, named set of files:
  *
  *  - includes/SealedBox.php      — defines the primitives, uses them internally;
  *  - includes/VaultCrypto.php    — the sanctioned wrapper: openField() (arms),
  *                                  openItemDek() (unwraps KEYS, not content; the
- *                                  content open that follows arms), and
- *                                  openHeldDeliveryBlob() (the ONE non-arming
- *                                  content open — mail held in transit, opened
- *                                  to complete first-time delivery);
+ *                                  content open that follows arms),
+ *                                  openHeldDeliveryBlob() and openBulkDelivery()
+ *                                  (the non-arming content opens — a Direct
+ *                                  message held in transit, base64 DEK form and
+ *                                  raw bulk form respectively, opened to complete
+ *                                  first-time delivery);
  *  - plugins/mailbox/includes/RelaySpoolConsumer.php
  *                                — opens relay spool envelopes with the SERVER's
  *                                  own transport key; no owner key is involved,
@@ -43,7 +45,7 @@ harness_boot();
 
 /** Call-shaped uses only: `->openDek(` / `::aeadDecrypt(` etc. A mention in
  *  prose or a docblock without the call parenthesis does not count. */
-const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|aeadDecrypt)\s*\(/';
+const SRP_PATTERN = '/(?:->|::)\s*(?:openDek|openBinary|aeadDecrypt)\s*\(/';
 
 /** The closed set, relative to public_html. */
 $allowed = array(
@@ -83,7 +85,7 @@ sort($callers);
 
 $unexpected = array_diff($callers, $allowed);
 check(count($unexpected) === 0,
-	'no file outside the sanctioned set calls SealedBox::openDek/aeadDecrypt directly — '
+	'no file outside the sanctioned set calls SealedBox::openDek/openBinary/aeadDecrypt directly — '
 	. 'sealed reads go through VaultCrypto::openField(), which arms the hot-turn rule',
 	count($unexpected) ? ('new callers: ' . implode(', ', $unexpected)
 		. ' — if one is genuinely held-in-transit delivery, argue it against the criterion in '

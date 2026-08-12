@@ -20,6 +20,8 @@
  * at pull. Catch-all recipients have no single owner, so they are always
  * transport-sealed.
  *
+ * @version 2.1 - the fragment carries Joinery Direct's served kinds, decoy secret,
+ *                limits and caps, so the relay serves the channel as DATA
  * @version 2.0 - emits the tenancy-native fragment (fragment_format 1); the
  *                Postfix artifacts are derived by the relay-side merge unit
  */
@@ -77,6 +79,15 @@ class RelayMapExporter {
 			'recipients'           => array(),
 			'domains'              => array(),
 		);
+
+		// Joinery Direct (docs/joinery_direct.md § The relay at Fortress). At
+		// Fortress the relay IS the endpoint, so everything it needs to answer a
+		// preflight travels here AS DATA: the served-kind list it compares as
+		// opaque strings, the domain secret behind decoy keys, and the limits and
+		// caps it enforces at the edge. That is what keeps a new payload kind a
+		// map update rather than a relay release — RELAY_VERSION moves only when
+		// the shared layer itself changes.
+		$fragment = array_merge($fragment, $this->directFragment());
 
 		// SRS-bounce accept (specs/mailbox_relay_fix_pack.md § Fix 6): bounces to
 		// forwarded mail return to SRS0=...@forwardingdomain, which is not in the
@@ -145,6 +156,10 @@ class RelayMapExporter {
 				$fragment['recipients'][$address] = array(
 					'public_key'        => $public_key,
 					'key_kind'          => $key_kind,
+					// The generation the relay reports in a Direct accept, so a
+					// sealed part can be tagged with the key it was sealed to and
+					// an unopenable message told apart from a corrupt one.
+					'key_generation'    => $this->keyGenerationFor($alias, $domain, $key_kind),
 					'mode'              => (string)$alias->get('iea_delivery_mode'),
 					'destinations'      => array_values($alias->get_destinations_array()),
 					'forwarding_domain' => $forwarding_domain,
@@ -162,6 +177,40 @@ class RelayMapExporter {
 
 		return array(
 			'fragment' => json_encode($fragment, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES),
+		);
+	}
+
+	/**
+	 * The Joinery Direct half of the fragment.
+	 *
+	 * With Direct off this still ships `direct_enabled: false` rather than
+	 * omitting the keys, so a relay merging an older fragment and a newer one
+	 * reads the same shape from both and a tenant turning Direct OFF actually
+	 * turns it off at the edge.
+	 */
+	private function directFragment(): array {
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectKinds.php'));
+
+		if (!DirectSettings::enabled()) {
+			return array('direct_enabled' => false, 'direct_kinds' => array());
+		}
+		return array(
+			'direct_enabled'      => true,
+			'direct_kinds'        => array_values(DirectKinds::servedNames()),
+			// The relay answers preflights on this tenant's behalf, so it needs
+			// the same secret the box would derive a decoy from — a decoy that
+			// differed between the two would be a distinguisher in itself.
+			'direct_decoy_secret' => DirectSettings::decoySecret(),
+
+			'direct_preflight_limit'          => DirectSettings::preflightLimit(),
+			'direct_preflight_window'         => DirectSettings::preflightWindowSeconds(),
+			'direct_max_parts'                => DirectSettings::maxParts(),
+			'direct_max_part_bytes'           => DirectSettings::maxBytesPerPart(),
+			'direct_max_total_bytes'          => DirectSettings::maxTotalBytes(),
+			'direct_spool_domain_cap_bytes'   => DirectSettings::spoolDomainCapBytes(),
+			'direct_spool_address_cap_bytes'  => DirectSettings::spoolAddressCapBytes(),
+			'direct_session_ttl'              => DirectSettings::sessionTtlSeconds(),
 		);
 	}
 
@@ -186,6 +235,28 @@ class RelayMapExporter {
 			}
 		}
 		return array($this->transport_public_key, 'transport');
+	}
+
+	/**
+	 * The key generation to report for one alias. A transport-key recipient has
+	 * no vault generation of its own, so it reports 1 — the same value a
+	 * never-rotated vault carries, which is also what a decoy reports, so the
+	 * three are indistinguishable on the wire.
+	 */
+	private function keyGenerationFor($alias, $domain, string $key_kind): int {
+		if ($key_kind !== 'user') {
+			return 1;
+		}
+		$owner_id = InboundEmailMessage::singleOwnerUserId(intval($alias->key));
+		if ($owner_id === null) {
+			return 1;
+		}
+		try {
+			$vault = UserEncryptionVault::loadForUser($owner_id);
+		} catch (\Throwable $e) {
+			return 1;
+		}
+		return ($vault !== null) ? max(1, intval($vault->get('uev_key_generation'))) : 1;
 	}
 
 	private function vaultPublicKey(int $owner_id): ?string {

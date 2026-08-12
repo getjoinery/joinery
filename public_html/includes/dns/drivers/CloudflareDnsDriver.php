@@ -165,6 +165,14 @@ class CloudflareDnsDriver extends DnsDriverBase {
 			$value = self::formatCaa((int)($data['flags'] ?? 0),
 				(string)($data['tag'] ?? 'issue'), (string)($data['value'] ?? ''));
 		}
+		if ($type === DnsRecord::TYPE_SRV && !empty($row['data'])) {
+			// Cloudflare models SRV as fields; the platform compares one RDATA
+			// string, so rebuild it here rather than trusting the rendered
+			// content, whose spelling varies.
+			$data = (array)$row['data'];
+			$value = self::formatSrv((int)($data['priority'] ?? 0), (int)($data['weight'] ?? 0),
+				(int)($data['port'] ?? 0), (string)($data['target'] ?? ''));
+		}
 		$ttl = (int)($row['ttl'] ?? 0);
 		$record = new DnsRecord(
 			$type,
@@ -188,6 +196,10 @@ class CloudflareDnsDriver extends DnsDriverBase {
 		if ($record->type === DnsRecord::TYPE_CAA) {
 			$caa = self::parseCaa($record->value);
 			$body['data'] = array('flags' => $caa['flags'], 'tag' => $caa['tag'], 'value' => $caa['value']);
+		} elseif ($record->type === DnsRecord::TYPE_SRV) {
+			$srv = self::parseSrv($record->value);
+			$body['data'] = array('priority' => $srv['priority'], 'weight' => $srv['weight'],
+				'port' => $srv['port'], 'target' => $srv['target']);
 		} elseif ($record->type === DnsRecord::TYPE_TXT) {
 			$body['content'] = $this->txtWireValue($record->value);
 		} else {

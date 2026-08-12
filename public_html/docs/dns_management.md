@@ -30,9 +30,20 @@ visible diff here.
 
 ## The record vocabulary
 
-A, AAAA, CNAME, MX, TXT and CAA. CAA is included because a wrong or missing CAA
-record blocks certificate issuance in the same silent way a missing challenge
-record does.
+A, AAAA, CNAME, MX, TXT, CAA and SRV. CAA is included because a wrong or missing
+CAA record blocks certificate issuance in the same silent way a missing challenge
+record does. SRV is what Joinery Direct's capability record needs; its whole RDATA
+— `priority weight port target` — travels in the record VALUE rather than in extra
+columns, so a plan still compares one string and a driver that passes values
+through needs no special case. Providers whose API models the four fields
+separately decompose it with `DnsDriverBase::parseSrv()`.
+
+**A provider that cannot express a type says so rather than guessing.**
+`supportsType()` defaults to every type; a driver that models one as vendor-named
+fields it has not had verified returns false, the diff shows the record as
+**add by hand** with its value ready to copy, and everything else in the plan still
+publishes with the button. A record written into the wrong fields is worse than one
+not written at all, because it looks published.
 
 **NS and SOA can never be expressed.** `new DnsRecord('NS', …)` throws, and so
 does rebuilding a plan from a payload that contains one — a plan that could

@@ -33,6 +33,8 @@
  * claims no ownership when it finds nothing — because the record it deletes is,
  * by definition, one the platform did not write.
  *
+ * @version 1.3 - the public-DNS diff reads SRV, so a capability record verifies green
+ * @version 1.2 - a record type a provider's API cannot express is reported, never written
  * @version 1.1 - a plan can require a record to be absent, and applying it deletes
  */
 
@@ -56,6 +58,16 @@ class DnsReconciler {
 	 */
 	const REMAINS   = 'remains';
 	const UNKNOWN   = 'unknown';
+	/**
+	 * This provider's API cannot express this record type, so the platform will
+	 * not write it — a record written into the wrong fields is worse than one
+	 * not written at all, because it looks published.
+	 *
+	 * The setup page renders every prescription as copy-paste instructions
+	 * regardless, so an operator on such a provider adds this one record by hand
+	 * and everything else still publishes with a button.
+	 */
+	const UNSUPPORTED = 'unsupported';
 	/**
 	 * Written here, and public DNS has not caught up yet.
 	 *
@@ -130,10 +142,23 @@ class DnsReconciler {
 		}
 		$rows = array();
 		foreach ($plan->getRecords() as $record) {
+			if (!$driver::supportsType($record->type)) {
+				$rows[] = $this->result_row_unsupported($plan, $record, $driver);
+				continue;
+			}
 			$live = $live_by_slot[$record->slotKey()] ?? array();
 			$rows[] = $this->rowFor($plan, $record, $live, true);
 		}
 		return $rows;
+	}
+
+	/** The diff row for a record this provider's API cannot express. */
+	private function result_row_unsupported(DnsRecordPlan $plan, DnsRecord $record, DnsProvider $driver): array {
+		$row = $this->rowFor($plan, $record, array(), false);
+		$row['outcome'] = self::UNSUPPORTED;
+		$row['note'] = $driver::getLabel() . ' cannot publish ' . $record->type
+			. ' records through its API; add this one at the provider.';
+		return $row;
 	}
 
 	/**
@@ -308,6 +333,17 @@ class DnsReconciler {
 						$live[] = new DnsRecord(DnsRecord::TYPE_CAA, $record->name, $caa);
 					}
 					break;
+				case DnsRecord::TYPE_SRV:
+					// The whole RDATA lives in the value, so rebuild it from the four
+					// fields the resolver hands back — the constructor canonicalizes
+					// the "priority weight port target" spelling. Without this case a
+					// published capability record never matches its own plan and the
+					// operator is told to re-publish forever.
+					foreach (DnsResolver::getSrv($record->name) as $srv) {
+						$live[] = new DnsRecord(DnsRecord::TYPE_SRV, $record->name,
+							$srv['pri'] . ' ' . $srv['weight'] . ' ' . $srv['port'] . ' ' . $srv['host']);
+					}
+					break;
 			}
 		} catch (Throwable $e) {
 			// A resolver failure is not evidence of absence. UNKNOWN keeps the
@@ -348,6 +384,12 @@ class DnsReconciler {
 			$record  = $row['record'];
 			$key     = $row['key'];
 			$outcome = $row['outcome'];
+
+			if ($outcome === self::UNSUPPORTED) {
+				$results[] = $this->result($key, $record, 'skipped', true,
+					(string)($row['note'] ?? 'This provider cannot publish this record type through its API.'));
+				continue;
+			}
 
 			// Deleting has its own gates and its own bookkeeping, and shares none
 			// of the create/update path's — least of all the ownership claim.

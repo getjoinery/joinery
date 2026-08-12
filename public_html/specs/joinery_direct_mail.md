@@ -638,8 +638,11 @@ nobody can ever open it — which costs nothing, because mail to a nonexistent a
 was going nowhere in any case. Existence, contact membership, and block status all stay
 unknowable from the wire.
 
-A decoy is derived as `HMAC(domain secret, lowercased address)` seeded into an X25519
-public key, with no private half ever computed. Two properties make it hold up:
+A decoy is derived as `HMAC(domain secret, lowercased address)` used as an X25519
+scalar, and the published decoy is its base-point multiple. The scalar — the private
+half — is therefore computed, but only in passing: it is zeroed the instant the point
+is derived and is never stored anywhere, so nothing on the box or off it can open a
+message sealed to a decoy. Two properties make it hold up:
 it must be a valid curve point, or malformed-key errors would identify it, and it must
 be **deterministic**, since a key that changed between probes of the same address would
 itself be the tell.
@@ -810,6 +813,23 @@ The spool keeps the delivery sealed until the plugin is reactivated, and expires
 quietly under the spool's ordinary retention if it never is. Nothing is returned to
 the sender in either case — the sender was answered `accept` at receive, and the
 no-bounce rule below applies to every kind, not just mail.
+
+**The defer decision is per-mailbox, not per-domain — an unencrypted mailbox on a
+sealing domain never waits for an unlock.** Deferral exists for one reason only: an
+encrypted mailbox's contact list is sealed, so the gate cannot read it until that
+mailbox's owner unlocks. A mailbox that does not encrypt — a **shared/group alias**
+(several grantees, no single vault) or an individual who holds no vault — has a
+*plaintext* address book even when its domain seals content, so its gate has nothing
+to wait for. Such a mailbox keeps the sealed tier's uniform wire posture — it still
+accepts unconditionally, so the answer signals neither existence nor encryption
+status — but runs its gate at **commit**, the moment the parts have arrived and their
+sealed-byte hashes verified: the contact check reads the plaintext book right then
+and files the message with its outcome — verified-direct for a contact,
+ordinary/spam for a stranger — exactly as the deferred path files it at unlock, only
+without the wait. Nothing is ever held for an unlock that will not come, so no
+unencrypted mailbox loses mail; only encrypted single-owner mailboxes defer. A shared
+alias's address book is the alias's own contacts — an entry any grantee added counts
+— so "in the mailbox's book" is answered against the mailbox, not against one person.
 
 **The spool is capped in bytes, and the cap is neither Sybil-able nor an oracle.**
 Accept-before-judgment means a flood's only real spend is disk held sealed until

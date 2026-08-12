@@ -57,6 +57,22 @@ type mapFragment struct {
 	ForwardingDomains  []string                `json:"forwarding_domains"`
 	Recipients         map[string]routingEntry `json:"recipients"`
 	Domains            map[string]domainEntry  `json:"domains"`
+
+	// Joinery Direct, all of it DATA (docs/joinery_direct.md § The relay).
+	// The relay compares the kind list as opaque strings and never interprets
+	// one, so a new payload kind — core or plugin — reaches the fleet as a
+	// fragment push rather than a relay release.
+	DirectEnabled           bool     `json:"direct_enabled"`
+	DirectKinds             []string `json:"direct_kinds"`
+	DirectDecoySecret       string   `json:"direct_decoy_secret"`
+	DirectPreflightLimit    int      `json:"direct_preflight_limit"`
+	DirectPreflightWindow   int      `json:"direct_preflight_window"`
+	DirectMaxParts          int      `json:"direct_max_parts"`
+	DirectMaxPartBytes      int64    `json:"direct_max_part_bytes"`
+	DirectMaxTotalBytes     int64    `json:"direct_max_total_bytes"`
+	DirectSpoolDomainCap    int64    `json:"direct_spool_domain_cap_bytes"`
+	DirectSpoolAddressCap   int64    `json:"direct_spool_address_cap_bytes"`
+	DirectSessionTTLSeconds int      `json:"direct_session_ttl"`
 }
 
 // tenantLimits mirrors tenants/<slug>/limits.json (shard policy, root-owned).
@@ -152,6 +168,21 @@ func runMerge() int {
 			SpoolMaxMiB:        limits.SpoolMaxMiB,
 			SpoolMaxEntries:    limits.SpoolMaxEntries,
 			FragmentVersion:    frag.Version,
+
+			// Direct is tenant-declared: a tenant that has not enabled it
+			// publishes no capability record either, so the two agree without
+			// the shard having to hold an opinion.
+			DirectEnabled:           frag.DirectEnabled,
+			DirectKinds:             frag.DirectKinds,
+			DirectDecoySecret:       frag.DirectDecoySecret,
+			DirectPreflightLimit:    frag.DirectPreflightLimit,
+			DirectPreflightWindow:   frag.DirectPreflightWindow,
+			DirectMaxParts:          frag.DirectMaxParts,
+			DirectMaxPartBytes:      frag.DirectMaxPartBytes,
+			DirectMaxTotalBytes:     frag.DirectMaxTotalBytes,
+			DirectSpoolDomainCap:    frag.DirectSpoolDomainCap,
+			DirectSpoolAddressCap:   frag.DirectSpoolAddressCap,
+			DirectSessionTTLSeconds: frag.DirectSessionTTLSeconds,
 		}
 		for addr, e := range frag.Recipients {
 			e.Tenant = slug

@@ -25,6 +25,7 @@ class PorkbunDnsDriver extends DnsDriverBase {
 	public static function getKey(): string { return 'porkbun'; }
 	public static function getLabel(): string { return 'Porkbun'; }
 
+
 	public static function nameservers(): array {
 		return array('curitiba.ns.porkbun.com', 'fortaleza.ns.porkbun.com',
 			'maceio.ns.porkbun.com', 'salvador.ns.porkbun.com');
@@ -88,7 +89,11 @@ class PorkbunDnsDriver extends DnsDriverBase {
 			$record = new DnsRecord(
 				$type,
 				(string)($row['name'] ?? $zone),      // Porkbun returns the FQDN
-				(string)($row['content'] ?? ''),
+				$type === DnsRecord::TYPE_SRV
+					// SRV is modelled exactly as MX here: the priority in its own
+					// field ('prio') and "weight port target" in the content.
+					? self::srvFromContent((string)($row['content'] ?? ''), (int)($row['prio'] ?? 0))
+					: (string)($row['content'] ?? ''),
 				$ttl > 0 ? $ttl : null,
 				$type === DnsRecord::TYPE_MX ? (int)($row['prio'] ?? 0) : null
 			);
@@ -145,6 +150,11 @@ class PorkbunDnsDriver extends DnsDriverBase {
 		);
 		if ($record->type === DnsRecord::TYPE_MX) {
 			$body['prio'] = (string)($record->priority !== null ? (int)$record->priority : 10);
+		}
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			$srv = self::parseSrv($record->value);
+			$body['content'] = self::srvContent($record->value);
+			$body['prio']    = (string)$srv['priority'];
 		}
 		if ($record->ttl !== null) {
 			$body['ttl'] = (string)max(600, (int)$record->ttl);   // Porkbun floors TTL at 600

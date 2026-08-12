@@ -129,6 +129,14 @@ $routes = [
         '/cart_confirm' => ['view' => 'views/cart_confirm', 'plugin' => 'store', 'check_setting' => 'products_active'],
         '/cart_clear'   => ['view' => 'views/cart_clear',   'plugin' => 'store', 'check_setting' => 'products_active'],
 
+        // Joinery Direct — the instance-to-instance endpoint (docs/joinery_direct.md).
+        // A route rather than a service: the box already terminates TLS for its
+        // own web traffic, so Direct needs no second stack, no extra certificate
+        // and no port to bind, which is what makes it work on shared hosting too.
+        // Callers are other instances authenticated by an Ed25519 instance
+        // signature, never a session.
+        '/.well-known/joinery-direct' => ['view' => 'ajax/joinery_direct'],
+
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],
         '/sitemap.xml' => ['view' => 'views/sitemap'],

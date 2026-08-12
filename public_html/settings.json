@@ -37,6 +37,7 @@
     "mobile_apps": "Mobile apps",
     "tier_gating": "Tier gating",
     "dns": "DNS",
+    "joinery_direct": "Joinery Direct",
     "email_identity": "Sender identity",
     "email_delivery": "Email delivery",
     "email_module": "Email module",
@@ -1327,6 +1328,108 @@
       "group": "captcha",
       "label": "hCaptcha site key",
       "type": "text"
+    },
+    {
+      "name": "joinery_direct_enabled",
+      "default": "0",
+      "group": "joinery_direct",
+      "label": "Deliver Joinery to Joinery directly",
+      "type": "checkbox",
+      "helptext": "When a message is addressed to someone whose account is on another Joinery instance, hand it straight to that instance over a signed, sealed channel instead of email. It only ever carries mail the recipient already asked for — the sender has to be in their contacts — and everything else falls back to ordinary email unchanged. Turn this on only once the domain's Joinery Direct DNS records are published; publishing them is the last step of enabling it, never the first."
+    },
+    {
+      "name": "joinery_direct_max_parts",
+      "default": "64",
+      "group": "joinery_direct",
+      "label": "Most pieces in one delivery",
+      "type": "number",
+      "helptext": "A delivery arrives as separate pieces — the message text, the formatted version, and one per attachment — so a big attachment never has to be squeezed through a single request. This is the most pieces one delivery may declare. A sender that declares more is turned away before any content crosses the wire, and its message arrives as ordinary email instead."
+    },
+    {
+      "name": "joinery_direct_max_part_bytes",
+      "default": "104857600",
+      "group": "joinery_direct",
+      "label": "Largest single piece (bytes)",
+      "type": "number",
+      "helptext": "The biggest one attachment or body may be. This is what actually bounds memory, because a piece is sealed in one go: nothing larger than this is ever held at once, no matter how large the whole message is."
+    },
+    {
+      "name": "joinery_direct_max_total_bytes",
+      "default": "262144000",
+      "group": "joinery_direct",
+      "label": "Largest whole delivery (bytes)",
+      "type": "number",
+      "helptext": "The biggest a whole message may be, counting every piece. Checked before any content is sent, so an oversized message costs the sender a refusal rather than the bandwidth."
+    },
+    {
+      "name": "joinery_direct_spool_domain_cap_bytes",
+      "default": "10737418240",
+      "group": "joinery_direct",
+      "label": "Held-mail limit per domain (bytes)",
+      "type": "number",
+      "helptext": "On a Private or Fortress domain a direct message is accepted and held sealed until its recipient next unlocks, because only they can say whether the sender is welcome. This caps how much can be waiting at once for the whole domain. Past it, further deliveries are refused and the sender's message comes by ordinary email instead — nothing is lost."
+    },
+    {
+      "name": "joinery_direct_spool_address_cap_bytes",
+      "default": "1073741824",
+      "group": "joinery_direct",
+      "label": "Held-mail limit per address (bytes)",
+      "type": "number",
+      "helptext": "The same limit, per individual address, so one flooded recipient cannot use up the whole domain's allowance."
+    },
+    {
+      "name": "joinery_direct_spool_retention_days",
+      "default": "30",
+      "group": "joinery_direct",
+      "label": "Discard held mail after (days)",
+      "type": "number",
+      "helptext": "How long a held delivery waits for an unlock that never comes before it is discarded. 0 keeps it indefinitely."
+    },
+    {
+      "name": "joinery_direct_preflight_limit",
+      "default": "120",
+      "group": "joinery_direct",
+      "label": "Deliveries accepted per sending instance",
+      "type": "number",
+      "helptext": "How many delivery attempts one other instance may make inside the window below, counted against the identity its signature proves — so one instance cannot flood this box no matter which of your addresses it aims at."
+    },
+    {
+      "name": "joinery_direct_preflight_window",
+      "default": "120",
+      "group": "joinery_direct",
+      "label": "Rate window (seconds)",
+      "type": "number",
+      "helptext": "The rolling window the limit above is counted over."
+    },
+    {
+      "name": "joinery_direct_session_ttl",
+      "default": "900",
+      "group": "joinery_direct",
+      "label": "Time to finish a delivery (seconds)",
+      "type": "number",
+      "helptext": "Once a delivery is accepted the sender has this long to finish sending its pieces. After that the part-finished delivery is thrown away and the sender has to start again — which it does automatically."
+    },
+    {
+      "name": "joinery_direct_connect_timeout",
+      "default": "5",
+      "group": "joinery_direct",
+      "label": "Connect timeout (seconds)",
+      "type": "number",
+      "helptext": "How long to wait for another instance to answer before giving up and sending the message as ordinary email."
+    },
+    {
+      "name": "joinery_direct_request_timeout",
+      "default": "30",
+      "group": "joinery_direct",
+      "label": "Request timeout (seconds)",
+      "type": "number",
+      "helptext": "How long a single delivery request may take before it is abandoned in favour of ordinary email."
+    },
+    {
+      "name": "joinery_direct_decoy_secret",
+      "default": "",
+      "managed": true,
+      "helptext": "The per-domain secret behind the stand-in key a Private or Fortress box hands back for an address that does not exist, so that answering a delivery attempt never reveals which of your addresses are real. Minted on first use and never displayed."
     },
     {
       "name": "logo_link",

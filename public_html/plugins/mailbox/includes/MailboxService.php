@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.19
+ * @version 1.20
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -856,6 +856,7 @@ class MailboxService {
 					BOOL_OR(iem_is_starred) AS any_starred,
 					BOOL_OR(iem_is_archived) AS any_archived,
 					MAX(iem_ai_danger_score) AS danger_score,
+					BOOL_OR(iem_direct_verified) AS any_direct_verified,
 					MIN(iem_delete_time) AS trashed_time,
 					CASE
 						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
@@ -950,6 +951,12 @@ class MailboxService {
 				// null if none has been scanned. The list badge is silent
 				// below 3 — see the reader JS.
 				'danger_score' => $r['danger_score'] !== null ? intval($r['danger_score']) : null,
+				// Joinery Direct (docs/joinery_direct.md § The social signal): true
+				// when any message in the thread arrived on the direct channel AND
+				// its sender is in this recipient's contacts. Applied by the
+				// receiver from verified transport plus contact membership, so
+				// nothing in a message's content can reproduce it.
+				'direct_verified' => (bool)$this->pgBool($r['any_direct_verified']),
 				'latest_time'  => $r['latest_time'],
 				'latest_id'    => $latest_id,
 				// Trash only: when this thread is permanently deleted (UTC), or null
@@ -1140,7 +1147,7 @@ class MailboxService {
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
 					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
-					iem_ai_summary
+					iem_ai_summary, iem_transport, iem_direct_verified
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1184,6 +1191,12 @@ class MailboxService {
 				// Content-spam score (specs/inbound_email_content_spam_filtering.md):
 				// display only, NULL when none reported. Never drives disposition.
 				'spam_score'        => ($r['iem_spam_score'] !== null) ? (float)$r['iem_spam_score'] : null,
+				// How the message reached the box, and whether it earned the
+				// verified-direct mark. The mark asserts exactly two things: the
+				// sending instance was cryptographically verified, and the sender
+				// is in this recipient's contacts. Never "trusted human".
+				'transport'         => (string)($r['iem_transport'] ?? ''),
+				'direct_verified'   => (bool)$this->pgBool($r['iem_direct_verified']),
 				'size_bytes'        => intval($r['iem_size_bytes']),
 				'message_id_header' => $r['iem_message_id_header'],
 				'direction'         => $r['iem_direction'] ?: 'inbound',

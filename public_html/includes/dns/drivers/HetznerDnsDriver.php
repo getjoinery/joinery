@@ -9,6 +9,7 @@
  * mail.example.com"), so the driver splits it out on read and folds it back in
  * on write — no caller ever sees the combined form.
  *
+ * @version 1.1 - SRV writes an absolute target so Hetzner cannot re-append the zone
  * @version 1.0
  */
 
@@ -168,6 +169,12 @@ class HetznerDnsDriver extends DnsDriverBase {
 			? $this->txtWireValue($record->value) : $record->value;
 		if ($record->type === DnsRecord::TYPE_MX) {
 			$value = ($record->priority !== null ? (int)$record->priority : 10) . ' ' . $record->value;
+		}
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			// Hetzner takes the RDATA verbatim, so the target must be absolute or
+			// Hetzner reads it as relative and appends the zone.
+			$srv = self::parseSrv($record->value);
+			$value = $srv['priority'] . ' ' . $srv['weight'] . ' ' . $srv['port'] . ' ' . $srv['target'] . '.';
 		}
 		$body = array(
 			'type'  => $record->type,

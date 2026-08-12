@@ -50,6 +50,26 @@ class VaultCrypto {
 		return $this->box->sealDek($dek, $public_key);
 	}
 
+	/**
+	 * Seal a BULK Joinery Direct part to the recipient's vault public key — raw
+	 * bytes, no base64 wrapping (see SealedBox::sealBinary). A part is arbitrary
+	 * payload of any size, so it must not pay the DEK format's 33% inflation and
+	 * extra in-memory copy.
+	 */
+	public function sealBulkDelivery(string $bytes, string $public_key): string {
+		return $this->box->sealBinary($bytes, $public_key);
+	}
+
+	/**
+	 * Open a bulk held-delivery part sealed by sealBulkDelivery(). Non-arming for
+	 * the same reason openHeldDeliveryBlob() is: it is a Direct delivery arriving
+	 * late, the same plaintext receive-time ingest holds cold on a Standard box —
+	 * NOT a read of content stored under the sealed-at-rest promise.
+	 */
+	public function openBulkDelivery(string $sealed, string $secret_key): string {
+		return $this->box->openBinary($sealed, $secret_key);
+	}
+
 	/** Open a sealed per-item DEK with the in-window vault secret key (the
 	 *  matching public key is derived from it — see SealedBox::openDek()).
 	 *

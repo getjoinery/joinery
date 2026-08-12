@@ -103,7 +103,7 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.18
+ * @version 1.19
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -252,6 +252,17 @@ class InboundEmailMessage extends SystemBase {
 		'iem_pending_parse'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'iem_relay_sealed_raw'    => array('type'=>'text', 'is_nullable'=>true),
 		'iem_relay_spool_id'      => array('type'=>'varchar(255)', 'is_nullable'=>true, 'unique'=>true),
+		// How this message reached the box, and whether it earned the
+		// verified-direct mark (docs/joinery_direct.md § The social signal).
+		//
+		// The mark asserts exactly two things: the sending INSTANCE was
+		// cryptographically verified, and the sender is in THIS recipient's
+		// contacts. Not "trusted human". It is applied by the receiver from
+		// verified transport plus contact membership, never from anything in the
+		// message itself, which is what makes it unforgeable from content — and
+		// it never appears on the SMTP fallback path.
+		'iem_transport'           => array('type'=>'varchar(20)', 'is_nullable'=>true), // null = SMTP/IMAP as before; 'joinery_direct'
+		'iem_direct_verified'     => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// Raw-message storage descriptor (specs/inbound_raw_message_storage.md).
 		'iem_raw_storage_driver'    => array('type'=>'varchar(16)', 'default'=>'inline'), // inline | local | cloud | remote
 		'iem_raw_storage_key'       => array('type'=>'varchar(500)'),                     // tier-invariant relative key (local/cloud); null for inline/remote

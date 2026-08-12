@@ -12,8 +12,14 @@
  *  - DELIBERATE ENTRY ONLY: manualAdd() and import() are the only public writers, so mail
  *    traffic cannot file a contact. Guarded by the public surface itself, not by a comment.
  *  - Add upsert: a new address inserts; a re-add bumps use_count (dedup by hash).
- *  - Plaintext store (no vault): address + name stored cleartext, hash = SHA-256.
- *  - Sealed store (vault): address/name are ciphertext, hash is a keyed blind index
+ *  - THE POSTURE SWITCH: a row seals only when the owner holds a vault AND the
+ *    mailbox's domain seals content — the same condition the mail beside it uses.
+ *    Vault possession alone is not enough, because sealing an address book while
+ *    the mail it describes sits in plaintext protects nothing (every correspondent
+ *    is already visible in that mail) and would cost the Joinery Direct contact
+ *    gate its readability at Standard.
+ *  - Plaintext store: address + name stored cleartext, hash = SHA-256.
+ *  - Sealed store: address/name are ciphertext, hash is a keyed blind index
  *    (does NOT equal the plain SHA-256), and opens back under the owner's key.
  *  - listForMailbox ranks by use_count and de-duplicates by address.
  *  - MAILBOX SCOPE: the same address added on two mailboxes is two independent rows,
@@ -23,6 +29,7 @@
  *  - lookup(): reports how the row got there; an unknown address returns null.
  *  - Delete is owner-scoped.
  *
+ * @version 2.1 - sealing follows the domain's posture, not vault possession alone
  * @version 2.0
  */
 
@@ -62,6 +69,27 @@ $make_alias = function ($local) use ($domain) {
 $work_alias     = $make_alias('work');
 $personal_alias = $make_alias('personal');
 
+// A second domain that SEALS content, so both sides of the posture switch are
+// exercised against the real service rather than only the plaintext side.
+$sealed_domain = new InboundEmailDomain(NULL);
+$sealed_domain->set('ied_domain', 'contact-sealed-' . bin2hex(random_bytes(4)) . '.example');
+$sealed_domain->set('ied_is_enabled', true);
+$sealed_domain->set('ied_security_level', InboundEmailDomain::LEVEL_PRIVATE);
+$sealed_domain->save();
+harness_register_row('ied_inbound_email_domains', 'ied_inbound_email_domain_id', (int)$sealed_domain->key);
+
+$sealed_alias = (function () use ($sealed_domain) {
+	$a = new InboundEmailAlias(NULL);
+	$a->set('iea_ied_inbound_email_domain_id', (int)$sealed_domain->key);
+	$a->set('iea_alias', 'private');
+	$a->set('iea_delivery_mode', 'store');
+	$a->set('iea_is_enabled', true);
+	$a->prepare();
+	$a->save();
+	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', (int)$a->key);
+	return (int)$a->key;
+})();
+
 // ── Nothing files a contact by itself ────────────────────────────────────────
 // The regression this file exists to hold down: mail traffic used to write here, so
 // every address that ever sent you spam became a contact. The guard is the public
@@ -74,7 +102,10 @@ foreach ((new ReflectionClass('MailboxContacts'))->getMethods(ReflectionMethod::
 	$public[] = $m->getName();
 }
 sort($public);
-$expected = array('addressHash', 'deleteContact', 'import', 'listForMailbox', 'lookup', 'manualAdd');
+// addressHash, aliasHasContact, listForMailbox and lookup are READERS; the only
+// writers are manualAdd() and import(). aliasHasContact answers the Direct contact
+// gate for a shared mailbox and writes nothing.
+$expected = array('addressHash', 'aliasHasContact', 'deleteContact', 'import', 'listForMailbox', 'lookup', 'manualAdd');
 check($public === $expected,
 	'the only public writers are manualAdd() and import() — no traffic-driven entry point',
 	implode(',', $public));
@@ -227,10 +258,38 @@ check($opened === 'carol@secret.example', 'sealed address opens back under the o
 $openedName = $vc->openField($srow['imc_display_name'], $dek, MailboxContact::sealAd($cid, 'imc_display_name'));
 check($openedName === 'Carol', 'sealed display name opens back', $openedName);
 
-// A sealed store with no open window has nowhere to put an address, and the add must
-// say so rather than report a save that never landed.
-check($svc->manualAdd($suid, 'dave@secret.example', $work_alias) === false,
-	'a locked vault holder gets a failed add, not a silent drop');
+// ── The posture switch ───────────────────────────────────────────────────────
+// Sealing hangs off the MAILBOX's posture, not on whether the adding user happens
+// to hold a vault. This is what makes the Joinery Direct contact gate able to run
+// live at Standard: contacts are genuinely readable there, so no locked vault can
+// block the gate and no lock-state oracle appears on the wire.
+section('Sealing follows the mailbox posture, not vault possession');
+
+// Same vault-holding user, Standard mailbox: the row stores like a no-vault
+// user's, and the add succeeds with no unlock window anywhere in sight.
+check($svc->manualAdd($suid, 'dave@standard.example', $work_alias) === true,
+	'a vault holder adding on a STANDARD mailbox succeeds with no open window');
+$plain = $db->query("SELECT * FROM imc_mailbox_contacts
+	WHERE imc_usr_user_id = $suid AND imc_iea_inbound_email_alias_id = $work_alias
+	  AND imc_address = 'dave@standard.example' LIMIT 1")->fetch(PDO::FETCH_ASSOC);
+check($plain !== false, 'and the row is there to read');
+if ($plain !== false) {
+	harness_register_row('imc_mailbox_contacts', 'imc_mailbox_contact_id', intval($plain['imc_mailbox_contact_id']));
+	check(empty($plain['imc_content_sealed']) || $plain['imc_content_sealed'] === 'f',
+		'stored UNSEALED — the mail beside it is plaintext, so sealing the address book would protect nothing');
+	check($plain['imc_address_hash'] === hash('sha256', 'joinery:contact:' . $work_alias . ':dave@standard.example'),
+		'and indexed by the plain SHA-256, which is what a live gate can look up without a vault');
+}
+check($svc->lookup($suid, 'dave@standard.example', $work_alias) !== null,
+	'a Standard lookup answers rather than reporting locked — the live contact gate depends on exactly this');
+
+// The same user on a SEALING mailbox with no open window: nowhere to put the
+// address, so the add must say so rather than report a save that never landed.
+check($svc->manualAdd($suid, 'dave@secret.example', $sealed_alias) === false,
+	'the same user adding on a SEALING mailbox with no open window gets a failed add, not a silent drop');
+$locked = $svc->lookup($suid, 'dave@secret.example', $sealed_alias);
+check(is_array($locked) && !empty($locked['locked']),
+	'and a lookup there reports locked rather than "not a contact"');
 
 // ── Import ───────────────────────────────────────────────────────────────────
 section('Import (vCard + CSV)');
