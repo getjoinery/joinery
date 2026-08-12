@@ -40,7 +40,9 @@ A card declares:
 | `status()` | `green` \| `amber` \| `red` \| `none` — drives page summary and setup-completion logic |
 
 The same seam carries all three page bands. No second mechanism for the
-wizard: **setup cards ARE the wizard.**
+wizard: **setup cards ARE the wizard.** `specs/setup_wizard.md` adds a
+first-login sequential presentation of this same registry (and two contract
+fields: `scope` and `copy`); whichever spec lands first creates the registry.
 
 ### Page behavior (`/admin`, view `adm/admin_dashboard.php`)
 
