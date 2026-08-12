@@ -364,7 +364,10 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         "upload_new" => upload(env, op, Some(read_place(&params)?)),
         "create_remote_folder" => create_remote_folder(env, op, read_place(&params)?),
         "create_local_folder" => create_local_folder(env, op, read_place(&params)?),
-        "move_remote" => move_remote(env, op, read_place(&params)?),
+        "move_remote" => {
+            let from = params.get("from").and_then(|v| read_place(v).ok());
+            move_remote(env, op, read_place(&params)?, from)
+        }
         "move_local" => {
             let from = params.get("from").and_then(|v| read_place(v).ok());
             move_local(env, op, read_place(&params)?, from)
@@ -378,7 +381,9 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
                 parent: entry.remote.parent,
                 name: read_place(&params)?.name,
             };
-            move_remote(env, op, to)
+            // No recorded starting point, and none wanted: parking builds its
+            // target from where the entry is right now, so it cannot be stale.
+            move_remote(env, op, to, None)
         }
         "park_local" => {
             let entry = match env.store.get_entry(op.entity)? {
@@ -1501,7 +1506,12 @@ fn create_local_folder(
 }
 
 /// Apply this computer's move to the server.
-fn move_remote(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, ExecError> {
+fn move_remote(
+    env: &ExecEnv,
+    op: &Op,
+    to: Placement,
+    from: Option<Placement>,
+) -> Result<OpOutcome, ExecError> {
     let Some(mut entry) = require_entry(env, op.entity)? else {
         return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
@@ -1510,6 +1520,18 @@ fn move_remote(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, ExecE
     if op.entity.is_provisional() {
         return Ok(OpOutcome::Overtaken(
             "it does not exist on the server yet".into(),
+        ));
+    }
+    // Where the server had this when the move was decided. If it has since put
+    // it somewhere else, somebody else moved it and this op describes a journey
+    // that no longer starts where it thought — so pushing it fights them for a
+    // name their file may now hold. Reconcile settles move against move, and it
+    // never gets the chance while a stale rename is retried into a refusal that
+    // waiting cannot lift. The soak rig found it as a move_remote on twenty-one
+    // attempts, still asking for a name another file had taken hours earlier.
+    if from.is_some_and(|f| entry.remote != f) {
+        return Ok(OpOutcome::Overtaken(
+            "the server has moved it since this was planned".into(),
         ));
     }
     let t = op.entity.entity_type.to_string();
