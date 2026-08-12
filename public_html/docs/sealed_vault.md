@@ -663,11 +663,16 @@ VaultDeferredWork::register(
 );
 ```
 
-**What starts it.** `assets/js/vault-presence.js` already beats
-`vault_heartbeat` every 25s from every signed-in page with an open vault. The
-beat now also reports `work_pending`, and the client fires the separate
-`vault_deferred_work` action when it is true, chaining while work remains.
-`VaultUnlock::open()` runs one batch immediately so work starts on the tap.
+**What starts it.** `assets/js/vault-presence.js` beats `vault_heartbeat`
+every 25s from every signed-in page with an open vault. The beat also reports
+`work_pending`, and the client fires the separate `vault_deferred_work` action
+when it is true, chaining while work remains. Drains observe a 10-second quiet
+period after the beacon starts (an unlock, or a page load with the window
+already open): `work_pending` schedules the drain for the end of the period
+rather than firing it, so the page's own requests — the mail-list refresh an
+unlock triggers, a fresh page's content fetches — get the workers and the
+database first. The backlog is background work and loses nothing by starting
+a few seconds late.
 
 The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind

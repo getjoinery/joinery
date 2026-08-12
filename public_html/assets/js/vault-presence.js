@@ -25,13 +25,24 @@
  * vault_deferred_work request and chains while work remains — separate because
  * a slice can involve a language model, and the beat must stay fast.
  *
- * @version 1.3
+ * Drains observe a quiet period: for the first QUIET_MS after the beacon
+ * starts (an unlock, or a page load with the window already open), work_pending
+ * schedules the drain for the end of the period instead of firing it. The
+ * page's own requests — the mail list refresh an unlock triggers, a fresh
+ * page's content fetches — get the workers and the database first; the backlog
+ * is background work and loses nothing by starting a few seconds late.
+ *
+ * @version 1.4
  */
 (function () {
 	'use strict';
 
+	var QUIET_MS = 10000;
+
 	var timer = null;
 	var draining = false;
+	var quietUntil = 0;
+	var drainTimer = null;
 
 	function beat() {
 		joineryApi.post('vault_heartbeat', {}).then(function (res) {
@@ -50,6 +61,13 @@
 	// overlapping requests would just contend for the same advisory lock.
 	function drain() {
 		if (draining || !timer) { return; }
+		var wait = quietUntil - Date.now();
+		if (wait > 0) {
+			if (!drainTimer) {
+				drainTimer = setTimeout(function () { drainTimer = null; drain(); }, wait);
+			}
+			return;
+		}
 		draining = true;
 		joineryApi.post('vault_deferred_work', {}).then(function (res) {
 			draining = false;
@@ -61,12 +79,14 @@
 
 	function start() {
 		if (timer) { return; }
+		quietUntil = Date.now() + QUIET_MS;
 		beat();
 		timer = setInterval(beat, 25000);
 	}
 
 	function stop() {
 		if (timer) { clearInterval(timer); timer = null; }
+		if (drainTimer) { clearTimeout(drainTimer); drainTimer = null; }
 		draining = false;   // a drain in flight finds timer null and stops chaining
 	}
 
