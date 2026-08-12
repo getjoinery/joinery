@@ -15,6 +15,7 @@
  * that resolves to the wrong address, and a credential that outlives its
  * publish. None of them needs a live provider to test.
  *
+ * @version 1.5 - SRV is part of the vocabulary now (Joinery Direct's capability record)
  * @version 1.4 - records that must be absent: the diff, the gates on deleting,
  *                and that nothing else in the rail learned to delete
  * @version 1.3 - the action column's vocabulary and colour grading
@@ -42,15 +43,17 @@ if (session_status() === PHP_SESSION_NONE) {
 section('The vocabulary refuses what it must never publish');
 // ---------------------------------------------------------------------------
 
-foreach (array('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA') as $type) {
+foreach (array('A', 'AAAA', 'CNAME', 'MX', 'TXT', 'CAA', 'SRV') as $type) {
 	$value = ($type === 'MX' || $type === 'CNAME') ? 'mail.example.com'
-		: ($type === 'CAA' ? '0 issue "letsencrypt.org"' : ($type === 'AAAA' ? '2001:db8::1' : '1.2.3.4'));
+		: ($type === 'CAA' ? '0 issue "letsencrypt.org"'
+		: ($type === 'SRV' ? '0 5 443 direct.example.com'
+		: ($type === 'AAAA' ? '2001:db8::1' : '1.2.3.4')));
 	$ok = true;
 	try { new DnsRecord($type, 'example.com', $value); } catch (Throwable $e) { $ok = false; }
 	check($ok, $type . ' is part of the vocabulary');
 }
 
-foreach (array('NS', 'SOA', 'SRV', 'DNSKEY') as $type) {
+foreach (array('NS', 'SOA', 'DNSKEY') as $type) {
 	$refused = false;
 	try { new DnsRecord($type, 'example.com', 'ns1.example.com'); }
 	catch (DnsRecordException $e) { $refused = true; }
@@ -62,6 +65,22 @@ try { DnsRecordPlan::fromArray(array('domain' => 'example.com', 'owner' => 'x',
 	'records' => array(array('type' => 'NS', 'name' => 'example.com', 'value' => 'ns1.evil.test')))); }
 catch (DnsRecordException $e) { $refused = true; }
 check($refused, 'a plan rebuilt from a payload cannot smuggle an NS record in');
+
+// SRV joined the vocabulary for Joinery Direct's capability record. Its whole
+// RDATA rides in the value — priority, weight, port and target — so a plan
+// compares one string and a driver that passes values through needs no special
+// case. Providers that DO split the fields use parseSrv().
+$srv = new DnsRecord('SRV', '_joinery._tcp.example.com', '0 5 443 Direct.Example.com.');
+check($srv->value === '0 5 443 direct.example.com',
+	'an SRV target is canonicalised: lowercased, trailing dot dropped');
+$respaced = new DnsRecord('SRV', '_joinery._tcp.example.com', '0   5  443   direct.example.com');
+check($srv->isSatisfiedBy($respaced), 'a provider re-spacing the RDATA is not a permanent diff');
+$parts = DnsDriverBase::parseSrv('10 20 8443 direct.example.com');
+check($parts['priority'] === 10 && $parts['weight'] === 20 && $parts['port'] === 8443
+	&& $parts['target'] === 'direct.example.com',
+	'parseSrv splits the four fields a field-modelled provider needs');
+check(DnsDriverBase::formatSrv(10, 20, 8443, 'Direct.Example.com.') === '10 20 8443 direct.example.com',
+	'formatSrv is its exact inverse, in the platform spelling');
 
 // ---------------------------------------------------------------------------
 section('TXT values are compared canonically, whatever the provider returns');

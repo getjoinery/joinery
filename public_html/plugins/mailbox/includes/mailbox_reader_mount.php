@@ -35,7 +35,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.13.0
+ * @version 1.14.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -89,6 +89,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'contactDeleteUrl'  => '/api/v1/action/mailbox/contact_delete',
 		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
 		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
+		'directStatusUrl'   => '/api/v1/action/mailbox/direct_status',
 		'setupStatusUrl'    => '/api/v1/action/mailbox/setup_status',
 		// Every mailbox user gets the Contact panel (their own contact store); the
 		// endpoint decides what goes in it — the site-account half is admin-only,
@@ -155,6 +156,15 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			<?php
 			$compose->textinput('to', 'To', array('id' => 'mbx_to',
 				'helptext' => 'Separate multiple addresses with commas.'));
+			// Joinery Direct's compose indicator (docs/joinery_direct.md § The
+			// social signal). This is the lever, not the reward: showing which
+			// path a message will take BEFORE you send is what makes people want
+			// the good one and nudge their correspondents onto it. It states only
+			// what the sender can honestly know — whether the recipient's domain
+			// speaks the channel — because whether that person accepts a direct
+			// delivery is theirs to answer, live, and is deliberately not
+			// queryable.
+			echo '<div class="mbx-direct-hint" id="mbx-direct-hint" hidden></div>';
 			$compose->textinput('cc', 'Cc', array('id' => 'mbx_cc', 'placeholder' => 'Optional'));
 			// Bcc is hidden behind a toggle (Gmail-style). It rides its own sealed
 			// column server-side (iem_bcc), never merged into the recipient list.

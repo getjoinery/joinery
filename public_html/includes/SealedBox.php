@@ -97,6 +97,45 @@ class SealedBox {
 	}
 
 	/**
+	 * Seal BULK bytes to a public key, RAW. The same anonymous crypto_box_seal
+	 * as sealDek, but the output is the sealed bytes themselves — no `v1.seal.`
+	 * prefix and no base64url.
+	 *
+	 * sealDek's text wrapping is right for a ~32-byte DEK travelling in a text
+	 * column. For a multi-megabyte payload it is dead weight: base64 inflates the
+	 * wire by a third, and the encoded string sits in memory beside both the
+	 * plaintext and the raw ciphertext — three copies at the peak. A large
+	 * Joinery Direct part seals with this and pays for none of that.
+	 */
+	public function sealBinary(string $bytes, string $public_key): string {
+		$public_raw = self::b64url_decode($public_key);
+		if ($public_raw === false || strlen($public_raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
+			throw new RuntimeException('SealedBox: malformed public key.');
+		}
+		return sodium_crypto_box_seal($bytes, $public_raw);
+	}
+
+	/**
+	 * Open raw bytes produced by sealBinary(). Throws on tamper or a wrong secret
+	 * key; like openDek() the public key is derived from the secret, so a caller
+	 * can never supply a mismatched pair.
+	 */
+	public function openBinary(string $sealed, string $secret_key): string {
+		$secret_raw = self::b64url_decode($secret_key);
+		if ($secret_raw === false || strlen($secret_raw) !== SODIUM_CRYPTO_BOX_SECRETKEYBYTES) {
+			throw new RuntimeException('SealedBox: malformed secret key.');
+		}
+		$public_raw = sodium_crypto_box_publickey_from_secretkey($secret_raw);
+		$keypair = sodium_crypto_box_keypair_from_secretkey_and_publickey($secret_raw, $public_raw);
+		$plain = sodium_crypto_box_seal_open($sealed, $keypair);
+		sodium_memzero($keypair);
+		if ($plain === false) {
+			throw new RuntimeException('SealedBox: unseal failed (tampered or wrong keypair).');
+		}
+		return $plain;
+	}
+
+	/**
 	 * Authenticated encryption (xchacha20poly1305_ietf) of arbitrary plaintext
 	 * under a symmetric key, with additional data binding the ciphertext to
 	 * its row (splice defense — see docs/sealed_vault.md). AD is NOT stored in

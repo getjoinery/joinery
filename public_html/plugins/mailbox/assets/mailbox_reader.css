@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.20
+ * Vanilla CSS, no framework. @version 2.21
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -389,6 +389,36 @@
 }
 .mbx-danger-badge.amber { background: #fef3c7; color: #92400e; }
 .mbx-danger-badge.red   { background: #fee2e2; color: #991b1b; }
+
+/* Verified-direct mark (docs/joinery_direct.md § The social signal).
+   Deliberately quiet: one small glyph in the accent colour, no pill, no badge
+   background, no borrowed blue check. It appears on a minority of messages, so
+   restraint is what makes it read as meaningful rather than as decoration —
+   and a mark that shouted would read as promotional, or as a phishing tell. */
+.mbx-direct-mark {
+	color: #0b7285;
+	font-size: var(--mbx-text-sm);
+	line-height: 1;
+	margin-right: 4px;
+	flex: 0 0 auto;
+}
+.mbx-direct-line {
+	color: #0b7285;
+}
+/* A hairline on the message block, not a coloured panel behind it. */
+.mbx-message-direct {
+	border-left: 2px solid #0b7285;
+	padding-left: 10px;
+}
+/* Compose-time indicator: one quiet line under the To field. It appears only
+   when there is something to say — a message going by ordinary email says
+   nothing, because the absence of the mark is the signal and a per-message
+   "this is ordinary" would be noise. */
+.mbx-direct-hint {
+	color: #0b7285;
+	font-size: var(--mbx-text-xs);
+	margin: -6px 0 8px;
+}
 
 .mbx-list-footer { padding: 10px 14px; text-align: center; }
 .mbx-more {

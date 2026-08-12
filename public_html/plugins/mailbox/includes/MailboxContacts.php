@@ -15,18 +15,32 @@
  * column — see addressHash() — so the existing (hash, user) unique constraint already means one
  * row per (user, mailbox, address).
  *
- * A row is sealed when the adding user holds a Sealed Vault; an add always runs in-window (the
- * user is right there doing it), so the plaintext address is available to hash and seal.
- * Sealing follows the USER, not the mailbox: two grantees sharing one mailbox each build their
- * own contacts, each readable only by them. The address hash is a keyed blind index for vault
- * holders (never leaks the sealed address) and a plain SHA-256 otherwise.
+ * A row is sealed when the adding user holds a Sealed Vault AND the mailbox's domain seals
+ * content — the SAME RULE AS THE MAIL BESIDE IT (`$domain->seals_content()`, the identical
+ * condition InboundEmailRouter uses). Sealing an address book while the mail it describes sits
+ * in plaintext would protect nothing: every correspondent is already visible in that plaintext
+ * mail. So both hang off one posture switch — a Standard mailbox is server-readable end to end,
+ * a Private/Fortress mailbox seals end to end — and there is no "plaintext mail, sealed
+ * contacts" mixed state.
  *
- * @version 2.0
+ * That is what makes the live contact gate possible at Standard: contacts are genuinely
+ * readable there, so no locked vault can block it, and no lock-state oracle appears on the
+ * Direct channel (docs/joinery_direct.md § Security tiers).
+ *
+ * An add always runs in-window (the user is right there doing it), so the plaintext address is
+ * available to hash and seal. Sealing follows the USER within that posture, not the mailbox:
+ * two grantees sharing one sealed mailbox each build their own contacts, each readable only by
+ * them. The address hash is a keyed blind index for sealed rows (never leaks the sealed
+ * address) and a plain SHA-256 otherwise.
+ *
+ * @version 2.1
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 
 class MailboxContacts {
 
@@ -35,6 +49,52 @@ class MailboxContacts {
 
 	private function db() {
 		return DbConnector::get_instance()->get_db_link();
+	}
+
+	/** @var array<int,bool> request-scoped: does this mailbox's domain seal content? */
+	private static $seals_cache = array();
+
+	/**
+	 * The vault a contact row on this mailbox seals under, or null when rows
+	 * here are plaintext.
+	 *
+	 * Two conditions, and both are required: the user must HOLD a vault, and the
+	 * mailbox's domain must be one that seals content (Private or Fortress).
+	 * Vault possession alone is not enough — a vault holder reading a Standard
+	 * mailbox stores contacts exactly as a user with no vault does, because the
+	 * mail beside them is plaintext and sealing the address book would secure
+	 * nothing while costing the live gate its readability.
+	 */
+	private function sealingVault(int $user_id, int $alias_id): ?UserEncryptionVault {
+		if (!$this->mailboxSealsContent($alias_id)) {
+			return null;
+		}
+		return UserEncryptionVault::loadForUser($user_id);
+	}
+
+	/** Does the domain behind this mailbox seal stored content? */
+	private function mailboxSealsContent(int $alias_id): bool {
+		if ($alias_id <= 0) {
+			return false;
+		}
+		if (array_key_exists($alias_id, self::$seals_cache)) {
+			return self::$seals_cache[$alias_id];
+		}
+		$seals = false;
+		try {
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
+			if ($domain_id > 0) {
+				$domain = new InboundEmailDomain($domain_id, TRUE);
+				$seals = $domain->seals_content();
+			}
+		} catch (\Throwable $e) {
+			// An unreadable mailbox is not a licence to store plaintext where
+			// ciphertext was expected — but it is also not a mailbox anything can
+			// be filed against, so the callers' own guards take it from here.
+			error_log('MailboxContacts: could not read the posture of mailbox ' . $alias_id . ': ' . $e->getMessage());
+		}
+		return self::$seals_cache[$alias_id] = $seals;
 	}
 
 	/**
@@ -105,9 +165,9 @@ class MailboxContacts {
 			return;
 		}
 		try {
-			$vault = UserEncryptionVault::loadForUser($user_id);
+			$vault = $this->sealingVault($user_id, $alias_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
-			// A vault holder whose window is closed: can't compute the keyed hash or
+			// A sealed mailbox whose window is closed: can't compute the keyed hash or
 			// read for dedup, so there is nowhere to put the address. The caller
 			// surfaces this as a failed add rather than silently dropping it.
 			if ($vault !== null && $secret === null) {
@@ -172,6 +232,32 @@ class MailboxContacts {
 		));
 	}
 
+	/**
+	 * Is $address in a mailbox's SHARED, unencrypted address book — an entry any
+	 * grantee added? For a shared mailbox with no single vault the contacts are
+	 * plaintext, so their digest is the unkeyed form (secret null) and the match is
+	 * across grantees rather than scoped to one user. Sealed per-grantee contacts
+	 * are deliberately not visible here — they need that grantee's unlock — but a
+	 * shared/group mailbox's book is plaintext by nature, which is the case this
+	 * serves.
+	 */
+	public function aliasHasContact(int $alias_id, string $address): bool {
+		$parsed = self::parseAddress($address);
+		if ($alias_id <= 0 || $parsed === null) {
+			return false;
+		}
+		try {
+			$hash = $this->addressHash($parsed[0], null, $alias_id);
+			$stmt = $this->db()->prepare('SELECT 1 FROM imc_mailbox_contacts
+				WHERE imc_iea_inbound_email_alias_id = ? AND imc_address_hash = ? LIMIT 1');
+			$stmt->execute(array($alias_id, $hash));
+			return $stmt->fetchColumn() !== false;
+		} catch (\Throwable $e) {
+			error_log('MailboxContacts: alias contact lookup failed: ' . $e->getMessage());
+			return false;
+		}
+	}
+
 	/** The row for one normalized address on one mailbox, or null when there is none. */
 	private function findRow(int $user_id, string $normalized, ?string $secret, int $alias_id): ?array {
 		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
@@ -199,7 +285,7 @@ class MailboxContacts {
 			return null;
 		}
 		try {
-			$vault = UserEncryptionVault::loadForUser($user_id);
+			$vault = $this->sealingVault($user_id, $alias_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			if ($vault !== null && $secret === null) {
 				return array('locked' => true);
@@ -232,7 +318,7 @@ class MailboxContacts {
 		if ($user_id <= 0 || $alias_id <= 0) {
 			return array('contacts' => array());
 		}
-		$vault = UserEncryptionVault::loadForUser($user_id);
+		$vault = $this->sealingVault($user_id, $alias_id);
 		if ($vault !== null && !VaultUnlock::isOpen($user_id)) {
 			return array('contacts' => array(), 'locked' => true);
 		}
@@ -344,7 +430,7 @@ class MailboxContacts {
 	 */
 	private function markSaved(int $user_id, string $normalized, string $name, int $alias_id): bool {
 		try {
-			$vault = UserEncryptionVault::loadForUser($user_id);
+			$vault = $this->sealingVault($user_id, $alias_id);
 			$secret = ($vault !== null) ? VaultUnlock::secretKey($user_id) : null;
 			if ($vault !== null && $secret === null) {
 				return false;

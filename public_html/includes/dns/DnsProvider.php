@@ -88,6 +88,18 @@ interface DnsProvider {
 	/** Human-readable label for the provider chooser. */
 	public static function getLabel(): string;
 
+	/**
+	 * Can this provider's API express one of the platform's record types?
+	 *
+	 * Every driver currently answers yes for every type in the vocabulary. The
+	 * hook exists because the alternative — guessing at a vendor's field names —
+	 * writes a record that LOOKS published and is not, which is worse than a
+	 * record the operator is told to add by hand. A driver that meets a type it
+	 * cannot map says so here, and the reconciler reports the record instead of
+	 * writing it.
+	 */
+	public static function supportsType(string $type): bool;
+
 	/** CREDENTIAL_OAUTH2 or CREDENTIAL_API. */
 	public static function credentialMode(): string;
 

@@ -14,6 +14,8 @@ The email system consists of three focused classes that provide clear separation
 
 **Outbound doctrine: a mail provider is the assumed path.** All outbound mail — transactional, composed, and forwarded — leaves through a configured provider (Mailgun, SMTP relay/submission, SES, a connected account). Self-hosting inbound (running your own MX) does **not** imply self-hosting outbound: a box that receives its own mail still sends through a provider by default. Direct-to-recipient delivery from the box's own port 25 is an **advanced setup** a user must deliberately pursue — it requires provider-level unblocking of outbound port 25 (most clouds block it by default and lift it only by support ticket), a matching PTR, and owning the IP's sending reputation. Setup flows, health checks, and dashboards treat the provider path as normal and must not present direct self-hosted delivery as a required step or a default fork.
 
+**One lane rides above the provider doctrine: Joinery-to-Joinery mail between established contacts.** When the recipient's domain advertises the Joinery Direct channel and the sender is in that recipient's contacts, the message delivers instance-to-instance over Direct's signed HTTPS exchange — no provider, no SMTP. Everything else about the doctrine is unchanged, because every non-`delivered` outcome (no capability record, not a contact, any failure) falls back to the provider path exactly as above. See **📖 [Joinery Direct](joinery_direct.md)**.
+
 ## Architecture
 
 ### EmailMessage Class

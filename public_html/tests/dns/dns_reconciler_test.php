@@ -340,6 +340,54 @@ check($rows[0]['outcome'] === DnsReconciler::MISSING,
 DnsResolver::clearBackend();
 
 // ---------------------------------------------------------------------------
+section('The public-DNS diff reads SRV, so a capability record verifies green');
+// ---------------------------------------------------------------------------
+
+// Joinery Direct's discovery record is an SRV. Without a resolveSlot case for
+// it the public diff answers "nothing there", every published record reads as
+// missing, and the operator is told to publish it again forever — the record is
+// live, the page just cannot see it.
+$srv_plan = new DnsRecordPlan(ZONE, 'joinery_direct');
+$srv_plan->addRecord('SRV', '_joinery._tcp.example.com', '0 5 443 direct.example.com',
+	null, null, 'Joinery Direct endpoint');
+
+// Nothing published yet: genuinely missing, and the diff must say so rather
+// than reporting a green it cannot see.
+DnsResolver::setBackend(new class { public function getRecords($n, $t) { return array(); } });
+$rows = $reconciler->diffAgainstPublicDns($srv_plan);
+check($rows[0]['outcome'] === DnsReconciler::MISSING,
+	'an SRV record absent from public DNS reads as missing', $rows[0]['outcome']);
+
+// The exact record, live: it must resolve to MATCHES, not stay stuck on missing.
+DnsResolver::setBackend(new class {
+	public function getRecords($n, $t) {
+		if ($n === '_joinery._tcp.example.com' && $t === DNS_SRV) {
+			return array(array('target' => 'direct.example.com', 'port' => 443, 'pri' => 0, 'weight' => 5));
+		}
+		return array();
+	}
+});
+$rows = $reconciler->diffAgainstPublicDns($srv_plan);
+check($rows[0]['outcome'] === DnsReconciler::MATCHES,
+	'the published SRV record verifies green against public DNS', $rows[0]['outcome']);
+check(DnsReconciler::allGreen($rows) === true,
+	'so the operator is not asked to re-publish a record that is already live');
+
+// A target that differs is a real difference, not a false green.
+DnsResolver::setBackend(new class {
+	public function getRecords($n, $t) {
+		if ($n === '_joinery._tcp.example.com' && $t === DNS_SRV) {
+			return array(array('target' => 'elsewhere.example.com', 'port' => 443, 'pri' => 0, 'weight' => 5));
+		}
+		return array();
+	}
+});
+$rows = $reconciler->diffAgainstPublicDns($srv_plan);
+check($rows[0]['outcome'] !== DnsReconciler::MATCHES,
+	'a live SRV pointing somewhere else is not reported as matching', $rows[0]['outcome']);
+DnsResolver::clearBackend();
+
+// ---------------------------------------------------------------------------
 section('Summaries read the way the page shows them');
 // ---------------------------------------------------------------------------
 

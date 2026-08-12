@@ -14,7 +14,7 @@
  * DnsAuthChecker and every other consumer testable. Production code never
  * touches it.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsLookupException.php'));
@@ -55,6 +55,39 @@ class DnsResolver {
         }
         usort($mx, function ($a, $b) { return $a['pri'] <=> $b['pri']; });
         return $mx;
+    }
+
+    /**
+     * SRV records for a name, in RFC 2782 selection order: lowest priority
+     * first, and within one priority the higher weight first.
+     *
+     * Weight is honored as a simple ordering rather than the RFC's weighted
+     * random draw. The consumer is service discovery for a single endpoint
+     * (Joinery Direct's `_joinery._tcp` record), where the first reachable
+     * target is what matters and load spreading across several targets is not
+     * something this platform publishes.
+     *
+     * @param string $name
+     * @return array<int,array{host:string,port:int,pri:int,weight:int}>
+     * @throws DnsLookupException on resolver failure.
+     */
+    public static function getSrv($name) {
+        $srv = [];
+        foreach (self::rawLookup($name, DNS_SRV) as $r) {
+            if (!empty($r['target'])) {
+                $srv[] = [
+                    'host'   => rtrim((string)$r['target'], '.'),
+                    'port'   => (int)($r['port'] ?? 0),
+                    'pri'    => (int)($r['pri'] ?? 0),
+                    'weight' => (int)($r['weight'] ?? 0),
+                ];
+            }
+        }
+        usort($srv, function ($a, $b) {
+            if ($a['pri'] !== $b['pri']) { return $a['pri'] <=> $b['pri']; }
+            return $b['weight'] <=> $a['weight'];
+        });
+        return $srv;
     }
 
     /**

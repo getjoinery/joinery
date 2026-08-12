@@ -20,7 +20,11 @@
  *  - CAA is modelled as separate tag/target fields with an implicit flags of 0.
  *  - A parent (reseller) login reaches child accounts; a chosen child is
  *    exchanged for a scoped token at publish time and never recorded.
+ *  - SRV carries its service and protocol as their own fields (name unused),
+ *    and Linode prepends the underscore itself, so those labels are submitted
+ *    bare and reassembled on read.
  *
+ * @version 1.1 - SRV writes the service/protocol fields Linode requires
  * @version 1.0
  */
 
@@ -227,16 +231,42 @@ class LinodeDnsDriver extends DnsDriverBase {
 		if ($type === DnsRecord::TYPE_CAA) {
 			$target = self::formatCaa(0, (string)($row['tag'] ?? 'issue'), $target);
 		}
+		if ($type === DnsRecord::TYPE_SRV) {
+			$target = self::formatSrv((int)($row['priority'] ?? 0), (int)($row['weight'] ?? 0),
+				(int)($row['port'] ?? 0), $target);
+		}
 		$ttl = (int)($row['ttl_sec'] ?? 0);
+		// Linode leaves an SRV row's name empty and carries the labels in its own
+		// service/protocol fields, so the whole name is reassembled from those or
+		// every SRV record would read back as the bare zone apex and never match
+		// its plan.
+		$name = $type === DnsRecord::TYPE_SRV
+			? self::srvNameFromParts((string)($row['service'] ?? ''), (string)($row['protocol'] ?? ''),
+				(string)($row['name'] ?? ''), $zone)
+			: self::absoluteName((string)($row['name'] ?? ''), $zone);
 		$record = new DnsRecord(
 			$type,
-			self::absoluteName((string)($row['name'] ?? ''), $zone),
+			$name,
 			$target,
 			$ttl > 0 ? $ttl : null,
 			$type === DnsRecord::TYPE_MX ? (int)($row['priority'] ?? 0) : null
 		);
 		$record->provider_id = (string)($row['id'] ?? '');
 		return $record;
+	}
+
+	/**
+	 * The service and protocol labels Linode wants as its own fields, taken from
+	 * an SRV record's name and stripped of the leading underscore Linode prepends
+	 * itself: `_joinery._tcp.example.com` becomes `['joinery', 'tcp']`.
+	 *
+	 * @return array{0:string,1:string}
+	 */
+	private static function srvSubmitLabels(string $name): array {
+		$parts = explode('.', DnsRecord::normalizeName($name));
+		$service  = isset($parts[0]) ? ltrim($parts[0], '_') : '';
+		$protocol = isset($parts[1]) ? ltrim($parts[1], '_') : '';
+		return array($service, $protocol);
 	}
 
 	/** The request body for a create or update. */
@@ -249,6 +279,22 @@ class LinodeDnsDriver extends DnsDriverBase {
 			$caa = self::parseCaa($record->value);
 			$body['tag'] = $caa['tag'];
 			$body['target'] = $caa['value'];
+		} elseif ($record->type === DnsRecord::TYPE_SRV) {
+			// Linode models SRV as service + protocol fields, prepends the
+			// underscore itself, and IGNORES name — so the service and protocol
+			// labels move out of the name (submitted without their leading
+			// underscore) and name is left empty. Omitting them writes a record
+			// Linode rejects or files at the wrong service, and the capability
+			// record never resolves.
+			$srv = self::parseSrv($record->value);
+			list($service, $protocol) = self::srvSubmitLabels($record->name);
+			$body['name']     = '';
+			$body['service']  = $service;
+			$body['protocol'] = $protocol;
+			$body['target']   = $srv['target'];
+			$body['priority'] = $srv['priority'];
+			$body['weight']   = $srv['weight'];
+			$body['port']     = $srv['port'];
 		} elseif ($record->type === DnsRecord::TYPE_TXT) {
 			$body['target'] = $this->txtWireValue($record->value);
 		} else {

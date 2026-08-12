@@ -22,6 +22,7 @@ class VultrDnsDriver extends DnsDriverBase {
 
 	public static function getKey(): string { return 'vultr'; }
 	public static function getLabel(): string { return 'Vultr DNS'; }
+
 	public static function supportsZones(): bool { return true; }
 
 	public static function nameservers(): array {
@@ -164,10 +165,17 @@ class VultrDnsDriver extends DnsDriverBase {
 			return null;
 		}
 		$ttl = (int)($row['ttl'] ?? 0);
+		$value = (string)($row['data'] ?? '');
+		if ($type === DnsRecord::TYPE_SRV) {
+			// SRV is modelled exactly as MX here: the priority in its own numeric
+			// field and "weight port target" in the content string. Rebuild the
+			// canonical RDATA so the plan compares one value.
+			$value = self::srvFromContent($value, (int)($row['priority'] ?? 0));
+		}
 		$record = new DnsRecord(
 			$type,
 			self::absoluteName((string)($row['name'] ?? ''), $zone),
-			(string)($row['data'] ?? ''),
+			$value,
 			$ttl > 0 ? $ttl : null,
 			$type === DnsRecord::TYPE_MX ? (int)($row['priority'] ?? 0) : null
 		);
@@ -184,6 +192,11 @@ class VultrDnsDriver extends DnsDriverBase {
 		);
 		if ($record->type === DnsRecord::TYPE_MX) {
 			$body['priority'] = $record->priority !== null ? (int)$record->priority : 10;
+		}
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			$srv = self::parseSrv($record->value);
+			$body['data']     = self::srvContent($record->value);
+			$body['priority'] = $srv['priority'];
 		}
 		if ($record->ttl !== null) {
 			$body['ttl'] = (int)$record->ttl;

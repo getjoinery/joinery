@@ -2,7 +2,7 @@
 /**
  * Inbound Email - Logs
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -32,6 +32,38 @@ $page->admin_header(
 );
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Logs');
+
+// Joinery Direct, if it is on (docs/joinery_direct.md § Blocking and abuse).
+// This panel exists because Direct's characteristic failure is invisible: a
+// drifted clock or an unpublished record makes every attempt fall back to
+// ordinary email, so mail keeps flowing, nothing is ever marked verified, and
+// nobody notices. Refusals and downgrades are counted so that state is
+// diagnosable at a glance.
+require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
+if (DirectSettings::enabled()) {
+	require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectStats.php'));
+	$direct = DirectStats::summary(24);
+	echo '<div class="card mb-3"><div class="card-body">';
+	echo '<h2 class="h6 mb-2">Joinery Direct — last 24 hours</h2>';
+	echo '<p class="mb-2">' . htmlspecialchars(DirectStats::headline($direct)) . '</p>';
+	echo '<ul class="list-inline mb-0 small text-muted">';
+	echo '<li class="list-inline-item">Delivered directly: <strong>' . (int)$direct['delivered'] . '</strong></li>';
+	echo '<li class="list-inline-item">Fell back to email: <strong>' . (int)$direct['downgrade_total'] . '</strong></li>';
+	echo '<li class="list-inline-item">Inbound attempts turned away: <strong>' . (int)$direct['refused'] . '</strong></li>';
+	echo '<li class="list-inline-item">Other instances that reached us: <strong>' . (int)$direct['peers'] . '</strong></li>';
+	echo '<li class="list-inline-item">Waiting for an unlock: <strong>' . (int)$direct['held'] . '</strong> ('
+		. number_format($direct['held_bytes'] / 1048576, 1) . ' MB)</li>';
+	echo '</ul>';
+	if (!empty($direct['reasons'])) {
+		echo '<p class="small text-muted mt-2 mb-0">Why inbound attempts were turned away: ';
+		$parts = array();
+		foreach ($direct['reasons'] as $reason => $n) {
+			$parts[] = htmlspecialchars($reason) . ' (' . (int)$n . ')';
+		}
+		echo implode(', ', $parts) . '</p>';
+	}
+	echo '</div></div>';
+}
 
 // Status filter
 echo '<form class="mb-3" method="get">';

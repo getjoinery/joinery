@@ -20,6 +20,7 @@
  * BasicDNS, and it has no concept of a delegated subdomain zone: the zone is
  * always the registered domain.
  *
+ * @version 1.1 - SRV write fails closed on an unread list; a sub-host SRV is refused
  * @version 1.0
  */
 
@@ -33,11 +34,14 @@ class NamecheapDnsDriver extends DnsDriverBase {
 	private $zones = null;
 	/** @var array<string,array> Raw host rows per zone, as last read. */
 	private $hosts = array();
+	/** @var array<string,array> Raw SRV rows per zone — a SEPARATE Namecheap list. */
+	private $srv = array();
 	/** @var array<string,string> The zone's EmailType, preserved across writes. */
 	private $email_type = array();
 
 	public static function getKey(): string { return 'namecheap'; }
 	public static function getLabel(): string { return 'Namecheap'; }
+
 
 	public static function nameservers(): array {
 		return array('dns1.registrar-servers.com', 'dns2.registrar-servers.com');
@@ -118,11 +122,24 @@ class NamecheapDnsDriver extends DnsDriverBase {
 			$record->provider_id = (string)$index;
 			$out[] = $record;
 		}
+		// SRV lives on its own endpoint here — it is NOT part of the host list —
+		// so it is read separately and appended. That separation is also what
+		// makes SRV support safe to add to a driver whose write path replaces
+		// the entire host list: setHosts cannot touch a list it does not own.
+		foreach ($this->rawSrv($zone) as $index => $row) {
+			$out[] = $this->srvRecord($zone, $row, $index);
+		}
 		return $out;
 	}
 
 	public function createRecord(string $zone, DnsRecord $record): void {
 		$zone = DnsRecord::normalizeName($zone);
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			$rows = $this->rawSrv($zone, true);
+			$rows[] = $this->toSrvRow($zone, $record);
+			$this->setSrv($zone, $rows);
+			return;
+		}
 		$hosts = $this->rawHosts($zone);
 		$hosts[] = $this->toHost($zone, $record);
 		$this->setHosts($zone, $hosts);
@@ -130,6 +147,17 @@ class NamecheapDnsDriver extends DnsDriverBase {
 
 	public function updateRecord(string $zone, DnsRecord $live, DnsRecord $desired): void {
 		$zone = DnsRecord::normalizeName($zone);
+		if ($desired->type === DnsRecord::TYPE_SRV) {
+			$rows = $this->rawSrv($zone, true);
+			$index = self::srvIndex($live);
+			if ($index === null || !isset($rows[$index])) {
+				throw new DnsProviderException('Cannot update ' . $desired->describe()
+					. ': the record is no longer in the Namecheap SRV list.');
+			}
+			$rows[$index] = $this->toSrvRow($zone, $desired);
+			$this->setSrv($zone, $rows);
+			return;
+		}
 		$hosts = $this->rawHosts($zone);
 		$index = $live->provider_id !== '' ? (int)$live->provider_id : -1;
 		if (!isset($hosts[$index])) {
@@ -142,6 +170,16 @@ class NamecheapDnsDriver extends DnsDriverBase {
 
 	public function deleteRecord(string $zone, DnsRecord $live): void {
 		$zone = DnsRecord::normalizeName($zone);
+		if ($live->type === DnsRecord::TYPE_SRV) {
+			$rows = $this->rawSrv($zone, true);
+			$index = self::srvIndex($live);
+			if ($index === null || !isset($rows[$index])) {
+				return;
+			}
+			unset($rows[$index]);
+			$this->setSrv($zone, array_values($rows));
+			return;
+		}
 		$hosts = $this->rawHosts($zone);
 		$index = $live->provider_id !== '' ? (int)$live->provider_id : -1;
 		if (!isset($hosts[$index])) {
@@ -227,6 +265,124 @@ class NamecheapDnsDriver extends DnsDriverBase {
 		}
 		$this->call('namecheap.domains.dns.setHosts', $params, 'POST');
 		$this->hosts[$zone] = $hosts;
+	}
+
+	/**
+	 * The zone's SRV list, from Namecheap's separate SRV endpoint.
+	 *
+	 * SRV is not a host row here: `getHosts`/`setHosts` never see it, and
+	 * `getsrvrecords`/`setsrvrecords` carry it as six typed fields. Keeping the
+	 * two lists apart is what lets the whole-list-replace write path stay safe.
+	 */
+	private function rawSrv(string $zone, bool $strict = false): array {
+		if (isset($this->srv[$zone])) {
+			return $this->srv[$zone];
+		}
+		list($sld, $tld) = $this->splitZone($zone);
+		$rows = array();
+		try {
+			$xml = $this->call('namecheap.domains.dns.getsrvrecords', array('SLD' => $sld, 'TLD' => $tld));
+			$result = $xml->CommandResponse->DomainDNSGetSrvRecordsResult ?? null;
+			if ($result !== null) {
+				foreach ($result->Srv as $row) {
+					$rows[] = array(
+						'Service'  => (string)$row['Service'],
+						'Protocol' => (string)$row['Protocol'],
+						'Priority' => (int)$row['Priority'],
+						'Weight'   => (int)$row['Weight'],
+						'Port'     => (int)$row['Port'],
+						'Target'   => (string)$row['Target'],
+					);
+				}
+			}
+		} catch (DnsProviderException $e) {
+			// The write path REPLACES the whole SRV list, so it must never build
+			// that replacement from a list it could not read — that would delete
+			// every SRV record the failed read did not return. A caller about to
+			// write says so and gets the failure; a reader (listRecords) tolerates
+			// it, showing the SRV row as missing, which is the honest state. The
+			// empty tolerant result is NOT cached, so a following strict read
+			// genuinely retries rather than trusting a failure.
+			if ($strict) {
+				throw new DnsProviderException('Refusing to change the Namecheap SRV list for ' . $zone
+					. ': its current contents could not be read, and a write would replace the whole list. '
+					. 'Publish again in a moment.', 0, $e);
+			}
+			error_log('NamecheapDnsDriver: SRV list unavailable for ' . $zone . ': ' . $e->getMessage());
+			return $rows;
+		}
+		return $this->srv[$zone] = $rows;
+	}
+
+	/** Write the whole SRV list back and refresh the cache. */
+	private function setSrv(string $zone, array $rows): void {
+		list($sld, $tld) = $this->splitZone($zone);
+		$params = array('SLD' => $sld, 'TLD' => $tld, 'SrvCount' => count($rows));
+		$i = 1;
+		foreach ($rows as $row) {
+			$params['Service' . $i]  = $row['Service'];
+			$params['Protocol' . $i] = $row['Protocol'];
+			$params['Priority' . $i] = (int)$row['Priority'];
+			$params['Weight' . $i]   = (int)$row['Weight'];
+			$params['Port' . $i]     = (int)$row['Port'];
+			$params['Target' . $i]   = $row['Target'];
+			$i++;
+		}
+		$this->call('namecheap.domains.dns.setsrvrecords', $params, 'POST');
+		$this->srv[$zone] = $rows;
+	}
+
+	/** One Namecheap SRV row as a platform record. */
+	private function srvRecord(string $zone, array $row, int $index): DnsRecord {
+		$labels = array();
+		foreach (array($row['Service'], $row['Protocol']) as $label) {
+			$label = trim((string)$label);
+			if ($label !== '') {
+				$labels[] = (substr($label, 0, 1) === '_') ? $label : '_' . $label;
+			}
+		}
+		$record = new DnsRecord(
+			DnsRecord::TYPE_SRV,
+			self::absoluteName(implode('.', $labels) ?: '@', $zone),
+			self::formatSrv((int)$row['Priority'], (int)$row['Weight'], (int)$row['Port'], (string)$row['Target']),
+			null,   // Namecheap holds no TTL for an SRV record
+			null
+		);
+		// Prefixed so a host-list index and an SRV-list index can never be
+		// mistaken for each other on the write path.
+		$record->provider_id = 'srv:' . $index;
+		return $record;
+	}
+
+	/** The SRV-list position a live record came from, or null. */
+	private static function srvIndex(DnsRecord $live): ?int {
+		if (strpos($live->provider_id, 'srv:') !== 0) {
+			return null;
+		}
+		return (int)substr($live->provider_id, 4);
+	}
+
+	/** One planned SRV record as a raw Namecheap SRV row. */
+	private function toSrvRow(string $zone, DnsRecord $record): array {
+		$srv = self::parseSrv($record->value);
+		// Namecheap's SRV row carries service and protocol but NO host, so the
+		// record can only sit at the zone apex. A name with a sub-host beyond
+		// _service._protocol would be written to the apex silently — refuse it
+		// rather than publish it somewhere it was not asked for.
+		$labels = explode('.', self::relativeName($record->name, $zone, ''));
+		if (count($labels) !== 2 || $labels[0] === '' || $labels[1] === '') {
+			throw new DnsProviderException('Namecheap can publish an SRV record only at the zone apex '
+				. '(_service._protocol.' . $zone . '); "' . $record->name
+				. '" names a sub-host its SRV API cannot express.');
+		}
+		return array(
+			'Service'  => $labels[0],
+			'Protocol' => $labels[1],
+			'Priority' => $srv['priority'],
+			'Weight'   => $srv['weight'],
+			'Port'     => $srv['port'],
+			'Target'   => $srv['target'],
+		);
 	}
 
 	/** One planned record as a raw Namecheap host row. */

@@ -23,6 +23,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.39 - the Joinery Direct capability record joins the plan
  * @version 1.38 - the automated mail identity (machine sender) card family
  *                 (specs/mailbox_machine_sender_card.md): derived on/off, the
  *                 incident red state, readiness rows for the ceremony, machine
@@ -450,6 +451,14 @@ class InboundEmailSetupCheck {
 				'DMARC — reporting policy, recommended once SPF and DKIM pass.');
 		}
 
+		// Joinery Direct's capability record (docs/joinery_direct.md § Discovery).
+		// It is added LAST in spirit as well as in code: publishing it is what
+		// tells other instances this domain speaks Direct, so it goes out only
+		// once the channel is actually on and a signing identity exists. A
+		// tenant whose relay or deployment is not ready simply publishes nothing
+		// and keeps receiving over SMTP exactly as before.
+		$this->directRecords($plan, $domain, $fronted, $mx_target);
+
 		// A hosted fleet slot accepts no mail for a domain until its owner proves
 		// control, so the ownership challenge is part of the record set.
 		if ($topology['mode'] === 'fleet') {
@@ -538,6 +547,66 @@ class InboundEmailSetupCheck {
 	 * omits would be reverted by the next reconcile, and one the finished shape
 	 * demands but the ceremony never offered would leave the operator stuck.
 	 */
+	/**
+	 * The two records that advertise Joinery Direct for a domain.
+	 *
+	 * The SRV target must be a host that reaches the receiving instance without
+	 * an intermediary that would otherwise see the traffic, and must not expose
+	 * an address the deployment is deliberately hiding. That is exactly the
+	 * choice the MX record already makes, so it is made the same way: the mail
+	 * host on a colocated deployment (a DNS-only name for the box, never a CDN-
+	 * or proxy-fronted web host), and the RELAY on a relay-fronted one —
+	 * publishing an SRV record pointing at a Fortress box would advertise in
+	 * public DNS precisely the address the relay exists to conceal.
+	 *
+	 * Every publishable signing key gets a TXT record, not just the active one:
+	 * during a rotation a sender that cached the record may still be quoting the
+	 * old key id, and both answering is what makes rotation a non-event.
+	 */
+	private function directRecords(DnsRecordPlan $plan, string $domain, bool $fronted, string $mx_target): void {
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectCapability.php'));
+		require_once(PathHelper::getIncludePath('data/direct_identities_class.php'));
+
+		if (!DirectSettings::enabled()) {
+			return;
+		}
+		$target = $fronted ? $mx_target : $this->mailHostname;
+		if (trim((string)$target) === '') {
+			return;
+		}
+		// Minting the keypair here is deliberate and idempotent: asking what this
+		// domain should publish IS the moment it needs a published key, and a
+		// domain that already has one keeps it — rotation is its own explicit
+		// act, never a side effect of rendering a plan. Same shape as the decoy
+		// secret, which mints itself the first time anything needs it.
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
+		try {
+			DirectSigningIdentity::ensureFor($domain);
+		} catch (\Throwable $e) {
+			error_log('InboundEmailSetupCheck: could not mint a Direct signing identity for '
+				. $domain . ': ' . $e->getMessage());
+		}
+
+		$identities = DirectIdentity::publishableFor($domain);
+		if (empty($identities)) {
+			// Nothing signs for this domain, so advertising an endpoint would
+			// invite deliveries nothing could authenticate.
+			return;
+		}
+
+		$this->planAdd($plan, 'SRV', '_joinery._tcp.' . $domain,
+			DirectCapability::srvRecordValue($target, 443), null,
+			'Joinery Direct — where other Joinery instances deliver to ' . $domain . '.');
+
+		foreach ($identities as $identity) {
+			$this->planAdd($plan, 'TXT', '_joinery-key.' . $domain,
+				DirectCapability::keyRecordValue((string)$identity->get('jdi_key_id'),
+					(string)$identity->get('jdi_public_key')), null,
+				'Joinery Direct — the signing key other instances verify this domain against.');
+		}
+	}
+
 	private function signingStageRecords(DnsRecordPlan $plan, string $domain, $model,
 			bool $fronted, array $topology, string $mx_target): void {
 		$selector = trim((string)$model->get('ied_dkim_selector'));

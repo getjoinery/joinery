@@ -21,6 +21,7 @@ class NameComDnsDriver extends DnsDriverBase {
 	public static function getKey(): string { return 'namecom'; }
 	public static function getLabel(): string { return 'Name.com'; }
 
+
 	public static function nameservers(): array {
 		return array('ns1ex.name.com', 'ns2ex.name.com', 'ns3ex.name.com', 'ns4ex.name.com');
 	}
@@ -82,7 +83,11 @@ class NameComDnsDriver extends DnsDriverBase {
 				$record = new DnsRecord(
 					$type,
 					(string)($row['fqdn'] ?? $zone),
-					(string)($row['answer'] ?? ''),
+					$type === DnsRecord::TYPE_SRV
+						// SRV is modelled exactly as MX here: the priority in its
+						// own field and "weight port target" in the answer.
+						? self::srvFromContent((string)($row['answer'] ?? ''), (int)($row['priority'] ?? 0))
+						: (string)($row['answer'] ?? ''),
 					$ttl > 0 ? $ttl : null,
 					$type === DnsRecord::TYPE_MX ? (int)($row['priority'] ?? 0) : null
 				);
@@ -147,6 +152,13 @@ class NameComDnsDriver extends DnsDriverBase {
 		);
 		if ($record->type === DnsRecord::TYPE_MX) {
 			$body['priority'] = $record->priority !== null ? (int)$record->priority : 10;
+		}
+		if ($record->type === DnsRecord::TYPE_SRV) {
+			// SRV is modelled exactly as MX here: the priority in its own field
+			// and "weight port target" in the answer.
+			$srv = self::parseSrv($record->value);
+			$body['answer']   = self::srvContent($record->value);
+			$body['priority'] = $srv['priority'];
 		}
 		if ($record->ttl !== null) {
 			$body['ttl'] = max(300, (int)$record->ttl);

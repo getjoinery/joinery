@@ -20,7 +20,7 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -176,10 +176,40 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 		}
 	}
 
-	if ($failed > 0 || $dkim_failed > 0) {
+	// A Joinery Direct signing key under vault custody seals to the same public
+	// key, for the same reason (docs/joinery_direct.md § The relay at Fortress:
+	// custody mirrors DKIM). Losing it in a rotation would not lose mail — Direct
+	// would simply stop signing and every send would fall back to SMTP — but it
+	// would be a silent capability loss, so it re-seals here on the same
+	// fail-loud contract.
+	require_once(PathHelper::getIncludePath('data/direct_identities_class.php'));
+	$direct_failed = 0;
+	$direct_rows = new MultiDirectIdentity(array('owner_user_id' => $user_id));
+	$direct_rows->load();
+	$direct_count = 0;
+	foreach ($direct_rows as $identity) {
+		$sealed = (string)$identity->get('jdi_sealed_secret_key');
+		if ($sealed === '') {
+			continue;
+		}
+		$direct_count++;
+		try {
+			$secret = $crypto->openItemDek($sealed, $old_secret_key);
+			$upd = $db->prepare('UPDATE jdi_direct_identities SET jdi_sealed_secret_key = ?
+				WHERE jdi_direct_identity_id = ?');
+			$upd->execute(array($crypto->sealItemDek($secret, $new_public_key), intval($identity->key)));
+		} catch (Throwable $e) {
+			$direct_failed++;
+			error_log('Mailbox vault reseal: failed to re-seal the Direct signing key for '
+				. $identity->get('jdi_domain') . ': ' . $e->getMessage());
+		}
+	}
+
+	if ($failed > 0 || $dkim_failed > 0 || $direct_failed > 0) {
 		throw new RuntimeException(
-			'Mailbox reseal: ' . $failed . ' of ' . count($ids) . ' sealed messages and '
-			. $dkim_failed . ' of ' . count($protected) . ' protected DKIM keys could not be re-sealed; '
+			'Mailbox reseal: ' . $failed . ' of ' . count($ids) . ' sealed messages, '
+			. $dkim_failed . ' of ' . count($protected) . ' protected DKIM keys and '
+			. $direct_failed . ' of ' . $direct_count . ' Direct signing keys could not be re-sealed; '
 			. 'the old key generation must not be retired.');
 	}
 });
@@ -213,6 +243,47 @@ VaultDeferredWork::register(
 		return DeferredIngest::drainForUser($user_id, $secret_key, DeferredIngest::DEFAULT_MAX, $deadline);
 	}
 );
+
+// --- Joinery Direct consumer hooks (docs/joinery_direct.md) ---
+// The channel is core and kind-independent; who an address belongs to, whose
+// contacts authorize a delivery, and whose vault holds a domain's signing key
+// are all mailbox facts. Core reads them through these registered callables and
+// never names a mailbox symbol — the same discipline the identity hooks above
+// follow. With the plugin inactive nothing registers, so the endpoint hosts no
+// addresses and every preflight refuses at request level.
+require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectRecipients.php'));
+require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectContactGate.php'));
+require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxDirectConsumer.php'));
+
+DirectRecipients::registerResolver(function (string $address): ?array {
+	return MailboxDirectConsumer::resolveAddress($address);
+});
+DirectContactGate::registerLookup(function (int $user_id, int $alias_id, string $address): bool {
+	return MailboxDirectConsumer::isContact($user_id, $alias_id, $address);
+});
+DirectSigningIdentity::registerVaultOwnerResolver(function (string $domain): ?int {
+	return MailboxDirectConsumer::signingVaultOwner($domain);
+});
+
+// A relay-fronted deployment sends Direct THROUGH the relay, so the recipient
+// sees the relay's address and never the box's — the same reason its MX points
+// at the relay. The box still signs; the relay only transports. With no relay
+// enabled this resolves to null and requests go out from the box directly.
+require_once(PathHelper::getIncludePath('includes/joinery_direct/JoineryDirect.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DirectRelayEgress.php'));
+JoineryDirect::registerEgress(function () {
+	return DirectRelayEgress::forDeployment();
+});
+
+// Mail's own Direct policy: try the direct channel first, fall back to SMTP for
+// every recipient it did not deliver. This mapping is mail's alone — no other
+// kind's declined or failed result ever produces an SMTP send.
+require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DirectMailTransport.php'));
+EmailSender::registerDirectAttempt(function (EmailMessage $message): array {
+	return DirectMailTransport::attempt($message);
+});
 
 // --- Chunked upload purpose (specs/chunked_upload_purposes.md) ---
 // A mail archive is routinely larger than a single web request can carry, so it

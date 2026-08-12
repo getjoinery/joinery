@@ -1605,6 +1605,16 @@ verifies it, **seals it to the recipient's public key at the moment of
 acceptance**, and spools ciphertext. Each tenant's Joinery box dials out over
 WireGuard and pulls its own sealed blobs. Its own IP appears in no mail DNS.
 
+**It also serves Joinery Direct** for its tenants, from the same binary in a
+third mode. At Fortress the relay has to: an SRV record pointing at the origin
+box would advertise the address the relay exists to conceal. It terminates the
+public endpoint on 443 (with an ACME certificate obtained in-process — still no
+web server), writes verified deliveries into the same spool as `.direct`
+entries, and offers a tunnel-only egress listener so a tenant's box-signed
+request leaves from the relay's address. The relay authenticates and never
+signs; the box authorizes at unlock. See
+[Joinery Direct](../../../docs/joinery_direct.md).
+
 **The relay stack is tenancy-native, and a self-hosted relay is a fleet of
 one.** Every tenant on a relay has its own spool subdirectory (setgid,
 tenant-group readable — the cross-tenant isolation boundary), its own

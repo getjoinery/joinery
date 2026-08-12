@@ -44,6 +44,10 @@ type routingEntry struct {
 	// The owning tenant's slug — selects the tenantConfig block (spool dir, SRS
 	// secret, forward identity, limits) this entry delivers under.
 	Tenant string `json:"tenant"`
+	// The recipient vault's key generation, answered in a Direct preflight so a
+	// sealed part can be tagged with the generation it was sealed to and an
+	// unopenable message told apart from a corrupt one.
+	KeyGeneration int `json:"key_generation"`
 }
 
 // domainEntry captures the domain-level catch-all posture, used when no exact
@@ -76,6 +80,43 @@ type tenantConfig struct {
 	SpoolMaxEntries    int `json:"spool_max_entries"`
 	// The tenant's fragment version at merge time (display/debug only).
 	FragmentVersion int64 `json:"fragment_version"`
+
+	// --- Joinery Direct (docs/joinery_direct.md) --------------------------
+	// At Fortress the relay IS the Direct endpoint, because publishing an SRV
+	// record pointing at the origin box would advertise in public DNS exactly
+	// the address the relay exists to conceal. Everything the relay needs to
+	// serve that endpoint arrives here as DATA, so the relay's code stays
+	// kind-blind: a new kind — core or plugin — reaches the fleet as a map
+	// update, never a relay release.
+	DirectEnabled bool `json:"direct_enabled"`
+	// The kinds this tenant serves. The relay compares opaque strings against
+	// it and refuses anything else at the edge, exactly as the box would.
+	DirectKinds []string `json:"direct_kinds"`
+	// Backs the deterministic decoy key handed back for an address that does
+	// not exist, so answering a preflight never reveals which addresses are
+	// real. Never leaves the relay.
+	DirectDecoySecret string `json:"direct_decoy_secret"`
+	// Shard-side limits and caps, in the tenant's own units.
+	DirectPreflightLimit    int   `json:"direct_preflight_limit"`
+	DirectPreflightWindow   int   `json:"direct_preflight_window"`
+	DirectMaxParts          int   `json:"direct_max_parts"`
+	DirectMaxPartBytes      int64 `json:"direct_max_part_bytes"`
+	DirectMaxTotalBytes     int64 `json:"direct_max_total_bytes"`
+	DirectSpoolDomainCap    int64 `json:"direct_spool_domain_cap_bytes"`
+	DirectSpoolAddressCap   int64 `json:"direct_spool_address_cap_bytes"`
+	DirectSessionTTLSeconds int   `json:"direct_session_ttl"`
+}
+
+// servesKind reports whether this tenant serves a payload kind. The relay never
+// interprets the string — it compares it — which is what keeps a new kind a map
+// update rather than a fleet upgrade.
+func (tc tenantConfig) servesKind(kind string) bool {
+	for _, k := range tc.DirectKinds {
+		if k == kind {
+			return true
+		}
+	}
+	return false
 }
 
 // routingMap is the DB-free routing table merged shard-side from the tenants'
@@ -148,6 +189,31 @@ func (m *routingMap) normalize() {
 		d.Tenant = legacyTenantSlug
 		m.Domains[dom] = d
 	}
+}
+
+// tenantForDomain finds the tenant that owns a domain, for callers that have a
+// domain rather than a resolved recipient — the Direct endpoint answers a
+// preflight before it knows whether the address exists, and must be able to
+// refuse a domain this relay does not front WITHOUT that refusal saying
+// anything about which addresses on it are real.
+func (m *routingMap) tenantForDomain(domain string) (string, tenantConfig, bool) {
+	domain = strings.ToLower(strings.TrimSpace(domain))
+	if d, ok := m.Domains[domain]; ok {
+		if tc, ok := m.Tenants[d.Tenant]; ok {
+			return d.Tenant, tc, true
+		}
+	}
+	// A domain with no entry of its own may still be served through a recipient
+	// row (a relay fronting individual addresses rather than a whole domain).
+	for addr, e := range m.Recipients {
+		if domainOf(addr) != domain {
+			continue
+		}
+		if tc, ok := m.Tenants[e.Tenant]; ok {
+			return e.Tenant, tc, true
+		}
+	}
+	return "", tenantConfig{}, false
 }
 
 // tenantFor returns the tenantConfig an entry delivers under. ok=false means

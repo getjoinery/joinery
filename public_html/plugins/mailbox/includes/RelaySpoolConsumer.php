@@ -81,14 +81,18 @@ class RelaySpoolConsumer {
 				$stage . '/',
 				$spool_path . '/',
 				true, // download
-				array('--exclude=tmp/', "--include=*.seal", "--include=*.meta", "--exclude=*")
+				array('--exclude=tmp/', "--include=*.seal", "--include=*.direct", "--include=*.meta", "--exclude=*")
 			);
 			list($code, $out) = RelaySsh::run($cmd);
 			if ($code !== 0) {
 				return array('status' => 'error', 'message' => 'rsync pull failed: ' . $out);
 			}
 
-			$seals = glob($stage . '/*.seal') ?: array();
+			// Two artifact kinds share one spool and one listing: `.seal` is a
+			// sealed MIME message from the MX path, `.direct` is a Joinery Direct
+			// delivery the relay verified at its edge. Both commit their .meta
+			// first, so seeing the artifact means the pair is complete.
+			$seals = array_merge(glob($stage . '/*.seal') ?: array(), glob($stage . '/*.direct') ?: array());
 			$stored = 0; $pending = 0; $errors = 0; $held = 0;
 			$acked_ids = array();
 
@@ -96,10 +100,13 @@ class RelaySpoolConsumer {
 				if (($stored + $pending + $errors + $held) >= $max) {
 					break;
 				}
-				$spool_id = basename($seal_path, '.seal');
+				$is_direct = (substr($seal_path, -7) === '.direct');
+				$spool_id = basename($seal_path, $is_direct ? '.direct' : '.seal');
 				$meta_path = $stage . '/' . $spool_id . '.meta';
 				try {
-					$outcome = $this->ingestOne($seal_path, $meta_path, $spool_id);
+					$outcome = $is_direct
+						? $this->ingestDirect($seal_path, $meta_path, $spool_id)
+						: $this->ingestOne($seal_path, $meta_path, $spool_id);
 					if ($outcome === 'stored')  { $stored++; }
 					if ($outcome === 'pending') { $pending++; }
 					// 'hold' is recoverable mail we deliberately leave on the relay
@@ -161,6 +168,38 @@ class RelaySpoolConsumer {
 	 *   'aged_out'   — a held blob past the grace window → ack-drop with a loud log.
 	 * Throws only on a real failure (so the caller leaves it un-acked to retry).
 	 */
+	/**
+	 * Store one Joinery Direct delivery the relay accepted on this box's behalf.
+	 *
+	 * The relay already did the half that needs no vault — verified the instance
+	 * signature against the sender domain's published key, and verified every
+	 * sealed-byte hash — so what arrives here is authenticated. What it is NOT is
+	 * authorized: the contact gate needs the sealed contact list, which only an
+	 * unlock window can read. So the delivery goes into the Direct spool exactly
+	 * as one accepted locally at a sealed tier does, and the framework gates and
+	 * ingests it at the next unlock. One deferred path, not two.
+	 *
+	 * The box does NOT re-verify the hashes here. It cannot: the parts are
+	 * sealed to the recipient's vault key, and the signature that binds them was
+	 * checked against the sender's published key at the edge — the same check
+	 * the box would make, against the same key, from the same DNS. What the box
+	 * does re-check is at unlock, where the sealed bytes are opened and their
+	 * recorded hash is what the Direct framework verified them under.
+	 */
+	private function ingestDirect(string $data_path, string $meta_path, string $spool_id): string {
+		if (!is_file($meta_path)) {
+			throw new \RuntimeException('missing .meta for ' . $spool_id);
+		}
+		$container = json_decode((string)file_get_contents($data_path), true);
+		if (!is_array($container) || empty($container['recipient'])) {
+			error_log('RelaySpoolConsumer: malformed .direct container ' . $spool_id . ' — dropping');
+			return 'unroutable';
+		}
+
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectRelayIngest.php'));
+		return DirectRelayIngest::store($container);
+	}
+
 	private function ingestOne(string $seal_path, string $meta_path, string $spool_id): string {
 		if (!is_file($meta_path)) {
 			// A .seal with no committed .meta is a torn pair; skip without acking so
