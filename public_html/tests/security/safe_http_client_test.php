@@ -159,4 +159,24 @@ check(strpos($source, 'CURLOPT_RESOLVE') !== false,
 check(strpos($source, 'checkAndResolve') !== false,
 	'and every request runs through the shared validator rather than a bespoke guard');
 
+// ---------------------------------------------------------------------------
+section('The migrated admin tools fetch through the client, not a bare curl');
+// ---------------------------------------------------------------------------
+
+// The two live-parameter admin callsites — the cache benchmark and the static-cache
+// diagnose — were the two existing SSRF-shaped fetches (a live param aimed by CSRF
+// or reflected-XSS on an admin session). Both now run through SafeHttpClient, so an
+// internal target is refused rather than probed with read-back.
+require_once(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+$diag = StaticPageCache::diagnoseCacheability('http://169.254.169.254/latest/meta-data/', true);
+check(is_array($diag) && in_array('❌ Failed to fetch URL', (array)($diag['reasons'] ?? array()), true),
+	'a static-cache diagnostic aimed at cloud metadata is refused, not fetched');
+
+$benchmark_src = (string)file_get_contents(PathHelper::getIncludePath('utils/cache_benchmark.php'));
+check(strpos($benchmark_src, 'new SafeHttpClient(') !== false && strpos($benchmark_src, 'curl_init(') === false,
+	'the cache benchmark tool fetches through SafeHttpClient, with no bare curl left');
+$cache_src = (string)file_get_contents(PathHelper::getIncludePath('includes/StaticPageCache.php'));
+check(strpos($cache_src, 'new SafeHttpClient(') !== false && strpos($cache_src, 'curl_init(') === false,
+	'and the static-cache diagnose fetch does too');
+
 harness_finish();

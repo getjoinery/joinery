@@ -940,25 +940,27 @@ class StaticPageCache {
             // Temporarily store original User-Agent
             $original_user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
 
-            $ch = curl_init();
-            curl_setopt($ch, CURLOPT_URL, $url);
-            curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-            curl_setopt($ch, CURLOPT_HEADER, true);
-            curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-            curl_setopt($ch, CURLOPT_TIMEOUT, 10);
-            curl_setopt($ch, CURLOPT_USERAGENT, 'StaticPageCache/1.0 Diagnostic');
-
-            $response = curl_exec($ch);
-            $http_code = curl_getinfo($ch, CURLINFO_HTTP_CODE);
-            $header_size = curl_getinfo($ch, CURLINFO_HEADER_SIZE);
-
-            if ($response === false) {
+            // The URL comes from a live admin request parameter, so this diagnostic
+            // fetch — which reads the response body back — goes through
+            // SafeHttpClient: without the IP pin a CSRF or reflected-XSS on the admin
+            // session could turn it into a read-back probe of an internal host
+            // (specs/safe_http_client.md, MIGRATE-NOW). Redirects are followed, every
+            // hop re-validated and re-pinned.
+            require_once(PathHelper::getIncludePath('includes/SafeHttpClient.php'));
+            $client = new SafeHttpClient([
+                'allowed_ports'   => [80, 443],
+                'allow_redirects' => true,
+                'timeout'         => 10,
+                'user_agent'      => 'StaticPageCache/1.0 Diagnostic',
+            ]);
+            try {
+                $response = $client->get($url);
+            } catch (Throwable $e) {
                 $result['reasons'][] = '❌ Failed to fetch URL';
                 return $result;
             }
-
-            $headers = substr($response, 0, $header_size);
-            $content = substr($response, $header_size);
+            $http_code = $response->status;
+            $content = $response->body;
 
             // Set up environment to simulate the actual request
             $_SERVER['HTTP_USER_AGENT'] = 'StaticPageCache/1.0 Diagnostic';

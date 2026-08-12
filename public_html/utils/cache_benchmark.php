@@ -19,29 +19,39 @@ if (!preg_match('/^https?:\/\//', $test_url)) {
     $test_url = 'http://' . $_SERVER['HTTP_HOST'] . '/' . ltrim($test_url, '/');
 }
 
-// Function to measure page load time
+// Function to measure page load time.
+//
+// The URL comes from a live request parameter, so the fetch goes through
+// SafeHttpClient: an admin session hit by CSRF/reflected-XSS must not become an
+// internal-network probe (specs/safe_http_client.md, MIGRATE-NOW). Redirects are
+// followed because the benchmark measures a real page load, but every hop is
+// re-validated and IP-pinned by the client.
 function measure_load_time($url, $use_cache = true) {
-    $ch = curl_init();
-    curl_setopt($ch, CURLOPT_URL, $url);
-    curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
-    curl_setopt($ch, CURLOPT_FOLLOWLOCATION, true);
-    curl_setopt($ch, CURLOPT_TIMEOUT, 30);
-
-    // Add header to bypass cache if needed
-    if (!$use_cache) {
-        curl_setopt($ch, CURLOPT_HTTPHEADER, ['Cache-Control: no-cache', 'X-Skip-Cache: 1']);
-    }
+    require_once(PathHelper::getIncludePath('includes/SafeHttpClient.php'));
+    $client = new SafeHttpClient(array(
+        'allowed_ports'   => [80, 443],
+        'allow_redirects' => true,
+        'timeout'         => 30,
+    ));
+    $headers = $use_cache ? [] : ['Cache-Control' => 'no-cache', 'X-Skip-Cache' => '1'];
 
     $start = microtime(true);
-    $content = curl_exec($ch);
+    try {
+        $response = $client->get($url, $headers);
+        $body = $response->body;
+        $code = $response->status;
+    } catch (Throwable $e) {
+        // A refused (SSRF-blocked) or failed fetch reports as a zero-code miss
+        // rather than throwing the benchmark page.
+        $body = '';
+        $code = 0;
+    }
     $end = microtime(true);
-
-    $info = curl_getinfo($ch);
 
     return [
         'time' => ($end - $start) * 1000, // Convert to milliseconds
-        'size' => strlen($content),
-        'http_code' => $info['http_code']
+        'size' => strlen($body),
+        'http_code' => $code
     ];
 }
 

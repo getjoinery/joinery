@@ -24,7 +24,12 @@
  * the HTTP client re-resolve the hostname — that pinning is what actually closes
  * the resolve->fetch DNS-rebinding window. Redirect handling is the caller's
  * responsibility: walk redirects manually and re-run this guard on every hop.
- * See FetchUrlTool and scan_url_logic for the canonical setups.
+ *
+ * Most callers should NOT wire this up by hand: SafeHttpClient wraps this
+ * validator, does the pinning and the redirect walk, and is the default safe
+ * outbound path (specs/safe_http_client.md). Reach for SafeHttpClient first;
+ * touch this validator directly only in the two canonical setups that predate it
+ * (FetchUrlTool and scan_url_logic).
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
