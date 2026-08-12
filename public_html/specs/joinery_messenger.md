@@ -117,8 +117,9 @@ per-host, which is correct here: a deployment is one box.
 - Broadcast lists, stories/status, stickers
 - Blocking. There is still no `UserBlock` class platform-wide; the `class_exists`
   seams in `conversations_class.php` remain the integration point, and this spec
-  does not build it. Cross-instance, blocking rides the mail block list when
-  Direct Mail's F5 resolution builds it (§8.4).
+  does not build it. Cross-instance, blocking rides Direct Mail's F5 resolution —
+  remove the contact plus a sender-matched filter rule; there is no separate block
+  store (§8.4).
 
 ## 4. What already exists (reuse, don't reinvent)
 
@@ -145,11 +146,14 @@ already ships** — not a parallel message store:
 - **Multi-recipient key wrapping precedent:** Drive's `FileKeyGrant`
   (`data/file_key_grants_class.php`) — one wrapped-key row per (item, user),
   `sync_for_file()` reconciliation, revocation by row delete.
-- **Cross-instance transport:** everything in `joinery_direct_mail.md` — capability
+- **Cross-instance transport:** everything in `joinery_direct_mail.md` — the
+  `JoineryDirect::send` client with its typed results, the `directKinds`
+  registration and `gate`/`ingest` handler contract (§Serving a kind), capability
   record, preflight + signed manifest (BLAKE2b part hashes per review F2), sender
-  sealing to the preflight key, contact gate over `imc_mailbox_contacts`, relay
-  termination at Fortress, deferred ingest under a locked vault, and the safe HTTP
-  client (`specs/safe_http_client.md`, review F1).
+  sealing to the preflight key, the canned contact gate over
+  `imc_mailbox_contacts`, relay termination at Fortress, the shared Direct spool
+  under a locked vault, and the safe HTTP client (`specs/safe_http_client.md`,
+  review F1).
 - **Moderation:** `adm/admin_conversations.php` / `admin_conversation.php` (gain
   group rendering, nothing structural).
 
@@ -369,7 +373,8 @@ instance-to-instance HTTPS channel; the messenger is its **second payload kind**
 not a second transport. Everything the review hardened — the safe HTTP client and
 port policy (F1), BLAKE2b part hashes in the signed manifest (F2), the honest DNS
 trust claim (F3), contact sealing following domain posture (F4), rate limiting and
-block list (F5), replay protection (F6) — applies to chat identically, because chat
+the no-block-store block model (F5), replay protection (F6) — applies to chat
+identically, because chat
 messages travel through the same preflight, the same signature check, the same
 endpoint, the same relay at Fortress. Chat adds **no new endpoint, no new DNS
 record, no new key custody, and no new oracle surface**.
@@ -413,8 +418,9 @@ not-reachable, and nothing breaks.
 ### 8.3 Receiving and the local model
 
 On an accepted chat message, the receiver routes `kind: chat` to the messenger's
-ingest (registered with the Direct receiver the way inbound webhook handlers are
-registered today): find-or-create the local conversation by (`cnv_guid`, peer
+ingest handler (declared in the plugin's `directKinds` registration —
+`joinery_direct_mail.md` §Serving a kind — with the canned contact gate as its
+`gate`): find-or-create the local conversation by (`cnv_guid`, peer
 address) for the recipient, store the message, fan out notifications through the
 normal funnel. The remote peer is a `crp_conversation_remote_peers` row — **no
 shadow user rows**; `msg_usr_user_id_sender` is null for remote messages and
@@ -426,29 +432,35 @@ the recipient's conversation (their deployment, their vault), the sender's copy 
 the sender's. The wire is sealed to the preflight key regardless (opportunistic at
 Standard/Private conversations, mandatory at Guarded — §7.3).
 
-**Locked-vault receive rides deferred ingest.** For a sealed conversation whose
-local participants are all locked (or a sealed-posture mailbox domain, per F4's
-resolution: contacts sealed → the gate can't run live), the receiver
-accepts-and-spools the sender-sealed parts pending-parse style and absorbs them into
-the conversation at the next unlock — authentication runs locked, authorization
-defers, no lock-state oracle, exactly the mail rules. A non-contact's chat message
-deferred this way is discarded at unlock (the sender saw "delivered"; structurally
-identical to mail filed to spam, minus a spam folder — recorded honestly).
+**Locked-vault receive rides the shared Direct spool.** For a sealed conversation
+whose local participants are all locked (or a sealed-posture mailbox domain, per
+F4's resolution: contacts sealed → the gate can't run live), the framework
+accepts-and-spools the sender-sealed parts in the Direct spool
+(`joinery_direct_mail.md` §Security levels) and drains them at the next unlock,
+running chat's deferred `gate` and handing the outcome to its `ingest` —
+authentication runs locked, authorization defers, no lock-state oracle, exactly the
+mail rules. A non-contact's deferred chat message is declined at unlock and chat's
+`ingest` discards it as its local disposition (the sender saw "delivered";
+structurally identical to mail filed to spam, minus a spam folder — recorded
+honestly).
 
 ### 8.4 Abuse
 
 Remove the contact → their next chat attempt gets `declined` (reads as
-not-reachable, indistinguishable from a downgrade). Block (once Direct Mail's F5
-block list exists) → same wire answer, so block status stays unobservable, per the
-mail design. Rate limiting is the Direct endpoint's, shared.
+not-reachable, indistinguishable from a downgrade). Block → the same move as
+mail's F5 resolution: remove the contact (plus mail's sender-matched filter rule;
+no separate block store), so a blocked sender is a non-contact on the wire and
+gets the same `declined` — block status stays unobservable. Rate limiting is the
+Direct endpoint's per-instance limiter, shared.
 
 ### 8.5 Delivery ticks
 
 Cross-instance messages get WhatsApp-style state the local path doesn't need:
-**queued** (clock — in the sender's outbound retry queue; Direct has no SMTP
-fallback for chat, so the sender keeps a small retry-with-backoff queue and the
-relay spools for Fortress destinations as it does for mail) → **delivered**
-(check — the receiving instance accepted the transfer). Read receipts and typing do
+**queued** (clock — in the sender's outbound retry queue: the messenger calls
+`JoineryDirect::send` with `kind: chat` and retries a `failed` result with
+backoff — chat maps no result to SMTP, per the client's per-kind result contract —
+while the relay spools for Fortress destinations as it does for mail) →
+**delivered** (check — the receiving instance accepted the transfer). Read receipts and typing do
 **not** cross instances in v1 — read-position chatter would multiply preflight
 traffic for marginal value; revisit on demand.
 
@@ -477,7 +489,7 @@ its own spec. Groups in v1 are same-instance.
 | Sealed Vault stack (`VaultCrypto`, `VaultUnlock`, `$sealed_fields`, `onReseal`, `VaultDeferredWork`) | Private/Guarded custody | New consumer per the documented contract |
 | `ProtectionLevel` + shared card picker | Level chip + picker | **Builds** the shared picker (doctrine work item 1) and consumes it |
 | APCu | Typing state | No (pattern exists: `VaultUnlock`) |
-| Direct Mail endpoint, preflight, manifest, relay, safe HTTP client | Cross-instance transport | `kind` field + chat ingest handler; sender retry queue (§8) |
+| Joinery Direct pipe (`JoineryDirect` client, receiver framework, `directKinds` registry, relay, safe HTTP client) | Cross-instance transport | `directKinds` chat entry + `gate`/`ingest` handler; sender retry queue (§8) |
 | `imc_mailbox_contacts` | Federation consent gate | No — the gate is Direct Mail's, shared |
 | Admin conversations pages | Moderation | Group rendering |
 | `update_database` / plugin sync | Tables + columns | Standard |
@@ -580,9 +592,10 @@ machine on the sender queue. Browser verification on dev per the standard workfl
 ## 13. Open decisions
 
 None blocking phases 1–2. Design questions inherited from companion specs stay
-owned there: Direct Mail's pending review findings (F5 block-list shape, F6 replay
-window, F1 port policy) gate phase 3, not this spec; the AI participant and
-cross-instance groups are their own specs. One product-level default worth an owner
+owned there: Direct Mail's review passes (F1–F10 security, G1–G7 generality/plugin
+API) are fully resolved and folded into `joinery_direct_mail.md`, so phase 3 builds
+against a settled design; the AI participant and cross-instance groups are their
+own specs. One product-level default worth an owner
 glance at build time: whether `messenger_default_protection_level` should ship as
 `standard` (proposed) or `private` for privacy-first deployments — a setting either
 way, so nothing hinges on it.

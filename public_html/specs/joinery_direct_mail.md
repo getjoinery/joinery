@@ -35,6 +35,16 @@ offers) defines its own gate rather than inheriting this one. A receiver refuses
 a preflight whose kind it does not serve, so a partially-upgraded federation
 reads as not-capable for that kind and never breaks.
 
+**The pipe addresses people, not machines.** Every kind's recipient is a user
+address (`user@domain`) on a domain whose instance publishes the capability
+record; consent, key discovery, decoys, and deferred authorization are all
+per-user constructs, and sealing is always to the recipient user's vault key
+returned in the `accept`. A payload with no user on the receiving end — fleet
+coordination, server-manager traffic, machine-to-machine sync — is out of scope
+for this channel and stays on the purpose-built machine channels (`FleetClient`);
+putting it here would leave every per-user layer of the pipe with nothing to
+attach to.
+
 ## The one idea that makes it safe
 
 The direct channel is **whitelist-only, and the whitelist is the address book you
@@ -51,19 +61,33 @@ Because a stranger is by definition not yet in your contacts, **cold contact
 routes itself to SMTP automatically.** The direct path only ever carries
 relationships that were already affirmed, so it has no unsolicited surface to
 filter. There is nothing to defend against because nothing unrequested can reach
-your inbox on it. (The one nuance — a locked Fortress box spools an accepted
-message before it can judge it — is bounded and covered in §Why there is no spam
+your inbox on it. (The one nuance — a locked Private or Fortress box spools an
+accepted message before it can judge it — is bounded and covered in §Why there is no spam
 problem.)
 
 ## Vocabulary
 
 - **Direct channel** — a single authenticated HTTPS request from the sending
   instance to the receiving instance's advertised host, carrying one message.
+- **Direct client** — the send-side service: one call,
+  `JoineryDirect::send($recipient_address, $kind, $parts, $options)`, that runs
+  discovery, preflight, sealing, and transfer identically for every kind and returns
+  a **typed result** — `delivered`, `declined`, `no_capability`, or `failed`, plus
+  whether content was sealed and to which key generation — never a behavior. What a
+  non-`delivered` result *means* belongs to the calling kind: mail falls back to
+  SMTP, chat renders the peer not-reachable.
 - **Kind** — the envelope field naming the payload type: `mail` (the default when
   absent) or `chat`, with more later. The receiver dispatches on it and refuses
   preflights for kinds it does not serve. What `declined` means is defined per
   kind: mail falls back to SMTP; chat renders the peer as not-reachable
   (`specs/joinery_messenger.md`).
+- **Protocol version** — an integer on the signed envelope naming the version of
+  the shared layer itself (envelope shape, manifest fields, hash and signature
+  construction) — distinct from *kind*, which names the payload. A receiver
+  refuses an envelope whose version it does not implement, in the same
+  request-level bucket as an unknown kind; the sender treats that like any other
+  failure, so version skew across a federation converges on the caller's fallback
+  and never breaks anything.
 - **Sealed part** — one piece of a message (body text, HTML, or a single attachment)
   encrypted by the *sending* instance to the recipient's vault public key, so nothing
   between the two endpoints — proxy, CDN, or relay — can read it.
@@ -76,6 +100,14 @@ problem.)
   crosses the wire. (Per-part integrity hashes are not here — they cover the *sealed*
   bytes, which do not exist until the recipient key arrives in the `accept`, so they
   travel signed *with the content transfer*; see *Message transfer*.)
+- **Delivery session** — the short-lived, single-use state an `accept` opens on
+  the receiving side, keyed by the envelope nonce: the admitted manifest, the
+  verified sending-instance identity, and the key generation answered. The content
+  transfer redeems it — once. Completion or terminal failure consumes it, expiry
+  (a declared TTL, default **15 minutes**) discards it along with any partial
+  parts, and a transfer against a consumed, expired, or unknown session is a
+  request-level refusal. It holds nothing sealed and nothing per-user, so it works
+  while a vault is locked.
 - **Capability record** — a DNS record on the recipient's domain advertising that
   it speaks Joinery Direct: the host, port, and the instance's signing key.
 - **Instance signature** — an Ed25519 signature by the *sending instance*, verified by
@@ -177,21 +209,47 @@ standing between the message and a middlebox.
 
 ## The send decision (sending instance)
 
-When `EmailSender::send()` resolves a transport for a message:
+The send side is the **Direct client** (see *Vocabulary*) — one kind-independent
+call that every consumer uses, mail included. The client owns the shared layer end
+to end: the caller supplies a recipient address, a kind, and parts, and gets back a
+typed result. The client never decides what a result means; that is the caller's
+kind policy.
 
-1. Look up `_joinery._tcp.<recipient-domain>`. No record → existing SMTP/relay
-   path, done.
+**What the caller hands the client.** `$parts` is a list of part descriptors —
+`role` (`body_text`, `body_html`, `attachment`), `content_type`, `filename` for
+attachments, and the content as either `bytes` or a `path`/stream — so a large
+attachment never has to sit in memory as a string just to be sent. Sealing is
+`crypto_box_seal`, a one-shot primitive, so peak memory scales with the *largest
+single part*, never the whole message — the ceiling the per-part size cap already
+enforces. `$options` stays minimal (a timeout override); anything a kind needs to
+say travels in its parts, not in new envelope fields.
+
+For any send:
+
+1. Look up `_joinery._tcp.<recipient-domain>`. No record → return
+   **`no_capability`**.
 2. Record present → **preflight**: POST the envelope — carrying a fresh timestamp and a
    random per-delivery nonce — the manifest, and the instance signature to
    `/.well-known/joinery-direct` at the advertised host and port. No content. A retry
    after any failure is a newly signed envelope with its own timestamp and nonce.
 3. The receiver either answers **`declined`** (this recipient does not accept Direct
-   from this sender) or **`accept`**, carrying the recipient's current public key and
-   key generation.
+   from this sender — returned to the caller as-is) or **`accept`**, carrying the
+   recipient's current public key and key generation.
 4. On `accept` → seal each part to the returned key, then transfer the parts together
-   with a signature over their sealed-byte hashes (bound to the preflight nonce). On
-   `declined`, or on any connection failure at either step, fall back to the existing
-   SMTP/relay path.
+   with a signature over their sealed-byte hashes (bound to the preflight nonce) →
+   **`delivered`**, recording whether the parts were sealed and to which key
+   generation. The transfer redeems the accept's single-use delivery session and
+   must complete within its window (see *The receive decision*); a late attempt is
+   refused, and a retry is a fresh preflight. Any connection or verification
+   failure at either step → **`failed`**.
+
+**Mail is the client's first caller, not its owner.** The mail transport — a new
+`EmailServiceProvider` wired into the `EmailSender` resolver — calls the client with
+`kind: mail` and maps every result short of `delivered` to the existing SMTP/relay
+path (see *The SMTP fallback boundary*). That mapping lives only in the mail
+adapter: the SMTP fallback is mail-kind policy, not pipe behavior. Chat maps the
+same results to "not reachable" (`specs/joinery_messenger.md`), and a future kind
+defines its own mapping.
 
 **The SRV target is validated before the sender connects (SSRF guard).** The recipient
 domain — and therefore the SRV host and port — is chosen by whoever controls that domain,
@@ -202,16 +260,17 @@ checked against the private/reserved/loopback/link-local blocklist and the conne
 pinned to a validated public IP; the port must be **443 or ≥ 1024** — privileged ports
 below 1024 (the SSH/SMTP/DNS range) are refused, since a dedicated Direct listener runs
 on 443 or a high port, never a privileged one; TLS is verified against the SRV hostname;
-and redirects are never followed. Any failure is treated like any other Direct failure —
-a silent fall back to SMTP. Mandatory TLS verification is the load-bearing control at any
+and redirects are never followed. Any failure is `failed` to the caller, treated like
+any other Direct failure — for mail, a silent fall back to SMTP. Mandatory TLS
+verification is the load-bearing control at any
 port: a target that cannot present a valid certificate for the recipient's host (a raw
 Redis, Memcached, or SSH port) never completes the handshake, so the port rule is
 defence-in-depth over it, not the only barrier.
 
 **The refusal is a plain status code, not a signed statement.** There is nothing for
 the sender to verify: the response already comes over TLS from the SRV-named host, and
-the worst a forged refusal achieves is a downgrade to SMTP — the path the message would
-have taken before this feature existed. Signing it would buy nothing and add a
+the worst a forged refusal achieves is a downgrade to the caller's fallback — for mail,
+SMTP: the path the message would have taken before this feature existed. Signing it would buy nothing and add a
 verification step that can itself fail. This has a useful side effect: a refusal from
 the recipient, a WAF, a proxy, and a dead host are all indistinguishable to the sender
 and all mean the same thing, so every failure mode converges on one behaviour instead of
@@ -249,9 +308,12 @@ and it expires quickly so re-adding a contact heals on its own.)
 ## The receive decision (receiving instance)
 
 A route serving `/.well-known/joinery-direct`, in the same shape as the existing
-inbound webhook. The route first dispatches on the envelope kind — the steps below
-define the mail kind, and a preflight for a kind the receiver does not serve is
-refused before any of them run. On preflight:
+inbound webhook. The route first dispatches on the envelope kind (see *Serving a
+kind*, below, for how kinds register) — the steps below define the mail kind, and a
+preflight for a kind the receiver does not serve is refused before any of them run.
+Steps 1–3 run identically at every tier; steps 4–5 are the **Standard** behaviour —
+at Private and Fortress the receiver instead accepts unconditionally and defers the
+gate (see *Security levels*). On preflight:
 
 1. **Verify the instance signature** against the sender domain's capability record,
    resolved through a **cached, rate-limited** capability lookup (see *Resolving the
@@ -272,13 +334,22 @@ refused before any of them run. On preflight:
    an invalid signature — not one of the two contact-gate answers — so it discloses
    nothing about the recipient: only a replayer, who already holds the captured message,
    ever triggers it.
-3. **Contact gate** — matched on the full sender address **and** a sending domain that
+3. **Manifest bounds.** The declared manifest is checked against the instance's
+   size caps — maximum parts per message, maximum bytes per part, and maximum
+   total bytes (declared settings; defaults **64 parts / 100 MB per part / 250 MB
+   total**) — applied identically to every recipient and every kind, at every
+   tier. Exceeding any is a request-level refusal in the same bucket as an
+   invalid signature: the caps are instance configuration, not per-user data, so
+   the answer discloses nothing. The admitted manifest is also the transfer-time
+   contract — a delivered part that exceeds its declared size aborts the
+   delivery.
+4. **Contact gate** — matched on the full sender address **and** a sending domain that
    matches the verified instance signature, never the bare address alone. A contact
    entry for `alice@example.com` is satisfied only by a message signed by
    `example.com`'s instance key, so a spoofed From cannot borrow someone else's place
    in your contacts. Three outcomes, but only **two answers on the wire**, so the
    protocol never becomes an oracle for the recipient's contact or block list:
-   - **Contact** → accept; continue to step 4.
+   - **Contact** → accept; continue to step 5.
    - **Not a contact** (stranger, or a contact you removed) → answer `declined` and
      drop (do not store, do not queue). The message reverts to ordinary email.
    - **Blocked** → identical on the wire. A block removes the contact, so a blocked
@@ -287,13 +358,33 @@ refused before any of them run. On preflight:
      block adds only that the fallback SMTP message is filed as spam by the recipient's
      `mark_spam` filter rule (see *Abuse*). The sender cannot tell a block from a plain
      downgrade.
-4. **Accept**, answering with the recipient's current public key and generation, and
+5. **Accept**, answering with the recipient's current public key and generation, and
    admit the declared manifest. Then take the sealed parts on the second request and
    store into `iem_inbound_email_messages` — attachments as their own
    `imc_inbound_message_attachment` rows, as they are stored today — tagged with its
    transport so the UI can show "delivered directly."
 
 Consent is a living list, not a one-time grant — every connection re-checks it.
+
+**An `accept` opens a single-use delivery session — the state between the two
+requests.** The receiver records, keyed by the envelope nonce: the admitted
+manifest, the verified sender identity (domain and key id), and the key generation
+it answered with. The content transfer redeems the session: each arriving part is
+verified against the session's sender key (the transfer signature is bound to the
+nonce) and checked against the admitted manifest — part count, declared sizes,
+roles — so a sender cannot stream more than it declared (step 3). Completion
+consumes the session, and so does a terminal failure such as a hash mismatch; a
+second transfer for the same nonce is a request-level refusal, closing
+content-transfer replay the way step 2 closes preflight replay. An unredeemed
+session expires after a declared TTL (default **15 minutes**), discarding any
+partially delivered parts — the sender sees a refusal, mail falls back to SMTP,
+and any retry is a fresh preflight with its own nonce. The session holds only
+envelope and manifest data — nothing sealed, nothing per-user — so it works while
+a vault is locked. At Fortress it lives at the relay, where the wire terminates;
+the origin box needs no session, because it independently re-verifies both
+signatures and every sealed-byte hash on the forwarded delivery (*Message
+transfer*) — the session disciplines the wire, while the signatures protect
+against the relay itself.
 
 **Resolving the sender's capability record (bounded, not per-request).** The sender
 domain in a preflight is attacker-chosen, and verifying the signature needs that
@@ -313,11 +404,108 @@ per-instance limit in *Abuse* cannot yet apply). Three bounds close it:
   naming non-resolving domains costs one lookup, not one per request.
 - **Rate-limit by connecting peer.** Because verification has not happened yet, this
   earlier limit keys on the transport peer (connecting IP) to cap how much resolver work
-  any one source can drive.
+  any one source can drive. This is `RequestLogger::check_rate_limit` — the same
+  IP-keyed sliding-window limiter the API and login paths already use — under a
+  Direct feature key, not a new mechanism.
 
 This is DNS resolution through the system resolver, not an HTTP fetch, so it is not the
 SSRF surface `specs/safe_http_client.md` addresses; the concern here is the *volume* of
 attacker-driven lookups, and caching plus the two limits are the answer.
+
+## Serving a kind: registration and the handler contract
+
+This is the developer surface — what it takes for any part of Joinery, core or
+plugin, to put a payload on the pipe.
+
+**Registration is declarative.** A plugin serves a kind by declaring it in its
+`plugin.json` under `directKinds` — kind name → handler class — the same idiom the
+platform already uses for settings, menus, and signals:
+
+```json
+"directKinds": {
+  "chat": { "handler": "includes/ChatDirectHandler.php", "gate": "contacts" }
+}
+```
+
+The string shorthand `"chat": "includes/ChatDirectHandler.php"` is equivalent and
+means the handler supplies its own `gate`. Core kinds are declared the same way in
+the core manifest, with mail as the first entry. The registry is instance configuration, readable without loading plugin
+code, so "does this instance serve kind X" is answerable the moment a preflight
+arrives; a kind whose plugin is deactivated is simply absent from the served set,
+so its preflights refuse exactly like an unknown kind's — the
+partially-upgraded-federation behavior falls out with no special case. The refusal
+is request-level (the same bucket as an invalid signature), issued before any
+handler code runs.
+
+At Fortress the wire terminates at the relay, so the refusal must too: the
+served-kind set is exported to the relay **as data** in the relay map, alongside
+the keys and secrets `RelayMapExporter` already ships, and the relay matches the
+envelope's kind string against it. Relay *code* stays kind-blind — a kind is an
+opaque string it compares, never logic it implements — so a new kind, core or
+plugin, reaches the fleet as a map update, never a `RELAY_VERSION` bump (see
+*Security levels*).
+
+**The framework owns the wire; a handler owns only its decision and its storage.**
+The hard-won properties of this design — exactly two gate answers, request-level
+refusals distinct from them, unconditional accept with a decoy key at the sealed tiers, no
+lock-state oracle, never a bounce — must hold for every kind, because a receiving
+endpoint is only as oracle-free as its leakiest kind. So they are not conventions a
+handler is trusted to follow; they are structure a handler cannot break:
+
+| Layer | Responsibility |
+|---|---|
+| Framework, identical for every kind | Signature verification; freshness + replay; manifest size bounds; per-instance and per-peer rate limits; spool byte caps; kind dispatch; every wire answer, including the key and sealed-tier decoy; sealed-byte hash verification; spool-while-locked and unlock scheduling |
+| Kind handler | `gate(envelope): accept \| decline` and `ingest(envelope, parts, gate_outcome)` |
+
+A handler's entire surface is those two pure functions:
+
+- **`gate(envelope)`** answers "does this recipient accept this kind from this
+  sender" — nothing else. It never sees lock state, never composes a wire
+  response, and at Private and Fortress is **not called at receive**: the framework
+  accepts unconditionally and defers the gate (see *Security levels*). A `decline`
+  becomes the wire's `declined` at Standard and a silent local filing decision at
+  Private and Fortress; the handler cannot tell which, and that is the point.
+- **`ingest(envelope, parts, gate_outcome)`** stores the delivered payload in the
+  kind's own model. It runs only after the framework has verified every
+  sealed-byte hash. On the live path it is called only on `accept`, so
+  `gate_outcome` is always accept there. On the deferred path (*Security levels*)
+  it is called at unlock for **every** spooled delivery, carrying the deferred
+  gate's outcome — because the sender was already answered `accept`, a deferred
+  decline is a local disposition, not a drop: mail files a declined message
+  exactly where SMTP would have put it (ordinary/spam, no verified mark), never
+  losing it and never signalling the sender. The verified-sender fact and
+  transport tag arrive with the envelope, so a kind can drive its own UI the way
+  mail's verified-direct mark does.
+
+With that shape a kind cannot produce a third wire answer, a lock-state
+distinguisher, or a bounce, and reviewing a new kind means reviewing two pure
+functions.
+
+**Handlers see typed objects, never wire bytes.** `gate` and `ingest` receive an
+envelope object with named accessors — kind, protocol version, verified sender
+(address and signing domain), recipient (address and resolved mailbox/user), and
+the manifest (each part's role, type, and declared size) — and `ingest`'s parts
+are part objects exposing role, content type, sealed-or-not, and a handle to the
+content. A handler never parses the wire format, so the wire format can move (a
+new protocol version) without touching any handler.
+
+**Every kind is testable without a second instance.** The framework provides a
+loopback send for the test estate: `JoineryDirect::send` to an address served by
+the same instance runs the full receive framework locally — registry lookup,
+session, gate, hash verification, ingest — with no DNS record and no network, so
+a plugin's handler is exercisable from `plugins/{plugin}/tests/` like any other
+code. Loopback is a test-tier tool, not a delivery path: real same-instance mail
+never needs Direct.
+
+**The contact gate is a canned gate, not mail's private one.** Mail's
+authorization — full sender address plus a sending domain bound to the verified
+instance signature, matched against `imc_mailbox_contacts` — is exported by the
+framework as a reusable policy, declared as `"gate": "contacts"` in the kind's
+`directKinds` entry. The framework then runs the canned gate itself and never
+calls a handler `gate` at all — such a handler implements only `ingest`. Mail and
+chat both declare it; a future kind declares it in that one line or supplies its
+own `gate`. Authorization stays per-kind, but the best-reviewed gate is the
+easiest one to reach for.
 
 ## Abuse: removing vs blocking
 
@@ -346,10 +534,27 @@ the receiving endpoint:
   blocked-sender lookup: an individual sender is never dropped early (that would need a
   gate-time block index readable while locked, which §Security levels rejects). A
   blocked sender is simply a non-contact on the wire whose SMTP fallback is spam-filed.
-  At Fortress the throttle runs at the relay, before the box is touched at all. The
-  limit is a **declared setting** (token bucket; default **60 preflights/min per
-  instance, burst 120** — tunable) and is the cap referenced by §Why there is no spam
-  problem.
+  At Fortress the throttle runs at the relay, before the box is touched at all, with
+  the limit values carried to it as relay-map data. The limiter is the platform's
+  existing sliding-window idiom, not a new engine: the per-instance check counts
+  recent preflights per sender domain in Direct's own request log, exactly as the
+  mailbox forwarding limiters count the inbound email log, and the pre-verification
+  per-peer check is `RequestLogger::check_rate_limit` (see *The receive decision*).
+  The limit is a **declared setting** (default **120 preflights per instance per
+  rolling 2 minutes** — the same average and burst as 60/min with burst 120, in
+  window form — tunable) and is the count cap referenced by §Why there is no spam
+  problem; the byte cap beside it is the spool cap (§Security levels).
+- Counts alone do not bound storage, so two byte-denominated caps ride with the
+  limiter: the framework's **manifest size bounds** at preflight (*The receive
+  decision*, step 3) and the **Direct spool caps** at the sealed tiers (*Security
+  levels*). A refusal from any of them is request-level and downgrades mail to
+  SMTP — nothing is lost.
+- **Nothing is silent to the operator.** Every request-level refusal (signature,
+  freshness, version, bounds, caps) and every send-side downgrade is counted in
+  Direct's request log and surfaced on the admin dashboard — so a box whose clock
+  has drifted (every inbound preflight failing freshness, every send quietly
+  falling back to SMTP with no user-visible symptom) is diagnosable at a glance.
+  Silence is a wire posture toward senders, never toward the operator.
 
 ## Encryption
 
@@ -419,13 +624,15 @@ A recipient's public key being readable by a verified peer is not a new exposure
 `RelayMapExporter` already ships owner→vault-public-key maps to relays as a matter of
 course. Sealing to a public key is what public keys are for.
 
-**Fortress answers with a key for every address, real or not.** At Fortress the
-receiver accepts unconditionally so that acceptance discloses nothing — but a
+**The sealed tiers answer with a key for every address, real or not.** At Private
+and Fortress the receiver accepts unconditionally so that acceptance discloses nothing — but a
 key-bearing `accept` would reopen exactly what that closed. Verifying an instance
 signature proves a sender is who it claims, never that it is welcome, so any instance
 could preflight a guessed address and learn from a real key coming back that the
 address exists. So the receiver returns a key unconditionally too, deriving a
-deterministic decoy from a domain secret for addresses that do not exist. It is
+deterministic decoy from a domain secret for addresses that do not exist (the
+domain secret lives on the box at Private, and travels in the relay map at
+Fortress, where the relay answers preflights). It is
 indistinguishable from a real key; the sender seals to it, the message arrives, and
 nobody can ever open it — which costs nothing, because mail to a nonexistent address
 was going nowhere in any case. Existence, contact membership, and block status all stay
@@ -457,11 +664,11 @@ fragile, and buys little against an attack that must first guess a low-entropy a
 then catch or await a rotation. The decoy therefore holds at generation 1 and this residual
 is accepted.
 
-Decoys are a Fortress mechanism only, not a uniform behaviour across tiers. At
-Standard and Private the contact gate refuses a stranger with `declined` before any
-key is offered, so the only sender who ever receives a key is one already in the
-recipient's contacts — who knows the address exists. There is no oracle to close, and
-a decoy path there would be dead code.
+Decoys are a sealed-tier (Private and Fortress) mechanism, not a uniform behaviour
+across tiers. At Standard the contact gate refuses a stranger with `declined` before
+any key is offered, so the only sender who ever receives a key is one already in the
+recipient's contacts — who knows the address exists. There is no oracle to close at
+Standard, and a decoy path there would be dead code.
 
 ## Message transfer: parts, not one blob
 
@@ -478,7 +685,9 @@ several of email's oldest attachment costs at once:
   largest part rather than the whole message.
 - **Refusal before transfer.** The manifest gives size and type up front, so a
   receiver can decline an oversized or unwanted message having received none of it —
-  and a whitelist miss costs no attachment bandwidth at all.
+  and a whitelist miss costs no attachment bandwidth at all. "Oversized" is
+  enforceable because the framework checks the manifest against declared size caps
+  at preflight (*The receive decision*, step 3), at every tier.
 - **Structure survives encryption.** This is the part worth dwelling on. PGP/MIME
   encrypts the whole MIME tree into one opaque object, which is precisely why
   `specs/mailbox_encrypted_interop.md` records that an encrypted inbound message
@@ -511,7 +720,9 @@ the plaintext lets the receiving box verify without unsealing, so even a locked 
 box rejects a substituted part at receive rather than discovering it at unlock — which
 matters precisely because the relay, the untrusted machine, is the one forwarding those
 bytes; the Ed25519 signature over the hash authenticates the plaintext transitively once
-it is unsealed.
+it is unsealed. The transfer also redeems the preflight's single-use delivery session
+(*The receive decision*), so it can happen exactly once: a captured transfer replayed
+against a consumed or expired session is refused at request level.
 
 What the hash must **never** do is let the receiver skip a part it already holds.
 Skip-if-held is an oracle pointed at the recipient: a sender that watches which parts
@@ -525,7 +736,7 @@ offset, not content-defined skipping; if it is ever built it must be invisible t
 sender — the receiver takes the bytes and discards them — which removes most of the
 saving and is a good reason not to build it.
 
-## Security levels: locked vaults and Fortress
+## Security levels: locked vaults and the sealed tiers
 
 Contacts (`imc_mailbox_contacts`) seal under the **same rule as the mail beside
 them**: sealed at rest only when the owner holds a vault **and** the mailbox's domain
@@ -543,7 +754,13 @@ Sealed contacts (Private/Fortress) can be read only while the vault is unlocked.
 raises the obvious question at **Private** (encrypted at rest, decrypts in bounded
 unlock windows) and **Fortress** (Private + edge-sealing ingest + off-box send): is
 Direct receiving only available while unlocked? **No** — Fortress already solved
-"receive while locked" for ordinary mail, and Direct rides the same machinery.
+"receive while locked" for ordinary mail, and Direct rides the same machinery at
+both sealed tiers. **Private and Fortress share one receive posture on the wire —
+accept unconditionally, never a live `declined`, defer authorization — and differ
+only in topology: Fortress adds the relay and edge concealment.** A Private box
+that answered live while unlocked and deferred while locked would turn its own
+answer into the lock-state oracle this section closes, so the sealed tiers behave
+identically whether locked or unlocked.
 
 **Authentication runs locked; authorization defers to unlock.** The gate is two
 halves and only one needs the vault:
@@ -555,27 +772,78 @@ halves and only one needs the vault:
 - *Is X in my contacts?* — needs the sealed contact list, so it runs only in an
   unlock window.
 
-**While locked, Direct accepts and seals, exactly like SMTP deferred ingest.**
-The connection is accepted, the signature verified, the message placed in the same
-pending-parse spool Fortress already uses, and the authorization decision deferred.
-A message the sender already sealed needs no edge-sealing step at all — it arrives in
-the state the spool wants it in, and no machine on the path ever held it readable. An
-unsealed one is edge-sealed on arrival as SMTP mail is. At the next unlock, the existing `unseal → parse` pipeline gains one step:
-run the contact gate against the now-readable list, and either apply the
-verified-direct mark (sender is a contact) or file the message exactly where SMTP
-would have (not a contact → ordinary/spam). The mark is deferred, never lost.
+**While locked, Direct accepts and seals, exactly like SMTP deferred ingest — and
+deferral is a shared-layer service, for every kind.** The connection is accepted,
+the signature verified and the sealed-byte hashes checked (both possible without the
+vault), and the delivery placed in the **Direct spool**: a framework-owned holding
+store keyed by kind, carrying the envelope, the verified-sender fact, and the sealed
+parts — nothing in it needs the vault. A message the sender already sealed needs no
+edge-sealing step at all — it arrives in the state the spool wants it in, and no
+machine on the path ever held it readable. An unsealed one is sealed on arrival
+(at the edge under Fortress, on the box at Private) as SMTP mail is. At the next
+unlock — at Fortress the same trigger that drains the existing SMTP pending-parse
+spool — the framework drains the Direct spool: for each
+delivery it runs the kind's deferred `gate`, then hands the outcome to the kind's
+`ingest` (see *Serving a kind*). For mail that means: run the contact gate against
+the now-readable list, and either apply the verified-direct mark (sender is a
+contact) or file the message exactly where SMTP would have (not a contact →
+ordinary/spam). The mark is deferred, never lost.
 
-**A deferred rejection is local, never returned.** This is the one place Fortress
-genuinely differs from Standard. At Standard the gate runs live, so a non-contact
-gets `declined` on the wire and the *sender* re-sends over SMTP. Under Fortress the
-message was accepted and sealed before the gate could run, and the sender is long
+**"Where SMTP would have" is literal — the gate decides elevation, never
+placement.** A non-contact's Direct message is handed to the same full inbound
+pipeline deferred SMTP mail already runs at unlock (`DeferredIngest` → parse,
+attachment split, filter rules), including the spam verdict: sender-sealed
+content has no relay-stamped score — no machine in the path could read it — so
+the box's own content scan (`scanContentSpam`, the same
+no-upstream-verdict path `MailboxSpamPolicy` already handles) runs at unlock, the
+first moment the content is readable. Direct changes the transport, not the
+classification: a non-contact is spam-scored and filter-sorted exactly as if the
+message had arrived over SMTP, so the direct path bypasses the spam apparatus for
+no one. A contact's mail skips it only in the sense that consent elevates it past
+scoring — the address-book feature, applied identically at every tier. The one
+honest delta from SMTP is timing: time-sensitive signals (URL reputation, RBLs)
+are evaluated at unlock rather than at receive, which is inherent to content
+nobody in the path can read.
+
+**A spooled kind whose plugin is deactivated before unlock is held, not errored.**
+The spool keeps the delivery sealed until the plugin is reactivated, and expires it
+quietly under the spool's ordinary retention if it never is. Nothing is returned to
+the sender in either case — the sender was answered `accept` at receive, and the
+no-bounce rule below applies to every kind, not just mail.
+
+**The spool is capped in bytes, and the cap is neither Sybil-able nor an oracle.**
+Accept-before-judgment means a flood's only real spend is disk held sealed until
+unlock, so that is what gets bounded — in two layers, both declared settings: a
+**per-domain cap** on the whole Direct spool (default **10 GB**), a request-level
+refusal once full, safe to signal because it is instance-level state and the same
+answer for every address; and a **per-address cap** beneath it (default **1 GB**),
+so one flooded recipient cannot consume the domain's budget. The per-address
+accounting applies to every address, real or decoy: a decoy delivery is discarded,
+but its declared bytes are still counted, so an address past its cap refuses
+identically whether it exists or not — sustained flooding cannot convert the cap
+into an existence probe. Counters drain as the spool drains at unlock, and by
+retention expiry for addresses holding nothing. Because the caps are absolute
+recipient-side bounds, no number of cheap sending domains raises the ceiling the
+way Sybil multiplies the per-instance rate limit. A cap refusal costs a legitimate
+sender only the downgrade — the mail adapter falls back to SMTP and the message
+arrives anyway; chat renders not-reachable. A silent local drop was considered and
+rejected: it could lose a legitimate contact's sealed mail, where a request-level
+refusal loses nothing. At Fortress the checks run where the wire terminates — the
+relay — with the cap values carried in the relay map and enforced as windowed byte
+counters at the edge, exactly as the rate limiter is.
+
+**A deferred rejection is local, never returned.** This is the one place the sealed
+tiers genuinely differ from Standard. At Standard the gate runs live, so a non-contact
+gets `declined` on the wire and the *sender* re-sends over SMTP. Under Private or
+Fortress the message was accepted and sealed before the gate could run, and the sender is long
 gone by unlock — so a rejection at unlock is a **local filing decision**: the message
 is placed exactly where SMTP would have put it (ordinary/spam) and denied the
 verified mark. It is not bounced, not returned to the sending instance, and the
 sender is never told. From the sender's side the message was "delivered" — and it
 was, into your spam. No round trip, no duplicate, no notification. The end state
-matches regular email; only the path differs. To keep this oracle-free, Fortress uses
-accept-then-decide-locally whether locked or unlocked — it never signals `declined`.
+matches regular email; only the path differs. To keep this oracle-free, the sealed
+tiers use accept-then-decide-locally whether locked or unlocked — they never signal
+`declined`.
 
 **Not handing it back is a feature, not a compromise.** Even given a free choice you
 would want this: a bounce or a rejection reply is a recon tool (attackers enumerate
@@ -588,9 +856,12 @@ of every spam folder already, and genuine contacts never land there.
 
 **Why not a locked-readable contact index.** A blind index (keyed hashes of contact
 addresses) would let the gate run at receive even while locked — tempting, because it
-saves the deferred step. It is fine at Standard/Private, whose threat model does not
-include an attacker reading sealed data while locked. It is a **net loss at Fortress**,
-whose threat model is exactly that. For the gate to run while locked, the hashing key
+saves the deferred step. It would be moot at Standard (contacts are plaintext there)
+and merely tolerable at Private, whose threat model does not include an attacker
+reading sealed data while locked. It is a **net loss at Fortress**, whose threat
+model is exactly that — and Private deliberately shares Fortress's receive path
+rather than gaining a mechanism whose only job is saving the middle tier a deferral
+(one rule beats two, below). For the gate to run while locked, the hashing key
 must be usable while locked, so an attacker who steals the locked box holds it too;
 email addresses are low-entropy, so a single `HMAC(candidate)` confirms or denies a
 specific relationship, and the whole graph falls to a dictionary run. That turns
@@ -633,7 +904,8 @@ SMTP mail is.
 **No lock-state oracle.** The receiver accepts identically whether locked or
 unlocked — it never answers `declined` based on lock state — so a sender cannot probe
 unlock windows by watching whether Direct succeeds. Fortress treats locked-state
-metadata leaks as in scope; Direct must not become one. (The live two-answer gate in
+metadata leaks as in scope, and Private shares the same wire posture so no seam
+opens between the sealed tiers; Direct must not become one. (The live two-answer gate in
 the send-decision section applies at **Standard**, where contacts are cleartext *by
 posture* — a Standard mailbox never seals them — so the gate always runs at receive
 and no locked vault can block it.)
@@ -669,6 +941,18 @@ Sender-side sealing completes the composition: **the relay forwards a blob it ca
 read.** It stops being a component that must be trusted with content and becomes a
 pure address-hiding forwarder — a stronger position than it holds today, where
 Fortress send hands it a readable message inside a bounded unlock window.
+
+**The relay is kind-agnostic by construction.** It authenticates, rate-limits, and
+forwards deliveries of any kind; the only kind-aware thing it does is match the
+envelope's kind — an opaque string — against the tenant's served-kind list carried
+in the relay map, refusing unserved kinds at the edge exactly as the box itself
+would. That refusal is request-level and leaks nothing: the served set is instance
+configuration, not per-user data. Kinds are data to the relay, never code — a
+tenant activating the messenger plugin, or any future kind, reaches the fleet as a
+map update with no relay release and no fleet upgrade. `RELAY_VERSION` moves only
+when the shared layer itself changes. (A delivery accepted in the window between a
+plugin's deactivation and the map update propagating simply lands in the Direct
+spool and is held or expires there — see the deferred-path rules above.)
 
 **Send-side key custody mirrors DKIM: the box signs, the relay only transports.**
 Outbound Direct is signed with the same custody as the deployment's DKIM at its level.
@@ -732,33 +1016,37 @@ already put in their contacts. Everything unsolicited either never attempts Dire
 path, the world's existing spam defenses apply exactly as they do today. We neither
 weaken nor re-solve them.
 
-**The one asterisk is storage, not the inbox, and only at locked Fortress.** There the
+**The one asterisk is storage, not the inbox, and only at the locked sealed tiers
+(Private and Fortress).** There the
 contact gate cannot run at receive — the sealed contact list is unreadable — so a
 message with a valid instance signature is accepted and spooled before it can be
 judged, then filed to spam or inbox at the next unlock (see §Security levels). Unsolicited
-mail can therefore reach *storage* ahead of the gate at that tier; it never reaches the
-inbox, but it occupies space until unlock. This is no worse than SMTP arriving at a
-locked Fortress box today — likewise spooled and filed at unlock — and it is bounded:
-the endpoint rate-limits preflights per verified sending instance (see §Abuse), so what
-any instance can park in your spool before a human sees it is capped. The inbox
-guarantee is absolute; the storage cost is bounded and identical to email's.
+mail can therefore reach *storage* ahead of the gate at those tiers; it never reaches the
+inbox, but it occupies space until unlock. At Fortress this is no worse than SMTP
+arriving at the same locked box today — likewise spooled and filed at unlock — and it is bounded
+twice: the endpoint rate-limits preflights per verified sending instance (see §Abuse),
+and the Direct spool itself is capped in bytes per domain and per address (see
+§Security levels), so what all senders together can park before a human sees it is
+capped in bytes, not merely in messages — no number of cheap instances raises it. The
+inbox guarantee is absolute; the storage cost is bounded and identical to email's.
 
 Cheap instances and infinite domains — the obvious attack on any federation — buy
 an attacker nothing here, because instance identity gates nothing valuable. The
 inbox is gated by the recipient's contact list, which only the recipient's own
 instance can write.
 
-## The SMTP fallback boundary
+## The SMTP fallback boundary (the mail adapter's result mapping)
 
-This is the contract that keeps the feature invisible when it doesn't apply:
+This is the mail kind's mapping of the Direct client's typed results — the contract
+that keeps the feature invisible when it doesn't apply:
 
-- No capability record → SMTP.
+- `no_capability` (no SRV record; recipient not a Joinery instance at all) → SMTP.
 - `declined` from the receiver (not a contact) → SMTP.
-- Connection/timeout/verification failure → SMTP.
-- Recipient is not a Joinery instance at all → SMTP.
+- `failed` (connection, timeout, or verification failure) → SMTP.
 
 Direct Mail is strictly additive. A message that can't or shouldn't go direct goes
-exactly where it goes today.
+exactly where it goes today. The mapping lives only in the mail adapter — no other
+kind's `declined` or `failed` ever produces an SMTP send.
 
 ## Build plan
 
@@ -769,17 +1057,33 @@ exactly where it goes today.
    positive and negative answers** by domain/key-id and **rate-limiting** lookups by
    connecting peer, so an attacker-named sender domain cannot drive unbounded outbound
    DNS (see *The receive decision*).
-2. **Direct transport (send)** — a new `EmailServiceProvider` that preflights with an
-   envelope and manifest, seals each part to the returned key, transfers the parts,
-   and maps `declined`/failure to fallback. Wire it into the `EmailSender` transport
-   resolver as a branch.
-3. **Direct receiver** — a route serving `/.well-known/joinery-direct`: kind
-   dispatch (unknown kind → refuse), then for the mail kind signature
-   verification, contact gate, key answer (with decoy derivation at Fortress),
-   manifest admission, then per-part storage into `iem_inbound_email_messages` and
-   `imc_inbound_message_attachment`. Built in the shape of
-   `inbound_email_webhook.php`, not as a service. Relay store-and-forward for offline
-   destinations.
+2. **Direct client (send)** — `JoineryDirect`, the kind-independent send service:
+   capability resolution (via item 1's resolver helper), SSRF-guarded connect,
+   preflight with timestamp + nonce, sealing to the returned key, signed sealed-byte
+   hashes, part transfer, typed result. Accepts part descriptors as bytes or file
+   paths/streams (*The send decision*). Plus the **mail adapter**: a new
+   `EmailServiceProvider` wired into the `EmailSender` transport resolver that calls
+   the client with `kind: mail` and maps every non-`delivered` result to the
+   SMTP/relay path.
+3. **Direct receiver** — a route serving `/.well-known/joinery-direct`: the shared
+   framework (signature verification, freshness/replay, rate limits, manifest size
+   bounds, kind dispatch from the `directKinds` registry — unknown or unserved
+   kind → request-level refuse — key answer with decoy derivation at the sealed
+   tiers, manifest admission, the single-use delivery-session store, sealed-byte
+   hash verification, spool byte caps),
+   then the kind handler's `gate`/`ingest`. Mail
+   ships as the first registered handler: the canned contact gate plus per-part
+   storage into `iem_inbound_email_messages` and `imc_inbound_message_attachment`.
+   Built in the shape of `inbound_email_webhook.php`, not as a service. Relay
+   store-and-forward for offline destinations. Rate limiting reuses the platform's
+   existing limiters — `RequestLogger::check_rate_limit` (IP-keyed sliding window)
+   for the per-peer check, and window counts over Direct's own request log (the
+   mailbox forwarding limiter pattern) for the per-instance check; the spool caps
+   are byte counters keyed by domain and address. Every limit and cap is a
+   declared setting; no new rate-limiting engine. Ships with the typed envelope
+   and part objects handlers receive, the canned contact gate
+   (`"gate": "contacts"`), and the loopback send the test estate uses to exercise
+   a kind without a second instance.
 4. **Relay path (in v1, not deferred)** — relay-side termination and forwarding
    inbound, relay-originated connections outbound, instance signing key in relay
    custody. Three sub-items follow from how relays already work:
@@ -788,7 +1092,10 @@ exactly where it goes today.
      **user** — a Fortress tenant, seal to that vault's public key — from
      **transport**, the relay's ambient key for everyone else. The preflight answer
      reuses that distinction verbatim rather than inventing a parallel one. What is
-     new in the map is the domain secret backing decoy derivation.
+     new in the map is the domain secret backing decoy derivation, the tenant's
+     served-kind list, and the tenant's rate-limit and spool-cap values — so
+     relay-side kind refusal and edge throttling are data-driven, and a new kind
+     never requires a relay code change.
    - **A `RELAY_VERSION` bump.** A relay runs provisioned contents and nobody can log
      in to patch one, so teaching relays to speak Direct means shipping a new relay
      version and offering the fleet the upgrade through the existing
@@ -801,7 +1108,9 @@ exactly where it goes today.
 5. **UI** — no new idiom. "Add to contacts" already exists. Three touch points
    (see **The social signal**): a compose-time direct-vs-email indicator, an
    inbox verified-direct mark, and a subtle in-message accent. Nothing to
-   configure per-recipient.
+   configure per-recipient. Plus the operator surface: request-level refusal and
+   SMTP-downgrade counters from Direct's request log on the admin dashboard
+   (§Abuse).
 
 ## Acceptance
 
@@ -809,8 +1118,9 @@ exactly where it goes today.
 2. Sender in the recipient's contacts, capability record present → message
    delivered over the direct channel, marked as such, never touches SMTP or a paid
    sender.
-3. Sender **not** in the recipient's contacts → receiver returns `declined`,
-   message delivered via SMTP, nothing stored on the direct path.
+3. Sender **not** in the recipient's contacts (at Standard, where the gate runs
+   live) → receiver returns `declined`, message delivered via SMTP, nothing stored
+   on the direct path.
 4. Message with an invalid/missing instance signature → refused, not stored.
 5. Receiving instance offline → message spools on the relay and delivers when it
    returns; no bounce.
@@ -827,12 +1137,13 @@ exactly where it goes today.
     stranger (no block oracle), and the SMTP fallback that follows is filed as spam.
 13. No queryable endpoint or DNS record reveals whether a given sender is a contact
     of, or blocked by, a given recipient.
-14. Under Fortress with the vault locked, a Direct message is accepted and
-    edge-sealed like any inbound mail; the contact gate and verified-direct mark are
-    applied at the next unlock, not at receive.
+14. Under Private or Fortress with the vault locked, a Direct message is accepted
+    and held sealed in the Direct spool (sender-sealed already, or sealed on
+    arrival); the contact gate and verified-direct mark are applied at the next
+    unlock, not at receive.
 15. A sender cannot determine a recipient's lock state from Direct's behaviour —
     the receiver accepts identically whether locked or unlocked.
-16. A Direct message rejected at unlock under Fortress is filed locally (ordinary or
+16. A Direct message rejected at unlock under Private or Fortress is filed locally (ordinary or
     spam), never returned to the sender: no bounce, no notification, and no duplicate
     delivered over SMTP.
 17. A message to a recipient whose vault public key is discoverable arrives sealed:
@@ -849,7 +1160,7 @@ exactly where it goes today.
     unlock, without ever having been readable in transit.
 22. Attachments transfer without base64 inflation, and a message larger than
     `post_max_size` delivers, because no single request carries the whole message.
-23. Under Fortress, preflighting a nonexistent address returns an `accept` and a key
+23. Under Private or Fortress, preflighting a nonexistent address returns an `accept` and a key
     indistinguishable from a real one; nothing in the exchange reveals whether the
     address exists.
 24. Under Fortress the published SRV record resolves to the relay; no DNS record
@@ -877,6 +1188,50 @@ exactly where it goes today.
     privileged port below 1024, is refused by the sender's SSRF guard and the message
     falls back to SMTP; the connection is pinned to the validated public IP and no
     redirect is ever followed.
+33. The send pipe is one client for every kind: mail sends through the same
+    `JoineryDirect` call the messenger uses, the SMTP fallback exists only in the
+    mail adapter, and a non-mail kind's `declined` or `failed` result never produces
+    an SMTP send.
+34. A plugin that declares a kind in `plugin.json` (`directKinds`) receives
+    deliveries through its `gate`/`ingest` handler with no core code changes, and
+    deactivating the plugin makes preflights for that kind refuse exactly as an
+    unknown kind does.
+35. The wire discipline is framework-enforced for every registered kind: a handler
+    expresses only `accept`/`decline` and storage, and no kind can produce a third
+    wire answer, an answer that varies with lock state, or a bounce.
+36. A non-mail kind accepted at a locked Fortress box is spooled sealed in the
+    shared Direct spool and its `gate` and `ingest` run at the next unlock; a
+    spooled delivery for a plugin deactivated before unlock is held until
+    reactivation or expires with the spool's retention, and in no case is anything
+    returned to the sender.
+37. A new kind, core or plugin-provided, requires no relay version change: a
+    Fortress tenant's relay learns it as a relay-map data update, and a preflight
+    for a kind the tenant does not serve is refused at the relay edge without
+    touching the origin box.
+38. A preflight carrying an unimplemented protocol version is refused cleanly at
+    request level, and the sender's behavior on that refusal is identical to any
+    other failure (for mail, the SMTP fallback).
+39. A preflight whose manifest exceeds the declared size caps — parts, bytes per
+    part, or total bytes — is refused at request level at every tier, and a
+    delivered part exceeding its declared size aborts the delivery.
+40. The Direct spool is capped in bytes per domain and per address: past a cap,
+    further deliveries are refused at request level; a flooded address refuses
+    identically whether it is real or a decoy, so filling a spool is not an
+    existence probe; and a cap refusal downgrades mail to the SMTP path, losing
+    nothing.
+41. A content transfer without a live matching delivery session — unknown nonce,
+    expired session, or one already redeemed — is refused at request level; a
+    captured transfer replayed after delivery re-delivers nothing.
+42. Delivered parts are enforced against the session's admitted manifest — part
+    count, declared sizes, and roles — and an unredeemed session expires
+    discarding its partial parts, with the sender's retry arriving as a fresh
+    preflight under a new nonce.
+43. A plugin kind's `gate` and `ingest` are exercisable in the test estate through
+    the loopback send — no second instance, DNS record, or network — and the same
+    handler code runs unmodified on the real wire.
+44. Request-level refusals and send-side SMTP downgrades appear as counters on the
+    admin surface; a clock-drifted deployment whose Direct silently degrades to
+    SMTP is diagnosable from that surface alone.
 
 ## Growth path (not built, kept open by design)
 
@@ -904,6 +1259,15 @@ don't relitigate settled ground. Each links to where it's handled.
   contacts, so it reaches no one's inbox no matter how many you spin up. Instance
   identity gates nothing valuable; the inbox is gated by recipient-held consent.
   → *Why there is no spam problem in v1.*
+- **Scraping capability records** (an internet-wide `_joinery._tcp` harvest to
+  find Direct-speaking domains). Reveals only what MX records have revealed for
+  decades — that a domain receives messages — and gates nothing: no inbox access
+  (contact gate), no address harvesting (a stranger's answer is identical for
+  real and nonexistent addresses at every tier), and no better channel than the
+  SMTP the spammer already has — Direct requires a signed, attributable,
+  per-instance-rate-limited identity where SMTP requires nothing. Spam economics
+  therefore stay on SMTP, whose exposure is unchanged by this feature.
+  → *Why there is no spam problem in v1*, *Encryption* (decoys), *Abuse.*
 - **POW / volume tax.** Rejected: volume is not what separates wanted mail from
   spam (opted-in bulk is the case we want to *enable*), so a per-message cost hits
   the best citizen hardest. → *Growth path.*
@@ -914,16 +1278,16 @@ don't relitigate settled ground. Each links to where it's handled.
   stateless — it reads only per-domain DNS capability and lets the receiver decide
   live. Per-user consent is never queryable, or it would leak the contact/block
   list. → *The send decision.*
-- **Locked vault / Fortress receive** ("receiving only when unlocked?"). No —
+- **Locked vault / sealed-tier receive** ("receiving only when unlocked?"). No —
   authentication runs while locked (stateless signature check), authorization
   defers to unlock via the existing deferred-ingest pipeline. → *Security levels.*
 - **Return-to-sender on rejection.** A Fortress rejection is filed locally, never
   bounced — which is a feature: no enumeration feedback, no backscatter, and it
   closes the lock/contact/block oracles at once. → *Security levels.*
-- **Membership hashfile** (locked-readable contact index). Rejected for Fortress:
-  a key usable while locked is a key a thief of the locked box holds, and
-  low-entropy addresses make the set dictionary-guessable. Fine at Standard/Private.
-  → *Security levels.*
+- **Membership hashfile** (locked-readable contact index). Rejected: a key usable
+  while locked is a key a thief of the locked box holds, and low-entropy addresses
+  make the set dictionary-guessable. Moot at Standard (contacts are plaintext);
+  Private shares Fortress's receive path rather than adding one. → *Security levels.*
 - **Middlebox on the transport** ("running over 443 puts a CDN or proxy in the
   path"). Answered by sender-side sealing: an intermediary sees ciphertext and
   metadata, not content — and SMTP leaks the same metadata to every hop today. The
@@ -940,7 +1304,7 @@ don't relitigate settled ground. Each links to where it's handled.
   TTL: a key that expires late produces a delivered, permanently unreadable message,
   which is worse than sending unsealed. The key rides the preflight response instead.
   → *Encryption.*
-- **Key-bearing `accept` as an existence oracle.** Answering Fortress preflights with
+- **Key-bearing `accept` as an existence oracle.** Answering sealed-tier preflights with
   a real key would reveal which addresses exist, undoing the unconditional accept.
   Closed by returning a deterministic decoy key for unknown addresses. → *Encryption.*
 - **Manifest hash as a possession oracle.** Using per-part hashes to *skip* content a
@@ -967,6 +1331,20 @@ don't relitigate settled ground. Each links to where it's handled.
   blocklist names who you are trying to escape, so it is more dangerous on a stolen
   locked box than the contact graph, not less — and with size declared at preflight
   the early drop saves little. → *Security levels.*
+- **Storage exhaustion at the sealed tiers** (park sealed blobs until unlock;
+  Sybil past the per-instance limiter with cheap domains). Bounded in bytes, not
+  in trust: manifest size caps at preflight, then per-domain and per-address spool
+  caps refusing at request level — with decoy addresses accruing phantom bytes so
+  a full spool refuses identically for real and nonexistent addresses. A cap
+  refusal downgrades to the caller's fallback (mail → SMTP), so nothing is lost.
+  → *Security levels*, *Abuse*, *The receive decision*.
+- **Replaying the content transfer.** A captured second request — sealed parts plus
+  transfer signature — re-presented later to re-deliver the message (F6 closes only
+  preflight replay). Closed by the single-use delivery session: the transfer
+  redeems the preflight nonce once, completion or terminal failure consumes it,
+  expiry discards it, so a replay is a request-level refusal. Splicing a transfer
+  onto a different preflight was already closed by binding the transfer signature
+  to the nonce. → *The receive decision*, *Message transfer*.
 
 Open seam, not yet walked: **multi-unlocker / multi-device** — whose unlock runs the
 deferred gate, and how the verified mark and read-state reconcile across several

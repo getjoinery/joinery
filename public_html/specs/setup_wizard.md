@@ -65,7 +65,10 @@ flows ship together; there is no separate member implementation.
 ### Trigger and dismissal
 
 - **Trigger:** on login, when the user has never dismissed the wizard and any
-  step in their scope reports non-green, redirect to `/setup`. Implemented in
+  step in their scope reports non-green, redirect to `/setup`. Accounts that
+  existed before the wizard shipped never get the redirect: a one-time data
+  migration seeds `usr_setup_dismissed_time` for every existing account, so
+  they see only the pill. Implemented in
   `SessionControl::check_permission()` alongside the existing interstitials
   (`/change-password-required`, `/terms-accept`), with the same exemptions:
   `/logout`, `/api/v1/` (the wizard's own enrollment fetches must survive the
@@ -79,7 +82,7 @@ flows ship together; there is no separate member implementation.
   (`usr_setup_dismissed_time` on `usr_users` via `$field_specifications`).
   Step completion is never stored — it is always derived.
 - After dismissal, a persistent **"Finish setup — n of m"** pill renders in
-  the admin header (owner) or the profile/member header (members) until every
+  the admin header (owner) or the member theme header (members) until every
   step in the viewer's scope is green. The pill opens `/setup` at the first
   non-green step. When all green, the pill and the login redirect both
   disappear forever with no state write.
@@ -110,8 +113,12 @@ Owner flow, in order. Scope `user` steps are the member flow.
 | 9 | `done` | You're set up | both | all steps in scope green |
 
 For optional steps (5, 6, 7) an explicit "not now" choice counts as green —
-the wizard measures *decided*, not *enabled*. The choice is derived where
-possible (7: empty provider settings after the step was visited) and the
+the wizard measures *decided*, not *enabled*. Calendar derives this for free
+(opting out saves the preferences row, which is the green condition). Mail
+import and AI provider leave no trace when declined, so the registry owns a
+decision store (`sud_setup_decisions`, below): the row records that the
+question was answered, never completion. Real state always wins — a resolving
+provider or a completed import run makes the row irrelevant, and the
 dashboard card for that area remains the place that shows the real state.
 
 ### Step 0 — Welcome
@@ -270,24 +277,45 @@ ceremonies. The genuinely new pieces:
    redirect gate in `SessionControl::check_permission()` with the `/logout` +
    `/api/v1/` + `/setup` exemptions.
 2. **`usr_setup_dismissed_time`** on `usr_users` (via
-   `$field_specifications`; schema syncs automatically).
+   `$field_specifications`; schema syncs automatically), plus the one-time
+   migration seeding it for accounts that predate the wizard.
 3. **Header pill** — "Finish setup — n of m" in admin and member chrome,
    scope-aware, no stored state.
-4. **AI test-connection action** (`joinery_ai`): a descriptor-exposed action
-   wrapping `reachabilityProbe()` plus a one-token `createMessage()` against
-   the configured provider. Wiring pattern:
-   `CloudStorageLifecycle::testConnection()` /
-   `ImapIngestor::testConnection()`. The Plugin Settings page gains the same
-   button — the action belongs to the plugin, not the wizard.
-5. **Headless mailbox provisioning function** — register-domain +
-   create-store-alias + grant in one call, extracted from the existing page
-   logic so the Setup tab and the wizard share it. Today alias creation and
-   grants exist only inside `admin_mailbox_alias.php` page logic; this is the
-   one mail operation with no callable entry point.
+4. **AI test-connection action** (`joinery_ai/test_connection`, permission
+   10, descriptor-exposed): builds the provider from the **saved** settings
+   (`LlmProviderFactory::build()`) — the action takes no parameters, so the
+   API key only ever travels the normal settings-save path. Sequence:
+   `reachabilityProbe()` first (a real check only for the local provider — the
+   cloud providers deliberately return null and rely on the live call), then
+   `createMessage()` with `max_tokens: 1` on the configured default model.
+   Returns model id + round-trip time, or the transport/auth error. The
+   wizard's flow is save-then-test, same as the plugin settings page. The
+   Plugin Settings page gains the same button — the action belongs to the
+   plugin, not the wizard.
+5. **Headless mailbox provisioning function** —
+   `mailbox_provision_mailbox($domain, $local_part, $user_id)` in
+   `plugins/mailbox/includes/`: register-domain + create-store-alias + grant
+   in one call, extracted from the existing page logic so the Setup tab and
+   the wizard share it. Today alias creation and grants exist only inside
+   `admin_mailbox_alias` page logic; this is the one mail operation with no
+   callable entry point. Contract:
+   - **Idempotent.** Domain already registered → reused; alias already
+     exists → reused, grant ensured. Re-running step 4's Apply after a
+     partial failure (e.g. DNS publish died mid-POST) skips what's done and
+     finishes the rest — the single Apply is safe to click again, always.
+   - **Carries the protected-domain invariant**
+     (`mailbox_protected_grant_error()`), same as the page logic.
+   - The vault-unlock gate on routing changes does not apply: this function
+     only creates, never edits an existing mailbox's destinations or mode.
 6. **`return_to` support** (allow-listed to `/setup`) on the few existing
    page-POST handlers the wizard submits through rather than reimplements —
    `admin_mailbox_setup_logic` actions and `admin_backups_logic` actions —
    so they bounce back to the wizard instead of their own tab.
+7. **`sud_setup_decisions`** (core data class): step key + user id (NULL for
+   site-scope decisions) + decided time, unique per step/user. The registry
+   exposes record/lookup; steps 5 and 7 write it on "Not now". It stores
+   decisions, never completion — every green is still derived, with the
+   decision row as the tie-breaker for optional steps only.
 
 ## Not in scope
 
@@ -300,15 +328,6 @@ ceremonies. The genuinely new pieces:
   deprioritized.
 - Inviting/creating additional members — the member flow triggers whenever a
   member first logs in, however they came to exist.
-
-## Open questions (owner)
-
-1. Should the login redirect fire for members created before the wizard
-   ships (they'd see steps 1–2 amber), or only for accounts created after?
-   Recommendation: fire for everyone — the security steps are exactly what
-   existing accounts are missing.
-2. Pill placement in member chrome: profile menu badge vs. header pill. The
-   admin header has an obvious slot; the member theme header may not.
 
 ## Docs to update on implementation
 

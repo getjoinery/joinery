@@ -6,8 +6,9 @@ SSRF guard is used in two places. This spec makes "the safe fetch" the easy defa
 instead of a per-callsite discipline nobody keeps.
 
 **Relationship to other specs:** `specs/joinery_direct_mail_review.md` F1 references this
-document. Direct Mail's outbound preflight becomes one consumer of the helper defined
-here rather than carrying its own bespoke guard.
+document. The Joinery Direct client (`JoineryDirect` — the kind-independent send side
+defined in `joinery_direct_mail.md`, carrying mail, chat, and future kinds) becomes one
+consumer of the helper defined here rather than carrying its own bespoke guard.
 
 ---
 
@@ -129,7 +130,7 @@ operator-fixed.
 |---|---|---|
 | `utils/cache_benchmark.php:25` | `$_GET['url']` (live request param) | `allowed_ports=[80,443]`, `allow_redirects=true` (it benchmarks a real fetch), read-back stays |
 | `adm/admin_static_cache.php:170` → `includes/StaticPageCache.php:943` | `diagnose_url` request param | same; strong read-back (headers+body) is the whole point, so pinning matters most here |
-| **Direct Mail outbound preflight** (per `joinery_direct_mail.md`) | SRV target host+port for a recipient domain, chosen by a remote party | port = 443 or ≥ 1024 (D1, resolved), `allow_redirects=false` |
+| **Joinery Direct client** (`JoineryDirect::send`, every kind — per `joinery_direct_mail.md`) | SRV target host+port for a recipient domain, chosen by a remote party | port = 443 or ≥ 1024 (D1, resolved), `allow_redirects=false` |
 
 The two admin tools are permission-8/9 gated, so this is authenticated-admin SSRF, not
 open — but the destination is a **live parameter**, so a CSRF or reflected-XSS against an
@@ -217,7 +218,7 @@ Plus a regression assertion for the two migrated admin tools: a `diagnose_url` /
 
 ## Open decisions
 
-- **D1 — Port policy for Direct Mail. RESOLVED:** the Direct transport permits **443 or
+- **D1 — Port policy for Joinery Direct. RESOLVED:** the Direct client permits **443 or
   any port ≥ 1024**; privileged ports below 1024 (other than 443) are refused. Rationale:
   the Direct design deliberately allows a deployment to run a dedicated listener on a
   non-443 port later (`joinery_direct_mail.md` → *The capability record*, "What the
@@ -228,10 +229,10 @@ Plus a regression assertion for the two migrated admin tools: a `diagnose_url` /
   The client expresses this as `allowed_ports` allowing 443 plus a ≥ 1024 floor (a list
   cannot enumerate an open range, so the port policy accepts a `{allow: [443], min:
   1024}`-style form as well as a plain list).
-- **D2 — One shared instance or per-caller construction?** Leaning per-caller
+- **D2 — One shared instance or per-caller construction? RESOLVED:** per-caller
   construction (policy varies: redirects on for the admin tools, off for Direct Mail), no
   singleton.
 - **D3 — Do the two node-check callers that need redirect-following or TLS-skip move onto
-  the client (with opt-in flags) or stay bespoke?** Leaning: redirect-following moves
+  the client (with opt-in flags) or stay bespoke? RESOLVED:** redirect-following moves
   (the client supports it); TLS-skip stays bespoke and documented, since baking an
   insecure switch into the safe client invites misuse.
