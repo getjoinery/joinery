@@ -575,6 +575,82 @@ fn work_whose_folder_is_no_longer_tracked_stops_instead_of_retrying_forever() {
 }
 
 #[test]
+fn a_rename_the_server_has_already_overtaken_is_not_pushed_forever() {
+    use jd_core::model::{EntityId, Entry, Placement};
+
+    // Two computers rename one file differently. Ours was planned first, so it
+    // is queued describing a journey from a name the file has already left --
+    // and the name it is headed for belongs to somebody else's file by the time
+    // it runs. The server is right to refuse, and no amount of waiting changes
+    // its mind, so the rename has to be given up rather than retried: only then
+    // can reconcile look at the two moves and decide between them.
+    //
+    // The soak rig found this as a move_remote on twenty-one attempts, still
+    // asking for a name another file had held for hours, taking the convergence
+    // invariant down with it every cycle.
+    let world = World::new(131, &["laptop"]);
+    let device = world.device("laptop");
+
+    let ours = world.server.seed_file(None, "a.txt", b"ours");
+    world.server.seed_file(None, "b.txt", b"somebody elses");
+    assert!(world.settle().is_some());
+
+    let entry = device
+        .store
+        .get_entry(EntityId::file(ours))
+        .unwrap()
+        .expect("the seeded file should have reached the device");
+
+    // Our rename, recorded the way the planner records one: where the server
+    // had it when we decided, and where we want it to end up.
+    device
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::file(ours),
+            &serde_json::json!({
+                "from": { "parent": null, "name": "a.txt" },
+                "parent": null,
+                "name": "b.txt",
+            })
+            .to_string(),
+            "our-rename",
+        )
+        .unwrap();
+
+    // Meanwhile the other computer's rename lands, and an index walk brings it
+    // home: the server no longer has this file under the name we planned from.
+    device
+        .store
+        .put_entry(&Entry {
+            remote: Placement {
+                parent: None,
+                name: "theirs.txt".into(),
+            },
+            ..entry
+        })
+        .unwrap();
+
+    for _ in 0..5 {
+        world.pass(device);
+    }
+
+    let stuck: Vec<_> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.kind == "move_remote" && op.entity == EntityId::file(ours))
+        .map(|op| format!("{} attempts={}", op.kind, op.attempts))
+        .collect();
+    assert!(
+        stuck.is_empty(),
+        "the rename should have been given up once the server moved the file \
+         out from under it: {stuck:?}"
+    );
+}
+
+#[test]
 fn two_computers_editing_the_same_file_both_keep_their_work() {
     // The case people actually hit. Neither edit may be discarded, and both
     // computers must end up seeing the same two files.

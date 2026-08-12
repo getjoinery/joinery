@@ -881,6 +881,37 @@ impl MockServer {
             return Err(refuse(400, "ValidationError", "A name is required."));
         }
 
+        // Renaming onto a name a live sibling already holds is refused, exactly
+        // as the real server's partial unique index refuses it. The mock checked
+        // this when things were CREATED and not when they were renamed, so the
+        // engine met the refusal on one path and never on the other — and a
+        // rename that can never succeed was retried twenty-one times on a live
+        // box, taking convergence down with it, while every scenario here passed.
+        // An encrypted file is exempt: its stored title stays an opaque
+        // placeholder, so siblings genuinely do share it.
+        if !encrypted_file {
+            let taken = if t == "folder" {
+                let parent = match st.folders.get(&id) {
+                    Some(f) => f.parent,
+                    None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+                };
+                st.folders
+                    .values()
+                    .any(|f| f.id != id && !f.trashed && f.parent == parent && f.name == name)
+            } else {
+                let folder = match st.files.get(&id) {
+                    Some(f) => f.folder,
+                    None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+                };
+                st.files
+                    .values()
+                    .any(|f| f.id != id && !f.trashed && f.folder == folder && f.name == name)
+            };
+            if taken {
+                return Err(name_taken("Something with that name is already here."));
+            }
+        }
+
         if t == "folder" {
             match st.folders.get_mut(&id) {
                 Some(f) => f.name = name,
