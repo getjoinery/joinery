@@ -666,7 +666,7 @@ if (in_array($operation, $classes)) {
 
 } else if (strtolower($url_segments[2] ?? '') === 'actions' && $request_method === 'get') {
 	// Action discovery endpoint: GET /api/v1/actions
-	$discover_actions = function ($logic_dir, $name_prefix) {
+	$discover_actions = function ($logic_dir, $name_prefix) use ($settings) {
 		$found = [];
 		foreach (glob($logic_dir . '/*_logic.php') as $file) {
 			$basename = basename($file, '.php');           // e.g., "register_logic"
@@ -680,6 +680,13 @@ if (in_array($operation, $classes)) {
 				require_once($file);
 				if (function_exists($descriptor_function)) {
 					$meta = call_user_func($descriptor_function);
+					// A feature that is switched off has no actions to offer.
+					// Same rule as an inactive plugin below, declared per
+					// action (specs/api_action_feature_gate.md).
+					$required_setting = $meta['requires_setting'] ?? null;
+					if ($required_setting && !$settings->get_setting($required_setting)) {
+						continue;
+					}
 					$found[$name_prefix . $action_name] = [
 						'description' => $meta['description'] ?? '',
 						'requires_session' => $meta['requires_session'] ?? true,

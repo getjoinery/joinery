@@ -43,6 +43,7 @@ function drive_device_rename_logic_descriptor(): array {
 	return array(
 		'description'      => 'Rename one of the caller\'s linked sync devices. The name is used in conflict-copy filenames.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'auth'             => array('capability' => 'write'),
 		'input'            => array(

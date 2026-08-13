@@ -119,6 +119,7 @@ function drive_restore_logic_descriptor(): array {
 	return array(
 		'description'      => 'Restore a Drive file or folder from the trash. Owner only.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),

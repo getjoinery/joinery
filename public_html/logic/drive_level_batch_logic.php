@@ -66,6 +66,7 @@ function drive_level_batch_logic_descriptor(): array {
 	return array(
 		'description'      => 'Convert one bounded batch of a Drive folder tree\'s files to the folder\'s current protection level (owner only). Call repeatedly until `remaining` is 0. A pass that converts nothing while files remain means those files cannot be converted — stop and report rather than looping.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'folder_id' => array('type' => 'int', 'required' => true, 'label' => 'Folder id'),

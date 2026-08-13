@@ -36,6 +36,7 @@ function drive_link_revoke_logic_descriptor(): array {
 	return array(
 		'description'      => 'Revoke a Drive share link (creator only).',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'link_id' => array('type' => 'int', 'required' => true, 'label' => 'Share link id'),

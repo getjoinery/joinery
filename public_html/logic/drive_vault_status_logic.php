@@ -62,6 +62,7 @@ function drive_vault_status_logic_descriptor(): array {
 	return array(
 		'description'      => 'Whether the caller has an encrypted-folder (drive) vault, its public key, and its key generation — the lean probe native sync clients use. Carries no wrappings, salts, or KDF parameters: those are unlock material and stay on the browser-only vault_client_status action.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

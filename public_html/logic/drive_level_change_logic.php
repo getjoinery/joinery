@@ -174,6 +174,7 @@ function drive_level_change_logic_descriptor(): array {
 	return array(
 		'description'      => 'Change a top-level Drive folder tree\'s protection level between standard and private (owner only). The folder changes immediately; existing files inside are converted afterwards by drive_level_batch. Going Private ends any public links and member grants in the subtree — the first call reports them as `blockers` and does nothing until `confirm_revoke_sharing` is sent. Going back to Standard requires an open unlock window.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'folder_id'               => array('type' => 'int', 'required' => true, 'label' => 'Folder id'),

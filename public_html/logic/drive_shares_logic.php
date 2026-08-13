@@ -78,6 +78,7 @@ function drive_shares_logic_descriptor(): array {
 	return array(
 		'description'      => 'List the grants and share links on a Drive file or folder (owner only).',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

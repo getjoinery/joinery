@@ -432,6 +432,7 @@ function drive_upload_complete_logic_descriptor(): array {
 	return array(
 		'description'      => 'Finish a resumable Drive upload and create the file (or a new version). For a NEW encrypted vault file the body also carries opaque client-produced payloads — `encrypted_metadata` (the FK-encrypted name/mime/etc. blob), `wrapped_file_keys` (a map { user_id: file key sealed to that user\'s drive vault public key } covering the destination\'s reader set, owner entry required — resolve the set via drive_public_keys with folder_id), and optionally `encrypted_thumbnail` (base64 ciphertext for the thumb variant slot). A new VERSION of an encrypted file must be produced with the file\'s existing key and content id (DriveCrypto.encryptFileWith): the uploader must hold a FileKeyGrant, and any wrapped-key payload is refused. All payloads are validated in the logic and pass through the boundary untouched.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'upload_token' => array('type' => 'string', 'required' => true, 'max_length' => 64, 'label' => 'Upload token'),

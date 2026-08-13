@@ -336,6 +336,7 @@ function drive_upload_init_logic_descriptor(): array {
 	return array(
 		'description'      => 'Begin a Drive upload: returns an upload token + chunk size, or dedup-completes immediately.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'name'       => array('type' => 'string', 'required' => false, 'max_length' => 255, 'label' => 'File name'),

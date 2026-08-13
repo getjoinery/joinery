@@ -52,6 +52,7 @@ function drive_version_restore_logic_descriptor(): array {
 	return array(
 		'description'      => 'Restore a saved version as a Drive file\'s current content.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'file_id'    => array('type' => 'int', 'required' => true, 'label' => 'File id'),

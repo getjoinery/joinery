@@ -118,6 +118,7 @@ function drive_stat_logic_descriptor(): array {
 	return array(
 		'description'      => 'Batch-fetch Drive entities by id — the companion to the id-only change feed. Entities that are gone or no longer visible to the caller are returned under `missing` instead of erroring, so a sync client can tell "deleted / unshared" from "request failed". Signed download and thumbnail URLs are omitted unless `urls` is true.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

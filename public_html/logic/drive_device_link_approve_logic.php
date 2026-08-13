@@ -104,6 +104,7 @@ function drive_device_link_approve_logic_descriptor(): array {
 	return array(
 		'description'      => 'Approve a pending device-link ceremony: mints the device\'s session credential, creates its SyncDevice identity, and (optionally) stores the browser-sealed drive vault key for the device to collect. Requires a signed-in browser session and a recent step-up. `sealed_vault_key` is opaque ciphertext produced in the browser — the server cannot open it.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'auth'             => array('requires_browser_session' => true),
 		'input'            => array(

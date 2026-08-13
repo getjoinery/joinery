@@ -46,6 +46,7 @@ function drive_key_grants_logic_descriptor(): array {
 	return array(
 		'description'      => 'Fetch the calling user\'s own wrapped file keys for encrypted Drive files. Body carries `file_ids` (a list); validated in the logic and passed through the boundary untouched.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(),

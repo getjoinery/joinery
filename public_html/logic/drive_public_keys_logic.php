@@ -81,6 +81,7 @@ function drive_public_keys_logic_descriptor(): array {
 	return array(
 		'description'      => 'Resolve members\' drive-scope vault public keys for encrypted-file key wraps. Body carries either `identifiers` (a list of user ids and/or emails — the share-dialog mode) or `folder_id` (returns the folder\'s full reader set: owner + all grant holders; requires write access — the encrypted-upload mode). Both are validated in the logic and pass the boundary untouched.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(
