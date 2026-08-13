@@ -1,7 +1,7 @@
 {
     "name": "zoukphilly-html5",
     "display_name": "ZoukPhilly HTML5",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "description": "Zero-dependency HTML5 version of the ZoukPhilly Tailwind theme",
     "author": "Joinery Team",
     "receives_upgrades": true,

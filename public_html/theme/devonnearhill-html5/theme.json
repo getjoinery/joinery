@@ -1,7 +1,7 @@
 {
     "name": "devonnearhill-html5",
     "display_name": "Devon Near Hill HTML5",
-    "version": "1.0.2",
+    "version": "1.0.3",
     "requires_plugins": [
         "event_manager"
     ],
