@@ -1,6 +1,6 @@
 # Code Preparation for PHP 8.5 and PostgreSQL 18
 
-**Status:** Phase 1 complete. 1.2's no-op deletions, 1.7 and 1.9 landed
+**Status:** IMPLEMENTED. Filed 2026-08-13. 1.2's no-op deletions, 1.7 and 1.9 landed
 2026-08-03 (`c8c085b3`); 1.1 and the rest of 1.2 landed 2026-08-04 (`d72e6812`);
 1.3, 1.4 and 1.5 landed 2026-08-04 (`a126b16a`); 1.6 landed 2026-08-05
 (`a03aaa0f`); 1.8 landed 2026-08-05 (`16584d95`). **All of Phase 1 is built,
@@ -8,12 +8,18 @@ committed, and deployed to the whole fleet** — all eight Joinery nodes run
 0.8.237 or later, so goal 1 (Phase 1 on every node before any is migrated) is
 met.
 
+**Scope of this spec.** The preparation work — every change that could be made
+compatible with both the old and new stacks — plus the behaviour verification
+that could only be run on the new one. The changes that *break* the old stack,
+and so land only as the fleet migrates, are split out to
+`specs/php_85_pg18_stack_cutover.md`.
+
 Phase 1 was then verified on a live scratch 24.04 box (45.33.72.32) on
 2026-08-06 against an installer byte-identical to the released one: 1.1 (FPM
 reload), 1.3 (no php-imap), 1.4 (version derivation and the six php.ini
 tunings, checked in the served SAPI) and 1.5 (pg_hba round trip) all pass. What
 is still unverified needs hardware that does not exist yet — a container host
-for the Docker paths, and a 26.04 box for everything in Phase 2.
+for the Docker paths, and a 26.04 box for everything in the cutover spec.
 
 **Phase 0 of the campaign spec is complete (2026-08-06, a real 26.04 VPS).**
 Everything under *Verification that belongs on the new stack* below has been run
@@ -21,11 +27,12 @@ on Ubuntu 26.04 / PHP 8.5.4 / PostgreSQL 18.4 and carries its result inline. Two
 installer defects and one application bug had to be fixed to get there; they are
 recorded in `specs/fleet_ubuntu_2604_postgres_upgrade.md` § Phase 0.
 
-Phase 2 remains gated on the OS campaign. Item 1 (the 26.04 base image) is
-verified — `joinery-base:2.0` was built `FROM ubuntu:26.04` on the test box and a
-container site on it serves, with the `Dockerfile.template` runtime globs and the
-container pg_hba round trip both proven — but deliberately **not landed**, since
-merging it forces `install.sh build-base` on every Docker host.
+The cutover itself remains gated on the OS campaign. Its first item (the 26.04
+base image) is already verified — `joinery-base:2.0` was built `FROM ubuntu:26.04`
+on the test box and a container site on it serves, with the `Dockerfile.template`
+runtime globs and the container pg_hba round trip both proven — but deliberately
+**not landed**, since merging it forces `install.sh build-base` on every Docker
+host. See `specs/php_85_pg18_stack_cutover.md`.
 
 Bumping Brevo exposed a deploy gap that belongs to no item here and is now
 closed: `ComposerValidator` checked only that a required package was *present*
@@ -86,7 +93,7 @@ Four consequences that constrain how code gets written:
    nothing is gained by carrying a fourth version.
 2. **A feature that genuinely needs a newer version detects and degrades**, rather
    than assuming the fleet is uniform. The live example is database incremental
-   backups, which require PostgreSQL ≥17 — `specs/backups_core_and_incremental.md`
+   backups, which require PostgreSQL ≥17 — `specs/backups_remaining_gaps.md`
    should gate on `server_version` and fall back to full dumps below it.
 3. **The installer guarantees only the current target.** Best-effort application
    support does not oblige `install.sh` to keep provisioning superseded releases;
@@ -601,36 +608,12 @@ exists either. The `agf_agent_files` "Internal CLAUDE.md" record carries the sam
 correction, applied through the `AgentFile` model so the drift hash stays
 consistent.
 
-## Phase 2 — Requires the New Stack
+## Behaviour verified on the new stack
 
-None of these can land before 26.04 nodes exist.
-
-1. **`Dockerfile.base:17`** — `FROM ubuntu:24.04` becomes `ubuntu:26.04`, with a
-   `BASE_IMAGE_VERSION` bump at `install.sh:119` (currently `1.1`). Every host
-   then needs `install.sh build-base` before site containers are recreated.
-2. **Linode stackscript** — point `install_tools/linode_stackscript_wrapper.sh`
-   and the Linode-side deploy image at 26.04, then re-run the quick-deploy app's
-   live gates from `specs/linode_quick_deploy_app.md`.
-3. **Drop 24.04 from the installer gate**, once no node remains on it. The
-   corresponding assertion in `tests/unit/installer_contract_test.php:233` moves
-   with it. This is an installer-scope decision, not an application-scope one:
-   per the compatibility policy, an existing 24.04 site keeps running and keeps
-   receiving upgrades — what stops is `install.sh` provisioning a *new* one, and
-   `--allow-unsupported-os` still covers that case by hand.
-4. **Documentation restatement.** Per the docs rule, these read as current state
-   with no migration narrative: `docs/installation.md:95` and `:233`,
-   `docs/deploy_and_upgrade.md:19`, `maintenance_scripts/install_tools/INSTALL_README.md:440`
-   and `:527` (the latter names `postgresql-16-main.log`), and the Server Manager
-   overview's node OS expectations.
-5. **`specs/geolocation_postgis_spec.md:47` and `:578`** pin
-   `postgresql-16-postgis-3`. That spec is unbuilt; update the pin when it is
-   built rather than now.
-
-### Verification that belongs on the new stack, not in Phase 1
-
-These are behaviour changes with no code fix — they need a run, not an edit.
-**All of them were run on 26.04 / PHP 8.5.4 / PG 18.4 on 2026-08-06** (the
-campaign spec's Phase 0); each bullet carries its result.
+These are behaviour changes with no code fix — they needed a run, not an edit,
+and could only be run on the new stack. **All of them were run on 26.04 / PHP
+8.5.4 / PG 18.4 on 2026-08-06** (the campaign spec's Phase 0); each bullet
+carries its result. None found a blocker.
 
 - **`round()` was reimplemented in 8.4.** Store money math is the exposure. The
   `db` tier is the gate; add a targeted check if one does not already cover
@@ -712,10 +695,11 @@ campaign spec's Phase 0); each bullet carries its result.
   connection works. Consequence worth knowing: `sudo -u postgres psql` now
   prompts for a password on a freshly installed box, because the local rule is
   no longer `peer`.
-- Still unverified, for want of the hardware: the Dockerfile CMD globs, the
-  container pg_hba round trip, `migrate_site_to_code_volumes.sh`, and
-  `install_email.sh` all need a container host; the `config.platform.php` pin
-  needs a 26.04 / PHP 8.5 build box.
+- The Dockerfile CMD globs and the container pg_hba round trip were proven on
+  the test box during the base-image build. `migrate_site_to_code_volumes.sh`
+  and `install_email.sh` still need a container host, and the
+  `config.platform.php` pin a 26.04 / PHP 8.5 build box; both are carried by
+  `specs/php_85_pg18_stack_cutover.md`.
 
 ## Out of Scope
 
@@ -726,7 +710,7 @@ campaign spec's Phase 0); each bullet carries its result.
   With 1.4 built, that spec inherits a script with no PHP version literal in it
   and its own examples now read as the state it is proposing to move away from.
 - Application adoption of PostgreSQL 18 features. Incremental base backups land
-  via `specs/backups_core_and_incremental.md`.
+  via `specs/backups_remaining_gaps.md`.
 
 ## Dependency Refresh
 
@@ -758,9 +742,10 @@ file count suggests.
 
 ## Documentation
 
-Phase 1 changes nothing user-visible, so no doc updates are due until Phase 2.
-At Phase 2, the files listed in Phase 2 item 4 are updated to describe the 26.04 /
-PHP 8.5 / PostgreSQL 18 stack as the current and only state.
+Phase 1 changes nothing user-visible, so no doc updates are due from this spec.
+The documentation restatement — describing the 26.04 / PHP 8.5 / PostgreSQL 18
+stack as the current and only state — belongs to the cutover, and is item 4 of
+`specs/php_85_pg18_stack_cutover.md`.
 
 ## Open Decisions
 
@@ -776,5 +761,6 @@ PHP 8.5 / PostgreSQL 18 stack as the current and only state.
    campaign's per-node checklist, gated on the `pg_authid` verifier check — no
    separate fleet sweep. See Phase 1.5.
 
-**No open decisions remain.** Phase 1 is fully specified and ready to build in
-order; Phase 2 is gated on 26.04.1 shipping.
+**No open decisions remain.** Phase 1 is built in full; the cutover work it
+prepared for is specified in `specs/php_85_pg18_stack_cutover.md` and gated on
+26.04 nodes existing.

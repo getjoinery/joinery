@@ -1,8 +1,29 @@
 # Drive Sync Clients — Full Specification
 
-**Status:** Specced — ready for build planning. All decisions are resolved
-(walked through with the owner 2026-07-16); deliberately-deferred items are
-collected in [§ Deferred items](#deferred-items). Supersedes the earlier skeleton.
+**Status: PARTIALLY BUILT — Phases 0–3 done, Phase 4 in progress.** All decisions
+are resolved (walked through with the owner 2026-07-16); deliberately-deferred
+items are collected in [§ Deferred items](#deferred-items).
+
+The client lives at `{repo root}/sync/` as a nine-crate Rust workspace —
+`jd-proto`, `jd-crypto`, `jd-core`, `jd-vfs`, `jd-platform`, `jd-daemon`,
+`jd-shell`, `jd-sim`, `jd-soak` — carrying roughly 630 test functions.
+
+- **Phase 0 (server work, §I.1–I.8)** — BUILT and verified.
+- **Phase 1 (contract crates)** — BUILT, committed `03c0179f`.
+- **Phase 2 (engine, plaintext, Linux)** — BUILT. Three simulator seeds were
+  still failing at the end of the phase; they are tracked with the engine work
+  rather than here.
+- **Phase 3 (macOS and Windows)** — BUILT 2026-07-31, macOS gate green on the
+  mini. APFS does **not** decompose, contrary to the assumption in §II.8.
+- **Phase 4 (encrypted vault sync)** — STARTED 2026-08-06, in progress. Two
+  known gaps: the fork handling, and the vault key not being present in
+  `ExecEnv`.
+- **Phases 5 and 6** — unbuilt.
+
+The soak and chaos rig that exercises this engine is its own spec,
+`specs/drive_sync_soak.md` (Phase A live, B and C unbuilt). Engine defects the
+rig has found are being fixed against the crates directly; this spec stays
+active until Phase 6 lands.
 
 ## Why this exists
 

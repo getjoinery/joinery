@@ -21,7 +21,7 @@ Two findings raise this from tidiness to urgency:
 
 ## Relationship to Other Specs
 
-`specs/backups_core_and_incremental.md` Phase 1 (envelope encryption: per-backup data key sealed to the operator recovery public key + a disposable site key) is the mechanism this spec relies on for backup artifacts. That spec owns the backup pipeline changes; this spec owns everything else about keys and defines the end-state custody model both must satisfy. Build order: Phase A here (DR card) → backups Phase 1 (envelope, which also encrypts the tarball) → remaining phases here in any order.
+`specs/implemented/backups_core_and_incremental.md` Phase 1 (envelope encryption: per-backup data key sealed to the operator recovery public key + a disposable site key) is the mechanism this spec relies on for backup artifacts. That spec owns the backup pipeline changes; this spec owns everything else about keys and defines the end-state custody model both must satisfy. Build order: Phase A here (DR card) → backups Phase 1 (envelope, which also encrypts the tarball) → remaining phases here in any order.
 
 ---
 
@@ -117,7 +117,7 @@ This collapses inventory section E into dependency on `secret_box_key` — accep
 
 ### Phase C — Backup envelope model
 
-Owned by `specs/backups_core_and_incremental.md` Phase 1; requirements this spec adds to it:
+Owned by `specs/implemented/backups_core_and_incremental.md` Phase 1; requirements this spec adds to it:
 
 - The **entire artifact set** (project tarball, DB dump, manifest sidecars) is envelope-encrypted — closing finding 3, not just restructuring keys.
 - Sealed data keys travel inside the artifact set; `bke_backup_key_escrow`, blob replication, and `~/.joinery_backup_key` retire as load-bearing pieces (legacy unseal path kept as a documented manual procedure for pre-envelope archives).

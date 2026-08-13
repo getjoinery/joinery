@@ -1,9 +1,14 @@
 # Platform Protection Levels — one four-rung vocabulary for every service
 
-**Status: DRAFT 2026-08-02 — doctrine + gap matrix. Nothing here is built; the
-matrix below is the work list. Companion spec: `specs/implemented/sealed_content_egress.md`
+**Status: DRAFT 2026-08-02 — doctrine + gap matrix; the matrix below is the work
+list. Companion spec: `specs/implemented/sealed_content_egress.md`
 (the egress choke point is what makes the Private rung meaningful platform-wide).
 Ladder shape and the Guarded name are owner-resolved (decisions R1/R2 below).**
+
+**One matrix row is built:** Drive's Private rung, per
+`specs/implemented/drive_private_tier.md`. Its level UI is Drive's own
+(`assets/js/drive.js`). The **shared** picker of work item 1 below is still this
+spec's deliverable, and Drive adopts it when it lands.
 
 ## Intent
 
@@ -187,8 +192,8 @@ mail is the platform's center. If it ever un-parks, it arrives as mail's true
    content search, office-editing gate flipped to in-window-allowed, public-link
    refusal, sync exclusion, folder-level migration flows (Standard↔Private
    re-encrypt jobs; Private→Fortress is a client-side re-encrypt and may land
-   later — see D2). *(fill-in, large — gets its own build spec:
-   `specs/drive_private_tier.md`, to be written from this doctrine)*
+   later — see D2). *(fill-in, large — **BUILT**, per its own build spec
+   `specs/implemented/drive_private_tier.md`, written from this doctrine)*
 3. **Renames** — mail and chat stored level values `fortress` → `guarded`
    (column values, card copy, ceremony wording, docs; pre-launch so no
    migration of user expectations, just a data update + sweep). Drive UI:

@@ -1,17 +1,18 @@
 # Publish Integrity Guards
 
-**Status: BUILT 2026-07-24.** All four phases implemented; safe tier green.
-Acceptance 1, 2, 4 and 6 are proven by test (`agent_release_channel`,
-`agent_bundle_drift`, `publish_log`).
+**Status: IMPLEMENTED.** Built 2026-07-24; filed 2026-08-13. All four phases
+implemented; safe tier green. Acceptance 1, 2, 4 and 6 are proven by test
+(`agent_release_channel`, `agent_bundle_drift`, `publish_log`).
 
 Live publishes 0.8.185, 0.8.186 and 0.8.187 each took the source-matches-bundle
 path, reported `v0.4.0 (skipped)`, and wrote a log to `logs/publish/` — proving
 acceptance 2 and the logging half of 5 on a real run, and confirming the refusal
 does not fire spuriously.
 
-Acceptance 3 is still open: no live publish has yet had agent source newer than
-the bundle, so the build-and-ship path has only ever run under test. Move to
-`implemented/` after a publish that actually rebuilds the agent.
+Acceptance 3 — a live publish where agent source is newer than the bundle, so
+the build-and-ship path runs for real rather than under test — is carried by the
+**pre-launch verification round**. The path is implemented and covered by test;
+what remains is one observation on a real release.
 
 ## What this is
 

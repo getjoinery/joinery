@@ -1,11 +1,32 @@
 # Linode Quick Deploy App — Joinery in the Akamai Marketplace
 
-**Status:** Unbuilt spec, gated on its dependency.
-**Depends on:** `specs/linode_stackscript.md` phases 1–3. That spec builds the
-mechanism; this one turns it into a listing. In particular, its Gap 3 (SSL
-without console intervention) is a hard Akamai requirement, not a nicety.
-**Licensing:** out of scope here — see `specs/open_core_licensing.md`. The
-listing's license line depends on that spec's first open decision.
+**Status:** UNBUILT — but **no longer blocked**. Every dependency is closed; what
+remains is the submission itself.
+
+**The mechanism is done.** `specs/implemented/linode_stackscript.md` shipped
+2026-08-11: StackScript **2185451** is public at
+`https://cloud.linode.com/stackscripts/2185451`, targeting `linode/ubuntu26.04`
+with the domain field required. Phases 0–2 are implemented and Gaps 3–7 are
+closed in code — including **Gap 3 (SSL without console intervention)**, the hard
+Akamai requirement, now a systemd timer that resolves the domain, issues the
+certificate, and disarms itself, watched doing so on a live box. Gates A2, B and
+C pass. **Gate A1 has never been run** — the hands-off record-creation path went
+public untested by owner's call, and it is the one path a Marketplace visitor
+could take that nobody has taken. Run it before submitting.
+
+**Licensing is resolved.** `specs/implemented/open_core_licensing.md` closed this
+spec's open decision #1 and deleted its licensing work: PolyForm Shield 1.0.0
+core makes the listing line **"free for your own use — source available."**
+
+**What is left is the listing, not the software:** the public glue repo, the
+Ansible playbook, the 100–125 word description, the support URL, the technical
+documentation, the brand assets, and the pull request to
+`akamai-compute-marketplace/marketplace-apps`.
+
+One coupling to watch: item 2 of `specs/php_85_pg18_stack_cutover.md` re-points
+the stackscript wrapper at 26.04 and calls for re-running these live gates. The
+StackScript already targets 26.04 only, so submitting before that cutover lands
+is safe.
 
 ## What this does for the user
 

@@ -1,11 +1,16 @@
 # Installer Defects Found Provisioning the Soak VPS
 
-**Status:** Built and committed 2026-08-06. §§ 1–6 fixed in
+**Status:** IMPLEMENTED. Built and committed 2026-08-06; filed 2026-08-13.
+§§ 1–6 fixed in
 `install.sh` 2.43 / `Dockerfile.template` 4.8 / `_site_init.sh` 2.7 /
 `fix_permissions.sh` 2.7, contract-test assertions added (274 checks green),
-live gate written at `tests/functional/install/install_container_gate.sh`
-(never yet run on a real box). § 7 still needs its publish — nothing there
-reaches an installing user until a release carries it. **§ 8 is built**
+live gate written at `tests/functional/install/install_container_gate.sh`.
+
+Two things are owned by the **pre-launch verification round** rather than by this
+spec: running that container gate on a real box, and the § 7 publish — every fix
+here is committed, but none reaches an installing user until a release carries it.
+
+**§ 8 is built**
 (`install.sh` 2.46, 2026-08-07) and proven: the installer's own HTTP-01 path
 issued a certificate for `upgradetest.getjoinery.com` on a dual-stack 26.04
 box.

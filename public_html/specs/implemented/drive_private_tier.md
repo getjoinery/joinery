@@ -1,6 +1,7 @@
 # Drive Private Tier — server-custody encrypted files, opened in-window
 
-**Status: BUILT and verified 2026-08-06.** Shipped in `1e5097d4`, covered by
+**Status: IMPLEMENTED.** Built and verified 2026-08-06, shipped in `1e5097d4`,
+filed 2026-08-13. Covered by
 `tests/functional/drive/private_tier_test.php` (103 checks) and
 `tests/vault/sealed_file_container_test.php` (83 checks), docs written. Build
 spec for the Private rung on Drive, per `specs/protection_levels_platform.md`
@@ -8,14 +9,11 @@ spec for the Private rung on Drive, per `specs/protection_levels_platform.md`
 machinery that already exists; each section names the code it rides on and the
 refactors it needs.
 
-**Deliberately still in `specs/` rather than `specs/implemented/`.** Every
-build-order step below is done except the last: this spec files *together with*
-the doctrine spec when the shared level-picker component lands. Drive's own
-level UI is complete and lives in `assets/js/drive.js`; what is outstanding is
-the **shared** picker, which is the doctrine spec's deliverable rather than
-this one's. The same coupling is recorded in
-`specs/implemented/drive_private_tier_defects.md`, so moving this file early
-would contradict a filed decision and break its references.
+Every build-order step below is done. Drive's own level UI is complete and lives
+in `assets/js/drive.js`. The **shared** level-picker component is a deliverable
+of the doctrine spec, `specs/protection_levels_platform.md`, and is tracked
+there; Drive adopts it when it lands, which is an adoption task against a
+shipped feature rather than unfinished work in this spec.
 
 **Defects found in review of the build are tracked in
 `specs/implemented/drive_private_tier_defects.md` (D1–D7). D7 carries the answer to this

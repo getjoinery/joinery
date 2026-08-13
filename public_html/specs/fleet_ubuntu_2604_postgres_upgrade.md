@@ -5,7 +5,7 @@
 
 ## Problem
 
-The entire fleet runs Ubuntu 24.04 LTS with the distro-default stack: PostgreSQL 16, PHP 8.3, Apache 2.4.58. PostgreSQL 16 lacks incremental base backups (`pg_basebackup --incremental` + `pg_combinebackup`, added in 17), which blocks the database-incremental phase of `specs/backups_core_and_incremental.md`. Rather than bolting PG 17 from the PGDG repository onto 24.04 — a second package source to maintain on every node forever — moving to Ubuntu 26.04 LTS gets a supported distro-default PostgreSQL ≥ 18 (which includes the incremental backup feature set), a current PHP, and resets the LTS clock in one campaign.
+The entire fleet runs Ubuntu 24.04 LTS with the distro-default stack: PostgreSQL 16, PHP 8.3, Apache 2.4.58. PostgreSQL 16 lacks incremental base backups (`pg_basebackup --incremental` + `pg_combinebackup`, added in 17), which blocks the database-incremental work in `specs/backups_remaining_gaps.md`. Rather than bolting PG 17 from the PGDG repository onto 24.04 — a second package source to maintain on every node forever — moving to Ubuntu 26.04 LTS gets a supported distro-default PostgreSQL ≥ 18 (which includes the incremental backup feature set), a current PHP, and resets the LTS clock in one campaign.
 
 ## Goals
 
@@ -44,7 +44,7 @@ Verified against the 26.04 (resolute) archive 2026-08-01: **PostgreSQL 18, PHP 8
    list is now filtered to what the release actually packages, the apt exit
    code is read, and twelve required modules are verified against `php -m`.
 3. **Done.** Test estate run under 8.5; the deprecation sweep is in
-   `specs/php_85_pg18_code_prep.md`. Bulk item was **not** implicitly-nullable
+   `specs/implemented/php_85_pg18_code_prep.md`. Bulk item was **not** implicitly-nullable
    parameters (three sites total) but `ReflectionProperty::setAccessible()` —
    73 calls across 41 files, three of them in `tests/lib/harness.php`, where
    `harness_shutdown_report()` prints `error_get_last()` and so reported the
@@ -110,7 +110,7 @@ Two procedures; per-node choice recorded in Open Decisions:
 
 - Mac build boxes (not Ubuntu; separate lifecycle).
 - PGDG-pinned PostgreSQL on 24.04 (rejected: permanent extra package source for a stack we're leaving).
-- App-level PostgreSQL 18 feature adoption (incremental backups land via `specs/backups_core_and_incremental.md`, not here).
+- App-level PostgreSQL 18 feature adoption (incremental database backups land via `specs/backups_remaining_gaps.md`, not here).
 
 ## Documentation (update at build time, current-state only)
 

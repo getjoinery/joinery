@@ -1,6 +1,8 @@
 # Agent Release Channel: ship and update joinery-agent inside the platform release
 
-**Status:** BUILT 2026-07-22. Gates 1, 3, 4 passed live on dev (Go suite 18 tests `-race`; bootstrap via install_agent.sh 0.2.0→0.3.0; unattended self-update 0.3.0→0.3.1; tampered v0.3.2 refused with `verify_failed` surfaced on the dashboard, recovered to `current` on manifest fix). Gate 2 passed in direct-invocation form (build+sign+idempotent-carry-forward proven; the publish_upgrade output lines ride the next real publish). **Gate 5 (fleet proof — next publish+apply on getjoinery brings its agent current with zero manual steps) is PENDING and is the condition for moving this spec to implemented/.**
+**Status:** IMPLEMENTED. Built 2026-07-22; filed 2026-08-13. Gates 1, 3, 4 passed live on dev (Go suite 18 tests `-race`; bootstrap via install_agent.sh 0.2.0→0.3.0; unattended self-update 0.3.0→0.3.1; tampered v0.3.2 refused with `verify_failed` surfaced on the dashboard, recovered to `current` on manifest fix). Gate 2 passed in direct-invocation form (build+sign+idempotent-carry-forward proven; the publish_upgrade output lines ride the next real publish).
+
+Gate 5 — the fleet proof, that a publish+apply on getjoinery brings its agent current with zero manual steps — is carried by the **pre-launch verification round**, which exercises a full publish+apply cycle across the fleet. The mechanism is built and every gate that dev can run is green; what remains is one observation on a real release, and it is owned by that round rather than by this spec.
 
 Owner decision 2026-07-22: the agent ships inside the platform release (one channel, no separate agent release stream).
 

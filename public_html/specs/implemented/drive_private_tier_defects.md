@@ -1,7 +1,7 @@
 # Drive Private tier — defect fix pack
 
 **Status: IMPLEMENTED 2026-08-06. Findings from the code review of the Private
-tier build (`specs/drive_private_tier.md`). Seven defects, most severe first. D1
+tier build (`specs/implemented/drive_private_tier.md`). Seven defects, most severe first. D1
 and D2 were data-loss and data-corruption bugs; D3 and D4 user-visible dead ends;
 D5 a hole in the v1 refusals; D6 an integrity gap; D7 an unresolved question from
 the parent spec's own build-time verification flag.**
@@ -13,12 +13,9 @@ reaching Private content) was answered by the owner, investigated, and deferred:
 platform passkeys turn out to be structurally unavailable for it, and the full
 analysis lives in `specs/native_vault_unlock.md`.
 
-The parent `specs/drive_private_tier.md` stays active — it files with
-`specs/protection_levels_platform.md` when the shared level-picker component
-lands.
-
-Parent spec: `specs/drive_private_tier.md` (stays in `specs/` until the shared
-level-picker component lands). Doctrine: `specs/protection_levels_platform.md`.
+Parent spec: `specs/implemented/drive_private_tier.md`, filed 2026-08-13.
+Doctrine: `specs/protection_levels_platform.md`, which owns the shared
+level-picker component Drive adopts when it lands.
 
 ---
 

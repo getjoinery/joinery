@@ -1,8 +1,8 @@
 # Drive Content Search — inside files, at every protection level that allows it
 
-**Status: DRAFT 2026-08-02 — the v2 companion to `specs/drive_private_tier.md`
-(split out per doctrine decision D1). Unbuilt; builds only after the Private
-tier lands. Drive search today is filename-only (`_drive_list_search()`,
+**Status: DRAFT 2026-08-02 — the v2 companion to
+`specs/implemented/drive_private_tier.md` (split out per doctrine decision D1).
+Unbuilt. Its dependency is met: the Private tier is built and filed. Drive search today is filename-only (`_drive_list_search()`,
 `logic/drive_list_logic.php:228`), and that stays working at every level —
 this spec adds matches on what's *inside* the files.**
 

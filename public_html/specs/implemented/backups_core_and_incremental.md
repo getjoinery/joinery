@@ -1,11 +1,16 @@
 # Backups: Core Engine, Retention, and Incremental Chains
 
-**Status:** Phases 1-3 BUILT, live-verified 2026-08-02 and committed as
-`b0bd8e16`. Chains were then exercised end to end against a real bucket on
-2026-08-06 (full plus two genuinely incremental runs, restore replaying an added,
-a changed and a deleted file) — which closed two of the three verification risks
-the review brief raised. Phase 4 untouched; see § Phase 4 scope below for what it
-now carries.
+**Status:** IMPLEMENTED. Phases 1-3 built, live-verified 2026-08-02 and committed as
+`b0bd8e16`; filed 2026-08-13. Chains were then exercised end to end against a real
+bucket on 2026-08-06 (full plus two genuinely incremental runs, restore replaying
+an added, a changed and a deleted file) — which closed two of the three
+verification risks the review brief raised. The third, retention actually
+deleting an aged chain from a real bucket, has not been observed and travels with
+the gaps spec below.
+
+**Scope of this spec:** the envelope key model, the core engine with self-backup
+and retention, and incremental file chains — all built. The three gaps the build
+deliberately left open are split out to `specs/backups_remaining_gaps.md`.
 **Date:** 2026-08-01
 
 ## Phase 3 as built
@@ -283,33 +288,13 @@ Restore of a chain point = download full + incrementals 1..k + the k-th db dump,
 
 ---
 
-## Phase 4 scope
+## Out of scope
 
-Three gaps the Phase 1-3 build left open deliberately. None is a regression and
-none blocks anything shipped; each is a feature that was scoped out, and they are
-recorded here because a review otherwise re-discovers them one at a time.
-
-1. **Remote core-history display.** The fleet Backups tab cannot show a managed
-   node's own backup history — it needs a new management API endpoint to read it.
-   The v1 decision was observe-only, so this is the natural completion of open
-   decision 4 rather than a defect.
-2. **Install-from-backup cannot open an envelope minted by another site.** A
-   restore onto a *different* node has no recipient it holds a private half for.
-   Pre-existing, not introduced by the envelope model — the old per-node escrow
-   had the same wall. The clean fix is the source node re-sealing the data key to
-   the destination's site key at provisioning time, which is a provisioning
-   change, not a backup-format one.
-3. **Multipart upload** — see *Later / Out of Scope* below; it belongs to both
-   lists because the 5 GB single-PUT ceiling is the first thing a large full
-   backup hits.
-
-## Later / Out of Scope
-
-- **Multipart S3 upload** in `S3Signer` — the single-PUT ceiling (5 GB on S3/B2) eventually bites large fulls; incrementals postpone, not remove, the need.
-- **PG 17+ incremental database backups** (`pg_basebackup --incremental` + `pg_combinebackup`) once the fleet's PostgreSQL allows.
-- Per-table logical incrementals: rejected — change detection via stats counters is not crash-safe; audit-trigger approaches cost more than they save.
-- restic/borg: rejected for now — replaces the archive format, key custody, and restore/browse model wholesale and adds a fleet-wide binary dependency; revisit only if cross-backup dedup becomes a measured cost problem.
-- Client-custody / Sealed Vault integration: backups here are operator-level infrastructure; user-level encrypted content (Drive E2E) is already opaque in the files being archived.
+Everything this build deliberately left open — remote core-history display,
+cross-site envelope portability on restore, multipart S3 upload — plus the
+rejected alternatives (per-table logical incrementals, restic/borg,
+client-custody integration) and the PG 17+ incremental database backups that
+wait on the OS campaign, is collected in `specs/backups_remaining_gaps.md`.
 
 ## Testing
 
@@ -328,6 +313,11 @@ recorded here because a review otherwise re-discovers them one at a time.
 ## Open Decisions
 
 1. ~~**Key model approval (gates Phase 1)**~~ **RESOLVED 2026-08-02 — adopt envelope encryption.** Two recipients (operator recovery key + disposable site key); per-node key escrow retired. The password-manager key is the single root secret; automated restores keep working via the site recipient.
-2. **Retention defaults:** proposed keep-4-chains cloud / 7-days local — confirm numbers.
-3. **Chain cadence defaults:** weekly full + daily incremental — confirm.
-4. **Backup history table naming/prefix** and whether server_manager's Backups tab should write core settings on remote nodes in v1 or observe-only.
+2. ~~**Retention defaults**~~ **TAKEN** — keep-4-chains cloud / 7-days local, as
+   shipped. Worth re-confirming against a real site's storage bill rather than
+   re-deciding here.
+3. ~~**Chain cadence defaults**~~ **TAKEN** — a fresh full every 7 days plus a
+   hard ceiling of 30 incrementals on one full, as shipped and exercised.
+4. **Backup history table naming/prefix**, and observe-only vs. writing core
+   settings on remote nodes — moved to `specs/backups_remaining_gaps.md`, where
+   it belongs to the remote-history gap it gates.
