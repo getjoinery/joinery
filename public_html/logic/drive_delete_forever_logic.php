@@ -60,6 +60,7 @@ function drive_delete_forever_logic_descriptor(): array {
 	return array(
 		'description'      => 'Permanently delete a Drive file or folder subtree. Owner only. Call once for an impact preview, then again with confirm=true.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),

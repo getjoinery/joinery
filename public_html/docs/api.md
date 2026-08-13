@@ -745,6 +745,7 @@ function your_action_logic_descriptor(): array {
     return [
         'description'      => 'What this action does',
         'requires_session' => true,   // default: true
+        'requires_setting' => 'drive_active',  // optional — feature gate
         'mutates'          => true,
         'input'            => [
             'email'   => ['type' => 'email', 'required' => true],
@@ -770,6 +771,19 @@ remains the backstop. See `includes/DescriptorValidator.php` for the type
 vocabulary (`string`, `int`, `float`, `bool`, `email`, `text`, `password`,
 `date`, `datetime`, `array`) and per-field options (`enum`, `min`/`max`,
 `max_length`, `items`).
+
+**Feature gating.** An action belonging to a feature the operator can switch
+off declares that setting as `requires_setting`. The name is a single setting;
+the action exists only while it is truthy. Enforcement happens at dispatch —
+before authentication and before the logic runs — and answers `403` with
+errortype `ActionError` and a message naming the setting. The discovery
+endpoint omits the action entirely, the same way it omits actions belonging to
+inactive plugins.
+
+This is the API face's counterpart to `check_setting` on a `serve.php` route,
+which gates the feature's pages. An action of a gated feature declares
+`requires_setting`; the page route declares `check_setting`. Every `drive_*`
+action declares `'requires_setting' => 'drive_active'`.
 
 **No descriptor, no endpoint.** An action with a `{action}_logic()` function
 but no `{action}_logic_descriptor()` is not exposed, and asking for it answers

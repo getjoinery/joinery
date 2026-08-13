@@ -77,6 +77,7 @@ function drive_versions_logic_descriptor(): array {
 	return array(
 		'description'      => 'List a Drive file\'s saved versions, newest first. Each carries content_sha256 — the identity of the bytes that version holds, in the same domain as the head file export (plaintext for a plaintext file, ciphertext for an encrypted one) — so a client can tell which entry holds the content it is looking for.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

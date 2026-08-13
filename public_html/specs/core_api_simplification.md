@@ -1,12 +1,15 @@
 # Core API simplification — design and behavior items from the 2026-08-13 review
 
-**Status: DRAFT 2026-08-13 — unbuilt. Companions:
-`specs/core_api_mechanical_pass.md` (the bugs / mechanical / fully verifiable
-items from the same review; several items below assume its groundwork),
-`specs/plugin_bootstrap_key.md` (split out to build NEXT, in the same commit
-as the uncommitted vault work — see R4), and
-`specs/plugin_routes_registry.md` (the routes registry, split out and
-deferred past the release — see R5).**
+**Status: DEFERRED 2026-08-13 (owner) — see R6. Prerequisites are met and the
+spec is buildable; it is deferred on value, not readiness. The one live defect
+it contained was split out and shipped as
+`specs/api_action_feature_gate.md`.**
+
+**Companions:** `specs/core_api_mechanical_pass.md` and
+`specs/plugin_bootstrap_key.md` (both built and committed — a3f575a0 lineage;
+in `specs/implemented/`), `specs/plugin_routes_registry.md` (deferred past the
+release — see R5), and `specs/api_action_feature_gate.md` (built; carries work
+item 1's second bullet).
 
 ## Intent
 
@@ -30,14 +33,15 @@ fields their schema already declares required.
   `requires_session` (page face: redirect to login; API face keeps 401), and
   runs the same `DescriptorValidator::coerce()` over the input before the
   logic body sees it.
-- A new descriptor key `requires_setting` (e.g. `'drive_active'`) enforced on
-  both faces, replacing the fact currently spelled four ways: 69 hand-written
-  body guards, `check_setting` in serve.php routes, `settingActivate` in
-  plugin.json, and nothing at all on the API face — today `GET /api/v1/actions`
-  lists Drive actions on an instance with Drive off. serve.php's
-  `check_setting` and plugin `settingActivate` become aliases fed from or
-  checked against the descriptor, so the fact has one home; the discovery
-  endpoint hides actions whose setting is off.
+- ~~A new descriptor key `requires_setting`~~ — **SHIPPED separately** as
+  `specs/api_action_feature_gate.md`. The key exists, is enforced on the API
+  face at both dispatch chokepoints as a 403, and filters the discovery
+  endpoint. It was split out because it was the only part of this spec fixing a
+  live defect: seven Drive actions were callable with Drive switched off, which
+  this item had described only as a discovery-listing cosmetic problem.
+  Remaining here, unbuilt: unifying serve.php's `check_setting` and plugin
+  `settingActivate` as aliases of the descriptor so the fact has one home, and
+  retiring the 69 hand-written body guards.
 - After enforcement lands, the redundant body guards and field re-checks are
   deleted (that mop-up is mechanical, but it is gated on this design change,
   which is why it lives here and not in the mechanical pass).
@@ -216,6 +220,33 @@ Deferred here solely so its diff cannot collide with in-flight work.
   `specs/plugin_routes_registry.md`, intended as the first post-release
   build — which records the deferral rationale and the declined
   collision-check middle path. Nothing in this spec depends on it.
+
+- **R6 — The spec is deferred; its one live defect ships alone** (owner,
+  2026-08-13). Both blocking prerequisites landed (`554a23f6` vault +
+  bootstrap key, `4d910a33` mechanical pass), so this was buildable. It is
+  deferred anyway: the bulk of it buys internal consistency rather than
+  user-visible capability, and it tightens 208 previously-permissive
+  enforcement paths immediately before a release. The exception —
+  `requires_setting` — was carved out and built, because it closed an actual
+  hole. Nothing here expires; it is picked up post-release.
+
+## Count corrections (audit, 2026-08-13)
+
+Verified against the tree while deciding R6. Most cited figures hold — 229
+views with the preamble (237 tree-wide), 16 redundant `check_if_exists`
+(exactly 16), 69 body setting-guards (exactly 69), ~6,957 require lines
+(6,984). Two need adjusting before this spec is scheduled:
+
+- **Work item 1's "109 of 208" is 167.** Counting strictly — descriptor
+  declares `requires_session: true` *and* the body re-checks anyway — 167 of
+  208 files are redundant, not 109. The mop-up is roughly half again the size
+  budgeted.
+- **Work item 6's "36 files" is 33 tree-wide but only 4 logic files.** The
+  claimed harm (the API reporting a declined action as *"completed
+  successfully"*, `api/apiv1.php:114`) can only occur on files reachable
+  through the API face. The other ~29 are views and ajax handlers the API never
+  sees. The `fail()`/`error()` design argument stands; its stated blast radius
+  does not.
 
 ## Open decisions
 

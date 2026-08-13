@@ -295,6 +295,7 @@ function drive_list_logic_descriptor(): array {
 	return array(
 		'description'      => 'List a Drive folder\'s contents, or the Starred / Trash / Shared-with-me collections.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

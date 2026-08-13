@@ -55,6 +55,7 @@ function drive_device_revoke_logic_descriptor(): array {
 	return array(
 		'description'      => 'Unlink a sync device and revoke the session key it authenticates with, cutting off further access immediately.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'auth'             => array('capability' => 'delete'),
 		'input'            => array(

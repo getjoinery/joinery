@@ -94,6 +94,7 @@ function drive_link_create_logic_descriptor(): array {
 	return array(
 		'description'      => 'Create a public share link for a Drive file or folder (owner only, tier-gated).',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'entity_type'  => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),

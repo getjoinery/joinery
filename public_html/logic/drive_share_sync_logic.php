@@ -117,6 +117,7 @@ function drive_share_sync_logic_descriptor(): array {
 	return array(
 		'description'      => 'Reconcile the member grants on a Drive file or folder (owner only). Body carries `grants`: a JSON object mapping each grantee (user id or email) to a role (viewer|editor). It is a map rather than a list, so it is validated in the logic (not the descriptor schema) and passes through the boundary untouched.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),

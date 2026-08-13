@@ -97,6 +97,7 @@ function drive_rename_logic_descriptor(): array {
 	return array(
 		'description'      => 'Rename a Drive file or folder. Plaintext items take `name`. An encrypted file takes `encrypted_metadata` instead (the FK-encrypted metadata blob with the new name, produced in the browser; a plaintext `name` is refused so the secret name never reaches the server).',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'entity_type' => array('type' => 'string', 'required' => true, 'enum' => array('file', 'folder'), 'label' => 'Entity type'),

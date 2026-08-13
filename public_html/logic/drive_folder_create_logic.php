@@ -105,6 +105,7 @@ function drive_folder_create_logic_descriptor(): array {
 	return array(
 		'description'      => 'Create a folder in the current user\'s Drive. `protection_level` is one of standard / private / fortress and is accepted only at the root: a folder under a protected parent inherits that parent\'s level, and raising the level part-way down a tree is refused (a protected tree is a top-level tree). `encrypted` is the older spelling for fortress and still works. A private folder requires the owner to have a vault.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(
 			'name'             => array('type' => 'string', 'required' => true, 'max_length' => 255, 'label' => 'Folder name'),

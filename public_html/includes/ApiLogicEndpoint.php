@@ -31,7 +31,12 @@
  * actions via the theme chain; {plugin}/{action} names resolve to a plugin's
  * logic directory).
  *
- * @version 1.4.0
+ * @version 1.5.0
+ * @changelog 1.5.0 - Feature gating (specs/api_action_feature_gate.md): a
+ *   descriptor's requires_setting names a setting that must be on for the
+ *   action to exist. Enforced in resolveAction()/resolveForm() — before auth
+ *   and before the logic runs — as a 403. Closes the gap where serve.php's
+ *   check_setting gated a feature's pages while its API actions stayed live.
  * @changelog 1.4.0 - Sealed idempotency cache (specs/implemented/sealed_content_egress.md
  *   § resolved decision 6): a response produced while the process held sealed
  *   content is stored encrypted to that owner — or not at all when more than
@@ -65,6 +70,33 @@ class ApiLogicEndpoint {
 	 */
 	protected static function requiresSession($meta) {
 		return $meta['requires_session'] ?? true;
+	}
+
+	/**
+	 * Refuse an action whose feature is switched off.
+	 *
+	 * serve.php gates a feature's pages with check_setting; the API face never
+	 * passes through serve.php, so without this an action of a disabled feature
+	 * stays callable — which is what a descriptor's requires_setting declares
+	 * away (specs/api_action_feature_gate.md).
+	 *
+	 * Called from resolveAction() and resolveForm(), the two points every API
+	 * request resolves a descriptor, so it cannot be reached around. Exits via
+	 * api_error() when the setting is off.
+	 *
+	 * 403, not 404: the action exists, and calling it unknown sends a developer
+	 * hunting a typo that is not there.
+	 */
+	protected static function assertSettingEnabled($meta, $action_label) {
+		$setting = $meta['requires_setting'] ?? null;
+		if ($setting === null || $setting === '') {
+			return;
+		}
+
+		if (!Globalvars::get_instance()->get_setting($setting)) {
+			api_error($action_label . ' is unavailable: the ' . $setting
+				. ' setting is off on this instance.', 'ActionError', 403);
+		}
 	}
 
 	/**
@@ -118,6 +150,8 @@ class ApiLogicEndpoint {
 		if (!function_exists($logic_function)) {
 			api_error('Action is misconfigured: ' . $action_label, 'ActionError', 500);
 		}
+
+		self::assertSettingEnabled($meta, $action_label);
 
 		return array($action_label, $meta, $logic_function);
 	}
@@ -574,6 +608,8 @@ class ApiLogicEndpoint {
 		if ($meta === null || !function_exists($form_function)) {
 			api_error('Unknown form: ' . $action_label, 'ActionError', 404);
 		}
+
+		self::assertSettingEnabled($meta, $action_label);
 
 		return array($action_label, $action_name, $meta, $form_function);
 	}

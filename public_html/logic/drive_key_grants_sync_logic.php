@@ -64,6 +64,7 @@ function drive_key_grants_sync_logic_descriptor(): array {
 	return array(
 		'description'      => 'Reconcile per-user wrapped file keys for encrypted Drive files (owner only). Body carries `file_keys`: a map { file_id: { user_id: wrapped_file_key } } of opaque browser-produced blobs; validated in the logic and passed through the boundary untouched.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => true,
 		'input'            => array(),
 	);

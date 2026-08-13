@@ -38,6 +38,7 @@ function drive_devices_logic_descriptor(): array {
 	return array(
 		'description'      => 'The sync devices linked to the caller\'s account, with last check-in time and change-feed position.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(),

@@ -285,6 +285,7 @@ function drive_index_logic_descriptor(): array {
 	return array(
 		'description'      => 'Walk every Drive entity the caller can see, in keyset-paginated pages — the cold-start and post-reset counterpart to drive_changes. Lean exports: no signed URLs, no breadcrumbs. Trashed items are included with deleted:true so a client can tell a trashed file from a vanished one. Pass the previous page\'s next_after_id back as after_id (treat it as opaque); stop when done is true.',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(

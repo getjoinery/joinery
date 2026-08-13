@@ -128,6 +128,7 @@ function drive_changes_logic_descriptor(): array {
 	return array(
 		'description'      => 'Drive sync change feed: changes after a cursor, visible to the caller, with the next cursor (or reset).',
 		'requires_session' => true,
+		'requires_setting' => 'drive_active',
 		'mutates'          => false,
 		'auth'             => array('capability' => 'read'),
 		'input'            => array(
