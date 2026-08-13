@@ -10,14 +10,19 @@ and [Drive's Fortress folders](drive_encryption.md) are client-custody consumers
 (their keys are unwrapped only in the browser). The vault owns the identity and
 the lock; each consumer owns what it seals and how it presents locked state.
 
-Consumers register their hooks from a bootstrap file the vault loads lazily:
-plugins through `VaultUnlock::CONSUMER_PLUGINS`, and core consumers — Drive is
-one, since it has no plugin — through `VaultUnlock::CONSUMER_CORE_FILES`.
+Consumers register their hooks from a bootstrap file the vault loads lazily.
+Who consumes the vault is instance configuration, not a list in core: a plugin
+declares itself under `vaultConsumer` in its `plugin.json`, and a core consumer
+— Drive is one, since it has no plugin — in `vault_consumers.json` at the
+`public_html/` root. See [Registering a consumer](#registering-a-consumer), and
+[Building a vault consumer](plugin_developer_guide.md#building-a-vault-consumer)
+for the developer-facing walkthrough.
 
 ## The shape of it
 
-Each user gets an X25519 keypair per **scope** (`uev_scope`; this package
-builds the server-custody `user` scope, shared by mail and chat). The
+Each user gets an X25519 keypair per **scope** (`uev_scope`). `user` is the
+server-custody scope, shared by mail, chat and every other consumer the server
+reads for while the member is present; every other scope is client custody. The
 **public** key is cleartext at rest — anything can seal to it, even while the
 user is offline. The **secret** key never touches disk unwrapped: it exists
 only as **wrappings**, one per enrolled unlocker (a passkey's WebAuthn PRF
@@ -38,8 +43,10 @@ secret key in the window; every server-custody consumer's
 `VaultUnlock::secretKey()` call sees it open at once. That is the UX win and
 the accepted cost: an attacker resident during an active window reads every
 consumer's in-window content, not just one — bounded by the idle timeout,
-seal-after-use, and key rotation. A consumer with genuinely higher sensitivity
-can enroll a second `uev` scope for isolation instead of sharing `user`.
+seal-after-use, and key rotation. A consumer that needs genuine isolation
+declares a **client-custody** scope of its own and accepts that no server-side
+feature can ever read it; isolation *with* server readability is the one
+combination the platform does not offer.
 
 ## Crypto core
 
@@ -375,7 +382,75 @@ path, so an LLM sees a legible state rather than a stack trace).
 
 ### Writing
 
-`sealColumns()` is the only supported writer for a `$sealed_fields` column:
+`save()` seals. A consumer writes its content the way it writes anything else:
+
+```php
+$note = new AcmeNote(NULL);
+$note->set('acn_usr_user_id', $user_id);
+$note->set('acn_body', $body);
+$note->save();          // sealed
+```
+
+`set()` records which sealed columns the caller supplied, and `save()` lifts
+exactly those out of the ordinary column build and seals them once the row id
+exists. Everything that can fail — resolving the owner, finding their vault,
+recovering an existing row's key — happens before any SQL runs, and the insert
+and its seal share one transaction, so a save either seals or changes nothing.
+
+**Whether a row seals is a per-row policy decision.** The default is *seal when
+this row's owner has an active vault*, which is right for a consumer whose
+premise is that its content is private and needs no declaration. A consumer
+whose policy is dynamic — a per-domain security level, a per-conversation
+setting — overrides one method:
+
+```php
+protected static function shouldSeal(array $row): bool {
+    return $row['acn_visibility'] === 'private';
+}
+```
+
+**Ownership** resolves through `sealedOwnerUserIdFor()`, falling back to the
+conventional `{prefix}_usr_user_id` column — which the consumer sets on the row
+anyway, and is why the write path needs no vault lookup of its own.
+
+**Create works offline; updating sealed content needs the window.** That
+asymmetry is the crypto, not the API: sealing needs only the owner's public key,
+so any process can seal to a member at any time — an ingest path writes into a
+locked vault and there is never a reason to store protected content in the clear
+because "the window might close". Reusing an existing row's key means
+*unwrapping* it, which needs the secret, so a sealed-column update against a
+closed window raises `VaultLockedException`, exactly as `get()` does.
+
+**An update reuses the row's existing key** rather than minting a fresh one.
+Minting would rewrite the wrapping and orphan every sealed column the update did
+not itself rewrite. Whether the row is sealed is the **database's** answer, not
+the instance's: `sealColumns()` writes with a targeted UPDATE that never touches
+an already-loaded instance, so "loaded before the row sealed" is an ordinary
+state (a deferred ingest, another request), and a save that trusted its own
+stale flag would mint over the live wrapping. For the same reason `save()`
+treats the seal flag and wrapping columns as owned by the sealing path on a
+sealed row — a stale instance's `false`/`NULL` copies are never written back.
+
+**A first-time seal of an existing row seals the whole row**, not just the
+columns the edit touched. A row created plaintext (its owner had no vault yet,
+or the policy declined) and sealed later must not end up half-and-half:
+plaintext in a sealed column of a sealed row is leaked at rest and an exception
+on every later read, so every populated `$sealed_fields` column is lifted into
+that first seal.
+
+**Null clears; non-scalars are refused.** Setting a sealed column to `null` (or
+`''`) stores the empty value bare — never an AEAD blob of nothing — so `IS
+NULL` queries stay honest and reads return the same shape a plaintext model
+would. An array or object value throws: a silent string cast would durably seal
+the literal `"Array"`. Encode structured values to a string before `set()`.
+The write path also honors `sealedFieldIsActive()`, the same per-row predicate
+the read path checks: a column that is metadata on this row travels the
+ordinary column build in the clear, because sealing it would hand later readers
+the raw blob as data.
+
+`$seal_on_save = false` opts a model out, for a consumer that owns its own
+sealing path — one that seals blobs under the same key, or decides in code that
+predates this. Those call `sealColumns()` directly:
 
 ```php
 MailboxContact::sealColumns($contact_id, $owner_vault, [
@@ -388,20 +463,10 @@ It mints the row's DEK, wraps it to the owner's vault public key, seals each
 value, sets the flag and writes one UPDATE — returning the raw DEK so the caller
 can seal related blobs (attachments, raw messages) under the same key. Pass a
 DEK as the fourth argument to re-seal under an existing one, which leaves the
-key wrapping untouched and keeps anything already sealed beside it readable.
-
-The row must exist first: the AD binds every value to the primary key. Insert
-with the sealed columns empty, then seal.
-
-**Sealing needs only the owner's public key.** Any process can seal content to a
-user at any time, with no unlock window — only reading needs the in-window
-secret. So there is never a reason to store protected content in the clear
-because "the window might close".
-
-**`save()` is sealed-safe.** On a row whose flag is set it skips the
-`$sealed_fields` columns entirely, so an ordinary metadata edit cannot write
-decrypted content back into them, and it works with the vault locked. Those
-columns belong to `sealColumns()`.
+key wrapping untouched and keeps anything already sealed beside it readable. The
+row must exist first: the AD binds every value to the primary key. On such a
+model `save()` skips the `$sealed_fields` columns entirely on a sealed row, so
+an ordinary metadata edit cannot write decrypted content back into them.
 
 ### The override surface
 
@@ -611,37 +676,162 @@ as a download — useless without a live unlocker, but the thing that makes a
 restored backup's wrappings reconstructible if a `uew` row is ever lost
 independently of the vault row itself.
 
+## Registering a consumer
+
+A consumer is a package that seals content under the vault. Its load point is
+its ordinary plugin bootstrap — the top-level `bootstrap` key every plugin may
+declare (docs/plugin_developer_guide.md § Bootstrap), loaded once per request
+by `PluginBootstraps` in declared order. `vaultConsumer` declares the vault
+obligations riding on that bootstrap:
+
+```json
+"bootstrap": "includes/bootstrap.php",
+"vaultConsumer": {
+  "order": 20,
+  "reseals": true,
+  "caches": true
+}
+```
+
+A core consumer declares in `vault_consumers.json` at the `public_html/` root;
+having no plugin.json, each entry there carries its own `bootstrap` path
+relative to `public_html` (the string shorthand `"name":
+"includes/File.php"` declares a bootstrap and no obligations).
+
+The bootstrap is where the consumer's hooks register: `File` decrypt hooks,
+`onReseal`, `onWipe`, `onWindowCaps`, `VaultDeferredWork::register`.
+
+- **`order`** — lower loads first, ties broken by consumer name; default `100`.
+  Load order is load-bearing rather than cosmetic: mail parsing must precede AI
+  judging, because an unparsed message has no fields to read. The resulting
+  order is also the order `VaultDeferredWork` drains in. A plugin with a
+  bootstrap and no `vaultConsumer` block loads at the default order.
+- **`reseals`** — this consumer stores sealed content and must register an
+  `onReseal` callback. Declared and missing **refuses key rotation**.
+- **`caches`** — this consumer keeps disposable in-window plaintext outside the
+  sealed columns and must register an `onWipe` callback. Declared and missing
+  **logs**.
+
+The two obligations read symmetrically and deliberately do not behave
+symmetrically. Rotation is an operation the platform may refuse; locking is not.
+The only moment a missing wipe callback becomes observable is window close, and
+refusing to close a window would leave the vault **open** — a live unlocked
+vault traded for a stale plaintext file, which is worse than the thing being
+guarded. So `caches` is worth declaring mainly for what it makes visible: a
+reviewer reading `plugin.json` can see which consumers hold member plaintext
+outside the sealed columns without reading their code. It is not checkable the
+way `reseals` is — `$sealed_fields` is a filesystem fact, while nothing in the
+tree betrays a consumer writing plaintext to `/dev/shm` — so it catches the
+honest-but-forgetful only.
+
+A deactivated plugin's consumer is simply absent: its hooks do not load, its
+window caps lapse, and its sealed rows are untouched. Rotation still refuses
+while it declares `reseals`, because deactivation removes the callbacks but not
+the content. A plugin that was **never activated** on the instance does not
+refuse: with no activation there are no sealed rows (often no tables), and
+holding every member's rotation hostage to a feature nobody switched on would
+be the guard misfiring. Activation history (`plg_plugins`) draws the line, so
+deactivated-after-use still refuses.
+
+The two core registry files are part of the tree, and a deploy that loses or
+corrupts one fails **loudly**: `VaultScopes`/`VaultConsumers` throw rather than
+serving an empty registry, because an empty registry is the quiet version of
+the worst outcome — no scope resolves a PRF context, no consumer's hooks load,
+and the rotation guard has nothing to refuse on. The `user` scope additionally
+has a structural floor: the ceremonies hardcode it, so no edit to
+`vault_scopes.json` can remove it.
+
+Registrations are attributed to whichever consumer's bootstrap is loading, which
+is what lets a missing obligation be reported by name. That holds only while
+bootstraps load through `VaultUnlock::loadConsumerBootstraps()` and nowhere
+else; the loader checks and logs loudly if a bootstrap was included some other
+way first. So code that needs a class a bootstrap defines (Drive logic needing
+`DriveSealed`) calls `VaultUnlock::loadConsumerBootstraps()` rather than
+`require_once`-ing the bootstrap file — same classes loaded, attribution
+intact.
+
 ## The consumer contract (server-custody)
 
-1. Seal content with `VaultCrypto`, storing a per-item `*_sealed_key` on your
-   own rows and using your own AD row-binding convention. Decide deliberately
-   whose key each item seals to, including items that have no obvious owner —
-   mail resolves the mailbox's single owner, falling back to the domain's owner
-   for mail that belongs to no mailbox, because an item with no resolvable owner
-   is stored in the clear.
-2. Read via `VaultUnlock::secretKey($user_id)`; treat `null` as locked — a
-   one-tap prompt, never an error.
-3. Reuse the File decrypt hook for sealed attachments (`File::registerDecryptHook`)
-   and the sealed-field model hook for generic reads (`$sealed_fields` +
-   `decryptSealedField()`/`decryptSealedFieldStatic()`).
-4. Register a re-seal callback for rotation (`VaultUnlock::onReseal()`):
-   re-seal exactly the items on `$old_key_generation`, attempt every item,
-   and throw if any failed — a swallowed failure would let the ceremony
-   retire the only path to that content. The callback must cover **every**
-   sealed asset the user can own, unconditionally — the mailbox callback
-   re-seals protected-domain DKIM keys (live and rotation-pending) for a
-   domain owner even when that user holds no mailbox grants at all.
-5. Register a wipe callback if you keep any disposable in-window cache
-   (`VaultUnlock::onWipe()`), e.g. a plaintext search index.
-6. Own your own levels, scope, and locked-state surfaces (list placeholders,
+1. Declare a top-level `bootstrap` and a `vaultConsumer` block in your
+   `plugin.json`, with `reseals: true` if you store sealed content.
+2. Declare `$sealed_fields` plus the four convention columns on your models, and
+   write with ordinary `set()`/`save()`. Decide deliberately whose key each item
+   seals to, including items that have no obvious owner — mail resolves the
+   mailbox's single owner, falling back to the domain's owner for mail that
+   belongs to no mailbox, because an item with no resolvable owner is stored in
+   the clear.
+3. Read via `SystemBase::get()`, or `VaultUnlock::secretKey($user_id)` where you
+   need the key itself; treat a locked vault as a one-tap prompt, never an error.
+4. Reuse the File decrypt hook for sealed attachments
+   (`File::registerDecryptHook`) and the sealed-field model hook for generic
+   reads (`$sealed_fields` + `decryptSealedField()`/`decryptSealedFieldStatic()`).
+5. Register a re-seal callback for rotation. For rows that live in models, that
+   is one line:
+
+   ```php
+   VaultUnlock::onReseal(VaultUnlock::modelReseal([
+       MailboxContact::class,
+       MailboxMessage::class,
+   ]));
+   ```
+
+   `SystemBase::resealRows()` does one model's pass: it re-seals exactly the
+   rows on `$old_key_generation`, honors `sealedOwnerUserIdFor()`, attempts every
+   row and reports failures so the caller throws. A consumer that also seals
+   material outside model columns — mailbox's DKIM keys, Drive's blob keys —
+   writes its own callback and may register this one alongside. Whichever you
+   write, the contract is the same: re-seal exactly the items on
+   `$old_key_generation`, attempt every item, and throw if any failed, because a
+   swallowed failure lets the ceremony retire the only path to that content. The
+   callback must cover **every** sealed asset the user can own, unconditionally —
+   the mailbox callback re-seals protected-domain DKIM keys (live and
+   rotation-pending) for a domain owner even when that user holds no mailbox
+   grants at all.
+6. Register a wipe callback if you keep any disposable in-window cache
+   (`VaultUnlock::onWipe()`), e.g. a plaintext search index, and declare
+   `caches: true`.
+7. Own your own levels, scope, and locked-state surfaces (list placeholders,
    a content-action unlock prompt, a native `locked` flag) — the vault
    provides everything below the content. Run web unlock/lock ceremonies
    through `JoineryVaultLock` and listen for the two lock-chip events (see
    *The lock chip*) so your surface and the chip stay in one state.
 
-**One unlock opens every server-custody consumer** — the accepted tradeoff. A
-consumer with a genuinely higher sensitivity bar may enroll a second `uev`
-scope instead of sharing `user`.
+**One unlock opens every server-custody consumer** — the accepted tradeoff, and
+the reason a consumer needing genuine isolation declares a client-custody scope
+instead (see *Client-custody scopes*).
+
+## How long a window lasts
+
+Every server-custody consumer shares one window, so its length is a fold of
+every consumer's opinion. A consumer registers a provider from its bootstrap:
+
+```php
+VaultUnlock::onWindowCaps(
+    function (int $user_id): array {
+        return ['idle' => 7200, 'absolute' => 86400];
+    },
+    ['idle' => 7200, 'absolute' => 86400]   // contributed instead if the provider throws
+);
+```
+
+`capsForUser()` folds every provider by taking the **strictest** value per
+field — the minimum non-null `idle`, the minimum non-null `absolute`. One
+window cannot honor two lengths, and a member who configured a tight window on
+any consumer expressed a preference about their unlock window as a whole. A null
+field is an abstention, not a cap of zero, and with no providers registered the
+window is uncapped.
+
+The second argument is the fail-closed pair: an error resolving a policy must
+never hand an uncapped window to someone who may have configured the strictest
+one, so a provider declares what its own failure should imply. Omitting it
+means the Fortress caps — abstaining on error must be said explicitly, with
+`['idle' => null, 'absolute' => null]`, never defaulted into.
+
+Fail-closed covers the load path too: a declared consumer bootstrap that is
+missing on disk (a partial deploy) never got to register its provider, so
+`capsForUser()` folds the Fortress caps in whenever any declared bootstrap
+failed to load. A real Fortress user sees no difference; everyone else gets a
+tighter-than-usual window until the deploy is fixed.
 
 ## Deferred work in the window
 
@@ -678,9 +868,9 @@ The work never runs inside the beat. A batch can involve a language model whose
 timeout is measured in minutes; a beat blocked that long would stack up behind
 itself while the window it exists to protect lapsed.
 
-**Order and budget.** Consumers run in registration order — which is
-`CONSUMER_PLUGINS` order, and is meaningful: mail parsing precedes AI judging,
-because an unparsed message has no fields to read. Each batch is bounded by
+**Order and budget.** Consumers run in registration order — the `order` each
+declares in its `vaultConsumer` block, and it is meaningful: mail parsing
+precedes AI judging, because an unparsed message has no fields to read. Each batch is bounded by
 `vault_deferred_work_slice_seconds` (default 10), shared round-robin so one slow
 consumer cannot starve another. The deadline is checked **between** items, never
 inside one — an in-flight model call cannot be cut off cleanly, so a batch may
@@ -764,8 +954,29 @@ shared client-custody layer lives in **core** so every consumer reuses it:
   the defense against a session-rider burning codes). The secret key is never
   unwrapped server-side.
 
-Each client scope has its **own** keypair and its **own** PRF context
-(`vault-passwords-kek`, `vault-drive-kek`), so unlocking one never opens another.
+Each client scope has its **own** keypair and its **own** PRF context, so
+unlocking one never opens another. The context is DERIVED from the scope name
+(`vault-{scope}-kek`, with `user` grandfathered to `vault-kek`), never declared:
+a declared context lets a copy-pasted declaration silently merge two scopes'
+unlocks, and deriving it makes that mistake unrepresentable. Which scopes exist
+is instance configuration — core scopes in `vault_scopes.json`, a plugin's own
+under `vaultScopes` in its `plugin.json`:
+
+```json
+"vaultScopes": {
+  "passwords": { "custody": "client", "label": "Password vault" }
+}
+```
+
+A scope a plugin declares is always client custody: `user` is the only
+server-custody scope, and `VaultScopes` refuses a plugin declaring
+`custody: server`. A name collision is refused rather than merged — core wins
+over a plugin, and two plugins claiming one name are both refused — because a
+shared name means a shared PRF context, which is the isolation failure
+derivation exists to prevent. A vault row whose scope nothing declares is inert:
+no card, no unlock, and the rows are never deleted, so reactivating the plugin
+restores access.
+
 The built consumers are the [password manager](../plugins/vault/docs/overview.md)
 (scope `passwords`) and [Drive encryption](drive_encryption.md) (scope `drive`,
 reusing this same layer and adding per-file content encryption and multi-user key

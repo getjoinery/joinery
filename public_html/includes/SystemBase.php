@@ -107,12 +107,12 @@ abstract class SystemBase {
 	public static $api_unwritable_fields = array();
 
 	/**
-	 * Sealed Vault (docs/sealed_vault.md) generic read hook. A consumer with
+	 * Sealed Vault (docs/sealed_vault.md) generic content hook. A consumer with
 	 * fields sealed under the vault lists their column names here; add the
 	 * four convention columns ({prefix}_content_sealed, {prefix}_sealed_key,
 	 * {prefix}_sealed_owner_user_id, {prefix}_key_generation) and reading and
-	 * writing both work with no crypto code of your own — sealColumns() writes,
-	 * get() decrypts, save() leaves the sealed columns alone.
+	 * writing both work with no crypto code of your own — set()/save() seals,
+	 * get() decrypts.
 	 *
 	 * Models whose owner is indirect, or whose columns are content only on some
 	 * rows, override sealedOwnerUserIdFor() / sealedFieldIsActive() rather than
@@ -120,6 +120,39 @@ abstract class SystemBase {
 	 * nothing: get() only takes the decrypt path for a listed field name.
 	 */
 	public static $sealed_fields = array();
+
+	/**
+	 * Whether save() seals this model's $sealed_fields itself.
+	 *
+	 * On by default, because a model that declares sealed fields wants its
+	 * content sealed and should not have to write a ceremony to get it. A
+	 * consumer that already owns its own sealing path — one that seals blobs
+	 * under the same DEK, or decides per row in code that predates this — sets
+	 * this false and keeps calling sealColumns() directly.
+	 *
+	 * WHETHER a given row seals is a separate question and belongs to
+	 * shouldSeal(): the same table holds a protected member's sealed rows and an
+	 * unprotected member's plaintext ones.
+	 */
+	public static $seal_on_save = true;
+
+	/**
+	 * @var array<string,bool> sealed columns this instance was handed plaintext
+	 * for, as a set. There is no general dirty tracking on SystemBase and this is
+	 * not it — it exists only to tell caller-supplied plaintext apart from the
+	 * ciphertext sitting in $this->data after a load, which is the one
+	 * distinction the sealing path cannot make by looking at the value.
+	 */
+	protected $sealed_dirty = array();
+
+	/**
+	 * @var array{0:mixed,1:bool}|null memo of [row id, sealed?] as the DATABASE
+	 * answers it — see rowIsSealedInDb(). The in-memory flag can be stale (an
+	 * instance loaded before another process sealed its row), and trusting it in
+	 * save() is how a stale instance overwrites a live key wrapping. Cleared on
+	 * load() and refreshed when applySealOnSave() changes the answer itself.
+	 */
+	protected $db_seal_state = null;
 
 	/**
 	 * Set true only around an intentional GET-action mutation (e.g. a delete link).
@@ -276,6 +309,9 @@ abstract class SystemBase {
 			$display_value = is_array($value) || is_object($value) ? json_encode($value) : $value;
 			error_log('EXCEPTION: Attempting to set the non-defined field ' . $key . ' of ' . get_class($this) . ' to ' . $display_value . '. Trace:' . print_r(debug_backtrace(FALSE), TRUE));
 		}
+		if (!empty(static::$sealed_fields) && in_array($key, static::$sealed_fields, true)) {
+			$this->sealed_dirty[$key] = true;
+		}
 		$this->data->$key = $value;
 	}
 	
@@ -409,6 +445,13 @@ abstract class SystemBase {
 	function get($key) {
 		$value = $this->data->$key ?? NULL;
 		if ($value !== NULL && !empty(static::$sealed_fields) && in_array($key, static::$sealed_fields, true)) {
+			// A column the caller just set holds their plaintext, not ciphertext:
+			// hand it straight back. Without this, reading back what you wrote on a
+			// sealed row hits the decrypt path, finds plaintext in a sealed column,
+			// and throws — including from inside save()'s own validation pass.
+			if (isset($this->sealed_dirty[$key])) {
+				return $value;
+			}
 			return $this->decryptSealedField($key, $value);
 		}
 		return $value;
@@ -419,8 +462,8 @@ abstract class SystemBase {
 	 * ciphertext. Sealing is per-row, not per-model — the same table holds
 	 * sealed and unsealed rows side by side — so the flag lives on the row.
 	 *
-	 * Convention is {prefix}_content_sealed, which four of the five sealed
-	 * models follow; AiMessageAttachment overrides it with aia_sealed.
+	 * Convention is {prefix}_content_sealed, which every sealed model but one
+	 * follows; AiMessageAttachment overrides it with aia_sealed.
 	 */
 	public static function sealFlagColumn() {
 		// $prefix is declared on concrete models, not here, so derive it
@@ -467,10 +510,65 @@ abstract class SystemBase {
 		return (bool)$value;
 	}
 
+	/**
+	 * Is this instance's ROW sealed, as the DATABASE holds it right now?
+	 *
+	 * save() must never trust the in-memory flag for this question. sealColumns()
+	 * writes the seal with a targeted UPDATE that never touches $this->data, so
+	 * any instance loaded before its row was sealed — by a deferred ingest, by
+	 * another request, by a direct sealColumns() call on a second instance —
+	 * still reads unsealed while the row carries a live key wrapping. A save()
+	 * that believes the stale flag writes plaintext and NULL metadata over a
+	 * sealed row, and (on the seal-on-save path) mints a second DEK whose
+	 * wrapping overwrites the one every other sealed column depends on.
+	 *
+	 * Falls back to the in-memory flag for a row that does not exist yet, or a
+	 * model without the sealing columns. Memoized per row id; load() clears it.
+	 */
+	protected function rowIsSealedInDb(): bool {
+		$flag    = static::sealFlagColumn();
+		$key_col = static::sealedKeyColumn();
+		if ($this->key === NULL || $flag === '' || $key_col === ''
+				|| !array_key_exists($flag, static::$field_specifications)
+				|| !array_key_exists($key_col, static::$field_specifications)) {
+			return $this->rowIsSealed();
+		}
+		if ($this->db_seal_state !== null && $this->db_seal_state[0] === $this->key) {
+			return $this->db_seal_state[1];
+		}
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT ' . $flag . ', ' . $key_col . ' FROM ' . static::$tablename
+			. ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($this->key));
+		$row = $stmt->fetch(PDO::FETCH_ASSOC);
+		$sealed = is_array($row)
+			&& self::sealFlagIsSet($row[$flag] ?? null)
+			&& !empty($row[$key_col]);
+		$this->db_seal_state = array($this->key, $sealed);
+		return $sealed;
+	}
+
 	/** Columns save() must leave alone on a sealed row, as a lookup set. */
 	protected function sealedColumnsToSkip() {
-		if (!$this->rowIsSealed()) return array();
-		$skip = array_flip(static::$sealed_fields);
+		// An INSERT skips nothing: there is no stored row whose sealed content or
+		// wrapping a write-back could destroy — the caller's columns ARE the row.
+		if ($this->key === NULL) return array();
+		$flag = static::sealFlagColumn();
+		if ($flag === '' || !array_key_exists($flag, static::$field_specifications)) return array();
+		if (!$this->rowIsSealedInDb()) return array();
+		// Per-field, through the same predicate the read path uses: a column that
+		// is metadata on THIS row (sealedFieldIsActive() false) holds plaintext,
+		// reads back verbatim, and stays writable like any ordinary column.
+		$skip = array();
+		$row = get_object_vars($this->data);
+		if (static::$pkey_column && $this->key !== NULL) {
+			$row[static::$pkey_column] = $this->key;
+		}
+		foreach (static::$sealed_fields as $sealed_field) {
+			if (static::sealedFieldIsActive($sealed_field, $row)) {
+				$skip[$sealed_field] = true;
+			}
+		}
 		// The seal METADATA travels with the content, not with save(). sealColumns()
 		// writes the key wrapping with a targeted UPDATE that never touches
 		// $this->data — so an instance that was in memory when its row sealed
@@ -479,7 +577,12 @@ abstract class SystemBase {
 		// destroys the wrapped DEK while the seal flag stays true: every byte the
 		// row sealed becomes permanently unreadable, silently. Unseal paths use
 		// their own targeted UPDATEs, so save() never legitimately writes these.
-		foreach (array(static::sealedKeyColumn(), static::sealedOwnerColumn(),
+		//
+		// The FLAG is one of them. A stale instance still holds false, and writing
+		// that back would mark the row unsealed while its columns stay ciphertext —
+		// after which every read hands the raw blobs back as though they were data,
+		// and the next seal-on-save mints a second DEK over the live wrapping.
+		foreach (array($flag, static::sealedKeyColumn(), static::sealedOwnerColumn(),
 				static::sealedGenerationColumn()) as $meta_col) {
 			if ($meta_col !== '' && array_key_exists($meta_col, static::$field_specifications)) {
 				$skip[$meta_col] = true;
@@ -534,8 +637,8 @@ abstract class SystemBase {
 	/**
 	 * Whose vault this row decrypts against. Default is the owner recorded on
 	 * the row at seal time, which is immune to later membership changes.
-	 * Overridden by models needing a fallback (a row sealed before the column
-	 * existed) or an indirect owner (chat resolves through the conversation).
+	 * Overridden by models needing a fallback — a row sealed before the owner
+	 * column existed resolves through a live lookup instead.
 	 * Returns null when nothing resolves — the caller treats that as locked.
 	 */
 	protected static function sealedOwnerUserIdFor(array $row): ?int {
@@ -688,7 +791,23 @@ abstract class SystemBase {
 		$sets = array();
 		$params = array();
 		foreach ($values as $col => $plaintext) {
+			if ($plaintext !== null && !is_scalar($plaintext)) {
+				throw new RuntimeException(
+					get_called_class() . '::sealColumns() refused "' . $col . '": a '
+					. gettype($plaintext) . ' cannot be sealed - encode it to a string first. '
+					. '(A silent (string) cast would durably seal the literal "Array".)'
+				);
+			}
 			$sets[] = $col . ' = ?';
+			if ($plaintext === null || $plaintext === '') {
+				// Clearing a sealed column stores the empty value BARE, never as an
+				// AEAD blob of nothing: the read path returns null/'' verbatim on a
+				// sealed row, and a blob here would break every IS NULL query while
+				// reading back as ''. NULL stays NULL and '' stays '' — the same
+				// distinction every plaintext model preserves.
+				$params[] = $plaintext;
+				continue;
+			}
 			$params[] = $crypto->sealField((string)$plaintext, $dek, static::sealAd($row_id, $col));
 		}
 		// Only a freshly-minted DEK writes the wrapping; a reused one leaves the
@@ -780,6 +899,284 @@ abstract class SystemBase {
 			$params[] = intval($vault->get('uev_usr_user_id'));
 		}
 		return array('sets' => $sets, 'params' => $params);
+	}
+
+	/**
+	 * Should THIS row's content be sealed? Per row, not per model: the same
+	 * table holds a protected member's sealed rows and an unprotected member's
+	 * plaintext ones side by side.
+	 *
+	 * The default is yes, which combined with save()'s behavior means "seal when
+	 * this row's owner has an active vault" — exactly right for a consumer whose
+	 * premise is that its content is private, and needing no declaration at all.
+	 * A consumer whose policy is dynamic (a per-domain security level, a
+	 * per-conversation setting) overrides this one method.
+	 *
+	 * $row is the row as it stands, plaintext included, keyed by column name.
+	 */
+	protected static function shouldSeal(array $row): bool {
+		return true;
+	}
+
+	/**
+	 * Whose vault a row being WRITTEN seals to.
+	 *
+	 * The read path resolves ownership from the owner column recorded at seal
+	 * time, which a row being sealed for the first time does not have yet. So
+	 * this asks the same hook first and falls back to the conventional
+	 * {prefix}_usr_user_id column — which is what a consumer sets on the row
+	 * anyway, and is why the write path needs no vault lookup of its own.
+	 */
+	protected static function sealOwnerForWrite(array $row): ?int {
+		$owner = static::sealedOwnerUserIdFor($row);
+		if ($owner !== null) {
+			return $owner;
+		}
+		$col = property_exists(static::class, 'prefix') ? static::$prefix . '_usr_user_id' : '';
+		if ($col !== '' && array_key_exists($col, static::$field_specifications)) {
+			$candidate = intval($row[$col] ?? 0);
+			if ($candidate > 0) {
+				return $candidate;
+			}
+		}
+		return null;
+	}
+
+	/**
+	 * Decide what save() must seal, BEFORE any SQL runs. Returns null when this
+	 * save writes nothing sealed, in which case save() behaves exactly as it does
+	 * for any other model.
+	 *
+	 * Everything that can fail happens here, so a save either seals or never
+	 * touches the database: resolving the owner, finding their vault, and — on a
+	 * row that is already sealed — recovering the existing DEK.
+	 *
+	 * That last step is why creating and updating are not symmetric, and the
+	 * asymmetry is the crypto rather than the API. Sealing needs only the owner's
+	 * PUBLIC key, so a brand-new row seals into a locked vault from any process.
+	 * Reusing an existing row's DEK means UNWRAPPING it, which needs the secret,
+	 * so a sealed-column update against a closed window throws
+	 * VaultLockedException — the same thing get() does, and harmless in practice
+	 * because editing content means having read it first.
+	 *
+	 * @return array{values:array<string,string>, vault:object, reuse_dek:?string}|null
+	 */
+	protected function planSealOnSave(): ?array {
+		if (!static::$seal_on_save || empty(static::$sealed_fields) || empty($this->sealed_dirty)) {
+			return null;
+		}
+		$row = get_object_vars($this->data);
+		if (static::$pkey_column && $this->key !== NULL) {
+			$row[static::$pkey_column] = $this->key;
+		}
+
+		$values = array();
+		foreach (static::$sealed_fields as $field) {
+			if (!isset($this->sealed_dirty[$field])) {
+				continue;
+			}
+			// The same per-row predicate the read path checks FIRST. A column that
+			// is metadata on this row must not be sealed: the read path returns it
+			// verbatim, so sealing it would hand callers the raw blob as data.
+			if (!static::sealedFieldIsActive($field, $row)) {
+				continue;   // travels the ordinary column build as plaintext
+			}
+			$value = $this->data->$field ?? null;
+			if ($value !== null && !is_scalar($value)) {
+				throw new SystemBaseException(get_called_class() . '.' . $field
+					. ' cannot be sealed as a ' . gettype($value)
+					. ' - encode it to a string before set().');
+			}
+			$values[$field] = $value;
+		}
+		if (empty($values)) {
+			return null;
+		}
+
+		if (!static::shouldSeal($row)) {
+			return null;   // policy says plaintext; save() writes the columns normally
+		}
+
+		$owner_id = static::sealOwnerForWrite($row);
+		if ($owner_id === null) {
+			return null;   // nobody to seal to
+		}
+
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		$vault = UserEncryptionVault::loadForUser($owner_id);
+		if (!$vault || !$vault->key) {
+			return null;   // no vault: this member's content is stored in the clear
+		}
+
+		// An already-sealed row keeps its DEK. Minting a fresh one would rewrite
+		// the key wrapping and orphan every sealed column this save did not
+		// rewrite — the partial-update trap consumers used to avoid by threading
+		// the old DEK through by hand. Sealed-ness is the DATABASE's answer, not
+		// this instance's: a stale instance that trusted its own flag here would
+		// mint over a live wrapping (see rowIsSealedInDb()).
+		$reuse_dek = null;
+		if ($this->key !== NULL && $this->rowIsSealedInDb()) {
+			$reuse_dek = $this->existingRowDek($owner_id);
+		}
+
+		// A FIRST-TIME seal of an existing row seals the whole row, not the dirty
+		// subset. The row was created plaintext (its owner had no vault yet, or the
+		// policy declined); sealing one edited column while the flag flips true
+		// would leave every other populated sealed column as plaintext-on-a-sealed-
+		// row — leaked at rest, and an exception on every later read.
+		if ($this->key !== NULL && $reuse_dek === null) {
+			foreach (static::$sealed_fields as $field) {
+				if (array_key_exists($field, $values) || !static::sealedFieldIsActive($field, $row)) {
+					continue;
+				}
+				$existing = $this->data->$field ?? null;
+				if ($existing === null || $existing === '' || !is_scalar($existing)) {
+					continue;   // nothing stored, or not this row's content
+				}
+				$values[$field] = $existing;
+			}
+		}
+
+		return array('values' => $values, 'vault' => $vault, 'reuse_dek' => $reuse_dek);
+	}
+
+	/**
+	 * The DEK a sealed row is already using, unwrapped under the owner's open
+	 * window. Read from the database rather than from $this->data, because an
+	 * instance can be in memory from before its row was sealed and still hold
+	 * NULL where the wrapping now lives.
+	 */
+	protected function existingRowDek(int $owner_id): string {
+		require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			'SELECT ' . static::sealedKeyColumn() . ' FROM ' . static::$tablename
+			. ' WHERE ' . static::$pkey_column . ' = ?');
+		$stmt->execute(array($this->key));
+		$sealed = (string)$stmt->fetchColumn();
+		if ($sealed === '') {
+			throw new RuntimeException(get_called_class() . ': row ' . $this->key
+				. ' is flagged sealed but carries no wrapped key.');
+		}
+		$secret = VaultUnlock::secretKey($owner_id);
+		if ($secret === null) {
+			throw new VaultLockedException();
+		}
+		$crypto = new VaultCrypto();
+		return $crypto->openItemDek($sealed, $secret);
+	}
+
+	/**
+	 * Seal the planned columns onto the row save() has just written, and forget
+	 * the plaintext this instance was holding.
+	 *
+	 * The row has to exist first: the AEAD binds each value to the primary key,
+	 * so an insert is necessarily two statements. save() runs both inside one
+	 * transaction, so a failure here leaves no half-written row behind.
+	 */
+	protected function applySealOnSave(array $plan): void {
+		static::sealColumns($this->key, $plan['vault'], $plan['values'], $plan['reuse_dek']);
+		foreach (array_keys($plan['values']) as $field) {
+			unset($this->sealed_dirty[$field]);
+			// $this->data still holds plaintext for these columns. Drop it: the
+			// row is ciphertext now, and an instance left holding cleartext is
+			// exactly what the Layer 0 contract exists to prevent.
+			unset($this->data->$field);
+		}
+		$flag = static::sealFlagColumn();
+		if ($flag !== '' && array_key_exists($flag, static::$field_specifications)) {
+			$this->data->$flag = true;
+		}
+		// The database's answer just changed, and this instance made it change.
+		$this->db_seal_state = array($this->key, true);
+	}
+
+	/**
+	 * Re-seal one model's rows from a draining key generation to a new one —
+	 * the generic half of every consumer's onReseal callback
+	 * (VaultUnlock::modelReseal()).
+	 *
+	 * Only the per-row DEK's WRAPPING moves. The DEK itself and every byte of
+	 * ciphertext it seals are untouched, which is what makes a rotation cheap
+	 * regardless of how much content a member holds.
+	 *
+	 * Scoped to $old_generation exactly, because that is the only generation
+	 * $old_secret_key can open — a row already on the new generation would fail
+	 * to unwrap and read as a rotation failure. A model with no generation column
+	 * cannot be scoped that way and is refused rather than half-rotated.
+	 *
+	 * Ownership cannot live entirely in the WHERE clause: sealedOwnerUserIdFor()
+	 * is overridable and at least one override falls back to a live lookup for
+	 * rows sealed before the owner column existed, which no SQL predicate
+	 * expresses. So the select narrows to this owner OR an empty owner column,
+	 * and every candidate row is confirmed through the hook before it is touched.
+	 *
+	 * Soft-deleted rows are re-sealed too. A deleted row is restorable, and one
+	 * left on a retired generation would come back permanently unreadable.
+	 *
+	 * Attempts every row, counts failures, and returns the tally — the caller
+	 * throws. That split exists so a consumer can compose several models (and its
+	 * own bespoke material) into one fail-loud callback.
+	 *
+	 * @return array{attempted:int, failed:int}
+	 */
+	public static function resealRows(int $user_id, string $old_secret_key, int $old_generation,
+			string $new_public_key, int $new_generation): array {
+		require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+
+		$flag      = static::sealFlagColumn();
+		$key_col   = static::sealedKeyColumn();
+		$gen_col   = static::sealedGenerationColumn();
+		$owner_col = static::sealedOwnerColumn();
+		$specs     = static::$field_specifications;
+
+		foreach (array($flag, $key_col, $gen_col) as $required) {
+			if ($required === '' || !array_key_exists($required, $specs)) {
+				throw new RuntimeException(get_called_class() . '::resealRows() needs '
+					. '{prefix}_content_sealed, {prefix}_sealed_key and {prefix}_key_generation columns.');
+			}
+		}
+
+		$where  = array($flag . ' = true', $gen_col . ' = ?');
+		$params = array($old_generation);
+		if ($owner_col !== '' && array_key_exists($owner_col, $specs)) {
+			$where[]  = '(' . $owner_col . ' = ? OR ' . $owner_col . ' IS NULL OR ' . $owner_col . ' = 0)';
+			$params[] = $user_id;
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$select = $db->prepare('SELECT * FROM ' . static::$tablename . ' WHERE ' . implode(' AND ', $where));
+		$select->execute($params);
+		$rows = $select->fetchAll(PDO::FETCH_ASSOC);
+
+		$update = $db->prepare('UPDATE ' . static::$tablename . ' SET ' . $key_col . ' = ?, '
+			. $gen_col . ' = ? WHERE ' . static::$pkey_column . ' = ?');
+
+		$crypto    = new VaultCrypto();
+		$attempted = 0;
+		$failed    = 0;
+		foreach ($rows as $row) {
+			$sealed = (string)($row[$key_col] ?? '');
+			if ($sealed === '') {
+				continue;   // a row mid-ingest, between its INSERT and its seal
+			}
+			if (static::sealedOwnerUserIdFor($row) !== $user_id) {
+				continue;   // matched the loose owner predicate but is not this member's
+			}
+			$attempted++;
+			$row_id = intval($row[static::$pkey_column] ?? 0);
+			try {
+				$dek = $crypto->openItemDek($sealed, $old_secret_key);
+				$update->execute(array($crypto->sealItemDek($dek, $new_public_key), $new_generation, $row_id));
+			} catch (Throwable $e) {
+				$failed++;
+				error_log('Vault reseal: failed for ' . static::$tablename . ' row ' . $row_id
+					. ': ' . $e->getMessage());
+			}
+		}
+
+		return array('attempted' => $attempted, 'failed' => $failed);
 	}
 
 	/**
@@ -1241,10 +1638,14 @@ abstract class SystemBase {
 
 	function load() {
 		$this->loaded = TRUE;
+		// Whatever the caller had set is gone; the sealed columns now hold the
+		// row's ciphertext again.
+		$this->sealed_dirty = array();
+		$this->db_seal_state = null;
 		if ($this->key === NULL) {
 			throw new SystemBaseNoKeyError('Cannot load a '.static::$tablename.' object with no key.');
 		}
-		
+
 		$this->data = SingleRowFetch(static::$tablename, static::$pkey_column,
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
@@ -1578,6 +1979,12 @@ abstract class SystemBase {
 				$this->set($field, $data->$field, FALSE);
 			}
 		}
+		// $data is a raw database row, so its sealed columns are ciphertext —
+		// the set() calls above marked them dirty as though they were plaintext.
+		// (load_from_object() deliberately keeps its marks: it copies through
+		// get(), so it really is holding plaintext to be re-sealed.)
+		$this->sealed_dirty = array();
+		$this->db_seal_state = null;
 	}
 
 	function load_from_object($other, $fields) {
@@ -1788,18 +2195,23 @@ abstract class SystemBase {
 			throw new DisplayableUserException($duplicate['message']);
 		}
 
-		// A sealed row's $sealed_fields are owned by the sealing path, never by
-		// save(). Without this, save() rebuilds every column from get() — which
-		// DECRYPTS — and writes the plaintext straight back into the sealed
-		// columns while the seal flag stays true. The row is then both leaked and
-		// unreadable: every later read AEAD-opens plaintext and throws. When the
-		// vault is locked it is worse still, because get() throws mid-save.
+		// A sealed row's $sealed_fields never travel through the ordinary column
+		// build. save() rebuilds every column from get(), which DECRYPTS, so
+		// letting them through would write plaintext straight back into the
+		// sealed columns while the seal flag stayed true — the row both leaked
+		// and unreadable, since every later read AEAD-opens plaintext and throws.
 		//
-		// This rule used to live only in a docblock on ChatSeal, which protected
-		// exactly the one subsystem whose author had read it — the AI email jobs
-		// walked into the same hazard months later. Enforcing it here is what
-		// makes the safe thing automatic instead of remembered.
+		// Instead the sealing path owns them end to end. planSealOnSave() lifts
+		// out whatever the caller set, does everything that can fail (owner,
+		// vault, existing DEK) before any SQL runs, and applySealOnSave() writes
+		// them as ciphertext once the row id is real.
+		$seal_plan = $this->planSealOnSave();
 		$skip_sealed = $this->sealedColumnsToSkip();
+		if ($seal_plan !== null) {
+			foreach (array_keys($seal_plan['values']) as $sealing_column) {
+				$skip_sealed[$sealing_column] = true;
+			}
+		}
 
 		$rowdata = array();
 		foreach(array_keys(get_class($this)::$field_specifications) as $field) {
@@ -2000,9 +2412,22 @@ abstract class SystemBase {
 			echo '</pre>';
 		}
 
+		// The row and its seal are one write. An insert is necessarily two
+		// statements (the AEAD binds to the primary key, which does not exist
+		// until the INSERT lands), so without this a failure between them would
+		// leave a row whose content the caller believes was saved and sealed.
+		$owns_seal_transaction = false;
+		if ($seal_plan !== null && !$dblink->inTransaction()) {
+			$dblink->beginTransaction();
+			$owns_seal_transaction = true;
+		}
+
 		try {
 			$dbhelper->execute_query();
 		} catch (PDOException $e) {
+			if ($owns_seal_transaction && $dblink->inTransaction()) {
+				$dblink->rollBack();
+			}
 			// Add context about the operation
 			$operation = $op == 'add' ? 'INSERT' : 'UPDATE';
 			$context = "Database $operation failed on table '" . static::$tablename . "'";
@@ -2031,6 +2456,21 @@ abstract class SystemBase {
 			}
 
 			$this->key = $dblink->lastInsertId($seq);
+		}
+
+		if ($seal_plan !== null) {
+			try {
+				$this->applySealOnSave($seal_plan);
+				if ($owns_seal_transaction) {
+					$dblink->commit();
+				}
+			} catch (Throwable $e) {
+				if ($owns_seal_transaction && $dblink->inTransaction()) {
+					$dblink->rollBack();
+					$this->key = ($op == 'edit') ? $p_keys[static::$pkey_column] : NULL;
+				}
+				throw $e;
+			}
 		}
 
 		// --- END: SQL generation and execution ---

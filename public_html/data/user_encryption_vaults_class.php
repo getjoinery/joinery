@@ -16,16 +16,16 @@ class UserEncryptionVaultException extends SystemBaseException {}
  * to it) and whose SECRET half is never stored here — only wrapped, one
  * wrapping per enrolled unlocker, in `uew_user_encryption_wrappings`.
  *
- * `uev_scope` names which vault this is ('user' = server-custody, shared by
- * mail + chat; 'drive'/'passwords' = future client-custody scopes, each its
- * own keypair). `uev_custody` names where the secret key is ever unwrapped
- * ('server' = a VaultUnlock APCu window; 'client' = the browser only — a
- * client-custody row's secret key must never be unwrapped server-side).
+ * `uev_scope` names which vault this is. Which scopes exist is instance
+ * configuration, declared in `vault_scopes.json` and in each plugin's
+ * `vaultScopes` — see VaultScopes. `uev_custody` names where the secret key is
+ * ever unwrapped ('server' = a VaultUnlock APCu window; 'client' = the browser
+ * only — a client-custody row's secret key must never be unwrapped
+ * server-side).
  *
- * This package builds server-custody only: scope 'user', custody 'server'.
- * The drive/passwords scopes and client custody ship as columns now (so the
- * shape is fixed) but are built by their own consumer packages — see
- * docs/sealed_vault.md.
+ * 'user' is the server-custody scope, shared by every consumer that needs the
+ * server able to read while the member is present. Every other scope is client
+ * custody, one keypair each.
  *
  * @version 1.0
  */
@@ -41,9 +41,16 @@ class UserEncryptionVault extends SystemBase {
 	public static $api_readable = false;
 	public static $api_writable = false;
 
-	const SCOPE_USER      = 'user';
-	const SCOPE_DRIVE      = 'drive';
-	const SCOPE_PASSWORDS  = 'passwords';
+	/**
+	 * The server-custody scope, and the only one that can exist: setup, rotation
+	 * and every ceremony unlock name it directly, and neither the ceremonies nor
+	 * the reseal callback signature carry a scope. It stays a named constant
+	 * because core code refers to it constantly and a bare 'user' reads worse.
+	 *
+	 * Client-custody scope names are not constants here — they come from
+	 * VaultScopes, which is where a plugin declares its own.
+	 */
+	const SCOPE_USER = 'user';
 
 	const CUSTODY_SERVER = 'server';
 	const CUSTODY_CLIENT = 'client';

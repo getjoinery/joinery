@@ -56,6 +56,10 @@ class MailboxContact extends SystemBase {
 
 	public static $sealed_fields = array('imc_address', 'imc_display_name');
 
+	// Sealing runs through MailboxContacts, which seals the address and the
+	// display name together under one DEK per contact.
+	public static $seal_on_save = false;
+
 	protected static $foreign_key_actions = array(
 		'imc_usr_user_id' => array('action' => 'cascade'),
 		// A mailbox going away takes its contacts with it — they are that mailbox's

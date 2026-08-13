@@ -1,0 +1,10 @@
+{
+    "user": {
+        "custody": "server",
+        "label": "Mail & messages vault"
+    },
+    "drive": {
+        "custody": "client",
+        "label": "Drive vault"
+    }
+}

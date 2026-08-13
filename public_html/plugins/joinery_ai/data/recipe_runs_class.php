@@ -89,6 +89,11 @@ class RecipeRun extends SystemBase {
         'rcr_workspace_before', 'rcr_workspace_after',
     );
 
+    // A run seals at start (sealToOwner() mints the DEK before there is any
+    // output) and re-seals each column under that same key as the run produces
+    // it, so the sealing path is the run's, not save()'s.
+    public static $seal_on_save = false;
+
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 10) {
             throw new SystemAuthenticationError(

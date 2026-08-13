@@ -152,21 +152,33 @@ than each re-deriving it.
 ## Consumer contract
 
 Every PRF consumer today is a [Sealed Vault](sealed_vault.md) scope, one context
-each (`ALLOWED_PRF_CONTEXTS`): `vault-kek` (server-custody mail + chat, whose KEK
-is sent to the server), and the two client-custody contexts `vault-passwords-kek`
-(the [password manager](../plugins/vault/docs/overview.md)) and `vault-drive-kek`
+each: `vault-kek` (server-custody mail + chat, whose KEK is sent to the server),
+and the client-custody contexts `vault-passwords-kek` (the
+[password manager](../plugins/vault/docs/overview.md)) and `vault-drive-kek`
 (Drive), whose KEK is derived and used **only in the browser** and never
 transmitted. The distinct per-scope context is what guarantees one scope's KEK can
-never unwrap another's key. Every derivation request sets `userVerification:
-required` (not merely `preferred`, unlike sign-in), since a vault unlock
-demands device user verification. A feature that wants a client-held encryption
-key beyond the vault is a **PRF consumer** in the same shape:
+never unwrap another's key.
+
+**A context is DERIVED from its scope name, never declared.**
+`VaultScopes::prfContext($scope)` returns `vault-{scope}-kek`, with the single
+grandfathered exception `user` → `vault-kek`, and
+`PasskeyService::allowedPrfContexts()` is computed over the registered scopes.
+That is the isolation property, made structural rather than trusted: a declared
+context is a footgun with no floor under it, because a developer who copies
+another plugin's declaration and forgets to change the string silently merges
+two scopes' unlocks — one tap would open both. Deriving from the name, which the
+scope registry already keeps unique, makes that mistake unrepresentable.
+
+Every derivation request sets `userVerification: required` (not merely
+`preferred`, unlike sign-in), since a vault unlock demands device user
+verification. A feature that wants a client-held encryption key beyond the vault
+is a **PRF consumer** in the same shape:
 
 1. Call `PasskeyService::getDerivationOptions($user, $context)` /
    `verifyDerivation($client_response_json, $context)`. `$context` must be one of
-   `PasskeyService::ALLOWED_PRF_CONTEXTS` — add a new entry there when a new
-   consumer enrolls. The context is hashed into a fixed, deterministic PRF salt,
-   so the same context always evaluates the same secret for a given credential.
+   `PasskeyService::allowedPrfContexts()` — declare a vault scope and its context
+   follows. The context is hashed into a fixed, deterministic PRF salt, so the
+   same context always evaluates the same secret for a given credential.
 2. `verifyDerivation()` returns `[User $user, Passkey $credential, string $prf_output_32]`.
    The 32-byte output is per-**credential** — two enrolled passkeys derive two
    different secrets for the same context. A consumer holds one wrapping of its

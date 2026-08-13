@@ -218,7 +218,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				// openable and the row's single wrapping has to cover them all.
 				// Sealing needs no window, so uploading into a Private folder
 				// works locked; only reading does not.
-				require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+				VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
 				require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
 				try {
 					$fk = DriveSealed::versionKeyFor($target_file);
@@ -312,7 +313,8 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				// sniffed from the plaintext first (sniffing a container would read
 				// application/octet-stream forever), and the thumbnail is rendered
 				// while the plaintext is still on disk.
-				require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+				VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
 				$file = DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
 			} else {
 				$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);

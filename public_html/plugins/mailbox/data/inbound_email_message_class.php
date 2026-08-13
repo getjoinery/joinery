@@ -144,6 +144,12 @@ class InboundEmailMessage extends SystemBase {
 	// is likewise sealed and only ever set on a draft row.
 	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan');
 
+	// Sealing runs through this class's own sealAndPersistContent() /
+	// sealExistingRow() paths,
+	// which reuse the message DEK so attachments and the raw message stay
+	// readable under the same key.
+	public static $seal_on_save = false;
+
 	/**
 	 * Sealed columns that are legitimately absent on a given row: a message may
 	 * never have been AI-triaged, and only a composed row carries bcc or draft

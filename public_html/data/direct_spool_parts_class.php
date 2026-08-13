@@ -86,9 +86,13 @@ class DirectSpoolPart extends SystemBase {
 		if ($file_id > 0) {
 			require_once(PathHelper::getIncludePath('data/files_class.php'));
 			$file = new File($file_id, TRUE);
-			$path = $file->get_file_path();
-			$raw = ($path !== '' && is_readable($path)) ? file_get_contents($path) : '';
-			return $raw === false ? '' : $raw;
+			if (!$file->key) {
+				return '';
+			}
+			// read_bytes() rather than a filesystem path, so a blob the storage
+			// layer has offloaded to the cloud bucket still reads.
+			$raw = $file->read_bytes();
+			return ($raw === null || $raw === false) ? '' : $raw;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare('SELECT jda_content FROM jda_direct_spool_parts WHERE jda_direct_spool_part_id = ?');

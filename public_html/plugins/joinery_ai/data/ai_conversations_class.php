@@ -36,6 +36,10 @@ class AiConversation extends SystemBase {
     // conversation. Every other aic column is operational metadata (cleartext).
     public static $sealed_fields = array('aic_title', 'aic_instructions');
 
+    // Sealing runs through ChatSeal, which seals the conversation and its
+    // messages under one policy read from aic_security_level.
+    public static $seal_on_save = false;
+
     // aic_owner_user_id doesn't fit the {prefix}_{owner_prefix}_..._id
     // convention (the owning User's own prefix isn't in the column), so it
     // needs an explicit source table. Action is permanent_delete rather than

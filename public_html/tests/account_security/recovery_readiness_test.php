@@ -115,7 +115,7 @@ check($outcome['ok'] === false && strpos($outcome['message'], 'vault') !== false
 // Client custody must be refused server-side: the code never travels here.
 $client_vault = new UserEncryptionVault(NULL);
 $client_vault->set('uev_usr_user_id', $fixture_user_id);
-$client_vault->set('uev_scope', UserEncryptionVault::SCOPE_DRIVE);
+$client_vault->set('uev_scope', 'drive');
 $client_vault->set('uev_custody', UserEncryptionVault::CUSTODY_CLIENT);
 $client_vault->set('uev_public_key', 'rr-test-client-public-key');
 $client_vault->set('uev_salt', $salt);
@@ -123,7 +123,7 @@ $client_vault->save();
 $client_vault->load();
 $cleanup_vaults[] = (int)$client_vault->key;
 
-$outcome = RecoveryReadiness::dryRunVaultCode($fixture_user_id, UserEncryptionVault::SCOPE_DRIVE, $code);
+$outcome = RecoveryReadiness::dryRunVaultCode($fixture_user_id, 'drive', $code);
 check($outcome['ok'] === false && stripos($outcome['message'], 'client') !== false,
 	'client-custody scope refuses a server-side check');
 

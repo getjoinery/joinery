@@ -3,7 +3,10 @@
 function drive_move_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+	// DriveSealed is the drive_sealed consumer bootstrap — it loads only through
+	// the loader, so its registrations attribute to the consumer.
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	VaultUnlock::loadConsumerBootstraps();
 	require_once(PathHelper::getIncludePath('data/file_changes_class.php'));
 
 	$settings = Globalvars::get_instance();

@@ -16,8 +16,10 @@
 function drive_level_batch_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	// DriveSealed is the drive_sealed consumer bootstrap — it loads only through
+	// the loader, so its registrations attribute to the consumer.
+	VaultUnlock::loadConsumerBootstraps();
 
 	$settings = Globalvars::get_instance();
 	$session  = SessionControl::get_instance();
