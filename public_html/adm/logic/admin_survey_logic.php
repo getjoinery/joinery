@@ -31,20 +31,14 @@ function admin_survey_logic(array $input): LogicResult {
 
                 case 'removequestion':
                     $survey_question = new SurveyQuestion($input['srq_survey_question_id'], TRUE);
-                    $survey_question->authenticate_write([
-                        'current_user_id' => $session->get_user_id(),
-                        'current_user_permission' => $session->get_permission()
-                    ]);
+                    $survey_question->assert_can_write($session);
                     $survey_question->permanent_delete();
                     return LogicResult::redirect('/admin/admin_survey?svy_survey_id=' . $input['svy_survey_id']);
                     break;
 
                 case 'removesurvey':
                     $survey = new Survey($input['svy_survey_id'], TRUE);
-                    $survey->authenticate_write([
-                        'current_user_id' => $session->get_user_id(),
-                        'current_user_permission' => $session->get_permission()
-                    ]);
+                    $survey->assert_can_write($session);
                     $survey->permanent_delete();
                     return LogicResult::redirect('/admin/admin_surveys');
                     break;
@@ -60,24 +54,14 @@ function admin_survey_logic(array $input): LogicResult {
 
         switch ($input['action']) {
             case 'delete':
-                $survey->authenticate_write([
-                    'current_user_id' => $session->get_user_id(),
-                    'current_user_permission' => $session->get_permission()
-                ]);
-                SystemBase::$allow_get_mutation = true;
-                try { $survey->soft_delete(); }
-                finally { SystemBase::$allow_get_mutation = false; }
+                $survey->assert_can_write($session);
+                $survey->soft_delete();
                 return LogicResult::redirect('/admin/admin_surveys');
                 break;
 
             case 'undelete':
-                $survey->authenticate_write([
-                    'current_user_id' => $session->get_user_id(),
-                    'current_user_permission' => $session->get_permission()
-                ]);
-                SystemBase::$allow_get_mutation = true;
-                try { $survey->undelete(); }
-                finally { SystemBase::$allow_get_mutation = false; }
+                $survey->assert_can_write($session);
+                $survey->undelete();
                 return LogicResult::redirect('/admin/admin_surveys');
                 break;
         }

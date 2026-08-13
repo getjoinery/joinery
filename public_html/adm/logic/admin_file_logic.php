@@ -21,19 +21,19 @@ function admin_file_logic(array $input): LogicResult {
 	$get_action = $input['action'] ?? null;
 
 	if($post_action == 'remove'){
-		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$file->assert_can_write($session);
 		$file->permanent_delete();
 
 		return LogicResult::redirect('/admin/admin_files');
 	}
 	else if($get_action == 'delete'){
-		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$file->assert_can_write($session);
 		$file->soft_delete();
 
 		return LogicResult::redirect('/admin/admin_files');
 	}
 	else if($get_action == 'undelete'){
-		$file->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$file->assert_can_write($session);
 		$file->undelete();
 
 		return LogicResult::redirect('/admin/admin_files');
@@ -43,10 +43,10 @@ function admin_file_logic(array $input): LogicResult {
 	$options['altlinks'] = array();
 	$options['altlinks'] += array('Edit File' => '/admin/admin_file_edit?fil_file_id='.$file->key);
 	if($file->get('fil_delete_time')){
-		$options['altlinks'] += array('Undelete' => '/admin/admin_file?action=undelete&fil_file_id='.$file->key);
+		$options['altlinks'] += array('Undelete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'undelete', 'fil_file_id' => $file->key)));
 	}
 	else{
-		$options['altlinks'] += array('Soft Delete' => '/admin/admin_file?action=delete&fil_file_id='.$file->key);
+		$options['altlinks'] += array('Soft Delete' => array('post' => '/admin/admin_file', 'hidden' => array('action' => 'delete', 'fil_file_id' => $file->key)));
 	}
 	if($session->get_user_id() == 1){
 		$options['altlinks'] += array('Permanently Delete' => '/admin/admin_file_delete?fil_file_id='.$file->key);
@@ -58,9 +58,9 @@ function admin_file_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

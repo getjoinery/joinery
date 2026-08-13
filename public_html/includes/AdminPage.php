@@ -7,7 +7,7 @@ require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
 
 // Admin section always uses joinery-system theme, regardless of the active public theme
-if (!class_exists('PublicPage')) {
+if (!class_exists('PublicPage', false)) {
     class PublicPage extends PublicPageJoinerySystem {}
 }
 
@@ -99,8 +99,10 @@ class AdminPage extends PublicPage {
 	 */
 	private function renderFlashMessages(): string {
 		$session = SessionControl::get_instance();
-		// NULL location = both GLOBAL and IN_PAGE — admin has one message region.
+		// NULL location = both GLOBAL and IN_PAGE — admin has one message region,
+		// and renders every slot, so it takes them all.
 		$messages = $session->get_messages($_SERVER['REQUEST_URI'] ?? '', NULL);
+		$session->mark_shown($messages);
 		$out = '';
 		foreach ($messages as $msg) {
 			$alert_class = 'alert-info';

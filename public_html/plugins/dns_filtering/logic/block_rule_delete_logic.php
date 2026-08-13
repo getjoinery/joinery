@@ -57,7 +57,7 @@ function block_rule_delete_logic_descriptor(): array {
 	return [
 		'description' => 'Delete a custom domain rule (rule_id)',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true],
+		'requires_session'        => true,
 		'input'       => [
 			'rule_id' => ['type' => 'int', 'required' => false, 'label' => 'Rule ID'],
 		],

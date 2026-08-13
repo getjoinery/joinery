@@ -30,7 +30,7 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 		// DELETE A SCHEDULED BLOCK (always-on blocks can't be deleted from the UI)
 		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, 'required', 'Block id is required.', 'safemode', 'int');
 		$block = new SdScheduledBlock($block_id, TRUE);
-		$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$block->assert_can_write($session);
 
 		if($block->get('sdb_is_always_on')){
 			return LogicResult::error("The always-on block cannot be deleted.");
@@ -44,14 +44,14 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 		// CREATE OR EDIT A BLOCK
 		$device_id = LibraryFunctions::fetch_variable_local($input, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$device->assert_can_write($session);
 
 		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, '', '', 'safemode', 'int');
 
 		if($block_id){
 			// Edit existing (could be scheduled or always-on)
 			$block = new SdScheduledBlock($block_id, TRUE);
-			$block->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$block->assert_can_write($session);
 		}
 		else{
 			// Create new scheduled block — the always-on block is auto-created per device
@@ -131,14 +131,14 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 		// GET - LOAD FORM DATA
 		$device_id = LibraryFunctions::fetch_variable_local($input, 'device_id', NULL, 'required', 'Device id is required.', 'safemode', 'int');
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$device->assert_can_read($session);
 		$page_vars['device'] = $device;
 
 		$block_id = LibraryFunctions::fetch_variable_local($input, 'block_id', NULL, '', '', 'safemode', 'int');
 
 		if($block_id){
 			$block = new SdScheduledBlock($block_id, TRUE);
-			$block->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$block->assert_can_read($session);
 		}
 		else{
 			// New scheduled block — empty object
@@ -175,7 +175,7 @@ function scheduled_block_edit_logic(array $input): LogicResult{
 	return LogicResult::render($page_vars);
 }
 
-function scheduled_block_edit_logic_api() {
+function scheduled_block_edit_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Read a device block (device_id, optional block_id) or save it (action=edit) / delete it (action=delete)',

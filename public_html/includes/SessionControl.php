@@ -24,7 +24,22 @@ class DisplayMessage {
 	public $display_type; // MESSAGE_ANNOUNCEMENT, MESSAGE_WARNING, MESSAGE_ERROR, DEFAULT ANNOUNCEMENT
 	public $display_location; // MESSAGE_DISPLAY_GLOBAL, MESSAGE_DISPLAY_IN_PAGE, DEFAULT IN PAGE
 	public $identifier; // OPTIONAL, FOR INDICATING WHERE THE ERROR IS TO DISPLAY ON THE PAGE, DEFAULT NULL
-	public $clearable; // OPTIONAL,(T/F), DEFAULT TRUE
+
+	/**
+	 * Whether this message is spent once it has been shown. TRUE for the
+	 * ordinary one-shot message; FALSE for one that should keep appearing
+	 * until something else removes it. The author's intent, fixed at
+	 * construction.
+	 */
+	public $clearable;
+
+	/**
+	 * Whether this message has actually been rendered to a page yet. The
+	 * runtime fact, and a different question from $clearable — which is why
+	 * they are separate fields. Reading a message must not spend it; only
+	 * showing it does.
+	 */
+	public $shown = FALSE;
 
 	function __construct($message, $message_title, $page_regex=NULL, $display_type=DisplayMessage::MESSAGE_ANNOUNCEMENT, $display_location=DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier=NULL, $clearable=TRUE) {
 		$this->message = $message;
@@ -34,6 +49,7 @@ class DisplayMessage {
 		$this->display_location = $display_location;
 		$this->identifier = $identifier;
 		$this->clearable = $clearable;
+		$this->shown = FALSE;
 	}
 
 	function get_message_class() {
@@ -80,6 +96,14 @@ class SessionControl{
 		// The default php.ini gc_maxlifetime of 1440 s (24 min) was silently
 		// expiring sessions while the browser still held a valid cookie.
 		ini_set('session.gc_maxlifetime', 7200);
+		// samesite=Lax is stated rather than inherited from the browser default,
+		// which differs by browser and version. Lax and not Strict because
+		// sign-in links, payment-gateway returns and password reset links all
+		// arrive as top-level navigation from another site and must find the
+		// session; Lax withholds the cookie from cross-site POSTs, which is the
+		// case worth stopping. It does NOT cover cross-site GET navigation,
+		// which is why an action a user triggers is a POST button rather than a
+		// link (PublicPageBase::renderActionEntry).
 		session_set_cookie_params([
 			'lifetime' => 0,
 			'path'     => '/',
@@ -88,6 +112,7 @@ class SessionControl{
 			'samesite' => 'Lax',
 		]);
 		session_start();
+		self::shadow_verify_form_csrf();
 		if(!isset($_SESSION['saved_messages'])) {
 			$_SESSION['saved_messages'] = array();
 		}
@@ -745,54 +770,154 @@ class SessionControl{
 		session_write_close();
 	}
 
+	/**
+	 * Record — without acting on it — every form POST whose CSRF token would
+	 * not check out.
+	 *
+	 * Forms already carry a token; nothing yet refuses a submission that lacks
+	 * one. Before that can change, the size and shape of the problem has to be
+	 * known: how many real submissions arrive with no token at all (a form
+	 * built outside FormWriter, a page cached past the token's life) versus a
+	 * mismatched one. This writes that to the error log and changes nothing
+	 * else — same request, same outcome, token or no token.
+	 *
+	 * Non-consuming on purpose: FormWriter's own validateCSRF() clears the
+	 * token on a successful check, and this must not take that away from it.
+	 */
+	private static function shadow_verify_form_csrf() {
+		if (($_SERVER['REQUEST_METHOD'] ?? '') !== 'POST') {
+			return;
+		}
+
+		// Every FormWriter form posts this field; a POST without it is not a
+		// FormWriter submission and is not this measurement's business.
+		$field = '_csrf_token';
+		if (!array_key_exists($field, $_POST)) {
+			return;
+		}
+
+		$presented = is_string($_POST[$field]) ? $_POST[$field] : '';
+		$stored = isset($_SESSION['csrf_tokens']) && is_array($_SESSION['csrf_tokens'])
+			? $_SESSION['csrf_tokens'] : array();
+
+		$reason = null;
+		if ($presented === '') {
+			$reason = 'absent';
+		} else {
+			$matched = false;
+			$expired = false;
+			foreach ($stored as $entry) {
+				if (!is_array($entry) || !isset($entry['token'])) {
+					continue;
+				}
+				if (hash_equals((string)$entry['token'], $presented)) {
+					$matched = true;
+					$expired = isset($entry['expires']) && $entry['expires'] < time();
+					break;
+				}
+			}
+			if (!$matched) {
+				$reason = $stored ? 'mismatched' : 'no-token-in-session';
+			} elseif ($expired) {
+				$reason = 'expired';
+			}
+		}
+
+		if ($reason !== null) {
+			error_log(sprintf(
+				'[CSRF_SHADOW] would-have-failed POST: reason=%s path=%s form_ids_in_session=%s user_id=%s',
+				$reason,
+				$_SERVER['REQUEST_URI'] ?? '?',
+				$stored ? implode(',', array_keys($stored)) : '(none)',
+				$_SESSION['usr_user_id'] ?? 'anonymous'
+			));
+		}
+	}
+
 	// DISPLAY MESSAGES
 	function save_message(DisplayMessage $message) {
 		$_SESSION['saved_messages'][] = $message;
 	}
 
-	function get_messages($page_url = NULL, $display_location = DisplayMessage::MESSAGE_DISPLAY_IN_PAGE) {
+	/**
+	 * The pending messages addressed to this page — a pure read.
+	 *
+	 * Reading does not spend a message; rendering does (see mark_shown(), and
+	 * PublicPageBase::render_messages(), which is the thing that calls it).
+	 * That separation is what lets any code ask what is pending without
+	 * destroying a message it was never going to display.
+	 *
+	 * @param string $page_url The URL to match each message's page_regex against.
+	 * @param int|null $display_location Filter to one location, or NULL for all.
+	 * @param string|null $identifier Filter to messages addressed to one named
+	 *                                slot on the page. NULL means every slot.
+	 * @return DisplayMessage[]
+	 */
+	function get_messages($page_url = NULL, $display_location = DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, $identifier = NULL) {
 		$messages_out = array();
 
 		if(!isset($_SESSION['saved_messages'])) {
 			return $messages_out;
 		}
 
-		foreach ($_SESSION['saved_messages'] AS &$current_message) {
+		foreach ($_SESSION['saved_messages'] AS $current_message) {
 			if(!($current_message instanceof DisplayMessage)) {
 				error_log('SessionControl.php: Bad DisplayMessage object: ' . print_r($current_message, TRUE));
 				continue;
 			}
 
-			if(!$current_message->page_regex || preg_match($current_message->page_regex, $page_url)) {
-				if($display_location) {
-					if($current_message->display_location == $display_location) {
-						$messages_out[] = $current_message;
-						$current_message->clearable = TRUE;
-					}
-				} else {
-					$messages_out[] = $current_message;
-					$current_message->clearable = TRUE;
-				}
+			if($current_message->page_regex && !preg_match($current_message->page_regex, $page_url)) {
+				continue;
 			}
+			if($display_location && $current_message->display_location != $display_location) {
+				continue;
+			}
+			if($identifier !== NULL && $current_message->identifier != $identifier) {
+				continue;
+			}
+
+			$messages_out[] = $current_message;
 		}
 
 		return $messages_out;
 	}
 
+	/**
+	 * Record that these messages have been rendered to the page. Called by
+	 * whatever emitted them; the footer then clears the spent ones.
+	 *
+	 * @param DisplayMessage[] $messages
+	 */
+	function mark_shown(array $messages) {
+		foreach ($messages as $message) {
+			if ($message instanceof DisplayMessage) {
+				$message->shown = TRUE;
+			}
+		}
+	}
+
+	/**
+	 * Drop the messages that have been shown and were meant to be one-shot.
+	 * A message that was read but never rendered is left pending, which is the
+	 * whole point: a page that does not display a message must not consume it.
+	 */
 	function clear_clearable_messages() {
 		if(!isset($_SESSION['saved_messages'])) {
 			return TRUE;
 		}
 
-		$nummessages = count($_SESSION['saved_messages']);
-		for($i=0; $i < $nummessages; $i++) {
-			$current_message = $_SESSION['saved_messages'][$i];
-			if($current_message->clearable) {
-				unset($_SESSION['saved_messages'][$i]);
+		$remaining = array();
+		foreach ($_SESSION['saved_messages'] as $current_message) {
+			if (!($current_message instanceof DisplayMessage)) {
+				continue;
 			}
+			if ($current_message->shown && $current_message->clearable) {
+				continue;
+			}
+			$remaining[] = $current_message;
 		}
 
-		$_SESSION['saved_messages'] = array_values($_SESSION['saved_messages']);
+		$_SESSION['saved_messages'] = $remaining;
 	}
 
 	/**
@@ -817,6 +942,7 @@ class SessionControl{
 		}
 		return $_SESSION['api_csrf_token'];
 	}
+
 
 	/**
 	 * API session simulation — sets session variables for the given user

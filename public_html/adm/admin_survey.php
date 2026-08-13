@@ -10,9 +10,9 @@ extract($page_vars);
 // Build dropdown actions
 $options['altlinks'] = array('Edit Survey' => '/admin/admin_survey_edit?svy_survey_id=' . $survey->key);
 if (!$survey->get('svy_delete_time') && $_SESSION['permission'] >= 8) {
-    $options['altlinks']['Soft Delete'] = '/admin/admin_survey?action=delete&svy_survey_id=' . $survey->key;
+    $options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_survey', 'hidden' => array('action' => 'delete', 'svy_survey_id' => $survey->key));
 } else if ($_SESSION['permission'] >= 8) {
-    $options['altlinks']['Undelete'] = '/admin/admin_survey?action=undelete&svy_survey_id=' . $survey->key;
+    $options['altlinks']['Undelete'] = array('post' => '/admin/admin_survey', 'hidden' => array('action' => 'undelete', 'svy_survey_id' => $survey->key));
 }
 
 // Build dropdown button from altlinks
@@ -21,9 +21,9 @@ if (!empty($options['altlinks'])) {
     $dropdown_button = '<div class="dropdown">';
     $dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
     $dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-    foreach ($options['altlinks'] as $label => $url) {
+    foreach ($options['altlinks'] as $label => $entry) {
         $is_danger = strpos($label, 'Delete') !== false;
-        $dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+        $dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
     }
     $dropdown_button .= '</div>';
     $dropdown_button .= '</div>';
@@ -80,20 +80,20 @@ $total_responses = 0;
                         <?php if ($survey->get('svy_create_time')): ?>
                             <tr>
                                 <td class="p-1 text-800 fw-semi-bold">Created</td>
-                                <td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($survey->get('svy_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+                                <td class="p-1 text-600"><?php echo $survey->get_local('svy_create_time', 'M j, Y g:i A T'); ?></td>
                             </tr>
                         <?php endif; ?>
                         <?php if ($survey->get('svy_last_edit_time')): ?>
                             <tr>
                                 <td class="p-1 text-800 fw-semi-bold">Last Edited</td>
-                                <td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($survey->get('svy_last_edit_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+                                <td class="p-1 text-600"><?php echo $survey->get_local('svy_last_edit_time', 'M j, Y g:i A T'); ?></td>
                             </tr>
                         <?php endif; ?>
                         <tr>
                             <td class="p-1 text-800 fw-semi-bold">Status</td>
                             <td class="p-1">
                                 <?php if ($survey->get('svy_delete_time')): ?>
-                                    <span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($survey->get('svy_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+                                    <span class="badge badge-danger">Deleted at <?php echo $survey->get_local('svy_delete_time'); ?></span>
                                 <?php else: ?>
                                     <span class="badge badge-subtle-success">Active</span>
                                 <?php endif; ?>

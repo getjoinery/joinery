@@ -100,9 +100,6 @@ class MultiMobileStoreProduct extends SystemMultiBase {
 			$filters['msp_is_active'] = $this->options['active'] ? '= TRUE' : '= FALSE';
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['msp_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('msp_mobile_store_products', $filters, $this->order_by, $only_count, $debug);
 	}

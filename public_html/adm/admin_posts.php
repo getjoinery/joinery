@@ -47,8 +47,8 @@
 
 		$rowvalues = array();
 		array_push($rowvalues, "<a href='/admin/admin_post?pst_post_id=$post->key'>".$title."</a>". $deleted);
-		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $post->get_local('pst_create_time'));
+		array_push($rowvalues, $post->get_local('pst_published_time'));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
 		if($post->get('pst_delete_time')) {

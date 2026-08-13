@@ -37,9 +37,9 @@ function ai_panel_state_logic_descriptor(): array {
 	return [
 		'description' => "The signed-in user's AI recipe cards for one area page's AI panel.",
 		'mutates'     => false,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'read',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'area'    => ['type' => 'string', 'required' => true, 'enum' => ['mailbox'],

@@ -21,10 +21,7 @@ function querylog_logic(array $input): LogicResult {
 
 	try {
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array(
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		));
+		$device->assert_can_read($session);
 	} catch (Exception $e) {
 		return $session->is_api_context()
 			? LogicResult::error('Device not found or access denied.')
@@ -113,7 +110,7 @@ function querylog_logic(array $input): LogicResult {
 	return LogicResult::render($page_vars);
 }
 
-function querylog_logic_api() {
+function querylog_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Fetch a device\'s DNS query log (device_id, optional lines: 100/250/500)',

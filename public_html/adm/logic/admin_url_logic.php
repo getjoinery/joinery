@@ -13,21 +13,21 @@ function admin_url_logic(array $input): LogicResult {
 	$url = new Url($input['url_url_id'], TRUE);
 
 	if($input['action'] == 'soft_delete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$url->assert_can_write($session);
 		$url->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
 	if($input['action'] == 'undelete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$url->assert_can_write($session);
 		$url->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_urls");
 	}
 	if($input['action'] == 'permanent_delete'){
-		$url->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$url->assert_can_write($session);
 		$url->permanent_delete();
 
 		//$returnurl = $session->get_return();

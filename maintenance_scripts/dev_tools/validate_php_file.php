@@ -192,10 +192,15 @@ class MethodExistenceTest {
     private function loadFile() {
         echo "Loading file and dependencies...\n";
 
-        // Core classes resolve one-class-per-file: Foo => includes/Foo.php.
-        // Autoloading them on demand lets class_exists()/method_exists()
-        // verify calls against LogicResult, Pager, EmailSender, etc. instead
-        // of reporting every core class as "Class not found".
+        // Core and active-plugin classes resolve through the platform
+        // autoloader (registered by PathHelper), so class_exists() and
+        // method_exists() answer for any class the file references whether or
+        // not the file requires it — an autoloadable class is never reported
+        // as "Class not found".
+        //
+        // This second loader covers what the platform map deliberately omits:
+        // classes belonging to plugins that are installed but not active, which
+        // a developer may still be editing.
         spl_autoload_register(function ($class) {
             if (!preg_match('/^[A-Za-z0-9_]+$/', $class)) {
                 return;

@@ -39,11 +39,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 
 	$formwriter->begin_form();
 
-	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'addressbox') {	
-			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-		}
-	}
+	echo $page->render_messages('addressbox');
 
 	if ($page_vars['has_old_password']) {
 		$formwriter->passwordinput('usr_old_password', 'Old Password', ['maxlength' => 255]);

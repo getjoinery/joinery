@@ -82,17 +82,13 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 	if (($input['action'] ?? '') == 'remove_version') {
 		$product_version = new ProductVersion($input['product_version_id'], TRUE);
 		$product_version->set('prv_status', 0);
-		SystemBase::$allow_get_mutation = true;
-		try { $product_version->prepare(); $product_version->save(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$product_version->prepare(); $product_version->save();
 		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
 	}
 	else if (($input['action'] ?? '') == 'activate_version') {
 		$product_version = new ProductVersion($input['product_version_id'], TRUE);
 		$product_version->set('prv_status', 1);
-		SystemBase::$allow_get_mutation = true;
-		try { $product_version->prepare(); $product_version->save(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$product_version->prepare(); $product_version->save();
 		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
 	}
 

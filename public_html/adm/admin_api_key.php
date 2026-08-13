@@ -29,19 +29,19 @@
 	$options['title'] = 'ApiKey';
 	$options['altlinks'] = array('Edit'=>'/admin/admin_api_key_edit?apk_api_key_id='.$api_key->key);
 	if(!$api_key->get('apk_delete_time')){
-		$options['altlinks']['Soft Delete'] = '/admin/admin_api_key?action=soft_delete&apk_api_key_id='.$api_key->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'soft_delete', 'apk_api_key_id' => $api_key->key));
 	}
 	else{
-		$options['altlinks']['Undelete'] = '/admin/admin_api_key?action=undelete&apk_api_key_id='.$api_key->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'undelete', 'apk_api_key_id' => $api_key->key));
 	}
 
 	// Add regenerate secret option (not shown when secret is currently displayed)
 	if(!$api_key->get('apk_delete_time') && !(isset($_SESSION['new_api_secret']) && isset($_SESSION['new_api_key_id']) && $_SESSION['new_api_key_id'] == $api_key->key)){
-		$options['altlinks']['Regenerate Secret'] = '/admin/admin_api_key?action=regenerate_secret&apk_api_key_id='.$api_key->key;
+		$options['altlinks']['Regenerate Secret'] = array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'regenerate_secret', 'apk_api_key_id' => $api_key->key));
 	}
 
 	if($_SESSION['permission'] >= 8) {
-		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_api_key?action=permanent_delete&apk_api_key_id='.$api_key->key);
+		$options['altlinks'] += array('Permanent Delete' => array('post' => '/admin/admin_api_key', 'hidden' => array('action' => 'permanent_delete', 'apk_api_key_id' => $api_key->key)));
 	}
 
 	$page->begin_box($options);
@@ -77,7 +77,7 @@
 
 	echo '<h3>'.htmlspecialchars($api_key->get('apk_name')).'</h3>';
 
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($api_key->get('apk_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$api_key->get_local('apk_create_time') .'<br />';
 
 	$rowvalues = array();
 

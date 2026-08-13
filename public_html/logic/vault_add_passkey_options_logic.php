@@ -46,7 +46,7 @@ function vault_add_passkey_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function vault_add_passkey_options_logic_api() {
+function vault_add_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

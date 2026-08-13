@@ -16,28 +16,28 @@
 	$post = new Post($_GET['pst_post_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->assert_can_write($session);
 		$post->soft_delete();
 
 		header("Location: /admin/admin_posts");
 		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->assert_can_write($session);
 		$post->undelete();
 
 		header("Location: /admin/admin_posts");
 		exit();
 	}
 	else if($_REQUEST['action'] == 'set_primary_photo'){
-		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->assert_can_write($session);
 		$post->set_primary_photo((int)$_POST['photo_id']);
 
 		header("Location: /admin/admin_post?pst_post_id=" . $post->key);
 		exit();
 	}
 	else if($_REQUEST['action'] == 'clear_primary_photo'){
-		$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$post->assert_can_write($session);
 		$post->clear_primary_photo();
 
 		header("Location: /admin/admin_post?pst_post_id=" . $post->key);
@@ -47,10 +47,10 @@
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Post' => '/admin/admin_post_edit?pst_post_id='.$post->key);
 	if(!$post->get('pst_delete_time')){
-		$options['altlinks']['Soft Delete'] = '/admin/admin_post?action=delete&pst_post_id='.$post->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'delete', 'pst_post_id' => $post->key));
 	}
 	else{
-		$options['altlinks']['Undelete'] = '/admin/admin_post?action=undelete&pst_post_id='.$post->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_post', 'hidden' => array('action' => 'undelete', 'pst_post_id' => $post->key));
 	}
 
 	if($_SESSION['permission'] >= 8) {
@@ -63,9 +63,9 @@
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';
@@ -112,13 +112,13 @@
 					</tr>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Created</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($post->get('pst_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $post->get_local('pst_create_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Status</td>
 						<td class="p-1">
 							<?php if($post->get('pst_delete_time')): ?>
-								<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($post->get('pst_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+								<span class="badge badge-danger">Deleted at <?php echo $post->get_local('pst_delete_time'); ?></span>
 							<?php elseif($post->get('pst_is_published')): ?>
 								<span class="badge badge-subtle-success">Published</span>
 							<?php else: ?>
@@ -129,7 +129,7 @@
 					<?php if($post->get('pst_published_time')): ?>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Published</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($post->get('pst_published_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $post->get_local('pst_published_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<?php endif; ?>
 					<?php if($post->get('pst_usr_user_id')): ?>
@@ -146,7 +146,7 @@
 					<?php if($post->get('pst_last_edit_time')): ?>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Last Edited</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($post->get('pst_last_edit_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $post->get_local('pst_last_edit_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<?php endif; ?>
 				</tbody>

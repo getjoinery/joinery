@@ -202,9 +202,6 @@ class MultiRelayCloudProvision extends SystemMultiBase {
 			$filters['rcp_kind'] = [$this->options['kind'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['rcp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('rcp_relay_cloud_provisions', $filters, $this->order_by, $only_count, $debug);
 	}

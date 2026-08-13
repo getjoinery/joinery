@@ -18,7 +18,7 @@ function admin_email_logic(array $input): LogicResult {
 
 	// Handle actions
 	if($input['action'] == 'delete'){
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$email->assert_can_write($session);
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);
 		$email->soft_delete();
@@ -26,14 +26,14 @@ function admin_email_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_emails');
 	}
 	else if($input['action'] == 'undelete'){
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$email->assert_can_write($session);
 		$email->undelete();
 
 		return LogicResult::redirect('/admin/admin_emails');
 	}
 	else if($input['action'] == 'unqueue'){
 		$email->set('eml_status', Email::EMAIL_CREATED);
-		$email->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$email->assert_can_write($session);
 		$email->save();
 		//REMOVE THE RECIPIENTS
 		EmailRecipient::DeleteAll($email->key);

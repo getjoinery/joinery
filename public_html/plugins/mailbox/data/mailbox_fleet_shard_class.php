@@ -102,9 +102,6 @@ class MultiMailboxFleetShard extends SystemMultiBase {
 			$filters['mfs_mgn_managed_node_id'] = [intval($this->options['node_id']), PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mfs_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mfs_mailbox_fleet_shards', $filters, $this->order_by, $only_count, $debug);
 	}

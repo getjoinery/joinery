@@ -71,7 +71,7 @@ function draft_save_logic(array $input): LogicResult {
 	));
 }
 
-function draft_save_logic_api() {
+function draft_save_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Create or update a compose draft (multipart attachments supported)',

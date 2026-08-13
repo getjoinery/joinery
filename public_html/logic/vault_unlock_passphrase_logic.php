@@ -54,7 +54,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 	return LogicResult::render(['unlocked' => true]);
 }
 
-function vault_unlock_passphrase_logic_api() {
+function vault_unlock_passphrase_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

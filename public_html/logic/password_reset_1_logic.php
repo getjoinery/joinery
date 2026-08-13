@@ -69,13 +69,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	return LogicResult::render($page_vars);
 }
 
-function password_reset_1_logic_api() {
-    return [
-        'requires_session' => false,
-        'description' => 'Request password reset email',
-    ];
-}
-
 /**
  * Form builder — single source for the web reset-request form and the JSON
  * form definition (GET /api/v1/form/password_reset_1).

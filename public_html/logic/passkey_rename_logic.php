@@ -28,7 +28,7 @@ function passkey_rename_logic(array $input): LogicResult {
 	return LogicResult::render(['renamed' => true]);
 }
 
-function passkey_rename_logic_api() {
+function passkey_rename_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

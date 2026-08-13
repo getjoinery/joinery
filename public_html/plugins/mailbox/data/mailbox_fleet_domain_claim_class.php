@@ -98,9 +98,6 @@ class MultiMailboxFleetDomainClaim extends SystemMultiBase {
 			$filters['mfd_status'] = "IN ('pending', 'verified')";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mfd_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mfd_mailbox_fleet_domain_claims', $filters, $this->order_by, $only_count, $debug);
 	}

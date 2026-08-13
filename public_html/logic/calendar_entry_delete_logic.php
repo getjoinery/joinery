@@ -71,9 +71,7 @@ function calendar_entry_delete_logic_descriptor(): array {
 	return [
 		'description' => 'Delete a native calendar entry (scope aware for recurring series).',
 		'mutates'     => true,
-		'auth'        => [
-			'requires_session' => true,
-		],
+		'requires_session'        => true,
 		'input'       => [
 			'entry_id'        => ['type' => 'int',    'required' => false, 'label' => 'Entry ID'],
 			'scope'           => ['type' => 'string', 'required' => false, 'enum' => ['this', 'future', 'all'], 'label' => 'Recurring delete scope'],

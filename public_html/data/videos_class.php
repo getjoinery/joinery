@@ -321,9 +321,6 @@ class MultiVideo extends SystemMultiBase {
             $filters['vid_link'] = [$this->options['link'], PDO::PARAM_STR];
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['vid_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         if (isset($this->options['source'])) {
             $filters['vid_source'] = [$this->options['source'], PDO::PARAM_INT];

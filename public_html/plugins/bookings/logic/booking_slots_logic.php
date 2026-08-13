@@ -51,9 +51,7 @@ function booking_slots_logic_descriptor(): array {
 	return [
 		'description' => 'Public open booking slots for a booking type over a UTC range.',
 		'mutates'     => false,
-		'auth'        => [
-			'requires_session' => false,
-		],
+		'requires_session'        => false,
 		'input'       => [
 			'slug'  => ['type' => 'string', 'required' => false, 'label' => 'Booking type slug'],
 			'start' => ['type' => 'string', 'required' => false, 'label' => 'Range start (UTC)'],

@@ -34,17 +34,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['checkedvals'] = $lists['checked'];
 	$page_vars['user'] = $user;
 
-	//$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-
-
 	return LogicResult::render($page_vars);
-}
-
-function contact_preferences_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Update contact preferences',
-    ];
 }
 
 /**

@@ -155,12 +155,73 @@ abstract class SystemBase {
 	protected $db_seal_state = null;
 
 	/**
-	 * Set true only around an intentional GET-action mutation (e.g. a delete link).
-	 * See assert_not_get_mutation(). Always reset in a finally{} block.
+	 * Set true only around a write the server itself initiated while serving a
+	 * page view. See assert_not_get_mutation(). Prefer server_initiated_write(),
+	 * which owns the flag and always resets it; setting it by hand is for the
+	 * one handler whose guarded region is a whole function body.
 	 */
 	public static $allow_get_mutation = false;
 
-	function __construct($key, $and_load=FALSE) {
+	/**
+	 * Persist something the SERVER decided to write while serving a page view.
+	 *
+	 * ═══════════════════════════════════════════════════════════════════════
+	 *  DO NOT REACH FOR THIS TO MAKE A SAVE WORK.
+	 *
+	 *  If a save is being refused during a page view, the answer is almost
+	 *  always that the thing doing the saving should be a POST — not that it
+	 *  needs this. Using it to silence the refusal converts a caught bug into
+	 *  a shipped one.
+	 * ═══════════════════════════════════════════════════════════════════════
+	 *
+	 * A page view must not persist what a USER asked for. That rule exists
+	 * because a misfiring submission guard otherwise saves a record simply
+	 * because someone opened the edit page — and because a link is a GET, and a
+	 * browser performs a GET whenever it is told to, including by another site,
+	 * carrying the session cookie along. Anything a user triggers is therefore
+	 * a POST button (AdminPage::action_button, or an `altlinks` entry
+	 * describing a `post`), never a link.
+	 *
+	 * This is the exception for writes with no user behind them at all. The
+	 * test is not "is this write deliberate?" — every write is deliberate. It
+	 * is "would this still happen if nobody had asked for anything?" Four
+	 * shapes qualify, and they are the only ones in the tree:
+	 *
+	 *   - Observation: an error or a request recorded, usage tracked. The page
+	 *     would render identically without it.
+	 *   - Reconciliation: a local row brought into line with a remote fact the
+	 *     server just fetched anyway.
+	 *   - Third-party redirect: a payment gateway or OAuth provider sending the
+	 *     browser back, where persisting the result IS the request's purpose.
+	 *   - Lazy processing: work a scheduled task would have done, done now
+	 *     because someone happened to look.
+	 *
+	 * A user clicking something is NONE of these, however much it looks like a
+	 * side effect from inside the function that performs it.
+	 *
+	 * The callers are enumerated in tests/unit/core_api_mechanical_test.php,
+	 * which fails on a new one. That is deliberate: adding a caller should be a
+	 * decision someone made on purpose, not a line that slipped in.
+	 *
+	 * @param callable $action
+	 * @return mixed Whatever $action returns.
+	 */
+	public static function server_initiated_write(callable $action) {
+		$previous = self::$allow_get_mutation;
+		self::$allow_get_mutation = true;
+		try {
+			return $action();
+		} finally {
+			self::$allow_get_mutation = $previous;
+		}
+	}
+
+	/**
+	 * @param mixed $key Primary key of the row to represent. NULL (the default)
+	 *                   means a new, unsaved record.
+	 * @param bool $and_load Load the row from the database immediately.
+	 */
+	function __construct($key = NULL, $and_load = FALSE) {
 		$this->key = $key;
 		$this->data = new StdClass;
 		$this->loaded = FALSE;
@@ -2535,6 +2596,72 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * One of this record's times, in the viewer's timezone, ready to print.
+	 *
+	 * Every time in the database is UTC, and every time on screen should be the
+	 * viewer's — so the conversion is the same three arguments at every call
+	 * site, and getting one of them wrong shows a plausible time that is simply
+	 * the wrong one. This is the display-side twin of the conversion FormWriter
+	 * already does on the way into a form.
+	 *
+	 * Returns FALSE for an empty field, so an optional date renders as nothing
+	 * rather than as "now".
+	 *
+	 * LibraryFunctions::convert_time() remains for values that are not model
+	 * fields, and for a timezone that is not the viewer's.
+	 *
+	 * @param string $field The field name, e.g. 'usr_create_time'.
+	 * @param string $format Any date() format string.
+	 * @return string|false
+	 */
+	public function get_local($field, $format = 'M j, Y g:i A T') {
+		return LibraryFunctions::convert_time(
+			$this->get($field),
+			'UTC',
+			SessionControl::get_instance()->get_timezone(),
+			$format
+		);
+	}
+
+	/**
+	 * Refuse unless the signed-in user may change this row.
+	 *
+	 * Takes the session, like authenticate_tier() does, so callers never
+	 * assemble the identity array themselves — hand-assembling it is how a
+	 * permission level gets hardcoded into a check that should have read the
+	 * session. Subclass overrides of authenticate_write() apply unchanged.
+	 *
+	 * @param SessionControl $session
+	 * @throws SystemAuthenticationError
+	 */
+	public function assert_can_write($session) {
+		$this->authenticate_write(self::session_identity($session));
+	}
+
+	/**
+	 * Refuse unless the signed-in user may see this row.
+	 *
+	 * @param SessionControl $session
+	 * @throws SystemAuthenticationError
+	 */
+	public function assert_can_read($session) {
+		$this->authenticate_read(self::session_identity($session));
+	}
+
+	/**
+	 * The identity array the authenticate_* methods take.
+	 *
+	 * @param SessionControl $session
+	 * @return array
+	 */
+	protected static function session_identity($session) {
+		return array(
+			'current_user_id'         => $session->get_user_id(),
+			'current_user_permission' => $session->get_permission(),
+		);
+	}
+
+	/**
 	 * Check whether the current user has sufficient tier access to view this entity.
 	 *
 	 * @param SessionControl $session  The current session
@@ -2841,18 +2968,175 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	}
 
 	/**
+	 * The model this collection queries, but only when it queries that model's
+	 * own table. A collection over a join or a view gets NULL: there,
+	 * $field_specifications is not the authority on what the query's columns
+	 * are, so core cannot infer filters from it. Same carve-out
+	 * assert_sortable_column() applies to sorting.
+	 *
+	 * @param string $table The table the query targets.
+	 * @return string|null Model class name.
+	 */
+	private function own_table_model($table) {
+		$model = isset(static::$model_class) ? static::$model_class : null;
+		if (!$model || !class_exists($model)) {
+			return null;
+		}
+		if (!isset($model::$tablename) || $model::$tablename !== $table) {
+			return null;
+		}
+		if (empty($model::$field_specifications) || empty($model::$prefix)) {
+			return null;
+		}
+		return $model;
+	}
+
+	/**
+	 * The soft-delete column of a collection's model, when it has one.
+	 *
+	 * @param string $table
+	 * @return string|null
+	 */
+	private function delete_time_column($table) {
+		$model = $this->own_table_model($table);
+		if (!$model) {
+			return null;
+		}
+		$column = $model::$prefix . '_delete_time';
+		return isset($model::$field_specifications[$column]) ? $column : null;
+	}
+
+	/**
+	 * Core's implementation of the `deleted` option: TRUE selects soft-deleted
+	 * rows, FALSE selects live ones. Every model carrying a {prefix}_delete_time
+	 * column gets it without writing it out.
+	 *
+	 * Omitting the option leaves the filter off, exactly as before — a
+	 * collection that wants deleted rows excluded by default still says so
+	 * itself.
+	 *
+	 * @param string $table
+	 * @return array
+	 */
+	private function deleted_option_filter($table) {
+		if (!is_array($this->options) || !isset($this->options['deleted'])) {
+			return array();
+		}
+		$column = $this->delete_time_column($table);
+		if (!$column) {
+			return array();
+		}
+		return array($column => $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL');
+	}
+
+	/**
+	 * Filters for option keys that name a declared column of the collection's
+	 * model — either in full (`usr_email`) or without the table prefix
+	 * (`email`). The value binds as a parameter typed from the field spec; a
+	 * NULL value means "this column is empty", since `column = NULL` matches
+	 * nothing in SQL and is never what a caller meant.
+	 *
+	 * Only keys the collection does not implement itself are considered, so a
+	 * hand-written filter always wins over the inferred one. Collections that
+	 * map every option to a column generically are skipped — they already do
+	 * this.
+	 *
+	 * @param string $table
+	 * @return array
+	 */
+	private function column_option_filters($table) {
+		$specs = null;
+		$out   = array();
+		foreach ($this->column_option_columns($table, $specs) as $key => $column) {
+			$value = $this->options[$key];
+			if ($value === NULL) {
+				$out[$column] = 'IS NULL';
+			} else {
+				$out[$column] = array($value, self::pdo_type_for_spec($specs[$column]));
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * option key => column name for every option this collection does not
+	 * implement itself but which names one of its model's columns.
+	 *
+	 * @param string $table
+	 * @param array|null $specs Receives the model's field specifications.
+	 * @return array
+	 */
+	private function column_option_columns($table, &$specs = null) {
+		if (!is_array($this->options) || $this->options === array()) {
+			return array();
+		}
+		$known = $this->known_option_keys();
+		if ($known === null) {
+			return array();
+		}
+		$model = $this->own_table_model($table);
+		if (!$model) {
+			return array();
+		}
+
+		$specs  = $model::$field_specifications;
+		$prefix = $model::$prefix;
+		$out    = array();
+
+		foreach (array_keys($this->options) as $key) {
+			if (in_array($key, $known, true)) {
+				continue;
+			}
+			if (isset($specs[$key])) {
+				$out[$key] = $key;
+			} elseif (isset($specs[$prefix . '_' . $key])) {
+				$out[$key] = $prefix . '_' . $key;
+			}
+		}
+
+		return $out;
+	}
+
+	/**
+	 * The PDO bind type a declared column's value should carry.
+	 *
+	 * @param array $spec One entry of $field_specifications.
+	 * @return int
+	 */
+	private static function pdo_type_for_spec($spec) {
+		$type = strtolower(isset($spec['type']) ? $spec['type'] : '');
+		if (strpos($type, 'bool') !== false) {
+			return PDO::PARAM_BOOL;
+		}
+		if (strpos($type, 'int') !== false || strpos($type, 'serial') !== false) {
+			return PDO::PARAM_INT;
+		}
+		return PDO::PARAM_STR;
+	}
+
+	/**
 	 * Refuse a query whose options include a key this collection does not
 	 * implement. Without this, an unknown key is silently dropped and the
 	 * collection returns MORE rows than the caller asked for — which for an
 	 * ownership filter is a data-exposure bug that reads as correct code.
+	 *
+	 * @param string $table The table the query targets, so the keys core itself
+	 *                      answers for this model count as implemented.
 	 */
-	private function assert_options_known() {
+	private function assert_options_known($table = null) {
 		if (!is_array($this->options) || $this->options === array()) {
 			return;
 		}
 		$known = $this->known_option_keys();
 		if ($known === null) {
 			return;
+		}
+		if ($table !== null) {
+			// Keys core answers for this model, which no class has to write out.
+			if ($this->delete_time_column($table)) {
+				$known[] = 'deleted';
+			}
+			$known = array_merge($known, array_keys($this->column_option_columns($table)));
 		}
 		$unknown = array_diff(array_keys($this->options), $known);
 		if ($unknown) {
@@ -2902,7 +3186,13 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	}
 
 	protected function _get_resultsv2($table, $filters = [], $sorts = [], $only_count = false, $debug = false) {
-		$this->assert_options_known();
+		$this->assert_options_known($table);
+
+		// Filters core derives from the model itself. Union with `+` so a
+		// filter the collection built by hand always wins over the inferred
+		// one for the same column.
+		$filters = $filters + $this->deleted_option_filter($table) + $this->column_option_filters($table);
+
 		$where_clauses = [];
 		$bind_params = [];
 		$operation = $this->operation;
@@ -3023,6 +3313,16 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 		}
 	}
 
+	/**
+	 * Refuse unless the signed-in user may see every member of the collection.
+	 *
+	 * @param SessionControl $session
+	 * @throws SystemAuthenticationError
+	 */
+	public function assert_can_read($session) {
+		$this->assert_can_read($session);
+	}
+
 	function usort($callback) {
 		usort($this->multi_data, $callback);
 	}
@@ -3119,6 +3419,11 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	}
 
 	function add($value) {
+		// A hand-populated collection is a loaded collection: adding a member
+		// answers the "has this been filled in yet?" question that
+		// autoload_if_needed() asks, so building one by hand never triggers a
+		// query that would throw the hand-built members away.
+		$this->loaded = TRUE;
 		$this->multi_data[] = $value;
 	}
 
@@ -3161,11 +3466,39 @@ abstract class SystemMultiBase implements IteratorAggregate, Countable {
 	}
 
 	function count(): int {
+		$this->autoload_if_needed();
 		return count($this->multi_data);
 	}
 
 	function getIterator(): Traversable {
+		$this->autoload_if_needed();
 		return new ArrayIterator($this->multi_data);
+	}
+
+	/**
+	 * Run the query the collection was constructed with, the first time anyone
+	 * asks what is in it. Constructing a collection states the question;
+	 * iterating or counting it is what asks for the answer, so no caller has to
+	 * remember a separate load() step first.
+	 *
+	 * A collection built by hand (add()) or explicitly marked unloadable
+	 * ($options === NULL) is left alone.
+	 */
+	private function autoload_if_needed() {
+		if (!$this->loaded && $this->loadable) {
+			$this->load();
+		}
+	}
+
+	/**
+	 * Reading a property a collection does not have is always a mistake, and
+	 * the mistake it almost always is has a name: results live in a private
+	 * array reached by iteration, so `$multi->results` reads as working code
+	 * while the loop body never runs.
+	 */
+	public function __get($name) {
+		throw new SystemBaseException(get_class($this) . " has no property '" . $name
+			. "'. Collections are iterated directly: foreach (\$multi as \$item).");
 	}
 
 	function incremental_iterator($incremental_limit=200) {

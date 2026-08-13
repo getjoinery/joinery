@@ -92,14 +92,10 @@ function oauth_callback_logic(array $input, ?OAuth2Client $client = null): Logic
         $client = $client ?: new OAuth2Client();
         $token = $client->exchangeCode($providerClass, $code, OAuth2Client::redirectUri());
         // The provider redirects back with a GET; persisting the granted token
-        // is this request's entire purpose. Opt in to the GET-mutation guard
-        // for the consumer dispatch (same pattern as JobResultProcessor).
-        SystemBase::$allow_get_mutation = true;
-        try {
-            $success = $consumer->onTokenGranted($token, is_array($flow['payload']) ? $flow['payload'] : []);
-        } finally {
-            SystemBase::$allow_get_mutation = false;
-        }
+        // is this request's entire purpose.
+        $success = SystemBase::server_initiated_write(function () use ($consumer, $token, $flow) {
+            return $consumer->onTokenGranted($token, is_array($flow['payload']) ? $flow['payload'] : []);
+        });
     } catch (OAuth2Exception $e) {
         error_log('OAuth2 callback: ' . $e->getMessage());
         return $neutral_error;

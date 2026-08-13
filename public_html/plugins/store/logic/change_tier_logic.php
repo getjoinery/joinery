@@ -758,13 +758,6 @@ function change_tier_logic(array $input): LogicResult {
     return LogicResult::render($page_vars);
 }
 
-function change_tier_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Change subscription tier',
-    ];
-}
-
 function change_tier_logic_descriptor(): array {
 	return [
 		'description'      => 'Change the current user\'s subscription tier. action=upgrade or downgrade requires product_id; cancel and reactivate do not.',

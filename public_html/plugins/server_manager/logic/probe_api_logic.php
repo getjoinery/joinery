@@ -42,7 +42,8 @@ function probe_api_logic_descriptor(): array {
 	return [
 		'description' => 'Probe a managed node\'s management/health endpoint (dashboard API indicator).',
 		'mutates'     => false,
-		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'requires_session'        => true,
+		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
 			'node_id' => ['type' => 'int', 'required' => false, 'label' => 'Node ID'],
 		],

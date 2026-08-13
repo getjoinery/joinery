@@ -101,9 +101,20 @@ abstract class FormWriterV2Base {
         // Store merged values
         $this->values = $final_values;
 
-        // Handle edit_primary_key_value for automatic hidden field
-        if (isset($this->options['edit_primary_key_value']) && $this->options['edit_primary_key_value'] !== null) {
-            $this->edit_primary_key_value = $this->options['edit_primary_key_value'];
+        // Which record this form saves onto, as a hidden field.
+        if (array_key_exists('edit_primary_key_value', $this->options)) {
+            // Stated outright — including an explicit null, which is how a form
+            // that really does mean "save this as a new record" says so.
+            if ($this->options['edit_primary_key_value'] !== null) {
+                $this->edit_primary_key_value = $this->options['edit_primary_key_value'];
+            }
+        } elseif (isset($this->options['model']) && is_object($this->options['model'])
+                && isset($this->options['model']->key) && $this->options['model']->key !== null) {
+            // A form handed a saved record is editing that record. Leaving the
+            // key off does not fail — it saves a second copy of the row and
+            // looks like it worked, which is why the form does not have to
+            // remember to say it.
+            $this->edit_primary_key_value = $this->options['model']->key;
         }
 
         // Apply automatic local time conversion to timestamp fields

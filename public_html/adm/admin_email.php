@@ -31,7 +31,7 @@
 		}
 
 		if(!$email->get('eml_delete_time') && $_SESSION['permission'] >= 8) {
-			$altlinks['Soft Delete'] = '/admin/admin_email?action=delete&eml_email_id='.$email->key;
+			$altlinks['Soft Delete'] = array('post' => '/admin/admin_email', 'hidden' => array('action' => 'delete', 'eml_email_id' => $email->key));
 		}
 		$pageoptions['altlinks'] = $altlinks;
 		$page->begin_box($pageoptions);
@@ -128,15 +128,14 @@
 	else{
 		if($email->get('eml_status') == Email::EMAIL_QUEUED){
 			$pageoptions['altlinks'] = array(
-				'Remove From Queue'=>'/admin/admin_email?action=unqueue&eml_email_id='.$email->key
-				);
+				'Remove From Queue'=>array('post' => '/admin/admin_email', 'hidden' => array('action' => 'unqueue', 'eml_email_id' => $email->key)));
 		}
 
 		$pageoptions['title'] = 'Email: '.$email->get('eml_subject');
 		$page->begin_box($pageoptions);
 		$time= '';
 		if($email->get('eml_delete_time')){
-			echo 'Status: Deleted at '.LibraryFunctions::convert_time($email->get('eml_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+			echo 'Status: Deleted at '.$email->get_local('eml_delete_time').'<br />';
 		}
 		if($email->get('eml_status') == 10){
 			$time = 'Sent: '. LibraryFunctions::convert_time($email->get('eml_sent_time'), "UTC", $session->get_timezone());

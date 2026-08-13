@@ -84,7 +84,7 @@ function direct_status_logic(array $input): LogicResult {
 	return LogicResult::render(array('direct' => $all_direct, 'addresses' => $answers));
 }
 
-function direct_status_logic_api() {
+function direct_status_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Whether a recipient address can be reached over Joinery Direct (per-domain capability only)',

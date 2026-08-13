@@ -1374,9 +1374,6 @@ class MultiInboundEmailMessage extends SystemMultiBase {
 			$filters['iem_received_time'] = '>= ' . $dblink->quote($this->options['received_since']);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['iem_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		// Spam disposition (specs/inbound_email_spam_filtering.md).
 		if (isset($this->options['spam_verdict'])) {

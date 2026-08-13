@@ -72,7 +72,7 @@ function vault_client_replace_recovery_logic(array $input): LogicResult {
 	return LogicResult::render(['replaced' => true, 'recovery_code_count' => $fresh_recovery]);
 }
 
-function vault_client_replace_recovery_logic_api() {
+function vault_client_replace_recovery_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

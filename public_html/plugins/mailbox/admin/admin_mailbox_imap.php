@@ -55,7 +55,7 @@ foreach ($accounts as $acct) {
 		: '<span class="badge bg-secondary">Disabled</span>';
 
 	$last_poll = $acct->get('iia_last_poll_time')
-		? htmlspecialchars(LibraryFunctions::convert_time($acct->get('iia_last_poll_time'), 'UTC', $session->get_timezone(), 'M j, g:i A T'))
+		? htmlspecialchars($acct->get_local('iia_last_poll_time', 'M j, g:i A T'))
 		: '<span class="text-muted">never</span>';
 
 	$status = $acct->get('iia_last_status') ? htmlspecialchars($acct->get('iia_last_status')) : '<span class="text-muted">-</span>';

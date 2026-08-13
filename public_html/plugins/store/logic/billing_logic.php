@@ -172,7 +172,7 @@ function billing_logic(array $input): LogicResult {
         foreach ($orders as $order) {
             if ($order->get('ord_status') == Order::STATUS_PAID) {
                 $page_vars['invoices'][] = array(
-                    'date' => LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'),
+                    'date' => $order->get_local('ord_timestamp', 'M j, Y'),
                     'description' => 'Order #' . $order->key,
                     'amount' => number_format($order->get('ord_total_cost'), 2),
                     'status' => 'paid',
@@ -251,7 +251,6 @@ function billing_logic(array $input): LogicResult {
         $page_vars['success_message'] = 'Your payment method has been updated.';
     }
 
-    $page_vars['display_messages'] = $session->get_messages('/profile/billing');
 
     return LogicResult::render($page_vars);
 }

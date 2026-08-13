@@ -222,6 +222,8 @@ foreach ($display_messages as $msg) {
 	echo htmlspecialchars($msg->message);
 	echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 }
+// Rendered above, so these are spent; the footer drops them.
+$session->mark_shown($display_messages);
 $session->clear_clearable_messages();
 
 // ── Upgrade History ──
@@ -281,7 +283,7 @@ $page->begin_box($pageoptions);
 							<br><small class="text-muted">in use by <?php echo htmlspecialchars($r['in_use_by']); ?></small>
 						<?php endif; ?>
 					</td>
-					<td><small><?php echo LibraryFunctions::convert_time($u->get('upg_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'); ?></small></td>
+					<td><small><?php echo $u->get_local('upg_create_time', 'M j, Y g:i A'); ?></small></td>
 					<td>
 						<?php if ($r['archive_exists']): ?>
 							<small class="text-muted"><?php echo htmlspecialchars($r['filename']); ?> (<?php echo htmlspecialchars(UpgradeRetention::formatBytes($r['bytes'])); ?>)</small>

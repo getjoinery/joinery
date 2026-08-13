@@ -1,15 +1,14 @@
 {
-  "name": "jeremytunnell-html5",
-  "display_name": "Jeremy Tunnell HTML5",
-  "version": "1.0.3",
-  "description": "Clean HTML5 theme based on Typology design, zero dependencies",
-  "author": "Joinery Team",
-  "receives_upgrades": true,
-  "included_in_publish": true,
-  "requires": {
-    "php": ">=7.4"
-  },
-  "cssFramework": "html5",
-  "formWriterBase": "FormWriterV2HTML5",
-  "publicPageBase": "PublicPageBase"
+    "name": "jeremytunnell-html5",
+    "display_name": "Jeremy Tunnell HTML5",
+    "version": "1.0.3",
+    "description": "Clean HTML5 theme based on Typology design, zero dependencies",
+    "author": "Joinery Team",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=7.4"
+    },
+    "cssFramework": "html5",
+    "publicPageBase": "PublicPageBase"
 }

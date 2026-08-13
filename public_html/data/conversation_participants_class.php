@@ -78,9 +78,6 @@ class MultiConversationParticipant extends SystemMultiBase {
 			$filters['cnp_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['cnp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('cnp_conversation_participants', $filters, $this->order_by, $only_count, $debug);
 	}

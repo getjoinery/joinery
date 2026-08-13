@@ -98,9 +98,7 @@ foreach ($runs as $run) {
 
     $row[] = htmlspecialchars($run->get('rcr_trigger') ?: '');
 
-    $row[] = htmlspecialchars(LibraryFunctions::convert_time(
-        $run->get('rcr_started_time'), 'UTC', $session->get_timezone(), 'M j g:i A'
-    ));
+    $row[] = htmlspecialchars($run->get_local('rcr_started_time', 'M j g:i A'));
 
     $duration = '';
     if ($run->get('rcr_completed_time')) {

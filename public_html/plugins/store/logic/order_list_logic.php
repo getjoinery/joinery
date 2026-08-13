@@ -65,7 +65,7 @@ function order_list_logic(array $input): LogicResult {
 	));
 }
 
-function order_list_logic_api() {
+function order_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Paginated order history for the signed-in owner, with line item summaries',

@@ -32,11 +32,7 @@
         <h3>Login to your Account</h3>
 
         <?php
-        foreach ($page_vars['display_messages'] as $display_message) {
-            if ($display_message->identifier == 'loginbox') {
-                echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-            }
-        }
+        echo $page->render_messages('loginbox');
 
         $formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
         $formwriter->begin_form();

@@ -61,6 +61,10 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// cart_charge is the payment-gateway return handler — Stripe/PayPal redirect the
 	// buyer back here via GET — as well as the checkout POST target. Both legitimately
 	// persist the order, so opt in to the GET-is-read-only tripwire for the handler.
+	//
+	// The opt-in spans the whole handler rather than one call, which is why this
+	// sets the flag directly instead of using SystemBase::server_initiated_write():
+	// the guarded region is the function body, with its own returns.
 	SystemBase::$allow_get_mutation = true;
   try {
 

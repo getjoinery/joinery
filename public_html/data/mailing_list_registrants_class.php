@@ -126,9 +126,6 @@ class MultiMailingListRegistrant extends SystemMultiBase {
 			$filters['mlr_mlt_mailing_list_id'] = [$this->options['mailing_list_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mlr_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mlr_mailing_list_registrants', $filters, $this->order_by, $only_count, $debug);
 	}

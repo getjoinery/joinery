@@ -170,7 +170,6 @@ if (empty($errors)) {
         echo "   Active theme: {$activeTheme->getName()}\n";
         echo "   Display name: {$activeTheme->getDisplayName()}\n";
         echo "   CSS Framework: " . ($activeTheme->getCssFramework() ?? 'not specified') . "\n";
-        echo "   FormWriter Base: " . ($activeTheme->getFormWriterBase() ?? 'not specified') . "\n";
     } catch (Exception $e) {
         echo "   Theme error: " . $e->getMessage() . "\n";
     }

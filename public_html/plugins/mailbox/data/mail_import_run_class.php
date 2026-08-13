@@ -496,9 +496,6 @@ class MultiMailImportRun extends SystemMultiBase {
 			$filters['mir_fil_file_id'] = array($this->options['file_id'], PDO::PARAM_INT);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mir_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('mir_mail_import_runs', $filters, $this->order_by, $only_count, $debug);
 	}

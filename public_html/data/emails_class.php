@@ -84,16 +84,6 @@ class Email extends SystemBase {	public static $prefix = 'eml';
 	    'eml_mlt_mailing_list_id' => array('type'=>'int4'),
 	);
 
-public function __construct($key, $load=FALSE) { 
-		parent::__construct($key, $load);
-
-		// Store a few things here for easy passthrough into the 
-		// email templates
-		// Note: webdir is now handled by LibraryFunctions::get_absolute_url() in EmailTemplate.php
-		//$settings = Globalvars::get_instance();
-		//$this->webdir = $settings->get_setting('webDir');
-	}
-
 	//THIS ADDS AN ENTRY TO THE RECIPIENT GROUPS TABLE NAMING A TARGET PROVIDER + REFERENCE
 	//THE OP FIELD TELLS THE MAILER WHETHER TO ADD THESE RECIPIENTS TO THE EMAIL OR SUBTRACT THEM WHEN IT'S TIME TO QUEUE THE EMAIL
 	function add_recipient_group($provider, $reference_id, $op='add'){
@@ -251,9 +241,6 @@ class MultiEmail extends SystemMultiBase {
             $filters['eml_status'] = [$this->options['status'], PDO::PARAM_INT];
         }
         
-        if (isset($this->options['deleted'])) {
-            $filters['eml_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         if (isset($this->options['scheduleddate']) && $this->options['scheduleddate'] == self::SCHEDULED_PAST) {
             $filters['eml_scheduled_time'] = "< NOW()";

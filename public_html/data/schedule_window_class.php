@@ -52,9 +52,6 @@ class MultiScheduleWindow extends SystemMultiBase {
 		if (isset($this->options['day_of_week'])) {
 			$filters['scw_day_of_week'] = [$this->options['day_of_week'], PDO::PARAM_INT];
 		}
-		if (isset($this->options['deleted'])) {
-			$filters['scw_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('scw_schedule_windows', $filters, $this->order_by, $only_count, $debug);
 	}

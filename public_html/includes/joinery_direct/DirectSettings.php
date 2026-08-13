@@ -120,20 +120,13 @@ class DirectSettings {
 	}
 
 	/**
-	 * Write a managed setting the platform mints for itself.
-	 *
-	 * There is no Globalvars::set_setting by design, so this upserts the row
-	 * directly. get_setting() re-reads a blank value from the database rather
-	 * than trusting its in-request copy, so the freshly written value is
-	 * readable on the next call with nothing to invalidate.
+	 * Write a managed setting the platform mints for itself. Never fatal — a
+	 * value that cannot be recorded is regenerated on the next call.
 	 */
 	private static function persist(string $name, string $value): void {
 		try {
-			$db = DbConnector::get_instance()->get_db_link();
-			$stmt = $db->prepare('INSERT INTO stg_settings (stg_name, stg_value, stg_create_time, stg_update_time)
-				VALUES (?, ?, now(), now())
-				ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = now()');
-			$stmt->execute(array($name, $value));
+			require_once(PathHelper::getIncludePath('data/settings_class.php'));
+			Setting::put($name, $value);
 		} catch (\Throwable $e) {
 			error_log('DirectSettings: could not persist ' . $name . ': ' . $e->getMessage());
 		}

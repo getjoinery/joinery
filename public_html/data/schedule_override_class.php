@@ -52,9 +52,6 @@ class MultiScheduleOverride extends SystemMultiBase {
 		if (isset($this->options['date'])) {
 			$filters['sco_date'] = [$this->options['date'], PDO::PARAM_STR];
 		}
-		if (isset($this->options['deleted'])) {
-			$filters['sco_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('sco_schedule_overrides', $filters, $this->order_by, $only_count, $debug);
 	}

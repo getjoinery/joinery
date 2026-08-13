@@ -190,10 +190,10 @@ class MultiContentVersion extends SystemMultiBase {
 		$items = array();
 		foreach($this as $content_version) {
 			if($content_version->get('cnv_description')){
-				$items[$content_version->key] = $content_version->get('cnv_description'). ' - ' .  LibraryFunctions::convert_time($content_version->get('cnv_create_time'), 'UTC', $session->get_timezone());
+				$items[$content_version->key] = $content_version->get('cnv_description'). ' - ' .  $content_version->get_local('cnv_create_time');
 			}
 			else{
-				$items[$content_version->key] = LibraryFunctions::convert_time($content_version->get('cnv_create_time'), 'UTC', $session->get_timezone());
+				$items[$content_version->key] = $content_version->get_local('cnv_create_time');
 			}
 		}
 		if ($include_new) {

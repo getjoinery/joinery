@@ -91,13 +91,13 @@ array(
 						</tr>
 						<tr>
 							<td class="p-1" style="width: 35%;">Signed Up:</td>
-							<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($user->get('usr_signup_date'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></td>
+							<td class="p-1 text-600"><?php echo $user->get_local('usr_signup_date', 'M j, Y'); ?></td>
 						</tr>
 						<?php if($user->get('usr_delete_time')): ?>
 						<tr>
 							<td class="p-1" style="width: 35%;">Status:</td>
 							<td class="p-1">
-								<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($user->get('usr_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+								<span class="badge badge-danger">Deleted at <?php echo $user->get_local('usr_delete_time'); ?></span>
 							</td>
 						</tr>
 						<?php endif; ?>
@@ -272,7 +272,7 @@ array(
 							require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
 							foreach($tier_changes as $change): ?>
 								<?php
-									$change_time = LibraryFunctions::convert_time($change->get('cht_change_time'), 'UTC', $session->get_timezone());
+									$change_time = $change->get_local('cht_change_time');
 									$old_value = $change->get('cht_old_value') ? 'Level ' . $change->get('cht_old_value') : 'Free';
 									$new_value = $change->get('cht_new_value') ? 'Level ' . $change->get('cht_new_value') : 'Free';
 									$reason = $change->get('cht_change_reason');

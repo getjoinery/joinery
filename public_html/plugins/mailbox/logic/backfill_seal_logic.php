@@ -109,7 +109,7 @@ function backfill_seal_logic(array $input): LogicResult {
 	return LogicResult::render(['done' => count($ids) < $batch_size, 'sealed' => $sealed]);
 }
 
-function backfill_seal_logic_api() {
+function backfill_seal_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Seal one batch of the caller\'s own not-yet-sealed mail (pre-launch convergence); call repeatedly until done',

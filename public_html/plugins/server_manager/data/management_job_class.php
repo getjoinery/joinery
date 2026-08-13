@@ -159,9 +159,6 @@ class MultiManagementJob extends SystemMultiBase {
 			$filters['mjb_created_by'] = [$this->options['created_by'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mjb_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mjb_management_jobs', $filters, $this->order_by, $only_count, $debug);
 	}

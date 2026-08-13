@@ -101,7 +101,7 @@ function tests_run_logic(array $input): LogicResult {
 	));
 }
 
-function tests_run_logic_api() {
+function tests_run_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		// Superadmin only; browser sessions carry no API key, so skip the

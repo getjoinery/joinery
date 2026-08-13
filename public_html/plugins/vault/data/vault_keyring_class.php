@@ -45,10 +45,6 @@ class VaultKeyring extends SystemBase {
 		'vlk_updated_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** The keyring row for a user, or null if the store DEK isn't sealed yet. */
 	public static function loadForUser(int $user_id): ?VaultKeyring {
 		$multi = new MultiVaultKeyring(['user_id' => $user_id]);

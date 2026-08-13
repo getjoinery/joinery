@@ -127,7 +127,7 @@ function block_filter_set_logic_descriptor(): array {
 	return [
 		'description' => 'Set or clear one filter/service toggle on a block (block_id, type filter/service, key, action 0/1/empty-to-remove)',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true],
+		'requires_session'        => true,
 		'input'       => [
 			'block_id' => ['type' => 'int',    'required' => false, 'label' => 'Block ID'],
 			'type'     => ['type' => 'string', 'required' => false, 'enum' => ['filter', 'service'], 'label' => 'Type'],

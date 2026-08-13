@@ -44,7 +44,7 @@ function unseal_batch_logic(array $input): LogicResult {
 	return LogicResult::render(mailbox_protection_unseal_batch($domain, $user_id));
 }
 
-function unseal_batch_logic_api() {
+function unseal_batch_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

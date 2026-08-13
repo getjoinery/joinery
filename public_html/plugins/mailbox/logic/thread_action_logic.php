@@ -122,7 +122,7 @@ function thread_action_logic(array $input): LogicResult {
 	return LogicResult::render(array('count' => $count));
 }
 
-function thread_action_logic_api() {
+function thread_action_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Mutate mail state: read/star/archive/delete/spam, restore/purge from trash, labels, create-folder',

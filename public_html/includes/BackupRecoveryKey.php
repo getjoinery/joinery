@@ -437,13 +437,9 @@ class BackupRecoveryKey {
 		self::write_setting(self::PROOF_SETTING, $value);
 	}
 
-	/** Upsert a core backups setting row. */
+	/** Write a core backups setting row. */
 	private static function write_setting($name, $value) {
-		$db = DbConnector::get_instance()->get_db_link();
-		$up = $db->prepare(
-			"INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
-			 VALUES (?, ?, 1, NOW(), NOW(), ?)
-			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
-		$up->execute([$name, $value, self::SETTING_GROUP]);
+		require_once(PathHelper::getIncludePath('data/settings_class.php'));
+		Setting::put($name, $value);
 	}
 }

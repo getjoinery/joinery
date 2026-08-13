@@ -77,7 +77,7 @@ class SubscriptionsPanel implements AdminUserPanel {
 							<div class="fs-11 text-600 mt-1">
 								Status: <span class="text-success"><?php echo htmlspecialchars($status_words); ?></span><br>
 								<?php if ($subscription->get('odi_subscription_period_end')): ?>
-									Period ends: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?><br>
+									Period ends: <?php echo $subscription->get_local('odi_subscription_period_end'); ?><br>
 								<?php endif; ?>
 								<a href="/profile/orders_recurring_action?order_item_id=<?php echo $subscription->key; ?>" class="text-danger">cancel</a>
 							</div>
@@ -104,9 +104,9 @@ class SubscriptionsPanel implements AdminUserPanel {
 								</a> - $<?php echo number_format($subscription->get('odi_price'), 2); ?>/month
 							</div>
 							<div class="fs-11 text-600 mt-1">
-								Canceled: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()); ?>
+								Canceled: <?php echo $subscription->get_local('odi_subscription_cancelled_time'); ?>
 								<?php if ($subscription->get('odi_subscription_period_end')): ?>
-									<br>Last day: <?php echo LibraryFunctions::convert_time($subscription->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?>
+									<br>Last day: <?php echo $subscription->get_local('odi_subscription_period_end'); ?>
 								<?php endif; ?>
 							</div>
 						</div>

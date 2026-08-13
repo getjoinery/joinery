@@ -31,22 +31,22 @@
 	$options['altlinks'] = array('Edit Question' => '/admin/admin_question_edit?qst_question_id='.$question->key);
 	$options['altlinks'] += array('Delete Question' => '/admin/admin_question_permanent_delete?qst_question_id='.$question->key);
 	if(!$question->get('qst_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_question?action=delete&qst_question_id='.$question->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_question', 'hidden' => array('action' => 'delete', 'qst_question_id' => $question->key));
 	}
 
 	$page->begin_box($options);
 
 	if($question->get('qst_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($question->get('qst_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		echo 'Status: Deleted at '.$question->get_local('qst_delete_time').'<br />';
 	}
 	else if($question->get('qst_is_published')){
-		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()). '<br />';
+		echo '<strong>Published:</strong> ' . $question->get_local('qst_published_time'). '<br />';
 	}
 	else{
 		echo '<strong>UNPUBLISHED</strong><br />';
 	}
 
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$question->get_local('qst_create_time') .'<br />';
 
 	if($_POST){
 		echo '<b>'.$valid.'</b>';

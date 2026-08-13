@@ -26,7 +26,7 @@ function admin_email_template_permanent_delete_logic(array $input): LogicResult 
 
 		if ($confirm) {
 			$email_template = new EmailTemplateStore($emt_email_template_id, TRUE);
-			$email_template->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$email_template->assert_can_write($session);
 			$email_template->permanent_delete();
 		}
 

@@ -83,7 +83,7 @@
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Uploaded</td>
-								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($file->get('fil_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+								<td class="p-1 text-600"><?php echo $file->get_local('fil_create_time', 'M j, Y g:i A T'); ?></td>
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Status</td>

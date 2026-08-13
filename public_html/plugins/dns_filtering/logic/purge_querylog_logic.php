@@ -28,10 +28,7 @@ function purge_querylog_logic(array $input): LogicResult{
 
 	try {
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array(
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		));
+		$device->assert_can_read($session);
 	} catch (Exception $e) {
 		return LogicResult::error('Device not found or access denied');
 	}
@@ -80,7 +77,7 @@ function purge_querylog_logic_descriptor(): array {
 	return [
 		'description' => 'Truncate a device\'s DNS query log (device_id)',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true],
+		'requires_session'        => true,
 		'input'       => [
 			'device_id' => ['type' => 'int', 'required' => false, 'label' => 'Device ID'],
 		],

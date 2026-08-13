@@ -118,9 +118,6 @@ class MultiInboundEmailLog extends SystemMultiBase {
 			$filters['iel_ied_inbound_email_domain_id'] = [$this->options['domain_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['iel_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('iel_inbound_email_logs', $filters, $this->order_by, $only_count, $debug);
 	}

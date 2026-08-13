@@ -59,7 +59,7 @@ function catalog_logic(array $input): LogicResult{
 	));
 }
 
-function catalog_logic_api() {
+function catalog_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Filter and service catalog with advanced-filter flags. Static per deployment — cache client-side.',

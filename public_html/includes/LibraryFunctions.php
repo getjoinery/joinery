@@ -21,6 +21,7 @@ class LibraryFunctions {
 		return ($_SERVER['REQUEST_METHOD'] ?? '') === 'POST';
 	}
 
+
 	/**
 	 * Normalize a timestamp for an API payload: UTC, 'Y-m-d H:i:s', seconds
 	 * precision (the API contract format — see docs/api.md § Contract).
@@ -363,6 +364,9 @@ class LibraryFunctions {
 			return; // already recorded — the common case, and it costs nothing
 		}
 		try {
+			// Raw rather than Setting::put(): this runs on every dynamic request
+			// and the IS DISTINCT FROM clause is what makes it a no-op once the
+			// answer has settled. put() would write a row every time.
 			$db = DbConnector::get_instance()->get_db_link();
 			$stmt = $db->prepare(
 				"UPDATE stg_settings SET stg_value = ?

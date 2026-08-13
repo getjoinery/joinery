@@ -440,13 +440,12 @@ function admin_mailbox_relay_tenant_vars(): array {
 	if ($fleet_configured) {
 		// status() folds fresh coordinates into the relay row — intentional
 		// server-side reconciliation on a GET view, like job result processing.
-		SystemBase::$allow_get_mutation = true;
 		try {
-			$fleet_status = $fleet_client->status();
+			$fleet_status = SystemBase::server_initiated_write(function () use ($fleet_client) {
+				return $fleet_client->status();
+			});
 		} catch (\Throwable $e) {
 			$fleet_error = $e->getMessage();
-		} finally {
-			SystemBase::$allow_get_mutation = false;
 		}
 	}
 
@@ -458,14 +457,12 @@ function admin_mailbox_relay_tenant_vars(): array {
 	$live_run = RelayCloudProvision::live();
 	if ($live_run !== null && in_array((string)$live_run->get('rcp_status'), array('ready', 'booting'), true)) {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RelayCloudProvisioner.php'));
-		$was_allowed = SystemBase::$allow_get_mutation;
-		SystemBase::$allow_get_mutation = true;
 		try {
-			(new RelayCloudProvisioner())->advanceCheap($live_run);
+			SystemBase::server_initiated_write(function () use ($live_run) {
+				(new RelayCloudProvisioner())->advanceCheap($live_run);
+			});
 		} catch (\Throwable $e) {
 			error_log('relay cloud page-advance failed for run ' . intval($live_run->key) . ': ' . $e->getMessage());
-		} finally {
-			SystemBase::$allow_get_mutation = $was_allowed;
 		}
 	}
 
@@ -662,8 +659,7 @@ function admin_mailbox_relay_operator_vars(): array {
 		$shard_multi = new MultiMailboxFleetShard(array('deleted' => false));
 		$shard_multi->load();
 		// Shard-row sync from node facts is reconciliation on a GET view.
-		SystemBase::$allow_get_mutation = true;
-		try {
+		SystemBase::server_initiated_write(function () use ($shard_multi, &$fleet_shards) {
 			foreach ($shard_multi as $shard) {
 				admin_mailbox_relay_sync_shard_from_node($shard);
 				$fleet_shards[] = array(
@@ -672,9 +668,7 @@ function admin_mailbox_relay_operator_vars(): array {
 					'dns'   => admin_mailbox_relay_shard_dns_rows($shard),
 				);
 			}
-		} finally {
-			SystemBase::$allow_get_mutation = false;
-		}
+		});
 	}
 
 	$nodes = array();
@@ -860,14 +854,10 @@ function admin_mailbox_relay_backfill_mx_hostname($relay): void {
 		if ($hostname === '' || strpos($hostname, '.') === false) {
 			return;
 		}
-		$was_allowed = SystemBase::$allow_get_mutation;
-		SystemBase::$allow_get_mutation = true;
-		try {
+		SystemBase::server_initiated_write(function () use ($relay, $hostname) {
 			$relay->set('mrl_mx_hostname', substr($hostname, 0, 255));
 			$relay->save();
-		} finally {
-			SystemBase::$allow_get_mutation = $was_allowed;
-		}
+		});
 	} catch (\Throwable $e) {
 		// Best-effort reconcile; the list still renders — but never silently.
 		error_log('admin_mailbox_relay_backfill_mx_hostname failed for relay '

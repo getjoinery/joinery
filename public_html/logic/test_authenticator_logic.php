@@ -61,7 +61,5 @@ function test_authenticator_logic(array $input): LogicResult {
 		));
 	}
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-	$session->clear_clearable_messages();
 	return LogicResult::render($page_vars);
 }

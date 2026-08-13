@@ -45,10 +45,6 @@ class FileKeyGrant extends SystemBase {
 		'fkg_create_time'       => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** The grantee's wrapped file key for a file, or null when they hold none. */
 	public static function wrapped_key_for($file_id, $user_id) {
 		$dblink = DbConnector::get_instance()->get_db_link();

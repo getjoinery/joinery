@@ -55,17 +55,13 @@ function admin_user_logic(array $input): LogicResult {
 	// Handle GET actions.
 	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
 	if(isset($input['action']) && $input['action'] == 'delete'){
-		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		SystemBase::$allow_get_mutation = true;
-		try { $user->soft_delete(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$user->assert_can_write($session);
+		$user->soft_delete();
 		return LogicResult::redirect('/admin/admin_users');
 	}
 	else if(isset($input['action']) && $input['action'] == 'undelete'){
-		$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		SystemBase::$allow_get_mutation = true;
-		try { $user->undelete(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$user->assert_can_write($session);
+		$user->undelete();
 		return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 	}
 
@@ -160,7 +156,7 @@ function admin_user_logic(array $input): LogicResult {
 			$options['altlinks']['Send email to user'] = '/admin/admin_users_message?usr_user_id='.$user->key;
 
 			$options['altlinks']['Change password'] = '/admin/admin_users_password_edit?usr_user_id='.$user->key;
-			$options['altlinks']['Soft Delete'] = '/admin/admin_user?action=delete&usr_user_id='.$user->key;
+			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_user', 'hidden' => array('action' => 'delete', 'usr_user_id' => $user->key));
 
 			if(!$user->get('usr_is_activated')) {
 				$options['altlinks']['Activate User'] = '/admin/admin_activate?usr_user_id='.$user->key;
@@ -186,8 +182,8 @@ function admin_user_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item">' . htmlspecialchars($label) . '</a>';
+		foreach ($options['altlinks'] as $label => $entry) {
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item');
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

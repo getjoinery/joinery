@@ -38,10 +38,6 @@ class FileVersion extends SystemBase {
 		'fvr_create_time'     => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/**
 	 * Release this version's blob reference, then delete the row. The blob↔version
 	 * relationship is code-managed (five-segment FK, no auto rule), so it must be

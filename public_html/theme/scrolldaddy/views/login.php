@@ -38,11 +38,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
   <div class="w-full sm:max-w-md p-5 mx-auto">
 	<?php 
 
-		foreach($page_vars['display_messages'] AS $display_message) {
-			if($display_message->identifier == 'loginbox') {	
-				echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-			}
-		}   		
+		echo $page->render_messages('loginbox');   		
 		
 		$formwriter = $page->getFormWriter('form1', ['action' => '/login', 'method' => 'POST']);
 

@@ -41,11 +41,7 @@
 
                 $formwriter->begin_form();
 
-                foreach($display_messages AS $display_message) {
-                    if($display_message->identifier == 'phonebox') {
-                        echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-                    }
-                }
+                echo $page->render_messages('phonebox');
 
                 PhoneNumber::renderFormFields($formwriter, [
                     'required' => true,

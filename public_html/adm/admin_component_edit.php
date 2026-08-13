@@ -54,7 +54,7 @@ if (isset($_GET['cnv_content_version_id']) && $_GET['cnv_content_version_id'] &&
 	}
 
 	$version_notice = 'Viewing version from ' .
-		LibraryFunctions::convert_time($content_version->get('cnv_create_time'), 'UTC', $session->get_timezone()) .
+		$content_version->get_local('cnv_create_time') .
 		'. Save to restore this version.';
 }
 

@@ -81,7 +81,7 @@ function send_logic(array $input): LogicResult {
 	));
 }
 
-function send_logic_api() {
+function send_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Send a reply, reply-all, or forward as the mailbox',

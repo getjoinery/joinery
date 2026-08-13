@@ -12,13 +12,13 @@ function admin_contact_type_logic(array $input): LogicResult {
 	$contact_type = new ContactType($input['ctt_contact_type_id'], TRUE);
 
 	if($input['action'] == 'delete'){
-		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$contact_type->assert_can_write($session);
 		$contact_type->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_contact_types");
 	}
 	else if($input['action'] == 'undelete'){
-		$contact_type->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$contact_type->assert_can_write($session);
 		$contact_type->undelete();
 
 		return LogicResult::redirect("/admin/admin_contact_types");

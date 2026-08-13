@@ -25,12 +25,7 @@ $page->begin_box($pageoptions);
 // Prepare override values for timezone conversion
 $override_values = [];
 if($order->key && $order->get('ord_timestamp')){
-	$override_values['ord_timestamp'] = LibraryFunctions::convert_time(
-		$order->get('ord_timestamp'),
-		'UTC',
-		$session->get_timezone(),
-		'Y-m-d H:i:s'
-	);
+	$override_values['ord_timestamp'] = $order->get_local('ord_timestamp', 'Y-m-d H:i:s');
 }
 
 // Editing an existing order

@@ -123,6 +123,10 @@ abstract class AbstractExtensionManager {
         // Cached anonymous pages were rendered under the old active set —
         // stale until dropped (the cache has no TTL, only random sampling).
         $this->clearStaticPageCache();
+
+        // The class map covers active plugins, so the active set changing
+        // changes the map.
+        ClassAutoloader::flush();
     }
 
     /**
@@ -166,6 +170,10 @@ abstract class AbstractExtensionManager {
         // A deactivated extension's cached pages would keep serving from the
         // static cache instead of 404ing — the route gate runs after the cache.
         $this->clearStaticPageCache();
+
+        // The class map covers active plugins, so the active set changing
+        // changes the map.
+        ClassAutoloader::flush();
     }
 
     /**

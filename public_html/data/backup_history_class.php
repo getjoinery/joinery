@@ -224,9 +224,6 @@ class MultiBackupHistory extends SystemMultiBase {
 			$filters['bkh_upload_time'] = $this->options['offsite'] ? "IS NOT NULL" : "IS NULL";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['bkh_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('bkh_backup_history', $filters, $this->order_by, $only_count, $debug);
 	}

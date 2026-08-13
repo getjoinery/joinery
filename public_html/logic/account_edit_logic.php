@@ -24,9 +24,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	// intentional mutations, so opt in to the GET-is-read-only tripwire.
 	if (isset($input['action']) && $input['action'] == 'set_primary_photo') {
 		$user = new User($session->get_user_id(), TRUE);
-		SystemBase::$allow_get_mutation = true;
-		try { $user->set_primary_photo((int)$input['photo_id']); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$user->set_primary_photo((int)$input['photo_id']);
 
 		$msgtxt = 'Your profile picture has been updated.';
 		$message = new DisplayMessage($msgtxt, 'Photo updated', '/\/profile\/account_edit.*/',
@@ -37,9 +35,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	if (isset($input['action']) && $input['action'] == 'clear_primary_photo') {
 		$user = new User($session->get_user_id(), TRUE);
-		SystemBase::$allow_get_mutation = true;
-		try { $user->clear_primary_photo(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$user->clear_primary_photo();
 
 		$msgtxt = 'Your profile picture has been removed.';
 		$message = new DisplayMessage($msgtxt, 'Photo removed', '/\/profile\/account_edit.*/',
@@ -138,19 +134,11 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		
 	} 
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	
 	$page_vars['user'] = $user;
 	$page_vars['user_photos'] = $user->get_photos();
 	return LogicResult::render($page_vars);
-}
-
-function account_edit_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Update profile fields',
-    ];
 }
 
 /**

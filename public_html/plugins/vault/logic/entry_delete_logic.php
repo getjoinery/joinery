@@ -24,7 +24,7 @@ function entry_delete_logic(array $input): LogicResult {
 	return LogicResult::render(['deleted' => true]);
 }
 
-function entry_delete_logic_api() {
+function entry_delete_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

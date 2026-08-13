@@ -346,4 +346,9 @@ class PathHelper {
         throw new Exception($error_msg);
     }
 }
+
+// Platform classes resolve by name from here on. PathHelper is the one file
+// every entry point loads first, so this is the single registration point.
+require_once(__DIR__ . '/ClassAutoloader.php');
+ClassAutoloader::register();
 ?>

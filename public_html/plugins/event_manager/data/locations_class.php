@@ -172,9 +172,6 @@ class MultiLocation extends SystemMultiBase {
 			$filters['loc_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['loc_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('loc_locations', $filters, $this->order_by, $only_count, $debug);
 	}

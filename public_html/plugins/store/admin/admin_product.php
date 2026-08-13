@@ -147,11 +147,18 @@
 							</div>
 							<div>
 								<a href="/plugins/store/admin/admin_product_version_edit?product_id=<?php echo $product->key; ?>&product_version_id=<?php echo $version->key; ?>" class="btn btn-link btn-sm">Edit</a>
-								<?php if($version->get('prv_status')): ?>
-									<a href="/plugins/store/admin/admin_product_version_edit?product_id=<?php echo $product->key; ?>&product_version_id=<?php echo $version->key; ?>&action=remove_version" class="btn btn-link btn-sm">Deactivate</a>
-								<?php else: ?>
-									<a href="/plugins/store/admin/admin_product_version_edit?product_id=<?php echo $product->key; ?>&product_version_id=<?php echo $version->key; ?>&action=activate_version" class="btn btn-link btn-sm">Activate</a>
-								<?php endif; ?>
+								<?php echo AdminPage::action_button(
+									$version->get('prv_status') ? 'Deactivate' : 'Activate',
+									'/plugins/store/admin/admin_product_version_edit',
+									array(
+										'hidden' => array(
+											'product_id'         => $product->key,
+											'product_version_id' => $version->key,
+											'action'             => $version->get('prv_status') ? 'remove_version' : 'activate_version',
+										),
+										'class' => 'btn btn-link btn-sm',
+									)
+								); ?>
 							</div>
 						</div>
 						<?php endforeach; ?>

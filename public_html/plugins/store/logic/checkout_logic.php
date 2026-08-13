@@ -235,7 +235,7 @@ function checkout_logic(array $input): LogicResult{
 	return LogicResult::render($page_vars);
 }
 
-function checkout_logic_api() {
+function checkout_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Add item to cart',

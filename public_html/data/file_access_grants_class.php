@@ -35,10 +35,6 @@ class FileAccessGrant extends SystemBase {
 		'fga_create_time'          => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** Entity ids of a given type that are shared to $user_id. */
 	public static function entity_ids_for_user($user_id, $entity_type) {
 		$grants = new MultiFileAccessGrant(array('user_id' => (int)$user_id, 'entity_type' => $entity_type));

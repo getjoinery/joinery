@@ -122,9 +122,6 @@ class MultiBookingType extends SystemMultiBase {
             $filters['bkt_provider'] = [$this->options['provider'], PDO::PARAM_STR];
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['bkt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('bkt_booking_types', $filters, $this->order_by, $only_count, $debug);
     }

@@ -297,14 +297,9 @@ function mailbox_reader_emit_unseal_convergence(): void {
 	?>
 <script>
 (function () {
-	var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
 	function batch() {
-		fetch('/api/v1/action/mailbox/unseal_batch', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-			body: JSON.stringify({})
-		}).then(function (r) { return r.json(); }).then(function (j) {
-			var d = (j && j.data) || {};
+		joineryApi.post('mailbox/unseal_batch', {}).then(function (d) {
+			d = d || {};
 			if (d.locked || !d.unsealed || !(d.own_remaining > 0)) return;
 			batch();
 		}).catch(function () { /* silent — the next visit resumes */ });
@@ -370,16 +365,11 @@ function mailbox_reader_emit_ai_catchup(): void {
 	if (!box) { return; }
 	var btn = box.querySelector('.mbx-catchup-btn');
 	var out = box.querySelector('.mbx-catchup-progress');
-	var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
 	var done = 0, running = false;
 
 	function pass() {
-		fetch('/api/v1/action/vault_deferred_work', {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-			body: JSON.stringify({})
-		}).then(function (r) { return r.json(); }).then(function (j) {
-			var d = (j && j.data) || {};
+		joineryApi.post('vault_deferred_work', {}).then(function (d) {
+			d = d || {};
 			if (d.locked) {
 				out.textContent = 'Unlock your vault to continue.';
 				stop();

@@ -179,9 +179,6 @@ class MultiBackupTarget extends SystemMultiBase {
 			$filters['bkt_enabled'] = $this->options['enabled'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['bkt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('bkt_backup_targets', $filters, $this->order_by, $only_count, $debug);
 	}

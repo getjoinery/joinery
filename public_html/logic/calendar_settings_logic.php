@@ -70,9 +70,7 @@ function calendar_settings_logic_descriptor(): array {
 	return [
 		'description' => 'Read or save the signed-in member\'s calendar email preferences (summaries and reminder default).',
 		'mutates'     => true,
-		'auth'        => [
-			'requires_session' => true,
-		],
+		'requires_session'        => true,
 		'input'       => [
 			'action'                   => ['type' => 'string', 'required' => false, 'enum' => ['save'], 'label' => 'Pass "save" to write; omit to read'],
 			'summary_frequency'        => ['type' => 'string', 'required' => false, 'enum' => ['none', 'daily', 'weekly'], 'label' => 'Summary emails'],

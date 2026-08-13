@@ -170,7 +170,8 @@ function backup_actions_logic_descriptor(): array {
 	return [
 		'description' => 'Backup browser actions (refresh_list / delete_file / upload_file / list_status) for a managed node.',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'requires_session'        => true,
+		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
 			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'list_status'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],

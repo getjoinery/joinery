@@ -14,14 +14,14 @@
 	$location = new Location($_REQUEST['loc_location_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$location->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$location->assert_can_write($session);
 		$location->soft_delete();
 
 		header("Location: /plugins/event_manager/admin/admin_locations");
 		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$location->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$location->assert_can_write($session);
 		$location->undelete();
 
 		header("Location: /plugins/event_manager/admin/admin_locations");
@@ -37,7 +37,7 @@
 	}
 
 	if(!$location->get('loc_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/plugins/event_manager/admin/admin_location?action=delete&loc_location_id='.$location->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_location', 'hidden' => array('action' => 'delete', 'loc_location_id' => $location->key));
 	}
 
 	// Build dropdown button from altlinks
@@ -46,9 +46,9 @@
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';
@@ -105,7 +105,7 @@
 								<td class="p-1 text-800 fw-semi-bold">Status</td>
 								<td class="p-1">
 									<?php if($location->get('loc_delete_time')): ?>
-										<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($location->get('loc_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+										<span class="badge badge-danger">Deleted at <?php echo $location->get_local('loc_delete_time'); ?></span>
 									<?php elseif($location->get('loc_is_published')): ?>
 										<span class="badge badge-subtle-success">Published</span>
 									<?php else: ?>
@@ -116,7 +116,7 @@
 							<?php if($location->get('loc_create_time')): ?>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Created</td>
-								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($location->get('loc_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+								<td class="p-1 text-600"><?php echo $location->get_local('loc_create_time', 'M j, Y g:i A T'); ?></td>
 							</tr>
 							<?php endif; ?>
 						</tbody>

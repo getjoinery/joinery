@@ -91,9 +91,6 @@ class MultiCouponCodeUse extends SystemMultiBase {
             $filters['ccu_ord_order_id'] = [$this->options['order_id'], PDO::PARAM_INT];
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['ccu_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('ccu_coupon_code_uses', $filters, $this->order_by, $only_count, $debug);
     }

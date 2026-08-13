@@ -32,7 +32,7 @@
 	}
 
 	if(!$contact_type->get('ctt_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_contact_type?action=delete&ctt_contact_type_id='.$contact_type->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_contact_type', 'hidden' => array('action' => 'delete', 'ctt_contact_type_id' => $contact_type->key));
 	}
 
 	$page->begin_box($options);
@@ -40,7 +40,7 @@
 	echo '<h3>'.htmlspecialchars($contact_type->get('ctt_name')).'</h3>';
 
 	if($contact_type->get('ctt_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($contact_type->get('ctt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		echo 'Status: Deleted at '.$contact_type->get_local('ctt_delete_time').'<br />';
 	}
 	else{
 		echo 'Status: Active'.'<br />';

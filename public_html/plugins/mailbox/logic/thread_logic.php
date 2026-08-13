@@ -57,7 +57,7 @@ function thread_logic(array $input): LogicResult {
 	));
 }
 
-function thread_logic_api() {
+function thread_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Fetch a mail thread: messages with bodies, signed attachment and inline-image URLs',

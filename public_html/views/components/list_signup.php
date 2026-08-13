@@ -73,7 +73,6 @@ $is_logged_in = $session && $session->get_user_id();
 $already_subscribed = ($list_mode !== 'all') && $is_logged_in && $member_of_list;
 
 // FormWriter setup
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 $form_id = 'list_signup' . ($component_slug ? '_' . $component_slug : '_' . uniqid());
 $form_options = [
 	'method' => 'POST',
@@ -82,7 +81,7 @@ $form_options = [
 if ($compact_mode) {
 	$form_options['class'] = 'lsu-compact';
 }
-$formwriter = new FormWriter($form_id, $form_options);
+$formwriter = new FormWriterV2HTML5($form_id, $form_options);
 
 $settings = Globalvars::get_instance();
 ?>

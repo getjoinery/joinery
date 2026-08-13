@@ -1,7 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/PublicPageBase.php'));
 
-if (!class_exists('PublicPage')) {
+if (!class_exists('PublicPage', false)) {
 class PublicPage extends PublicPageBase {
 
     protected function getTableClasses() {

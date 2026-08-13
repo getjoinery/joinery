@@ -51,7 +51,7 @@ $session = $page_vars['session'];
                         </div>
                         <div class="text-end">
                             <p class="muted text-sm jy-tight">
-                                <?php echo LibraryFunctions::convert_time($order->get('ord_timestamp'), 'UTC', $session->get_timezone(), 'M j, Y'); ?>
+                                <?php echo $order->get_local('ord_timestamp', 'M j, Y'); ?>
                             </p>
                         </div>
                     </div>
@@ -104,7 +104,7 @@ $session = $page_vars['session'];
                     </div>
                     <div class="text-end">
                         <p class="muted text-sm jy-tight">
-                            <?php echo LibraryFunctions::convert_time($license_key->get('lck_create_time'), 'UTC', $session->get_timezone(), 'M j, Y'); ?>
+                            <?php echo $license_key->get_local('lck_create_time', 'M j, Y'); ?>
                         </p>
                     </div>
                 </div>

@@ -366,9 +366,6 @@ class MultiInboundEmailDomain extends SystemMultiBase {
 			$filters['ied_is_enabled'] = $this->options['enabled'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['ied_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('ied_inbound_email_domains', $filters, $this->order_by, $only_count, $debug);
 	}

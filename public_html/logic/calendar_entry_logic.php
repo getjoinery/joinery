@@ -33,10 +33,7 @@ function calendar_entry_logic(array $input): LogicResult {
 		return LogicResult::error('Entry not found.');
 	}
 	try {
-		$entry->authenticate_read([
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		]);
+		$entry->assert_can_read($session);
 	} catch (SystemAuthenticationError $e) {
 		return LogicResult::error('Entry not found.');
 	}
@@ -83,7 +80,7 @@ function calendar_entry_logic(array $input): LogicResult {
 	));
 }
 
-function calendar_entry_logic_api() {
+function calendar_entry_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Load one native calendar entry (owner-only) for editing',

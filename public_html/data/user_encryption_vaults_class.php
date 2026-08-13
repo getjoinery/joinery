@@ -69,10 +69,6 @@ class UserEncryptionVault extends SystemBase {
 		'uev_updated_time'   => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** The one vault row for a (user, scope), or null if not set up yet. */
 	public static function loadForUser(int $user_id, string $scope = self::SCOPE_USER): ?UserEncryptionVault {
 		$multi = new MultiUserEncryptionVault(['user_id' => $user_id, 'scope' => $scope]);

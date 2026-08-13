@@ -87,7 +87,7 @@ foreach ($conversations as $cnv) {
 	if ($latest_messages->count() > 0) {
 		$latest = $latest_messages->get(0);
 		$latest_preview = htmlspecialchars(substr(strip_tags($latest->get('msg_body')), 0, 50), ENT_QUOTES, 'UTF-8');
-		$latest_time = LibraryFunctions::convert_time($latest->get('msg_sent_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A');
+		$latest_time = $latest->get_local('msg_sent_time', 'M j, Y g:i A');
 	}
 
 	$status = $cnv->get('cnv_delete_time') ? 'Deleted' : 'Active';

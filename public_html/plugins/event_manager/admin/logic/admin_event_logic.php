@@ -30,13 +30,13 @@ function admin_event_logic(array $input): LogicResult {
 
 	// Handle actions
 	if($input['action'] == 'delete'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$event->soft_delete();
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_events');
 	}
 	else if($input['action'] == 'undelete'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$event->undelete();
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_events');
@@ -44,7 +44,7 @@ function admin_event_logic(array $input): LogicResult {
 
 	// Recurring event actions
 	if($input['action'] == 'cancel_instance'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$instance = $event->materialize_instance($input['instance_date']);
 		$instance->set('evt_status', Event::STATUS_CANCELED);
 		$instance->save();
@@ -52,7 +52,7 @@ function admin_event_logic(array $input): LogicResult {
 	}
 
 	if($input['action'] == 'revert_instance'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
 			$instance = new Event($instance_id, TRUE);
@@ -62,7 +62,7 @@ function admin_event_logic(array $input): LogicResult {
 	}
 
 	if($input['action'] == 'delete_instance'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$instance_id = intval($input['instance_event_id']);
 		if($instance_id){
 			$instance = new Event($instance_id, TRUE);
@@ -72,7 +72,7 @@ function admin_event_logic(array $input): LogicResult {
 	}
 
 	if($input['action'] == 'end_series'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$event->end_series();
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
@@ -96,14 +96,14 @@ function admin_event_logic(array $input): LogicResult {
 	}
 
 	if($input['action'] == 'set_primary_photo'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$event->set_primary_photo((int)$input['photo_id']);
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
 	}
 
 	if($input['action'] == 'clear_primary_photo'){
-		$event->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event->assert_can_write($session);
 		$event->clear_primary_photo();
 
 		return LogicResult::redirect('/plugins/event_manager/admin/admin_event?evt_event_id='.$event->key);
@@ -166,12 +166,12 @@ function admin_event_logic(array $input): LogicResult {
 		}
 		if($_SESSION['permission'] >= 8) {
 			$options['altlinks']['Email Registrants'] = '/plugins/event_manager/admin/admin_event_emails?evt_event_id='.$event->key;
-			$options['altlinks']['Soft Delete'] = '/plugins/event_manager/admin/admin_event?action=delete&evt_event_id='.$event->key;
+			$options['altlinks']['Soft Delete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'delete', 'evt_event_id' => $event->key));
 		}
 	}
 	else {
 		if($_SESSION['permission'] >= 8) {
-			$options['altlinks']['Undelete'] = '/plugins/event_manager/admin/admin_event?action=undelete&evt_event_id='.$event->key;
+			$options['altlinks']['Undelete'] = array('post' => '/plugins/event_manager/admin/admin_event', 'hidden' => array('action' => 'undelete', 'evt_event_id' => $event->key));
 		}
 	}
 
@@ -181,8 +181,8 @@ function admin_event_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item">' . htmlspecialchars($label) . '</a>';
+		foreach ($options['altlinks'] as $label => $entry) {
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item');
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

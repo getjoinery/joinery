@@ -2675,7 +2675,7 @@ The mailbox is exposed to API clients (the native mobile mail screens,
 | `contacts` / `contact_delete` / `contacts_import` | List (decrypted, ranked) / delete / import-or-add the caller's contacts for ONE mailbox — `contacts` and `contacts_import` both require `alias_id`, since a contact belongs to a mailbox |
 | `sender_context` | Resolve a thread counterparty (by message id) to the caller's contact-store entry, plus (admins only) their member record, orders and registrations |
 
-Each action is a `logic/{action}_logic.php` with an `_logic_api()` opt-in that
+Each action is a `logic/{action}_logic.php` with a `_logic_descriptor()` opt-in that
 builds a `MailboxViewer` for the key's user and goes through
 `MailboxService` / `MailboxSender` — the same shared brain the web AJAX
 endpoints wrap, so scoping, threading, view semantics, and send side effects

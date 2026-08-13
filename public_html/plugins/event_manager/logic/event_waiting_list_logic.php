@@ -1,6 +1,5 @@
 <?php
 
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 function event_waiting_list_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -42,7 +41,7 @@ function event_waiting_list_logic(array $input): LogicResult {
 			$user = new User($session->get_user_id(), TRUE);
 		}
 		else{
-			$formwriter = new FormWriter('form1');
+			$formwriter = new FormWriterV2HTML5('form1');
 			if(!$formwriter->honeypot_check($_POST)){
 				LibraryFunctions::display_404_page();
 			}
@@ -115,13 +114,6 @@ function event_waiting_list_logic(array $input): LogicResult {
 	}
 
 	return LogicResult::render($page_vars);
-}
-
-function event_waiting_list_logic_api() {
-	return [
-		'requires_session' => true,
-		'description' => 'Join event waiting list',
-	];
 }
 
 function event_waiting_list_logic_descriptor(): array {

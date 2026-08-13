@@ -222,8 +222,6 @@ function security_logic(array $input): LogicResult{
 			$page_vars['secret'] = $_SESSION['totp_setup_secret'];
 			$page_vars['provisioning_uri'] = _build_totp_uri($_SESSION['totp_setup_secret'], $user, $settings);
 			$page_vars['qr_uri'] = _build_qr_data_uri($page_vars['provisioning_uri']);
-			$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-			$session->clear_clearable_messages();
 			return LogicResult::render($page_vars);
 		}
 
@@ -238,8 +236,6 @@ function security_logic(array $input): LogicResult{
 			$page_vars['secret'] = $_SESSION['totp_setup_secret'];
 			$page_vars['provisioning_uri'] = _build_totp_uri($_SESSION['totp_setup_secret'], $user, $settings);
 			$page_vars['qr_uri'] = _build_qr_data_uri($page_vars['provisioning_uri']);
-			$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-			$session->clear_clearable_messages();
 			return LogicResult::render($page_vars);
 		}
 
@@ -252,8 +248,6 @@ function security_logic(array $input): LogicResult{
 		$page_vars['totp_enabled_time'] = $user->get('usr_totp_enabled_time');
 		$page_vars['just_enabled'] = true;
 		$page_vars['backup_codes'] = $backup_codes;
-		$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-		$session->clear_clearable_messages();
 		return LogicResult::render($page_vars);
 	}
 
@@ -275,8 +269,6 @@ function security_logic(array $input): LogicResult{
 		$message = new DisplayMessage($msgtxt, 'Backup codes regenerated', '/\/profile\/security.*/',
 			DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);
 		$session->save_message($message);
-		$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-		$session->clear_clearable_messages();
 		return LogicResult::render($page_vars);
 	}
 
@@ -465,8 +457,6 @@ function security_logic(array $input): LogicResult{
 	$page_vars['sync_device_key_ids'] = $device_key_ids;
 
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-	$session->clear_clearable_messages();
 	return LogicResult::render($page_vars);
 }
 
@@ -491,13 +481,6 @@ function _build_qr_data_uri($provisioning_uri) {
 		'scale'      => 5,
 	]);
 	return (new \chillerlan\QRCode\QRCode($opts))->render($provisioning_uri);
-}
-
-function security_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Manage two-factor authentication settings',
-    ];
 }
 
 function security_logic_descriptor(): array {

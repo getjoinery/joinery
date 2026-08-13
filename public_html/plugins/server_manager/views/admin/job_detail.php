@@ -109,6 +109,8 @@ if (!empty($display_messages)) {
 		echo htmlspecialchars($msg->message);
 		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
+	// Rendered above, so these are spent; the footer drops them.
+	$session->mark_shown($display_messages);
 	$session->clear_clearable_messages();
 }
 
@@ -145,12 +147,12 @@ $status_class = match($job->get('mjb_status')) {
 				<p><strong>Progress:</strong> <span id="job-progress"><?php echo $done_steps; ?></span> / <?php echo $total_steps; ?> steps</p>
 			</div>
 			<div class="col-md-6">
-				<p><strong>Created:</strong> <?php echo LibraryFunctions::convert_time($job->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A'); ?></p>
+				<p><strong>Created:</strong> <?php echo $job->get_local('mjb_create_time', 'M j, Y g:i:s A'); ?></p>
 				<?php if ($job->get('mjb_started_time')): ?>
-					<p><strong>Started:</strong> <?php echo LibraryFunctions::convert_time($job->get('mjb_started_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A'); ?></p>
+					<p><strong>Started:</strong> <?php echo $job->get_local('mjb_started_time', 'M j, Y g:i:s A'); ?></p>
 				<?php endif; ?>
 				<?php if ($job->get('mjb_completed_time')): ?>
-					<p><strong>Completed:</strong> <?php echo LibraryFunctions::convert_time($job->get('mjb_completed_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A'); ?></p>
+					<p><strong>Completed:</strong> <?php echo $job->get_local('mjb_completed_time', 'M j, Y g:i:s A'); ?></p>
 				<?php endif; ?>
 				<?php if ($job->get('mjb_started_time') && $job->get('mjb_completed_time')): ?>
 					<?php $dur = strtotime($job->get('mjb_completed_time')) - strtotime($job->get('mjb_started_time')); ?>

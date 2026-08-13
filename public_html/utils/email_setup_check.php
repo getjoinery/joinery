@@ -1,6 +1,5 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 require_once(PathHelper::getIncludePath('/includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('/includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('/includes/LibraryFunctions.php'));

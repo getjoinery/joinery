@@ -71,7 +71,7 @@ function conversation_send_logic(array $input): LogicResult {
 	));
 }
 
-function conversation_send_logic_api() {
+function conversation_send_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Send a message in a conversation (conversation_id or to for a new/existing 1:1)',

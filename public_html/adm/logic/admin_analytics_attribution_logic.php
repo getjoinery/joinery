@@ -17,6 +17,11 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 	$session = SessionControl::get_instance();
 	$session->check_permission(5);
 
+	// Revenue attribution reads ord_orders, which only exists with the store plugin.
+	if (!PluginHelper::isPluginActive('store')) {
+		return LogicResult::error('Store plugin is not installed');
+	}
+
 	$today = date('Y-m-d');
 	$startdate    = LibraryFunctions::fetch_variable('startdate', date('Y-m-d', strtotime('-30 days')), 0, '');
 	$enddate      = LibraryFunctions::fetch_variable('enddate', $today, 0, '');

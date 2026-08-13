@@ -2,7 +2,6 @@
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 	require_once(PathHelper::getThemeFilePath('products_logic.php', 'logic', 'system', null, 'store', false));
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 	//OVERRIDE GET VARS
 	$_GET['numperpage'] = 100;

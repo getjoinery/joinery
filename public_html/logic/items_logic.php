@@ -7,8 +7,13 @@ require_once(__DIR__ . '/../includes/PathHelper.php');
 		require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		require_once(PathHelper::getIncludePath('includes/Pager.php'));
-		require_once(PathHelper::getIncludePath('plugins/items/data/items_class.php'));  	
-		
+
+		$items_class = PathHelper::getIncludePath('plugins/items/data/items_class.php');
+		if (!file_exists($items_class)) {
+			return LogicResult::error('Items plugin is not installed');
+		}
+		require_once($items_class);
+
 		$settings = Globalvars::get_instance();
 		$page_vars['settings'] = $settings;
 		/*

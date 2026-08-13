@@ -217,7 +217,7 @@ deleting its wrapping for that credential would strand its protected key.
 
 ## API surface
 
-Eight `_logic_api()` actions under `/api/v1/action/*` (see [API](api.md) for the
+Eight descriptor-declared actions under `/api/v1/action/*` (see [API](api.md) for the
 full table) plus the free CRUD read `GET /api/v1/Passkeys` for the credential
 list — no bespoke listing endpoint. Enrollment always demands proof beyond the
 session cookie: a second (or later) passkey requires a fresh step-up assertion

@@ -66,7 +66,7 @@ class OrdersPanel implements AdminUserPanel {
 
 				if ($order_item->get('odi_subscription_cancelled_time')) {
 					$status_words = $order_item->get('odi_subscription_status') ? $order_item->get('odi_subscription_status') : 'canceled';
-					$this_out .= '<br><span class="fs-11 text-600">' . htmlspecialchars($status_words) . ' at ' . LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()) . '</span>';
+					$this_out .= '<br><span class="fs-11 text-600">' . htmlspecialchars($status_words) . ' at ' . $order_item->get_local('odi_subscription_cancelled_time') . '</span>';
 				} else if ($order_item->get('odi_subscription_status')) {
 					$this_out .= '<br><span class="fs-11 text-600">STATUS: ' . htmlspecialchars($order_item->get('odi_subscription_status')) . '</span>';
 				}

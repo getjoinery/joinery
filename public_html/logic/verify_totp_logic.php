@@ -93,16 +93,7 @@ function verify_totp_logic(array $input): LogicResult{
 		return LogicResult::redirect(Login2fa::completePendingLogin($user, !empty($input['trust_device'])));
 	}
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-	$session->clear_clearable_messages();
 	return LogicResult::render($page_vars);
-}
-
-function verify_totp_logic_api() {
-    return [
-        'requires_session' => false,
-        'description' => 'Verify TOTP code during login',
-    ];
 }
 
 function verify_totp_logic_descriptor(): array {

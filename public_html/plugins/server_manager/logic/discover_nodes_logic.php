@@ -79,7 +79,8 @@ function discover_nodes_logic_descriptor(): array {
 	return [
 		'description' => 'Create or poll a node-discovery job (host + SSH details, or job_id to poll).',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'requires_session'        => true,
+		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
 			'job_id'       => ['type' => 'int',    'required' => false, 'label' => 'Job ID (poll)'],
 			'host'         => ['type' => 'string', 'required' => false, 'label' => 'Host'],

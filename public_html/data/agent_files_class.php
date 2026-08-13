@@ -443,9 +443,6 @@ class MultiAgentFile extends SystemMultiBase {
 	protected function getMultiResults($only_count = false, $debug = false) {
 		$filters = array();
 
-		if (isset($this->options['deleted'])) {
-			$filters['agf_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		if (isset($this->options['written'])) {
 			$filters['agf_last_written_time'] = $this->options['written'] ? 'IS NOT NULL' : 'IS NULL';

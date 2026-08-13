@@ -139,16 +139,15 @@ abstract class PublicPageBase {
 	}
 
 	/**
-	 * Get a FormWriter instance appropriate for this page
-	 * Loads the theme's FormWriter via the standard theme override chain
+	 * A FormWriter for this page. One class writes every form on the platform;
+	 * the .jy-ui kit styles what it emits, whatever the active theme.
 	 *
 	 * @param string $form_id The form identifier (default: 'form1')
 	 * @param array $options Configuration options for FormWriter
-	 * @return FormWriter The theme-appropriate FormWriter instance
+	 * @return FormWriterV2HTML5
 	 */
 	public function getFormWriter($form_id = 'form1', $options = []) {
-        require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
-        return new FormWriter($form_id, $options);
+        return new FormWriterV2HTML5($form_id, $options);
     }
 	
 	public static function get_public_menu(){
@@ -1021,6 +1020,49 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * Render the pending messages addressed to one named slot on this page.
+	 *
+	 * A message says which box it belongs to through its `identifier`
+	 * ('loginbox', 'userbox', 'addressbox', …), and a page renders the slots it
+	 * owns:
+	 *
+	 *   echo $page->render_messages('userbox');
+	 *
+	 * Showing a message is what spends it — this marks what it emitted, and the
+	 * footer clears those. Reading messages without rendering them leaves them
+	 * pending for the next page that does show them, which is why nothing else
+	 * needs to be careful about fetching.
+	 *
+	 * Markup comes from static::alert(), so a theme's own alert styling applies
+	 * unchanged.
+	 *
+	 * @param string|null $identifier The slot to render; NULL renders every
+	 *                                message matching this page.
+	 * @param int|null $display_location Location filter; NULL for all.
+	 * @return string HTML, empty when nothing is pending.
+	 */
+	public function render_messages($identifier = NULL, $display_location = DisplayMessage::MESSAGE_DISPLAY_IN_PAGE) {
+		$session = SessionControl::get_instance();
+		$messages = $session->get_messages(
+			$_SERVER['REQUEST_URI'] ?? '',
+			$display_location,
+			$identifier
+		);
+
+		$out = '';
+		foreach ($messages as $message) {
+			$out .= static::alert(
+				$message->message_title,
+				$message->message,
+				$message->get_message_class()
+			);
+		}
+
+		$session->mark_shown($messages);
+		return $out;
+	}
+
+	/**
 	 * Render the site logo (image + text fallback)
 	 * Override in theme-specific PublicPage subclasses for custom markup
 	 */
@@ -1578,6 +1620,61 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * One entry in an `altlinks` list.
+	 *
+	 * A plain string is a URL and renders as a link — that is what most entries
+	 * are: "Edit", "View", somewhere to go.
+	 *
+	 * An entry that CHANGES something is described instead of linked, and
+	 * renders as a submit button in its own POST form:
+	 *
+	 *   $options['altlinks']['Soft Delete'] = array(
+	 *       'post'    => '/admin/admin_post',
+	 *       'hidden'  => array('action' => 'delete', 'pst_post_id' => $post->key),
+	 *       'confirm' => 'Delete this post?',       // optional
+	 *   );
+	 *
+	 * The distinction is not decoration. A link is a GET, and a browser makes a
+	 * GET whenever it is told to — by another site, by a prefetcher, by a bot
+	 * following hrefs — carrying the session cookie with it. A POST form is not
+	 * something another site can make the browser submit, because the session
+	 * cookie is SameSite=Lax and simply is not sent.
+	 *
+	 * @param string $label
+	 * @param string|array $entry
+	 * @param string $class CSS classes for the rendered control.
+	 * @return string
+	 */
+	public static function renderActionEntry($label, $entry, $class) {
+		if (!is_array($entry)) {
+			return '<a href="' . htmlspecialchars($entry) . '" class="' . htmlspecialchars($class) . '">'
+				. htmlspecialchars($label) . '</a>';
+		}
+
+		$action  = isset($entry['post']) ? $entry['post'] : '';
+		$hidden  = isset($entry['hidden']) && is_array($entry['hidden']) ? $entry['hidden'] : array();
+		$confirm = isset($entry['confirm']) ? (string)$entry['confirm'] : '';
+
+		$onclick = '';
+		if ($confirm !== '') {
+			$escaped = addslashes(htmlspecialchars($confirm, ENT_QUOTES));
+			$onclick = ' onclick="var f=this.closest(\'form\');'
+				. ' JoineryModal.confirm(\'' . $escaped . '\', function(){ f.submit(); });'
+				. ' return false;"';
+		}
+
+		$html = '<form method="POST" action="' . htmlspecialchars($action) . '" style="display:inline;">';
+		foreach ($hidden as $name => $value) {
+			$html .= '<input type="hidden" name="' . htmlspecialchars($name)
+				. '" value="' . htmlspecialchars((string)$value) . '">';
+		}
+		$html .= '<button type="submit" class="' . htmlspecialchars($class) . '"' . $onclick . '>'
+			. htmlspecialchars($label) . '</button>';
+		$html .= '</form>';
+		return $html;
+	}
+
+	/**
 	 * Render a dropdown menu for action links (>2 links)
 	 * Override in subclasses for framework-specific markup
 	 */
@@ -1586,8 +1683,8 @@ abstract class PublicPageBase {
 		echo '<details class="dropdown">';
 		echo '<summary>' . htmlspecialchars($label) . '</summary>';
 		echo '<ul class="dropdown-menu">';
-		foreach($links as $link_label => $link_url){
-			echo '<li><a href="' . htmlspecialchars($link_url) . '">' . htmlspecialchars($link_label) . '</a></li>';
+		foreach($links as $link_label => $entry){
+			echo '<li>' . static::renderActionEntry($link_label, $entry, 'dropdown-item') . '</li>';
 		}
 		echo '</ul>';
 		echo '</details>';
@@ -1600,8 +1697,8 @@ abstract class PublicPageBase {
 	 */
 	protected function renderButtonGroup($links) {
 		echo '<div class="action-buttons">';
-		foreach($links as $label => $link){
-			echo '<a href="' . htmlspecialchars($link) . '" class="btn btn-outline">' . htmlspecialchars($label) . '</a> ';
+		foreach($links as $label => $entry){
+			echo static::renderActionEntry($label, $entry, 'btn btn-outline') . ' ';
 		}
 		echo '</div>';
 	}

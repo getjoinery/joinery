@@ -34,13 +34,6 @@ function orders_recurring_action_logic(array $input): LogicResult {
 	return LogicResult::redirect($returnurl);
 }
 
-function orders_recurring_action_logic_api() {
-	return [
-		'requires_session' => true,
-		'description' => 'Recurring order action',
-	];
-}
-
 function orders_recurring_action_logic_descriptor(): array {
 	return [
 		'description'      => 'Execute a recurring-order action (cancel, reactivate, etc.) for an order item.',

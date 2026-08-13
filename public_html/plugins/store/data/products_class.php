@@ -883,9 +883,6 @@ class MultiProduct extends SystemMultiBase {
 			$filters['pro_sbt_subscription_tier_id'] = [$this->options['pro_sbt_subscription_tier_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['pro_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['max_visible_tier_level'])) {
 			$level = intval($this->options['max_visible_tier_level']);

@@ -63,16 +63,8 @@ function phone_numbers_edit_logic(array $input): LogicResult{
 	}
 
 	$page_vars['phone_number'] = $phone_number;
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	return LogicResult::render($page_vars);
-}
-
-function phone_numbers_edit_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Update phone numbers',
-    ];
 }
 
 /**

@@ -31,7 +31,7 @@ function mailboxes_logic(array $input): LogicResult {
 	return LogicResult::render($payload);
 }
 
-function mailboxes_logic_api() {
+function mailboxes_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'List the granted mailboxes with unread counts, folder rails, and compose capability',

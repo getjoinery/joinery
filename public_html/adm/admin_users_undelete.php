@@ -23,7 +23,7 @@ if ($_POST){
 		$user->set('usr_is_disabled', FALSE);
 
 		try {
-			$user->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$user->assert_can_write($session);
 			$user->save();
 		} catch (TTClassException $e) {
 			require_once(__DIR__ . '/../includes/Exceptions/AuthorizationException.php');

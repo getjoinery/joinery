@@ -281,9 +281,6 @@ class MultiPost extends SystemMultiBase {
 			$filters['pst_is_on_homepage'] = $this->options['listed'] ? "= TRUE" : "= FALSE";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['pst_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['after_date'])) {
 			$filters['pst_published_time'] = "> '" . $this->options['after_date'] . "'";

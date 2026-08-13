@@ -73,16 +73,8 @@ function address_edit_logic(array $input): LogicResult{
 	}
 
 	$page_vars['address'] = $address;
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	return LogicResult::render($page_vars);
-}
-
-function address_edit_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Update address',
-    ];
 }
 
 /**

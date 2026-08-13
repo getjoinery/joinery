@@ -280,9 +280,6 @@ class MultiScheduledTask extends SystemMultiBase {
 			$filters['sct_is_active'] = $this->options['active'] ? '= true' : '= false';
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['sct_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['task_class'])) {
 			$filters['sct_task_class'] = [$this->options['task_class'], PDO::PARAM_STR];

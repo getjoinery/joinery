@@ -29,7 +29,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 	} elseif ($is_virtual_edit && !LibraryFunctions::isFormSubmission()) {
 		// GET request for editing a virtual instance: pre-populate from parent
 		$parent = new Event($parent_event_id, TRUE);
-		$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$parent->assert_can_write($session);
 
 		$event = new Event(NULL);
 		foreach (Event::$field_specifications as $field => $spec) {
@@ -82,7 +82,7 @@ function admin_event_edit_logic(array $input): LogicResult {
 		// If editing a virtual instance, materialize it first
 		if ($is_virtual_edit && !$input['edit_primary_key_value']) {
 			$parent = new Event($parent_event_id, TRUE);
-			$parent->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$parent->assert_can_write($session);
 			$event = $parent->materialize_instance($instance_date);
 		}
 

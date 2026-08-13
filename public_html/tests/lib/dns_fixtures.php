@@ -25,7 +25,7 @@
  *   - a key that is absent entirely is treated as [] (no such record)
  */
 
-if (!class_exists('FakeDnsBackend')) {
+if (!class_exists('FakeDnsBackend', false)) {
     class FakeDnsBackend {
         /** @var array map of "name|type" => records array, or false for a lookup failure */
         private $data;

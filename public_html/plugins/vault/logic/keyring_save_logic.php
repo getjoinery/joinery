@@ -32,7 +32,7 @@ function keyring_save_logic(array $input): LogicResult {
 	return LogicResult::render(['set_up' => true]);
 }
 
-function keyring_save_logic_api() {
+function keyring_save_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

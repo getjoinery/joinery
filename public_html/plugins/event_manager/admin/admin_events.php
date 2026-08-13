@@ -60,7 +60,7 @@
 
 		// Start Date
 		$start_date = $event->get('evt_start_time')
-			? LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'D, M j, Y')
+			? $event->get_local('evt_start_time', 'D, M j, Y')
 			: '—';
 		$rowvalues[] = $start_date;
 

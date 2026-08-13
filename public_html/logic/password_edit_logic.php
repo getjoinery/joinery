@@ -79,7 +79,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	}
 
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	if ($has_old_password) {
 		$page_vars['page_title'] = 'Change Password';
@@ -91,13 +90,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$page_vars['user'] = $user;
 
 	return LogicResult::render($page_vars);
-}
-
-function password_edit_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Change password (logged in)',
-    ];
 }
 
 /**

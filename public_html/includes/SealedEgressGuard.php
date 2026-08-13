@@ -59,7 +59,7 @@
  * @version 1.1
  */
 
-if (!class_exists('SealedContentEgressException')) {
+if (!class_exists('SealedContentEgressException', false)) {
 	/**
 	 * A hot process tried to write sealed-derived content somewhere that
 	 * cannot protect it. The message names the destination and the scope that

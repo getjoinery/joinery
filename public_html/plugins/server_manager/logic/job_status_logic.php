@@ -67,7 +67,8 @@ function job_status_logic_descriptor(): array {
 	return [
 		'description' => 'Poll a management job\'s live output and status.',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'requires_session'        => true,
+		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
 			'job_id'        => ['type' => 'int', 'required' => false, 'label' => 'Job ID'],
 			'output_offset' => ['type' => 'int', 'required' => false, 'label' => 'Output offset'],

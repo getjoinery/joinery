@@ -92,7 +92,7 @@ function vault_client_setup_logic(array $input): LogicResult {
 	return LogicResult::render(['set_up' => true, 'scope' => $scope, 'vault_id' => (int)$vault->key]);
 }
 
-function vault_client_setup_logic_api() {
+function vault_client_setup_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

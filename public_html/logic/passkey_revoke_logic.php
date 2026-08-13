@@ -51,7 +51,7 @@ function passkey_revoke_logic(array $input): LogicResult {
 	return LogicResult::render(['revoked' => true]);
 }
 
-function passkey_revoke_logic_api() {
+function passkey_revoke_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

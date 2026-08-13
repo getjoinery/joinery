@@ -54,9 +54,7 @@ foreach ($conversations as $conversation) {
         : htmlspecialchars($conversation->get('aic_title') ?: '(untitled)');
 
     $when = $conversation->get('aic_delete_time')
-        ? LibraryFunctions::convert_time(
-            $conversation->get('aic_delete_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'
-          )
+        ? $conversation->get_local('aic_delete_time', 'M j, Y g:i A')
         : '-';
     $row[] = htmlspecialchars($when);
 

@@ -61,7 +61,7 @@ function conversation_list_logic(array $input): LogicResult {
 	));
 }
 
-function conversation_list_logic_api() {
+function conversation_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Paginated conversation inbox for the signed-in owner',

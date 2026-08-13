@@ -271,9 +271,6 @@ class MultiPageContent extends SystemMultiBase {
 			$filters['pac_location_name'] = array($this->options['slug'], PDO::PARAM_STR);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['pac_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('pac_page_contents', $filters, $this->order_by, $only_count, $debug);
 	}

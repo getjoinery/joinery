@@ -30,12 +30,14 @@ if (isset($_REQUEST['action'])) {
 
 	if ($action === 'delete_message' && isset($_REQUEST['msg_message_id'])) {
 		$msg = new Message((int)$_REQUEST['msg_message_id'], TRUE);
+		$msg->assert_can_write($session);
 		$msg->soft_delete();
 		header("Location: /admin/admin_conversation?cnv_conversation_id=" . $conversation_id);
 		exit();
 	}
 
 	if ($action === 'delete_conversation') {
+		$conversation->assert_can_write($session);
 		$conversation->soft_delete();
 		header("Location: /admin/admin_conversations");
 		exit();
@@ -72,17 +74,17 @@ $page->admin_header(
 // Conversation metadata
 $options = array('title' => 'Conversation Details');
 if (!$conversation->get('cnv_delete_time')) {
-	$options['altlinks']['Delete Conversation'] = '/admin/admin_conversation?action=delete_conversation&cnv_conversation_id=' . $conversation_id;
+	$options['altlinks']['Delete Conversation'] = array('post' => '/admin/admin_conversation', 'hidden' => array('action' => 'delete_conversation', 'cnv_conversation_id' => $conversation_id));
 }
 $page->begin_box($options);
 
 echo '<strong>ID:</strong> ' . (int)$conversation_id . '<br>';
-echo '<strong>Created:</strong> ' . LibraryFunctions::convert_time($conversation->get('cnv_create_time'), 'UTC', $session->get_timezone()) . '<br>';
+echo '<strong>Created:</strong> ' . $conversation->get_local('cnv_create_time') . '<br>';
 if ($conversation->get('cnv_subject')) {
 	echo '<strong>Subject:</strong> ' . htmlspecialchars($conversation->get('cnv_subject'), ENT_QUOTES, 'UTF-8') . '<br>';
 }
 if ($conversation->get('cnv_delete_time')) {
-	echo '<strong>Status:</strong> <span style="color:red;">Deleted</span> at ' . LibraryFunctions::convert_time($conversation->get('cnv_delete_time'), 'UTC', $session->get_timezone()) . '<br>';
+	echo '<strong>Status:</strong> <span style="color:red;">Deleted</span> at ' . $conversation->get_local('cnv_delete_time') . '<br>';
 } else {
 	echo '<strong>Status:</strong> Active<br>';
 }
@@ -106,10 +108,10 @@ foreach ($participants as $p) {
 		$user_link = 'User #' . (int)$user_id;
 	}
 
-	$joined = $p->get('cnp_create_time') ? LibraryFunctions::convert_time($p->get('cnp_create_time'), 'UTC', $session->get_timezone()) : '-';
-	$last_read = $p->get('cnp_last_read_time') ? LibraryFunctions::convert_time($p->get('cnp_last_read_time'), 'UTC', $session->get_timezone()) : 'Never';
+	$joined = $p->get('cnp_create_time') ? $p->get_local('cnp_create_time') : '-';
+	$last_read = $p->get('cnp_last_read_time') ? $p->get_local('cnp_last_read_time') : 'Never';
 	$muted = $p->get('cnp_is_muted') ? 'Yes' : 'No';
-	$deleted = $p->get('cnp_delete_time') ? LibraryFunctions::convert_time($p->get('cnp_delete_time'), 'UTC', $session->get_timezone()) : '-';
+	$deleted = $p->get('cnp_delete_time') ? $p->get_local('cnp_delete_time') : '-';
 
 	echo '<tr>';
 	echo '<td style="padding:4px 8px;">' . $user_link . '</td>';
@@ -139,7 +141,7 @@ if ($messages->count() === 0) {
 			$sender_name = 'User #' . (int)$sender_id;
 		}
 
-		$time = LibraryFunctions::convert_time($msg->get('msg_sent_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A');
+		$time = $msg->get_local('msg_sent_time', 'M j, Y g:i A');
 		$body = htmlspecialchars($msg->get('msg_body'), ENT_QUOTES, 'UTF-8');
 		$is_deleted = (bool)$msg->get('msg_delete_time');
 
@@ -151,9 +153,19 @@ if ($messages->count() === 0) {
 		echo '</div>';
 		echo '<div>' . nl2br($body) . '</div>';
 		if ($is_deleted) {
-			echo '<div style="color:red;font-size:0.85rem;margin-top:0.25rem;">Deleted at ' . LibraryFunctions::convert_time($msg->get('msg_delete_time'), 'UTC', $session->get_timezone()) . '</div>';
+			echo '<div style="color:red;font-size:0.85rem;margin-top:0.25rem;">Deleted at ' . $msg->get_local('msg_delete_time') . '</div>';
 		} else {
-			echo '<div style="margin-top:0.25rem;"><a href="/admin/admin_conversation?action=delete_message&cnv_conversation_id=' . $conversation_id . '&msg_message_id=' . (int)$msg->key . '" style="color:#c00;font-size:0.85rem;">Delete</a></div>';
+			echo '<div style="margin-top:0.25rem;">'
+				. AdminPage::action_button('Delete', '/admin/admin_conversation', array(
+					'hidden' => array(
+						'action'              => 'delete_message',
+						'cnv_conversation_id' => $conversation_id,
+						'msg_message_id'      => (int)$msg->key,
+					),
+					'class'   => 'btn btn-link btn-sm',
+					'confirm' => 'Delete this message?',
+				))
+				. '</div>';
 		}
 		echo '</div>';
 	}

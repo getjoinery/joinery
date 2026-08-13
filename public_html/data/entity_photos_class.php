@@ -103,9 +103,6 @@ class MultiEntityPhoto extends SystemMultiBase {
 			$filters['eph_fil_file_id'] = [$this->options['file_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['eph_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		$sorts = [];
 		if (!empty($this->order_by)) {

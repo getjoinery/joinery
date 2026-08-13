@@ -18,7 +18,7 @@ function keyring_get_logic(array $input): LogicResult {
 	]);
 }
 
-function keyring_get_logic_api() {
+function keyring_get_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

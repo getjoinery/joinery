@@ -42,9 +42,9 @@ function ai_action_resolve_logic_descriptor(): array {
 	return [
 		'description' => "Approve (execute now, as the owner) or decline one pending AI action.",
 		'mutates'     => true,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'write',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'action_id'  => ['type' => 'int', 'required' => true, 'label' => 'The pending action'],

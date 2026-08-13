@@ -41,7 +41,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	return LogicResult::render($page_vars);
 }
 
-function booking_logic_api() {
+function booking_logic_descriptor() {
     return [
         'requires_session' => true,
         'description' => 'Book an appointment',

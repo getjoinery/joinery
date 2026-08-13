@@ -1390,9 +1390,6 @@ class MultiEvent extends SystemMultiBase {
             $filters['(evt_status'] = '= 1 OR evt_status = 2)';
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['evt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         if (isset($this->options['upcoming']) && $this->options['upcoming']) {
             $filters['(evt_end_time'] = "> now() OR (evt_end_time IS NULL AND evt_start_time > now()))";

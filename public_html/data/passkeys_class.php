@@ -66,10 +66,6 @@ class Passkey extends SystemBase {
 		array('columns'=>array('pkc_credential_id'), 'unique'=>true, 'where'=>'pkc_delete_time IS NULL'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/**
 	 * Owner-ONLY read — tighter than the platform's owner-or-staff default.
 	 * Passkeys are authentication credentials (credential id, AAGUID, sign

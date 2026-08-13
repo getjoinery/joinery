@@ -244,9 +244,6 @@ class MultiPage extends SystemMultiBase {
 			$filters['pag_link'] = "IS NOT NULL AND pag_link != ''";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['pag_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['published'])) {
 			$filters['pag_published_time'] = $this->options['published'] ? "IS NOT NULL" : "IS NULL";

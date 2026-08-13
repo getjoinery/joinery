@@ -23,10 +23,7 @@ function test_logic(array $input): LogicResult {
 
 	try {
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array(
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		));
+		$device->assert_can_read($session);
 	} catch (Exception $e) {
 		return LogicResult::redirect('/profile/dns_filtering/devices');
 	}

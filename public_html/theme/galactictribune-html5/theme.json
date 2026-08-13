@@ -1,12 +1,11 @@
 {
-  "name": "galactictribune-html5",
-  "display_name": "Galactic Tribune HTML5",
-  "version": "1.0.3",
-  "description": "Zero-dependency HTML5 version of the Galactic Tribune theme",
-  "author": "Joinery Team",
-  "receives_upgrades": true,
-  "included_in_publish": true,
-  "cssFramework": "html5",
-  "formWriterBase": "FormWriterV2HTML5",
-  "publicPageBase": "PublicPageBase"
+    "name": "galactictribune-html5",
+    "display_name": "Galactic Tribune HTML5",
+    "version": "1.0.3",
+    "description": "Zero-dependency HTML5 version of the Galactic Tribune theme",
+    "author": "Joinery Team",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "cssFramework": "html5",
+    "publicPageBase": "PublicPageBase"
 }

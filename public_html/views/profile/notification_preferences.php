@@ -33,11 +33,7 @@
 
             <div class="jy-panel jy-form-actions">
                 <?php
-                foreach ($page_vars['display_messages'] as $display_message) {
-                    if ($display_message->identifier == 'notifybox') {
-                        echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-                    }
-                }
+                echo $page->render_messages('notifybox');
 
                 $options = array();
                 $sub_checked = array();

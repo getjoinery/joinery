@@ -89,10 +89,6 @@ class DeviceLink extends SystemBase {
 		'dlk_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** A fresh 8-character link code, shown as XXXX-XXXX. */
 	public static function generate_code() {
 		$out = '';

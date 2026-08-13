@@ -14,28 +14,28 @@ function admin_api_key_logic(array $input): LogicResult {
 	$api_key = new ApiKey($input['apk_api_key_id'], TRUE);
 
 	if($input['action'] == 'soft_delete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$api_key->assert_can_write($session);
 		$api_key->soft_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
 	if($input['action'] == 'undelete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$api_key->assert_can_write($session);
 		$api_key->undelete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
 	if($input['action'] == 'permanent_delete'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$api_key->assert_can_write($session);
 		$api_key->permanent_delete();
 
 		//$returnurl = $session->get_return();
 		return LogicResult::redirect("/admin/admin_api_keys");
 	}
 	if($input['action'] == 'regenerate_secret'){
-		$api_key->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$api_key->assert_can_write($session);
 
 		// Generate new secret
 		$new_secret = 'secret_'.LibraryFunctions::random_string(16);

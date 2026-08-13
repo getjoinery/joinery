@@ -47,7 +47,7 @@ function passkey_lab_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function passkey_lab_options_logic_api() {
+function passkey_lab_options_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

@@ -49,7 +49,7 @@ function passkey_register_verify_logic(array $input): LogicResult {
 	]);
 }
 
-function passkey_register_verify_logic_api() {
+function passkey_register_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

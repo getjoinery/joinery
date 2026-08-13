@@ -427,9 +427,6 @@ class MultiEventSessions extends SystemMultiBase {
             $filters['evs_title'] = 'ILIKE \'%'.$this->options['title_like'].'%\'';
         }
         
-        if (isset($this->options['deleted'])) {
-            $filters['evs_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         if (isset($this->options['future'])) {
             $filters['evs_end_time'] = '> \''.$this->options['future'].'\'';

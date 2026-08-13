@@ -257,9 +257,6 @@ class MultiReaction extends SystemMultiBase {
 			$filters['rct_reaction_type'] = [$this->options['reaction_type'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['rct_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		$sorts = [];
 		if (!empty($this->order_by)) {

@@ -609,9 +609,6 @@ class MultiCalendarEntry extends SystemMultiBase {
 		if (isset($this->options['subject_id'])) {
 			$filters['cal_subject_id'] = [$this->options['subject_id'], PDO::PARAM_INT];
 		}
-		if (isset($this->options['deleted'])) {
-			$filters['cal_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 		// Provenance lookup (CalendarEntryImporter dedup) — both must be given
 		// together; there is no case for matching one without the other.
 		if (isset($this->options['source']) && isset($this->options['source_ref'])) {
