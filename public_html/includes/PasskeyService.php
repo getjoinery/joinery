@@ -84,13 +84,19 @@ class PasskeyService {
 	const CHALLENGE_TTL_SECONDS = 300;
 	const STEPUP_MARKER_TTL_SECONDS = 3600;
 
-	/** PRF contexts a consumer may request. Add a new entry when a new
-	 *  client-held-key consumer enrolls (docs/passkeys.md). One context per
-	 *  vault scope, so a KEK derived for one scope can never unwrap another's
-	 *  key: 'vault-kek' is server-custody (mail + chat, sent to the server);
-	 *  'vault-passwords-kek' and 'vault-drive-kek' are client-custody
-	 *  (browser-only, never transmitted). */
-	const ALLOWED_PRF_CONTEXTS = array('vault-kek', 'vault-passwords-kek', 'vault-drive-kek');
+	/**
+	 * PRF contexts a consumer may request: one per registered vault scope, so a
+	 * KEK derived for one scope can never unwrap another's key (docs/passkeys.md).
+	 *
+	 * Computed from VaultScopes rather than listed, because the context is
+	 * derived from the scope name — a scope declared in a plugin's plugin.json
+	 * is derivable here the moment the plugin is active, and cannot be spelled
+	 * in a way that collides with another scope's.
+	 */
+	public static function allowedPrfContexts(): array {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		return VaultScopes::prfContexts();
+	}
 
 	/** @var callable[] */
 	private static $pre_revoke_callbacks = array();
@@ -385,7 +391,7 @@ class PasskeyService {
 	 *   caller passes through, rather than in each of them.
 	 */
 	public function getDerivationOptions(User $user, string $context, ?array $credential_ids = null): array {
-		if (!in_array($context, self::ALLOWED_PRF_CONTEXTS, true)) {
+		if (!in_array($context, self::allowedPrfContexts(), true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
 
@@ -435,7 +441,7 @@ class PasskeyService {
 	}
 
 	public function verifyDerivation(string $client_response_json, string $context): array {
-		if (!in_array($context, self::ALLOWED_PRF_CONTEXTS, true)) {
+		if (!in_array($context, self::allowedPrfContexts(), true)) {
 			throw new PasskeyException('Unknown passkey secret context: ' . $context);
 		}
 

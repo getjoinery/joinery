@@ -40,13 +40,6 @@ class RecoveryReadiness {
 	const MANIFEST_KEY = 'recoveryReadiness';
 	const LOW_CODE_THRESHOLD = 3;
 
-	/** Vault scope -> what the user reads. */
-	private static $scope_titles = array(
-		'user'      => 'Mail & messages vault recovery codes',
-		'drive'     => 'Drive vault recovery codes',
-		'passwords' => 'Password vault recovery codes',
-	);
-
 	/**
 	 * Every must-save item for this session's user, ledger state attached,
 	 * ordered: platform items first, then the user's vault scopes.
@@ -175,6 +168,7 @@ class RecoveryReadiness {
 	private static function vaultItems($user_id) {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
 
 		$vaults = new MultiUserEncryptionVault(array('user_id' => $user_id));
 		$vaults->load();
@@ -182,6 +176,12 @@ class RecoveryReadiness {
 		$items = array();
 		foreach ($vaults as $vault) {
 			$scope = (string)$vault->get('uev_scope');
+			// A vault whose scope nothing declares belongs to a deactivated
+			// plugin. It is INERT, not broken: no card, no unlock, and the rows
+			// are never touched, so reactivating restores everything.
+			if (!VaultScopes::isRegistered($scope)) {
+				continue;
+			}
 			$counts = self::wrappingCounts((int)$vault->key);
 
 			$warnings = array();
@@ -208,7 +208,7 @@ class RecoveryReadiness {
 
 			$items[] = self::normalize(array(
 				'key'      => 'vault_codes_' . $scope,
-				'title'    => isset(self::$scope_titles[$scope]) ? self::$scope_titles[$scope] : ucfirst($scope) . ' vault recovery codes',
+				'title'    => VaultScopes::labelFor($scope) . ' recovery codes',
 				'protects' => $custody === 'client'
 					? 'This content is end-to-end encrypted. If every unlocker is lost, nobody — including this server — can ever open it again.'
 					: 'Encrypted content in this vault. Losing every unlocker makes it permanently unreadable.',

@@ -232,7 +232,14 @@ the domain seals content), so the tiers behave as:
   at the next unlock, running each delivery's deferred `gate` then `ingest`. A
   spooled delivery for a deactivated plugin is held sealed until reactivation or
   expires quietly with the spool's retention; nothing is ever returned to the
-  sender. The gate decides only elevation, never placement: for mail, a deferred
+  sender. Held parts are sealed straight to the recipient's vault keypair, so
+  the spool is a `reseals: true` vault consumer: on a key rotation
+  `DirectSpoolDrain::resealForUser()` re-seals every held delivery's sealed
+  parts to the new keypair (each delivery atomically, alongside its
+  `jdp_key_generation`), and a part that cannot be re-sealed refuses the
+  ceremony. A delivery still **staging** rides out the rotation untouched — its
+  sender is mid-transfer sealing to the key it discovered, and an undrainable
+  staging row is an abandoned transfer the retention sweep reclaims. The gate decides only elevation, never placement: for mail, a deferred
   decline hands the message to the same classification ordinary mail gets — content
   spam scan and filter rules included. The decoy's domain secret is minted on first
   use and kept, because a key that changed between probes of one address would

@@ -16,7 +16,9 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
 require_once(PathHelper::getIncludePath('data/folders_class.php'));
 require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
 require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+// DriveSealed is the drive_sealed consumer bootstrap — it loads only through the loader.
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+VaultUnlock::loadConsumerBootstraps();
 require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
 require_once(PathHelper::getIncludePath('includes/SealedFileContainer.php'));
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));

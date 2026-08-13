@@ -17,7 +17,10 @@
 function drive_level_change_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
-	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+	// DriveSealed is the drive_sealed consumer bootstrap — it loads only through
+	// the loader, so its registrations attribute to the consumer.
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	VaultUnlock::loadConsumerBootstraps();
 	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
 	require_once(PathHelper::getIncludePath('data/folders_class.php'));
 	require_once(PathHelper::getIncludePath('data/file_changes_class.php'));
@@ -114,7 +117,8 @@ function drive_level_change_logic(array $input): LogicResult {
 
 /** Public links and member grants anywhere in the subtree — what going Private will end. */
 function _drive_level_sharing_blockers($folder_id): array {
-	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 	$ids = DriveSealed::subtreeFolderIds($folder_id);
 	$in = DriveHelper::int_in_list($ids);
@@ -146,7 +150,8 @@ function _drive_level_sharing_blockers($folder_id): array {
 
 /** Revoke what Private cannot carry, once the owner has confirmed it. */
 function _drive_level_revoke_sharing($folder_id): void {
-	require_once(PathHelper::getIncludePath('includes/DriveSealed.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
 	require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
 	$ids = DriveSealed::subtreeFolderIds($folder_id);
 	$in = DriveHelper::int_in_list($ids);

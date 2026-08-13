@@ -119,6 +119,10 @@ class AiConversationMessage extends SystemBase {
     // Standard conversation.
     public static $sealed_fields = array('aim_content', 'aim_tool_calls', 'aim_error');
 
+    // Sealing runs through ChatSeal: a message's DEK also seals its
+    // attachments' bytes, so the key has to be minted where both can reach it.
+    public static $seal_on_save = false;
+
     function authenticate_write($data) {
         if ($data['current_user_permission'] < 5) {
             throw new SystemAuthenticationError(

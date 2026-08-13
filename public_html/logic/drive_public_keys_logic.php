@@ -62,7 +62,7 @@ function drive_public_keys_logic(array $input): LogicResult {
 		}
 		$public_key = null;
 		if ($uid > 0) {
-			$vault = UserEncryptionVault::loadForUser($uid, UserEncryptionVault::SCOPE_DRIVE);
+			$vault = UserEncryptionVault::loadForUser($uid, 'drive');
 			if ($vault && $vault->key) {
 				$public_key = (string)$vault->get('uev_public_key');
 			}

@@ -380,8 +380,8 @@ not ask.
 callback selects exactly `fil_key_generation = $old_generation` for that owner,
 re-wraps each `fil_sealed_key` to the new public key, attempts every file, and
 throws if any failed. Drive is a **core** consumer — it has no plugin whose
-bootstrap could carry the hooks — so `VaultUnlock::CONSUMER_CORE_FILES` loads
-`includes/DriveSealed.php` alongside the plugin bootstraps. There is no wipe
+bootstrap could carry the hooks — so it declares itself in `vault_consumers.json`
+and `includes/DriveSealed.php` loads alongside the plugin bootstraps. There is no wipe
 callback: a Private read streams from the container and caches no plaintext.
 
 ## Client modules

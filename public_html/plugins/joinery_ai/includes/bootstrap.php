@@ -1,7 +1,8 @@
 <?php
 /**
- * joinery_ai plugin bootstrap — loaded once per request by
- * VaultUnlock::loadConsumerBootstraps() whenever the plugin is active. Wires AI
+ * joinery_ai plugin bootstrap — the plugin's declared load point (the top-level
+ * `bootstrap` key in plugin.json), loaded once per request by the plugin
+ * bootstrap loader (PluginBootstraps) whenever the plugin is active. Wires AI
  * chat into the Sealed Vault's generic consumer hooks (docs/sealed_vault.md
  * § The consumer contract), mirroring the mailbox bootstrap: the File decrypt
  * hook for sealed chat-upload bytes, and the rotation re-seal / window-wipe
@@ -15,7 +16,10 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - the reseal callback covers soft-deleted conversations and
+ *   messages: a deleted row is restorable, and one left on a retired generation
+ *   would come back permanently unreadable.
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -32,8 +36,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatAsync.p
 // A pipeline job that reads sealed content cannot run from cron, because a
 // command-line worker never holds an unlock window. Those recipes run here
 // instead: in slices, inside the owner's own request, while their vault is open.
-// Registered AFTER mailbox (VaultUnlock::CONSUMER_PLUGINS order) because the
-// email jobs skip unparsed mail — parsing has to lead.
+// Registered AFTER mailbox (a higher vaultConsumer `order` in plugin.json)
+// because the email jobs skip unparsed mail — parsing has to lead.
 require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
 VaultDeferredWork::register(
@@ -83,11 +87,13 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
     $failed = 0;
     $attempted = 0;
 
-    // Conversation DEKs.
+    // Conversation DEKs. Soft-deleted rows are re-sealed too (the resealRows()
+    // contract): a deleted conversation is restorable, and one left on a
+    // retired generation would come back permanently unreadable.
     $cs = $db->prepare(
         'SELECT aic_conversation_id, aic_sealed_key FROM aic_conversations
          WHERE aic_owner_user_id = ? AND aic_content_sealed = true
-         AND aic_key_generation = ? AND aic_delete_time IS NULL');
+         AND aic_key_generation = ?');
     $cs->execute(array($user_id, $old_key_generation));
     foreach ($cs->fetchAll(PDO::FETCH_ASSOC) as $row) {
         if ((string)$row['aic_sealed_key'] === '') { continue; }
@@ -105,11 +111,12 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
         }
     }
 
-    // Message DEKs — self-contained via aim_sealed_owner_user_id (the conversation owner).
+    // Message DEKs — self-contained via aim_sealed_owner_user_id (the
+    // conversation owner). Soft-deleted messages re-seal too, same as above.
     $ms = $db->prepare(
         'SELECT aim_message_id, aim_sealed_key FROM aim_conversation_messages
          WHERE aim_sealed_owner_user_id = ? AND aim_content_sealed = true
-         AND aim_key_generation = ? AND aim_delete_time IS NULL');
+         AND aim_key_generation = ?');
     $ms->execute(array($user_id, $old_key_generation));
     foreach ($ms->fetchAll(PDO::FETCH_ASSOC) as $row) {
         if ((string)$row['aim_sealed_key'] === '') { continue; }

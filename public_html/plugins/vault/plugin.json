@@ -10,6 +10,12 @@
     "styles": [
         "assets/css/vault.css"
     ],
+    "vaultScopes": {
+        "passwords": {
+            "custody": "client",
+            "label": "Password vault"
+        }
+    },
     "requires": {
         "php": ">=8.0",
         "extensions": ["sodium"]

@@ -25,18 +25,13 @@ class VaultClientCustodyException extends Exception {}
 
 class VaultClientCustody {
 
-	/** The client-custody scopes and their per-scope WebAuthn PRF context.
-	 *  The context is what keeps one scope's unlock from opening another. */
-	const SCOPE_CONTEXTS = array(
-		UserEncryptionVault::SCOPE_PASSWORDS => 'vault-passwords-kek',
-		UserEncryptionVault::SCOPE_DRIVE     => 'vault-drive-kek',
-	);
-
 	/** Validate and normalize a requested scope; only client-custody scopes are
 	 *  reachable through these actions (the 'user' scope is server-custody and
-	 *  has its own vault_* actions). */
+	 *  has its own vault_* actions). Which scopes exist, and whose custody they
+	 *  are, comes from VaultScopes — so a plugin adds one by declaring it. */
 	public static function assertClientScope(string $scope): string {
-		if (!isset(self::SCOPE_CONTEXTS[$scope])) {
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		if (!VaultScopes::isClientCustody($scope)) {
 			throw new VaultClientCustodyException('Unknown or non-client vault scope.');
 		}
 		return $scope;
@@ -45,7 +40,8 @@ class VaultClientCustody {
 	/** The PRF context a scope's passkey unlock derives its KEK under. */
 	public static function contextForScope(string $scope): string {
 		self::assertClientScope($scope);
-		return self::SCOPE_CONTEXTS[$scope];
+		require_once(PathHelper::getIncludePath('includes/VaultScopes.php'));
+		return VaultScopes::prfContext($scope);
 	}
 
 	/** The one client-custody vault row for (user, scope), or null. */

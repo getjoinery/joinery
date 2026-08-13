@@ -70,6 +70,7 @@ Before diving in, a quick reference for the four common things plugins need to r
 
 | What you're adding | Where it goes | Section |
 |---|---|---|
+| Runtime hook registrations (upload purposes, File decrypt hooks, policy callables, window caps, deferred work) | a bootstrap file named by the top-level `bootstrap` key in `plugin.json` | [Bootstrap](#bootstrap-declarative) |
 | Tables and columns | `$field_specifications` in a data class under `data/` — applied automatically on install and sync | [Table Creation](#table-creation-automatic) |
 | Admin menu entries | `adminMenu` key in `plugin.json` — created on activate, removed on deactivate/uninstall | [Admin Menus](#admin-menus-declarative) |
 | Default plugin settings | `settings` array in `plugin.json` — seeded on activate and sync | [Plugin Settings](#plugin-settings-declarative) |
@@ -81,6 +82,31 @@ Before diving in, a quick reference for the four common things plugins need to r
 | Uninstall external cleanup *(optional)* | `uninstall.php` defining `{plugin}_uninstall()` — only for work the declarative systems can't do (external API calls, filesystem cleanup) | [Uninstall Script](#uninstall-script) |
 
 If you find yourself writing SQL to INSERT menu rows, or CREATE TABLE statements in a migration, stop — you're on the wrong path. Those pieces come from the data class and `plugin.json` respectively.
+
+### Bootstrap (Declarative)
+
+A plugin whose hooks must be **registered at runtime** — an upload purpose
+(`UploadPurposeRegistry::register()`), a File decrypt hook
+(`File::registerDecryptHook()` / `registerStreamingDecryptHook()`), a policy
+callable (the `MailIdentityGuard` shape), a window-cap provider, a
+deferred-work consumer — declares one load point in `plugin.json`:
+
+```json
+"bootstrap": "includes/bootstrap.php"
+```
+
+The file runs **once per request, lazily**, loaded by `PluginBootstraps` the
+first time any registry needs its callbacks live, while the plugin is active.
+It should contain registrations and requires only — no request work, no output,
+nothing that assumes a signed-in user. Static registries reset with every
+request, so registration belongs here rather than in an activate hook.
+
+Load order follows `vaultConsumer.order` for plugins that declare one (see
+[Building a Vault Consumer](#building-a-vault-consumer)); a plugin without it
+loads after every ordered consumer, sorted by plugin name. A bootstrap is never
+`require`d directly from other code — anything needing a class it defines calls
+`VaultUnlock::loadConsumerBootstraps()` and lets the loader run it, which is
+what keeps each registration attributed to its plugin.
 
 ### Core File Guarantees
 
@@ -1118,6 +1144,176 @@ function my_plugin_uninstall() {
 ```
 
 **Do not** include `DROP TABLE`, `DELETE FROM stg_settings`, or `DELETE FROM amu_admin_menus` in the hook — those are the system's job now. A hook that duplicates them isn't harmful (drops are `IF EXISTS`, deletes match exact keys the system already cleared), but the extra code rots.
+
+## Building a Vault Consumer
+
+Your plugin can hold content that only its owner can read — encrypted at rest,
+opened after they prove presence with a passkey. The platform's
+[Sealed Vault](sealed_vault.md) provides the identity, the unlocker, the unlock
+window and the key rotation; you provide the content.
+
+There are two ways to do it, and the choice is about **who can read the
+content**, not about how much work it is.
+
+### Which one you want
+
+**Seal it at rest (server custody).** The server can open this content while the
+member is present. Previews, search, notifications, exports and AI features keep
+working. A stolen database, a stolen backup, or a snapshot taken while nobody is
+signed in yields ciphertext.
+
+**Encrypt it to the edge (client custody).** The keys are unwrapped only in the
+browser. The server never holds one and can never read the content — and neither
+can any server-side feature of yours, ever. No search, no thumbnails, no
+server-side rendering, no AI. Everything happens in the member's browser or not
+at all.
+
+Server custody is the right default. Reach for client custody when the content
+is sensitive enough that "the server could read this while you are signed in" is
+not acceptable — passwords, or a member's most private files.
+
+Both paths owe the member the same honesty at opt-in: **lose every unlocker and
+the content is gone.** There is no support-desk recovery, no operator override,
+no reset link. Say so where they turn it on.
+
+One thing the platform does not offer: content that is isolated from the other
+server-custody consumers *and* readable by the server. One unlock opens every
+server-custody consumer at once — that is the whole point of a single tap, and
+its accepted cost. If your content must not be readable whenever mail is,
+client custody is the answer.
+
+### Path 1 — seal it at rest
+
+Three declarations and one line of code. There is no crypto in your plugin.
+
+**1. Declare yourself a consumer** in `plugin.json`. The load point is your
+plugin's ordinary [bootstrap](#bootstrap-declarative); `vaultConsumer` declares
+the vault obligations riding on it:
+
+```json
+"bootstrap": "includes/bootstrap.php",
+"vaultConsumer": {
+  "order": 50,
+  "reseals": true
+}
+```
+
+`reseals: true` says you store sealed content. It is not paperwork — it is what
+makes a key rotation refuse rather than quietly destroy your content if the
+callback below ever goes missing.
+
+**2. Declare which columns hold content**, plus the four convention columns, on
+your model:
+
+```php
+class AcmeNote extends SystemBase {
+    public static $prefix = 'acn';
+    public static $tablename = 'acn_acme_notes';
+    public static $pkey_column = 'acme_note_id';
+
+    public static $sealed_fields = array('acn_title', 'acn_body');
+
+    public static $field_specifications = array(
+        'acn_acme_note_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
+        'acn_usr_user_id'  => array('type'=>'int8', 'is_nullable'=>false),
+        'acn_title'        => array('type'=>'text'),
+        'acn_body'         => array('type'=>'text'),
+
+        // The four sealing columns, by convention.
+        'acn_content_sealed'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+        'acn_sealed_key'           => array('type'=>'text'),
+        'acn_sealed_owner_user_id' => array('type'=>'int8'),
+        'acn_key_generation'       => array('type'=>'int4'),
+    );
+}
+```
+
+**3. Register the re-seal** in your bootstrap:
+
+```php
+// plugins/acme/includes/bootstrap.php
+require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+require_once(PathHelper::getIncludePath('plugins/acme/data/acme_notes_class.php'));
+
+VaultUnlock::onReseal(VaultUnlock::modelReseal(array(AcmeNote::class)));
+```
+
+That is the whole integration. Reading and writing are ordinary:
+
+```php
+$note = new AcmeNote(NULL);
+$note->set('acn_usr_user_id', $user_id);
+$note->set('acn_title', $title);
+$note->set('acn_body',  $body);
+$note->save();                       // sealed
+
+$note = new AcmeNote($id, TRUE);
+echo $note->get('acn_body');         // plaintext, in-window
+```
+
+**The one runtime behavior to learn:** a read or a sealed-column update against
+a closed vault raises `VaultLockedException`. That is a **one-tap unlock
+prompt**, never an error. Catch it and show the member the unlock control; do
+not log it as a failure and do not show them a stack trace. Creating a new row
+works with the vault locked — sealing needs only the public key — so an ingest
+path never has to store content in the clear because "the window might close".
+
+**Sealing is per row.** By default a row seals when its owner has a vault, and a
+member with no vault has their content stored in the clear. If your plugin
+decides per row — a per-item setting, a per-domain level — override one method:
+
+```php
+protected static function shouldSeal(array $row): bool {
+    return $row['acn_visibility'] === 'private';
+}
+```
+
+**If you keep a plaintext cache** — a search index, a working copy on disk —
+declare `"caches": true` and register `VaultUnlock::onWipe()` to clear it when
+the window closes. Otherwise the lock chip tells the member their content is
+locked while your copy of it sits there.
+
+**If you have an opinion about how long the window lasts**, register a provider
+with `VaultUnlock::onWindowCaps()`. Every server-custody consumer shares one
+window and the strictest opinion wins.
+
+See [Sealed Vault § The consumer contract](sealed_vault.md#the-consumer-contract-server-custody)
+for the full contract, and `includes/ApiIdempotencySealed.php` for the smallest
+complete consumer in the tree.
+
+### Path 2 — encrypt it to the edge
+
+The browser generates the keypair, wraps it to each unlocker, encrypts every
+value, and sends the server opaque blobs. The whole client-side layer is core —
+you do not write crypto either.
+
+**1. Declare a scope** in `plugin.json`. A scope is one keypair with its own
+unlockers and its own unlock:
+
+```json
+"vaultScopes": {
+  "acme_secrets": { "custody": "client", "label": "Acme secrets vault" }
+}
+```
+
+The passkey derivation context is derived from the scope name, so it is
+impossible for two scopes to share one by accident. A scope a plugin declares is
+always client custody — `custody: server` is refused, because server custody is
+what you get from path 1 by declaring no scope at all.
+
+**2. Store blobs** through the core `vault_client_*` actions
+(`includes/VaultClientCustody.php`): create the keypair record, fetch the keyring
+view, add and remove unlocker wrappings, consume a recovery key. The server
+stores and returns ciphertext byte-for-byte and never inspects it.
+
+**3. Drive the crypto in the browser** with `assets/js/vault-crypto.js` and
+`assets/js/vault-keyring.js`, both core and both scope-parameterized.
+
+The reference implementation is the [password manager](../plugins/vault/docs/overview.md)
+— its entire server footprint is four logic files, because everything that
+matters happens in the browser. [Drive's Fortress folders](drive_encryption.md)
+reuse the same layer for a completely different content type and add no keyring
+or identity surface at all.
 
 ## Declaring Host Provisioners
 

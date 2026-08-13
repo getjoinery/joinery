@@ -39,7 +39,7 @@ try { VaultClientCustody::assertClientScope('nonsense'); } catch (VaultClientCus
 check($threw, 'an unknown scope is rejected');
 check(VaultClientCustody::contextForScope('passwords') === 'vault-passwords-kek', 'passwords derives its KEK under vault-passwords-kek');
 check(VaultClientCustody::contextForScope('drive') === 'vault-drive-kek', 'drive derives its KEK under vault-drive-kek (isolated context)');
-check(in_array('vault-passwords-kek', PasskeyService::ALLOWED_PRF_CONTEXTS, true), 'the passwords PRF context is registered with PasskeyService');
+check(in_array('vault-passwords-kek', PasskeyService::allowedPrfContexts(), true), 'the passwords PRF context is registered with PasskeyService');
 
 // ---------------------------------------------------------------------------
 section('Zero-knowledge storage: blobs stored verbatim, never re-wrapped');
@@ -50,7 +50,7 @@ $passkey = vault_fixture_passkey((int)$user->key);
 // A client-custody passwords vault, created the way the setup action does.
 $vault = new UserEncryptionVault(NULL);
 $vault->set('uev_usr_user_id', (int)$user->key);
-$vault->set('uev_scope', UserEncryptionVault::SCOPE_PASSWORDS);
+$vault->set('uev_scope', 'passwords');
 $vault->set('uev_custody', UserEncryptionVault::CUSTODY_CLIENT);
 $vault->set('uev_public_key', 'BROWSER_GENERATED_PUBLIC_KEY_b64');
 $vault->set('uev_salt', 'BROWSER_SALT_b64');

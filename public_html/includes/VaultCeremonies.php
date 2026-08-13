@@ -13,7 +13,10 @@
  * Every VaultCeremonyException message is written to be shown to the user
  * verbatim.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - the reseal guard no longer refuses rotation for a plugin that
+ *   was never activated on this instance (it holds nothing sealed); activation
+ *   history keeps deactivated-after-use refusing.
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -130,6 +133,7 @@ class VaultCeremonies {
 		if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
 			throw new VaultCeremonyException('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 		}
+		$this->assertEveryResealerPresent();
 
 		$all_wrappings = new MultiUserEncryptionWrapping(['vault_id' => $vault->key]);
 		$all_wrappings->load();
@@ -339,6 +343,70 @@ class VaultCeremonies {
 			'dropped_passkeys'       => $dropped_passkeys,
 			'key_file'               => $this->buildKeyFile((int)$vault->key, (string)$vault->get('uev_public_key'), (string)$vault->get('uev_salt')),
 		];
+	}
+
+	/**
+	 * Refuse the rotation while any consumer that declared it stores sealed
+	 * content has no re-seal callback in place.
+	 *
+	 * Without this the rotation completes, retires the old wrappings, and that
+	 * consumer's content is gone — the one failure mode a platform cannot ask a
+	 * developer to avoid by having read a doc. The check runs at the very START
+	 * of rotate(), before the new generation is minted: the crash-safety ordering
+	 * already makes any pre-retirement throw safe, but refusing before the mint
+	 * costs nothing and avoids leaving even a benign pending rotation behind.
+	 *
+	 * Installed-but-INACTIVE plugins count. Deactivating a plugin removes its
+	 * callbacks but not its sealed rows, so rotating past a deactivated consumer
+	 * is exactly the same silent loss — a hole that predates the registry and is
+	 * only checkable because a declaration is readable without loading the
+	 * plugin.
+	 *
+	 * A plugin that was NEVER activated on this instance does not count. Its
+	 * code ships in every tree, but with no activation it holds no sealed rows
+	 * (often no tables), so refusing for it would make rotation permanently
+	 * unavailable to members who never wanted the feature. Activation HISTORY
+	 * draws the line, so deactivated-after-use still refuses.
+	 */
+	private function assertEveryResealerPresent(): void {
+		require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
+		VaultUnlock::loadConsumerBootstraps();
+
+		$blocking = array();
+		foreach (VaultConsumers::unmetObligations(true) as $name => $missing) {
+			if (in_array(VaultConsumers::OBLIGATION_RESEAL, $missing, true)) {
+				$declaration = VaultConsumers::declaration($name);
+				$is_inactive_plugin = ($declaration !== null && $declaration['plugin'] !== '' && !$declaration['active']);
+				if ($is_inactive_plugin && !VaultConsumers::pluginEverActivated($declaration['plugin'])) {
+					error_log('Vault rotation: consumer "' . $name . '" declares reseals but its plugin '
+						. 'was never activated on this instance — it holds nothing sealed, so it does not '
+						. 'block the rotation.');
+					continue;
+				}
+				$blocking[$name] = $is_inactive_plugin;
+			}
+		}
+		if (!$blocking) {
+			return;
+		}
+
+		$inactive = array_keys(array_filter($blocking));
+		$broken   = array_keys(array_filter($blocking, function ($is_inactive) { return !$is_inactive; }));
+
+		error_log('Vault rotation refused: consumers declaring reseals with no callback registered - '
+			. implode(', ', array_keys($blocking)));
+
+		if ($inactive) {
+			throw new VaultCeremonyException(
+				'Rotating now would permanently lock the content held by a switched-off feature ('
+				. implode(', ', $inactive) . '), because nothing is there to re-secure it. Nothing was '
+				. 'changed. Switch it back on and rotate again, or remove it if you no longer want '
+				. 'its content.');
+		}
+		throw new VaultCeremonyException(
+			'Key rotation is unavailable right now: a feature holding your encrypted content ('
+			. implode(', ', $broken) . ') is not able to re-secure it, and rotating would make that '
+			. 'content permanently unreadable. Nothing was changed.');
 	}
 
 	/**

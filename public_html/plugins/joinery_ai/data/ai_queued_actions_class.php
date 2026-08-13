@@ -81,6 +81,10 @@ class AiQueuedAction extends SystemBase {
 
     public static $sealed_fields = array('aqa_arguments', 'aqa_model_note', 'aqa_result');
 
+    // Sealing runs through ActionQueue, which seals the proposal on the way in
+    // and the result on the way out under the row's one DEK.
+    public static $seal_on_save = false;
+
     // aqa_owner_user_id doesn't follow the {prefix}_{owner_prefix} convention,
     // so it names its source table explicitly. The queue is the audit trail of
     // what the AI did for a person — it dies with them (permanent_delete), and

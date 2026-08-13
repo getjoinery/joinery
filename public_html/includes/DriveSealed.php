@@ -10,7 +10,7 @@
  * folder succeeds with the vault locked, from any session with write access, the
  * same rule mail ingest lives by. Opening needs the owner's unlock window.
  *
- * This file is a CORE consumer (VaultUnlock::CONSUMER_CORE_FILES): it registers
+ * This file is a CORE consumer (declared in vault_consumers.json): it registers
  * the streaming decrypt hook and the rotation callback the same way a plugin
  * bootstrap does, because Drive has no plugin to carry them.
  *

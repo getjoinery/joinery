@@ -16,8 +16,8 @@
  * below).
  *
  * Registration order is meaningful: mail parsing must precede AI judging,
- * because an unparsed message has no fields to read. Order is set by
- * VaultUnlock::CONSUMER_PLUGINS, which controls bootstrap load order.
+ * because an unparsed message has no fields to read. Order is the `order` each
+ * consumer declares (VaultConsumers), which controls bootstrap load order.
  *
  * § The heartbeat stays fast. The keep-alive beat exists to hold the window
  * open and must never depend on a language model — the local provider's

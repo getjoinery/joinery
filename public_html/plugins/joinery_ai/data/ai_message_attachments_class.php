@@ -69,6 +69,10 @@ class AiMessageAttachment extends SystemBase {
     // decrypted transparently by SystemBase::get() on a sealed attachment.
     public static $sealed_fields = array('aia_extracted_text');
 
+    // Sealed under the OWNING message's DEK, not one of its own — ChatSeal
+    // owns that key, so it owns this row's sealing too.
+    public static $seal_on_save = false;
+
     /** This model predates the {prefix}_content_sealed convention. */
     public static function sealFlagColumn() {
         return 'aia_sealed';

@@ -1,0 +1,17 @@
+{
+    "drive_sealed": {
+        "bootstrap": "includes/DriveSealed.php",
+        "order": 60,
+        "reseals": true
+    },
+    "direct_spool": {
+        "bootstrap": "includes/joinery_direct/DirectSpoolDrain.php",
+        "order": 70,
+        "reseals": true
+    },
+    "api_idempotency": {
+        "bootstrap": "includes/ApiIdempotencySealed.php",
+        "order": 80,
+        "reseals": true
+    }
+}

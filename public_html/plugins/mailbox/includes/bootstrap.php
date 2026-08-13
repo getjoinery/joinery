@@ -1,7 +1,8 @@
 <?php
 /**
- * Mailbox plugin bootstrap - loaded once per request by
- * VaultUnlock::loadConsumerBootstraps() whenever the plugin is active. Wires
+ * Mailbox plugin bootstrap - the plugin's declared load point (the top-level
+ * `bootstrap` key in plugin.json), loaded once per request by the plugin
+ * bootstrap loader (PluginBootstraps) whenever the plugin is active. Wires
  * mail into the Sealed Vault's two generic consumer hooks (docs/sealed_vault.md
  * § The consumer contract): the File decrypt hook for sealed attachments, and
  * the rotation re-seal / window-wipe callbacks.
@@ -20,7 +21,10 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - the reseal callback covers soft-deleted messages: a deleted
+ *   row is restorable, and one left on a retired generation would come back
+ *   permanently unreadable.
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -44,6 +48,38 @@ MailIdentityGuard::registerProtectedDomainCheck(function (string $from_domain): 
 MailIdentityGuard::registerDkimSigner(function (string $from_domain): ?array {
 	return MailboxDkimSigner::resolveFor($from_domain);
 });
+
+// --- Unlock-window caps (specs/mailbox_security_levels.md § The Unlock Window) ---
+// Mail's window policy, expressed as this consumer's opinion about the shared
+// server-custody window rather than as something core knows: a Fortress user's
+// window ends after 2h without a content decrypt and unconditionally 24h after
+// arming; a Private user gets the 7-day absolute backstop only. Core folds every
+// registered provider strictest-wins, so a member who set a tight window on any
+// consumer keeps it.
+//
+// The fail-closed pair is the Fortress caps: an error resolving the level must
+// never grant an uncapped window to someone who may have configured the
+// strictest policy. A real Fortress user sees no difference; anyone else gets a
+// tighter-than-usual window until the fault clears.
+VaultUnlock::onWindowCaps(
+	function (int $user_id): array {
+		$level = InboundEmailDomain::maxSecurityLevelForUser($user_id);
+		if ($level === 'fortress') {
+			return array(
+				'idle'     => VaultUnlock::FORTRESS_IDLE_CAP_SECONDS,
+				'absolute' => VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
+			);
+		}
+		if ($level === 'private') {
+			return array('idle' => null, 'absolute' => VaultUnlock::PRIVATE_ABSOLUTE_CAP_SECONDS);
+		}
+		return array('idle' => null, 'absolute' => null);
+	},
+	array(
+		'idle'     => VaultUnlock::FORTRESS_IDLE_CAP_SECONDS,
+		'absolute' => VaultUnlock::FORTRESS_ABSOLUTE_CAP_SECONDS,
+	)
+);
 
 // --- Sealed-File decrypt hook (docs/sealed_vault.md § The two generic consumer hooks) ---
 // Resolve the owning message (and its owner) from the attachment manifest,
@@ -89,10 +125,13 @@ VaultUnlock::onReseal(function (int $user_id, string $old_secret_key, int $old_k
 	$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
 	if (count($alias_ids)) {
 		$in = implode(',', array_map('intval', $alias_ids));
+		// Soft-deleted messages are re-sealed too (the resealRows() contract): a
+		// deleted row is restorable, and one left on a retired generation would
+		// come back permanently unreadable.
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id IN ($in)
-			 AND iem_content_sealed = true AND iem_key_generation = ? AND iem_delete_time IS NULL");
+			 AND iem_content_sealed = true AND iem_key_generation = ?");
 		$stmt->execute(array($old_key_generation));
 		$ids = $stmt->fetchAll(PDO::FETCH_COLUMN);
 
@@ -230,8 +269,9 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
 // Fortress mail arrives sealed and unparsed while the owner is logged out; only
 // their open window can turn it into readable fields. Registering here means the
 // backlog drains wherever the owner happens to be on the site, not only when
-// they open the mailbox. Mailbox registers FIRST (VaultUnlock::CONSUMER_PLUGINS
-// order) because the AI email jobs skip unparsed mail — parsing has to lead.
+// they open the mailbox. Mailbox registers FIRST (it declares a lower vaultConsumer
+// `order` than joinery_ai) because the AI email jobs skip unparsed mail —
+// parsing has to lead.
 require_once(PathHelper::getIncludePath('includes/VaultDeferredWork.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/DeferredIngest.php'));
 VaultDeferredWork::register(

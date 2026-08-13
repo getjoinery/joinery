@@ -81,6 +81,10 @@ class ApiIdempotencyKey extends SystemBase {
 	/** The cached response body seals when the request that produced it was hot. */
 	public static $sealed_fields = array('aik_response_body');
 
+	// Sealed by ApiLogicEndpoint once the response exists and the owner whose
+	// content it was built from is known — a decision save() cannot make.
+	public static $seal_on_save = false;
+
 	/**
 	 * The credential-scope string for an authenticated principal: the API key
 	 * when one was presented, else the browser session's user. Sessionless

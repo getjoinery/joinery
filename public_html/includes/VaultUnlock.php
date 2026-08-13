@@ -19,7 +19,14 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.5
+ * @version 1.7
+ * @changelog 1.7 - loadConsumerBootstraps() delegates to PluginBootstraps, the
+ *   loader for every plugin's top-level `bootstrap` key; same call sites, same
+ *   invariant, generalized beyond vault consumers.
+ * @changelog 1.6 - window caps fail CLOSED end to end: a declared consumer
+ *   bootstrap missing on disk folds the Fortress caps into capsForUser(), and
+ *   onWindowCaps()'s fail-closed default is the Fortress caps rather than
+ *   "abstain".
  * @changelog 1.5 - lock() drops VaultCrypto's memoized item DEKs, so keys
  *   unwrapped under a window cannot outlive it.
  * @changelog 1.4 - offerableCredentialIds(): which passkeys a scope's vault
@@ -68,6 +75,9 @@ class VaultUnlock {
 	/** @var callable[] consulted, in registration order, whenever a window closes. */
 	private static $wipe_callbacks = array();
 
+	/** @var array<int,array{provider:callable, fail_closed:array}> window-length policy, see onWindowCaps(). */
+	private static $window_cap_providers = array();
+
 	/**
 	 * @var bool While set, secretKey() hands back the key WITHOUT counting as
 	 * user activity — no TTL re-store, no marker touch, no content stamp.
@@ -82,66 +92,24 @@ class VaultUnlock {
 	 */
 	private static $activity_suppressed = false;
 
-	/** @var bool guards loadConsumerBootstraps() to once per request. */
-	private static $consumer_bootstraps_loaded = false;
-
 	/**
-	 * Every consumer package's bootstrap file, keyed by the plugin name that
-	 * guards it — plugin.json convention: 'plugins/{name}/includes/bootstrap.php'.
-	 * A consumer's bootstrap registers its File decrypt hook (File::registerDecryptHook)
-	 * and its onReseal()/onWipe() callbacks. Add a plugin name here when a new
-	 * consumer package lands (mail was the first; chat is the second).
-	 */
-	const CONSUMER_PLUGINS = array('mailbox', 'joinery_ai');
-
-	/**
-	 * Consumers that live in core rather than in a plugin, loaded the same way
-	 * and holding the same contract. Drive is the first: its Private files are
-	 * sealed by core code, so there is no plugin whose bootstrap could carry the
-	 * hooks. Paths are relative to public_html.
-	 */
-	const CONSUMER_CORE_FILES = array(
-		'includes/DriveSealed.php',
-		// The Joinery Direct spool: deliveries accepted at a sealed tier wait
-		// here for the recipient's unlock, because the contact list that
-		// authorizes them is sealed. Core rather than plugin — the spool is
-		// kind-independent and holds chat and any future kind alongside mail.
-		'includes/joinery_direct/DirectSpoolDrain.php',
-	);
-
-	/**
-	 * Load each active consumer's bootstrap file — lazy, once per request, called
-	 * by every code path that needs a consumer's hooks live: the File decrypt-hook
-	 * resolution (File::serve_from_path()), the rotation ceremony (resealCallbacks()),
-	 * and window-close (runWipeCallbacks()). Static callback registries reset at the
-	 * start of every request (a fresh PHP execution context even under php-fpm
-	 * worker reuse), so this must be called before any of those three read them —
-	 * calling it from all three read sites, guarded to run once, means no call site
-	 * has to remember the ordering.
+	 * Load every plugin bootstrap and core consumer bootstrap — lazy, once per
+	 * request, called by every code path that needs a consumer's hooks live: the
+	 * File decrypt-hook resolution (File::serve_from_path()), the rotation
+	 * ceremony (resealCallbacks()), window-close (runWipeCallbacks()), the
+	 * window-cap fold (capsForUser()), and the non-vault registries
+	 * (UploadPurposeRegistry, MailIdentityGuard, the Direct hooks).
+	 *
+	 * The mechanism lives in PluginBootstraps (docs/plugin_developer_guide.md
+	 * § Bootstrap): who loads comes from the top-level `bootstrap` key in each
+	 * active plugin's plugin.json plus the core entries in vault_consumers.json;
+	 * order comes from `vaultConsumer.order`; each load is attributed for the
+	 * obligation accounting. This wrapper exists so vault code paths need not
+	 * know the loader moved — the two names are the same load.
 	 */
 	public static function loadConsumerBootstraps(): void {
-		if (self::$consumer_bootstraps_loaded) {
-			return;
-		}
-		self::$consumer_bootstraps_loaded = true;
-		require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
-		foreach (self::CONSUMER_PLUGINS as $plugin) {
-			if (!PluginHelper::isPluginActive($plugin)) {
-				continue;
-			}
-			$path = PathHelper::getIncludePath('plugins/' . $plugin . '/includes/bootstrap.php');
-			if (file_exists($path)) {
-				require_once($path);
-			}
-		}
-		// Core consumers have no plugin to be active or inactive; they register
-		// unconditionally, and their own hooks decide whether there is work.
-		foreach (self::CONSUMER_CORE_FILES as $relative) {
-			$path = PathHelper::getIncludePath($relative);
-			if (file_exists($path)) {
-				require_once($path);
-			}
-		}
+		require_once(PathHelper::getIncludePath('includes/PluginBootstraps.php'));
+		PluginBootstraps::load();
 	}
 
 	/**
@@ -170,38 +138,82 @@ class VaultUnlock {
 	}
 
 	/**
-	 * The end-event caps for a user, by their highest mail security level
-	 * (specs/mailbox_security_levels.md § The Unlock Window). Guarded: with the
-	 * mailbox plugin absent it returns no caps, so this class stays generic.
+	 * Register a provider of end-event caps for the shared server-custody window.
+	 *
+	 * Every server-custody consumer shares one window, so its length is a
+	 * platform-wide decision that any consumer may have an opinion about. A
+	 * consumer registers from its bootstrap; core knows nothing about what the
+	 * opinion is based on.
+	 *
+	 * @param callable $provider          fn(int $user_id): array{idle:?int, absolute:?int}
+	 * @param array    $fail_closed_caps  contributed instead when $provider throws.
+	 *   Fail CLOSED is the rule: an error resolving a policy must never hand an
+	 *   uncapped window to someone who may have configured the strictest one, so a
+	 *   provider declares the caps its own failure should imply. The DEFAULT is
+	 *   therefore the Fortress caps — the strictest policy the platform knows — so
+	 *   a consumer that registers without thinking about its failure mode gets the
+	 *   safe direction, not an uncapped window. A provider whose failure genuinely
+	 *   implies no cap must say so explicitly with array('idle' => null,
+	 *   'absolute' => null).
+	 */
+	public static function onWindowCaps(callable $provider, array $fail_closed_caps = array(
+			'idle' => self::FORTRESS_IDLE_CAP_SECONDS,
+			'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS)): void {
+		self::$window_cap_providers[] = array('provider' => $provider, 'fail_closed' => $fail_closed_caps);
+	}
+
+	/**
+	 * The end-event caps for a user: every registered provider folded by taking
+	 * the STRICTEST value per field — the minimum non-null idle, the minimum
+	 * non-null absolute.
+	 *
+	 * Strictest-wins is the only defensible fold. One shared window cannot honor
+	 * two different lengths, and a member who configured a tight window on any
+	 * consumer expressed a preference about their unlock window as a whole.
+	 *
+	 * With no providers registered the window is uncapped, which is the correct
+	 * answer for an instance whose consumers all have no window policy — but ONLY
+	 * when every declared bootstrap actually loaded. A declared bootstrap missing
+	 * on disk (a partial deploy) may have been the one carrying the strictest
+	 * policy, so its absence folds in the Fortress caps rather than silently
+	 * widening anyone's window: a real Fortress user sees no difference, anyone
+	 * else gets a tighter-than-usual window until the deploy is fixed.
 	 *
 	 * @return array{idle:?int, absolute:?int}
 	 */
 	public static function capsForUser(int $user_id): array {
-		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
-		if (is_file($domain_class)) {
-			require_once($domain_class);
-			if (class_exists('InboundEmailDomain')) {
-				try {
-					$level = InboundEmailDomain::maxSecurityLevelForUser($user_id);
-					if ($level === 'fortress') {
-						return array('idle' => self::FORTRESS_IDLE_CAP_SECONDS, 'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS);
-					}
-					if ($level === 'private') {
-						return array('idle' => null, 'absolute' => self::PRIVATE_ABSOLUTE_CAP_SECONDS);
-					}
-				} catch (\Throwable $e) {
-					// Fail CLOSED: an error resolving the level must never grant an
-					// uncapped window to a user who may have configured the strictest
-					// policy — apply the Fortress caps and let a real Fortress user
-					// see no difference, a lower-level user a tighter-than-usual
-					// window until the fault clears.
-					error_log('VaultUnlock::capsForUser: level lookup failed for user '
-						. $user_id . ' - applying Fortress caps: ' . $e->getMessage());
-					return array('idle' => self::FORTRESS_IDLE_CAP_SECONDS, 'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS);
+		self::loadConsumerBootstraps();
+
+		$caps = array('idle' => null, 'absolute' => null);
+		if (!empty(PluginBootstraps::notLoaded())) {
+			$caps = array(
+				'idle'     => self::FORTRESS_IDLE_CAP_SECONDS,
+				'absolute' => self::FORTRESS_ABSOLUTE_CAP_SECONDS,
+			);
+		}
+		foreach (self::$window_cap_providers as $entry) {
+			try {
+				$contribution = call_user_func($entry['provider'], $user_id);
+			} catch (\Throwable $e) {
+				error_log('VaultUnlock::capsForUser: a window-cap provider failed for user '
+					. $user_id . ' - applying its fail-closed caps: ' . $e->getMessage());
+				$contribution = $entry['fail_closed'];
+			}
+			if (!is_array($contribution)) {
+				continue;
+			}
+			foreach (array('idle', 'absolute') as $field) {
+				$value = $contribution[$field] ?? null;
+				if ($value === null) {
+					continue;
+				}
+				$value = (int)$value;
+				if ($caps[$field] === null || $value < $caps[$field]) {
+					$caps[$field] = $value;
 				}
 			}
 		}
-		return array('idle' => null, 'absolute' => null);
+		return $caps;
 	}
 
 	public static function isOpen(int $user_id, string $scope = 'user'): bool {
@@ -426,6 +438,49 @@ class VaultUnlock {
 	 */
 	public static function onReseal(callable $callback): void {
 		self::$reseal_callbacks[] = $callback;
+		require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
+		VaultConsumers::noteRegistration(VaultConsumers::OBLIGATION_RESEAL);
+	}
+
+	/**
+	 * A ready-made onReseal callback for the ordinary case: re-seal every sealed
+	 * row of these models that sits on the draining generation.
+	 *
+	 *   VaultUnlock::onReseal(VaultUnlock::modelReseal([MailboxContact::class]));
+	 *
+	 * The sealed-field model hook already knows the four column names and how
+	 * ownership resolves, so nearly every consumer's hand-written callback was
+	 * the same loop with different table names in it. A consumer that also seals
+	 * material outside model columns (mailbox's DKIM keys, Drive's blob keys)
+	 * keeps its own callback and may register this one alongside.
+	 *
+	 * Fail-loud per the onReseal contract: every row is attempted, then any
+	 * failure throws so the ceremony refuses to retire the old wrappings.
+	 *
+	 * @param string[] $model_classes SystemBase subclasses declaring $sealed_fields
+	 */
+	public static function modelReseal(array $model_classes): callable {
+		return function (int $user_id, string $old_secret_key, int $old_key_generation,
+				string $new_public_key, int $new_key_generation) use ($model_classes) {
+			$attempted = 0;
+			$failed = 0;
+			$names = array();
+			foreach ($model_classes as $class) {
+				$result = $class::resealRows($user_id, $old_secret_key, $old_key_generation,
+					$new_public_key, $new_key_generation);
+				$attempted += $result['attempted'];
+				$failed += $result['failed'];
+				if ($result['failed'] > 0) {
+					$names[] = $class;
+				}
+			}
+			if ($failed > 0) {
+				throw new RuntimeException(
+					'Vault reseal: ' . $failed . ' of ' . $attempted . ' sealed rows across '
+					. implode(', ', $names) . ' could not be re-sealed; the old key generation '
+					. 'must not be retired.');
+			}
+		};
 	}
 
 	/** @return callable[] */
@@ -664,6 +719,8 @@ class VaultUnlock {
 	 */
 	public static function onWipe(callable $callback): void {
 		self::$wipe_callbacks[] = $callback;
+		require_once(PathHelper::getIncludePath('includes/VaultConsumers.php'));
+		VaultConsumers::noteRegistration(VaultConsumers::OBLIGATION_CACHES);
 	}
 
 	private static function runWipeCallbacks(int $user_id, ?string $scope): void {
@@ -690,6 +747,20 @@ class VaultUnlock {
 			throw new RuntimeException('VaultUnlock: a browser session is required.');
 		}
 		return $session_id;
+	}
+
+	/**
+	 * Drop every registration and let the bootstraps load again. Tests only —
+	 * a test that activates a plugin or writes a declaration needs the next
+	 * loadConsumerBootstraps() to see it.
+	 */
+	public static function resetForTests(): void {
+		self::$reseal_callbacks = array();
+		self::$wipe_callbacks = array();
+		self::$window_cap_providers = array();
+		self::$activity_suppressed = false;
+		require_once(PathHelper::getIncludePath('includes/PluginBootstraps.php'));
+		PluginBootstraps::resetForTests();
 	}
 
 	/** The session id, or null where none exists (a CLI/cron process). Readers
