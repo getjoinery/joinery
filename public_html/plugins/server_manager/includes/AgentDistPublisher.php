@@ -1,7 +1,7 @@
 <?php
 /**
  * AgentDistPublisher - bundles the joinery-agent binary into the platform
- * release (specs/agent_release_channel.md).
+ * release (specs/implemented/agent_release_channel.md).
  *
  * Called by publish_upgrade.php before plugin archives are built. Writes
  * plugins/server_manager/agent_dist/ (manifest.json + gzipped, Ed25519-signed

@@ -1,7 +1,7 @@
 <?php
 /**
  * PublishLog - keeps a durable record of a publish run
- * (specs/publish_integrity_guards.md).
+ * (specs/implemented/publish_integrity_guards.md).
  *
  * A publish reports through publish_output(), which streams to a terminal or a
  * browser and nothing else. Any stage that hits a problem and continues — or

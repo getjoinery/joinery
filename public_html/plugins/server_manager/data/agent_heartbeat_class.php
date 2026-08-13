@@ -4,7 +4,7 @@
  *
  * @version 1.1 - ahb_bundled_version + ahb_update_state: the agent reports
  *                what the shipped agent_dist offers and where its self-update
- *                stands (specs/agent_release_channel.md).
+ *                stands (specs/implemented/agent_release_channel.md).
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
