@@ -1,0 +1,4 @@
+# Compiled build artifact — built on the relay by build.sh for its own
+# architecture (or pre-built for scp). Regenerated from the tracked .go
+# sources; never commit the binary itself.
+/relay-sealer
