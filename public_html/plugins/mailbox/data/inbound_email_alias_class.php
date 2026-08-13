@@ -220,9 +220,6 @@ class MultiInboundEmailAlias extends SystemMultiBase {
 			$filters['iea_is_enabled'] = $this->options['enabled'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['iea_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('iea_inbound_email_aliases', $filters, $this->order_by, $only_count, $debug);
 	}

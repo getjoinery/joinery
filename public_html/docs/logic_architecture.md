@@ -502,23 +502,20 @@ function index_logic(array $input): LogicResult {
 
     $page_vars = array();
 
-    // Load recent blog posts (4 posts for homepage)
-    $recent_posts = new MultiPost(
+    // Recent blog posts (4 for the homepage). A collection runs its query the
+    // first time the view iterates it, so there is nothing to load here.
+    $page_vars['recent_posts'] = new MultiPost(
         array('published' => TRUE, 'deleted' => false),
         array('pst_published_time' => 'DESC'),
         4, 0
     );
-    $recent_posts->load();
-    $page_vars['recent_posts'] = $recent_posts;
 
-    // Load upcoming events (6 events for sidebar)
-    $upcoming_events = new MultiEvent(
+    // Upcoming events (6 for the sidebar)
+    $page_vars['upcoming_events'] = new MultiEvent(
         array('deleted' => false, 'upcoming' => true),
         array('evt_start_time' => 'ASC'),
         6, 0
     );
-    $upcoming_events->load();
-    $page_vars['upcoming_events'] = $upcoming_events;
 
     return LogicResult::render($page_vars);
 }

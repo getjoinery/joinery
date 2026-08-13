@@ -50,7 +50,7 @@ function password_reset_2fa_passkey_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function password_reset_2fa_passkey_options_logic_api() {
+function password_reset_2fa_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin the passkey second factor for a vault-holder password reset',

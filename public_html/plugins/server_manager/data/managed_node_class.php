@@ -186,9 +186,6 @@ class MultiManagedNode extends SystemMultiBase {
 			$filters['mgn_enabled'] = $this->options['enabled'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mgn_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		// Use array_key_exists so null values (→ IS NULL) are handled correctly
 		if (array_key_exists('ssl_state', $this->options)) {

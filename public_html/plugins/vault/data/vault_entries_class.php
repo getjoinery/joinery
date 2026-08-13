@@ -46,10 +46,6 @@ class VaultEntry extends SystemBase {
 		'vle_updated_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'vle_delete_time'  => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
-
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
 }
 
 class MultiVaultEntry extends SystemMultiBase {

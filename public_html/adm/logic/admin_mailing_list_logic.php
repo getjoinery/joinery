@@ -14,13 +14,13 @@ function admin_mailing_list_logic(array $input): LogicResult {
 	$mailing_list = new MailingList($input['mlt_mailing_list_id'], TRUE);
 
 	if($input['action'] == 'delete'){
-		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$mailing_list->assert_can_write($session);
 		$mailing_list->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
 	}
 	else if($input['action'] == 'undelete'){
-		$mailing_list->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$mailing_list->assert_can_write($session);
 		$mailing_list->undelete();
 
 		return LogicResult::redirect("/admin/admin_mailing_lists");
@@ -58,10 +58,10 @@ function admin_mailing_list_logic(array $input): LogicResult {
 
 	if($_SESSION['permission'] >= 8){
 		if($mailing_list->get('mlt_delete_time')) {
-			$options['altlinks']['Undelete'] = '/admin/admin_mailing_list?action=undelete&mlt_mailing_list_id='.$mailing_list->key;
+			$options['altlinks']['Undelete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'undelete', 'mlt_mailing_list_id' => $mailing_list->key));
 		}
 		else {
-			$options['altlinks']['Soft Delete'] = '/admin/admin_mailing_list?action=delete&mlt_mailing_list_id='.$mailing_list->key;
+			$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_mailing_list', 'hidden' => array('action' => 'delete', 'mlt_mailing_list_id' => $mailing_list->key));
 		}
 	}
 
@@ -71,9 +71,9 @@ function admin_mailing_list_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

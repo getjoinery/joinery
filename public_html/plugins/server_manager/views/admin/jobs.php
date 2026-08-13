@@ -145,7 +145,7 @@ foreach ($jobs as $job) {
 	array_push($rowvalues, htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))));
 	array_push($rowvalues, '<span class="badge bg-' . $status_class . '">' . htmlspecialchars($job->get('mjb_status')) . '</span>');
 	array_push($rowvalues, $progress);
-	array_push($rowvalues, LibraryFunctions::convert_time($job->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, g:i A'));
+	array_push($rowvalues, $job->get_local('mjb_create_time', 'M j, g:i A'));
 	array_push($rowvalues, $duration);
 
 	$page->disprow($rowvalues);

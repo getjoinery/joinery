@@ -87,7 +87,8 @@ function add_discovered_nodes_logic_descriptor(): array {
 	return [
 		'description' => 'Bulk-create managed nodes from a discovery result.',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true, 'min_user_permission' => 10],
+		'requires_session'        => true,
+		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
 			'host'         => ['type' => 'string', 'required' => false, 'label' => 'Host'],
 			'ssh_user'     => ['type' => 'string', 'required' => false, 'label' => 'SSH user'],

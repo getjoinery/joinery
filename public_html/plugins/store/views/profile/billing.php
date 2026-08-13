@@ -42,11 +42,7 @@ $page->public_header([
             </div>
 
             <?php
-            if (!empty($page_vars['display_messages'])) {
-                foreach ($page_vars['display_messages'] as $msg) {
-                    echo PublicPage::alert($msg->message_title, $msg->message, $msg->get_message_class());
-                }
-            }
+            echo $page->render_messages();
             ?>
 
             <?php if (!empty($page_vars['success_message'])): ?>

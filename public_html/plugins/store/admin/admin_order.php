@@ -145,7 +145,7 @@
 									<span class="badge badge-subtle-danger me-2">REFUNDED <?php echo $currency_symbol.number_format($order_item->get('odi_refund_amount'), 2); ?></span>
 								</div>
 								<div class="fs-11 text-600 mt-1">
-									Refund time: <?php echo LibraryFunctions::convert_time($order_item->get('odi_refund_time'), 'UTC', $session->get_timezone()); ?>
+									Refund time: <?php echo $order_item->get_local('odi_refund_time'); ?>
 								</div>
 								<?php if($order_item->get('odi_refund_note')): ?>
 								<div class="fs-11 text-600 mt-1">
@@ -164,12 +164,12 @@
 								</div>
 								<?php if($order_item->get('odi_subscription_period_end')): ?>
 								<div class="fs-11 text-600 mt-1">
-									Period ends: <?php echo LibraryFunctions::convert_time($order_item->get('odi_subscription_period_end'), 'UTC', $session->get_timezone()); ?>
+									Period ends: <?php echo $order_item->get_local('odi_subscription_period_end'); ?>
 								</div>
 								<?php endif; ?>
 								<?php if($order_item->get('odi_subscription_cancelled_time')): ?>
 								<div class="fs-11 text-600 mt-1">
-									Cancelled at: <?php echo LibraryFunctions::convert_time($order_item->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone()); ?>
+									Cancelled at: <?php echo $order_item->get_local('odi_subscription_cancelled_time'); ?>
 								</div>
 								<?php endif; ?>
 								<?php endif; ?>

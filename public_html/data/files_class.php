@@ -1636,6 +1636,9 @@ public static function get_by_name($name, $search_deleted = false) {
 			// conflicting row and evaluates this WHERE against its latest version,
 			// so a concurrent loser sees the winner's key and leaves it alone, and
 			// a key already in use is never overwritten.
+			// Raw rather than Setting::put(): the WHERE clause below is the race
+			// guard — two requests provisioning at once must not overwrite each
+			// other's key, and put() has no conditional form.
 			$box = new SecretBox();
 			$new_blob = $box->encrypt(base64_encode(random_bytes(32)));
 			$ins = $dblink->prepare(
@@ -1970,9 +1973,6 @@ class MultiFile extends SystemMultiBase {
 			$filters['fil_title'] = 'ILIKE ' . $dblink->quote('%' . $this->options['title_like'] . '%');
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['fil_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		// 'picture' mirrors File::is_image(): the raster allowlist, not
 		// LIKE 'image/%' (which would sweep in image/svg+xml — a file with no

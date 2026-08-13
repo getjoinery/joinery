@@ -14,7 +14,7 @@
 
 	if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'approve'){
 		$comment->set('cmt_is_approved', true);
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$comment->assert_can_write($session);
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
@@ -23,21 +23,21 @@
 	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'unapprove'){
 
 		$comment->set('cmt_is_approved', false);
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$comment->assert_can_write($session);
 		$comment->save();
 
 		header("Location: /admin/admin_comments");
 		exit();
 	}
 	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'delete'){
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$comment->assert_can_write($session);
 		$comment->soft_delete();
 
 		header("Location: /admin/admin_comments");
 		exit();
 	}
 	else if(isset($_REQUEST['action']) && $_REQUEST['action'] == 'undelete'){
-		$comment->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$comment->assert_can_write($session);
 		$comment->undelete();
 
 		header("Location: /admin/admin_comments");
@@ -77,15 +77,15 @@
 	}
 
 	if(!$comment->get('cmt_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_comment?action=delete&cmt_comment_id='.$comment->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_comment', 'hidden' => array('action' => 'delete', 'cmt_comment_id' => $comment->key));
 	}
 
 	$page->begin_box($options);
 
-	echo '<p>By: '.htmlspecialchars($comment->get('cmt_author_name')).' at '.LibraryFunctions::convert_time($comment->get('cmt_created_time'), 'UTC', $session->get_timezone()).'<br>';
+	echo '<p>By: '.htmlspecialchars($comment->get('cmt_author_name')).' at '.$comment->get_local('cmt_created_time').'<br>';
 	echo 'On: <a href="'.$post->get_url().'">'.$post->get('pst_title').'</a><br>';
 	if($comment->get('cmt_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($comment->get('cmt_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		echo 'Status: Deleted at '.$comment->get_local('cmt_delete_time').'<br />';
 	}
 	else if($comment->get('cmt_is_approved')){
 		echo 'Status: Approved';

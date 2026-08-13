@@ -1374,9 +1374,6 @@ class MultiUser extends SystemMultiBase {
             $filters['usr_is_disabled'] = $this->options['disabled'] ? "= TRUE" : "= FALSE";
         }
         
-        if (isset($this->options['deleted'])) {
-            $filters['usr_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         if (isset($this->options['not_system_users'])) {
             $filters['usr_user_id'] = '!= '.User::USER_SYSTEM.' AND usr_user_id != '.User::USER_DELETED;

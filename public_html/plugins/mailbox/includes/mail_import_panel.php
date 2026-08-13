@@ -286,12 +286,21 @@ function mailbox_import_panel_script(): void {
 	var busyBox = document.getElementById('mail-import-busy');
 	var polling = null;
 
+	// Calls go through the shared transport (window.joineryApi), which owns the
+	// CSRF token and its cookie-first lookup. The panel's own callers read the
+	// API envelope, so a refusal is handed back in envelope shape rather than
+	// raised — every one of them already turns {error} into a message on screen.
 	function post(path, body) {
-		return fetch('/api/v1/action/' + path, {
-			method: 'POST',
-			headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-			body: JSON.stringify(body || {})
-		}).then(function (r) { return r.json(); });
+		return joineryApi.post(path, body).then(function (data) {
+			return { data: data };
+		}).catch(function (err) {
+			return {
+				error: err.message,
+				errortype: err.errorType,
+				validation_errors: err.validationErrors,
+				data: err.data || {}
+			};
+		});
 	}
 
 	/** One of this plugin's actions. */

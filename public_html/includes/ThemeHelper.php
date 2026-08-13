@@ -69,14 +69,6 @@ class ThemeHelper extends ComponentBase {
             $errors[] = "Theme manifest missing required field: name";
         }
         
-        // Check FormWriter base class if specified
-        if ($formWriterBase = $this->getFormWriterBase()) {
-            $classFile = PathHelper::getIncludePath("includes/{$formWriterBase}.php");
-            if (!file_exists($classFile)) {
-                $errors[] = "FormWriter base class file not found: {$formWriterBase}.php";
-            }
-        }
-        
         return empty($errors) ? true : $errors;
     }
     
@@ -85,13 +77,6 @@ class ThemeHelper extends ComponentBase {
      */
     public function getCssFramework() {
         return $this->manifestData['cssFramework'] ?? null;
-    }
-    
-    /**
-     * Get FormWriter base class for theme
-     */
-    public function getFormWriterBase() {
-        return $this->manifestData['formWriterBase'] ?? null;
     }
     
     // === STATIC HELPER METHODS ===

@@ -1,5 +1,4 @@
 <?php
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 function lists_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -39,7 +38,7 @@ function lists_logic(array $input): LogicResult {
 	if($_POST){
 	
 		if(!$session->get_user_id()){
-			$formwriter = new FormWriter('form1');
+			$formwriter = new FormWriterV2HTML5('form1');
 			if(!$formwriter->honeypot_check($_POST)){
 				LibraryFunctions::display_404_page();			
 			}

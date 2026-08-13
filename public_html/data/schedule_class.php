@@ -110,9 +110,6 @@ class MultiSchedule extends SystemMultiBase {
 		if (isset($this->options['subject_id'])) {
 			$filters['sch_subject_id'] = [$this->options['subject_id'], PDO::PARAM_INT];
 		}
-		if (isset($this->options['deleted'])) {
-			$filters['sch_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('sch_schedules', $filters, $this->order_by, $only_count, $debug);
 	}

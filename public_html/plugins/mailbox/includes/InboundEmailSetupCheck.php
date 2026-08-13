@@ -190,13 +190,9 @@ class InboundEmailSetupCheck {
 			$client = new FleetClient();
 			// status() folds fresh slot coordinates into the relay row —
 			// server-side reconciliation, deliberate on a GET view.
-			$was_allowed = SystemBase::$allow_get_mutation;
-			SystemBase::$allow_get_mutation = true;
-			try {
-				$status = $client->status();
-			} finally {
-				SystemBase::$allow_get_mutation = $was_allowed;
-			}
+			$status = SystemBase::server_initiated_write(function () use ($client) {
+				return $client->status();
+			});
 			$state['ok'] = true;
 			$state['enrolled'] = !empty($status['enrolled']);
 			foreach ((array)($status['claims'] ?? array()) as $claim) {
@@ -2245,18 +2241,9 @@ class InboundEmailSetupCheck {
 			$existing->load();
 			$setting = count($existing) ? $existing->get(0) : null;
 			if ($setting === null || (string)$setting->get('stg_value') !== $value) {
-				$was_allowed = SystemBase::$allow_get_mutation;
-				SystemBase::$allow_get_mutation = true;
-				try {
-					if ($setting === null) {
-						$setting = new Setting(NULL);
-						$setting->set('stg_name', 'mailbox_relay_cutover_complete');
-					}
-					$setting->set('stg_value', $value);
-					$setting->save();
-				} finally {
-					SystemBase::$allow_get_mutation = $was_allowed;
-				}
+				SystemBase::server_initiated_write(function () use ($value) {
+					Setting::put('mailbox_relay_cutover_complete', $value);
+				});
 			}
 		} catch (\Throwable $e) {
 			error_log('InboundEmailSetupCheck::recordCutover failed: ' . $e->getMessage());

@@ -59,27 +59,22 @@
 class ApiLogicEndpoint {
 
 	/**
-	 * Whether a request runs under a simulated session. Honors the forward-
-	 * looking ['auth']['requires_session'] first, then the top-level
-	 * requires_session declaration, defaulting to true (sessioned). Shared by
-	 * both the action and form faces.
+	 * Whether a request runs under a simulated session. Declared at the top
+	 * level of the descriptor; sessioned unless the descriptor says otherwise.
+	 * Shared by both the action and form faces.
 	 */
 	protected static function requiresSession($meta) {
-		return $meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true;
+		return $meta['requires_session'] ?? true;
 	}
 
 	/**
-	 * Resolve an action's metadata array from its companion function —
-	 * {action}_logic_descriptor() when it exists, {action}_logic_api() as the
-	 * legacy fallback. Returns null when the action declares neither (not
-	 * exposed to the API). Shared by both faces.
+	 * Resolve an action's metadata array from its companion function,
+	 * {action}_logic_descriptor(). Returns null when the action has none — that
+	 * is what "not exposed to the API" means. Shared by both faces.
 	 */
 	protected static function resolveMeta($action_name) {
 		if (function_exists($action_name . '_logic_descriptor')) {
 			return call_user_func($action_name . '_logic_descriptor');
-		}
-		if (function_exists($action_name . '_logic_api')) {
-			return call_user_func($action_name . '_logic_api');
 		}
 		return null;
 	}
@@ -103,12 +98,20 @@ class ApiLogicEndpoint {
 
 		list($action_label, $action_name) = api_resolve_logic_path($url_segments, 'action');
 
-		// Check for opt-in: the logic file must define a metadata companion
-		// ({action_name}_logic_descriptor() or legacy {action_name}_logic_api())
+		// Check for opt-in: the logic file must define a metadata companion,
+		// {action_name}_logic_descriptor().
 		$logic_function = $action_name . '_logic';
 		$meta = self::resolveMeta($action_name);
 
 		if ($meta === null) {
+			// The file resolved, so the action exists on this deployment — it
+			// just is not exposed. Saying "unknown" here sends the caller
+			// looking for a typo that is not there.
+			if (function_exists($logic_function)) {
+				api_error($action_label . ' exists but is not exposed to the API — add '
+					. $action_name . '_logic_descriptor() to its logic file.',
+					'ActionError', 404);
+			}
 			api_error('Unknown action: ' . $action_label, 'ActionError', 404);
 		}
 
@@ -559,6 +562,14 @@ class ApiLogicEndpoint {
 
 		$form_function = $action_name . '_logic_form';
 		$meta = self::resolveMeta($action_name);
+
+		// Same distinction the action face draws: a form builder that is present
+		// but undeclared is a missing descriptor, not a wrong URL.
+		if ($meta === null && function_exists($form_function)) {
+			api_error($action_label . ' has a form builder but is not exposed to the API — add '
+				. $action_name . '_logic_descriptor() to its logic file.',
+				'ActionError', 404);
+		}
 
 		if ($meta === null || !function_exists($form_function)) {
 			api_error('Unknown form: ' . $action_label, 'ActionError', 404);

@@ -59,7 +59,7 @@ function chat_thread_action_logic(array $input): LogicResult {
     return LogicResult::error('Unknown action.');
 }
 
-function chat_thread_action_logic_api() {
+function chat_thread_action_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'Pin, rename, or delete an AI chat conversation.'];
 }

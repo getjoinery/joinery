@@ -80,8 +80,7 @@ class GeneralError extends SystemBase {	public static $prefix = 'err';
 	);
 
 function display_time($session) {
-		return LibraryFunctions::convert_time(
-			$this->get('err_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
+		return $this->get_local('err_log_time', '%a, %d %b %Y %R:%S');
 	}	
 
 	/**
@@ -151,8 +150,11 @@ function display_time($session) {
 			$this->set('err_usr_user_id', $session_obj->get_user_id());
 		}
 		
-		// Use standard save method
-		$this->save();
+		// Recording an error is something the server does on its own, on
+		// whatever request happened to fail — including a GET. Without the
+		// opt-in, every error on a GET logs a second entry complaining that
+		// the first one persisted data.
+		SystemBase::server_initiated_write(function () { $this->save(); });
 	}
 
 	/**

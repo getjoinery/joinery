@@ -72,7 +72,6 @@ function notification_preferences_logic(array $input): LogicResult {
 		'signals' => $signals,
 		'prefs'   => $prefs,
 	);
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 	return LogicResult::render($page_vars);
 }
 

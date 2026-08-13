@@ -83,7 +83,7 @@ function password_reset_2fa_logic(array $input): LogicResult {
 	return LogicResult::render($page_vars);
 }
 
-function password_reset_2fa_logic_api() {
+function password_reset_2fa_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Confirm the second factor for a vault-holder passkey password reset (TOTP path)',

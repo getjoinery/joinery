@@ -478,9 +478,6 @@ class MultiInboundImapAccount extends SystemMultiBase {
 				"IS NULL OR iia_last_poll_time + (iia_poll_interval_seconds * INTERVAL '1 second') <= now())";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['iia_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('iia_inbound_imap_accounts', $filters, $this->order_by, $only_count, $debug);
 	}

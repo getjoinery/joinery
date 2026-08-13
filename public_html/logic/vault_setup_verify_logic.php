@@ -60,7 +60,7 @@ function vault_setup_verify_logic(array $input): LogicResult {
 	]);
 }
 
-function vault_setup_verify_logic_api() {
+function vault_setup_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

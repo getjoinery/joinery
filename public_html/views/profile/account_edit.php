@@ -11,11 +11,7 @@
 		'title' => 'Account Edit',
 	]);
 
-	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'userbox') {
-			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-		}
-	}
+	echo $page->render_messages('userbox');
 ?>
 <div class="jy-ui">
 <section class="jy-content-section">

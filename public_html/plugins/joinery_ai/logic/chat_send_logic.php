@@ -159,7 +159,7 @@ function chat_send_logic(array $input): LogicResult {
     return LogicResult::render($payload);
 }
 
-function chat_send_logic_api() {
+function chat_send_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'Send a message to the AI assistant (creates a conversation when conversation_id is omitted); returns a poll handle for the streaming reply.'];
 }

@@ -13,7 +13,7 @@ function admin_coupon_code_logic(array $input): LogicResult {
 	$coupon_code = new CouponCode($input['ccd_coupon_code_id'], TRUE);
 
 	if($input['action'] == 'remove'){
-		$coupon_code->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$coupon_code->assert_can_write($session);
 		$coupon_code->permanent_delete();
 
 		//$returncoupon_code = $session->get_return();

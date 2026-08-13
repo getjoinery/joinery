@@ -40,7 +40,7 @@ function vault_client_add_wrapping_logic(array $input): LogicResult {
 	return LogicResult::render(['added' => true]);
 }
 
-function vault_client_add_wrapping_logic_api() {
+function vault_client_add_wrapping_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

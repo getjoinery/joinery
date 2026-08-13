@@ -28,10 +28,21 @@ class DnsDriverRegistry {
 			return self::$drivers;
 		}
 
-		$dir = PathHelper::getIncludePath('includes/dns/drivers/');
-		if (is_dir($dir)) {
-			foreach (glob($dir . '*.php') as $file) {
-				require_once($file);
+		$dirs = array(PathHelper::getIncludePath('includes/dns/drivers/'));
+
+		try {
+			foreach (PluginHelper::getActivePlugins() as $name => $plugin) {
+				$dirs[] = PathHelper::getIncludePath('plugins/' . $name . '/includes/dns_drivers/');
+			}
+		} catch (Throwable $e) {
+			error_log('DnsDriverRegistry: error enumerating active plugins: ' . $e->getMessage());
+		}
+
+		foreach ($dirs as $dir) {
+			if (is_dir($dir)) {
+				foreach (glob($dir . '*.php') as $file) {
+					require_once($file);
+				}
 			}
 		}
 

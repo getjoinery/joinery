@@ -59,13 +59,9 @@ elseif ($status === 'running')  $badge = 'info';
 elseif ($status === 'pending')  $badge = 'warning';
 elseif (in_array($status, ['failed', 'timeout', 'skipped'])) $badge = 'danger';
 
-$started = LibraryFunctions::convert_time(
-    $run->get('rcr_started_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A T'
-);
+$started = $run->get_local('rcr_started_time', 'M j, Y g:i:s A T');
 $completed = $run->get('rcr_completed_time')
-    ? LibraryFunctions::convert_time(
-        $run->get('rcr_completed_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A T'
-      )
+    ? $run->get_local('rcr_completed_time', 'M j, Y g:i:s A T')
     : '—';
 
 $duration = '';

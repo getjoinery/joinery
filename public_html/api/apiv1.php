@@ -671,27 +671,19 @@ if (in_array($operation, $classes)) {
 		foreach (glob($logic_dir . '/*_logic.php') as $file) {
 			$basename = basename($file, '.php');           // e.g., "register_logic"
 			$action_name = substr($basename, 0, -6);       // e.g., "register" (strip "_logic")
-			$descriptor_function = $basename . '_descriptor'; // canonical metadata
-			$api_meta_function = $basename . '_api';        // legacy fallback
+			$descriptor_function = $basename . '_descriptor'; // the metadata companion
 
 			// Check file contents for a metadata companion without including
 			// (some legacy files have top-level code that would execute on include)
 			$contents = file_get_contents($file);
-			$declares = function ($fn) use ($contents) {
-				return (bool) preg_match('/function\s+' . preg_quote($fn, '/') . '\s*\(/', $contents);
-			};
-			if ($declares($descriptor_function) || $declares($api_meta_function)) {
+			if (preg_match('/function\s+' . preg_quote($descriptor_function, '/') . '\s*\(/', $contents)) {
 				require_once($file);
-				$meta_function = function_exists($descriptor_function)
-					? $descriptor_function
-					: (function_exists($api_meta_function) ? $api_meta_function : null);
-				if ($meta_function) {
-					$meta = call_user_func($meta_function);
+				if (function_exists($descriptor_function)) {
+					$meta = call_user_func($descriptor_function);
 					$found[$name_prefix . $action_name] = [
 						'description' => $meta['description'] ?? '',
-						'requires_session' => $meta['auth']['requires_session'] ?? $meta['requires_session'] ?? true,
-						// Typed input schema from the descriptor; null when the
-						// action only has the legacy _logic_api() companion
+						'requires_session' => $meta['requires_session'] ?? true,
+						// Typed input schema, when the descriptor declares one
 						'input' => (isset($meta['input']) && is_array($meta['input'])) ? $meta['input'] : null,
 						// Form builder companion → GET /api/v1/form/{action} works
 						'has_form' => function_exists($basename . '_form'),

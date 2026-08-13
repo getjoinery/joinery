@@ -90,7 +90,7 @@ function events_profile_logic(array $input): LogicResult {
 			$tevent['event_status'] = 'Active';
 			$tevent['event_expires'] = '';
 			if ($event_registrant->get('evr_expires_time')) {
-				$tevent['event_expires'] = LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone());
+				$tevent['event_expires'] = $event_registrant->get_local('evr_expires_time');
 			}
 		} elseif ($event->get('evt_status') == Event::STATUS_CANCELED) {
 			$tevent['event_status'] = 'Canceled';
@@ -120,7 +120,6 @@ function events_profile_logic(array $input): LogicResult {
 	$page_vars['num_events'] = $total;
 	$page_vars['pager'] = $pager;
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	return LogicResult::render($page_vars);
 }

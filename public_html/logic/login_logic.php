@@ -241,8 +241,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
-	$session->clear_clearable_messages();
 	return LogicResult::render($page_vars);
 }
 ?>

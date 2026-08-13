@@ -40,9 +40,7 @@ $page->admin_header(
 
 echo AdminPage::tab_menu(mailbox_admin_tabs(), 'Mailboxes');
 
-$received_local = LibraryFunctions::convert_time(
-	$message->get('iem_received_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i:s A T'
-);
+$received_local = $message->get_local('iem_received_time', 'M j, Y g:i:s A T');
 
 // Sender/recipient/subject/body come from the logic layer as $sender/
 // $recipient/$subject/$body_plain/$body_html, already resolved through the

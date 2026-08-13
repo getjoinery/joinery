@@ -39,11 +39,7 @@
 
                 $formwriter->begin_form();
 
-                foreach($page_vars['display_messages'] AS $display_message) {
-                    if($display_message->identifier == 'addressbox') {
-                        echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-                    }
-                }
+                echo $page->render_messages('addressbox');
 
                 // Shared form definition — also serves GET /api/v1/form/password_edit
                 password_edit_logic_form($formwriter, $page_vars['user'], array_merge($_GET, $_POST));

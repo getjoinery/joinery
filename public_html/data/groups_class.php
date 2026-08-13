@@ -419,9 +419,6 @@ class MultiGroup extends SystemMultiBase {
 			$filters['grp_usr_user_id'] = [$this->options['user_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['grp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['category'])) {
 			$filters['grp_category'] = [$this->options['category'], PDO::PARAM_STR];

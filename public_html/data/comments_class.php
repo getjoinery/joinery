@@ -97,8 +97,7 @@ function display_title(){
 				LibraryFunctions::display_404_page();			
 			}		
 
-			require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
-			$formwriter = new FormWriter('form1');
+			$formwriter = new FormWriterV2HTML5('form1');
 
 			if(!$formwriter->honeypot_check($data)){
 				LibraryFunctions::display_404_page();		
@@ -158,9 +157,6 @@ class MultiComment extends SystemMultiBase {
             $filters['cmt_is_approved'] = $this->options['approved'] ? "= TRUE" : "= FALSE";
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['cmt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         if (isset($this->options['post_id'])) {
             $filters['cmt_pst_post_id'] = [$this->options['post_id'], PDO::PARAM_INT];

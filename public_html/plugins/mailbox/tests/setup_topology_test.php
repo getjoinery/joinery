@@ -77,7 +77,7 @@ function call_private($obj, string $method, ...$args) {
 }
 
 /** Scriptable DkimRecordSource double — the setup check calls it by class name. */
-if (!class_exists('FakeDkimRecordProvider')) {
+if (!class_exists('FakeDkimRecordProvider', false)) {
 	class FakeDkimRecordProvider {
 		public static $status = array('status' => 'ok', 'records' => array());
 		public static function getDkimStatus(string $domain): array { return self::$status; }

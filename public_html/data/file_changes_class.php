@@ -54,10 +54,6 @@ class FileChange extends SystemBase {
 		'fch_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()', 'index' => true),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/**
 	 * Append one change row. The single write helper every drive mutation calls.
 	 * Best-effort by design: a failure to record a change never fails the

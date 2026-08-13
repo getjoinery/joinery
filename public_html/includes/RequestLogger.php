@@ -62,9 +62,8 @@ class RequestLogger {
 
 		// A request-log row is an intentional persist on any request method
 		// (GET reads are logged and rate-limited too).
-		SystemBase::$allow_get_mutation = true;
 		try {
-			$log->save();
+			SystemBase::server_initiated_write(function () use ($log) { $log->save(); });
 		} catch (Throwable $e) {
 			// Logging is observation, never the work itself. A row that cannot be
 			// written — a refused egress, a full disk, a lock — must not take down

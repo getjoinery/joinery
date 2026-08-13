@@ -69,7 +69,7 @@
 		array_push($rowvalues, "<a href='/admin/admin_video?vid_video_id=$video->key'>".$video->get('vid_title')."</a> ".$deleted);
 		array_push($rowvalues, $video->get_source());
 
-		array_push($rowvalues, LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $video->get_local('vid_create_time'));
 
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 

@@ -41,10 +41,6 @@ class RecoveryVerification extends SystemBase {
 		'rcv_verify_time' => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	public function prepare() {
 		$method = (string)$this->get('rcv_method');
 		if (!in_array($method, array(self::METHOD_CEREMONY, self::METHOD_DRY_RUN, self::METHOD_ATTESTED), true)) {

@@ -26,6 +26,7 @@
 	}
 
 	if($_REQUEST['action'] == 'delete'){
+		$event_session->assert_can_write($session);
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
 		$sql = 'DELETE FROM evs_event_sessions WHERE evs_event_session_id=:evs_event_session_id';
@@ -33,8 +34,7 @@
 		try{
 			$q = $dblink->prepare($sql);
 			$q->bindParam(':evs_event_session_id', $event_session->key, PDO::PARAM_INT);
-			$count = $q->execute();
-			$q->setFetchMode(PDO::FETCH_OBJ);
+			$q->execute();
 		}
 		catch(PDOException $e){
 			$dbhelper->handle_query_error($e);
@@ -44,7 +44,7 @@
 	}
 	else if($_REQUEST['action'] == 'addfile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
-		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$event_session->assert_can_write($session);
 
 		//IF SOMEONE JUST CLICKS THE BUTTON, FAIL SILENTLY
 		if($_REQUEST['fil_file_id']){
@@ -57,8 +57,9 @@
 	}
 	else if($_REQUEST['action'] == 'removefile'){
 		$event_session = new EventSession($_REQUEST['evs_event_session_id'], TRUE);
-		$event_session->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		$event_session->remove_file($_REQUEST['fil_file_id']);
+		$event_session->assert_can_write($session);
+		$file_id = $_REQUEST['fil_file_id'];
+		$event_session->remove_file($file_id);
 
 		//$returnurl = $session->get_return();
 		header("Location: /plugins/event_manager/admin/admin_event_session_edit?evs_event_session_id=".$event_session->key);
@@ -292,7 +293,16 @@
 		$session_files = $event_session->get_files();
 		$rowcontent = '<ul>';
 		foreach($session_files as $session_file){
-			$rowcontent .= '<li><a href="/admin/admin_file?fil_file_id='.$session_file->key.'">'.$session_file->get_name().'</a> (<a href="/plugins/event_manager/admin/admin_event_session_edit?action=removefile&evs_event_session_id='.$event_session->key.'&fil_file_id='.$session_file->key.'">remove</a>)</li>';
+			$rowcontent .= '<li><a href="/admin/admin_file?fil_file_id='.$session_file->key.'">'.$session_file->get_name().'</a> ('
+				. AdminPage::action_button('remove', '/plugins/event_manager/admin/admin_event_session_edit', array(
+					'hidden' => array(
+						'action'                => 'removefile',
+						'evs_event_session_id'  => $event_session->key,
+						'fil_file_id'           => $session_file->key,
+					),
+					'class' => 'btn btn-link btn-sm',
+				))
+				. ')</li>';
 		}
 		$rowcontent .= '</ul>';
 		echo $rowcontent;

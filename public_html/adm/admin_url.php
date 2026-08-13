@@ -29,19 +29,19 @@
 	$options['title'] = 'Url';
 	$options['altlinks'] = array('Edit'=>'/admin/admin_url_edit?url_url_id='.$url->key);
 	if(!$url->get('url_delete_time')){
-		$options['altlinks']['Soft Delete'] = '/admin/admin_url?action=soft_delete&url_url_id='.$url->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'soft_delete', 'url_url_id' => $url->key));
 	}
 	else{
-		$options['altlinks']['Undelete'] = '/admin/admin_url?action=undelete&url_url_id='.$url->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_url', 'hidden' => array('action' => 'undelete', 'url_url_id' => $url->key));
 	}
 
 	if($_SESSION['permission'] >= 8) {
-		$options['altlinks'] += array('Permanent Delete' => '/admin/admin_url?action=permanent_delete&url_url_id='.$url->key);
+		$options['altlinks'] += array('Permanent Delete' => array('post' => '/admin/admin_url', 'hidden' => array('action' => 'permanent_delete', 'url_url_id' => $url->key)));
 	}
 
 	$page->begin_box($options);
 
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($url->get('url_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$url->get_local('url_create_time') .'<br />';
 
 	echo '<br /><strong>Incoming:</strong> <a href="'.$url->get('url_incoming') .'">'.$url->get('url_incoming').'</a><br />';
 	echo '<strong>Redirect:</strong> ';

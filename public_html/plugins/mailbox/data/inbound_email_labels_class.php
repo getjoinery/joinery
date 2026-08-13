@@ -98,9 +98,6 @@ class MultiInboundEmailLabel extends SystemMultiBase {
 			$filters['ilb_name'] = array($this->options['name'], PDO::PARAM_STR);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['ilb_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('ilb_inbound_email_labels', $filters, $this->order_by, $only_count, $debug);
 	}

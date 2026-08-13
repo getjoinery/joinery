@@ -123,10 +123,7 @@ class AddressRequirement extends AbstractProductRequirement {
                 ];
             }
             $address = new Address($address_key, true);
-            $address->authenticate_write([
-                'current_user_id' => $session->get_user_id(),
-                'current_user_permission' => $session->get_permission(),
-            ]);
+            $address->assert_can_write($session);
             return [
                 ['address' => $address],
                 ['Address' => $address->get_address_string(', ')],

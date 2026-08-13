@@ -26,7 +26,7 @@ function admin_order_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$order = new Order($ord_order_id, TRUE);
-			$order->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$order->assert_can_write($session);
 			$order->permanent_delete();
 		}
 

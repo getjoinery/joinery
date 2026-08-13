@@ -29,12 +29,12 @@
 
 	$options['title'] = 'Coupon Code';
 	$options['altlinks'] = array('Edit Coupon Code'=>'/plugins/store/admin/admin_coupon_code_edit?ccd_coupon_code_id='.$coupon_code->key);
-	$options['altlinks'] += array('Delete Coupon Code' => '/plugins/store/admin/admin_coupon_code?action=remove&ccd_coupon_code_id='.$coupon_code->key);
+	$options['altlinks'] += array('Delete Coupon Code' => array('post' => '/plugins/store/admin/admin_coupon_code', 'hidden' => array('action' => 'remove', 'ccd_coupon_code_id' => $coupon_code->key)));
 	$page->begin_box($options);
 
 	echo '<br /><strong>Code:</strong> '.htmlspecialchars($coupon_code->get('ccd_code')) . ' (' . LibraryFunctions::bool_to_english($coupon_code->get('ccd_is_active'), "Active", "Inactive") . ')<br />';
 
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$coupon_code->get_local('ccd_create_time') .'<br />';
 
 	echo '<br /><strong>Applies to:</strong> ';
 	if($coupon_code->get('ccd_applies_to') == 0){
@@ -67,11 +67,11 @@
 	}
 
 	if($coupon_code->get('ccd_start_time')){
-		echo '<br /><strong>Start time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_start_time'), 'UTC', $session->get_timezone());
+		echo '<br /><strong>Start time:</strong> '.$coupon_code->get_local('ccd_start_time');
 	}
 
 	if($coupon_code->get('ccd_start_time')){
-		echo '<br /><strong>End time:</strong> '.LibraryFunctions::convert_time($coupon_code->get('ccd_end_time'), 'UTC', $session->get_timezone());
+		echo '<br /><strong>End time:</strong> '.$coupon_code->get_local('ccd_end_time');
 	}
 
 	echo '<br />';

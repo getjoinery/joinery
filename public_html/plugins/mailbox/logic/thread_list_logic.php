@@ -51,7 +51,7 @@ function thread_list_logic(array $input): LogicResult {
 	return LogicResult::render($service->listThreads($alias_id, $filters, $page, 50, $folder_id));
 }
 
-function thread_list_logic_api() {
+function thread_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'List mail threads for a mailbox view (inbox/all/spam/trash, search, labels), paged',

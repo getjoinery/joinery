@@ -48,7 +48,7 @@ function draft_get_logic(array $input): LogicResult {
 	return LogicResult::render($data);
 }
 
-function draft_get_logic_api() {
+function draft_get_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Return the decrypted compose state + attachments for a saved draft',

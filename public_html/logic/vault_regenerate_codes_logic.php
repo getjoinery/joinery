@@ -79,7 +79,7 @@ function vault_regenerate_codes_logic(array $input): LogicResult {
 	return LogicResult::render(['recovery_codes' => $recovery_codes]);
 }
 
-function vault_regenerate_codes_logic_api() {
+function vault_regenerate_codes_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

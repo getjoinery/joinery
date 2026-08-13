@@ -133,9 +133,6 @@ class MultiMailboxFleetSlot extends SystemMultiBase {
 			$filters['mft_status'] = "IN ('provisioning', 'active', 'suspended')";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mft_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mft_mailbox_fleet_slots', $filters, $this->order_by, $only_count, $debug);
 	}

@@ -45,8 +45,8 @@
 
 		$rowvalues = array();
 		array_push($rowvalues, "<a href='/admin/admin_page?pag_page_id=$page->key'>".$title."</a>" . $deleted);
-		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $page->get_local('pag_create_time'));
+		array_push($rowvalues, $page->get_local('pag_published_time'));
 
 		$user_id = $page->get('pag_usr_user_id');
 		if ($user_id) {

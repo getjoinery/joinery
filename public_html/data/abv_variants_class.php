@@ -60,9 +60,6 @@ class MultiAbTestVariant extends SystemMultiBase {
 			$filters['abv_abt_test_id'] = array($this->options['test_id'], PDO::PARAM_INT);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['abv_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('abv_variants', $filters, $this->order_by, $only_count, $debug);
 	}

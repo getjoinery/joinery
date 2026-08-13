@@ -48,7 +48,7 @@ function login_2fa_passkey_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function login_2fa_passkey_options_logic_api() {
+function login_2fa_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin passkey second-factor confirmation during password sign-in',

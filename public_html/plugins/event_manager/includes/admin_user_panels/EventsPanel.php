@@ -95,8 +95,8 @@ class EventsPanel implements AdminUserPanel {
 				htmlspecialchars($event->get('evt_location')) .
 				'</a>';
 
-			$added_cell = LibraryFunctions::convert_time($event_registration->get('evr_create_time'), 'UTC', $session->get_timezone(), 'M j');
-			$expires_cell = LibraryFunctions::convert_time($event_registration->get('evr_expires_time'), 'UTC', $session->get_timezone(), 'M j');
+			$added_cell = $event_registration->get_local('evr_create_time', 'M j');
+			$expires_cell = $event_registration->get_local('evr_expires_time', 'M j');
 
 			$action_cell = AdminPage::action_button('Remove', '/admin/admin_user', array(
 				'hidden'  => array('action' => 'remove_from_event', 'evt_event_id' => $event->key, 'usr_user_id' => $user->key),

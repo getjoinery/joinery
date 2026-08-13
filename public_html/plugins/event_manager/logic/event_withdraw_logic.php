@@ -33,10 +33,7 @@ function event_withdraw_logic(array $input): LogicResult {
 			if (EventRegistrant::check_if_exists($evr_event_registrant_id)) {
 				$event_registrant = new EventRegistrant($evr_event_registrant_id, TRUE);
 				$event = new Event($event_registrant->get('evr_evt_event_id'), true);
-				$event_registrant->authenticate_write(array(
-					'current_user_id' => $session->get_user_id(),
-					'current_user_permission' => $session->get_permission()
-				));
+				$event_registrant->assert_can_write($session);
 				$event_registrant->remove();
 
 				require_once(PathHelper::getIncludePath('includes/SignalBus.php'));
@@ -72,13 +69,6 @@ function event_withdraw_logic(array $input): LogicResult {
 	}
 
 	return LogicResult::render($page_vars);
-}
-
-function event_withdraw_logic_api() {
-	return [
-		'requires_session' => true,
-		'description' => 'Withdraw from event',
-	];
 }
 
 function event_withdraw_logic_descriptor(): array {

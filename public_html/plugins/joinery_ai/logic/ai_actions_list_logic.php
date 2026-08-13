@@ -52,9 +52,9 @@ function ai_actions_list_logic_descriptor(): array {
 	return [
 		'description' => "The signed-in user's queued AI actions, as server-rendered approval cards.",
 		'mutates'     => false,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'read',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'status' => ['type' => 'string', 'required' => false,

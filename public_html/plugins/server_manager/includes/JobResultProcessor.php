@@ -50,11 +50,9 @@ class JobResultProcessor {
 		}
 		// The Go agent marks jobs completed by writing the DB directly, so result
 		// processing runs lazily on the first PHP view of the finished job — often
-		// a GET (job detail page, status poll). These writes are intentional
-		// server-side reconciliation, not user mutations: opt in explicitly so the
-		// GET-mutation guard doesn't flag them.
-		SystemBase::$allow_get_mutation = true;
-		try {
+		// a GET (job detail page, status poll). These writes are server-side
+		// reconciliation, not something a user asked a link for.
+		SystemBase::server_initiated_write(function () use ($job, $method) {
 			self::$method($job);
 			// Sweep invariant: a terminal job must never leave processing without
 			// a recorded result — the dashboard sweep keys on mjb_result IS NULL
@@ -66,9 +64,7 @@ class JobResultProcessor {
 				$job->set('mjb_result', json_encode(['status' => (string)$job->get('mjb_status')]));
 				$job->save();
 			}
-		} finally {
-			SystemBase::$allow_get_mutation = false;
-		}
+		});
 	}
 
 	/**

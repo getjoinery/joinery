@@ -26,7 +26,7 @@ function admin_group_permanent_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$group = new Group($grp_group_id, TRUE);
-			$group->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$group->assert_can_write($session);
 			$group->permanent_delete();
 		}
 

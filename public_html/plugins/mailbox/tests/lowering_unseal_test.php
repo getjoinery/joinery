@@ -254,7 +254,7 @@ try {
 	// -----------------------------------------------------------------------
 	section('mailbox/unseal_batch action refusals');
 
-	$descriptor = unseal_batch_logic_api();
+	$descriptor = unseal_batch_logic_descriptor();
 	check(!empty($descriptor['requires_session'])
 		&& !empty($descriptor['auth']['requires_browser_session']),
 		'the action requires a browser session');

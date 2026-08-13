@@ -33,10 +33,6 @@ class DriveUsage extends SystemBase {
 		'dru_update_time'    => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/**
 	 * Load-or-create the usage row for a user (the NotificationPreference::get_for
 	 * idiom). Never returns null.

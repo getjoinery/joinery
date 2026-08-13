@@ -31,7 +31,7 @@ function contact_delete_logic(array $input): LogicResult {
 	return LogicResult::render(array('deleted' => (bool)$deleted));
 }
 
-function contact_delete_logic_api() {
+function contact_delete_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Delete one of the caller\'s contacts',

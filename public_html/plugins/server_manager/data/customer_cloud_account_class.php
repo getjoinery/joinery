@@ -117,9 +117,6 @@ class MultiCustomerCloudAccount extends SystemMultiBase {
 			$filters['cca_status'] = [$this->options['status'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['cca_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('cca_customer_cloud_accounts', $filters, $this->order_by, $only_count, $debug);
 	}

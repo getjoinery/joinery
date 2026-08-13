@@ -38,9 +38,33 @@ so a declared setting always has at least one place it can be edited.
 | `settings.json` / `plugin.json` | The declarations. The source of truth for what exists and what its rules are. |
 | `SettingsDeclarations` | Reads the manifests and answers questions about them. |
 | `SettingsFieldRenderer` | The only code that turns a setting into a form field. |
-| `SettingsWriter` | The only path that writes a setting. |
+| `SettingsWriter` | Writes what an operator submitted on the settings page. |
+| `Setting::put($name, $value)` | Writes one value from code — a setting the platform mints for itself. Refuses an undeclared name. |
 | `Globalvars::get_setting()` | Reads a value, from the config file or the database. |
-| `Setting` / `MultiSetting` | Row-level CRUD, used by the writer and by seeding. |
+| `Setting` / `MultiSetting` | Row-level CRUD, used by the writers and by seeding. |
+
+### Writing a setting from code
+
+Some settings are not typed by anyone: a generated key id, the protocol the site
+was last reached on, a cutover marker. `Setting::put()` is how code records one.
+
+```php
+Setting::put('backup_recovery_public_key', $b64);
+```
+
+The name has to be declared in `settings.json` or a plugin's `plugin.json`, and
+`put()` throws otherwise — the same rule the settings page enforces. That
+refusal is the point: an undeclared name writes a row nothing reads and no page
+shows, so a misspelling becomes a setting that silently never takes effect.
+
+Reading back is immediate. `get_setting()` re-reads a blank value from the
+database rather than trusting its in-request copy, so there is no cache to
+invalidate.
+
+Raw SQL against `stg_settings` remains correct in two places, both marked with a
+comment saying why: a conditional write whose `WHERE` clause is the point (an
+idempotent no-op, a race guard), and installer or bootstrap code that runs
+before declarations are loadable.
 
 ### The declaration
 

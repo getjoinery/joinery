@@ -26,7 +26,7 @@ function admin_post_permanent_delete_logic(array $input): LogicResult {
 
 		if ($confirm) {
 			$post = new Post($pst_post_id, TRUE);
-			$post->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$post->assert_can_write($session);
 			$post->permanent_delete();
 		}
 

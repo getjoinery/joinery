@@ -49,9 +49,9 @@ function calendar_feed_logic_descriptor(): array {
 	return [
 		'description' => 'Aggregated calendar items for the signed-in owner over a UTC range.',
 		'mutates'     => false,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'read',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'start' => ['type' => 'string', 'required' => false, 'label' => 'Range start (UTC)'],

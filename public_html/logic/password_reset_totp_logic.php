@@ -79,7 +79,7 @@ function password_reset_totp_logic(array $input): LogicResult {
 	return LogicResult::redirect(PasswordResetAuthorizers::issueResetUrl($user));
 }
 
-function password_reset_totp_logic_api() {
+function password_reset_totp_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Reset a password using email plus an authenticator code (accounts without a vault only)',

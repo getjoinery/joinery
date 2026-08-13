@@ -65,14 +65,8 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 				$is_mine = ($msg->get('msg_usr_user_id_sender') == $current_user_id);
 				$bubble_class = $is_mine ? 'message-mine' : 'message-theirs';
 				$body = htmlspecialchars($msg->get('msg_body'), ENT_QUOTES, 'UTF-8');
-				$time = LibraryFunctions::convert_time(
-					$msg->get('msg_sent_time'), 'UTC',
-					$session->get_timezone(), 'g:i A'
-				);
-				$date = LibraryFunctions::convert_time(
-					$msg->get('msg_sent_time'), 'UTC',
-					$session->get_timezone(), 'M j, Y'
-				);
+				$time = $msg->get_local('msg_sent_time', 'g:i A');
+				$date = $msg->get_local('msg_sent_time', 'M j, Y');
 			?>
 				<div class="message-bubble <?php echo $bubble_class; ?>">
 					<?php if (!$is_mine && $other_user): ?>

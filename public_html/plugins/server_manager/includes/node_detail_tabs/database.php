@@ -111,7 +111,7 @@
 					<td><a href="/admin/server_manager/job_detail?job_id=<?php echo $job->key; ?>">#<?php echo $job->key; ?></a></td>
 					<td><?php echo htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type'))); ?></td>
 					<td><span class="badge bg-<?php echo $sc; ?>"><?php echo htmlspecialchars($job->get('mjb_status')); ?></span></td>
-					<td><?php echo LibraryFunctions::convert_time($job->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, g:i A'); ?></td>
+					<td><?php echo $job->get_local('mjb_create_time', 'M j, g:i A'); ?></td>
 					<td><?php echo $dur; ?></td>
 				</tr>
 			<?php endforeach; ?>

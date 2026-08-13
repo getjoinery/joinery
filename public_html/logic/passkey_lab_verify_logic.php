@@ -48,7 +48,7 @@ function passkey_lab_verify_logic(array $input): LogicResult {
 	return LogicResult::render($result);
 }
 
-function passkey_lab_verify_logic_api() {
+function passkey_lab_verify_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

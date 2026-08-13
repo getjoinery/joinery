@@ -89,10 +89,7 @@ function scan_url_logic(array $input): LogicResult{
 	// Load device and verify ownership
 	try {
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array(
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		));
+		$device->assert_can_read($session);
 	} catch (Exception $e) {
 		return LogicResult::error('Device not found or access denied.');
 	}
@@ -387,7 +384,7 @@ function scan_url_logic_descriptor(): array {
 	return [
 		'description' => 'Fetch a page and test its external domains against a device\'s filter (device_id, url). Heavy: responses can take several seconds.',
 		'mutates'     => false,
-		'auth'        => ['requires_session' => true],
+		'requires_session'        => true,
 		'input'       => [
 			'device_id' => ['type' => 'int',    'required' => false, 'label' => 'Device ID'],
 			'url'       => ['type' => 'string', 'required' => false, 'label' => 'URL to scan'],

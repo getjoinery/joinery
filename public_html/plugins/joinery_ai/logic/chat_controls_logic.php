@@ -47,7 +47,7 @@ function chat_controls_logic(array $input): LogicResult {
     ]);
 }
 
-function chat_controls_logic_api() {
+function chat_controls_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'AI chat control metadata: the model catalog and the default control values.'];
 }

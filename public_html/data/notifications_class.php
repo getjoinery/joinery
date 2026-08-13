@@ -135,9 +135,6 @@ class MultiNotification extends SystemMultiBase {
 			$filters['ntf_type'] = [$this->options['type'], PDO::PARAM_STR];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['ntf_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('ntf_notifications', $filters, $this->order_by, $only_count, $debug);
 	}

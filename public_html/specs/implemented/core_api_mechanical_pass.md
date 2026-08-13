@@ -1,9 +1,87 @@
 # Core API mechanical pass — bugs, mechanical rewrites, and fully verifiable changes
 
-**Status: DRAFT 2026-08-13 — unbuilt. Companion:
-`specs/core_api_simplification.md` (the design and behavior-change items from
-the same review). Origin: the 2026-08-13 core API review sweep (model layer,
-logic/API layer, helper surfaces, core→plugin reaches).**
+**Status: BUILT 2026-08-13 — complete. Item 4c was withdrawn and replaced by
+`specs/display_message_render_consumes.md`, which is built (see below).
+Companion: `specs/core_api_simplification.md` (the design and behavior-change
+items from the same review). Origin: the 2026-08-13 core API review sweep (model
+layer, logic/API layer, helper surfaces, core→plugin reaches).**
+
+## What was found during implementation
+
+Five things differed from the spec's premises. Each is recorded because the
+number in the spec is what a later reader would check against.
+
+**The `deleted` filter count.** 73 per-class implementations were byte-identical
+modulo prefix and were deleted. The remaining 12 are not: `passkeys`,
+`vault_entries`, `user_encryption_wrappings`, `seo_page_metadata`,
+`dns_filtering/scheduled_blocks`, and six `joinery_ai` collections apply the
+filter **by default** when the option is omitted, and `conversations` has a
+second implementation on its join-query path. Deleting those would change
+default behavior, which this spec's own non-goal forbids, so they stayed.
+
+**`class_exists()` and the autoloader.** Making classes resolve by name changes
+what `class_exists('X')` means at four sites that used it as "has this been
+declared yet?" around a conditional `class X extends ...` — `includes/PublicPage.php`,
+`includes/AdminPage.php`, `views/404.php`, `includes/SealedEgressGuard.php`
+(plus two test fixtures). Under an autoloader these resolved the core file
+instead of declaring the conditional subclass, which silently gave every admin
+page the public theme's `PublicPage`. All six now pass `false` as the second
+argument. The autoloader also resolves `includes/` classes through the theme
+chain rather than straight to core, because `PublicPage` and `FormWriter` are
+the classes a theme replaces by shipping its own file.
+
+**ScrollDaddy's FormWriter.** `theme/scrolldaddy/includes/FormWriter.php` was
+not comment-only — it declared `$button_primary_class` and
+`$button_secondary_class`. Both are read by nothing anywhere in the tree
+(FormWriter V1 leftovers), so the file was empty in substance and was deleted
+with the other 13.
+
+**`convert_time()` call sites.** 111 sites matched the exact
+`$obj->get('field')` form and were rewritten to `get_local()`. The remaining 31
+pass a plain variable or an array element, which is the case the spec says
+`convert_time()` remains for.
+
+**GET-action handlers — and why 6b was replaced rather than shipped.** 3g and
+6b were built as written: a session-bound token on ~40 action links, checked by
+`SystemBase::as_get_action()`. It worked end to end. It was also the wrong
+shape, and the codebase already said so — `AdminPage::action_button()` exists
+and is used at 69 sites, rendering a destructive action as a POST form.
+
+A token in a URL is a weaker token than a hidden form field: it lands in
+browser history, `Referer` headers and access logs. And `as_get_action()` fused
+two unrelated concerns — the GET-write tripwire (a lint about misfiring form
+guards) with CSRF (a security control) — which is why it needed a sibling that
+was the same wrapper minus the security check. Two functions differing by a
+boolean is a concern split in the wrong place.
+
+So the links became POSTs instead. `altlinks` entries now accept an array
+describing a `post` action and render as a submit button
+(`PublicPageBase::renderActionEntry`); 43 link sites and 69 handler wrappers
+converted; `as_get_action()`, `LibraryFunctions::get_action_url()`,
+`SessionControl::get_action_token()` and the token parameter are all deleted.
+`SameSite=Lax` (6c) is what makes this safe, and it is why 6c matters more than
+it looked.
+
+What remains is one wrapper, `SystemBase::server_initiated_write()` — named for
+the question that actually decides whether it applies, who initiated the write —
+at 14 production sites across eight files: error and request logging, API key
+last-used, the OAuth callback, the payment-gateway return, three reconciliation
+sites. Every one is a write the server makes on its own during a page view,
+with no user action to convert.
+That is a normal invariant with a normal escape hatch. Its callers are
+enumerated in `tests/unit/core_api_mechanical_test.php`, which fails on a new
+one: reaching for it is nearly always the wrong fix for a refused save, so
+adding a caller is made a deliberate act rather than a line that slips in.
+
+`plugins/store/logic/cart_charge_logic.php` keeps its hand-written try/finally:
+its guarded region is an 880-line function body with its own `return`s.
+
+Two things the conversion turned up, both fixed: eleven admin pages build their
+own dropdown from `$options['altlinks']` by hand rather than through
+`renderDropdown()`, and each had to be routed through `renderActionEntry()`;
+and `GeneralError::logError()` was writing its row during GETs without the
+opt-in, so every error on a page view logged a second entry complaining about
+the first.
 
 ## Inclusion rule
 
@@ -149,16 +227,30 @@ sits after file resolution, preserving the 404-hides-plugin-existence property
 at `apiv1.php:171`. Same clarification for the form face
 (`resolveForm`). 74 files currently produce the misleading 404.
 
-**4c. `process_logic()` injects `display_messages`.** It already holds the
-session and already injects `validation_errors` unconditionally; inject
-`display_messages` the same way and delete the 16 byte-identical hand-fetched
-lines. Verification note: `get_messages()` marks matched messages clearable
-rather than consuming them (`SessionControl.php:753-780`), and
-`clear_clearable_messages()` does the deletion — implementation must confirm
-which layer calls the clear, so a message for a page whose view ignores the
-key is not marked clearable and silently cleared. If any live view depends on
-messages surviving such a visit, this item moves to the companion spec;
-enumeration of views that ignore the key is part of verification.
+**4c. `process_logic()` injects `display_messages` — WITHDRAWN. Replaced by
+`specs/display_message_render_consumes.md`, which is BUILT.**
+
+The enumeration this item made a condition of shipping came back against it.
+229 pages call `process_logic()`; 18 views render `display_messages`; and
+`PublicPageBase::public_footer()` calls `clear_clearable_messages()` on **every**
+public page. Because `get_messages()` marks what it returns, injecting on every
+page would consume — and the footer would destroy — a pending message on the
+211 pages that never show one.
+
+The item was misfiled. Injecting a consuming read into 211 pages is a behavior
+change, which this spec's own inclusion rule excludes; it read as mechanical
+only because the neighbouring `validation_errors` injection has the same shape,
+and fetching a validation error does not destroy it. The duplication 4c
+targeted was a symptom: the framework made displaying a message the caller's
+job *and* made reading one destroy it, so no page dared fetch a message it
+would not show.
+
+The replacement fixes that instead — a message is spent when it is **rendered**,
+`get_messages()` becomes a pure read, and one `render_messages($slot)` call
+replaces 18 hand-rolled loops. 4c's original goal, deleting the 20 duplicated
+fetch lines, falls out as a consequence: a view that renders a slot does not
+want the array, and a view that does not render one should never have received
+it. No injection into `process_logic()` is needed or wanted.
 
 ## Work item 5 — display-time helper
 

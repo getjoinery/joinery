@@ -58,9 +58,12 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	$consdirection = LibraryFunctions::fetch_variable('consdirection', 'DESC', 0, '');
 	$search_criteria = NULL;
 
+	// No 'deleted' filter: an order is never soft-deleted. Order carries
+	// ord_status and no delete-time column, so asking to exclude deleted orders
+	// asks for a filter that cannot exist — and MultiOrder refuses the option
+	// rather than silently returning every row.
 	$search_criteria = array();
 	$search_criteria['user_id'] = $session->get_user_id();
-	$search_criteria['deleted'] = false;
 
 	$orders = new MultiOrder(
 		$search_criteria,
@@ -74,7 +77,6 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 
 	$page_vars['user_subscribed_list'] = $user_subscribed_list;
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	return LogicResult::render($page_vars);
 }

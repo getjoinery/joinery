@@ -59,8 +59,7 @@ class FormError extends SystemBase {	public static $prefix = 'lfe';
 	);
 
 function display_time($session) {
-		return LibraryFunctions::convert_time(
-			$this->get('lfe_log_time'), 'UTC', $session->get_timezone(), '%a, %d %b %Y %R:%S');
+		return $this->get_local('lfe_log_time', '%a, %d %b %Y %R:%S');
 	}	
 
 	public static function LogFormError($session, $request) { 

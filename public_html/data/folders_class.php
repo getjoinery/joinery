@@ -59,10 +59,6 @@ class Folder extends SystemBase {
 		),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** True when this folder belongs to $user_id. */
 	public function is_owned_by($user_id) {
 		return (int)$this->get('fol_usr_user_id') === (int)$user_id;
@@ -100,9 +96,6 @@ class MultiFolder extends SystemMultiBase {
 			$filters['fol_name'] = array($this->options['name'], PDO::PARAM_STR);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['fol_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('fol_folders', $filters, $this->order_by, $only_count, $debug);
 	}

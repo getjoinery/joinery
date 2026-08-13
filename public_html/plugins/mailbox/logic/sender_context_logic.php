@@ -196,7 +196,7 @@ function sender_context_logic(array $input): LogicResult {
 	return LogicResult::render($payload);
 }
 
-function sender_context_logic_api() {
+function sender_context_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Resolve a thread counterparty to the caller\'s contact entry, plus their member record (admin only)',

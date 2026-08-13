@@ -60,7 +60,7 @@ function chat_turn_action_logic(array $input): LogicResult {
     return LogicResult::render(['deleted_ids' => $deleted_ids]);
 }
 
-function chat_turn_action_logic_api() {
+function chat_turn_action_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'Delete one AI chat turn (a deleted user turn also removes its paired reply).'];
 }

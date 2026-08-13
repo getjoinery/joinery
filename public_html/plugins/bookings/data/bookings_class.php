@@ -164,9 +164,6 @@ class MultiBooking extends SystemMultiBase {
             $filters['bkn_start_time'] = ">= " . $dblink->quote($this->options['start_after']);
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['bkn_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('bkn_bookings', $filters, $this->order_by, $only_count, $debug);
     }

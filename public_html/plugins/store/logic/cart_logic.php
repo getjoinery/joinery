@@ -55,7 +55,7 @@ function cart_logic(array $input): LogicResult {
 	return LogicResult::render($page_vars);
 }
 
-function cart_logic_api() {
+function cart_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Cart review page',

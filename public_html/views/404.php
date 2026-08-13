@@ -1,6 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-if (!class_exists('PublicPage')) {
+if (!class_exists('PublicPage', false)) {
     require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 }
 

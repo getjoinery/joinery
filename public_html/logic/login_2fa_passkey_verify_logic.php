@@ -58,7 +58,7 @@ function login_2fa_passkey_verify_logic(array $input): LogicResult {
 	return LogicResult::render(['redirect' => $redirect]);
 }
 
-function login_2fa_passkey_verify_logic_api() {
+function login_2fa_passkey_verify_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Complete passkey second-factor confirmation and finish password sign-in',

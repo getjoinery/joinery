@@ -1,7 +1,6 @@
 <?php
 require_once(__DIR__ . '/../includes/PathHelper.php');
 
-require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 function register_logic(array $input): LogicResult{
 	// Check if the page was requested with jQuery, if so, we should process this page differently
@@ -48,7 +47,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 		RequestLogger::log('register', 'register_attempt', TRUE);
 
-		$formwriter = new FormWriter('form1');
+		$formwriter = new FormWriterV2HTML5('form1');
 		if(!$formwriter->honeypot_check($input)){
 			return LogicResult::error('This feature is turned off');
 		}
@@ -186,13 +185,6 @@ function _register_email_is_platform_hosted(string $email): bool {
 		return false;
 	}
 	return InboundEmailDomain::isHostedEmailAddress($email);
-}
-
-function register_logic_api() {
-    return [
-        'requires_session' => false,
-        'description' => 'Register a new user account',
-    ];
 }
 
 /**

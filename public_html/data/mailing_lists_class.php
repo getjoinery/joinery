@@ -385,9 +385,6 @@ class MultiMailingList extends SystemMultiBase {
 			$filters['mlt_mailing_list_id'] = [$this->options['mailing_list_id'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mlt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['active'])) {
 			$filters['mlt_is_active'] = $this->options['active'] ? "IS TRUE" : "IS NOT TRUE";

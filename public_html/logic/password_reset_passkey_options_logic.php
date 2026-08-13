@@ -42,7 +42,7 @@ function password_reset_passkey_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function password_reset_passkey_options_logic_api() {
+function password_reset_passkey_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin a passkey password reset (returns WebAuthn request options)',

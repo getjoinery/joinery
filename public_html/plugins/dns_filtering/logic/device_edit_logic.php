@@ -40,7 +40,7 @@ function device_edit_logic(array $input): LogicResult{
 	$device = null;
 	if(!empty($input['device_id'])){
 		$device = new SdDevice($input['device_id'], TRUE);
-		$device->authenticate_read(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$device->assert_can_read($session);
 		$page_vars['device'] = $device;
 	}
 
@@ -107,7 +107,7 @@ function device_edit_logic(array $input): LogicResult{
 	return LogicResult::render($page_vars);
 }
 
-function device_edit_logic_api() {
+function device_edit_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Create a DNS-filtering device (omit device_id) or rename/edit one (pass device_id)',

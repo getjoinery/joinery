@@ -34,7 +34,7 @@ function admin_question_edit_logic(array $input): LogicResult {
 		$question_option->set('qop_qst_question_id', $question->key);
 		$question_option->set('qop_question_option_label', $input['qop_question_option_label']);
 		$question_option->set('qop_question_option_value', $input['qop_question_option_value']);
-		$question_option->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$question_option->assert_can_write($session);
 		$question_option->prepare();
 		$question_option->save();
 
@@ -43,7 +43,7 @@ function admin_question_edit_logic(array $input): LogicResult {
 	}
 	if(isset($input['action']) && $input['action'] == 'remove_question_option'){
 		$question_option = new QuestionOption($input['qop_question_option_id'], TRUE);
-		$question_option->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$question_option->assert_can_write($session);
 		$question_option->permanent_delete();
 
 		//$returnurl = $session->get_return();

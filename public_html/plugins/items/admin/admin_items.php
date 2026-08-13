@@ -70,8 +70,8 @@
 		
 		$rowvalues = array();
 		array_push($rowvalues, "<a href='/admin/admin_item?itm_item_id=$item->key'>".$title."</a>". $deleted);	
-		array_push($rowvalues, LibraryFunctions::convert_time($item->get('itm_create_time'), 'UTC', $session->get_timezone()));
-		array_push($rowvalues, LibraryFunctions::convert_time($item->get('itm_published_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $item->get_local('itm_create_time'));
+		array_push($rowvalues, $item->get_local('itm_published_time'));
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='.$user->key.'">'.$user->display_name() .'</a> ');
 
 		if($item->get('itm_delete_time')) {

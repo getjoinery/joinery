@@ -53,9 +53,7 @@ foreach ($notes as $note) {
            . htmlspecialchars($note->get('rcn_title')) . '</a>';
 
     $when = $note->get('rcn_update_time')
-        ? LibraryFunctions::convert_time(
-            $note->get('rcn_update_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'
-          )
+        ? $note->get_local('rcn_update_time', 'M j, Y g:i A')
         : 'never';
     $row[] = htmlspecialchars($when);
 

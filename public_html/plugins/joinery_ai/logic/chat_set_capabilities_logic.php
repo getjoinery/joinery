@@ -77,7 +77,7 @@ function chat_set_capabilities_logic(array $input): LogicResult {
     return LogicResult::render(['field' => $field]);
 }
 
-function chat_set_capabilities_logic_api() {
+function chat_set_capabilities_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'Set one AI chat control (model, temperature, thinking level, or a capability toggle) on an existing conversation.'];
 }

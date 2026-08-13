@@ -238,7 +238,7 @@ function get_order() {
 		$order = new Order($this->get('odi_ord_order_id'), TRUE);
 		$order_user = new User($this->get('odi_usr_user_id'), TRUE);
 		
-		$this->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$this->assert_can_write($session);
 
 		$stripe_subscription = $stripe_helper->cancel_subscription($this->get('odi_stripe_subscription_id'), $cancel_type);
 		if(!$stripe_subscription){
@@ -286,7 +286,7 @@ function get_order() {
 		}
 
 		if($this->get('odi_subscription_cancelled_time')){
-			$status = 'Canceled on '. LibraryFunctions::convert_time($this->get('odi_subscription_cancelled_time'), 'UTC', $session->get_timezone());
+			$status = 'Canceled on '. $this->get_local('odi_subscription_cancelled_time');
 			return $status;
 		}
 		else{

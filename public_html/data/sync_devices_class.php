@@ -55,10 +55,6 @@ class SyncDevice extends SystemBase {
 		'sde_delete_time'     => array('type' => 'timestamp(6)', 'is_nullable' => true),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** The platforms a client may register as. */
 	public static function platforms() {
 		return array(self::PLATFORM_MACOS, self::PLATFORM_WINDOWS, self::PLATFORM_LINUX);
@@ -149,9 +145,6 @@ class MultiSyncDevice extends SystemMultiBase {
 		}
 		if (isset($this->options['platform'])) {
 			$filters['sde_platform'] = array($this->options['platform'], PDO::PARAM_STR);
-		}
-		if (isset($this->options['deleted'])) {
-			$filters['sde_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
 		}
 
 		return $this->_get_resultsv2('sde_sync_devices', $filters, $this->order_by, $only_count, $debug);

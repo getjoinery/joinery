@@ -57,10 +57,6 @@ class FileUpload extends SystemBase {
 		'fup_create_time'    => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()'),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** Directory (outside the web root) where scratch .part files live. */
 	public static function scratch_dir() {
 		$dir = rtrim(PathHelper::getSiteRoot(), '/') . '/storage/drive_uploads';

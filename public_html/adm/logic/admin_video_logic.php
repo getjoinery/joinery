@@ -16,7 +16,7 @@ function admin_video_logic(array $input): LogicResult {
 	$user = new User($video->get('vid_usr_user_id'), TRUE);
 
 	if($input['action'] == 'remove'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$video->assert_can_write($session);
 		$video->permanent_delete();
 
 		//$returnurl = $session->get_return();
@@ -24,13 +24,13 @@ function admin_video_logic(array $input): LogicResult {
 	}
 
 	if($input['action'] == 'delete'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$video->assert_can_write($session);
 		$video->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_videos");
 	}
 	else if($input['action'] == 'undelete'){
-		$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$video->assert_can_write($session);
 		$video->undelete();
 
 		return LogicResult::redirect("/admin/admin_videos");
@@ -39,13 +39,13 @@ function admin_video_logic(array $input): LogicResult {
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Video'=>'/admin/admin_video_edit?vid_video_id='.$video->key);
 	if($video->get('vid_delete_time')){
-		$options['altlinks']['Undelete'] = '/admin/admin_video?action=undelete&vid_video_id='.$video->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'undelete', 'vid_video_id' => $video->key));
 	}
 	else{
-		$options['altlinks']['Soft Delete'] = '/admin/admin_video?action=delete&vid_video_id='.$video->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_video', 'hidden' => array('action' => 'delete', 'vid_video_id' => $video->key));
 	}
 	if($session->get_user_id() == 1){
-		$options['altlinks'] += array('Permanently Delete' => '/admin/admin_video?action=remove&vid_video_id='.$video->key);
+		$options['altlinks'] += array('Permanently Delete' => array('post' => '/admin/admin_video', 'hidden' => array('action' => 'remove', 'vid_video_id' => $video->key)));
 	}
 
 	// Build dropdown button from altlinks
@@ -54,9 +54,9 @@ function admin_video_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

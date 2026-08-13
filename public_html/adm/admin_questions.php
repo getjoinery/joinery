@@ -36,8 +36,8 @@ foreach ($questions as $question){
 	$rowvalues = array();
 	array_push($rowvalues, "Question ".$question->key.": ".$question->get('qst_question')." <a href='/admin/admin_question?qst_question_id=$question->key'> [edit]</a>");
 	array_push($rowvalues, $question->get('qst_type'));
-	array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_create_time'), 'UTC', $session->get_timezone()));
-	array_push($rowvalues, LibraryFunctions::convert_time($question->get('qst_published_time'), 'UTC', $session->get_timezone()));
+	array_push($rowvalues, $question->get_local('qst_create_time'));
+	array_push($rowvalues, $question->get_local('qst_published_time'));
 
 	if($question->get('qst_delete_time')) {
 		$status = 'Deleted';

@@ -660,7 +660,7 @@
 		echo '<td><a href="/admin/server_manager/job_detail?job_id=' . $oj->key . '">#' . $oj->key . '</a></td>';
 		echo '<td>' . htmlspecialchars(str_replace('_', ' ', $oj->get('mjb_job_type'))) . '</td>';
 		echo '<td><span class="badge bg-' . $oj_sc . '">' . htmlspecialchars($oj->get('mjb_status')) . '</span></td>';
-		echo '<td>' . LibraryFunctions::convert_time($oj->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, g:i A') . '</td>';
+		echo '<td>' . $oj->get_local('mjb_create_time', 'M j, g:i A') . '</td>';
 		echo '<td>' . $oj_dur . '</td>';
 		echo '</tr>';
 	}

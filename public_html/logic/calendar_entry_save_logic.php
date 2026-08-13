@@ -207,9 +207,7 @@ function calendar_entry_save_logic_descriptor(): array {
 	return [
 		'description' => 'Create or update a native calendar entry (recurrence and scope aware).',
 		'mutates'     => true,
-		'auth'        => [
-			'requires_session' => true,
-		],
+		'requires_session'        => true,
 		'input'       => [
 			'entry_id'        => ['type' => 'int',    'required' => false, 'label' => 'Entry ID (update when present)'],
 			'date'            => ['type' => 'string', 'required' => false, 'label' => 'Entry date (Y-m-d)'],

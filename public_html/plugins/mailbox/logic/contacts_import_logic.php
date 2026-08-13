@@ -74,7 +74,7 @@ function contacts_import_logic(array $input): LogicResult {
 	return LogicResult::render($result);
 }
 
-function contacts_import_logic_api() {
+function contacts_import_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Import contacts from a vCard/CSV file, or add one address by hand',

@@ -30,10 +30,7 @@ function block_list_logic(array $input): LogicResult{
 
 	try {
 		$device = new SdDevice($device_id, TRUE);
-		$device->authenticate_read(array(
-			'current_user_id'         => $session->get_user_id(),
-			'current_user_permission' => $session->get_permission(),
-		));
+		$device->assert_can_read($session);
 	} catch (Exception $e) {
 		return LogicResult::error('Device not found or access denied.');
 	}
@@ -59,7 +56,7 @@ function block_list_logic(array $input): LogicResult{
 	));
 }
 
-function block_list_logic_api() {
+function block_list_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'List a device\'s always-on and scheduled blocks with full contents (device_id)',

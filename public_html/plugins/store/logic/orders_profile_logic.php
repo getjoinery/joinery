@@ -50,7 +50,6 @@ function orders_profile_logic(array $input): LogicResult {
 	$license_keys->load();
 	$page_vars['license_keys'] = $license_keys;
 
-	$page_vars['display_messages'] = $session->get_messages($_SERVER['REQUEST_URI']);
 
 	return LogicResult::render($page_vars);
 }

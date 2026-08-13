@@ -22,13 +22,13 @@ function admin_product_logic(array $input): LogicResult {
 
 	// Handle actions
 	if($input['action'] == 'delete'){
-		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$product->assert_can_write($session);
 		$product->soft_delete();
 
 		return LogicResult::redirect('/plugins/store/admin/admin_products');
 	}
 	else if($input['action'] == 'undelete'){
-		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$product->assert_can_write($session);
 		$product->undelete();
 
 		return LogicResult::redirect('/plugins/store/admin/admin_products');
@@ -38,7 +38,7 @@ function admin_product_logic(array $input): LogicResult {
 		if($orders->count_all()){
 			return LogicResult::error('You cannot delete a product with orders.');
 		}
-		$product->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$product->assert_can_write($session);
 		$product->permanent_delete();
 
 		return LogicResult::redirect('/plugins/store/admin/admin_products');
@@ -52,10 +52,10 @@ function admin_product_logic(array $input): LogicResult {
 
 	if(!$orders->count_all()){
 		if($_SESSION['permission'] >= 5){
-			$options['altlinks'] += array('Soft Delete'=> '/plugins/store/admin/admin_product?action=delete&pro_product_id='.$product->key);
+			$options['altlinks'] += array('Soft Delete'=> array('post' => '/plugins/store/admin/admin_product', 'hidden' => array('action' => 'delete', 'pro_product_id' => $product->key)));
 		}
 		if($_SESSION['permission'] == 10){
-			$options['altlinks'] += array('Permanent Delete'=> '/plugins/store/admin/admin_product?action=permanent_delete&pro_product_id='.$product->key);
+			$options['altlinks'] += array('Permanent Delete'=> array('post' => '/plugins/store/admin/admin_product', 'hidden' => array('action' => 'permanent_delete', 'pro_product_id' => $product->key)));
 		}
 	}
 
@@ -65,9 +65,9 @@ function admin_product_logic(array $input): LogicResult {
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';

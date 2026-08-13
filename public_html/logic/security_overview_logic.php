@@ -67,7 +67,7 @@ function security_overview_logic(array $input): LogicResult {
 	));
 }
 
-function security_overview_logic_api() {
+function security_overview_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'TOTP status, app-session list, passkey count, and vault status for the signed-in owner',

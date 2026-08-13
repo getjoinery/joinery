@@ -46,7 +46,7 @@ function account_summary_logic(array $input): LogicResult{
 	));
 }
 
-function account_summary_logic_api() {
+function account_summary_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Subscription tier, ScrollDaddy feature flags, and device count vs. limit for the acting user',

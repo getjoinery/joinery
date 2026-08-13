@@ -50,11 +50,11 @@
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Start Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get('evt_start_time') ? LibraryFunctions::convert_time($event->get('evt_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T') : '—'; ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_start_time') ? $event->get_local('evt_start_time', 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">End Date:</td>
-								<td class="p-1 text-600"><?php echo $event->get('evt_end_time') ? LibraryFunctions::convert_time($event->get('evt_end_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T') : '—'; ?></td>
+								<td class="p-1 text-600"><?php echo $event->get('evt_end_time') ? $event->get_local('evt_end_time', 'M j, Y g:i A T') : '—'; ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Timezone:</td>
@@ -103,7 +103,7 @@
 							<?php endif; ?>
 							<tr>
 								<td class="p-1" style="width: 35%;">Created:</td>
-								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($event->get('evt_create_time'), 'UTC', $session->get_timezone(), 'M j, Y'); ?></td>
+								<td class="p-1 text-600"><?php echo $event->get_local('evt_create_time', 'M j, Y'); ?></td>
 							</tr>
 							<tr>
 								<td class="p-1" style="width: 35%;">Status:</td>
@@ -505,7 +505,7 @@
 
 		$rowvalues=array();
 		array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
-		array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_create_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $event_registrant->get_local('evr_create_time'));
 		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_default'), "Default", " dsasd"));
 		//array_push($rowvalues, LibraryFunctions::bool_to_english($registrant->get('evr_is_verified'), "Verified", 'Not Verified [<a class="sortlink" href="/admin/admin_phone_verify?evr_registrant_id='. $registrant->key. '">Verify</a>]'));
 
@@ -533,10 +533,10 @@
 		array_push($rowvalues, $evr_verified);
 
 		if($event_registrant->get('evr_expires_time') && $event_registrant->get('evr_expires_time') < date("Y-m-d H:i:s")){
-			array_push($rowvalues, 'Expired: '.LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
+			array_push($rowvalues, 'Expired: '.$event_registrant->get_local('evr_expires_time'));
 		}
 		else{
-			array_push($rowvalues, LibraryFunctions::convert_time($event_registrant->get('evr_expires_time'), 'UTC', $session->get_timezone()));
+			array_push($rowvalues, $event_registrant->get_local('evr_expires_time'));
 		}
 		$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event', [
 			'hidden'  => ['action' => 'remove_from_event', 'evr_event_registrant_id' => $event_registrant->key, 'evt_event_id' => $event->key],
@@ -571,7 +571,7 @@
 
 			$rowvalues=array();
 			array_push($rowvalues, '<a href="/admin/admin_user?usr_user_id='. $registrant->key. '">'.$registrant->display_name() . '</a>');
-			array_push($rowvalues, LibraryFunctions::convert_time($waiting_list->get('ewl_create_time'), 'UTC', $session->get_timezone()));
+			array_push($rowvalues, $waiting_list->get_local('ewl_create_time'));
 
 			$delform = AdminPage::action_button('Remove', '/plugins/event_manager/admin/admin_event', [
 				'hidden'  => ['action' => 'remove_from_waiting_list', 'ewl_waiting_list_id' => $waiting_list->key, 'evt_event_id' => $event->key],
@@ -615,7 +615,7 @@
 
 		// Start time
 		if($event_session->get('evs_start_time')) {
-			array_push($rowvalues, LibraryFunctions::convert_time($event_session->get('evs_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A'));
+			array_push($rowvalues, $event_session->get_local('evs_start_time', 'M j, Y g:i A'));
 		} else {
 			array_push($rowvalues, '—');
 		}
@@ -641,7 +641,11 @@
 
 		// Action
 		$action_link = '<a href="/plugins/event_manager/admin/admin_event_session_edit?evs_event_session_id='.$event_session->key.'" class="btn btn-sm btn-soft-default">Edit</a> ';
-		$action_link .= '<a href="#" class="btn btn-sm btn-soft-danger" onclick="JoineryModal.confirm(\'Delete this session?\', function(){ window.location=\'/plugins/event_manager/admin/admin_event_session_edit?action=delete&amp;evs_event_session_id='.$event_session->key.'\'; })">Delete</a>';
+		$action_link .= AdminPage::action_button('Delete', '/plugins/event_manager/admin/admin_event_session_edit', array(
+			'hidden'  => array('action' => 'delete', 'evs_event_session_id' => $event_session->key),
+			'class'   => 'btn btn-sm btn-soft-danger',
+			'confirm' => 'Delete this session?',
+		));
 		array_push($rowvalues, $action_link);
 
 		$page->disprow($rowvalues);
@@ -671,7 +675,7 @@
 		$rowvalues=array();
 		array_push($rowvalues, $user->display_name());
 		array_push($rowvalues, '<a href="/admin/admin_message?msg_message_id='.$message->key.'">'.$message->display_title(). '...</a>');
-		array_push($rowvalues, LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()));
+		array_push($rowvalues, $message->get_local('msg_sent_time'));
         $page->disprow($rowvalues);
 	}
 

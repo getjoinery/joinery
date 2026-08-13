@@ -320,7 +320,7 @@ The system handles dependencies automatically:
 
 ```php
 $user = new User($user_id, TRUE);
-$user->authenticate_write(['current_user_id' => $session_id, 'current_user_permission' => 10]);
+$user->assert_can_write($session);
 $user->permanent_delete();
 
 // Automatically:

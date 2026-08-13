@@ -78,7 +78,7 @@ function vault_client_consume_recovery_logic(array $input): LogicResult {
 	return LogicResult::render(['consumed' => true, 'regenerate_recommended' => $remaining->count_all() < 3]);
 }
 
-function vault_client_consume_recovery_logic_api() {
+function vault_client_consume_recovery_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

@@ -62,11 +62,37 @@ class StripeHelper {
 
 	public function is_initialized() {
 		if($this->api_key && $this->api_secret_key){
-			return true;			
+			return true;
 		}
 		else{
 			return false;
 		}
+	}
+
+	/**
+	 * The Stripe API client, or a refusal saying why there isn't one.
+	 *
+	 * The constructor returns early when no API keys are configured, which
+	 * leaves this object usable for everything that does not talk to Stripe
+	 * (is_initialized(), isTestMode(), key lookups) but with no client. Every
+	 * call that needs one goes through here so the failure is an exception
+	 * naming the cause, not "call to a member function on null" from whichever
+	 * line happened to touch it first.
+	 *
+	 * That distinction matters to callers: the surrounding code is full of
+	 * `catch (Exception $e)` blocks written to mean "Stripe is not set up here,
+	 * carry on" — and a null-method fatal is an Error, which those never catch.
+	 *
+	 * @return \Stripe\StripeClient
+	 * @throws StripeHelperException When Stripe is not configured.
+	 */
+	private function client() {
+		if (!$this->stripe) {
+			throw new StripeHelperException(
+				'Stripe is not configured on this deployment — no API keys are set'
+				. ($this->test_mode ? ' for test mode.' : '.'));
+		}
+		return $this->stripe;
 	}
 
 	/**
@@ -207,7 +233,7 @@ class StripeHelper {
 		
 		// Session content validation and replay protection
 		try {
-			$session = $this->stripe->checkout->sessions->retrieve($session_id);
+			$session = $this->client()->checkout->sessions->retrieve($session_id);
 			
 			// Verify payment status
 			if ($session->payment_status !== 'paid') {
@@ -612,7 +638,7 @@ class StripeHelper {
 	}
 
 	public function get_customer($user, $return_type='object') {
-		$stripe_customer = $this->stripe->customers->all(["email" => $user->get('usr_email')]);
+		$stripe_customer = $this->client()->customers->all(["email" => $user->get('usr_email')]);
 
 		// No matching customer in Stripe — caller (e.g. get_or_create_stripe_customer)
 		// is responsible for creating one. Return-type-appropriate "not found" sentinel.
@@ -643,7 +669,7 @@ class StripeHelper {
 	}
 	
 	public function get_customers($params){
-		$stripe_customers = $this->stripe->customers->all($params);
+		$stripe_customers = $this->client()->customers->all($params);
 		return $stripe_customers;
 	}
 
@@ -670,7 +696,7 @@ class StripeHelper {
 	}
 
 	public function create_customer_at_stripe($user, $return_type='object') {
-		$stripe_customer = $this->stripe->customers->create([
+		$stripe_customer = $this->client()->customers->create([
 				'name' => $user->get('usr_first_name'). ' ' . $user->get('usr_last_name'),
 				'email' => $user->get('usr_email'),
 				'description' => $user->get('usr_first_name'). ' ' . $user->get('usr_last_name'). ' ('.$user->get('usr_email').')',
@@ -709,22 +735,22 @@ class StripeHelper {
 	}
 	
 	public function get_charge($stripe_charge_id){
-		$charge = $this->stripe->charges->retrieve($stripe_charge_id);
+		$charge = $this->client()->charges->retrieve($stripe_charge_id);
 		return $charge;
 	}
 	
 	public function get_charges($params){
-		$charges = $this->stripe->charges->all($params);
+		$charges = $this->client()->charges->all($params);
 		return $charges;
 	}
 
 	public function get_invoices($params){
-		$invoices = $this->stripe->invoices->all($params);
+		$invoices = $this->client()->invoices->all($params);
 		return $invoices;
 	}
 	
 	public function get_payment_intent($stripe_payment_intent_id){
-		$intent = $this->stripe->paymentIntents->retrieve($stripe_payment_intent_id);
+		$intent = $this->client()->paymentIntents->retrieve($stripe_payment_intent_id);
 		return $intent;
 	}	
 	
@@ -809,18 +835,18 @@ class StripeHelper {
 	}
 
 	public function get_subscription($stripe_subscription_id){
-		$stripe_subscription = $this->stripe->subscriptions->retrieve($stripe_subscription_id);
+		$stripe_subscription = $this->client()->subscriptions->retrieve($stripe_subscription_id);
 		return $stripe_subscription;
 	}
 	
 	public function get_subscriptions($params){
-		$subs = $this->stripe->subscriptions->all($params);
+		$subs = $this->client()->subscriptions->all($params);
 		return $subs;
 	}
 	
 	public function refund_charge($stripe_charge_id, $refund_amount){
 		try{
-			$re = $this->stripe->refunds->create([
+			$re = $this->client()->refunds->create([
 			'charge' => $stripe_charge_id,
 			'amount' => $refund_amount*100
 			]);
@@ -884,7 +910,7 @@ class StripeHelper {
 	}
 
 	public function change_subscription($subscription_id, $item_id_to_update, $new_stripe_price){
-		$subscription = $this->stripe->subscriptions->update(
+		$subscription = $this->client()->subscriptions->update(
 			$subscription_id,
 			[
 				'items' => [
@@ -913,7 +939,7 @@ class StripeHelper {
 	 * @return object|false The schedule on success, false if it did not take
 	 */
 	public function schedule_subscription_change($subscription_id, $new_stripe_price){
-		$schedule = $this->stripe->subscriptionSchedules->create([
+		$schedule = $this->client()->subscriptionSchedules->create([
 			'from_subscription' => $subscription_id,
 		]);
 
@@ -932,7 +958,7 @@ class StripeHelper {
 			];
 		}
 
-		$updated = $this->stripe->subscriptionSchedules->update(
+		$updated = $this->client()->subscriptionSchedules->update(
 			$schedule->id,
 			[
 				'phases' => [
@@ -954,7 +980,7 @@ class StripeHelper {
 
 	public function cancel_subscription($subscription_id, $cancel_type){
 		if($cancel_type == 'period_end'){
-			$subscription = $this->stripe->subscriptions->update(
+			$subscription = $this->client()->subscriptions->update(
 				$subscription_id,
 				[
 					'cancel_at_period_end' => true,
@@ -987,7 +1013,7 @@ class StripeHelper {
 	 * @return object|false Returns the subscription object on success, false on failure
 	 */
 	public function reactivate_subscription($subscription_id){
-		$subscription = $this->stripe->subscriptions->update(
+		$subscription = $this->client()->subscriptions->update(
 			$subscription_id,
 			[
 				'cancel_at_period_end' => false,
@@ -1012,7 +1038,7 @@ class StripeHelper {
 				 'token' => $_REQUEST['stripeToken'],  
 			]);
 			*/
-			$source_result = $this->stripe->customers->createSource($stripe_customer_id, [ 
+			$source_result = $this->client()->customers->createSource($stripe_customer_id, [ 
 				 'source' => $stripe_token,  
 			]);
 	
@@ -1078,7 +1104,7 @@ class StripeHelper {
 		//SET NEW CARD AS DEFAULT 
 		if($set_as_default){
 			try {
-				$customer = $this->stripe->customers->retrieve($stripe_customer_id);
+				$customer = $this->client()->customers->retrieve($stripe_customer_id);
 				$customer->default_source=$source_result['id'];
 				$customer->save();  
 			}
@@ -1091,7 +1117,7 @@ class StripeHelper {
 	}
 	
 	public function get_payment_methods($stripe_user_id){
-		$result = $this->stripe->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
+		$result = $this->client()->customers->allPaymentMethods($stripe_user_id, ['limit' => 20]);
 		return $result;
 	}
 
@@ -1099,7 +1125,7 @@ class StripeHelper {
 	 * Create a Stripe Billing Portal session for payment method management.
 	 */
 	public function create_billing_portal_session($stripe_customer_id, $return_url) {
-		return $this->stripe->billingPortal->sessions->create([
+		return $this->client()->billingPortal->sessions->create([
 			'customer' => $stripe_customer_id,
 			'return_url' => $return_url,
 		]);
@@ -1109,7 +1135,7 @@ class StripeHelper {
 	 * Get recent invoices for a Stripe customer.
 	 */
 	public function get_customer_invoices($stripe_customer_id, $limit = 10) {
-		$invoices = $this->stripe->invoices->all([
+		$invoices = $this->client()->invoices->all([
 			'customer' => $stripe_customer_id,
 			'limit' => $limit,
 		]);
@@ -1118,7 +1144,7 @@ class StripeHelper {
 	
 	/*  WE ARE NO LONGER USING PLANS  
 	public function get_subscription_plan($plan_name){
-		$result = $this->stripe->plans->retrieve($plan_name);
+		$result = $this->client()->plans->retrieve($plan_name);
 		return $result;
 	}	
 	
@@ -1165,23 +1191,23 @@ class StripeHelper {
 		}
 
 		
-		$plan = $this->stripe->plans->create($plan_info); 	
+		$plan = $this->client()->plans->create($plan_info); 	
 		return $plan;
 	}
 	*/
 	
 	public function create_subscription($params){
-		$subscription = $this->stripe->subscriptions->create($params);	
+		$subscription = $this->client()->subscriptions->create($params);	
 		return $subscription;
 	}
 	
 	public function create_product($params){
-		$product = $this->stripe->products->create($params);	
+		$product = $this->client()->products->create($params);	
 		return $product;
 	}
 
 	public function create_price($params){
-		$price = $this->stripe->prices->create($params);	
+		$price = $this->client()->prices->create($params);	
 		return $price;
 	}
 	
@@ -1191,7 +1217,7 @@ class StripeHelper {
 
 	public function create_charge($params){
 		//CHARGE THE PURCHASE
-		$charge = $this->stripe->charges->create($params); 
+		$charge = $this->client()->charges->create($params); 
 		return $charge;
 	}
 
@@ -1231,7 +1257,7 @@ class StripeHelper {
 		}
 		
 		//GET ALL PRICES FOR PRODUCT
-		$stripe_prices = $this->stripe->prices->all([
+		$stripe_prices = $this->client()->prices->all([
 			'product' => $stripe_product_id,
 			'active' => 'true',
 			'type' => $stripe_type,
@@ -1433,14 +1459,14 @@ class StripeHelper {
 	
 
 	public function create_stripe_checkout_session($params){
-		$stripe_session = $this->stripe->checkout->sessions->create($params);
+		$stripe_session = $this->client()->checkout->sessions->create($params);
 		$this->stripe_checkout_session = $stripe_session;
 		return $stripe_session;
 	}
 	
 	public function get_checkout_session($session_id) {
 		try {
-			$session = $this->stripe->checkout->sessions->retrieve($session_id);
+			$session = $this->client()->checkout->sessions->retrieve($session_id);
 			return $session;
 		} catch (\Stripe\Exception $e) {
 			return false;
@@ -1487,7 +1513,7 @@ class StripeHelper {
 	
 	public function webhook_construct_event($payload, $sig_header, $endpoint_secret){
 	
-		  $event = $this->stripe->Webhook->construct_event(
+		  $event = $this->client()->Webhook->construct_event(
 			$payload, $sig_header, $endpoint_secret
 		  );
 		  return $event;

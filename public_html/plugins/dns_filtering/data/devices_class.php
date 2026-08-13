@@ -181,9 +181,6 @@ class MultiSdDevice extends SystemMultiBase {
             $filters['sdd_is_active'] = $this->options['active'] ? "= TRUE" : "= FALSE";
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['sdd_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('sdd_devices', $filters, $this->order_by, $only_count, $debug);
     }

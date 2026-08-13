@@ -119,7 +119,7 @@ function profile_dashboard_logic(array $input): LogicResult {
 	return LogicResult::render($out);
 }
 
-function profile_dashboard_logic_api() {
+function profile_dashboard_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Member dashboard summary: user card, counts, pending surveys, and recent lists',

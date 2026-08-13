@@ -68,7 +68,7 @@
 		$video->set('vid_description', $_POST['vid_description']);
 
 		try {
-			$video->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+			$video->assert_can_write($session);
 			$video->save();
 			$video->load();
 

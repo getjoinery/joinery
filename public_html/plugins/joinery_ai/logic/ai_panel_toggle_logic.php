@@ -56,9 +56,9 @@ function ai_panel_toggle_logic_descriptor(): array {
 	return [
 		'description' => "Bind or unbind the area context on one of the signed-in user's AI recipes.",
 		'mutates'     => true,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'write',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'area'         => ['type' => 'string', 'required' => true, 'enum' => ['mailbox'],

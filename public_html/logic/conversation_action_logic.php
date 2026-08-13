@@ -63,7 +63,7 @@ function conversation_action_logic(array $input): LogicResult {
 	));
 }
 
-function conversation_action_logic_api() {
+function conversation_action_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'description' => 'Mute, unmute, or delete a conversation for the signed-in owner',

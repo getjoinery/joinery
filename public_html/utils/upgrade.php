@@ -1390,6 +1390,10 @@
 			opcache_reset();
 		}
 		clearstatcache(true);
+		// The class map describes the tree that was just replaced.
+		if (class_exists('ClassAutoloader')) {
+			ClassAutoloader::flush();
+		}
 		if($verbose) upgrade_echo('Cleared PHP opcache and stat cache after file deployment<br>');
 
 		// ============================================

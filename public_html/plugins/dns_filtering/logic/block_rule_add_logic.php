@@ -102,7 +102,7 @@ function block_rule_add_logic_descriptor(): array {
 	return [
 		'description' => 'Add a custom domain rule to a block (block_id or device_id, hostname, action 0=block/1=allow, optional hard_block)',
 		'mutates'     => true,
-		'auth'        => ['requires_session' => true],
+		'requires_session'        => true,
 		'input'       => [
 			'block_id'   => ['type' => 'int',    'required' => false, 'label' => 'Block ID'],
 			'device_id'  => ['type' => 'int',    'required' => false, 'label' => 'Device ID'],

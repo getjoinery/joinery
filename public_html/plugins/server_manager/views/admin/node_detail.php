@@ -125,6 +125,8 @@ if (!empty($display_messages)) {
 		echo htmlspecialchars($msg->message);
 		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
 	}
+	// Rendered above, so these are spent; the footer drops them.
+	$session->mark_shown($display_messages);
 	$session->clear_clearable_messages();
 }
 

@@ -238,9 +238,6 @@ class MultiComponent extends SystemMultiBase {
 			$filters['com_is_active'] = $this->options['active'] ? "= TRUE" : "= FALSE";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['com_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		if (isset($this->options['has_type_key'])) {
 			$filters['com_type_key'] = "IS NOT NULL";

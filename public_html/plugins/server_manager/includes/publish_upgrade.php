@@ -843,7 +843,8 @@
 				echo '<button type="button" class="alert-close" aria-label="Close">&times;</button>';
 				echo '</div>';
 			}
-			$session->clear_clearable_messages();
+			// Rendered above, so these are spent; the footer drops them.
+			$session->mark_shown($display_messages);
 		}
 
 		$pageoptions['title'] = "Publish Upgrade";
@@ -854,7 +855,7 @@
 		$upgrades = new MultiUpgrade(array(), array('upgrade_id' => 'DESC'), 10, 0);
 		$upgrades->load();
 		foreach ($upgrades as $upgrade){
-			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). '.'. $upgrade->get('upg_patch_version'). ' - '. LibraryFunctions::convert_time($upgrade->get('upg_create_time'), 'UTC', $session->get_timezone()) . ' - '. substr($upgrade->get('upg_release_notes'), 0, 500);
+			$version_string = 'Version '.$upgrade->get('upg_major_version'). '.'. $upgrade->get('upg_minor_version'). '.'. $upgrade->get('upg_patch_version'). ' - '. $upgrade->get_local('upg_create_time') . ' - '. substr($upgrade->get('upg_release_notes'), 0, 500);
 
 			// Check if archive file exists (supports both old .zip and new .tar.gz)
 			$archive_filename = $upgrade->get('upg_name');

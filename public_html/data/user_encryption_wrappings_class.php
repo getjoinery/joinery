@@ -64,10 +64,6 @@ class UserEncryptionWrapping extends SystemBase {
 		'uew_delete_time'        => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);
 
-	function __construct($key, $and_load = FALSE) {
-		parent::__construct($key, $and_load);
-	}
-
 	/** The row-binding AD every wrapping is sealed with - splices a wrapping's
 	 *  ciphertext onto a different row and it fails to open. */
 	public static function adFor(int $vault_id, int $wrapping_id): string {

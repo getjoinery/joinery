@@ -122,11 +122,7 @@ function dashboard_render_section($section) {
         </div>
 
         <?php
-        foreach ($page_vars['display_messages'] as $display_message) {
-            if ($display_message->identifier == 'profilebox') {
-                echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-            }
-        }
+        echo $page->render_messages('profilebox');
         ?>
 
         <?php

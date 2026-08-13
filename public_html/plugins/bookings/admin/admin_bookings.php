@@ -66,7 +66,7 @@ foreach ($bookings as $booking) {
 	$rowvalues[] = '<a href="/plugins/bookings/admin/admin_booking?bkn_booking_id=' . $booking->key . '">' . htmlspecialchars($client->display_name()) . '</a>';
 	$rowvalues[] = $type_name;
 	$rowvalues[] = htmlspecialchars($host->display_name());
-	$rowvalues[] = LibraryFunctions::convert_time($booking->get('bkn_start_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T');
+	$rowvalues[] = $booking->get_local('bkn_start_time', 'M j, Y g:i A T');
 	$rowvalues[] = $status;
 	$page->disprow($rowvalues);
 }

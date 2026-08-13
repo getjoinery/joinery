@@ -19,13 +19,6 @@ function event_register_logic(array $input): LogicResult {
 	]));
 }
 
-function event_register_logic_api() {
-	return [
-		'requires_session' => true,
-		'description' => 'Register for an event',
-	];
-}
-
 function event_register_logic_descriptor(): array {
 	return [
 		'description'      => 'Register the current user for an event.',

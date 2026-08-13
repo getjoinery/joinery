@@ -16,7 +16,7 @@ function vault_lock_logic(array $input): LogicResult {
 	return LogicResult::render(['locked' => true]);
 }
 
-function vault_lock_logic_api() {
+function vault_lock_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

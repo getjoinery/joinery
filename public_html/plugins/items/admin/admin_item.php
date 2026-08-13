@@ -15,14 +15,14 @@
 	$item = new Item($_GET['itm_item_id'], TRUE);
 
 	if($_REQUEST['action'] == 'delete'){
-		$item->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$item->assert_can_write($session);
 		$item->soft_delete();
 
 		header("Location: /admin/admin_items");
 		exit();				
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$item->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$item->assert_can_write($session);
 		$item->undelete();
 
 		header("Location: /admin/admin_items");
@@ -44,10 +44,10 @@
 	$options['title'] = $item->get('itm_name');
 	$options['altlinks'] = array('Edit Item' => '/admin/admin_item_edit?itm_item_id='.$item->key);
 	if(!$item->get('itm_delete_time')){
-		$options['altlinks']['Soft Delete'] = '/admin/admin_item?action=delete&itm_item_id='.$item->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_item', 'hidden' => array('action' => 'delete', 'itm_item_id' => $item->key));
 	}
 	else{
-		$options['altlinks']['Undelete'] = '/admin/admin_item?action=undelete&itm_item_id='.$item->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_item', 'hidden' => array('action' => 'undelete', 'itm_item_id' => $item->key));
 	}
 	
 	if($_SESSION['permission'] >= 8) {
@@ -57,12 +57,12 @@
 	$page->begin_box($options);
 
 	echo '<strong>Title: </strong> '.$item->get('itm_name').'<br />';
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($item->get('itm_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$item->get_local('itm_create_time') .'<br />';
 	if($item->get('itm_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($item->get('itm_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		echo 'Status: Deleted at '.$item->get_local('itm_delete_time').'<br />';
 	}
 	else if($item->get('itm_is_published')){
-		echo '<strong>Published:</strong> ' . LibraryFunctions::convert_time($item->get('itm_published_time'), 'UTC', $session->get_timezone()). '<br />';
+		echo '<strong>Published:</strong> ' . $item->get_local('itm_published_time'). '<br />';
 	}
 	else{
 		echo '<strong>UNPUBLISHED</strong><br />';

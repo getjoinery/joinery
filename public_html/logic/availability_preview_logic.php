@@ -87,9 +87,9 @@ function availability_preview_logic_descriptor(): array {
 	return [
 		'description' => 'Owner-only availability preview: open availability blocks plus existing commitments over a UTC range.',
 		'mutates'     => false,
+		'requires_session' => true,
 		'auth'        => [
 			'capability'       => 'read',
-			'requires_session' => true,
 		],
 		'input'       => [
 			'start' => ['type' => 'string', 'required' => false, 'label' => 'Range start (UTC)'],

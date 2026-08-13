@@ -603,17 +603,15 @@ class MultiExample extends SystemMultiBase
  * // Soft delete
  * $example->soft_delete();
  * 
- * // Search multiple records using options array
+ * // Search multiple records using options array. The collection runs its
+ * // query the first time it is iterated or counted — there is no load() step.
  * $examples = new MultiExample(
  *     array('active' => true, 'status' => 1),  // Uses getMultiResults filtering
  *     array('exm_name' => 'ASC')                // Sort order
  * );
  * 
- * if ($examples->count_all() > 0) {
- *     $examples->load();
- *     foreach ($examples as $example) {
- *         echo $example->get('exm_name') . "\n";
- *     }
+ * foreach ($examples as $example) {
+ *     echo $example->get('exm_name') . "\n";
  * }
  * 
  * // Built-in URL generation (requires exm_link field and $url_namespace)

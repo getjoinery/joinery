@@ -1,6 +1,5 @@
 <?php
 	require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
-	require_once(PathHelper::getThemeFilePath('FormWriter.php', 'includes'));
 
 	require_once(PathHelper::getIncludePath('data/page_contents_class.php'));
 

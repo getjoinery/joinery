@@ -132,8 +132,7 @@
 			}
 
 			echo '<tr>';
-			echo '<td class="text-nowrap">' . htmlspecialchars(LibraryFunctions::convert_time(
-				$run->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, g:i A')) . '</td>';
+			echo '<td class="text-nowrap">' . htmlspecialchars($run->get_local('mjb_create_time', 'M j, g:i A')) . '</td>';
 			echo '<td><code class="small">' . htmlspecialchars(mb_strimwidth($cmd, 0, 90, '…')) . '</code>' . $source . '</td>';
 			echo '<td>' . htmlspecialchars((string)$who) . '</td>';
 			echo '<td><a class="badge bg-' . $badge . '" href="/admin/server_manager/job_detail?job_id=' . intval($run->key) . '">'

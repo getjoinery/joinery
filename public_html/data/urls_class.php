@@ -72,9 +72,6 @@ class MultiUrl extends SystemMultiBase {
             $filters['url_incoming'] = [$this->options['incoming'], PDO::PARAM_STR];
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['url_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('url_urls', $filters, $this->order_by, $only_count, $debug);
     }

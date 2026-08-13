@@ -32,11 +32,9 @@
         <?php endif; ?>
 
         <?php
-        foreach ($page_vars['display_messages'] ?? [] as $display_message) {
-            if ($display_message->identifier == 'loginbox' || $display_message->identifier == 'topbox') {
-                echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-            }
-        }
+        // This page shows both the sign-in slot and the page-top slot.
+        echo $page->render_messages('loginbox');
+        echo $page->render_messages('topbox');
 
         if ($has_totp) {
             $formwriter = $page->getFormWriter('form1', ['action' => '/verify-totp', 'method' => 'POST']);

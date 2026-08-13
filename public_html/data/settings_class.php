@@ -143,6 +143,54 @@ private function _check_for_duplicate_setting() {
 	}
 
 	/**
+	 * Write one setting's value.
+	 *
+	 * This is how code changes a setting outside the settings admin page — a
+	 * value the platform mints for itself (a generated key id, a recorded
+	 * protocol, a cutover marker), not something an operator typed.
+	 *
+	 * The name has to be declared, in `settings.json` or a plugin's
+	 * `plugin.json`, and put() refuses it otherwise. That refusal is the whole
+	 * point: an undeclared name writes a row nothing reads and no page shows,
+	 * so a typo becomes a setting that silently never takes effect. The same
+	 * rule the settings page enforces (SettingsWriter) applies here.
+	 *
+	 * Reading back is immediate: get_setting() re-reads a blank value from the
+	 * database rather than trusting its in-request copy, so there is no cache
+	 * to invalidate.
+	 *
+	 * @param string $name A declared setting name.
+	 * @param string|int|bool|null $value The value to store.
+	 * @throws InvalidArgumentException When the name is not declared.
+	 */
+	public static function put(string $name, $value): void {
+		$name = trim($name);
+		if ($name === '') {
+			throw new InvalidArgumentException('Setting::put: name is required');
+		}
+
+		require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+		if (!SettingsDeclarations::isDeclared($name)) {
+			throw new InvalidArgumentException(
+				"Setting::put: '$name' is not a declared setting. Declare it in settings.json "
+				. "(core) or the plugin's plugin.json before writing it — an undeclared name "
+				. 'stores a row nothing reads.');
+		}
+
+		if (is_bool($value)) {
+			$value = $value ? '1' : '0';
+		}
+		$value = ($value === null) ? '' : (string)$value;
+
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$stmt = $dblink->prepare(
+			"INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+			 VALUES (?, ?, 1, NOW(), NOW(), 'general')
+			 ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = NOW()");
+		$stmt->execute(array($name, $value));
+	}
+
+	/**
 	 * Bulk-insert declared default settings, skipping any stg_name that
 	 * already exists. Used by PluginManager (plugin.json settings array) and
 	 * update_database (core settings.json). Seed-only — never overwrites.

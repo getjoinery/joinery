@@ -37,7 +37,7 @@ FormWriter is a PHP class system that generates HTML forms with:
 
 ### Available Classes
 
-- **`FormWriterV2HTML5`** - The HTML renderer. Emits semantic HTML5 markup and is used by every theme.
+- **`FormWriterV2HTML5`** - The HTML renderer. Emits semantic HTML5 markup and is used by every theme. `$page->getFormWriter()` returns one; instantiate it directly where there is no page object. There is no per-theme FormWriter subclass to pick between.
 - **`FormWriterV2JSON`** - JSON form definitions for native-app renderers (a different output format, not a CSS concern — see [JSON Output Mode](#11-json-output-mode-server-driven-forms))
 - **Base class: `FormWriterV2Base`** - Abstract base with all core functionality
 
@@ -1546,6 +1546,18 @@ is generally **unnecessary for authenticated/admin forms** (anything behind a lo
 for it only on the rarer cases where you specifically want it (e.g. a sensitive unauthenticated
 POST).
 
+Two things do run platform-wide, neither of which changes a submission's outcome:
+
+- **The session cookie is `SameSite=Lax`**, so a browser does not attach it to a
+  cross-site POST at all. That is what makes opt-in verification tolerable today.
+- **Every form POST is shadow-checked.** A submission whose token would not have
+  passed is written to the error log as `[CSRF_SHADOW]` with the reason (absent,
+  mismatched, expired) and the path. Nothing is refused; the log is how the real
+  shape of the problem gets measured before enforcement is turned on.
+
+An action a user triggers is never a link — see
+[Actions are buttons, not links](#actions-are-buttons-not-links) below.
+
 ```php
 // The token is rendered into the form automatically — nothing to enable.
 $formwriter = new FormWriterV2HTML5('form', ['method' => 'POST']);
@@ -1573,6 +1585,84 @@ if (LibraryFunctions::isFormSubmission()) {
 
 > CSRF is forced **off** in JSON mode regardless — API requests authenticate via key headers,
 > which browsers never attach cross-origin.
+
+### Actions are buttons, not links
+
+Deleting, undeleting or reassigning something is a POST. Never a link.
+
+A link is a GET, and a browser performs a GET whenever it is told to — by
+another site, by a prefetcher, by anything that follows an href — carrying the
+session cookie along. A POST form is not something another site can make the
+browser submit, because the session cookie is `SameSite=Lax` and simply is not
+sent cross-site. That is the whole reason for the rule.
+
+In an `altlinks` list, describe the action instead of linking to it:
+
+```php
+// Somewhere to go — a plain string, rendered as a link
+$options['altlinks']['Edit'] = '/admin/admin_post_edit?pst_post_id=' . $post->key;
+
+// Something to do — an array, rendered as a submit button in its own form
+$options['altlinks']['Soft Delete'] = array(
+    'post'    => '/admin/admin_post',
+    'hidden'  => array('action' => 'delete', 'pst_post_id' => $post->key),
+    'confirm' => 'Delete this post?',      // optional
+);
+```
+
+Outside an `altlinks` list — inline in a table cell, say — `AdminPage::action_button()`
+renders the same thing:
+
+```php
+echo AdminPage::action_button('Delete', '/admin/admin_conversation', array(
+    'hidden'  => array('action' => 'delete_message', 'msg_message_id' => $msg->key),
+    'class'   => 'btn btn-link btn-sm',
+    'confirm' => 'Delete this message?',
+));
+```
+
+The handler needs nothing special — it is an ordinary POST:
+
+```php
+if ($input['action'] == 'delete') {
+    $post->assert_can_write($session);
+    $post->soft_delete();
+    return LogicResult::redirect('/admin/admin_posts');
+}
+```
+
+Handle the action **before** any generic form-save path in the same file, and
+return or exit from it. A delete POST would otherwise fall through into a
+`isFormSubmission()` branch and save the record it was meant to remove.
+
+### Writes the server makes on its own
+
+A page view sometimes writes without anyone asking: an error or a request is
+recorded, a row is reconciled against a remote fact, a payment gateway's
+redirect back becomes an order. Those cannot be POSTs — nobody submitted
+anything — so they say so explicitly:
+
+```php
+SystemBase::server_initiated_write(function () use ($log) {
+    $log->save();
+});
+```
+
+**This is not the fix for a refused save.** If a save is being refused during a
+page view, the answer is almost always that the thing doing the saving should be
+a POST. Reaching for this to silence the refusal converts a caught bug into a
+shipped one.
+
+The test is not "is this write deliberate?" — every write is. It is "would this
+still happen if nobody had asked for anything?" Four shapes qualify:
+observation (a log row the page would render fine without), reconciliation (a
+local row brought into line with a remote fact), a third-party redirect landing
+back here (payment gateway, OAuth provider), and lazy processing (work a
+scheduled task would otherwise have done). A user clicking something is none of
+them.
+
+Every caller is enumerated in `tests/unit/core_api_mechanical_test.php`, which
+fails on a new one — adding to that list is meant to be a deliberate act.
 
 ### Automatic Local Time Conversion
 
@@ -1798,7 +1888,7 @@ function account_edit_logic_form($formwriter, $user = null, $input = []) {
 
 Keep web-only concerns **out of the builder** and in the web view: bot defences (`antispam_question_input()`, `honeypot_hidden_input()`, `captcha_hidden_input()`), layout markup, and links. `FormWriterV2JSON` throws if a builder uses them.
 
-The exposure rule: `GET /api/v1/form/{action}` serves the form iff both a metadata companion (`{action}_logic_descriptor()` or legacy `{action}_logic_api()`) and `{action}_logic_form()` exist.
+The exposure rule: `GET /api/v1/form/{action}` serves the form iff both `{action}_logic_descriptor()` and `{action}_logic_form()` exist.
 
 ### Post-Construction Value Binding
 

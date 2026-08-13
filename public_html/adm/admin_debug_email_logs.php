@@ -43,7 +43,7 @@
 	$debug_email_logs->load();	
 
 	$headers = array('Debug Email', 'Time');
-	$altlinks = array('Delete All' => '/admin/admin_debug_email_logs?action=delete_all');
+	$altlinks = array('Delete All' => array('post' => '/admin/admin_debug_email_logs', 'hidden' => array('action' => 'delete_all')));
 	$pager = new Pager(array('numrecords'=>$numrecords, 'numperpage'=> $numperpage));
 	$table_options = array(
 		//'sortoptions'=>array("User ID"=>"user_id", "Last Name"=>"last_name", "First Name"=>"first_name"),

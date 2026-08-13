@@ -39,7 +39,7 @@ function seal_batch_logic(array $input): LogicResult {
 	));
 }
 
-function seal_batch_logic_api() {
+function seal_batch_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

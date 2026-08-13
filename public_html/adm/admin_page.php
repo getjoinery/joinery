@@ -24,7 +24,7 @@
 
 	// Handle layout save from the drag-reorder picker
 	if (isset($_POST['action']) && $_POST['action'] === 'save_layout') {
-		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$page->assert_can_write($session);
 		$ids = isset($_POST['layout']) && is_array($_POST['layout'])
 			? array_values(array_map('intval', $_POST['layout']))
 			: [];
@@ -35,14 +35,14 @@
 	}
 
 	if($_REQUEST['action'] == 'delete'){
-		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$page->assert_can_write($session);
 		$page->soft_delete();
 
 		header("Location: /admin/admin_pages");
 		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$page->assert_can_write($session);
 		$page->undelete();
 
 		header("Location: /admin/admin_pages");
@@ -50,7 +50,7 @@
 	}
 	else if($_REQUEST['action'] == 'remove_component'){
 		// Remove a component from this page's layout (keeps the component itself)
-		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$page->assert_can_write($session);
 		$remove_id = intval($_POST['pac_page_content_id'] ?? 0);
 		$layout = $page->get_component_layout();
 		$layout = array_values(array_filter($layout, function($id) use ($remove_id) {
@@ -63,7 +63,7 @@
 	}
 	else if($_REQUEST['action'] == 'add_component'){
 		// Append an existing component to this page's layout
-		$page->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$page->assert_can_write($session);
 		$add_id = intval($_POST['pac_page_content_id'] ?? 0);
 		if ($add_id) {
 			$layout = $page->get_component_layout();
@@ -92,10 +92,10 @@
 	// Build dropdown actions
 	$options['altlinks'] = array('Edit Page' => '/admin/admin_page_edit?pag_page_id='.$page->key);
 	if(!$page->get('pag_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_page?action=delete&pag_page_id='.$page->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'delete', 'pag_page_id' => $page->key));
 	}
 	else if($_SESSION['permission'] >= 8){
-		$options['altlinks']['Undelete'] = '/admin/admin_page?action=undelete&pag_page_id='.$page->key;
+		$options['altlinks']['Undelete'] = array('post' => '/admin/admin_page', 'hidden' => array('action' => 'undelete', 'pag_page_id' => $page->key));
 	}
 	$options['altlinks'] += array('Permanent Delete' => '/admin/admin_page_permanent_delete?pag_page_id='.$page->key);
 
@@ -105,9 +105,9 @@
 		$dropdown_button = '<div class="dropdown">';
 		$dropdown_button .= '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" aria-haspopup="true" aria-expanded="false">Actions</button>';
 		$dropdown_button .= '<div class="dropdown-menu dropdown-menu-end py-0">';
-		foreach ($options['altlinks'] as $label => $url) {
+		foreach ($options['altlinks'] as $label => $entry) {
 			$is_danger = strpos($label, 'Delete') !== false;
-			$dropdown_button .= '<a href="' . htmlspecialchars($url) . '" class="dropdown-item' . ($is_danger ? ' text-danger' : '') . '">' . htmlspecialchars($label) . '</a>';
+			$dropdown_button .= AdminPage::renderActionEntry($label, $entry, 'dropdown-item' . ($is_danger ? ' text-danger' : ''));
 		}
 		$dropdown_button .= '</div>';
 		$dropdown_button .= '</div>';
@@ -194,13 +194,13 @@
 					</tr>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Created</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $page->get_local('pag_create_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Status</td>
 						<td class="p-1">
 							<?php if($page->get('pag_delete_time')): ?>
-								<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($page->get('pag_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+								<span class="badge badge-danger">Deleted at <?php echo $page->get_local('pag_delete_time'); ?></span>
 							<?php elseif($page->get('pag_published_time')): ?>
 								<span class="badge badge-subtle-success">Published</span>
 							<?php else: ?>
@@ -211,13 +211,13 @@
 					<?php if($page->get('pag_published_time')): ?>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Published</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_published_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $page->get_local('pag_published_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<?php endif; ?>
 					<?php if($page->get('pag_last_edit_time')): ?>
 					<tr>
 						<td class="p-1 text-800 fw-semi-bold">Last Edited</td>
-						<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($page->get('pag_last_edit_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+						<td class="p-1 text-600"><?php echo $page->get_local('pag_last_edit_time', 'M j, Y g:i A T'); ?></td>
 					</tr>
 					<?php endif; ?>
 				</tbody>

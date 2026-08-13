@@ -298,7 +298,6 @@ if ($show_form) {
 			var unsealedTotal = 0;
 			var dot = document.querySelector('#lowering-unseal-row .receipt-dot');
 			var text = document.getElementById('lowering-unseal-text');
-			var csrf = (document.querySelector('meta[name="joinery-api-csrf"]') || {}).content || '';
 			var noscriptForm = document.getElementById('unsealing-continue');
 			if (noscriptForm) noscriptForm.remove();
 			function setDot(color) { if (dot) dot.style.background = color; }
@@ -320,14 +319,8 @@ if ($show_form) {
 				}
 			}
 			function batch() {
-				fetch('/api/v1/action/mailbox/unseal_batch', {
-					method: 'POST',
-					headers: { 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf },
-					body: JSON.stringify({ domain_id: parseInt(card.dataset.domainId, 10) })
-				}).then(async function (r) {
-					var j = await r.json();
-					if (!r.ok) throw new Error((j && j.error) || 'Request failed.');
-					return j.data;
+				joineryApi.post('mailbox/unseal_batch', {
+					domain_id: parseInt(card.dataset.domainId, 10)
 				}).then(function (d) {
 					var unsealed = parseInt(d.unsealed, 10) || 0;
 					remaining = parseInt(d.own_remaining, 10) || 0;

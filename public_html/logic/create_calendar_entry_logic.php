@@ -50,13 +50,6 @@ function create_calendar_entry_logic(array $input): LogicResult {
     ]);
 }
 
-function create_calendar_entry_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Add an entry to the current user\'s personal calendar (tentative until confirmed)',
-    ];
-}
-
 function create_calendar_entry_logic_descriptor(): array {
     return [
         'description'      => 'Add an entry to the current user\'s personal calendar. '

@@ -30,11 +30,7 @@ require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
 	echo PublicPage::BeginPage('Account Edit', $hoptions);
 	
 /*
-	foreach($page_vars['display_messages'] AS $display_message) {
-		if($display_message->identifier == 'userbox') {	
-			echo PublicPage::alert($display_message->message_title, $display_message->message, $display_message->get_message_class());
-		}
-	}		
+	echo $page->render_messages('userbox');		
 */
 	echo PublicPage::tab_menu($tab_menus, 'Edit Account');
 

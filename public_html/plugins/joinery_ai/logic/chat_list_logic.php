@@ -39,7 +39,7 @@ function chat_list_logic(array $input): LogicResult {
     return LogicResult::render($payload);
 }
 
-function chat_list_logic_api() {
+function chat_list_logic_descriptor() {
     return ['requires_session' => true,
             'description' => 'List the signed-in user\'s AI chat conversations (pinned first, newest first); optional title/body search.'];
 }

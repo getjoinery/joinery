@@ -351,9 +351,6 @@ class MultiAbTest extends SystemMultiBase {
 			$filters['abt_conversion_event_type'] = array($this->options['conversion_event_type'], PDO::PARAM_INT);
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['abt_delete_time'] = $this->options['deleted'] ? 'IS NOT NULL' : 'IS NULL';
-		}
 
 		return $this->_get_resultsv2('abt_tests', $filters, $this->order_by, $only_count, $debug);
 	}

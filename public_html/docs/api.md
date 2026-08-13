@@ -771,10 +771,10 @@ vocabulary (`string`, `int`, `float`, `bool`, `email`, `text`, `password`,
 `date`, `datetime`, `array`) and per-field options (`enum`, `min`/`max`,
 `max_length`, `items`).
 
-**Legacy companion.** A minimal `{action}_logic_api()` returning only
-`description` and `requires_session` also opts an action in; it carries no
-input schema, so no boundary validation applies. When both companions exist,
-the descriptor wins. New actions declare `_logic_descriptor()`.
+**No descriptor, no endpoint.** An action with a `{action}_logic()` function
+but no `{action}_logic_descriptor()` is not exposed, and asking for it answers
+with an error naming that as the fix rather than a bare `Unknown action` — the
+action exists on this deployment, it just is not published.
 
 ### Action Request Format
 
@@ -989,8 +989,8 @@ Returns a list of all available actions with descriptions. Useful for API consum
 ```
 
 `input` is the action's typed input schema from its descriptor — the same
-schema the action endpoint validates against; `null` when the action only has
-the legacy `_logic_api()` companion. `has_form` indicates whether the action
+schema the action endpoint validates against; `null` when the descriptor
+declares none. `has_form` indicates whether the action
 exposes a server-driven form definition (below).
 
 ## Form Definition Endpoint
@@ -1003,7 +1003,7 @@ Returns the action's form as a JSON **definition** — fields, labels, prefilled
 
 `visibility_rules` may appear on `drop`, `checkbox`, `radio`, and radio `checkbox_list` fields. The native renderer reads the current rule key by the trigger's type — a `drop`/`radio` keys on the selected option value, a `checkbox` keys on `checked`/`unchecked` — matching web behavior exactly (see [FormWriter §6](formwriter.md#6-field-visibility--custom-scripts)).
 
-A form is served iff the action's logic file defines **both** a metadata companion (`{action_name}_logic_descriptor()` or legacy `{action_name}_logic_api()`) and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
+A form is served iff the action's logic file defines **both** `{action_name}_logic_descriptor()` and `{action_name}_logic_form()` (reflected in the discovery endpoint's `has_form` flag).
 
 **Authentication mirrors the action's `requires_session` declaration:**
 

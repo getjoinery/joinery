@@ -108,7 +108,7 @@ foreach ($logs as $log) {
 	elseif ($status === 'rate_limited' || $status === 'store_capped') $status_class = 'bg-warning text-dark';
 
 	$rowvalues = array();
-	array_push($rowvalues, LibraryFunctions::convert_time($log->get('iel_create_time'), 'UTC', $session->get_timezone(), 'M j g:i A'));
+	array_push($rowvalues, $log->get_local('iel_create_time', 'M j g:i A'));
 	array_push($rowvalues, htmlspecialchars(substr($log->get('iel_from_address'), 0, 50)));
 	array_push($rowvalues, htmlspecialchars(substr($log->get('iel_to_address'), 0, 50)));
 	array_push($rowvalues, htmlspecialchars(substr($log->get('iel_subject'), 0, 60)));

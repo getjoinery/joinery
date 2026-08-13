@@ -79,16 +79,9 @@ register_shutdown_function(function () use (&$current_task_id) {
 $dbconnector = DbConnector::get_instance();
 $dblink = $dbconnector->get_db_link();
 try {
-	$sql = "UPDATE stg_settings SET stg_value = :ts WHERE stg_name = 'scheduled_tasks_last_cron_run'";
-	$q = $dblink->prepare($sql);
-	$q->execute([':ts' => $timestamp]);
-	if ($q->rowCount() === 0) {
-		// Setting doesn't exist yet, insert it
-		$sql = "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name) VALUES ('scheduled_tasks_last_cron_run', :ts, 1, now(), now(), 'system')";
-		$q = $dblink->prepare($sql);
-		$q->execute([':ts' => $timestamp]);
-	}
-} catch (PDOException $e) {
+	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	Setting::put('scheduled_tasks_last_cron_run', $timestamp);
+} catch (Throwable $e) {
 	echo "[$timestamp] Warning: Could not update heartbeat setting: " . $e->getMessage() . "\n";
 }
 

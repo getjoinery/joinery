@@ -104,9 +104,6 @@ class MultiManagedHost extends SystemMultiBase {
 			$filters['mgh_provisioning_enabled'] = $this->options['provisioning_enabled'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['mgh_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('mgh_managed_hosts', $filters, $this->order_by, $only_count, $debug);
 	}

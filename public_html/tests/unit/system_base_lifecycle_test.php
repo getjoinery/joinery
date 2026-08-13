@@ -58,11 +58,11 @@ function sbl_threw(callable $fn) {
 
 section('Constructing a model');
 
-// The constructor takes no default. `new Question()` is the single most common
-// first mistake against this API, and it fails loudly rather than producing a
-// half-built object.
-check(sbl_threw(function () { $c = 'Question'; new $c(); }),
-	'Constructing with no argument at all is an error');
+// Constructing with no argument means "a new record" — the reading everyone
+// reaches for first, and the one the constructor gives them.
+$implied = new Question();
+check($implied->key === NULL, 'Constructing with no argument gives a new record');
+check($implied->get('qst_question') === NULL, 'and it carries no field values');
 
 $fresh = new Question(NULL);
 check($fresh->key === NULL, 'A new record has no key until it is saved');
@@ -289,10 +289,11 @@ check(count($multi) === $iterated, 'count() agrees with what iteration produces'
 
 check(property_exists($multi, 'results') === false, 'There is no public results property');
 
-$phantom = 0;
-foreach ((array)($multi->results ?? array()) as $row) { $phantom++; }
-check($phantom === 0,
-	'Reading ->results yields nothing, so a loop over it silently never runs');
+// Results live in a private array reached by iteration. Reading ->results is
+// the mistake that reads as working code, so it is refused rather than
+// answered with nothing.
+check(sbl_threw(function () use ($multi) { $x = $multi->results; }),
+	'Reading ->results is an error, not a silent empty answer');
 
 check($multi->get(0) !== NULL, 'get(0) reaches the first row by position');
 

@@ -18,18 +18,14 @@ function admin_question_logic(array $input): LogicResult {
 
 	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
 	if(($input['action'] ?? '') == 'delete'){
-		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		SystemBase::$allow_get_mutation = true;
-		try { $question->soft_delete(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$question->assert_can_write($session);
+		$question->soft_delete();
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}
 	else if(($input['action'] ?? '') == 'undelete'){
-		$question->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
-		SystemBase::$allow_get_mutation = true;
-		try { $question->soft_delete(); }
-		finally { SystemBase::$allow_get_mutation = false; }
+		$question->assert_can_write($session);
+		$question->undelete();
 
 		return LogicResult::redirect("/admin/admin_questions");
 	}

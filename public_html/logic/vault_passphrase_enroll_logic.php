@@ -57,7 +57,7 @@ function vault_passphrase_enroll_logic(array $input): LogicResult {
 	return LogicResult::render(['enrolled' => true]);
 }
 
-function vault_passphrase_enroll_logic_api() {
+function vault_passphrase_enroll_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

@@ -87,9 +87,6 @@ class MultiNotificationPreference extends SystemMultiBase {
 			$filters['ntp_subscribed'] = $this->options['subscribed'] ? "= true" : "= false";
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['ntp_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('ntp_notification_preferences', $filters, $this->order_by, $only_count, $debug);
 	}

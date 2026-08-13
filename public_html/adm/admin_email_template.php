@@ -41,7 +41,7 @@
 	}
 
 	//echo '<strong>From:</strong> ('.$sender->key.') <a href="/admin/admin_user?usr_user_id='.$sender->key.'">'.$sender->display_name() .'</a><br />';
-	echo '<strong>Created:</strong> '.LibraryFunctions::convert_time($email_template->get('emt_create_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Created:</strong> '.$email_template->get_local('emt_create_time') .'<br />';
 
 	echo '<iframe src="/admin/admin_email_template_preview?emt_email_template_id='.$email_template->key.'" width="100%" height="500" style="border:1px solid black;"></iframe>';
 	//echo '<strong>Content:</strong><br /> '.$email_template->get('emt_body').'<br />';

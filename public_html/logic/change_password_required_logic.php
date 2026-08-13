@@ -93,13 +93,6 @@ function change_password_required_logic(array $input): LogicResult{
 	return LogicResult::render($page_vars);
 }
 
-function change_password_required_logic_api() {
-    return [
-        'requires_session' => true,
-        'description' => 'Forced password change',
-    ];
-}
-
 function change_password_required_logic_descriptor(): array {
 	return [
 		'description'      => 'Satisfy a forced password-change requirement for admin users.',

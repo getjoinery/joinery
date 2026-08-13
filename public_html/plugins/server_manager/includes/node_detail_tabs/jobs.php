@@ -99,7 +99,7 @@
 		$rowvalues[] = htmlspecialchars(str_replace('_', ' ', $job->get('mjb_job_type')));
 		$rowvalues[] = '<span class="badge bg-' . $status_class . '">' . htmlspecialchars($job->get('mjb_status')) . '</span>';
 		$rowvalues[] = $progress;
-		$rowvalues[] = LibraryFunctions::convert_time($job->get('mjb_create_time'), 'UTC', $session->get_timezone(), 'M j, g:i A');
+		$rowvalues[] = $job->get_local('mjb_create_time', 'M j, g:i A');
 		$rowvalues[] = $duration;
 
 		$page->disprow($rowvalues);

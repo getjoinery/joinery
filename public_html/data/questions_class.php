@@ -484,9 +484,6 @@ class MultiQuestion extends SystemMultiBase {
 			$filters['qst_type'] = [$this->options['type'], PDO::PARAM_INT];
 		}
 
-		if (isset($this->options['deleted'])) {
-			$filters['qst_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-		}
 
 		return $this->_get_resultsv2('qst_questions', $filters, $this->order_by, $only_count, $debug);
 	}

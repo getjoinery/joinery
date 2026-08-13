@@ -117,9 +117,6 @@ class MultiSurveyQuestion extends SystemMultiBase {
             $filters['srq_qst_question_id'] = [$this->options['question_id'], PDO::PARAM_INT];
         }
         
-        if (isset($this->options['deleted'])) {
-            $filters['srq_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         return $this->_get_resultsv2('srq_survey_questions', $filters, $this->order_by, $only_count, $debug);
     }

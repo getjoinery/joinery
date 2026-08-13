@@ -46,7 +46,7 @@ function passkey_login_options_logic(array $input): LogicResult {
 	return LogicResult::render(['options' => $options]);
 }
 
-function passkey_login_options_logic_api() {
+function passkey_login_options_logic_descriptor() {
 	return [
 		'requires_session' => false,
 		'description' => 'Begin passwordless passkey sign-in (returns WebAuthn request options)',

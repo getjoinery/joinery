@@ -163,9 +163,6 @@ class MultiAppBridgeToken extends SystemMultiBase {
             $filters['abt_used_time'] = $this->options['unused'] ? "IS NULL" : "IS NOT NULL";
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['abt_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('abt_app_bridge_tokens', $filters, $this->order_by, $only_count, $debug);
     }

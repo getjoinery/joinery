@@ -46,7 +46,7 @@ function signature_save_logic(array $input): LogicResult {
 	return LogicResult::render(array('ok' => true, 'signature' => $sanitized));
 }
 
-function signature_save_logic_api() {
+function signature_save_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'Save the compose signature for one of the caller\'s mailboxes',

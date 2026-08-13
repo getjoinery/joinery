@@ -23,14 +23,14 @@
 	}
 
 	if($_REQUEST['action'] == 'delete'){
-		$message->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$message->assert_can_write($session);
 		$message->soft_delete();
 
 		header("Location: /admin/admin_posts");
 		exit();
 	}
 	else if($_REQUEST['action'] == 'undelete'){
-		$message->authenticate_write(array('current_user_id'=>$session->get_user_id(), 'current_user_permission'=>$session->get_permission()));
+		$message->assert_can_write($session);
 		$message->soft_delete();
 
 		header("Location: /admin/admin_posts");
@@ -51,7 +51,7 @@
 	$options['title'] = 'Message';
 
 	if(!$message->get('msg_delete_time') && $_SESSION['permission'] >= 8) {
-		$options['altlinks']['Soft Delete'] = '/admin/admin_message?action=delete&msg_message_id='.$message->key;
+		$options['altlinks']['Soft Delete'] = array('post' => '/admin/admin_message', 'hidden' => array('action' => 'delete', 'msg_message_id' => $message->key));
 	}
 	$page->begin_box($options);
 
@@ -79,13 +79,13 @@
 			echo '<strong>Context:</strong> '.htmlspecialchars($message->get('msg_context_type').' #'.$message->get('msg_context_id')).'<br />';
 		}
 	}
-	echo '<strong>Sent:</strong> '.LibraryFunctions::convert_time($message->get('msg_sent_time'), 'UTC', $session->get_timezone()) .'<br />';
+	echo '<strong>Sent:</strong> '.$message->get_local('msg_sent_time') .'<br />';
 	if($message->get('msg_cnv_conversation_id')){
 		echo '<strong>Conversation:</strong> <a href="/admin/admin_conversation?cnv_conversation_id='.$message->get('msg_cnv_conversation_id').'">#'.$message->get('msg_cnv_conversation_id').'</a><br />';
 	}
 	echo '<strong>Message:</strong><br /> '.$message->get('msg_body').'<br />';
 	if($message->get('msg_delete_time')){
-		echo 'Status: Deleted at '.LibraryFunctions::convert_time($message->get('msg_delete_time'), 'UTC', $session->get_timezone()).'<br />';
+		echo 'Status: Deleted at '.$message->get_local('msg_delete_time').'<br />';
 	}
 	$page->end_box();
 

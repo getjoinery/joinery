@@ -109,9 +109,6 @@ class MultiItem extends SystemMultiBase {
             $filters['LENGTH(itm_link)'] = '> 0';
         }
         
-        if (isset($this->options['deleted'])) {
-            $filters['itm_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
         
         return $this->_get_resultsv2('itm_items', $filters, $this->order_by, $only_count, $debug);
     }

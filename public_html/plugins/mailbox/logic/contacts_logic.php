@@ -54,7 +54,7 @@ function contacts_logic(array $input): LogicResult {
 	return LogicResult::render($result);
 }
 
-function contacts_logic_api() {
+function contacts_logic_descriptor() {
 	return array(
 		'requires_session' => true,
 		'description' => 'One mailbox\'s email contacts (decrypted, ranked) for autocomplete + management',

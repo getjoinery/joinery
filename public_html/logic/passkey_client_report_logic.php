@@ -37,7 +37,7 @@ function passkey_client_report_logic(array $input): LogicResult {
 	return LogicResult::render(['recorded' => true]);
 }
 
-function passkey_client_report_logic_api() {
+function passkey_client_report_logic_descriptor() {
 	return [
 		'requires_session' => true,
 		'auth' => array('requires_browser_session' => true),

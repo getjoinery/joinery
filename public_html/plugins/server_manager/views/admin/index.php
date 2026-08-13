@@ -525,7 +525,7 @@ function render_node_row($node, $db, $session) {
 			<div class="svm-minw0">
 				<strong><?php echo htmlspecialchars($node->get('mgn_name')); ?></strong>
 				<?php if ($node->get('mgn_delete_time')): ?>
-					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars(LibraryFunctions::convert_time($node->get('mgn_delete_time'), 'UTC', $session->get_timezone(), 'M j, Y')); ?>">Removed</span>
+					<span class="badge bg-secondary ms-1" title="Removed <?php echo htmlspecialchars($node->get_local('mgn_delete_time', 'M j, Y')); ?>">Removed</span>
 				<?php endif; ?>
 				<?php if ($install_state === 'installing'): ?>
 					<span class="badge bg-info ms-1">Installing…</span>

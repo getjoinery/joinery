@@ -135,12 +135,7 @@ public static function GenerateKey($key) {
 		}
 		$this->set('apk_last_used_time', $now_utc);
 		// Usage tracking persists on GET API requests too
-		SystemBase::$allow_get_mutation = true;
-		try {
-			$this->save();
-		} finally {
-			SystemBase::$allow_get_mutation = false;
-		}
+		SystemBase::server_initiated_write(function () { $this->save(); });
 	}
 
 	/**
@@ -206,9 +201,6 @@ class MultiApiKey extends SystemMultiBase {
             $filters['apk_is_published'] = $this->options['published'] ? "= TRUE" : "= FALSE";
         }
 
-        if (isset($this->options['deleted'])) {
-            $filters['apk_delete_time'] = $this->options['deleted'] ? "IS NOT NULL" : "IS NULL";
-        }
 
         return $this->_get_resultsv2('apk_api_keys', $filters, $this->order_by, $only_count, $debug);
     }

@@ -108,42 +108,40 @@ loads after every ordered consumer, sorted by plugin name. A bootstrap is never
 `VaultUnlock::loadConsumerBootstraps()` and lets the loader run it, which is
 what keeps each registration attributed to its plugin.
 
-### Core File Guarantees
+### Classes Resolve By Name
 
-When developing plugins, the following core files are guaranteed to be available without requiring them:
+Name a class and it loads. That covers every class in core `includes/` and
+`data/`, and every class in an active plugin's `includes/` and `data/` — your
+own plugin's classes included. Nothing has to be required first.
 
-- **PathHelper** - Use for all file operations
-- **Globalvars** - Access configuration and settings
-- **SessionControl** - Handle session and authentication
-
-#### Example Usage in Plugins
+`PathHelper` stays for files that are not classes: view fragments, templates,
+seed data, the Composer autoloader.
 
 ```php
 // In any plugin file (admin, views, includes, etc.)
 
-// ✅ CORRECT - Use directly without require
+// ✅ CORRECT — name the class, it loads
 $settings = Globalvars::get_instance();
 $theme = $settings->get_setting('theme_template');
 
-$session = SessionControl::get_instance();
-if (!$session->is_logged_in()) {
-    // Handle not logged in
-}
+$user = new User($session->get_user_id(), TRUE);
+$notes = new MultiAcmeNote(array('user_id' => $user->key));
 
-// Use PathHelper for other includes
-require_once(PathHelper::getIncludePath('data/users_class.php'));
+// ✅ CORRECT — PathHelper for a file that is not a class
+require_once(PathHelper::getIncludePath('plugins/acme/includes/acme_panel.php'));
 
-// ❌ WRONG - Don't do this
+// ❌ WRONG — hand-built relative paths
 require_once(__DIR__ . '/../../includes/PathHelper.php');
-require_once(__DIR__ . '/../../includes/Globalvars.php');
+require_once(__DIR__ . '/../../data/users_class.php');
 ```
 
-#### Why This Matters
+A class added while a site is running resolves without a cache flush: the
+lookup rebuilds its map once before giving up. Activating or deactivating a
+plugin drops the map, so the active set and the resolvable set never disagree.
 
-1. **Cleaner Code** - No need for complex relative paths
-2. **Consistency** - Same pattern everywhere
-3. **Performance** - Files only loaded once
-4. **Maintainability** - Easier to refactor
+An inactive plugin's classes deliberately do NOT resolve — that is what makes
+`class_exists('SomePluginClass')` a truthful answer to "is this feature
+available here?"
 
 #### Common SessionControl methods
 
@@ -530,7 +528,7 @@ function my_feature_logic_descriptor(): array {
 }
 ```
 
-The `input` schema drives boundary validation and appears in discovery — see [docs/api.md](api.md#making-a-logic-function-available-via-api) for the field types and the legacy `_logic_api()` companion.
+The `input` schema drives boundary validation and appears in discovery — see [docs/api.md](api.md#making-a-logic-function-available-via-api) for the field types.
 
 The action is addressed under the plugin's namespace — `POST /api/v1/action/my-plugin/my_feature` — and listed in `GET /api/v1/actions` as `my-plugin/my_feature`. Resolution goes directly to `plugins/{plugin}/logic/{action}_logic.php`; only active plugins resolve, and the namespace means a plugin action can never collide with a core action or another plugin's.
 

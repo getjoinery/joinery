@@ -81,7 +81,7 @@
 							</tr>
 							<tr>
 								<td class="p-1 text-800 fw-semi-bold">Created</td>
-								<td class="p-1 text-600"><?php echo LibraryFunctions::convert_time($video->get('vid_create_time'), 'UTC', $session->get_timezone(), 'M j, Y g:i A T'); ?></td>
+								<td class="p-1 text-600"><?php echo $video->get_local('vid_create_time', 'M j, Y g:i A T'); ?></td>
 							</tr>
 							<?php if($video->get('vid_view_count')): ?>
 							<tr>
@@ -93,7 +93,7 @@
 								<td class="p-1 text-800 fw-semi-bold">Status</td>
 								<td class="p-1">
 									<?php if($video->get('vid_delete_time')): ?>
-										<span class="badge badge-danger">Deleted at <?php echo LibraryFunctions::convert_time($video->get('vid_delete_time'), 'UTC', $session->get_timezone()); ?></span>
+										<span class="badge badge-danger">Deleted at <?php echo $video->get_local('vid_delete_time'); ?></span>
 									<?php else: ?>
 										<span class="badge badge-subtle-success">Active</span>
 									<?php endif; ?>
