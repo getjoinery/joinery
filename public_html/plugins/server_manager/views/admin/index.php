@@ -12,7 +12,7 @@
  * @version 1.12 - Sweep reconciles all JobResultProcessor-handled types (P-17), not a hardcoded 3
  * @version 1.11 - Shared server_manager.js asset (smApiPost/smEsc/smSafeUrl)
  *          1.10 - Agent self-update surfacing: pending/refused/rolled-back
- *                 alerts from the heartbeat row (specs/agent_release_channel.md)
+ *                 alerts from the heartbeat row (specs/implemented/agent_release_channel.md)
  *          1.9 - Relay Fleet console link (mailbox plugin)
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));

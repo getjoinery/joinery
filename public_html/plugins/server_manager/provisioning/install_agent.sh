@@ -3,7 +3,7 @@
 # install_agent.sh - server_manager host_installer: install or converge the
 # joinery-agent from the shipped agent_dist artifact.
 #
-# Version: 1.1 (specs/agent_release_channel.md)
+# Version: 1.1 (specs/implemented/agent_release_channel.md)
 #
 # Runs at the platform's root moments (container start, site install, code
 # upgrade, and the Run Plugin Installers action) on any deployment where the

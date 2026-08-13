@@ -7,7 +7,7 @@
 # timeout: 3600
 #
 # A container install of the current tree on a throwaway Docker host, held to
-# the promises specs/installer_defects_2026_08_06.md pins as text elsewhere.
+# the promises specs/implemented/installer_defects_2026_08_06.md pins as text elsewhere.
 # The text assertions prove the guards are written down; this gate proves a
 # real install behaves. Every assertion here failed on a real box on
 # 2026-08-06 before the fixes:
