@@ -3,7 +3,7 @@
     "display_name": "Plugin-Provided Theme",
     "description": "Delegates all theme functionality to a selected plugin",
     "author": "System",
-    "version": "1.0.1",
+    "version": "1.0.2",
     "receives_upgrades": true,
     "included_in_publish": true,
     "framework": "none",

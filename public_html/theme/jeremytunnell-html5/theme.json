@@ -1,7 +1,7 @@
 {
     "name": "jeremytunnell-html5",
     "display_name": "Jeremy Tunnell HTML5",
-    "version": "1.0.3",
+    "version": "1.0.4",
     "description": "Clean HTML5 theme based on Typology design, zero dependencies",
     "author": "Joinery Team",
     "receives_upgrades": true,
