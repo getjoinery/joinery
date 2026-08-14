@@ -3,12 +3,14 @@
  * Persona Browser — Blocked Senders
  * URL: /plugins/persona_browser/admin/admin_persona_blocked_senders
  *
- * Lists every creator blocked from the feed ("Block sender" on a feed card)
- * with an Unblock button. Unblocking soft-deletes the block row, so the
- * sender's stored posts reappear in the feed immediately; blocking them again
- * revives the same row.
+ * Lists every creator blocked from the feed — by hand ("Block sender" on a
+ * feed card) or automatically (the ad-judging recipe's repeat-advertiser
+ * threshold) — with an Unblock button. Unblocking soft-deletes the block row,
+ * so the sender's stored posts reappear in the feed immediately; blocking them
+ * again by hand revives the same row, but auto-blocking never touches an
+ * author the owner has unblocked.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -49,10 +51,15 @@ $page->admin_header(array(
 if ($numrecords === 0) {
 	echo '<p>No blocked senders. Use the &#8942; menu on a feed post to block its creator; they will appear here.</p>';
 } else {
-	$page->tableheader(array('Sender', 'Blocked', ''), array('title' => 'Blocked Senders'));
+	$page->tableheader(array('Sender', 'Blocked by', 'Blocked', ''), array('title' => 'Blocked Senders'));
 	foreach ($blocks as $block) {
+		$note = trim((string)$block->get('pbs_note'));
+		$source = $block->get('pbs_source') === 'auto'
+			? 'AI' . ($note !== '' ? ' &mdash; ' . htmlspecialchars($note) : '')
+			: 'You';
 		$page->disprow(array(
 			htmlspecialchars($block->get('pbs_author')),
+			$source,
 			$block->get_local('pbs_create_time'),
 			AdminPage::action_button('Unblock', '/plugins/persona_browser/admin/admin_persona_blocked_senders', array(
 				'hidden' => array(

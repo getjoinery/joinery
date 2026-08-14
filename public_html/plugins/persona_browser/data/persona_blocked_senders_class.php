@@ -24,6 +24,12 @@ class PersonaBlockedSender extends SystemBase {
         'pbs_owner_user_id' => array('type'=>'int4', 'is_nullable'=>false, 'default'=>'0', 'unique_with'=>array('pbs_persona', 'pbs_author')),
         'pbs_persona' => array('type'=>'varchar(32)', 'is_nullable'=>false, 'required'=>true),
         'pbs_author' => array('type'=>'varchar(255)', 'is_nullable'=>false, 'required'=>true),
+        // Who decided: 'manual' = the owner clicked Block sender; 'auto' = the
+        // ad-judging pipeline hit the repeat-advertiser threshold.
+        'pbs_source' => array('type'=>'varchar(10)', 'is_nullable'=>false, 'default'=>'manual'),
+        // Short human-readable why, shown on the Blocked Senders admin page
+        // (e.g. '3 posts judged ads'). Empty for manual blocks.
+        'pbs_note' => array('type'=>'varchar(255)'),
         'pbs_create_time' => array('type'=>'timestamp(6)', 'default'=>'now()'),
         'pbs_update_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
         'pbs_delete_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
@@ -61,6 +67,10 @@ class PersonaBlockedSender extends SystemBase {
         ]);
         foreach ($existing as $row) {
             if ($row->get('pbs_delete_time')) {
+                // The owner re-blocking by hand owns the row from here on,
+                // whatever originally created it.
+                $row->set('pbs_source', 'manual');
+                $row->set('pbs_note', '');
                 $row->undelete();
             }
             return;
@@ -71,6 +81,38 @@ class PersonaBlockedSender extends SystemBase {
         $row->set('pbs_persona', $persona);
         $row->set('pbs_author', $author);
         $row->save();
+    }
+
+    /**
+     * Block an author on the system's initiative (the repeat-advertiser
+     * threshold). Declines — returns FALSE — if ANY row for this author
+     * already exists, live or soft-deleted: a live row means already blocked,
+     * and a soft-deleted row means the owner unblocked this author once, a
+     * decision automation never overrides. Returns TRUE when a block was added.
+     */
+    public static function auto_block(int $owner_user_id, string $persona, string $author, string $note): bool {
+        $author = trim($author);
+        if ($author === '') return false;
+        // Case-insensitive existence check — captures vary an author's casing,
+        // and the display filter compares lowercased, so the decision must too.
+        $existing = new MultiPersonaBlockedSender([
+            'owner_user_id' => $owner_user_id,
+            'persona'       => $persona,
+        ]);
+        foreach ($existing as $row) {
+            if (mb_strtolower(trim((string)$row->get('pbs_author'))) === mb_strtolower($author)) {
+                return false;
+            }
+        }
+
+        $row = new PersonaBlockedSender(NULL);
+        $row->set('pbs_owner_user_id', $owner_user_id);
+        $row->set('pbs_persona', $persona);
+        $row->set('pbs_author', $author);
+        $row->set('pbs_source', 'auto');
+        $row->set('pbs_note', mb_substr($note, 0, 255));
+        $row->save();
+        return true;
     }
 }
 
