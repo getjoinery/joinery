@@ -1,6 +1,6 @@
 {
     "name": "Persona Browser",
-    "version": "0.8.0",
+    "version": "0.10.0",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
@@ -66,6 +66,17 @@
             "label": "Hide reels from the feed",
             "type": "checkbox",
             "helptext": "When on, short-video reels are left out of the feed."
+        },
+        {
+            "name": "persona_browser_auto_block_ad_count",
+            "default": "3",
+            "group": "display",
+            "label": "Auto-block a sender after this many ad posts",
+            "type": "number",
+            "helptext": "When the AI has judged this many of one creator's posts to be advertisements, that creator is added to Blocked Senders automatically. Unblocking them there is final — they are never auto-blocked again. 0 turns auto-blocking off.",
+            "validation": {
+                "min": 0
+            }
         },
         {
             "name": "persona_browser_post_retention_days",
