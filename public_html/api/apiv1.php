@@ -2,7 +2,14 @@
 /**
  * API v1 Endpoint
  *
- * @version 2.14
+ * @version 2.16
+ * @changelog 2.16 - a collection GET includes a locked sealed row with its
+ *   sealed fields masked and content_locked set (export_for_api_locked),
+ *   instead of silently omitting it from a list presented as complete.
+ * @changelog 2.15 - a sealed record nobody present can open answers 423
+ *   VaultLocked on the single-object CRUD read, not a generic 400: the record
+ *   exists and the caller may read it, so "unlock and retry" is actionable
+ *   where "something went wrong" is not.
  * @changelog 2.13 - Drive chunk transport logs its OUTCOME: the api_upload
  *   request-log row is written by DriveUploadTransport's response helpers
  *   (success on 2xx, failure with status code otherwise) instead of a
@@ -455,6 +462,17 @@ if (in_array($operation, $classes)) {
 				'success_message' => $class_name . ' found.',
 				'data' => $object->export_for_api()
 			);
+		} catch (VaultLockedException $e) {
+			// The record exists and the caller may read it — its content is
+			// sealed and nobody who can open it is present. That is a different
+			// answer from "broken", and a client can act on it: prompt to
+			// unlock, then retry. Never the ciphertext, and never a 200.
+			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
+				'user_id' => $api_user->key,
+				'status_code' => 423,
+				'error_type' => 'VaultLocked',
+			]);
+			api_error('That content is sealed. Unlock your vault to read it.', 'VaultLocked', 423);
 		} catch (Exception $e) {
 			RequestLogger::log('api', $request_method . ' ' . $operation, false, [
 				'user_id' => $api_user->key,
@@ -649,6 +667,12 @@ if (in_array($operation, $classes)) {
 				api_authorize_row($object, 'authenticate_read', $auth_data);
 			}
 			$response_array[] = $object->export_for_api();
+		} catch (VaultLockedException $e) {
+			// Authorized, but the row's sealed content is not openable right
+			// now. The single-object GET answers 423; a collection includes the
+			// row with sealed fields masked and content_locked set — dropping it
+			// would present the list as complete while quietly omitting rows.
+			$response_array[] = $object->export_for_api_locked();
 		} catch (Exception $e) {
 			// Skip unauthorized objects
 			continue;

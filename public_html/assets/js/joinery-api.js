@@ -8,6 +8,12 @@
  * error envelope or network failure — logic-level soft failures the action
  * returns inside `data` (e.g. {ok: false}) pass through resolved.
  *
+ * window.joineryApi.postForm(action, formData) is the same call carrying a
+ * multipart body (file uploads). Same envelope, same CSRF header, same
+ * stale-token retry — an upload after an idle session recovers exactly like
+ * every other call, which is why page JS must never hand-roll its own fetch
+ * for one.
+ *
  * window.joineryApi.csrf() reads the token cookie-first (docs/api.md § Browser
  * sessions): the joinery_api_csrf mirror cookie tracks the CURRENT session —
  * resynced on every response, including after a logout in another tab — while
@@ -25,7 +31,7 @@
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 (function () {
 	'use strict';
@@ -45,15 +51,24 @@
 		return send(url, body, false);
 	}
 
+	function postForm(action, formData) {
+		var url = action.charAt(0) === '/' ? action : '/api/v1/action/' + action;
+		return send(url, formData, false);
+	}
+
 	function send(url, body, isRetry) {
 		var token = csrf();
-		var headers = { 'Content-Type': 'application/json' };
+		// A FormData body sets its own multipart Content-Type (with boundary);
+		// naming one here would break it.
+		var isForm = (typeof FormData !== 'undefined') && (body instanceof FormData);
+		var headers = {};
+		if (!isForm) headers['Content-Type'] = 'application/json';
 		if (token) headers['X-Joinery-Csrf'] = token;
 		return fetch(url, {
 			method: 'POST',
 			headers: headers,
 			credentials: 'same-origin',
-			body: JSON.stringify(body || {})
+			body: isForm ? body : JSON.stringify(body || {})
 		}).then(function (r) {
 			return r.json().catch(function () { return {}; }).then(function (env) {
 				if (!r.ok) {
@@ -86,5 +101,5 @@
 		});
 	}
 
-	window.joineryApi = { post: post, csrf: csrf };
+	window.joineryApi = { post: post, postForm: postForm, csrf: csrf };
 })();

@@ -35,7 +35,9 @@
  * re-seal the bytes themselves or retire the only keypair that can ever open
  * them — and a spooled delivery can wait for months.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - DirectDeferIngest from a kind's ingest leaves the delivery
+ *   held quietly for a future unlock instead of logging it as a drain failure.
  * @changelog 1.1 - onReseal callback: held deliveries' sealed parts re-seal to
  *   the new vault keypair on rotation instead of being silently orphaned.
  */
@@ -111,7 +113,14 @@ class DirectSpoolDrain {
 		// is the same gate an unencrypted mailbox runs at commit — here it runs at
 		// unlock, against the now-readable sealed contact list.
 		$accepted = DirectSpoolService::gateFor($spool);
-		DirectSpoolService::ingest($spool, $accepted, $secret_key);
+		try {
+			DirectSpoolService::ingest($spool, $accepted, $secret_key);
+		} catch (DirectDeferIngest $e) {
+			// Still not openable from THIS member's unlock — the store it
+			// belongs in is sealed to someone else's window. Held for a future
+			// unlock; retention reclaims it if that never comes.
+			return false;
+		}
 
 		$spool->set('jdp_state', DirectSpool::STATE_DONE);
 		$spool->set('jdp_drained_time', gmdate('Y-m-d H:i:s'));

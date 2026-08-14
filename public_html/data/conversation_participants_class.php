@@ -4,7 +4,9 @@
  *
  * Tracks who is in each conversation, their read status, and mute preferences.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - cnp_is_admin: group membership and the group name are an
+ *   admin's to manage (specs/implemented/joinery_messenger.md).
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -55,6 +57,9 @@ class ConversationParticipant extends SystemBase {
 		'cnp_usr_user_id'                 => array('type' => 'int4', 'required' => true),
 		'cnp_last_read_time'              => array('type' => 'timestamp(6)'),
 		'cnp_is_muted'                    => array('type' => 'bool', 'default' => false),
+		// Group admins manage membership and the group name. The creator is one;
+		// a 1:1 conversation has no meaningful admin and ignores this.
+		'cnp_is_admin'                    => array('type' => 'bool', 'default' => false),
 		'cnp_create_time'                 => array('type' => 'timestamp(6)'),
 		'cnp_delete_time'                 => array('type' => 'timestamp(6)'),
 	);

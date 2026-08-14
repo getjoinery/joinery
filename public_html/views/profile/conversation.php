@@ -64,7 +64,15 @@ $other_name = $other_user ? htmlspecialchars($other_user->display_name(), ENT_QU
 			<?php foreach ($page_vars['messages'] as $msg):
 				$is_mine = ($msg->get('msg_usr_user_id_sender') == $current_user_id);
 				$bubble_class = $is_mine ? 'message-mine' : 'message-theirs';
-				$body = htmlspecialchars($msg->get('msg_body'), ENT_QUOTES, 'UTF-8');
+				try {
+					$body_text = (string)$msg->get('msg_body');
+				} catch (VaultLockedException $e) {
+					// A sealed conversation with no open unlock window still has
+					// to render for its own participant — as a locked stand-in,
+					// never as an error page.
+					$body_text = 'Protected message — unlock your vault to read it.';
+				}
+				$body = htmlspecialchars($body_text, ENT_QUOTES, 'UTF-8');
 				$time = $msg->get_local('msg_sent_time', 'g:i A');
 				$date = $msg->get_local('msg_sent_time', 'M j, Y');
 			?>

@@ -2,7 +2,9 @@
 /**
  * Admin conversation list
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a Kind column: group name where there is one, and the
+ *   protection level where it is above Standard.
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -45,7 +47,7 @@ $page->admin_header(
 	)
 );
 
-$headers = array("ID", "Participants", "Messages", "Last Message", "Last Activity", "Status", "Actions");
+$headers = array("ID", "Kind", "Participants", "Messages", "Last Message", "Last Activity", "Status", "Actions");
 $pager = new Pager(array('numrecords' => $numrecords, 'numperpage' => $numperpage));
 $table_options = array(
 	'title' => 'Conversations (' . $numrecords . ')',
@@ -86,14 +88,30 @@ foreach ($conversations as $cnv) {
 	$latest_time = '';
 	if ($latest_messages->count() > 0) {
 		$latest = $latest_messages->get(0);
-		$latest_preview = htmlspecialchars(substr(strip_tags($latest->get('msg_body')), 0, 50), ENT_QUOTES, 'UTF-8');
+		try {
+			$latest_preview = htmlspecialchars(substr(strip_tags((string)$latest->get('msg_body')), 0, 50), ENT_QUOTES, 'UTF-8');
+		} catch (VaultLockedException $e) {
+			// A protected conversation shows a preview to nobody, here included.
+			$latest_preview = 'Protected';
+		}
 		$latest_time = $latest->get_local('msg_sent_time', 'M j, Y g:i A');
 	}
 
 	$status = $cnv->get('cnv_delete_time') ? 'Deleted' : 'Active';
 
+	// A named thread, or one with more than two people in it, is a group; the
+	// name is what the members see, so it is what an administrator should see.
+	$kind = $cnv->get('cnv_subject')
+		? 'Group: ' . htmlspecialchars($cnv->get('cnv_subject'), ENT_QUOTES, 'UTF-8')
+		: ($participants->count() > 2 ? 'Group' : 'Direct');
+	$level = ProtectionLevel::normalize($cnv->get('cnv_protection_level'));
+	if ($level !== ProtectionLevel::STANDARD) {
+		$kind .= ' &middot; ' . htmlspecialchars(ProtectionLevel::label($level), ENT_QUOTES, 'UTF-8');
+	}
+
 	$rowvalues = array();
 	$rowvalues[] = $cnv->key;
+	$rowvalues[] = $kind;
 	$rowvalues[] = implode(', ', $participant_names);
 	$rowvalues[] = $message_count;
 	$rowvalues[] = $latest_preview ? '"' . $latest_preview . '..."' : '-';

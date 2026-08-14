@@ -20,7 +20,9 @@
  * partially-upgraded-federation behavior falls out with no special case, and the
  * refusal is request-level, issued before any handler code runs.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a leading-underscore key in a registry file is a JSON
+ *   comment, not a kind; left in, the served set advertised one.
  */
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
@@ -152,6 +154,13 @@ class DirectKinds {
 
 	/** Normalize one declaration; null when it is unusable. */
 	private static function normalize($kind, $declaration, string $plugin): ?array {
+		// JSON has no comments, so a registry file documents itself with a
+		// leading-underscore key. Those are notes, not kinds: left in, the
+		// served set would answer "yes, I serve _comment" to a preflight and
+		// then try to load a handler from a sentence.
+		if (strncmp((string)$kind, '_', 1) === 0) {
+			return null;
+		}
 		$kind = self::normalizeName((string)$kind);
 		if ($kind === '') {
 			return null;

@@ -83,7 +83,13 @@
 	if($message->get('msg_cnv_conversation_id')){
 		echo '<strong>Conversation:</strong> <a href="/admin/admin_conversation?cnv_conversation_id='.$message->get('msg_cnv_conversation_id').'">#'.$message->get('msg_cnv_conversation_id').'</a><br />';
 	}
-	echo '<strong>Message:</strong><br /> '.$message->get('msg_body').'<br />';
+	// A protected conversation reads as locked here like anywhere else.
+	try {
+		$body = nl2br(htmlspecialchars((string)$message->get('msg_body'), ENT_QUOTES, 'UTF-8'));
+	} catch (VaultLockedException $e) {
+		$body = '<em>Protected — unlock your vault to read this.</em>';
+	}
+	echo '<strong>Message:</strong><br /> '.$body.'<br />';
 	if($message->get('msg_delete_time')){
 		echo 'Status: Deleted at '.$message->get_local('msg_delete_time').'<br />';
 	}

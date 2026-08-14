@@ -122,6 +122,13 @@ rather than a failure state.
 - `mailbox/thread_action` (mark/star/delete) operates on cleartext metadata and
   keeps working while locked.
 
+The CRUD surface follows the same contract. A single-object GET whose sealed
+content nobody present can open answers **423 `VaultLocked`** — the record
+exists and the caller may read it, so "unlock and retry" is actionable. A
+**collection GET** includes such a row rather than omitting it: its sealed
+fields are null, its plain columns populated, and it carries
+`content_locked: true` so the client renders its locked placeholder.
+
 The unlock ceremony is the platform passkey `vault-kek` derivation over
 `/api/v1` (`vault_unlock_options` → `vault_unlock_passkey`), opening the same
 server-side window. **`vault_heartbeat`** keeps that window alive: the site-wide

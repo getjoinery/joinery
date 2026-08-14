@@ -54,7 +54,9 @@ foreach ($model_files as $file) {
 	if (!preg_match('/\$sealed_fields\s*=\s*array\s*\(\s*[\'"]/', $source)) {
 		continue;   // no declaration, or an empty one
 	}
-	preg_match('/class\s+(\w+)\s+extends\s+SystemBase/', $source, $class_match);
+	// \b matters: without it "extends SystemBaseException" matches too, and the
+	// census names a file's exception class instead of its model.
+	preg_match('/class\s+(\w+)\s+extends\s+SystemBase\b/', $source, $class_match);
 	$sealed_models[] = array(
 		'file'   => $file,
 		'class'  => $class_match[1] ?? basename($file),
@@ -64,10 +66,18 @@ foreach ($model_files as $file) {
 check(count($sealed_models) >= 8, 'the census found the tree\'s sealed models (' . count($sealed_models) . ' of them)');
 
 $declarations = VaultConsumers::allDeclarations();
-$core_bootstrap_source = '';
+
+// Where a core model's sealing is owned is not always core. A model can live in
+// core because several consumers share its rows while exactly one package seals
+// them — Message is the case: conversations are core, and the messenger plugin
+// is what protects them. So the census reads EVERY resealing consumer's
+// bootstrap, plugin or core, and asks whether any of them takes the model on.
+// Narrowing this to core consumers would force a plugin's obligation to be
+// declared in core, which is the opposite of how consumers are meant to work.
+$resealer_source = '';
 foreach ($declarations as $declaration) {
-	if ($declaration['plugin'] === '' && $declaration['reseals'] && is_file($declaration['path'])) {
-		$core_bootstrap_source .= (string)file_get_contents($declaration['path']);
+	if ($declaration['reseals'] && is_file($declaration['path'])) {
+		$resealer_source .= (string)file_get_contents($declaration['path']);
 	}
 }
 
@@ -78,10 +88,10 @@ foreach ($sealed_models as $model) {
 			$model['class'] . ' is covered by plugin "' . $model['plugin'] . '" declaring reseals: true');
 		continue;
 	}
-	// A core model has no plugin to declare for it, so it must be named by a
-	// core consumer that does.
-	check(strpos($core_bootstrap_source, $model['class']) !== false,
-		$model['class'] . ' is named by a core consumer declaring reseals: true');
+	// A core model has no plugin of its own to declare for it, so some consumer
+	// that does declare the obligation has to name it.
+	check(strpos($resealer_source, $model['class']) !== false,
+		$model['class'] . ' is named by a consumer declaring reseals: true');
 }
 
 // ---------------------------------------------------------------------------
