@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.42
+ * No framework. @version 2.45
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1649,6 +1649,23 @@
 		return banner;
 	}
 
+	// Splice <base target="_blank"> into a message document so every link in it
+	// opens a new tab. Placement matters: anything ahead of a leading <!DOCTYPE>
+	// puts the frame in quirks mode and reflows the email, so the tag goes after
+	// the <head>/<html>/doctype the sender actually wrote, and only leads the
+	// document when there is none.
+	function withBaseTarget(html) {
+		var BASE = '<base target="_blank">';
+		var at = function (m) { return m.index + m[0].length; };
+		var head = /<head\b[^>]*>/i.exec(html);
+		if (head) return html.slice(0, at(head)) + BASE + html.slice(at(head));
+		var htmlTag = /<html\b[^>]*>/i.exec(html);
+		if (htmlTag) return html.slice(0, at(htmlTag)) + '<head>' + BASE + '</head>' + html.slice(at(htmlTag));
+		var doctype = /^\s*<!doctype\b[^>]*>/i.exec(html);
+		if (doctype) return html.slice(0, at(doctype)) + BASE + html.slice(at(doctype));
+		return BASE + html;
+	}
+
 	function messageBlock(m, expanded) {
 		var outbound = (m.direction === 'outbound');
 		var wrap = el('div', 'mbx-message' + (outbound ? ' mbx-outbound' : '') + (expanded ? '' : ' mbx-collapsed'));
@@ -1682,9 +1699,9 @@
 
 		var right = el('div', 'mbx-message-right');
 		right.appendChild(el('span', 'mbx-message-time', fmtTime(m.received_time)));
-		// The kebab holds only detail-page deep links; the member mount has no
-		// detail page (messageDetailBase null), so it renders no kebab at all.
-		if (CFG.messageDetailBase) right.appendChild(kebabMenu(m));
+		// Every mount gets the kebab: Show original reads through an API action
+		// scoped to the caller's own grants, so it needs no admin detail page.
+		right.appendChild(kebabMenu(m));
 		head.appendChild(right);
 
 		head.addEventListener('click', function () { wrap.classList.toggle('mbx-collapsed'); });
@@ -1698,17 +1715,27 @@
 
 		var body = el('div', 'mbx-message-body');
 		if (m.body_html) {
-			// Render the sender-authored (untrusted) HTML in a fully locked-down
-			// iframe: empty sandbox grants nothing, so no scripts run and the frame
-			// can't reach the session or the surrounding page.
+			// Render the sender-authored (untrusted) HTML in a locked-down
+			// iframe: no allow-scripts and no allow-same-origin, so no JS runs
+			// and the frame can't reach the session or the surrounding page.
+			//
+			// The two popup grants are what makes a link in an email clickable.
+			// allow-popups lets the frame open a new tab at all; without
+			// allow-popups-to-escape-sandbox the opened site would inherit this
+			// frame's restrictions (opaque origin, no scripts) and load broken.
+			// The injected <base> (withBaseTarget) sends every link to a new tab
+			// rather than navigating the message frame itself — which is what a
+			// reader wants, and it also keeps the frame from being replaced by a
+			// hostile page. Browsers imply rel=noopener on target=_blank, so the
+			// opened tab gets no handle back on us.
 			var iframe = document.createElement('iframe');
-			iframe.setAttribute('sandbox', '');
-			iframe.setAttribute('srcdoc', m.body_html);
+			iframe.setAttribute('sandbox', 'allow-popups allow-popups-to-escape-sandbox');
+			iframe.setAttribute('srcdoc', withBaseTarget(m.body_html));
 			body.appendChild(iframe);
 		} else if (m.body_plain) {
 			body.appendChild(el('pre', null, m.body_plain));
 		} else {
-			body.appendChild(el('em', null, 'No text body. Use the ⋮ menu → View raw / .eml.'));
+			body.appendChild(el('em', null, 'No text body. Use the ⋮ menu → Show original.'));
 		}
 
 		wrap.appendChild(body);
@@ -1804,8 +1831,13 @@
 		return span;
 	}
 
-	// Gmail-style per-message kebab (⋮) menu — currently holds the raw / .eml
-	// deep-link, kept out of the way until asked for.
+	// Gmail-style per-message kebab (⋮) menu — the per-message actions that are
+	// not worth a button, kept out of the way until asked for.
+	//
+	// Show original and Download .eml both need a stored RFC822 original, which
+	// an IMAP-polled message does not have (has_original). They are left out
+	// entirely there rather than offered and then refused. Print works from the
+	// parsed body, so it is always available.
 	function kebabMenu(m) {
 		var wrap = el('div', 'mbx-kebab-wrap');
 		var btn = el('button', 'mbx-kebab', '⋮');
@@ -1815,12 +1847,28 @@
 
 		var menu = el('div', 'mbx-kebab-menu');
 		menu.hidden = true;
-		var base = CFG.messageDetailBase + '?iem_inbound_email_message_id=' + encodeURIComponent(m.id);
-		var raw = el('a', 'mbx-kebab-item', 'View raw / .eml');
-		raw.href = base + '&view=raw';
-		raw.target = '_blank';
-		raw.rel = 'noopener';
-		menu.appendChild(raw);
+
+		if (m.has_original) {
+			var original = el('button', 'mbx-kebab-item', 'Show original');
+			original.type = 'button';
+			original.addEventListener('click', function () {
+				closeAllKebabs();
+				openMessageSource(m);
+			});
+			menu.appendChild(original);
+
+			var download = el('a', 'mbx-kebab-item', 'Download .eml');
+			download.href = CFG.exportUrlBase + '?message_id=' + encodeURIComponent(m.id);
+			download.addEventListener('click', function () { closeAllKebabs(); });
+			menu.appendChild(download);
+		}
+
+		var print = el('a', 'mbx-kebab-item', 'Print');
+		print.href = CFG.exportUrlBase + '?format=print&message_id=' + encodeURIComponent(m.id);
+		print.target = '_blank';
+		print.rel = 'noopener';
+		print.addEventListener('click', function () { closeAllKebabs(); });
+		menu.appendChild(print);
 
 		// Don't let kebab/menu clicks collapse the message (the head toggles it).
 		btn.addEventListener('click', function (e) {
@@ -2182,6 +2230,102 @@
 
 	function closeModal(overlay) {
 		if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
+	}
+
+	// "Show original" — the message exactly as it arrived on the wire (headers
+	// and all), read through mailbox/message_source. The endpoint scopes the read
+	// to the caller's own grants, so this is the same answer on the member mount
+	// and the admin one.
+	//
+	// Not every message HAS an original to show: a mailbox polled over IMAP keeps
+	// no copy here, and a huge one is cut short rather than poured into a modal.
+	// The endpoint says which happened and the modal repeats it, because "there
+	// is no stored original" and "we failed to read it" are different facts.
+	function openMessageSource(m) {
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal mbx-source-modal');
+		modal.appendChild(el('h3', 'mbx-modal-title', 'Original message'));
+		var note = el('p', 'mbx-modal-help', 'Loading…');
+		modal.appendChild(note);
+
+		var pre = el('pre', 'mbx-source');
+		pre.hidden = true;
+		modal.appendChild(pre);
+
+		var actions = el('div', 'mbx-modal-actions');
+		var copy = el('button', 'mbx-action', 'Copy');
+		copy.type = 'button';
+		copy.disabled = true;
+		copy.addEventListener('click', function () {
+			var write = navigator.clipboard && navigator.clipboard.writeText
+				? navigator.clipboard.writeText(pre.textContent) : Promise.reject();
+			write.then(function () {
+				copy.textContent = 'Copied';
+				setTimeout(function () { copy.textContent = 'Copy'; }, 1500);
+			}).catch(function () { copy.textContent = 'Press Ctrl+C'; });
+		});
+		var close = el('button', 'mbx-action mbx-primary', 'Close');
+		close.type = 'button';
+		close.addEventListener('click', function () { closeModal(overlay); });
+		actions.appendChild(copy);
+		actions.appendChild(close);
+		modal.appendChild(actions);
+
+		overlay.appendChild(modal);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
+		document.body.appendChild(overlay);
+
+		// Esc closes, and the listener leaves with the modal.
+		function onKey(e) {
+			if (e.key !== 'Escape') return;
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
+		document.addEventListener('keydown', onKey);
+
+		function render(data) {
+			data = data || {};
+			if (data.locked) {
+				// A sealed original is a content action like any other: offer the
+				// one-tap ceremony, then ask again with the window open.
+				note.textContent = 'Your vault is locked. Unlocking…';
+				unlockVault().then(function (ok) {
+					if (!ok) { note.textContent = 'Your vault is locked, so the original stays sealed.'; return; }
+					state.threadLocked = false;
+					note.textContent = 'Loading…';
+					load();
+				});
+				return;
+			}
+			if (data.available === false) {
+				note.textContent = data.reason || 'No original was stored for this message.';
+				return;
+			}
+			if (typeof data.source !== 'string') {
+				note.textContent = 'The original could not be read.';
+				return;
+			}
+			pre.textContent = data.source;
+			note.textContent = data.truncated
+				? ('The message exactly as it arrived — showing the first '
+					+ fmtBytes(data.source.length) + ' of ' + fmtBytes(data.size_bytes) + '.')
+				: ('The message exactly as it arrived, headers and all — '
+					+ fmtBytes(data.size_bytes) + '.');
+			pre.hidden = false;
+			copy.disabled = false;
+		}
+
+		function load() {
+			apiV1(CFG.messageSourceUrl, { message_id: String(m.id) })
+				.then(render)
+				.catch(function (err) {
+					// The endpoint's own refusal is the useful sentence ("You do
+					// not have access to this mailbox"); the generic line is only
+					// for a request that never answered.
+					note.textContent = (err && err.message) || 'The original could not be read.';
+				});
+		}
+		load();
 	}
 
 	// Place the caret at the very start of an element (so the user types ABOVE an

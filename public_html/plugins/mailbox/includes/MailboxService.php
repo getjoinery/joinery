@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.20
+ * @version 1.21
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -1147,7 +1147,9 @@ class MailboxService {
 					iem_size_bytes, iem_message_id_header, iem_direction,
 					iem_body_plain, iem_body_html, iem_content_sealed, iem_sealed_key,
 					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
-					iem_ai_summary, iem_transport, iem_direct_verified
+					iem_ai_summary, iem_transport, iem_direct_verified,
+					iem_raw_storage_driver, iem_raw_storage_key,
+					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1213,10 +1215,34 @@ class MailboxService {
 				// native/API consumers. The web thread view does not render it — the
 				// full body is already on screen, so a summary of it is noise there.
 				'ai_summary'        => $decrypted['iem_ai_summary'],
+				// Whether a stored original exists to show or download. A mailbox
+				// polled over IMAP ('remote') keeps no platform copy — only its
+				// parts are fetched on demand — so the reader hides Show original
+				// and Download .eml rather than offering two dead ends.
+				'has_original'      => $this->hasStoredOriginal($r),
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
 		return $out;
+	}
+
+	/**
+	 * Does this row have a whole RFC822 original to export? Reads the storage
+	 * descriptor (see InboundEmailMessage's header): 'remote' rows never have
+	 * one, file/object-backed rows have one when they carry a key, and an
+	 * 'inline' row has one when the column is non-empty. Says nothing about
+	 * whether a sealed one can be opened right now — that is the vault's answer,
+	 * given when the export is actually asked for.
+	 */
+	private function hasStoredOriginal(array $row): bool {
+		$driver = (string)($row['iem_raw_storage_driver'] ?? '') ?: 'inline';
+		if ($driver === 'remote') {
+			return false;
+		}
+		if ($driver === 'local' || $driver === 'cloud') {
+			return trim((string)($row['iem_raw_storage_key'] ?? '')) !== '';
+		}
+		return (bool)$this->pgBool($row['iem_has_inline_raw'] ?? false);
 	}
 
 	/**

@@ -16,7 +16,7 @@
  * also used by the member page at /profile/mailbox/mailbox — this page
  * supplies the admin chrome and the admin endpoint URLs.
  *
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -51,7 +51,6 @@ mailbox_render_mailbox_reader($page, array(
 	'csrf_token'          => $csrf_token,
 	'initial_mailboxes'   => $initial_mailboxes,
 	'attachment_url_base' => '/plugins/mailbox/admin/admin_mailbox_attachment',
-	'message_detail_base' => '/plugins/mailbox/admin/admin_mailbox_message',
 	// An empty inbox is where "is this even wired up?" gets asked, so the answer
 	// is one click away from the mailbox rather than two tabs over.
 	'setup_url_base'      => '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=',
