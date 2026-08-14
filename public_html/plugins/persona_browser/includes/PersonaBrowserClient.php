@@ -6,8 +6,9 @@
  * and bearer token from settings and calls the service over the tailnet.
  *
  * The service opens a hand-logged-in Firefox profile headlessly and returns the
- * feed plus cached post images; this class shuttles requests and normalizes the
- * feed response into one of a few states the caller cares about.
+ * raw markup of each captured post plus the images it cached; this class
+ * shuttles requests, runs the markup through FacebookFeedExtractor, and
+ * normalizes the result into one of a few states the caller cares about.
  */
 class PersonaBrowserClient {
 
@@ -35,7 +36,8 @@ class PersonaBrowserClient {
      * @return array{state:string, items:array, url:?string, error:?string}
      *   state is one of: 'ok', 'needs_login', 'not_configured', 'unreachable'.
      *   Each item: {dedup_key, author, message, image_alt, link, media[]} where
-     *   media[] are the service's cached image filenames.
+     *   media[] are the service's cached image filenames. The service returns
+     *   raw post markup; FacebookFeedExtractor turns it into these items.
      */
     public function get_feed(string $persona = 'facebook'): array {
         if (!$this->is_configured()) {
@@ -62,19 +64,9 @@ class PersonaBrowserClient {
             return ['state' => 'needs_login', 'items' => [], 'url' => $decoded['url'] ?? null, 'error' => null];
         }
 
-        $items = [];
-        foreach (($decoded['items'] ?? []) as $it) {
-            $dedup = trim((string)($it['dedupKey'] ?? ''));
-            if ($dedup === '') continue;
-            $items[] = [
-                'dedup_key' => $dedup,
-                'author'    => trim((string)($it['author'] ?? '')),
-                'message'   => trim((string)($it['message'] ?? '')),
-                'image_alt' => trim((string)($it['imageAlt'] ?? '')),
-                'link'      => trim((string)($it['link'] ?? '')),
-                'media'     => array_values(array_filter((array)($it['media'] ?? []), 'is_string')),
-            ];
-        }
+        $posts = array_values(array_filter((array)($decoded['posts'] ?? []), 'is_string'));
+        $media = is_array($decoded['media'] ?? null) ? $decoded['media'] : [];
+        $items = FacebookFeedExtractor::extract($posts, $media);
 
         return ['state' => 'ok', 'items' => $items, 'url' => $decoded['url'] ?? null, 'error' => null];
     }
