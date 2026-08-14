@@ -1,0 +1,11 @@
+{
+  "name": "persona-browser",
+  "version": "1.0.0",
+  "description": "Tailnet-bound reader for a hand-logged-in social feed (Persona Browser plugin service).",
+  "main": "server.js",
+  "type": "commonjs",
+  "license": "PolyForm-Shield-1.0.0",
+  "dependencies": {
+    "playwright": "^1.62.1"
+  }
+}
