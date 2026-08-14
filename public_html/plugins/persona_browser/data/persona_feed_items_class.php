@@ -35,6 +35,29 @@ class PersonaFeedItem extends SystemBase {
         'pfi_image_alt' => array('type'=>'text'),
         'pfi_link' => array('type'=>'text'),
         'pfi_media' => array('type'=>'text'),
+        // Capture metadata read from the post's header/footer markup at fetch
+        // time (see FacebookFeedExtractor). Empty/NULL = captured before these
+        // fields existed, or the marker was absent from the markup.
+        // pfi_relation: how the post entered the feed — 'network' (friends and
+        // followed pages), 'suggested' (algorithm-injected, had a Follow
+        // button), 'group' (a group the account is in), 'group_suggested'
+        // (group post with a Join button).
+        'pfi_relation' => array('type'=>'varchar(20)'),
+        // For group posts: the group's name (pfi_author is the person posting).
+        'pfi_group_name' => array('type'=>'varchar(255)'),
+        // Canonical profile/page URL of the author — identity that survives
+        // display-name changes.
+        'pfi_author_link' => array('type'=>'text'),
+        'pfi_author_verified' => array('type'=>'bool', 'is_nullable'=>true),
+        // 'text' | 'photo' | 'video' | 'reel'
+        'pfi_post_type' => array('type'=>'varchar(12)'),
+        // The "Shared with …" audience string ('Public', 'Friends', 'Public group').
+        'pfi_audience' => array('type'=>'varchar(40)'),
+        // Engagement at capture time. NULL = not shown in the markup (which
+        // includes a true zero — Facebook omits the number entirely).
+        'pfi_reactions' => array('type'=>'int4', 'is_nullable'=>true),
+        'pfi_comment_count' => array('type'=>'int4', 'is_nullable'=>true),
+        'pfi_share_count' => array('type'=>'int4', 'is_nullable'=>true),
         // Advertisement verdict from the MarkAdvertisementsJob AI recipe.
         // pfi_is_ad NULL = not yet judged; TRUE/FALSE = judged.
         'pfi_is_ad' => array('type'=>'bool', 'is_nullable'=>true),

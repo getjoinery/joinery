@@ -12,8 +12,12 @@
  * selectors version, test, and deploy with the rest of the plugin.
  *
  * Output item shape matches what PersonaBrowserClient::get_feed() returns and
- * FetchFeedTask consumes: {dedup_key, author, message, image_alt, link, media[]}
- * where media[] are the service's cached image filenames (served via /media).
+ * FetchFeedTask consumes: {dedup_key, author, message, image_alt, link, media[],
+ * relation, group_name, author_link, author_verified, post_type, audience,
+ * reactions, comment_count, share_count} where media[] are the service's cached
+ * image filenames (served via /media). The metadata fields are read from the
+ * post's header/footer markup — see the corresponding pfi_ columns in
+ * PersonaFeedItem for what each means.
  */
 class FacebookFeedExtractor {
 
@@ -38,12 +42,19 @@ class FacebookFeedExtractor {
 
             $key = $item['dedup_key'];
             if (isset($out[$key])) {
-                // Same post captured again on a later scroll — union its media.
+                // Same post captured again on a later scroll — union its media
+                // and fill any metadata the first sighting missed.
                 $out[$key]['media'] = array_values(array_unique(
                     array_merge($out[$key]['media'], $item['media'])
                 ));
                 if ($out[$key]['image_alt'] === '' && $item['image_alt'] !== '') {
                     $out[$key]['image_alt'] = $item['image_alt'];
+                }
+                foreach (['relation', 'group_name', 'author_link', 'audience'] as $k) {
+                    if ($out[$key][$k] === '' && $item[$k] !== '') $out[$key][$k] = $item[$k];
+                }
+                foreach (['author_verified', 'reactions', 'comment_count', 'share_count'] as $k) {
+                    if ($out[$key][$k] === null && $item[$k] !== null) $out[$key][$k] = $item[$k];
                 }
             } else {
                 $out[$key] = $item;
@@ -51,6 +62,72 @@ class FacebookFeedExtractor {
         }
 
         return array_values($out);
+    }
+
+    /**
+     * Pull the Stories tray out of a capture: who has an active story, the
+     * link to view it, and the cached preview/avatar image filenames. The tray
+     * is the horizontal bubble row Facebook renders as a feed unit; extract()
+     * deliberately drops it (it is not a post), and this reads it instead.
+     * Returns [] when the capture contains no tray, in tray order.
+     *
+     * Each story: {story_key, author, link, preview, avatar} — preview/avatar
+     * are keys into the service's media map ('' if not cached).
+     */
+    public static function extractStories(array $posts, array $media): array {
+        foreach ($posts as $html) {
+            if (!is_string($html) || $html === '') continue;
+
+            $doc = new DOMDocument();
+            libxml_use_internal_errors(true);
+            $doc->loadHTML('<?xml encoding="UTF-8">' . $html, LIBXML_NOWARNING | LIBXML_NOERROR);
+            libxml_clear_errors();
+            $xp = new DOMXPath($doc);
+
+            $anchors = $xp->query('//a[contains(@href, "/stories/")]');
+            if ($anchors->length < 3) continue;   // not the tray
+
+            $out = [];
+            foreach ($anchors as $a) {
+                $href = $a->getAttribute('href');
+                // "Create story" and other chrome carry no numeric story id.
+                if (!preg_match('#/stories/(\d+)#', $href, $m)) continue;
+                $key = $m[1];
+                if (isset($out[$key])) continue;
+
+                $author = trim(preg_replace('/\s+/u', ' ', $a->textContent));
+                if ($author === '') continue;
+
+                $path = parse_url($href, PHP_URL_PATH);
+                if (!is_string($path) || $path === '') continue;
+
+                // The card holds two images: the story's cover frame (large)
+                // and the author's avatar (small).
+                $preview = '';
+                $avatar = '';
+                $preview_w = 0;
+                foreach ($xp->query('.//img', $a) as $img) {
+                    $src = $img->getAttribute('src');
+                    if (!isset($media[$src])) continue;
+                    $nw = (int)$img->getAttribute('data-nw');
+                    if ($nw >= 150) {
+                        if ($nw > $preview_w) { $preview = $media[$src]; $preview_w = $nw; }
+                    } elseif ($nw > 0 && $avatar === '') {
+                        $avatar = $media[$src];
+                    }
+                }
+
+                $out[$key] = [
+                    'story_key' => $key,
+                    'author'    => $author,
+                    'link'      => 'https://www.facebook.com' . $path,
+                    'preview'   => $preview,
+                    'avatar'    => $avatar,
+                ];
+            }
+            if ($out) return array_values($out);
+        }
+        return [];
     }
 
     /** Parse one post's markup into an item, or null if it carries nothing. */
@@ -61,10 +138,16 @@ class FacebookFeedExtractor {
         libxml_clear_errors();
         $xp = new DOMXPath($doc);
 
-        $author  = self::author($xp);
+        $head    = self::headerMeta($xp);
+        $author  = $head['author'] !== '' ? $head['author'] : self::author($xp);
         $message = self::message($xp, $author);
         [$id, $link] = self::identity($xp);
         [$image_alt, $media_files] = self::images($xp, $media);
+
+        // The Reels/Stories trays are feed units but not posts — drop them.
+        if (self::isTray($xp, $author)) {
+            return null;
+        }
 
         // Nothing worth storing: no author, no real body, no images.
         if ($author === '' && mb_strlen($message) < 20 && count($media_files) === 0) {
@@ -73,14 +156,151 @@ class FacebookFeedExtractor {
 
         $dedup_key = $id !== '' ? $id : ('h:' . $author . '|' . mb_substr($message, 0, 80));
 
-        return [
+        if (strncmp($id, 'reel:', 5) === 0)        { $post_type = 'reel'; }
+        elseif (strncmp($id, 'video:', 6) === 0)   { $post_type = 'video'; }
+        elseif (count($media_files) > 0 || strncmp($id, 'photo:', 6) === 0) { $post_type = 'photo'; }
+        else                                       { $post_type = 'text'; }
+
+        return array_merge([
             'dedup_key' => $dedup_key,
             'author'    => $author,
             'message'   => $message,
             'image_alt' => $image_alt,
             'link'      => $link,
             'media'     => $media_files,
-        ];
+            'post_type' => $post_type,
+            'audience'  => self::audience($xp),
+        ], $head['meta'], self::engagement($xp));
+    }
+
+    /**
+     * Read the post's own header (the first h2–h4 block): who the author is,
+     * their profile/page link, whether the post came from a group, and the
+     * relationship marker. A "Follow" button beside the name means the account
+     * does not follow this creator (the algorithm injected the post); a "Join"
+     * button means a group the account is not in. No marker = the post came
+     * from the account's own network. Scoped strictly to the header so a body
+     * that merely says "follow me" can never classify the post.
+     */
+    private static function headerMeta(DOMXPath $xp): array {
+        $none = ['author' => '', 'meta' => [
+            'relation' => '', 'group_name' => '', 'author_link' => '', 'author_verified' => null,
+        ]];
+        $h = $xp->query('//*[self::h2 or self::h3 or self::h4]')->item(0);
+        if (!$h) return $none;
+
+        $htext = trim(preg_replace('/\s+/u', ' ', $h->textContent));
+        $verified = mb_strpos($htext, 'Verified account') !== false;
+
+        // Follow/Join marker: a link or span inside the header whose exact
+        // text is the button word.
+        $marker = '';
+        foreach ($xp->query('.//a|.//span', $h) as $n) {
+            $t = trim($n->textContent);
+            if ($t === 'Follow' || $t === 'Join') { $marker = $t; break; }
+        }
+
+        $first = $xp->query('.//a[@href]', $h)->item(0);
+        $first_href = $first ? $first->getAttribute('href') : '';
+        $first_text = $first ? trim(preg_replace('/\s+/u', ' ', $first->textContent)) : '';
+
+        $author = $first_text;
+        $author_link = $first_href !== '' ? self::canonicalAuthorLink($first_href) : '';
+        $group_name = '';
+        if (strpos($first_href, '/groups/') !== false) {
+            // Group post: the header names the group; the person who posted is
+            // the /groups/{gid}/user/{uid}/ link that follows it.
+            $group_name = $first_text;
+            $relation = ($marker === 'Join') ? 'group_suggested' : 'group';
+            foreach ($xp->query('//a[contains(@href, "/user/")]') as $a) {
+                if (strpos($a->getAttribute('href'), '/groups/') === false) continue;
+                $t = trim(preg_replace('/\s+/u', ' ', $a->textContent));
+                if ($t === '') continue;
+                $author = $t;
+                $author_link = self::canonicalAuthorLink($a->getAttribute('href'));
+                break;
+            }
+        } else {
+            $relation = ($marker === 'Follow') ? 'suggested' : 'network';
+        }
+
+        return ['author' => $author, 'meta' => [
+            'relation'        => $relation,
+            'group_name'      => $group_name,
+            'author_link'     => $author_link,
+            'author_verified' => $verified,
+        ]];
+    }
+
+    /** Normalize a header href to a stable profile/page/group-member URL. */
+    private static function canonicalAuthorLink(string $href): string {
+        $parts = parse_url($href);
+        if ($parts === false) return '';
+        $path = $parts['path'] ?? '';
+        if ($path === '' || $path === '/') return '';
+        $origin = ($parts['scheme'] ?? 'https') . '://' . ($parts['host'] ?? 'www.facebook.com');
+        parse_str($parts['query'] ?? '', $q);
+        if ($path === '/profile.php' && !empty($q['id'])) {
+            return $origin . '/profile.php?id=' . $q['id'];
+        }
+        return $origin . rtrim($path, '/');
+    }
+
+    /**
+     * The Reels tray and Stories tray scroll past as feed units but are
+     * navigation chrome, not posts.
+     */
+    private static function isTray(DOMXPath $xp, string $author): bool {
+        if ($author === 'Reels' || $author === 'Stories') return true;
+        // The stories tray has no heading — recognize it by its pile of
+        // /stories/ links.
+        return $xp->query('//a[contains(@href, "/stories/")]')->length >= 3;
+    }
+
+    /** The "Shared with …" audience string ('Public', 'Friends', 'Public group'). */
+    private static function audience(DOMXPath $xp): string {
+        foreach ($xp->query('//span') as $n) {
+            if ($n->getElementsByTagName('span')->length > 0) continue;   // leaf spans only
+            $t = trim(preg_replace('/\s+/u', ' ', $n->textContent));
+            if (preg_match('/^Shared with (.{1,40})$/u', $t, $m)) {
+                return $m[1];
+            }
+        }
+        return '';
+    }
+
+    /**
+     * Engagement counts from the post's action bar. Each count is the number
+     * span inside a role=button whose aria-label identifies the action, so a
+     * number in the body text can never be mistaken for a count. NULL = the
+     * markup showed no number (Facebook omits zero).
+     */
+    private static function engagement(DOMXPath $xp): array {
+        $out = ['reactions' => null, 'comment_count' => null, 'share_count' => null];
+        foreach ($xp->query('//div[@role="button"][@aria-label]') as $btn) {
+            $label = $btn->getAttribute('aria-label');
+            if ($label === 'Like' || $label === 'React')                   { $slot = 'reactions'; }
+            elseif ($label === 'Leave a comment')                          { $slot = 'comment_count'; }
+            elseif ($label === 'Share' || stripos($label, 'Send this to friends') === 0) { $slot = 'share_count'; }
+            else continue;
+            if ($out[$slot] !== null) continue;   // first (outermost post's) bar wins
+            foreach ($xp->query('.//span', $btn) as $s) {
+                if ($s->getElementsByTagName('span')->length > 0) continue;
+                if (preg_match('/^([0-9][0-9.,]*)\s*([KM])?$/', trim($s->textContent), $m)) {
+                    $out[$slot] = self::parseCount($m[1], $m[2] ?? '');
+                    break;
+                }
+            }
+        }
+        return $out;
+    }
+
+    /** '1.2' + 'K' → 1200; '316' + '' → 316. */
+    private static function parseCount(string $num, string $suffix): int {
+        $n = (float)str_replace(',', '', $num);
+        if ($suffix === 'K') $n *= 1000;
+        if ($suffix === 'M') $n *= 1000000;
+        return (int)round($n);
     }
 
     /** Author is the first heading link; failing that, the heading's first line. */

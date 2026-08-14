@@ -33,15 +33,16 @@ class PersonaBrowserClient {
     /**
      * Fetch the feed for a persona.
      *
-     * @return array{state:string, items:array, url:?string, error:?string}
+     * @return array{state:string, items:array, stories:array, url:?string, error:?string}
      *   state is one of: 'ok', 'needs_login', 'not_configured', 'unreachable'.
-     *   Each item: {dedup_key, author, message, image_alt, link, media[]} where
-     *   media[] are the service's cached image filenames. The service returns
-     *   raw post markup; FacebookFeedExtractor turns it into these items.
+     *   Each item carries the full extractor shape and each story the tray-teaser
+     *   shape (see FacebookFeedExtractor's docblocks); media[] are the service's
+     *   cached image filenames. The service returns raw post markup;
+     *   FacebookFeedExtractor turns it into these items.
      */
     public function get_feed(string $persona = 'facebook'): array {
         if (!$this->is_configured()) {
-            return ['state' => 'not_configured', 'items' => [], 'url' => null, 'error' => null];
+            return ['state' => 'not_configured', 'items' => [], 'stories' => [], 'url' => null, 'error' => null];
         }
 
         try {
@@ -53,22 +54,23 @@ class PersonaBrowserClient {
                 'body' => json_encode(['persona' => $persona]),
             ]);
         } catch (\Exception $e) {
-            return ['state' => 'unreachable', 'items' => [], 'url' => null, 'error' => $e->getMessage()];
+            return ['state' => 'unreachable', 'items' => [], 'stories' => [], 'url' => null, 'error' => $e->getMessage()];
         }
 
         $decoded = json_decode((string)$response->getBody(), true);
         if (!is_array($decoded)) {
-            return ['state' => 'unreachable', 'items' => [], 'url' => null, 'error' => 'non-JSON response'];
+            return ['state' => 'unreachable', 'items' => [], 'stories' => [], 'url' => null, 'error' => 'non-JSON response'];
         }
         if (!empty($decoded['needsLogin']) || empty($decoded['loggedIn'])) {
-            return ['state' => 'needs_login', 'items' => [], 'url' => $decoded['url'] ?? null, 'error' => null];
+            return ['state' => 'needs_login', 'items' => [], 'stories' => [], 'url' => $decoded['url'] ?? null, 'error' => null];
         }
 
         $posts = array_values(array_filter((array)($decoded['posts'] ?? []), 'is_string'));
         $media = is_array($decoded['media'] ?? null) ? $decoded['media'] : [];
         $items = FacebookFeedExtractor::extract($posts, $media);
+        $stories = FacebookFeedExtractor::extractStories($posts, $media);
 
-        return ['state' => 'ok', 'items' => $items, 'url' => $decoded['url'] ?? null, 'error' => null];
+        return ['state' => 'ok', 'items' => $items, 'stories' => $stories, 'url' => $decoded['url'] ?? null, 'error' => null];
     }
 
     /**
