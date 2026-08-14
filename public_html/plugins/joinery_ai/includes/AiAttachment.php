@@ -32,15 +32,19 @@ class AiAttachment {
     const MODE_ORIGINAL  = 'original';
 
     /**
-     * Detected MIME -> routing category. This is the whole accepted set for v1
-     * (images + PDF + plaintext family); anything not a key here is rejected at
-     * ingress. Keyed on detected MIME exactly — never "starts with image/" or
-     * "contains xml", so every finfo guise of an SVG falls through to reject.
+     * Detected MIME -> routing category. This is the whole accepted set;
+     * anything not a key here is rejected at ingress. Keyed on detected MIME
+     * exactly — never "starts with image/" or "contains xml", so every finfo
+     * guise of an SVG falls through to reject.
      *
-     *   image -> vision image block
-     *   pdf   -> extracted text (default) or native document block
-     *   text  -> extracted/verbatim text block (plaintext family)
-     *   html  -> stripped visible text (extract) or raw markup (original)
+     *   image    -> vision image block
+     *   pdf      -> extracted text (default) or native document block
+     *   text     -> extracted/verbatim text block (plaintext family)
+     *   html     -> stripped visible text (extract) or raw markup (original)
+     *   document -> extracted text ONLY. No model takes a docx or a spreadsheet
+     *               natively, so there is no original-mode door for these: a
+     *               document with no readable text has nothing to send, and the
+     *               block builder says so rather than degrading silently.
      */
     const CATEGORY = [
         'image/png'        => 'image',
@@ -56,7 +60,62 @@ class AiAttachment {
         'application/csv'  => 'text',
         'application/json' => 'text',
         'text/html'        => 'html',
+        // Office, OpenDocument and the other formats the core extractor reads.
+        // Deliberately absent: image/svg+xml (markup wearing an image's name),
+        // and application/zip (a container the user did not mean to feed a model).
+        'application/vnd.openxmlformats-officedocument.wordprocessingml.document'   => 'document',
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'         => 'document',
+        'application/vnd.openxmlformats-officedocument.presentationml.presentation' => 'document',
+        'application/vnd.oasis.opendocument.text'         => 'document',
+        'application/vnd.oasis.opendocument.spreadsheet'  => 'document',
+        'application/vnd.oasis.opendocument.presentation' => 'document',
+        'application/epub+zip' => 'document',
+        'application/rtf'      => 'document',
+        'text/rtf'             => 'document',
+        'message/rfc822'       => 'document',
+        'text/calendar'        => 'document',
+        'application/xml'      => 'document',
+        'text/xml'             => 'document',
     ];
+
+    /**
+     * Detected MIMEs that name a container rather than a format. libmagic
+     * identifies docx/xlsx/pptx/odt/epub by convention, not by rule, so on some
+     * builds they all arrive as a plain zip — and an upload rejected as "a
+     * application/zip file, which can't be read" is a lie the user cannot act on.
+     */
+    const CONTAINER_MIMES = [
+        'application/zip', 'application/x-zip-compressed', 'application/octet-stream', '',
+    ];
+
+    /**
+     * Core extractor category -> this plugin's category. The extractor opens the
+     * bytes for real, so what it reports is the last word on what a file WAS;
+     * comparing it against what ingress accepted is how a plain zip renamed
+     * .docx gets caught after the name got it past the door. A core category
+     * absent here (`archive`) is one the chat does not accept at all.
+     */
+    const CORE_CATEGORY = [
+        'pdf'  => 'pdf',
+        'html' => 'html',
+        'text' => 'text',
+        'docx' => 'document',
+        'xlsx' => 'document',
+        'pptx' => 'document',
+        'odf'  => 'document',
+        'epub' => 'document',
+        'rtf'  => 'document',
+        'eml'  => 'document',
+        'ics'  => 'document',
+        'xml'  => 'document',
+    ];
+
+    /** What the extractor's verdict means here, or null when the chat accepts
+     *  no such thing. */
+    public static function categoryForCoreCategory(?string $core): ?string {
+        if ($core === null || $core === '') return null;
+        return self::CORE_CATEGORY[$core] ?? null;
+    }
 
     /** Cap on extracted / verbatim text fed to the model, in characters. */
     const MAX_TEXT_CHARS = 50000;
@@ -85,6 +144,13 @@ class AiAttachment {
     /** Per-text-file byte cap (txt/md/csv/json/html). */
     public static function textMaxBytes(): int {
         return self::settingInt('joinery_ai_attach_text_max_bytes', 2 * 1024 * 1024);
+    }
+
+    /** Per-document byte cap (Word, Excel, PowerPoint, OpenDocument, EPUB, RTF,
+     *  forwarded mail, calendar invites, XML). Higher than the text cap because
+     *  a document's bytes are mostly markup and images around the words. */
+    public static function documentMaxBytes(): int {
+        return self::settingInt('joinery_ai_attach_document_max_bytes', 10 * 1024 * 1024);
     }
 
     /** Max attachments accepted on one message. */
@@ -120,10 +186,39 @@ class AiAttachment {
     /** The raw byte cap that applies to a given category. */
     public static function maxBytesForCategory(string $category): int {
         switch ($category) {
-            case 'image': return self::imageMaxBytes();
-            case 'pdf':   return self::pdfMaxBytes();
-            default:      return self::textMaxBytes();   // text, html
+            case 'image':    return self::imageMaxBytes();
+            case 'pdf':      return self::pdfMaxBytes();
+            case 'document': return self::documentMaxBytes();
+            default:         return self::textMaxBytes();   // text, html
         }
+    }
+
+    /**
+     * The MIME an upload is treated as. What the bytes say wins; the filename is
+     * consulted ONLY when detection landed on a generic container and the name
+     * claims a format built on one — because docx, xlsx, pptx, odt and epub ARE
+     * zips, and libmagic tells them apart by convention rather than by rule.
+     *
+     * The fallback can never mint an image or a native PDF block: those two
+     * categories send the raw bytes to the model, so a lying extension would be
+     * a real forgery. Every category it CAN reach is extracted-text-only, where
+     * the extension merely chooses which parser gets a look — and that parser
+     * re-detects the bytes inside its sandbox and returns SKIPPED when the name
+     * lied. Detection stays the authority; this only stops a correctly-named
+     * document being rejected as "a application/zip file, which can't be read".
+     */
+    public static function resolveUploadMime($detected, ?string $filename): string {
+        $detected = self::normalizeMime($detected);
+        if (self::categoryForMime($detected) !== null) return $detected;
+        if (!in_array($detected, self::CONTAINER_MIMES, true)) return $detected;
+
+        $claimed = DocumentText::mimeForExtension($filename);
+        if ($claimed === null) return $detected;
+        $category = self::categoryForMime($claimed);
+        if ($category === null || $category === 'image' || $category === 'pdf') {
+            return $detected;
+        }
+        return $claimed;
     }
 
     // ---- Ingress validation (fail-loud, user-facing) -----------------------
@@ -160,7 +255,8 @@ class AiAttachment {
 
         if ($category === null) {
             return "“{$label}” is a " . ($mime !== '' ? $mime : 'unknown') . " file, which can't "
-                 . 'be read. Attach an image, PDF, or a text/markdown/CSV/JSON/HTML file.';
+                 . 'be read. Attach an image, a PDF, an Office or OpenDocument file, or a '
+                 . 'text/markdown/CSV/JSON/HTML file.';
         }
 
         $cap = self::maxBytesForCategory($category);
@@ -253,7 +349,13 @@ class AiAttachment {
         if ($status === DocumentText::SECURED || $status === DocumentText::TOO_LARGE) {
             $status = self::EXTRACT_FAILED;
         }
-        return ['status' => $status, 'text' => (string)($result['text'] ?? '')];
+        // 'category' is what the sandbox found the bytes to BE, carried through
+        // so ingress can check it against what it accepted (categoryForCoreCategory).
+        return [
+            'status'   => $status,
+            'text'     => (string)($result['text'] ?? ''),
+            'category' => $result['category'] ?? null,
+        ];
     }
 
     // ---- Sealed-bytes read (send time) --------------------------------------
@@ -404,6 +506,15 @@ class AiAttachment {
                     return [self::framedText($cachedText, $nonce, "HTML: $label")];
                 }
                 return [self::note("An HTML attachment ($label) had no extractable text.")];
+
+            case 'document':
+                // Extracted text is the only door — no model reads a docx or a
+                // spreadsheet natively, so there is nothing to fall back to and
+                // an honest note beats a silent drop.
+                if ((string)$cachedText !== '') {
+                    return [self::framedText($cachedText, $nonce, $label)];
+                }
+                return [self::note("A document attachment ($label) had no readable text.")];
 
             case 'text':
             default:

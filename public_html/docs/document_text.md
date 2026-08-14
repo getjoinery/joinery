@@ -87,7 +87,9 @@ The parent must not write all of stdin before reading: up to 15MB can go down th
 
 `AiAttachment` owns policy — which types the chat accepts, per-category byte caps, model capability gating, untrusted-input framing — and delegates every read here. Its four stored statuses (`aia_extract_status`) are aliases of the core constants; `secured` and `too_large` collapse to `failed`, because for send-time routing an encrypted PDF is simply one with no readable text, and `blocksForAttachment()` then offers the original to a document-capable model.
 
-The chat's accepted set is `AiAttachment::CATEGORY`, which is narrower than what the core extractor can read. Widening it is a deliberate decision about what a model ingests, not a side effect of the extractor learning a format.
+The chat's accepted set is `AiAttachment::CATEGORY`, and it stays narrower than what this class can read — an upload there becomes part of a model payload, so what the chat accepts is a decision about what a model ingests, not a consequence of the extractor learning a format. Archives are refused there for that reason, and so is SVG.
+
+Two rules make the container formats safe to accept. `resolveUploadMime()` consults the filename **only** when detection landed on a bare container and the name claims a format built on one — a real need, because Office and OpenDocument files are zips and libmagic tells them apart by convention. It can never reach `image` or `pdf`, the categories that send raw bytes to a model. And whatever gets past that, `categoryForCoreCategory()` compares the category this class reports after actually opening the bytes against the one ingress accepted, so a plain zip renamed `.docx` is refused after the fact.
 
 ### mailbox
 

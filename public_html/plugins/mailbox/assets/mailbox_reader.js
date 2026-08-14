@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.47
+ * No framework. @version 2.48
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1787,11 +1787,13 @@
 			open.appendChild(meta);
 			chip.appendChild(open);
 
-			if (a.previewable) {
+			if (a.preview_kind) {
+				var isImage = a.preview_kind === 'image';
 				var eye = el('button', 'mbx-attachment-preview');
 				eye.type = 'button';
-				eye.title = 'Preview as text';
-				eye.setAttribute('aria-label', 'Preview ' + name + ' as text');
+				eye.title = isImage ? 'View the picture' : 'Preview as text';
+				eye.setAttribute('aria-label', isImage
+					? ('View ' + name) : ('Preview ' + name + ' as text'));
 				eye.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">'
 					+ '<path fill="none" stroke="currentColor" stroke-width="1.8" '
 					+ 'd="M1.8 12S5.5 5.5 12 5.5 22.2 12 22.2 12 18.5 18.5 12 18.5 1.8 12 1.8 12z"/>'
@@ -1811,24 +1813,40 @@
 		return box;
 	}
 
-	// Read an attachment WITHOUT opening it: the endpoint returns the document's
-	// words as plain text and the modal writes them with textContent. Nothing in
-	// the file is rendered, parsed as markup, or fetched.
+	// Read an attachment WITHOUT opening it. Two shapes, and the difference is
+	// stated in the modal rather than glossed over:
 	//
-	// A third of real PDFs land somewhere other than "here is your text" —
-	// scanned, encrypted, oversized — so each outcome gets its own sentence
-	// rather than a shared failure line.
+	//   text  — the endpoint returns the document's words and the modal writes
+	//           them with textContent. Nothing in the file is rendered, parsed
+	//           as markup, or fetched. A third of real PDFs land somewhere other
+	//           than "here is your text" (scanned, encrypted, oversized), so
+	//           each outcome gets its own sentence.
+	//
+	//   image — there is no text in a picture to pull out, so this one really is
+	//           decoded, by the browser's image decoder. It is still the smaller
+	//           exposure than the alternative it replaces, which is downloading
+	//           the file and opening it on your own computer. The bytes are
+	//           fetched through the same gated download endpoint and given an
+	//           image type here, so a sender's declared type never decides how
+	//           the response is treated.
 	function openAttachmentPreview(att, downloadUrl) {
 		var name = att.filename || 'attachment';
+		var isImage = att.preview_kind === 'image';
 		var overlay = el('div', 'mbx-modal-overlay');
 		var modal = el('div', 'mbx-modal mbx-preview-modal');
 		modal.appendChild(el('h3', 'mbx-modal-title', name));
-		var note = el('p', 'mbx-modal-help', 'Reading…');
+		var note = el('p', 'mbx-modal-help', isImage ? 'Loading the picture…' : 'Reading…');
 		modal.appendChild(note);
 
 		var pre = el('pre', 'mbx-preview-text');
 		pre.hidden = true;
 		modal.appendChild(pre);
+
+		var img = el('img', 'mbx-preview-image');
+		img.alt = name;
+		img.hidden = true;
+		modal.appendChild(img);
+		var blobUrl = null;
 
 		var actions = el('div', 'mbx-modal-actions');
 		var copy = el('button', 'mbx-action', 'Copy');
@@ -1858,20 +1876,29 @@
 		});
 		var close = el('button', 'mbx-action mbx-primary', 'Close');
 		close.type = 'button';
-		close.addEventListener('click', function () { closeModal(overlay); });
-		actions.appendChild(copy);
+		close.addEventListener('click', function () { dismiss(); });
+		// Copying a picture is not what the Copy button does — it copies the
+		// extracted text — so it is left out entirely rather than offered dead.
+		if (!isImage) actions.appendChild(copy);
 		actions.appendChild(download);
 		actions.appendChild(close);
 		modal.appendChild(actions);
 
 		overlay.appendChild(modal);
-		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) dismiss(); });
 		document.body.appendChild(overlay);
+
+		// The blob URL holds the picture's bytes in memory until it is revoked,
+		// so every way out of this modal goes through here.
+		function dismiss() {
+			if (blobUrl) { URL.revokeObjectURL(blobUrl); blobUrl = null; }
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
 
 		function onKey(e) {
 			if (e.key !== 'Escape') return;
-			document.removeEventListener('keydown', onKey);
-			closeModal(overlay);
+			dismiss();
 		}
 		document.addEventListener('keydown', onKey);
 
@@ -1921,6 +1948,57 @@
 				+ (data.truncated ? ' — shown in part; the download has the rest.' : '.');
 		}
 
+		// Extensions to image types. The response's own Content-Type is not
+		// trusted for this: it is whatever the sender declared, and most real
+		// attachments declare octet-stream, which no browser will render.
+		var IMAGE_TYPES = {
+			png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg', gif: 'image/gif',
+			webp: 'image/webp', avif: 'image/avif', bmp: 'image/bmp'
+		};
+
+		function loadImage() {
+			// A sealed attachment needs an open window before the bytes exist to
+			// fetch — otherwise the endpoint answers with its refusal page and
+			// the picture would just fail to decode for the wrong reason.
+			if (state.threadLocked) {
+				note.textContent = 'Your vault is locked. Unlocking…';
+				unlockVault().then(function (ok) {
+					if (!ok) { note.textContent = 'Your vault is locked, so this attachment stays sealed.'; return; }
+					state.threadLocked = false;
+					note.textContent = 'Loading the picture…';
+					loadImage();
+				});
+				return;
+			}
+
+			fetch(downloadUrl, { credentials: 'same-origin' }).then(function (res) {
+				var type = res.headers.get('content-type') || '';
+				// The download endpoint renders an HTML page for its own refusals
+				// (no access, no longer available) rather than failing the request.
+				if (!res.ok || /text\/html/i.test(type)) {
+					throw new Error('This picture could not be loaded.');
+				}
+				return res.blob();
+			}).then(function (blob) {
+				var ext = name.toLowerCase().split('.').pop();
+				var typed = (blob.type && blob.type.indexOf('image/') === 0)
+					? blob : new Blob([blob], { type: IMAGE_TYPES[ext] || 'image/png' });
+				blobUrl = URL.createObjectURL(typed);
+				img.onload = function () {
+					img.hidden = false;
+					note.textContent = 'The picture only — decoded as an image, and nothing else in '
+						+ 'the file is opened or run. ' + fmtBytes(att.size_bytes) + '.';
+				};
+				img.onerror = function () {
+					note.textContent = 'This file is not a picture your browser can show. '
+						+ 'Download it if you want to open it yourself.';
+				};
+				img.src = blobUrl;
+			}).catch(function (err) {
+				note.textContent = (err && err.message) || 'This picture could not be loaded.';
+			});
+		}
+
 		function load() {
 			apiV1(CFG.attachmentTextUrl, { attachment_id: String(att.id) })
 				.then(render)
@@ -1931,7 +2009,8 @@
 					note.textContent = (err && err.message) || 'This attachment could not be read.';
 				});
 		}
-		load();
+
+		if (isImage) loadImage(); else load();
 	}
 
 	// Human-readable byte size.

@@ -133,21 +133,31 @@ $run = function ($uid, $attachment_id) use ($session) {
 // ── Eligibility: the octet-stream problem ────────────────────────────────────
 section('Eligibility');
 
-// The flag the reader draws its button from — the SAME helper MailboxService
-// and the endpoint use, so this tests production, not a copy of it.
-$eligible = function ($declared, $filename) {
-	return DocumentText::canPreview($declared, $filename);
+// What the reader draws its button from — the SAME helper MailboxService uses,
+// so this tests production rather than a copy of it.
+$kind = function ($declared, $filename) {
+	return MailboxService::previewKind($declared, $filename);
 };
 
-check($eligible('application/octet-stream', 'statement.pdf'),
+check($kind('application/octet-stream', 'statement.pdf') === 'text',
 	'a PDF declared octet-stream is still offered a preview (the 71% case)');
-check($eligible('application/pdf', 'statement.pdf'), 'an honestly declared PDF is offered a preview');
-check(!$eligible('application/octet-stream', 'passwords.kdbx'),
-	'an encrypted database declared octet-stream is not offered a preview');
-check(!$eligible('application/octet-stream', 'archive.7z'),
-	'a format nothing here can read is not offered a preview');
-check($eligible('application/octet-stream', 'contract.docx'), 'a docx is offered a preview');
-check(!$eligible('image/png', 'photo.png'), 'an image is not offered a text preview');
+check($kind('application/pdf', 'statement.pdf') === 'text', 'an honestly declared PDF is offered a preview');
+check($kind('application/octet-stream', 'passwords.kdbx') === null,
+	'an encrypted database declared octet-stream is offered nothing');
+check($kind('application/octet-stream', 'archive.7z') === null,
+	'a format nothing here can read is offered nothing');
+check($kind('application/octet-stream', 'contract.docx') === 'text', 'a docx previews as text');
+
+// A picture has no text to pull out, so it gets the other kind of preview.
+check($kind('image/png', 'photo.png') === 'image', 'a PNG previews as a picture, not as text');
+check($kind('image/jpeg', 'scan.jpg') === 'image', 'so does a JPEG');
+check($kind('application/octet-stream', 'photo.HEIC') === null,
+	'a format the browser cannot show is offered nothing');
+check($kind('application/octet-stream', 'holiday.jpeg') === 'image',
+	'an image declared octet-stream is recognized by its name');
+// SVG is markup wearing an image's name: it previews as TEXT, never as a picture.
+check($kind('image/svg+xml', 'chart.svg') === 'text',
+	'an SVG previews as text, never as a rendered picture');
 
 // The payload the reader actually receives carries the flag.
 $service_rows = null;
@@ -164,9 +174,10 @@ if ($thread_key !== '') {
 if ($service_rows === null) {
 	check(true, 'SKIP: the reader payload was not reachable in this run', 'thread lookup returned nothing');
 } else {
-	check(array_key_exists('previewable', $service_rows),
-		'the reader payload carries the previewable flag');
-	check(!empty($service_rows['previewable']), 'and it is set for a readable attachment');
+	check(array_key_exists('preview_kind', $service_rows),
+		'the reader payload carries the preview kind');
+	check(($service_rows['preview_kind'] ?? null) === 'text',
+		'and it says text for a readable attachment', json_encode($service_rows['preview_kind'] ?? null));
 }
 
 // ── The gate ─────────────────────────────────────────────────────────────────

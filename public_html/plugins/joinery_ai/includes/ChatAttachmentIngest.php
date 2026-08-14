@@ -55,6 +55,12 @@ class ChatAttachmentIngest {
             }
             $mime = File::detect_mime_bytes($bytes);
             if ($mime === null || $mime === '') $mime = (string)$u['client_type'];
+            // Office and OpenDocument files are zips, and libmagic does not always
+            // say which kind — resolve those by name so a correctly-named document
+            // is not rejected as a bare container. Detection still wins wherever
+            // it recognized the format, and the fallback cannot reach a category
+            // that sends raw bytes to the model.
+            $mime = AiAttachment::resolveUploadMime($mime, $u['name']);
             $reject = AiAttachment::validateRaw($mime, strlen($bytes), $mode, $caps, $u['name']);
             if ($reject !== null) return ['ok' => false, 'error' => $reject];
 
@@ -70,6 +76,30 @@ class ChatAttachmentIngest {
                 return ['ok' => false, 'error' => '“' . $u['name'] . '” is a secured or image-only PDF '
                     . 'with no readable text, and the selected model can’t read PDFs directly. Switch to '
                     . 'a Claude model, or upload a text-based file.'];
+            }
+            // A document has no native door at all — no model reads a docx or a
+            // spreadsheet directly — so one with no readable text has nothing to
+            // send. Refuse it here rather than store an attachment the model will
+            // only be told about.
+            if ($category === 'document' && $extract['status'] !== AiAttachment::EXTRACT_OK) {
+                return ['ok' => false, 'error' => '“' . $u['name'] . '” has no readable text — it may be '
+                    . 'empty, password-protected, or a scan. Models read these files as text, so there '
+                    . 'would be nothing to send.'];
+            }
+
+            // The extractor opened the bytes for real, so its verdict outranks
+            // both the sniff and the name. A file that turned out to be
+            // something else — a plain zip renamed .docx — is refused here even
+            // though its name got it through the door.
+            $actual = AiAttachment::categoryForCoreCategory($extract['category'] ?? null);
+            if ($actual !== null && $actual !== $category) {
+                return ['ok' => false, 'error' => '“' . $u['name'] . '” is not the kind of file its name '
+                    . 'says it is. Rename it to match what it really is, or attach a different file.'];
+            }
+            if ($actual === null && ($extract['category'] ?? null) !== null
+                    && $extract['status'] === AiAttachment::EXTRACT_OK) {
+                return ['ok' => false, 'error' => '“' . $u['name'] . '” is not the kind of file its name '
+                    . 'says it is, and its real type can’t be attached here.'];
             }
 
             // The resolved, validated MIME is the single type authority from here
@@ -150,6 +180,24 @@ class ChatAttachmentIngest {
                 error_log('[joinery_ai chat] attachment store failed: ' . $e->getMessage());
                 $failures[] = $label;
                 continue;
+            }
+
+            // createFromBytes detects the type from the bytes again, and for an
+            // Office or OpenDocument file that lands on the container it is built
+            // from (application/zip) — which the drift guard below would read as a
+            // mismatch and drop a perfectly good upload. Persist the resolved type
+            // instead, but only on the evidence that settles it: detection landed
+            // on a bare container, the name claimed a real format, and the
+            // extractor then OPENED the bytes and agreed. Anything less keeps the
+            // detected type, so the guard still catches real drift.
+            $stored_mime = AiAttachment::normalizeMime($file->get('fil_type'));
+            $validated   = $p['category'] ?? null;
+            if ($stored_mime !== $p['mime']
+                    && in_array($stored_mime, AiAttachment::CONTAINER_MIMES, true)
+                    && AiAttachment::categoryForMime($p['mime']) === $validated
+                    && AiAttachment::categoryForCoreCategory($p['extract']['category'] ?? null) === $validated) {
+                $file->set('fil_type', $p['mime']);
+                $file->save();
             }
 
             // Invariant: the persisted fil_type must map to the category prepare()
