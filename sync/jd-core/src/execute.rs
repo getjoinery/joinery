@@ -731,15 +731,28 @@ impl std::io::Seek for Source<'_> {
 /// were overwriting the copy they had rescued an hour earlier.
 ///
 /// So the name is chosen against the disk rather than computed and hoped for.
+///
+/// `taken` extends that to the other place a name can already be spoken for.
+/// Two computers meeting the same conflict on the same day derive the same
+/// name, and whichever uploads first owns it; the other's copy is then refused
+/// that name for as long as it keeps asking, because the file holding it has
+/// arrived and settled and is not going to move. Free has to mean free on both
+/// sides — a disk this rescue can land on, and a name the server has not
+/// already given away.
 fn free_conflict_path(
     env: &ExecEnv,
     beside: &std::path::Path,
     name: &str,
+    taken: &[String],
 ) -> Result<PathBuf, ExecError> {
     // Bounded so a directory that somehow defeats this cannot spin forever;
     // a thousand conflicted copies of one file in one day is already a story.
     for suffix in 1..=1000 {
-        let candidate = beside.with_file_name((env.conflict_name)(name, suffix));
+        let candidate_name = (env.conflict_name)(name, suffix);
+        if taken.iter().any(|t| t == &candidate_name) {
+            continue;
+        }
+        let candidate = beside.with_file_name(&candidate_name);
         if env.vfs.fingerprint(&candidate)?.is_none() {
             return Ok(candidate);
         }
@@ -747,6 +760,21 @@ fn free_conflict_path(
     Err(ExecError::Contract(format!(
         "no free conflict-copy name for {name} after a thousand tries"
     )))
+}
+
+/// The names the server has already given out inside one folder.
+///
+/// Live only: a trashed sibling is not holding anything, and the server's own
+/// uniqueness rule says the same, so treating one as an obstacle would push
+/// every rescue a suffix further along for no reason.
+fn names_the_server_has(env: &ExecEnv, parent: Option<i64>) -> Result<Vec<String>, ExecError> {
+    Ok(env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|e| !e.remote_deleted && !e.id.is_provisional() && e.remote.parent == parent)
+        .map(|e| e.remote.name)
+        .collect())
 }
 
 fn make_room(
@@ -768,7 +796,9 @@ fn make_room(
         .file_name()
         .map(|n| n.to_string_lossy().to_string())
         .unwrap_or_default();
-    let aside = free_conflict_path(env, path, &name)?;
+    // No server-side names to avoid: this moves aside whatever is sitting at a
+    // path, which may be nothing the server has ever heard of.
+    let aside = free_conflict_path(env, path, &name, &[])?;
     env.vfs.rename(path, &aside)?;
     env.store.raise_issue(
         None,
@@ -1353,11 +1383,15 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
             "the local copy is no longer there".into(),
         ));
     }
-    // The name came from the plan, which cannot see the disk. If something is
-    // already there it is an earlier rescue of this same file, and renaming
-    // over it would destroy the copy that rescue was for.
-    let to = if env.vfs.fingerprint(&to)?.is_some() {
-        free_conflict_path(env, &to, &entry.remote.name)?
+    // The name came from the plan, which can see neither the disk nor the
+    // server. Something already at this path is an earlier rescue of this same
+    // file, and renaming over it would destroy the copy that rescue was for.
+    // A name the server has already given to another device's rescue is the
+    // same problem seen from the other side: landing here would earn a refusal
+    // that never lifts, because the file holding the name has settled.
+    let spoken_for = names_the_server_has(env, entry.remote.parent)?;
+    let to = if env.vfs.fingerprint(&to)?.is_some() || spoken_for.iter().any(|t| t == &kept.name) {
+        free_conflict_path(env, &to, &entry.remote.name, &spoken_for)?
     } else {
         to
     };
@@ -1746,7 +1780,7 @@ fn rescue_unsynced(
                 let to = if env.vfs.fingerprint(&plain)?.is_none() {
                     plain
                 } else {
-                    free_conflict_path(env, &plain, &child.name)?
+                    free_conflict_path(env, &plain, &child.name, &[])?
                 };
                 env.vfs.rename(&path, &to)?;
                 rescued.push(child.name.clone());
