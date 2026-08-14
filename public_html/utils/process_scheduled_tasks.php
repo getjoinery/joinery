@@ -196,6 +196,27 @@ foreach ($tasks as $task) {
 
 			if ($status === 'success') {
 				$tasks_run++;
+
+				// Success chain: queue any recipes the task declared under
+				// run_on_success (docs/scheduled_tasks.md), unless this run
+				// opted out with run_chain=false (e.g. it found nothing new).
+				// A chain failure is logged but never fails the task.
+				$chain_opted_out = is_array($result)
+					&& array_key_exists('run_chain', $result)
+					&& $result['run_chain'] === false;
+				if (!$chain_opted_out) {
+					try {
+						$ui_recipe_ids = $task->get_task_config()['run_on_success_recipes'] ?? [];
+						$fired = ScheduledTaskRegistry::fireSuccessChain(
+							ScheduledTaskRegistry::metadataFor($task_class),
+							is_array($ui_recipe_ids) ? $ui_recipe_ids : []);
+						foreach ($fired as $chained_name) {
+							echo "[$timestamp]   Chained recipe: $chained_name\n";
+						}
+					} catch (Throwable $chain_e) {
+						echo "[$timestamp]   Chain error: " . $chain_e->getMessage() . "\n";
+					}
+				}
 			} elseif ($status === 'skipped') {
 				$tasks_skipped++;
 			} else {

@@ -36,6 +36,18 @@
             "max_tokens": 5000,
             "monthly_token_cap": 200000,
             "thinking_level": "off"
+        },
+        {
+            "key": "persona_browser_mark_ads_default",
+            "name": "Mark advertisements in the social feed",
+            "pipeline_job": "mark_advertisements",
+            "requires_plugin": "persona_browser",
+            "prompt": "",
+            "schedule_frequency": "hourly",
+            "max_iterations": 50,
+            "max_tokens": 4000,
+            "monthly_token_cap": 200000,
+            "thinking_level": "off"
         }
     ]
 }

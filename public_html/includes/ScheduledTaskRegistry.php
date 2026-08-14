@@ -297,4 +297,94 @@ class ScheduledTaskRegistry {
 		}
 		return $map;
 	}
+
+	/**
+	 * The declared JSON metadata for one task class, or null if it isn't on
+	 * disk. Used by the runner to read a task's run_on_success chain.
+	 */
+	public static function metadataFor(string $class_name): ?array {
+		$all = self::discover();
+		return isset($all[$class_name]) ? ($all[$class_name]['json'] ?? null) : null;
+	}
+
+	/**
+	 * Fire a completed task's declared success-chain: any AI recipes named in
+	 * its JSON under `run_on_success.recipes` (by rcp_declared_key) are queued
+	 * to run right away, so work a task produces is picked up in seconds rather
+	 * than at the recipe's own next scheduled tick.
+	 *
+	 * A general scheduled-tasks hook — any task may declare it, not just this
+	 * plugin's. Deliberately conservative:
+	 *   - does nothing unless joinery_ai's recipe machinery is present;
+	 *   - only fires recipes that exist AND are enabled (never resurrects a
+	 *     recipe the operator turned off, never runs one still unconfigured);
+	 *   - skips a recipe that already has a pending/running run, so a burst of
+	 *     task completions can't stack duplicate runs.
+	 *
+	 * Two sources feed the chain, unioned and deduped here:
+	 *   - $metadata — the task's own JSON `run_on_success.recipes` (declared
+	 *     keys), a plugin author shipping a task+recipe pair chained by default;
+	 *   - $ui_recipe_ids — recipe ids an operator picked on the task's edit page
+	 *     (stored in sct_task_config.run_on_success_recipes), which also covers
+	 *     operator-created recipes that carry no declared key.
+	 *
+	 * @param  array|null $metadata        the task's JSON (from metadataFor())
+	 * @param  int[]       $ui_recipe_ids   operator-selected recipe ids
+	 * @return string[]                     labels of recipes actually queued
+	 */
+	public static function fireSuccessChain(?array $metadata, array $ui_recipe_ids = []): array {
+		$slugs = $metadata['run_on_success']['recipes'] ?? [];
+		if (!is_array($slugs)) $slugs = [];
+		if (!$slugs && !$ui_recipe_ids) return [];
+
+		// joinery_ai owns recipes; without it there is nothing to fire. The
+		// name lookup triggers the autoloader when the plugin is active.
+		if (!class_exists('Recipe') || !class_exists('RecipeRun') || !class_exists('RecipeWorkerSpawner')) {
+			return [];
+		}
+
+		// Resolve both sources to recipe rows, keyed by id so a recipe named by
+		// both a declared key and a UI pick fires only once.
+		$candidates = [];
+		foreach ($slugs as $slug) {
+			$slug = trim((string)$slug);
+			if ($slug === '') continue;
+			$matches = new MultiRecipe(['declared_key' => $slug, 'deleted' => false]);
+			foreach ($matches as $r) { $candidates[(int)$r->key] = $r; break; }
+		}
+		foreach ($ui_recipe_ids as $id) {
+			$id = (int)$id;
+			if ($id <= 0 || isset($candidates[$id])) continue;
+			$r = new Recipe($id, true);
+			if ($r->key) $candidates[$id] = $r;
+		}
+
+		$db = DbConnector::get_instance()->get_db_link();
+		$fired = [];
+
+		foreach ($candidates as $recipe) {
+			// Never resurrect a recipe the operator turned off or left unconfigured.
+			if (!$recipe->get('rcp_enabled')) continue;
+
+			// Don't stack a second run on top of one already in flight.
+			$active = $db->prepare(
+				"SELECT 1 FROM rcr_recipe_runs
+				 WHERE rcr_rcp_recipe_id = ? AND rcr_status IN (?, ?) AND rcr_delete_time IS NULL
+				 LIMIT 1");
+			$active->execute([(int)$recipe->key, RecipeRun::STATUS_PENDING, RecipeRun::STATUS_RUNNING]);
+			if ($active->fetchColumn()) continue;
+
+			$run = new RecipeRun(NULL);
+			$run->set('rcr_rcp_recipe_id', (int)$recipe->key);
+			$run->set('rcr_status', RecipeRun::STATUS_PENDING);
+			$run->set('rcr_trigger', RecipeRun::TRIGGER_SCHEDULE);
+			$run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+			$run->prepare();
+			$run->save();
+			RecipeWorkerSpawner::spawnIfUnderCap($run);
+			$fired[] = (string)$recipe->get('rcp_name');
+		}
+
+		return $fired;
+	}
 }

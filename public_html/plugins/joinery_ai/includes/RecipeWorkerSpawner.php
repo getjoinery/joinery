@@ -13,10 +13,13 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
  *   - CLI worker on exit (self-chain): spawnNextPending() to keep the
  *     queue moving without waiting for the next cron tick.
  *
- * The race between count_running() and the spawned worker actually starting
- * (and flipping its row to running) is benign at the v1 cap of 3 — at-cap-
- * plus-one is fine. If precision becomes important, wrap the check + spawn
- * in pg_advisory_lock.
+ * The concurrency cap gates on the number of workers actually running, not on
+ * the number of rows queued: a pending row occupies no process, and counting
+ * it would let a backlog of undispatched rows starve the drain (the queue can
+ * never shrink if being queued is itself what blocks dispatch). A row is
+ * claimed for a worker by flipping it pending -> running in a single
+ * conditional UPDATE, so two concurrent drainers can never launch two workers
+ * for the same row; the loser's UPDATE simply matches nothing.
  */
 class RecipeWorkerSpawner {
 
@@ -28,54 +31,97 @@ class RecipeWorkerSpawner {
      */
     public static function spawnIfUnderCap(RecipeRun $run): bool {
         if (!self::isSpawnable($run)) return false;
-        if (self::countActive() >= self::cap()) return false;
+        if (self::countRunning() >= self::cap()) return false;
+        // Claim before spawning so a concurrent drainer can't also take it.
+        if (!self::claim((int)$run->key)) return false;
         return self::spawn((int)$run->key);
     }
 
     /**
-     * Find the oldest pending row and spawn a worker for it (if under cap).
-     * Returns true if a worker was kicked off, false if there was nothing to
-     * do or no slack.
+     * Claim the oldest runnable pending row and spawn a worker for it (if under
+     * cap). Returns true if a worker was kicked off, false if there was nothing
+     * to do or no slack.
      */
     public static function spawnNextPending(): bool {
-        if (self::countActive() >= self::cap()) return false;
-
-        $db = DbConnector::get_instance()->get_db_link();
-        $sql = "SELECT rcr_run_id FROM rcr_recipe_runs
-                WHERE rcr_status = ? AND rcr_delete_time IS NULL
-                ORDER BY rcr_started_time ASC
-                LIMIT 1";
-        $q = $db->prepare($sql);
-        $q->execute([RecipeRun::STATUS_PENDING]);
-        $row = $q->fetch(PDO::FETCH_ASSOC);
-        if (!$row) return false;
-
-        return self::spawn((int)$row['rcr_run_id']);
+        if (self::countRunning() >= self::cap()) return false;
+        $run_id = self::claimNextRunnablePending();
+        if ($run_id === null) return false;
+        return self::spawn($run_id);
     }
 
     /**
      * Drain the pending queue oldest-first up to the concurrency cap. Used by
-     * the dispatcher tick. Returns the number of workers spawned.
+     * the dispatcher tick. Returns the number of workers spawned. Each claimed
+     * row flips to running, so countRunning() rises as we go and the loop stops
+     * exactly at the cap.
      */
     public static function drainPendingQueue(): int {
         $spawned = 0;
         $cap = self::cap();
-        for ($i = 0; $i < $cap; $i++) {
-            if (self::countActive() >= $cap) break;
-            if (!self::spawnNextPending()) break;
+        while (self::countRunning() < $cap) {
+            $run_id = self::claimNextRunnablePending();
+            if ($run_id === null) break;
+            self::spawn($run_id);
             $spawned++;
         }
         return $spawned;
     }
 
-    /** Number of currently in-flight runs (pending or running). */
-    public static function countActive(): int {
+    /** Number of workers currently occupying a slot (rows in 'running'). */
+    public static function countRunning(): int {
         $db = DbConnector::get_instance()->get_db_link();
         $sql = "SELECT count(*) FROM rcr_recipe_runs
-                WHERE rcr_status IN (?, ?) AND rcr_delete_time IS NULL";
+                WHERE rcr_status = ? AND rcr_delete_time IS NULL";
         $q = $db->prepare($sql);
-        $q->execute([RecipeRun::STATUS_PENDING, RecipeRun::STATUS_RUNNING]);
+        $q->execute([RecipeRun::STATUS_RUNNING]);
         return (int)$q->fetchColumn();
+    }
+
+    /**
+     * Atomically claim the oldest pending row that a worker can actually make
+     * progress on, flipping it pending -> running. Returns the claimed run id,
+     * or null if nothing is claimable.
+     *
+     * In-window (fully-sealed) recipes are skipped: their pending rows wait for
+     * the owner's browser session, never a worker (specs/in_window_deferred_work.md).
+     * A row whose recipe is gone is left for the reaper, but still claimable so
+     * a stray never wedges the scan.
+     */
+    private static function claimNextRunnablePending(): ?int {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+        $db = DbConnector::get_instance()->get_db_link();
+        $sql = "SELECT rcr_run_id, rcr_rcp_recipe_id FROM rcr_recipe_runs
+                WHERE rcr_status = ? AND rcr_delete_time IS NULL
+                ORDER BY rcr_started_time ASC";
+        $q = $db->prepare($sql);
+        $q->execute([RecipeRun::STATUS_PENDING]);
+        $rows = $q->fetchAll(PDO::FETCH_ASSOC);
+        foreach ($rows as $row) {
+            $recipe = new Recipe((int)$row['rcr_rcp_recipe_id'], true);
+            if ($recipe->key && !RecipeVaultScope::cronRunnable($recipe)) {
+                continue;   // in-window: not a worker's to run
+            }
+            if (self::claim((int)$row['rcr_run_id'])) {
+                return (int)$row['rcr_run_id'];
+            }
+            // Lost the claim race to another drainer; try the next candidate.
+        }
+        return null;
+    }
+
+    /**
+     * Flip a specific row pending -> running. Returns true only for the caller
+     * that actually claimed it (the row was still pending); a concurrent claim
+     * of the same row matches nothing and returns false.
+     */
+    private static function claim(int $run_id): bool {
+        $db = DbConnector::get_instance()->get_db_link();
+        $sql = "UPDATE rcr_recipe_runs
+                SET rcr_status = ?, rcr_started_time = (NOW() AT TIME ZONE 'UTC')
+                WHERE rcr_run_id = ? AND rcr_status = ? AND rcr_delete_time IS NULL";
+        $q = $db->prepare($sql);
+        $q->execute([RecipeRun::STATUS_RUNNING, $run_id, RecipeRun::STATUS_PENDING]);
+        return $q->rowCount() === 1;
     }
 
     public static function cap(): int {

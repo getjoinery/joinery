@@ -143,6 +143,22 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 	$mailing_lists = new MultiMailingList(array('deleted' => false), array('mlt_name' => 'ASC'));
 	$mailing_lists->load();
 
+	// Load recipes for the "run on success" chooser. Only when joinery_ai is
+	// present (Recipe autoloads by name); otherwise the chooser simply doesn't
+	// appear. Disabled recipes are listed too so an operator can pre-wire one
+	// — the runner skips any that aren't enabled at fire time.
+	$chain_recipes = array();
+	if (class_exists('Recipe')) {
+		$recipe_multi = new MultiRecipe(array('deleted' => false), array('rcp_name' => 'ASC'));
+		foreach ($recipe_multi as $r) {
+			$chain_recipes[] = array(
+				'id'      => (int)$r->key,
+				'name'    => (string)$r->get('rcp_name'),
+				'enabled' => (bool)$r->get('rcp_enabled'),
+			);
+		}
+	}
+
 	// Get site timezone for display
 	$site_timezone = $settings->get_setting('default_timezone');
 	if (!$site_timezone) {
@@ -189,6 +205,7 @@ function admin_scheduled_tasks_logic(array $input): LogicResult {
 		'last_cron_run' => $last_cron_run,
 		'is_docker' => $is_docker,
 		'mailing_lists' => $mailing_lists,
+		'chain_recipes' => $chain_recipes,
 		'site_timezone' => $site_timezone,
 		'dry_run_supported' => $dry_run_supported,
 		'retired_tasks' => $retired_tasks,
@@ -406,6 +423,13 @@ function _handle_save($input) {
 			$config[$field_name] = $input['config_' . $field_name];
 		}
 	}
+
+	// "Run on success" recipe chain (universal, not task-specific config). The
+	// checkbox list posts chain_recipes[] of recipe ids; absent = none checked,
+	// which clears the selection.
+	$picked = $input['chain_recipes'] ?? array();
+	$config['run_on_success_recipes'] = array_values(array_unique(array_map('intval', (array)$picked)));
+
 	$task->set('sct_task_config', json_encode($config));
 
 	$task->save();

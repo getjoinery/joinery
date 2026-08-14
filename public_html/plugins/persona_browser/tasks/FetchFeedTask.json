@@ -1,0 +1,9 @@
+{
+    "name": "Persona Feed Fetch",
+    "description": "Pulls new posts from the persona browser service every hour, dedupes against stored posts, and caches new posts' images locally.",
+    "activate_on_install": true,
+    "default_frequency": "hourly",
+    "run_on_success": {
+        "recipes": ["persona_browser_mark_ads_default"]
+    }
+}
