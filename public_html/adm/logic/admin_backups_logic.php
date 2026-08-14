@@ -77,6 +77,14 @@ function _admin_backups_handle($action, array $input, $session) {
 	$url = '/admin/admin_backups';
 	$page_regex = '/admin\/admin_backups/';
 
+	// The setup wizard submits these same actions and bounces back to its own
+	// step instead of this tab (specs/setup_wizard.md § New backend work 6).
+	// Allow-listed: only /setup is ever accepted.
+	if ((string)($input['return_to'] ?? '') === '/setup') {
+		$url = '/setup?step=backups';
+		$page_regex = '/\/setup/';
+	}
+
 	// DisplayMessage lives in the pre-loaded SessionControl.php — never required.
 	$say = function ($message, $ok) use ($session, $page_regex) {
 		$session->save_message(new DisplayMessage(

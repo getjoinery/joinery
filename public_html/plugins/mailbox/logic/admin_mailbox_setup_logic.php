@@ -25,6 +25,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  * plugin, enable SRS, register a domain, or apply a one-click fix — each writes
  * through a model and redirects so the next render reads fresh settings.
  *
+ * @version 2.16 - wizard_provision: the setup wizard's one-go apply
+ *   (specs/setup_wizard.md § Step 4) — provision + optional additive publish.
  * @version 2.15 - the machine sender ceremony (specs/mailbox_machine_sender_card.md):
  *                 machine_setup view state, register/switch/test-send actions,
  *                 machine records in the publish box while the ceremony is open
@@ -222,6 +224,81 @@ function admin_mailbox_setup_logic(array $input): LogicResult {
 			// domain should leave exactly the decisions that deserve a human,
 			// not a checklist to go and find.
 			return LogicResult::redirect(DnsPublishBox::urlWith($redirect_url, array('dns_show' => '1')));
+		}
+
+		// --- Setup wizard one-go apply (specs/setup_wizard.md § Step 4) ---
+		// Domain + store mailbox + grant + (optionally) an additive DNS
+		// publish in one POST. APPLY_ADDITIVE creates only what is missing —
+		// it never rewrites an existing record, so re-pressing Apply is safe
+		// and anything that conflicts is reported, not overwritten. Confirmed
+		// cutovers stay on this tab's own publish box.
+		if ($input['action'] === 'wizard_provision') {
+			$wizard_return = ((string)($input['return_to'] ?? '') === '/setup')
+				? '/setup?step=mail_receive' : $redirect_url;
+			$outcome = array(
+				'error' => null, 'domain' => '', 'address' => '',
+				'domain_created' => false, 'alias_created' => false,
+				'publish_summary' => '', 'publish_error' => '',
+			);
+
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
+			$prov = mailbox_provision_mailbox(
+				(string)($input['domain'] ?? ''),
+				(string)($input['local_part'] ?? ''),
+				(int)$session->get_user_id()
+			);
+			if ($prov['error'] !== null) {
+				$outcome['error'] = $prov['error'];
+			} else {
+				if ((string)$settings->get_setting('mailbox_enabled') !== '1') {
+					mailbox_setup_write_setting('mailbox_enabled', '1');
+				}
+				$outcome['domain'] = (string)$prov['domain']->get('ied_domain');
+				$outcome['address'] = $prov['alias']->get_full_address();
+				$outcome['domain_created'] = $prov['domain_created'];
+				$outcome['alias_created'] = $prov['alias_created'];
+
+				if ((string)($input['dns_mode'] ?? '') === 'publish') {
+					$plan = _setup_dns_plan_for_domain((int)$prov['domain']->key);
+					if ($plan === null || $plan->isEmpty()) {
+						$outcome['publish_error'] = 'No records to publish for this domain.';
+					} else {
+						require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
+						require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+						$driver_class = DnsDriverRegistry::get(trim((string)($input['dns_provider'] ?? '')));
+						if ($driver_class === null) {
+							$outcome['publish_error'] = 'Choose a DNS provider to publish the records.';
+						} elseif ($driver_class::credentialMode() !== DnsProvider::CREDENTIAL_API) {
+							$outcome['publish_error'] = $driver_class::getLabel()
+								. ' publishes through a sign-in consent flow — use the mail Setup tab for that, or add the records yourself.';
+						} else {
+							$credential = array('account_id' => trim((string)($input['dns_account'] ?? '')));
+							$missing = false;
+							foreach ($driver_class::credentialFields() as $field => $spec) {
+								$credential[$field] = trim((string)($input['dns_cred_' . $field] ?? ''));
+								if ($credential[$field] === '' && empty($spec['optional'])
+										&& $field !== 'session_token' && $field !== 'client_ip') {
+									$missing = true;
+								}
+							}
+							if ($missing) {
+								$outcome['publish_error'] = 'Enter the ' . $driver_class::getLabel() . ' credential to publish.';
+							} else {
+								$publish = DnsPublishBox::publish($driver_class, $credential, $plan,
+									array(), DnsReconciler::APPLY_ADDITIVE);
+								unset($credential);   // the only copy, gone before the response is built
+								$outcome['publish_summary'] = DnsPublishBox::summarizeResults($publish);
+								if (!empty($publish['error'])) {
+									$outcome['publish_error'] = (string)$publish['error'];
+								}
+							}
+						}
+					}
+				}
+			}
+
+			$_SESSION['setup_mail_receive_result'] = $outcome;
+			return LogicResult::redirect($wizard_return);
 		}
 
 		// --- Machine sender ceremony (specs/mailbox_machine_sender_card.md) ---

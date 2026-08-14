@@ -477,6 +477,9 @@ class PublicPageJoinerySystem extends PublicPageBase {
         </li>
         <?php endif;
 
+        // --- Setup wizard pill (specs/setup_wizard.md) ---
+        $this->render_setup_pill('li', 'nav-item');
+
         // --- Vault lock chip mount (docs/sealed_vault.md § The lock chip) ---
         $this->render_vault_lock_slot('li', 'nav-item');
 

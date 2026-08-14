@@ -29,6 +29,9 @@ class PublicPage extends PublicPageBase {
         $cart       = $menu_data['cart'] ?? null;
         $user_menu  = $menu_data['user_menu'];
 
+        // Setup wizard pill (specs/setup_wizard.md) — gone once all steps are green
+        $this->render_setup_pill();
+
         // Vault lock chip mount (docs/sealed_vault.md § The lock chip)
         $this->render_vault_lock_slot();
 

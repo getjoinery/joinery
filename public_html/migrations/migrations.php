@@ -1272,3 +1272,13 @@
 	$migration['migration_file'] = 'backfill_file_source_from_references.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// The /setup wizard's first-login redirect is for accounts whose first
+	// login comes after the wizard shipped. Anyone who has already logged in
+	// is seeded as dismissed: pill yes, redirect never (specs/setup_wizard.md).
+	$migration = array();
+	$migration['database_version'] = '171';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'seed_setup_dismissed_for_existing_accounts.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

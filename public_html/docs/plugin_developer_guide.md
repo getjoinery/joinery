@@ -108,6 +108,17 @@ loads after every ordered consumer, sorted by plugin name. A bootstrap is never
 `VaultUnlock::loadConsumerBootstraps()` and lets the loader run it, which is
 what keeps each registration attributed to its plugin.
 
+**Contributing setup wizard steps.** A plugin registers steps into the
+`SetupSteps` registry from its bootstrap (`SetupSteps::register('key', [...])`
+— see `docs/admin_pages.md` § Setup steps for the field contract). The registry
+pulls plugin bootstraps in itself before anyone reads it, so a bootstrap-side
+registration is all a step needs to appear in `/setup`, the header pill, and
+the login gate. Keep the step's `render_file` partial under the plugin's
+`includes/` (not `views/`, which would make it routable), and keep `status()`
+cheap — it runs when the wizard or pill asks, wrapped so a throw reads as
+not-started rather than a fatal. The mailbox plugin's `mail_receive` /
+`mail_import` steps are the reference implementations.
+
 ### Classes Resolve By Name
 
 Name a class and it loads. That covers every class in core `includes/` and

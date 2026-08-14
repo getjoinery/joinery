@@ -1519,17 +1519,36 @@ class SessionControl{
 				}
 			}
 
+			// First-login setup wizard (specs/setup_wizard.md): an account that
+			// has never dismissed the wizard and has outstanding setup steps is
+			// taken to /setup. Sits BEFORE the 2FA gates on purpose — the wizard
+			// mounts the same enrollment ceremonies, so a fresh admin enrolls
+			// there; dismissing without enrolling lands on the stricter gates
+			// below. Same /api/v1/ exemption as those gates: the wizard's own
+			// enrollment fetches must survive this.
+			if ($current_path !== NULL && $current_path !== '/setup'
+					&& $current_path !== '/logout'
+					&& strpos((string)$current_path, '/api/v1/') !== 0) {
+				require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+				if (SetupSteps::shouldInterrupt()) {
+					header('Location: /setup');
+					exit();
+				}
+			}
+
 			// Enforce 2FA on admin accounts when totp_require_admins is set.
-			// Exempt /profile/security (where they enable it) and /logout to avoid
-			// loops, and ALL /api/v1/ requests: the gate governs page navigation,
-			// but the security page does its enrollment through /api/v1 fetches
+			// Exempt /profile/security (where they enable it), /setup (which
+			// mounts the same enrollment) and /logout to avoid loops, and ALL
+			// /api/v1/ requests: the gate governs page navigation, but the
+			// security page does its enrollment through /api/v1 fetches
 			// (passkey_register_*, TOTP setup) that call check_permission()
 			// themselves — an HTML redirect inside a JSON fetch would make
 			// enrollment impossible. Protected content over the API is already
 			// independently vault-gated.
 			if ($this->must_enable_totp_for_admin()) {
 				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/logout'
+				if ($current_path !== '/profile/security' && $current_path !== '/setup'
+						&& $current_path !== '/logout'
 						&& strpos((string)$current_path, '/api/v1/') !== 0) {
 					$msgtxt = urlencode('Your administrator account requires two-factor authentication.');
 					header('Location: /profile/security?msgtext=' . $msgtxt);
@@ -1543,7 +1562,8 @@ class SessionControl{
 			// (including the /api/v1/ exemption, so passkey/TOTP enrollment works).
 			if ($this->must_enroll_2fa_for_fortress()) {
 				$current_path = parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH);
-				if ($current_path !== '/profile/security' && $current_path !== '/logout'
+				if ($current_path !== '/profile/security' && $current_path !== '/setup'
+						&& $current_path !== '/logout'
 						&& strpos((string)$current_path, '/api/v1/') !== 0) {
 					$msgtxt = urlencode('A domain on your account uses the Fortress level, which requires a second factor that is separate from any single passkey. Add an authenticator app or a second passkey to continue.');
 					header('Location: /profile/security?msgtext=' . $msgtxt);
