@@ -1,0 +1,4 @@
+# Fixtures here are build products of generate_fixtures.php, not checked-in blobs.
+*
+!.gitignore
+!generate_fixtures.php

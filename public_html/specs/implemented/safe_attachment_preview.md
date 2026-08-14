@@ -1,6 +1,17 @@
 # Safe Attachment Preview — Spec
 
-**Status:** UNBUILT. Drafted 2026-08-14. Format research done against real files on dev — see Evidence.
+**Status:** BUILT 2026-08-14, then full code review applied same day (10 verified findings fixed: staged /dev/shm cleanup survives a killed child, RTF skip-group and \uN fallback correctness, unknown-charset fallback, sandbox stdout pinned, pre-fetch byte ceiling with throttled refusals, modal download unlock, one hardened XML parse, canPreview() as the one eligibility rule, multi-attendee .ics). Safe tier green (`document_text`, 100 checks); db tier green (`attachment_preview`, 31 checks); verified live in the reader on dev against real mail, including a real encrypted PDF answering `secured`. See **As built** below for where the implementation departs from this draft.
+
+## As built
+
+Four departures from the draft, all deliberate:
+
+1. **A rate-limit refusal answers HTTP 200 with `{previewable:false, rate_limited:true, reason:…}`**, not 429. The action dispatcher maps a `LogicResult` error to 422 and has no per-result status hook; inventing one for this endpoint would be a change to the API contract for every action. The refusal is a payload the modal renders, exactly like `{locked:true}`.
+2. **`refineContainerMime()` takes a path, not bytes** — `ZipArchive` can only open a file, and the container is already staged on `/dev/shm` by the time the question is asked.
+3. **The generic XML branch puts each text node on its own line.** Flattening arbitrary XML with `textContent` runs every value together (`Ada LovelaceAnalytical Engine9900.00`), which is unreadable. Formats with known paragraph tags (OOXML, ODF) still use the tag-boundary path.
+4. **A preview may return up to 200,000 characters**, against the 50,000 the model payload uses. A model has a token budget; a person reading a contract does not.
+
+One new setting ships with it: `mailbox_preview_max_bytes` (15 MB), declared in `plugins/mailbox/plugin.json`. It reaches `stg_settings` through the normal plugin sync; until then the endpoint's own default applies, so nothing waits on it.
 
 ## What this gives the user
 
