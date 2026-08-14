@@ -846,8 +846,8 @@ rebuild the list from scratch. Each message
 shows the parsed plain-text body, a sandboxed iframe rendering of the HTML body
 (no scripts, no top-nav), and a per-attachment download. Each attachment is a
 private `File`, streamed through a single gated endpoint for every transport (see
-**Attachment & message storage** below); the whole-message `.eml` is never
-reconstructed.
+**Attachment & message storage** below); a `.eml` is never reassembled from those
+parts — the reader's Download .eml serves the stored original or nothing.
 
 Stored bodies are fully attacker-controlled — admins should never paste a
 captured token into a non-admin page or feed an untrusted body to an AI
@@ -933,8 +933,8 @@ reads its `File`; `remote` fetches the one part from IMAP; a legacy/fallback row
 extracts it from the stored raw. Retrieval and streaming (original `ima_filename`,
 attachment disposition, `nosniff`) are the shared helpers in
 `includes/attachment_retrieval.php`, used by both download endpoints — each endpoint
-gates first with its own authorization posture, then retrieves. The whole `.eml` is
-never reassembled.
+gates first with its own authorization posture, then retrieves. A `.eml` is never
+reassembled from these parts; the export serves the stored original or nothing.
 
 **Forward** re-attaches the original's parts in one manifest-driven loop dispatching per
 row: a file-backed row reads its `File`, `remote` fetches from IMAP, a legacy raw row
@@ -952,7 +952,7 @@ endpoint (`ajax/mailbox_thread.php`), the single-message detail page
 to a short-lived **signed URL** (`docs/file_signed_urls.md`, 1-hour TTL for the
 web readers) for the manifest row whose `ima_content_id` matches `<id>` **in
 that message only** — a Content-ID can never reach another message's parts.
-Signed URLs are required, not optional: the body renders inside a `sandbox=""`
+Signed URLs are required, not optional: the body renders inside a sandboxed
 `srcdoc` iframe whose opaque origin attaches no cookies to subresource
 requests, and mailbox visibility is a grant decision (`MailboxViewer`) that
 `File::is_viewable()`'s owner-or-admin rule cannot express — so a session-gated
@@ -2211,14 +2211,12 @@ The reader has **two mounts** of one shared UI
 (`includes/mailbox_reader_mount.php`):
 
 - **Admin** — the **Mailboxes** tab (`admin_mailbox_reader.php`), staff
-  chrome, with attachment downloads at the admin endpoint and kebab deep links
-  to the single-message detail page (raw MIME / `.eml` download).
+  chrome, with attachment downloads at the admin endpoint.
 - **Member** — `/profile/mailbox/mailbox`
   (`views/profile/mailbox.php` + `logic/profile_mailbox_logic.php`), theme
   chrome, for any signed-in member; what they see is their granted mailboxes.
   A member with no grants gets a short "no mailboxes are assigned to your
-  account" state. Attachment chips point at the member endpoint; there are no
-  detail-page deep links (`messageDetailBase` null hides the kebab). The
+  account" state. Attachment chips point at the member endpoint. The
   plugin's `profileMenu` declares the "Email" entry that puts the page in the
   member menu on every theme and in the apps' navigation.
 
@@ -2418,9 +2416,68 @@ cookie + `X-Joinery-Csrf`). The reader consumes the response envelope's `data`.
 | `mailbox/thread` | messages in a `thread_key` (with bodies) |
 | `mailbox/thread_action` | mark read/unread, star/unstar, delete — accepts `ids[]`, a `thread_key`, or a whole selection as `thread_keys[]` — each expanded server-side |
 | `mailbox/send` | multipart: send a reply / reply-all / forward / new message AS the mailbox; stores the sent copy |
+| `mailbox/message_source` | the original RFC822 source of one message, for **Show original** |
 
-HTML bodies stay sandboxed (`<iframe sandbox="">`, no `allow-scripts`) exactly as
-the detail page does — stored mail is fully attacker-controlled.
+HTML bodies stay sandboxed — stored mail is fully attacker-controlled. The
+reader's frame carries `sandbox="allow-popups allow-popups-to-escape-sandbox"`
+and nothing else: no `allow-scripts` and no `allow-same-origin`, so no script in
+a message runs and the frame reaches neither the session nor the page around it.
+The two popup grants are what make a link in an email clickable — `allow-popups`
+lets the frame open a tab at all, and `allow-popups-to-escape-sandbox` keeps the
+opened site from inheriting the frame's restrictions and loading broken. The
+reader splices `<base target="_blank">` into the message document (after the
+sender's `<head>`/`<html>`/doctype, so the frame stays out of quirks mode), which
+sends every link to a new tab rather than navigating the message frame itself.
+Browsers imply `rel=noopener` on `target=_blank`, so the opened tab gets no
+handle back on the reader. The admin detail page
+(`admin_mailbox_message.php`) is a forensic view and grants nothing: its
+`sandbox=""` frame leaves links dead on purpose.
+
+### The message kebab: Show original, Download .eml, Print
+
+Every message card carries a kebab (⋮) in its top-right corner, on both mounts:
+
+| Item | What it does |
+|------|--------------|
+| **Show original** | the message exactly as it arrived, headers and all, in a modal with a Copy button (`mailbox/message_source`) |
+| **Download .eml** | the same bytes as a `message/rfc822` file, named from the subject |
+| **Print** | a print sheet — addressed header block, body, attachment names — opened in a new tab and printed on load |
+
+Every one of them scopes the read to the caller's own grants exactly as the
+reader does (a NULL-alias catch-all message stays superadmin-only), so the member
+mount and the admin mount give the same answer and the admin mount needs no staff
+route of its own. The two exports live at `/profile/mailbox/original`
+(`logic/profile_original_logic.php` gates, `includes/message_export.php`
+renders); `format=print` picks the sheet, and the `.eml` download is the default.
+
+**Which messages have an original.** Show original and Download .eml both need a
+stored RFC822 original, so the reader leaves them out of the menu when the
+message has none (`has_original` on the thread payload) rather than offering two
+dead ends. Print always appears — it works from the parsed body. An IMAP-polled
+message (`iem_raw_storage_driver` = `remote`) is the case that has none: no
+platform copy is kept, only individual parts fetched on demand. Reaching either
+export by URL anyway gets an honest page saying so, never a broken file.
+
+Two more limits worth knowing: Show original cuts off past **1 MB** and names the
+full size (a message with attachments is mostly base64, and the whole of one
+belongs in the download); and a sealed original on a protected mailbox needs an
+open unlock window, where a locked one answers `{locked:true}` and the modal
+offers the one-tap ceremony before asking again — the same contract as reading a
+sealed body.
+
+**The print sheet is the one place received HTML is not sandboxed.** It cannot
+be: a browser prints only the visible slice of a scrollable frame, and the
+frame's opaque origin is exactly what stops us measuring its content to size it.
+So the sheet inlines the body through `MailboxHtmlSanitizer::sanitizeForPrint()`
+— an allowlist that keeps what an email's layout is made of (tables, alignment
+attributes, inline styles) and drops everything that executes, fetches, or
+escapes the attribute, including `<style>` blocks and any style value carrying
+`url()` / `expression()` / `@import`. Images survive only with an `http(s)` src;
+`cid:` parts are already signed URLs by then. The response then carries a
+`Content-Security-Policy` allowing no script beyond the sheet's own nonce'd
+print call and no network fetch beyond images, so a miss in the sanitizer is
+still not an execution. `plugins/mailbox/tests/print_sanitizer_test.php` holds
+that contract.
 
 ### Reply / Forward / New Message
 
@@ -3384,8 +3441,8 @@ deleted/moved/account disabled), the endpoint says so honestly. The manifest +
 endpoint + reader list are **transport-agnostic**: the download dispatches on where
 the bytes live — a `File` for push mail, an IMAP fetch for `remote` mail, a raw
 section for a legacy/fallback row (see **Attachment & message storage**) — through the
-same endpoint, same table, same UI. The whole-message *.eml* download and raw-source
-view do not exist for any transport.
+same endpoint, same table, same UI. The whole-message *.eml* is a separate
+export, offered only where a stored original exists — see **The message kebab**.
 
 **Deleting a feed with mirrored mail.** Because a `remote` message's attachments
 live on the source account, removing the IMAP feed — or permanently deleting the
@@ -3513,6 +3570,27 @@ source Sent folder itself. Sent dedup is **by Message-ID only**: a provider that
 preserves the Message-ID reconciles the filed copy to the locally-stored sent row,
 while a provider that rewrites it on send (Gmail) stores no local row — the message
 appears on the next Sent ingest (one poll-interval later).
+
+## Provisioning a mailbox in one call
+
+`plugins/mailbox/includes/provisioning.php` exposes the headless provisioning
+functions — register a domain, create a store-mode mailbox on it, and grant it
+to a user, with no page or session plumbing:
+
+- `mailbox_provision_domain($domain_name)` — ensures the domain row exists
+  (files fleet domain claims on creation, exactly like the Setup tab's
+  add-domain action).
+- `mailbox_provision_mailbox($domain_name, $local_part, $user_id)` — domain +
+  store alias + access grant in one call.
+
+Both are **idempotent**: what already exists is reused, grants are added by
+union (never overwritten), and re-running after a partial failure finishes the
+rest. The protected-domain grant invariant is enforced at the mutation point;
+the vault-unlock gate on routing changes does not apply because these only
+create — they never edit an existing alias's destinations or mode. Callers own
+authorization (every current caller sits behind `check_permission(5)` or
+higher). The setup wizard's one-go apply (`wizard_provision` in
+`admin_mailbox_setup_logic`) is the primary consumer.
 
 ## Importing an existing archive
 

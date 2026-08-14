@@ -22,9 +22,16 @@
  * stripped, links rendered as "text <url>" — so a degraded client (or the FTS
  * indexer, mobile app, snippet builder) always has a faithful plaintext copy.
  *
+ * The other two entry points read RECEIVED mail, which is arbitrary and hostile
+ * and is normally kept behind a sandboxed iframe rather than sanitized at all.
+ * toReadableText() reduces it to the words a person would read (list previews);
+ * sanitizeForPrint() keeps its structure — tables, alignment, inline styles —
+ * for the one surface that has to render received mail inside a document of
+ * ours, the print sheet.
+ *
  * Uses ext-dom (DOMDocument), always present in this deployment; no new dependency.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 class MailboxHtmlSanitizer {
@@ -152,7 +159,213 @@ class MailboxHtmlSanitizer {
 		return self::collapseReadable($text);
 	}
 
+	/**
+	 * Sanitize RECEIVED HTML for rendering inside one of our OWN documents —
+	 * the print sheet. Distinct from sanitize(), which is the narrow allowlist
+	 * for mail we compose: a printout has to keep looking like the email, and an
+	 * email's layout is tables, alignment attributes and inline styles. So the
+	 * structure survives here and only the parts that can act are removed.
+	 *
+	 * What cannot survive: script and every other executable or fetching
+	 * container (the $DROP list), <style> blocks, every event handler and
+	 * unlisted attribute, any style declaration outside the property allowlist,
+	 * and any style value containing url() / expression() / @import — which is
+	 * what stops a printed message from phoning home. <img> keeps only http(s)
+	 * sources; cid: references are already signed URLs by the time they arrive.
+	 *
+	 * This is defence in depth, not the only defence: the print sheet is served
+	 * under a Content-Security-Policy that forbids script outright, so a hole
+	 * here is still not an execution.
+	 */
+	public static function sanitizeForPrint(string $html): string {
+		$html = trim($html);
+		if ($html === '') {
+			return '';
+		}
+		$doc = self::load($html);
+		if ($doc === null) {
+			return '';
+		}
+		$body = $doc->getElementsByTagName('body')->item(0);
+		if ($body === null) {
+			return '';
+		}
+		$out = new DOMDocument('1.0', 'UTF-8');
+		$frag = $out->createDocumentFragment();
+		foreach (iterator_to_array($body->childNodes) as $child) {
+			foreach (self::cleanPrintNode($child, $out) as $clean) {
+				$frag->appendChild($clean);
+			}
+		}
+		if (!$frag->hasChildNodes()) {
+			return '';
+		}
+		$result = $out->saveHTML($frag);
+		return $result === false ? '' : trim($result);
+	}
+
 	// ── internals ────────────────────────────────────────────────────────────
+
+	/** Tags kept when rendering received mail for print (attributes still filtered). */
+	private static $PRINT_ALLOWED = array(
+		'a' => true, 'abbr' => true, 'address' => true, 'article' => true,
+		'aside' => true, 'b' => true, 'big' => true, 'blockquote' => true,
+		'br' => true, 'caption' => true, 'center' => true, 'cite' => true,
+		'code' => true, 'col' => true, 'colgroup' => true, 'dd' => true,
+		'del' => true, 'div' => true, 'dl' => true, 'dt' => true, 'em' => true,
+		'figcaption' => true, 'figure' => true, 'font' => true, 'footer' => true,
+		'h1' => true, 'h2' => true, 'h3' => true, 'h4' => true, 'h5' => true,
+		'h6' => true, 'header' => true, 'hr' => true, 'i' => true, 'img' => true,
+		'ins' => true, 'li' => true, 'main' => true, 'mark' => true, 'nav' => true,
+		'ol' => true, 'p' => true, 'pre' => true, 'q' => true, 's' => true,
+		'section' => true, 'small' => true, 'span' => true, 'strike' => true,
+		'strong' => true, 'sub' => true, 'sup' => true, 'table' => true,
+		'tbody' => true, 'td' => true, 'tfoot' => true, 'th' => true,
+		'thead' => true, 'time' => true, 'tr' => true, 'u' => true, 'ul' => true,
+	);
+
+	/** Attributes allowed on any print tag. */
+	private static $PRINT_GLOBAL_ATTRS = array(
+		'style' => true, 'align' => true, 'valign' => true, 'dir' => true,
+		'title' => true,
+	);
+
+	/** Extra attributes allowed on specific print tags. */
+	private static $PRINT_TAG_ATTRS = array(
+		'img'      => array('alt' => true, 'width' => true, 'height' => true, 'hspace' => true, 'vspace' => true),
+		'table'    => array('width' => true, 'height' => true, 'bgcolor' => true, 'border' => true,
+							'cellpadding' => true, 'cellspacing' => true),
+		'td'       => array('width' => true, 'height' => true, 'bgcolor' => true,
+							'colspan' => true, 'rowspan' => true, 'nowrap' => true),
+		'th'       => array('width' => true, 'height' => true, 'bgcolor' => true,
+							'colspan' => true, 'rowspan' => true, 'nowrap' => true),
+		'tr'       => array('bgcolor' => true, 'height' => true),
+		'col'      => array('span' => true, 'width' => true),
+		'colgroup' => array('span' => true, 'width' => true),
+		'font'     => array('color' => true, 'face' => true, 'size' => true),
+		'ol'       => array('start' => true, 'type' => true),
+		'hr'       => array('width' => true, 'size' => true, 'noshade' => true),
+	);
+
+	/** CSS properties kept from an inline style attribute. */
+	private static $PRINT_STYLE_PROPS = array(
+		'background-color' => true, 'border' => true, 'border-bottom' => true,
+		'border-bottom-color' => true, 'border-bottom-style' => true,
+		'border-bottom-width' => true, 'border-collapse' => true,
+		'border-color' => true, 'border-left' => true, 'border-radius' => true,
+		'border-right' => true, 'border-spacing' => true, 'border-style' => true,
+		'border-top' => true, 'border-width' => true, 'clear' => true,
+		'color' => true, 'direction' => true, 'display' => true, 'float' => true,
+		'font' => true, 'font-family' => true, 'font-size' => true,
+		'font-style' => true, 'font-variant' => true, 'font-weight' => true,
+		'height' => true, 'letter-spacing' => true, 'line-height' => true,
+		'list-style-type' => true, 'margin' => true, 'margin-bottom' => true,
+		'margin-left' => true, 'margin-right' => true, 'margin-top' => true,
+		'max-height' => true, 'max-width' => true, 'min-height' => true,
+		'min-width' => true, 'overflow-wrap' => true, 'padding' => true,
+		'padding-bottom' => true, 'padding-left' => true, 'padding-right' => true,
+		'padding-top' => true, 'text-align' => true, 'text-decoration' => true,
+		'text-indent' => true, 'text-transform' => true, 'vertical-align' => true,
+		'white-space' => true, 'width' => true, 'word-break' => true,
+	);
+
+	/**
+	 * Recursively clean one received node for print. Same contract as
+	 * cleanNode(): kept elements map to themselves, unknown ones unwrap to their
+	 * children, $DROP containers map to nothing.
+	 *
+	 * @return DOMNode[]
+	 */
+	private static function cleanPrintNode(DOMNode $node, DOMDocument $out): array {
+		if ($node->nodeType === XML_TEXT_NODE) {
+			return array($out->createTextNode($node->nodeValue));
+		}
+		if ($node->nodeType !== XML_ELEMENT_NODE) {
+			return array(); // comments (incl. MSO conditionals), PIs, CDATA
+		}
+		$tag = strtolower($node->nodeName);
+		if (isset(self::$DROP[$tag])) {
+			return array();
+		}
+
+		$children = array();
+		foreach (iterator_to_array($node->childNodes) as $child) {
+			foreach (self::cleanPrintNode($child, $out) as $c) {
+				$children[] = $c;
+			}
+		}
+
+		if (!isset(self::$PRINT_ALLOWED[$tag])) {
+			return $children; // unwrap — keep the content, drop the container
+		}
+
+		$elem = $out->createElement($tag);
+
+		if ($tag === 'img') {
+			$src = trim($node->getAttribute('src'));
+			// cid: parts arrive already rewritten to signed https URLs; anything
+			// else (data:, file:, a bare cid: that never resolved) is dropped, and
+			// an <img> is void so there is nothing to unwrap.
+			if (!preg_match('#^https?://#i', $src)) {
+				return array();
+			}
+			$elem->setAttribute('src', $src);
+		} elseif ($tag === 'a') {
+			$href = trim($node->getAttribute('href'));
+			if (self::allowedHref($href)) {
+				$elem->setAttribute('href', $href);
+				$elem->setAttribute('rel', 'noopener noreferrer nofollow');
+			}
+		}
+
+		$extra = self::$PRINT_TAG_ATTRS[$tag] ?? array();
+		foreach ($node->attributes as $attr) {
+			$name = strtolower($attr->nodeName);
+			if (!isset(self::$PRINT_GLOBAL_ATTRS[$name]) && !isset($extra[$name])) {
+				continue; // everything unlisted, which is every on* handler
+			}
+			$value = (string)$attr->nodeValue;
+			if ($name === 'style') {
+				$value = self::filterPrintStyle($value);
+				if ($value === '') {
+					continue;
+				}
+			}
+			$elem->setAttribute($name, $value);
+		}
+
+		foreach ($children as $c) {
+			$elem->appendChild($c);
+		}
+		return array($elem);
+	}
+
+	/**
+	 * Keep the declarations of an inline style that only describe appearance.
+	 * A value that fetches (url(), @import), computes (expression()) or escapes
+	 * the attribute is dropped whole rather than repaired — the printed message
+	 * has no reason to reach the network.
+	 */
+	private static function filterPrintStyle(string $style): string {
+		$kept = array();
+		foreach (explode(';', $style) as $declaration) {
+			$colon = strpos($declaration, ':');
+			if ($colon === false) {
+				continue;
+			}
+			$prop = strtolower(trim(substr($declaration, 0, $colon)));
+			$value = trim(substr($declaration, $colon + 1));
+			if ($prop === '' || $value === '' || !isset(self::$PRINT_STYLE_PROPS[$prop])) {
+				continue;
+			}
+			if (preg_match('#url\s*\(|expression\s*\(|javascript\s*:|@import|\\\\|[<>"\']#i', $value)) {
+				continue;
+			}
+			$kept[] = $prop . ':' . $value;
+		}
+		return implode(';', $kept);
+	}
+
 
 	/** Ceiling on the HTML fed to toReadableText(), in bytes. */
 	const READABLE_INPUT_LIMIT = 200000;

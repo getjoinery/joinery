@@ -35,7 +35,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.14.0
+ * @version 1.16.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -48,8 +48,6 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.
  *   - csrf_token          (string, required) reader session token
  *   - initial_mailboxes   (array, required)  switcher seed data
  *   - attachment_url_base (string, required) per-attachment download endpoint
- *   - message_detail_base (string|null)      single-message deep-link page, or
- *                                            null to omit deep links (member mount)
  *   - setup_url_base      (string|null)      admin Setup page prefix, ready for an
  *                                            alias id. Its presence is also what
  *                                            turns on the setup check: the reader
@@ -85,6 +83,11 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'draftDeleteUrl'    => '/api/v1/action/mailbox/draft_delete',
 		'draftAttachmentDeleteUrl' => '/api/v1/action/mailbox/draft_attachment_delete',
 		'signatureSaveUrl'  => '/api/v1/action/mailbox/signature_save',
+		'messageSourceUrl'  => '/api/v1/action/mailbox/message_source',
+		// .eml download + print sheet. One grant-scoped endpoint for both mounts:
+		// a superadmin reaches every mailbox through it exactly as they do in the
+		// reader, so the admin mount needs no separate staff route.
+		'exportUrlBase'     => '/profile/mailbox/original',
 		'contactsUrl'       => '/api/v1/action/mailbox/contacts',
 		'contactDeleteUrl'  => '/api/v1/action/mailbox/contact_delete',
 		'contactsImportUrl' => '/api/v1/action/mailbox/contacts_import',
@@ -95,7 +98,6 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		// endpoint decides what goes in it — the site-account half is admin-only,
 		// because member records are operator data.
 		'canSeeContext'     => TRUE,
-		'messageDetailBase' => $opts['message_detail_base'] ?? null,
 		'setupUrlBase'      => $opts['setup_url_base'] ?? null,
 		'attachmentUrlBase' => (string)$opts['attachment_url_base'],
 		'initialMailboxes'  => $opts['initial_mailboxes'],

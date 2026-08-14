@@ -5,7 +5,7 @@
  * as the admin mount (includes/mailbox_reader_mount.php); this page supplies the
  * theme chrome, the member attachment endpoint, and no detail-page deep links.
  *
- * @version 1.3.0
+ * @version 1.4.0
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -58,7 +58,6 @@ if (!$has_mailboxes) {
 		'csrf_token'          => $csrf_token,
 		'initial_mailboxes'   => $initial_mailboxes,
 		'attachment_url_base' => '/profile/mailbox/attachment',
-		'message_detail_base' => null,
 	));
 
 	if ($ai_panel_active) {
