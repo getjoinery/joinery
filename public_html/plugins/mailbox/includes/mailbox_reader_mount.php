@@ -35,7 +35,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.16.0
+ * @version 1.16.1
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -84,6 +84,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'draftAttachmentDeleteUrl' => '/api/v1/action/mailbox/draft_attachment_delete',
 		'signatureSaveUrl'  => '/api/v1/action/mailbox/signature_save',
 		'messageSourceUrl'  => '/api/v1/action/mailbox/message_source',
+		'attachmentTextUrl' => '/api/v1/action/mailbox/attachment_text',
 		// .eml download + print sheet. One grant-scoped endpoint for both mounts:
 		// a superadmin reaches every mailbox through it exactly as they do in the
 		// reader, so the admin mount needs no separate staff route.

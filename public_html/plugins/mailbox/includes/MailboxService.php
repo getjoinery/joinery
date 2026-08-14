@@ -49,7 +49,7 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.21
+ * @version 1.22
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -1323,11 +1323,20 @@ class MailboxService {
 		$by_msg = array();
 		foreach ($rows as $r) {
 			$mid = intval($r['ima_iem_inbound_email_message_id']);
+			$filename = $r['ima_filename'] ?: 'attachment';
+			$declared = $r['ima_content_type'] ?: 'application/octet-stream';
 			$by_msg[$mid][] = array(
 				'id'           => intval($r['ima_inbound_message_attachment_id']),
-				'filename'     => $r['ima_filename'] ?: 'attachment',
-				'content_type' => $r['ima_content_type'] ?: 'application/octet-stream',
+				'filename'     => $filename,
+				'content_type' => $declared,
 				'size_bytes'   => intval($r['ima_size_bytes']),
+				// Whether to offer "read this as text" — canPreview() is the one
+				// eligibility rule, shared with the endpoint that answers the
+				// button, so the button and the answer cannot drift apart. The
+				// filename is consulted because senders lie: most real PDFs
+				// arrive declared application/octet-stream, and going by the
+				// declared type alone would hide the button on nearly all of them.
+				'previewable'  => DocumentText::canPreview($declared, $filename),
 			);
 		}
 		return $by_msg;

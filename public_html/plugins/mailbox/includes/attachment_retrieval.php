@@ -15,7 +15,7 @@
  * (the admin endpoint per its backing rules, the member endpoint via
  * MailboxViewer scope) and only then retrieves.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
@@ -24,11 +24,17 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
 /**
  * Fetch the raw bytes for an attachment row. Does NOT authorize.
  *
- * @return array ['ok' => bool, 'content' => string|null, 'error' => string|null]
+ * A sealed attachment on a locked vault fails with 'locked' => true as well as
+ * a message, because the two consumers want different things from that fact:
+ * the download endpoints render the sentence, and the reader's JSON endpoints
+ * answer {locked:true} so the browser can run the one-tap unlock ceremony and
+ * retry instead of showing an error.
+ *
+ * @return array ['ok' => bool, 'content' => string|null, 'error' => string|null, 'locked' => bool]
  */
 function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, InboundEmailMessage $message): array {
-	$fail = function (string $error) {
-		return array('ok' => false, 'content' => null, 'error' => $error);
+	$fail = function (string $error, bool $locked = false) {
+		return array('ok' => false, 'content' => null, 'error' => $error, 'locked' => $locked);
 	};
 
 	$fil_id = intval($att->get('ima_fil_file_id'));
@@ -51,9 +57,9 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		try {
 			$content = InboundEmailMessage::openSealedAttachment($message, $att, $content);
 		} catch (VaultLockedException $e) {
-			return $fail('Unlock your vault to download this attachment.');
+			return $fail('Unlock your vault to download this attachment.', true);
 		}
-		return array('ok' => true, 'content' => $content, 'error' => null);
+		return array('ok' => true, 'content' => $content, 'error' => null, 'locked' => false);
 	}
 
 	// Section-pointer / IMAP rows: retrieve by the message's raw-storage driver.
@@ -87,7 +93,7 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		if (empty($result['ok'])) {
 			return $fail($result['message'] ?? 'This attachment is no longer available in the source mailbox.');
 		}
-		return array('ok' => true, 'content' => (string)$result['content'], 'error' => null);
+		return array('ok' => true, 'content' => (string)$result['content'], 'error' => null, 'locked' => false);
 	}
 
 	// Stored raw (inline / local / cloud): MIME-parse and extract the one part.
@@ -97,12 +103,12 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 	try {
 		$part = $message->getRawMimePart((string)$att->get('ima_mime_part'));
 	} catch (VaultLockedException $e) {
-		return $fail('Unlock your vault to download this attachment.');
+		return $fail('Unlock your vault to download this attachment.', true);
 	}
 	if ($part === null) {
 		return $fail('This attachment is no longer available.');
 	}
-	return array('ok' => true, 'content' => (string)$part['content'], 'error' => null);
+	return array('ok' => true, 'content' => (string)$part['content'], 'error' => null, 'locked' => false);
 }
 
 /** Strip CR/LF and path separators; fall back to a safe default. */

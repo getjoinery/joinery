@@ -12,7 +12,8 @@ require_once(PathHelper::getIncludePath('data/files_class.php'));
  *     loud with a user-facing message rather than silently dropping a block,
  *   - routes each type to the cheapest door the model can consume (text-first),
  *     honoring the per-chat extract-vs-original mode,
- *   - runs extraction only in the isolated timeout+memory subprocess, and
+ *   - reads a file's words only through the core extractor (DocumentText),
+ *     which parses in an isolated timeout+memory subprocess, and
  *   - frames every attachment as untrusted user input.
  *
  * No other call site builds an image/document/text attachment block by hand — a
@@ -57,18 +58,17 @@ class AiAttachment {
         'text/html'        => 'html',
     ];
 
-    /** Hard ceiling for the extraction subprocess wall-clock (seconds). */
-    const EXTRACT_TIMEOUT_SECONDS = 20;
-    /** Hard memory ceiling handed to the extraction subprocess. */
-    const EXTRACT_MEMORY_LIMIT = '256M';
     /** Cap on extracted / verbatim text fed to the model, in characters. */
     const MAX_TEXT_CHARS = 50000;
 
-    /** Extraction outcome markers stored on the attachment-link row. */
-    const EXTRACT_OK      = 'ok';       // text present
-    const EXTRACT_EMPTY   = 'empty';    // parsed, but no text layer (e.g. scanned PDF)
-    const EXTRACT_FAILED  = 'failed';   // parser error / timeout / OOM
-    const EXTRACT_SKIPPED = 'skipped';  // not an extractable type (image)
+    /** Extraction outcome markers stored on the attachment-link row. The core
+     *  extractor owns these values; the aliases keep every existing comparison
+     *  (ChatAttachmentIngest, ChatRunner, ai_message_attachments_class) reading
+     *  the way it always has. */
+    const EXTRACT_OK      = DocumentText::OK;       // text present
+    const EXTRACT_EMPTY   = DocumentText::EMPTY;    // parsed, but no text layer (e.g. scanned PDF)
+    const EXTRACT_FAILED  = DocumentText::FAILED;   // parser error / timeout / OOM
+    const EXTRACT_SKIPPED = DocumentText::SKIPPED;  // not an extractable type (image)
 
     // ---- Policy: type + size caps (settings-tunable) -----------------------
 
@@ -184,14 +184,19 @@ class AiAttachment {
         return null;
     }
 
-    // ---- Extraction (subprocess-only) --------------------------------------
+    // ---- Extraction (delegated to the core extractor) -----------------------
+    //
+    // The parsing itself is DocumentText's job — one isolated timeout+memory
+    // subprocess for the whole platform, so mailbox previews, Drive search and
+    // chat uploads cannot drift apart on what a file says or on how safely it
+    // was read. What stays here is policy: which types this plugin accepts at
+    // all, and how an outcome maps onto the model-payload decision.
 
     /**
-     * Extract text from a stored File in the isolated timeout+memory subprocess.
-     * Returns ['status'=>EXTRACT_*, 'text'=>string]. Images are skipped (no text).
-     * A parser error, timeout (exit 124), or OOM (exit 137) yields EXTRACT_FAILED
-     * with empty text — the caller marks the attachment un-extractable and
-     * continues. Never runs the parser in-process. Reads only already-stored
+     * Extract text from a stored File. Returns ['status'=>EXTRACT_*,
+     * 'text'=>string]. Images are skipped (no text layer). A parser error,
+     * timeout, or OOM yields EXTRACT_FAILED with empty text — the caller marks
+     * the attachment un-extractable and continues. Reads only already-stored
      * bytes; the caller is responsible for ownership.
      */
     public static function extract(File $file): array {
@@ -203,28 +208,24 @@ class AiAttachment {
 
         $path = self::localPath($file);
         if ($path === null) {
-            // Cloud-stored bytes: stage them to a temp file for the subprocess.
+            // Cloud-stored bytes: they go down the subprocess's stdin rather
+            // than through a temp file, so decrypted content never lands on
+            // disk (specs/implemented/sealed_content_egress.md logged the old
+            // staging as an accepted risk; this retires it).
             $bytes = $file->read_bytes('original');
             if ($bytes === null) {
                 return ['status' => self::EXTRACT_FAILED, 'text' => ''];
             }
-            $tmp = tempnam(sys_get_temp_dir(), 'ai_extract_');
-            if ($tmp === false || file_put_contents($tmp, $bytes) === false) {
-                if ($tmp !== false) @unlink($tmp);
-                return ['status' => self::EXTRACT_FAILED, 'text' => ''];
-            }
-            $result = self::runExtract($tmp, $mime);
-            @unlink($tmp);
-            return $result;
+            return self::fromCore(DocumentText::extractBytes($bytes, $mime, self::MAX_TEXT_CHARS));
         }
-        return self::runExtract($path, $mime);
+        return self::fromCore(DocumentText::extractPath($path, $mime, self::MAX_TEXT_CHARS));
     }
 
     /**
      * Extract text directly from a file already on local disk (e.g. the uploaded
      * $_FILES tmp file), so the ingress path can learn the extraction outcome
-     * BEFORE it mints a File row and decides sendability. Same subprocess and
-     * status contract as extract(); images (no text layer to read) return SKIPPED.
+     * BEFORE it mints a File row and decides sendability. Same status contract
+     * as extract(); images (no text layer to read) return SKIPPED.
      */
     public static function extractPath(string $path, string $mime): array {
         $mime = self::normalizeMime($mime);
@@ -235,43 +236,24 @@ class AiAttachment {
         if (!is_readable($path)) {
             return ['status' => self::EXTRACT_FAILED, 'text' => ''];
         }
-        return self::runExtract($path, $mime);
+        return self::fromCore(DocumentText::extractPath($path, $mime, self::MAX_TEXT_CHARS));
     }
 
-    /** Spawn `timeout N php -d memory_limit=… extract_text.php <path> <mime> <cap>`
-     *  and interpret the exit code. */
-    private static function runExtract(string $path, string $mime): array {
-        $script = PathHelper::getIncludePath('plugins/joinery_ai/cli/extract_text.php');
-        $php = self::phpBinary();
-        $cmd = 'timeout ' . (int)self::EXTRACT_TIMEOUT_SECONDS . ' '
-             . escapeshellarg($php)
-             . ' -d ' . escapeshellarg('memory_limit=' . self::EXTRACT_MEMORY_LIMIT)
-             . ' ' . escapeshellarg($script)
-             . ' ' . escapeshellarg($path)
-             . ' ' . escapeshellarg($mime)
-             . ' ' . (int)self::MAX_TEXT_CHARS
-             . ' 2>/dev/null';
-
-        $output = [];
-        $exit = 0;
-        exec($cmd, $output, $exit);
-        $text = trim(implode("\n", $output));
-
-        if ($exit === 124) {
-            error_log('[joinery_ai attach] extraction timed out for ' . $path);
-            return ['status' => self::EXTRACT_FAILED, 'text' => ''];
+    /**
+     * Core result -> the four statuses this plugin persists in
+     * aia_extract_status. The core extractor tells encrypted and oversized
+     * documents apart from plain parser failures, which the preview UI needs
+     * and a model payload does not: for send-time routing an encrypted PDF is
+     * simply one with no text we can read, which is what FAILED already means
+     * (blocksForAttachment then offers the original to a document-capable
+     * model). Collapsing here keeps the stored vocabulary at four values.
+     */
+    private static function fromCore(array $result): array {
+        $status = $result['status'] ?? self::EXTRACT_FAILED;
+        if ($status === DocumentText::SECURED || $status === DocumentText::TOO_LARGE) {
+            $status = self::EXTRACT_FAILED;
         }
-        if ($exit === 137) {
-            error_log('[joinery_ai attach] extraction OOM-killed for ' . $path);
-            return ['status' => self::EXTRACT_FAILED, 'text' => ''];
-        }
-        if ($exit !== 0) {
-            return ['status' => self::EXTRACT_FAILED, 'text' => ''];
-        }
-        if ($text === '') {
-            return ['status' => self::EXTRACT_EMPTY, 'text' => ''];
-        }
-        return ['status' => self::EXTRACT_OK, 'text' => $text];
+        return ['status' => $status, 'text' => (string)($result['text'] ?? '')];
     }
 
     // ---- Sealed-bytes read (send time) --------------------------------------
@@ -498,13 +480,5 @@ class AiAttachment {
         if ($n >= 1048576) return round($n / 1048576, 1) . ' MB';
         if ($n >= 1024) return round($n / 1024) . ' KB';
         return $n . ' B';
-    }
-
-    /** Absolute CLI php path (matches ChatWorkerSpawner's resolution). */
-    private static function phpBinary(): string {
-        foreach ([PHP_BINDIR . '/php', '/usr/bin/php', '/usr/local/bin/php'] as $c) {
-            if (@is_executable($c)) return $c;
-        }
-        return 'php';
     }
 }

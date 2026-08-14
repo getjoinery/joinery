@@ -14,7 +14,8 @@
  * Import is one-directional, manual, owner-scoped: each VEVENT becomes a native
  * cal_entries row owned by the given CalendarSubject. See docs/calendar.md.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - parse(): repeated ATTENDEE lines collect into an 'attendees' list (like exdates) instead of overwriting one props slot
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -39,7 +40,9 @@ class IcsImporter {
 	 * Parse raw .ics text into a structured array.
 	 *
 	 * @return array ['calendar' => [name => value], 'events' => [ event, ... ]]
-	 *   Each event: ['props' => [NAME => ['value'=>, 'params'=>]], 'exdates' => [ ['value'=>,'params'=>], ... ]]
+	 *   Each event: ['props' => [NAME => ['value'=>, 'params'=>]], 'exdates' => [...], 'attendees' => [...]]
+	 *   EXDATE and ATTENDEE repeat legally, so each collects into its own list
+	 *   rather than a props slot that would keep only the last one.
 	 */
 	public static function parse(string $ics_text): array {
 		// Strip a leading UTF-8 BOM.
@@ -73,7 +76,7 @@ class IcsImporter {
 				if ($cur !== null) {
 					$nested++; // a component inside the event (VALARM)
 				} elseif ($comp === 'VEVENT') {
-					$cur = ['props' => [], 'exdates' => []];
+					$cur = ['props' => [], 'exdates' => [], 'attendees' => []];
 					$nested = 0;
 				} else {
 					$skip_depth++; // VTIMEZONE / STANDARD / DAYLIGHT etc.
@@ -96,6 +99,8 @@ class IcsImporter {
 			if ($cur !== null && $nested === 0) {
 				if ($name === 'EXDATE') {
 					$cur['exdates'][] = ['value' => $val, 'params' => $p['params']];
+				} elseif ($name === 'ATTENDEE') {
+					$cur['attendees'][] = ['value' => $val, 'params' => $p['params']];
 				} else {
 					$value = in_array($name, ['SUMMARY', 'DESCRIPTION', 'LOCATION', 'COMMENT'], true)
 						? self::unescapeText($val)

@@ -936,6 +936,26 @@ attachment disposition, `nosniff`) are the shared helpers in
 gates first with its own authorization posture, then retrieves. A `.eml` is never
 reassembled from these parts; the export serves the stored original or nothing.
 
+**Preview reads an attachment without opening it.** Beside every attachment the platform
+can turn into text, the reader draws an eye button; it opens a modal containing the
+document's **words as plain text** and nothing else — no page is rendered, no markup
+becomes a document, no font is loaded, no URL is fetched. The endpoint is
+`mailbox/attachment_text` (POST `attachment_id`), gated on the **same mailbox-grant rule
+as the download** (a preview is exactly as private as the file), throttled at 30 per five
+minutes per IP because each one costs a subprocess — refusals count against the throttle
+too — and ceilinged by `mailbox_preview_max_bytes` (15 MB) from the attachment's recorded
+size before any byte is fetched or decrypted. Parsing itself is
+[`DocumentText`](../../../docs/document_text.md) — PDF, Word, Excel, PowerPoint,
+OpenDocument, EPUB, RTF, XML/SVG, forwarded `.eml`, calendar invites, the whole text
+family, and a name-and-size manifest for a `.zip`. Whether the button appears is decided
+from the declared type **and** the filename, because most real PDFs arrive declared
+`application/octet-stream`; that is a UI hint only, and the extractor re-sniffs the bytes
+regardless. A scanned document, an encrypted one, and one too large to read each get
+their own sentence rather than a shared failure line. On a protected mailbox the bytes
+are sealed, so a locked vault answers `{locked:true}` and the modal offers the one-tap
+unlock. Nothing is cached: extracted text from a sealed message is exactly as sensitive
+as the sealed body, and re-reading costs milliseconds.
+
 **Forward** re-attaches the original's parts in one manifest-driven loop dispatching per
 row: a file-backed row reads its `File`, `remote` fetches from IMAP, a legacy raw row
 extracts the section. An inline (`cid:`) part is **re-embedded** with its original

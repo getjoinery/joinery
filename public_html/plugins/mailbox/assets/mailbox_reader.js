@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.45
+ * No framework. @version 2.47
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -1748,7 +1748,10 @@
 		return wrap;
 	}
 
-	// A row of download chips (icon + name + size) for a message's attachments.
+	// A row of chips for a message's attachments. Each chip is a container, not
+	// a link: the download is the link inside it, and an eye button sits beside
+	// it for anything we can read as text (a button cannot legally nest inside
+	// a link, which is why the chip itself is a div).
 	function attachmentsBlock(atts) {
 		var box = el('div', 'mbx-attachments');
 		box.appendChild(el('div', 'mbx-attachments-label',
@@ -1758,32 +1761,177 @@
 		atts.forEach(function (a) {
 			var name = a.filename || 'attachment';
 			var size = fmtBytes(a.size_bytes);
-			var chip = el('a', 'mbx-attachment');
-			chip.href = CFG.attachmentUrlBase + '?ima_inbound_message_attachment_id='
+			var chip = el('div', 'mbx-attachment');
+
+			var open = el('a', 'mbx-attachment-open');
+			open.href = CFG.attachmentUrlBase + '?ima_inbound_message_attachment_id='
 				+ encodeURIComponent(a.id);
-			chip.target = '_blank';
-			chip.rel = 'noopener';
-			chip.title = name + ' (' + size + ')';
+			open.target = '_blank';
+			open.rel = 'noopener';
+			open.title = name + ' (' + size + ')';
 
 			// Downloading a sealed attachment is a content action: while the thread
 			// is locked, prompt one-tap unlock, then open the download (§ 4.1).
-			chip.addEventListener('click', function (ev) {
+			open.addEventListener('click', function (ev) {
 				if (!state.threadLocked) return; // unlocked / Standard — download directly
 				ev.preventDefault();
 				unlockVault().then(function (ok) {
-					if (ok) { state.threadLocked = false; window.open(chip.href, '_blank', 'noopener'); }
+					if (ok) { state.threadLocked = false; window.open(open.href, '_blank', 'noopener'); }
 				});
 			});
 
-			chip.appendChild(fileIcon(a.content_type, name));
+			open.appendChild(fileIcon(a.content_type, name));
 			var meta = el('div', 'mbx-attachment-meta');
 			meta.appendChild(el('div', 'mbx-attachment-name', name));
 			meta.appendChild(el('div', 'mbx-attachment-size', size));
-			chip.appendChild(meta);
+			open.appendChild(meta);
+			chip.appendChild(open);
+
+			if (a.previewable) {
+				var eye = el('button', 'mbx-attachment-preview');
+				eye.type = 'button';
+				eye.title = 'Preview as text';
+				eye.setAttribute('aria-label', 'Preview ' + name + ' as text');
+				eye.innerHTML = '<svg viewBox="0 0 24 24" width="17" height="17" aria-hidden="true">'
+					+ '<path fill="none" stroke="currentColor" stroke-width="1.8" '
+					+ 'd="M1.8 12S5.5 5.5 12 5.5 22.2 12 22.2 12 18.5 18.5 12 18.5 1.8 12 1.8 12z"/>'
+					+ '<circle cx="12" cy="12" r="3.1" fill="none" stroke="currentColor" stroke-width="1.8"/>'
+					+ '</svg>';
+				eye.addEventListener('click', function (ev) {
+					ev.preventDefault();
+					ev.stopPropagation();
+					openAttachmentPreview(a, open.href);
+				});
+				chip.appendChild(eye);
+			}
+
 			grid.appendChild(chip);
 		});
 		box.appendChild(grid);
 		return box;
+	}
+
+	// Read an attachment WITHOUT opening it: the endpoint returns the document's
+	// words as plain text and the modal writes them with textContent. Nothing in
+	// the file is rendered, parsed as markup, or fetched.
+	//
+	// A third of real PDFs land somewhere other than "here is your text" —
+	// scanned, encrypted, oversized — so each outcome gets its own sentence
+	// rather than a shared failure line.
+	function openAttachmentPreview(att, downloadUrl) {
+		var name = att.filename || 'attachment';
+		var overlay = el('div', 'mbx-modal-overlay');
+		var modal = el('div', 'mbx-modal mbx-preview-modal');
+		modal.appendChild(el('h3', 'mbx-modal-title', name));
+		var note = el('p', 'mbx-modal-help', 'Reading…');
+		modal.appendChild(note);
+
+		var pre = el('pre', 'mbx-preview-text');
+		pre.hidden = true;
+		modal.appendChild(pre);
+
+		var actions = el('div', 'mbx-modal-actions');
+		var copy = el('button', 'mbx-action', 'Copy');
+		copy.type = 'button';
+		copy.disabled = true;
+		copy.addEventListener('click', function () {
+			var write = navigator.clipboard && navigator.clipboard.writeText
+				? navigator.clipboard.writeText(pre.textContent) : Promise.reject();
+			write.then(function () {
+				copy.textContent = 'Copied';
+				setTimeout(function () { copy.textContent = 'Copy'; }, 1500);
+			}).catch(function () { copy.textContent = 'Press Ctrl+C'; });
+		});
+		var download = el('a', 'mbx-action', 'Download');
+		download.href = downloadUrl;
+		download.target = '_blank';
+		download.rel = 'noopener';
+		// Same rule as the chip's own download link: on a locked thread, a plain
+		// GET would render the endpoint's raw refusal text — run the one-tap
+		// unlock ceremony instead, then open the download.
+		download.addEventListener('click', function (ev) {
+			if (!state.threadLocked) return; // unlocked / Standard — download directly
+			ev.preventDefault();
+			unlockVault().then(function (ok) {
+				if (ok) { state.threadLocked = false; window.open(download.href, '_blank', 'noopener'); }
+			});
+		});
+		var close = el('button', 'mbx-action mbx-primary', 'Close');
+		close.type = 'button';
+		close.addEventListener('click', function () { closeModal(overlay); });
+		actions.appendChild(copy);
+		actions.appendChild(download);
+		actions.appendChild(close);
+		modal.appendChild(actions);
+
+		overlay.appendChild(modal);
+		overlay.addEventListener('click', function (e) { if (e.target === overlay) closeModal(overlay); });
+		document.body.appendChild(overlay);
+
+		function onKey(e) {
+			if (e.key !== 'Escape') return;
+			document.removeEventListener('keydown', onKey);
+			closeModal(overlay);
+		}
+		document.addEventListener('keydown', onKey);
+
+		// Columns and manifests need alignment; extracted prose is unreadable in
+		// a monospace column.
+		var MONOSPACE = { text: 1, xlsx: 1, archive: 1, xml: 1 };
+
+		var STATUS_NOTE = {
+			empty: 'This looks like a scanned document — there is no text layer to read. '
+				+ 'Download it to view the pages.',
+			secured: 'This document is password-protected or restricted, so its text cannot be read.',
+			failed: 'This file could not be read as text.',
+			too_large: 'This file is too large to preview. Download it to read it.'
+		};
+
+		function render(data) {
+			data = data || {};
+			if (data.locked) {
+				// A sealed attachment is a content action like any other: offer
+				// the one-tap ceremony, then ask again with the window open.
+				note.textContent = 'Your vault is locked. Unlocking…';
+				unlockVault().then(function (ok) {
+					if (!ok) { note.textContent = 'Your vault is locked, so this attachment stays sealed.'; return; }
+					state.threadLocked = false;
+					note.textContent = 'Reading…';
+					load();
+				});
+				return;
+			}
+			if (data.previewable === false) {
+				note.textContent = data.reason || 'This kind of file cannot be shown as text.';
+				return;
+			}
+			if (data.status !== 'ok') {
+				note.textContent = STATUS_NOTE[data.status] || 'This file could not be read as text.';
+				return;
+			}
+
+			pre.textContent = data.text || '';
+			pre.classList.toggle('mbx-preview-mono', !!MONOSPACE[data.category]);
+			pre.hidden = false;
+			copy.disabled = false;
+
+			var what = (data.category === 'archive') ? 'Contents' : 'Text only';
+			note.textContent = what + '. Nothing in this file is opened or run. '
+				+ fmtBytes(data.size_bytes)
+				+ (data.truncated ? ' — shown in part; the download has the rest.' : '.');
+		}
+
+		function load() {
+			apiV1(CFG.attachmentTextUrl, { attachment_id: String(att.id) })
+				.then(render)
+				.catch(function (err) {
+					// The endpoint's own refusal is the useful sentence ("You do
+					// not have access to this mailbox"); the generic line is only
+					// for a request that never answered.
+					note.textContent = (err && err.message) || 'This attachment could not be read.';
+				});
+		}
+		load();
 	}
 
 	// Human-readable byte size.

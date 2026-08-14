@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.22
+ * Vanilla CSS, no framework. @version 2.23
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -567,18 +567,39 @@
 .mbx-attachment-grid {
 	display: flex; flex-wrap: wrap; gap: 8px;
 }
+/* The chip is a container: a download link, plus an optional preview button
+ * beside it. A button cannot nest inside a link, which is why the bordered
+ * chip is a div and the link sits inside it. */
 .mbx-attachment {
-	display: flex; align-items: center; gap: 10px;
-	max-width: 260px;
+	display: flex; align-items: stretch;
+	max-width: 300px;
 	border: 1px solid #d7dee6; border-radius: 8px;
-	padding: 8px 12px 8px 10px;
-	background: #fbfcfd; text-decoration: none;
+	background: #fbfcfd;
 	color: #1f2933; transition: background .12s, border-color .12s, box-shadow .12s;
 }
 .mbx-attachment:hover {
 	background: #eef4fd; border-color: #a9c6f2;
 	box-shadow: 0 1px 3px rgba(16,24,40,.10);
 }
+.mbx-attachment-open {
+	display: flex; align-items: center; gap: 10px;
+	min-width: 0; flex: 1 1 auto;
+	padding: 8px 12px 8px 10px;
+	text-decoration: none; color: inherit;
+	border-radius: 8px 0 0 8px;
+}
+.mbx-attachment-preview {
+	flex: 0 0 auto;
+	display: inline-flex; align-items: center; justify-content: center;
+	width: 34px;
+	border: 0; border-left: 1px solid #dde4ec;
+	border-radius: 0 8px 8px 0;
+	background: transparent; color: #52606d;
+	cursor: pointer; padding: 0;
+	transition: background .12s, color .12s;
+}
+.mbx-attachment-preview:hover { background: #dbe8fb; color: #1d4ed8; }
+.mbx-attachment-preview:focus-visible { outline: 2px solid #2563eb; outline-offset: -2px; }
 .mbx-attachment-icon {
 	flex: 0 0 auto; width: 30px; height: 30px;
 	object-fit: contain;
@@ -966,12 +987,41 @@
 	-webkit-user-select: text;
 	user-select: text;
 }
+/* Attachment preview: the document's words, never the document. Extracted
+ * prose reads as prose (proportional, wrapped); spreadsheets, archive
+ * manifests and raw XML keep their columns (monospace). */
+.mbx-preview-modal { width: min(820px, 94vw); }
+.mbx-preview-text {
+	margin: 0;
+	padding: .7rem .8rem;
+	background: #f7f8fa;
+	border: 1px solid #e4e7eb;
+	border-radius: 6px;
+	max-height: 62vh;
+	overflow: auto;
+	font-family: inherit;
+	font-size: var(--mbx-text-base);
+	line-height: 1.5;
+	color: #1f2933;
+	white-space: pre-wrap;
+	word-break: break-word;
+	-webkit-user-select: text;
+	user-select: text;
+}
+.mbx-preview-text.mbx-preview-mono {
+	font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+	font-size: var(--mbx-text-sm);
+	white-space: pre;
+	word-break: normal;
+}
 .mbx-modal-actions {
 	display: flex;
 	justify-content: flex-end;
 	gap: .5rem;
 	margin-top: .9rem;
 }
+/* The Download action is an anchor; it must sit level with the buttons. */
+.mbx-modal-actions a.mbx-action { display: inline-flex; align-items: center; text-decoration: none; }
 .mbx-action.mbx-primary { background: #2563eb; border-color: #2563eb; color: #fff; }
 .mbx-action.mbx-primary:hover { background: #1d4ed8; }
 .mbx-action.mbx-primary:disabled { opacity: .6; cursor: default; }
