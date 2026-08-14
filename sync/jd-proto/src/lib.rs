@@ -103,11 +103,33 @@ pub struct Client {
     creds: Option<Credentials>,
 }
 
+/// How long a connection may sit silent before the client stops waiting on it.
+///
+/// This is an idle timeout, not a deadline: every byte that arrives resets it,
+/// so a large transfer over a slow link is never cut off, and only a connection
+/// that has genuinely stopped talking is abandoned. A deadline would do the
+/// opposite — kill the honest slow transfer and still wait out the dead one.
+///
+/// It matters more than it looks. When traffic is dropped rather than refused
+/// — a laptop leaving wifi, a NAT forgetting a mapping — the socket stays open
+/// and the reply simply never comes. Without this, a worker waits for it
+/// forever; with only three transfer workers, one such partition takes the
+/// whole executor down and the daemon keeps running while syncing nothing.
+pub const SILENCE_LIMIT: std::time::Duration = std::time::Duration::from_secs(60);
+
 impl Client {
     /// `base_url` like `https://dev.getjoinery.com` (scheme + host, no path).
     pub fn new(base_url: &str) -> Client {
+        Client::with_silence_limit(base_url, SILENCE_LIMIT)
+    }
+
+    /// As `new`, with the silence limit chosen by the caller. Tests use a short
+    /// one so they can watch the client give up without waiting a real minute.
+    pub fn with_silence_limit(base_url: &str, silence_limit: std::time::Duration) -> Client {
         let agent = ureq::AgentBuilder::new()
             .timeout_connect(std::time::Duration::from_secs(15))
+            .timeout_read(silence_limit)
+            .timeout_write(silence_limit)
             .build();
         Client {
             base_url: base_url.trim_end_matches('/').to_string(),

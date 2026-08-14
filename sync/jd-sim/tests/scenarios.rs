@@ -651,6 +651,79 @@ fn a_rename_the_server_has_already_overtaken_is_not_pushed_forever() {
 }
 
 #[test]
+fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
+    use jd_core::model::EntityId;
+
+    // Two computers hitting the same conflict on the same day derive the same
+    // rescue name -- same file, same date, same suffix. Whichever uploads first
+    // owns it. The other one lands its copy on a disk where that name happens
+    // to be free, then asks the server for it forever: the file holding the
+    // name has arrived and settled, so the refusal never lifts and no amount of
+    // waiting changes it. The rig had a chain of these, one blocking the next,
+    // at thirty-five to thirty-nine attempts.
+    //
+    // The name is already chosen against the disk rather than computed and
+    // hoped for. It has to be chosen against the server too -- free means free
+    // on both sides.
+    use jd_core::model::{Entry, LocalStatus, Placement};
+
+    let world = World::new(167, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_write("slot-1.dat", b"original");
+    assert!(world.settle().is_some());
+
+    // The exact name this device's rescue reaches for first, already spoken for
+    // on the server. Out of scope so the pass leaves it alone -- what matters is
+    // that it holds a name, not what else might be done about it.
+    let first_choice = jd_vfs::conflict_copy_name("slot-1.dat", "2026-07-31", "desktop", 1);
+    desktop
+        .store
+        .put_entry(&Entry {
+            id: EntityId::file(90_001),
+            remote: Placement {
+                parent: None,
+                name: first_choice.clone(),
+            },
+            remote_content: None,
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: LocalStatus::OutOfScope,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    // A real conflict: both computers change it before either hears the other.
+    laptop.fs.user_write("slot-1.dat", b"the laptop's edit");
+    world
+        .device("desktop")
+        .fs
+        .user_write("slot-1.dat", b"the desktop's edit");
+    assert!(world.settle().is_some(), "the world never comes to rest");
+
+    let on_disk = disk_tree(laptop);
+    assert!(
+        !on_disk.contains_key(&first_choice),
+        "the rescue took a name the server had already given away, which is a \
+         push that can only ever be refused"
+    );
+    assert!(
+        on_disk.len() >= 2,
+        "the losing edit has to survive somewhere: {:?}",
+        on_disk.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn two_computers_editing_the_same_file_both_keep_their_work() {
     // The case people actually hit. Neither edit may be discarded, and both
     // computers must end up seeing the same two files.
