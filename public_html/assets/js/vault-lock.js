@@ -27,7 +27,7 @@
  * both keep the chip and events in sync, so page code should always go
  * through them rather than calling the vault actions directly.
  *
- * @version 1.0
+ * @version 1.1
  */
 (function () {
 	'use strict';
@@ -69,6 +69,13 @@
 			document.dispatchEvent(new CustomEvent('joinery:vault-unlocked'));
 			return true;
 		} catch (e) {
+			if (e && e.status === 401) {
+				// The session is gone (idle past expiry, no remember-me) — the
+				// transport's stale-token retry already ran, so this denial is
+				// real. Unlocking needs a signed-in session; go get one.
+				window.location.href = '/login';
+				return false;
+			}
 			alert(e.message || 'Could not unlock your vault.');
 			return false;
 		} finally {

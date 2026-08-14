@@ -15,10 +15,17 @@
  * fallback. Sessionless actions need no token; post() simply omits the header
  * when none is present.
  *
+ * Stale-token recovery: a page that sat idle past server-side session expiry
+ * holds a token the server no longer knows. The failing request itself starts
+ * a fresh session — re-syncing the mirror cookie and restoring login from the
+ * remember-me cookie — so on a 403 AuthenticationError, post() re-reads the
+ * cookie and, if the server rotated it, retries the request once with the new
+ * token. The token-changed guard keeps genuine denials from looping.
+ *
  * Loaded unconditionally by PublicPageBase::public_header() on every page,
  * before any inline page script.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 (function () {
 	'use strict';
@@ -35,6 +42,10 @@
 		// or a full endpoint URL (leading '/') — components configured with a
 		// feed URL pass it straight through.
 		var url = action.charAt(0) === '/' ? action : '/api/v1/action/' + action;
+		return send(url, body, false);
+	}
+
+	function send(url, body, isRetry) {
 		var token = csrf();
 		var headers = { 'Content-Type': 'application/json' };
 		if (token) headers['X-Joinery-Csrf'] = token;
@@ -46,6 +57,17 @@
 		}).then(function (r) {
 			return r.json().catch(function () { return {}; }).then(function (env) {
 				if (!r.ok) {
+					// Stale-token recovery (see header): the 403 response has
+					// already re-synced the mirror cookie; a changed value means
+					// the session rotated under us, so the same request with the
+					// fresh token is a brand-new attempt, not a repeat denial.
+					if (!isRetry && r.status === 403
+							&& env && env.errortype === 'AuthenticationError') {
+						var fresh = csrf();
+						if (fresh && fresh !== token) {
+							return send(url, body, true);
+						}
+					}
 					// Error envelope keys per api_error(): errortype + error.
 					var err = new Error((env && env.error) || 'Request failed (' + r.status + ')');
 					err.status = r.status;
