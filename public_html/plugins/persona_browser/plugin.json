@@ -1,0 +1,65 @@
+{
+    "name": "Persona Browser",
+    "version": "0.2.0",
+    "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
+    "author": "Joinery",
+    "license": "PolyForm-Shield-1.0.0",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "profileMenu": [
+        {
+            "slug": "persona-browser-feed",
+            "title": "My Feed",
+            "url": "/profile/persona_browser/feed",
+            "icon": "rss_feed",
+            "visibility": "in",
+            "permission": 0,
+            "order": 80
+        }
+    ],
+    "settings": [
+        {
+            "name": "persona_browser_endpoint",
+            "default": "http://100.85.61.49:8899",
+            "group": "service",
+            "label": "Service Endpoint",
+            "type": "text",
+            "helptext": "Base URL of the persona browser service on the Mac (tailnet address, no trailing slash)."
+        },
+        {
+            "name": "persona_browser_token",
+            "default": "",
+            "secret": true,
+            "group": "service",
+            "label": "Service Token",
+            "helptext": "Bearer token from the service's config.json on the Mac. Paste it once."
+        },
+        {
+            "name": "persona_browser_hide_ads",
+            "default": "0",
+            "group": "display",
+            "label": "Hide ads from the feed",
+            "type": "checkbox",
+            "helptext": "When on, posts the ad-marking recipe flagged as advertisements are left out of the feed. Posts not yet judged still show."
+        },
+        {
+            "name": "persona_browser_hide_reels",
+            "default": "0",
+            "group": "display",
+            "label": "Hide reels from the feed",
+            "type": "checkbox",
+            "helptext": "When on, short-video reels are left out of the feed."
+        },
+        {
+            "name": "persona_browser_post_retention_days",
+            "default": "0",
+            "group": "retention",
+            "label": "Delete posts older than (days)",
+            "type": "number",
+            "helptext": "A post is permanently deleted this many days after it was first captured, together with its cached images. 0 keeps posts indefinitely.",
+            "validation": {
+                "min": 0
+            }
+        }
+    ]
+}

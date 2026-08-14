@@ -366,6 +366,24 @@ if (isset($_GET['edit'])) {
 			}
 		}
 
+		// Run-on-success recipe chain (universal — any task can queue AI recipes
+		// when it finishes). Autodetected from the recipes on this deployment.
+		if (!empty($chain_recipes)) {
+			$selected_chain = $task_config['run_on_success_recipes'] ?? array();
+			$selected_chain = array_map('intval', is_array($selected_chain) ? $selected_chain : array());
+			$recipe_options = array();
+			foreach ($chain_recipes as $cr) {
+				$recipe_options[$cr['id']] = $cr['name'] . ($cr['enabled'] ? '' : ' (disabled)');
+			}
+			$formwriter->checkboxList('chain_recipes', 'Run recipes when this task succeeds', array(
+				'options'  => $recipe_options,
+				'checked'  => $selected_chain,
+				'helptext' => 'After a successful run, queue these AI recipes immediately instead of '
+				            . 'waiting for their own schedule. A recipe judges only new work, so one '
+				            . 'with nothing to do is a cheap no-op. Disabled recipes never fire.',
+			));
+		}
+
 		$formwriter->submitbutton('btn_save', 'Save Changes');
 		echo $formwriter->end_form();
 		$page->end_box();

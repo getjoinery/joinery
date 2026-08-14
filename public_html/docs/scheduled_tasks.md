@@ -73,6 +73,32 @@ Place in `/tasks/` (core) or `/plugins/{plugin}/tasks/` (plugin).
 - `boolean` — Checkbox
 - `mailing_list` — Mailing list dropdown (populated from database)
 
+### Running an AI recipe when a task succeeds (`run_on_success`)
+
+A task can hand its output straight to an AI recipe the moment it finishes, so work the task produces is judged in seconds rather than waiting for the recipe's own next scheduled tick. Declare it in the task JSON:
+
+```json
+{
+    "name": "My Task",
+    "default_frequency": "hourly",
+    "run_on_success": {
+        "recipes": ["some_recipe_declared_key"]
+    }
+}
+```
+
+Each entry is a recipe's `rcp_declared_key` (the key it was seeded under in `recipes.json`). After the task returns `success`, the runner queues a run of each named recipe. It is deliberately conservative — it fires only when joinery_ai is present, only for recipes that exist **and are enabled** (never resurrecting one an operator turned off or one still unconfigured), and skips a recipe that already has a run in flight. Queuing is the guarantee: the immediate spawn is best-effort, and the per-minute dispatcher drains any pending run.
+
+**Two ways to wire it — they stack.** The JSON above is the *plugin author's* zero-config default, for when the same plugin ships the task and the recipe and wants them chained out of the box (portable — it uses the recipe's declared key). Separately, an **operator** can wire any task to any recipe on the **Edit Task** page (Admin › System › Scheduled Tasks › Edit): a "Run recipes when this task succeeds" checkbox list, autodetected from the recipes on this deployment, saved into `sct_task_config.run_on_success_recipes` as recipe **ids** (so it works for operator-created recipes that carry no declared key). At run time the two sources are unioned and deduped, so a recipe named by both fires once. Disabled recipes are listed but never fire.
+
+**Firing only when there was work.** By default a successful run fires the chain. A task that often succeeds with nothing to hand on can opt out per run by returning an array result with `run_chain => false`:
+
+```php
+return ['status' => 'success', 'message' => '0 new items', 'run_chain' => false];
+```
+
+Omit the key (or return a plain `'success'` string) to fire the chain as normal.
+
 ### 2. Create the PHP Task Class
 
 ```php
