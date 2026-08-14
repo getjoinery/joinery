@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.19.3",
+    "version": "0.19.4",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
@@ -382,6 +382,15 @@
             "default": "2097152",
                 "group": "chat",
                 "label": "Max text attachment (bytes)",
+                "type": "number",
+                "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
+        },
+        {
+            "name": "joinery_ai_attach_document_max_bytes",
+            "default": "10485760",
+                "group": "chat",
+                "label": "Max document attachment (bytes)",
+                "helptext": "Word, Excel, PowerPoint, OpenDocument, EPUB, RTF, forwarded mail and calendar files. These are read as text before they reach a model.",
                 "type": "number",
                 "validation": {"number": true, "min": 0, "messages": {"min": "Must be 0 or more."}}
         },

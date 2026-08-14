@@ -951,7 +951,9 @@ family, and a name-and-size manifest for a `.zip`. Whether the button appears is
 from the declared type **and** the filename, because most real PDFs arrive declared
 `application/octet-stream`; that is a UI hint only, and the extractor re-sniffs the bytes
 regardless. A scanned document, an encrypted one, and one too large to read each get
-their own sentence rather than a shared failure line. On a protected mailbox the bytes
+their own sentence rather than a shared failure line.
+
+**A picture gets the other kind of preview.** There is no text inside a photo to pull out, so an image attachment opens as the picture itself — the one preview that really is decoded, by the browser's image decoder. It is offered because the alternative it replaces is worse: downloading the file and opening it on your own computer. The modal says so plainly rather than repeating the text preview's promise. The bytes come through the same gated download endpoint and are given an image type in the browser, so a sender's declared type never decides how the response is treated, and a file that is not really a picture simply fails to decode. SVG is deliberately not in this path: it is markup wearing an image's name, and it previews as text. Which kind of preview an attachment gets — `text`, `image`, or none — is `MailboxService::previewKind()`, and the reader carries it as `preview_kind` on each attachment. On a protected mailbox the bytes
 are sealed, so a locked vault answers `{locked:true}` and the modal offers the one-tap
 unlock. Nothing is cached: extracted text from a sealed message is exactly as sensitive
 as the sealed body, and re-reading costs milliseconds.

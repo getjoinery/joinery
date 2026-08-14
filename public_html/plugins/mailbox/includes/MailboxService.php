@@ -1297,15 +1297,60 @@ class MailboxService {
 	}
 
 	/**
+	 * Raster image types the reader will show in the preview modal. SVG is
+	 * deliberately absent: it is markup wearing an image's name, and it already
+	 * previews as text through the extractor, which is the safer answer.
+	 */
+	const PREVIEW_IMAGE_MIMES = array(
+		'image/png', 'image/jpeg', 'image/gif', 'image/webp', 'image/avif', 'image/bmp',
+	);
+
+	/** Extensions that name one of those, for the same reason the text side
+	 *  consults the filename: senders declare octet-stream constantly. */
+	const PREVIEW_IMAGE_EXTENSIONS = array(
+		'png' => 'image/png',  'jpg'  => 'image/jpeg', 'jpeg' => 'image/jpeg',
+		'gif' => 'image/gif',  'webp' => 'image/webp', 'avif' => 'image/avif',
+		'bmp' => 'image/bmp',
+	);
+
+	/**
+	 * What Preview can offer for one attachment: 'text', 'image', or null.
+	 *
+	 * A UI HINT ONLY. It draws a button; it never decides what anything is
+	 * handed. The text path re-sniffs the bytes inside its sandbox. The image
+	 * path fetches them through the gated download endpoint and gives them an
+	 * image type in the browser, so a sender's declared type never decides how
+	 * the response is treated and a file that is not a picture simply fails to
+	 * decode.
+	 *
+	 * A picture is the one preview that is not extraction — there is no text in
+	 * it to pull out. Showing it here is still the smaller exposure than the
+	 * alternative, which is downloading it and opening it on your own computer;
+	 * the modal says plainly that this one is decoded as an image.
+	 */
+	public static function previewKind($declared, ?string $filename): ?string {
+		if (DocumentText::canPreview($declared, $filename)) {
+			return 'text';
+		}
+		$mime = DocumentText::normalizeMime($declared);
+		if (in_array($mime, self::PREVIEW_IMAGE_MIMES, true)) {
+			return 'image';
+		}
+		$ext = strtolower((string)pathinfo((string)$filename, PATHINFO_EXTENSION));
+		return isset(self::PREVIEW_IMAGE_EXTENSIONS[$ext]) ? 'image' : null;
+	}
+
+	/**
 	 * The non-inline attachment manifest for a set of messages, grouped by message
 	 * id — what the reader lists below each message. Each entry carries what a
 	 * download chip needs: the manifest id (the download endpoint's key), filename,
-	 * content type, and size. Inline (cid:) parts are excluded (they belong to the
-	 * HTML body). Bytes are never loaded here — the chip links to the gated
-	 * per-attachment download endpoint.
+	 * content type, size, and which kind of preview (if any) to offer.
+	 * Inline (cid:) parts are excluded (they belong to the HTML body). Bytes are
+	 * never loaded here — the chip links to the gated per-attachment download
+	 * endpoint.
 	 *
 	 * @param int[] $message_ids
-	 * @return array<int, array<int, array>>  message_id => [ {id, filename, content_type, size_bytes}, ... ]
+	 * @return array<int, array<int, array>>  message_id => [ {id, filename, content_type, size_bytes, preview_kind}, ... ]
 	 */
 	private function attachmentsForMessages(array $message_ids): array {
 		if (!count($message_ids)) {
@@ -1330,13 +1375,9 @@ class MailboxService {
 				'filename'     => $filename,
 				'content_type' => $declared,
 				'size_bytes'   => intval($r['ima_size_bytes']),
-				// Whether to offer "read this as text" — canPreview() is the one
-				// eligibility rule, shared with the endpoint that answers the
-				// button, so the button and the answer cannot drift apart. The
-				// filename is consulted because senders lie: most real PDFs
-				// arrive declared application/octet-stream, and going by the
-				// declared type alone would hide the button on nearly all of them.
-				'previewable'  => DocumentText::canPreview($declared, $filename),
+				// What the Preview button offers, if anything: 'text', 'image',
+				// or null. See previewKind().
+				'preview_kind' => self::previewKind($declared, $filename),
 			);
 		}
 		return $by_msg;
