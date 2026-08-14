@@ -1571,6 +1571,39 @@ abstract class SystemBase {
 		return $out;
 	}
 
+	/**
+	 * The API shape of a row whose sealed content nobody present can open.
+	 *
+	 * Every readable plain column exports normally; a field the lock keeps
+	 * closed exports as null, and the row carries content_locked: true so a
+	 * client can show its locked placeholder. This is what lets a collection
+	 * include the row honestly — a list that silently dropped locked rows would
+	 * present itself as complete while omitting them. Derived fields are left
+	 * out entirely: any of them may read sealed content on the way to its value.
+	 */
+	function export_for_api_locked() {
+		$out = array();
+		foreach (array_keys(static::$field_specifications) as $field) {
+			if (static::is_unreadable_field($field)) {
+				continue;
+			}
+			try {
+				$value = $this->get($field);
+			} catch (VaultLockedException $e) {
+				$value = null;
+			}
+			// SQL function defaults like 'now()' are not dates on the wire.
+			if ($value !== null && $this->is_timestamp_field($field)
+					&& is_string($value) && preg_match('/^\w+\(\)$/', $value)) {
+				$value = null;
+			}
+			$out[$field] = $value;
+		}
+		$out['key'] = $this->key;
+		$out['content_locked'] = true;
+		return $out;
+	}
+
 	function export_as_array() {
 		$out_array = array();
 		foreach(array_keys(static::$field_specifications) as $field) {

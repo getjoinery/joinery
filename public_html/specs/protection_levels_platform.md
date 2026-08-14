@@ -5,10 +5,13 @@ list. Companion spec: `specs/implemented/sealed_content_egress.md`
 (the egress choke point is what makes the Private rung meaningful platform-wide).
 Ladder shape and the Guarded name are owner-resolved (decisions R1/R2 below).**
 
-**One matrix row is built:** Drive's Private rung, per
-`specs/implemented/drive_private_tier.md`. Its level UI is Drive's own
-(`assets/js/drive.js`). The **shared** picker of work item 1 below is still this
-spec's deliverable, and Drive adopts it when it lands.
+**Two matrix rows are built.** Drive's Private rung, per
+`specs/implemented/drive_private_tier.md` — its level UI is Drive's own
+(`assets/js/drive.js`). And social messaging, per
+`specs/implemented/joinery_messenger.md`, which also **delivered work item 1**:
+the shared card picker is `includes/ProtectionLevelPicker.php`, it owns the card
+copy for every service, and the messenger is its first consumer. Mail and Drive
+adopt it when next touched.
 
 ## Intent
 
@@ -173,20 +176,31 @@ mail is the platform's center. If it ever un-parks, it arrives as mail's true
 | Dial | none; plaintext (`rcn_notes`, `mem_memories`, `rcp_workspace`) | **no picker.** These gain Layer 0 sealed columns on demand — when the hot-turn rule refuses a write a product flow needs (egress spec resolved decision 10). Rows written by a hot turn seal to the content owner; rows the user types by hand stay Standard | fill-in (demand-driven, already owned by the egress spec) |
 | Rationale | | Mostly AI-written surfaces, so the derived-tier rule covers the real risk (AI copying protected content in). Revisit — calendar-style — if hand-typed "Private notes" becomes a real ask | — |
 
-### Social messaging — out of scope, recorded for honesty
+### Social messaging — BUILT
 
 | Facet | Current | Target | Gap |
 |---|---|---|---|
-| Dial | none; plaintext | none in this spec. Multi-party custody (N readers per thread) is a different key-management problem than one-owner sealing; folding it in here would balloon the doctrine. Candidate for a future spec | deferred |
+| Dial | per **conversation**, 3-card picker (`cnv_protection_level`), Standard / Private / Guarded | as current | **built** |
+| Custody | one key per conversation, wrapped to each participant (`ckg_conversation_key_grants`); the server reads a message only while a holder is present | as current | built |
+| Fortress | not offered. Client custody for a multi-party thread is per-participant browser ceremonies, re-sealing on every membership change, and client-side decrypt of every render — a different key-management problem, and per R2 a service that cannot honestly offer a rung shows no card for it | a client-custody messaging spec, if ever wanted, arrives as this picker's fourth card | deferred, on record |
+
+Multi-party custody is the one place the platform's one-owner sealing shape
+varies, and it varies in exactly one part: where the key wrapping lives. See
+`docs/sealed_vault.md` § Many readers.
 
 ---
 
 ## Gap summary (the work list, in build order)
 
-1. **Shared level-picker component** — extract the mailbox three-card picker
-   (outcome language, prerequisite checklist pattern) into a core component both
-   mail and Drive render. Card copy comes from one place so the promise wording
-   never drifts. *(fill-in, small)*
+1. **Shared level-picker component** — **BUILT** as
+   `includes/ProtectionLevelPicker.php` (delivered by
+   `specs/implemented/joinery_messenger.md`). A consumer declares its subset of
+   the ladder and a copy flavour; the cards, and the three promises on each of
+   them, come from one place. Rendered through FormWriter's card radio, so the
+   control carries the platform's validation styling and markup like any other
+   field, and the card presentation now lives in the shared kit stylesheet
+   rather than only in the admin theme. Mail and Drive still render their own
+   hand-rolled pickers and adopt this when next touched.
 2. **Drive Private tier** — the substantive build: per-file server-custody
    sealing (content, metadata blob, thumbnail), in-window read paths, in-window
    content search, office-editing gate flipped to in-window-allowed, public-link

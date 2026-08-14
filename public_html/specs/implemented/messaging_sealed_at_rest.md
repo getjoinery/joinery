@@ -1,6 +1,10 @@
 # Spec: Sealed-at-rest human conversations (server-custody encryption for messaging)
 
-**Status:** Draft — design record (sealed-at-rest / server-custody option). Captured while scoping; not yet scheduled.
+**Status:** BUILT 2026-08-14, as the **Private** rung of
+`specs/implemented/joinery_messenger.md` § Protection levels, which absorbed this
+design and resolved its open questions (§7.6 there). This file stays as the
+design record; the current-state developer documentation is
+`docs/social_features.md` § Protection levels.
 **Area:** core messaging (`data/conversations_class.php`, `data/messages_class.php`) + Sealed Vault server-custody stack
 **Companion to:** `messaging_ai_participant.md` (the in-room AI — this spec is designed to *coexist* with it, §5)
 **Contrast with:** `DEFERRED_client_custody_mail.md` (the zero-knowledge / client-custody posture — a different, larger, mutually-exclusive-with-AI build; §6)

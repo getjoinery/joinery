@@ -1,0 +1,13 @@
+{
+  "name": "Retry cross-site chat messages",
+  "description": "Sends chat messages that have not yet reached the other Joinery instance. A message whose first attempt failed — the far instance restarting, a network hiccup — is queued with a doubling backoff and retried here until it lands or is given up on. A refusal is never retried: that answer will not change. Reactions and deletes are best-effort and never queued.",
+  "activate_on_install": true,
+  "default_frequency": "every_run",
+  "config_fields": {
+    "batch_size": {
+      "type": "number",
+      "label": "Messages per run (default 50)",
+      "required": false
+    }
+  }
+}

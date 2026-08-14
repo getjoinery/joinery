@@ -34,7 +34,7 @@
  *     live. If the sender could look up "am I allowed to send Direct to bob@you"
  *     that would be an oracle leaking the recipient's contact and block lists.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SafeHttpClient.php'));
@@ -56,6 +56,13 @@ class DirectSendResult {
 	const DECLINED      = 'declined';
 	/** The recipient domain publishes no capability record. */
 	const NO_CAPABILITY = 'no_capability';
+	/**
+	 * The caller required sealing and the recipient published no key to seal
+	 * to. Refused between preflight and transfer, so no content byte crossed
+	 * the wire. Final for as long as the far side has no vault — retrying asks
+	 * the same instance the same question.
+	 */
+	const NO_SEALING    = 'no_sealing';
 	/** Connection, timeout, or verification failure at either step. */
 	const FAILED        = 'failed';
 
@@ -129,7 +136,10 @@ class JoineryDirect {
 	 *        or a `path` — so a large attachment never has to sit in memory as a
 	 *        string just to be sent.
 	 * @param array  $options           'timeout' overrides the request timeout;
-	 *        'sender' names the From address when it is not the site default.
+	 *        'sender' names the From address when it is not the site default;
+	 *        'require_sealed' refuses (NO_SEALING) instead of transferring when
+	 *        the preflight returns no recipient key — for callers whose policy
+	 *        forbids the opportunistic plaintext-over-TLS fallback.
 	 */
 	public static function send(string $recipient_address, string $kind, array $parts, array $options = array()): DirectSendResult {
 		$recipient_address = strtolower(trim($recipient_address));
@@ -251,6 +261,10 @@ class JoineryDirect {
 		$recipient_key = (string)($answer['key'] ?? '');
 		$key_generation = (int)($answer['key_generation'] ?? 0);
 		$sealed = ($recipient_key !== '');
+		if (!$sealed && !empty($options['require_sealed'])) {
+			return new DirectSendResult(DirectSendResult::NO_SEALING,
+				array('detail' => $recipient_domain . ' published no key to seal to'));
+		}
 
 		// 4. Transfer each part as its own request, then commit with a signature
 		//    over the ordered hashes of the SEALED bytes, bound to the nonce.
@@ -351,6 +365,10 @@ class JoineryDirect {
 
 		$recipient_key = (string)($answer['key'] ?? '');
 		$sealed = ($recipient_key !== '');
+		if (!$sealed && !empty($options['require_sealed'])) {
+			return new DirectSendResult(DirectSendResult::NO_SEALING,
+				array('detail' => 'loopback recipient published no key to seal to'));
+		}
 		$hashes = array();
 		foreach ($descriptors as $index => $descriptor) {
 			$bytes = self::materialize($descriptor);

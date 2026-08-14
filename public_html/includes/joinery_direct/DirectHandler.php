@@ -23,10 +23,23 @@
  * distinguisher, or a bounce, and reviewing a new kind means reviewing two pure
  * functions.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectEnvelope.php'));
+
+/**
+ * Thrown by a kind's ingest() to say the payload cannot be stored YET — the
+ * store it belongs in is sealed and nobody present can open it. The framework
+ * keeps the delivery HELD, parts intact, and re-runs ingest at the recipient's
+ * next unlock, the same disposition as a sealed-tier deferral. It never reaches
+ * the wire: the sender was already answered, and lock state must not leak.
+ *
+ * This is for "not now", never for "not ever" — a payload that is genuinely
+ * unstorable should be logged and dropped by the handler itself, because a
+ * held delivery is retried at every unlock until retention reclaims it.
+ */
+class DirectDeferIngest extends Exception {}
 
 interface DirectKindHandler {
 

@@ -96,7 +96,15 @@ returns a **typed result**, never a behavior:
 | `delivered` | Accepted and transferred; the result records whether parts were sealed and to which key generation |
 | `declined` | The receiver answered `declined` — this recipient does not accept this kind from this sender |
 | `no_capability` | The recipient domain publishes no capability record, or this deployment holds no signing identity for the sender |
+| `no_sealing` | The caller passed `require_sealed` and the preflight returned no recipient key — refused between preflight and transfer, so no content byte crossed the wire |
 | `failed` | Connection, timeout, or verification failure at any step |
+
+**`require_sealed`** (option): the client's default is opportunistic sealing —
+parts cross plaintext-over-TLS when the far side publishes no key. A caller whose
+policy forbids that trade (a Guarded conversation) passes
+`'require_sealed' => true` and gets `no_sealing` instead of a transfer. The
+refusal is final for as long as the far side has no vault: retrying asks the same
+instance the same question.
 
 **What a result means belongs to the calling kind, not the client.** Mail's
 transport adapter (`DirectMailTransport`, registered into `EmailSender`) maps
@@ -183,6 +191,15 @@ A handler is two pure functions — that is the entire surface:
   answered `accept`, a deferred decline is a local disposition, not a drop — mail
   files such a message where the ordinary path would have (ordinary/spam, no
   verified mark).
+
+An ingest that cannot store **yet** — its destination is sealed and nobody
+present can open it (chat arriving into a conversation the local member raised to
+Private, say) — throws `DirectDeferIngest`. The framework holds the delivery
+(state HELD, parts intact) and re-runs ingest at the recipient's next unlock; the
+wire answer is unchanged, so lock state never leaks. This is for "not now", never
+"not ever": a genuinely unstorable payload is the handler's to log and drop,
+because a held delivery is retried at every unlock until the retention sweep
+reclaims it.
 
 The envelope hands ingest the verified-sender fact and transport tag, so a kind can
 drive its own UI the way mail's verified-direct mark does — applied by the

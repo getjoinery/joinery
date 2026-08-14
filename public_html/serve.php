@@ -1,7 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
-// @version 1.4.0
+// @version 1.5.0 — /profile/conversation(s) hand off to the messenger app when
+// its plugin is active, and serve the older thread views when it is not.
 
 // RouteHelper handles all routing and dependency loading
 require_once(__DIR__ . '/includes/RouteHelper.php');
@@ -191,6 +192,26 @@ $routes = [
         // the entry point (permission is enforced by the target page).
         '/admin' => function($params, $settings, $session, $template_directory) {
             header('Location: /admin/admin_users');
+            exit;
+        },
+
+        // One messaging surface. With the messenger installed AND switched on it
+        // IS the member's messages app, so the older thread pages hand off to it
+        // rather than running alongside and drifting. Without the plugin — or
+        // with its messenger_active switch off — these routes do nothing and the
+        // older pages serve normally, so messaging never loses its last working
+        // surface to a redirect into an app that refuses.
+        '/profile/conversations' => function($params, $settings, $session, $template_directory) {
+            if (!PluginHelper::isPluginActive('messenger')) { return false; }
+            if (!$settings->get_setting('messenger_active', true, true)) { return false; }
+            header('Location: /profile/messenger');
+            exit;
+        },
+        '/profile/conversation' => function($params, $settings, $session, $template_directory) {
+            if (!PluginHelper::isPluginActive('messenger')) { return false; }
+            if (!$settings->get_setting('messenger_active', true, true)) { return false; }
+            $id = isset($_GET['id']) ? (int)$_GET['id'] : 0;
+            header('Location: /profile/messenger' . ($id ? '?c=' . $id : ''));
             exit;
         },
         // Plugin admin discovery

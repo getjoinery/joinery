@@ -23,7 +23,9 @@
  * was considered and rejected: it could lose a legitimate contact's sealed mail,
  * where a request-level refusal loses nothing.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a kind's ingest may throw DirectDeferIngest at commit; the
+ *   delivery is HELD with its parts and drained at the recipient's next unlock.
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
@@ -223,7 +225,17 @@ class DirectSpoolService {
 		// uniformly on the wire without gating — the contact check run now against
 		// its plaintext address book, the deferred gate without the wait.
 		$accepted = $session->get('jds_gate_at_commit') ? self::gateFor($spool) : true;
-		self::ingest($spool, $accepted, null);
+		try {
+			self::ingest($spool, $accepted, null);
+		} catch (DirectDeferIngest $e) {
+			// The kind's store is sealed and nobody present can open it — a
+			// conversation raised to Private on a Standard-posture mailbox, say.
+			// Held with its parts and drained at the recipient's next unlock;
+			// the wire answer is unchanged, so lock state never leaks.
+			$spool->set('jdp_state', DirectSpool::STATE_HELD);
+			$spool->save();
+			return;
+		}
 		$spool->set('jdp_state', DirectSpool::STATE_DONE);
 		$spool->set('jdp_drained_time', gmdate('Y-m-d H:i:s'));
 		$spool->save();

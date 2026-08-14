@@ -1,6 +1,12 @@
 # Joinery Messenger — WhatsApp-style messaging in the member area
 
-**Status:** Draft 2026-08-11 — awaiting review. Not yet built.
+**Status:** BUILT 2026-08-14 — all three phases. Phases 1 and 2 are verified on
+dev end to end (browser + `db` tier). Phase 3's handler, wire format, retry
+queue and reachability are covered by `messenger_federation`; the live
+two-instance crossing is not verified here because dev publishes no Direct
+signing identity — that gate belongs with Direct Mail's own fleet rollout.
+Developer docs: `docs/social_features.md` § Messaging / Conversations and
+`plugins/messenger/docs/overview.md`.
 
 **Plugin name:** `messenger`
 

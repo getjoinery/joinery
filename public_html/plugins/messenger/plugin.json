@@ -1,0 +1,106 @@
+{
+    "name": "Joinery Messenger",
+    "version": "1.0.0",
+    "description": "WhatsApp-style messaging in the member area: conversations and groups with near-realtime delivery, read receipts, typing indicators, replies, reactions and attachments.",
+    "author": "Joinery",
+    "license": "PolyForm-Shield-1.0.0",
+    "status": "beta",
+    "receives_upgrades": true,
+    "included_in_publish": true,
+    "requires": {
+        "php": ">=8.0"
+    },
+    "tags": [
+        "messaging",
+        "chat",
+        "messenger",
+        "conversations"
+    ],
+    "styles": [
+        "assets/css/messenger.css"
+    ],
+    "bootstrap": "includes/bootstrap.php",
+    "directKinds": {
+        "chat": {
+            "handler": "includes/ChatDirectHandler.php",
+            "class": "ChatDirectHandler",
+            "gate": "contacts"
+        }
+    },
+    "vaultConsumer": {
+        "order": 30,
+        "reseals": true,
+        "caches": false
+    },
+    "profileMenu": [
+        {
+            "slug": "messenger",
+            "title": "Messages",
+            "url": "/profile/messenger",
+            "icon": "chat",
+            "visibility": "in",
+            "permission": 0,
+            "order": 53
+        }
+    ],
+    "settingsGroups": {
+        "messenger": "Messenger",
+        "messenger_limits": "Limits",
+        "messenger_polling": "Refresh rate"
+    },
+    "settings": [
+        {
+            "name": "messenger_active",
+            "default": "1",
+            "group": "messenger",
+            "label": "Messenger enabled",
+            "type": "checkbox",
+            "helptext": "Turns the member Messages app on. With it off the app and its API actions refuse; existing conversations are untouched."
+        },
+        {
+            "name": "messenger_default_protection_level",
+            "default": "standard",
+            "group": "messenger",
+            "label": "Protection level for new conversations",
+            "type": "select",
+            "options": {
+                "standard": "Standard - the server manages messages for you",
+                "private": "Private - sealed at rest, readable only while a participant is present",
+                "guarded": "Guarded - Private, plus no message content leaves in notifications"
+            },
+            "helptext": "What a new conversation starts at when the member does not choose. A conversation can be raised afterwards but never lowered."
+        },
+        {
+            "name": "messenger_max_group_size",
+            "default": "32",
+            "group": "messenger_limits",
+            "label": "Largest group",
+            "type": "text",
+            "helptext": "How many people one group conversation may hold."
+        },
+        {
+            "name": "messenger_max_attachment_mb",
+            "default": "25",
+            "group": "messenger_limits",
+            "label": "Largest attachment (MB)",
+            "type": "text",
+            "helptext": "Per file. The server's own upload limit still applies on top of this."
+        },
+        {
+            "name": "messenger_poll_thread_seconds",
+            "default": "3",
+            "group": "messenger_polling",
+            "label": "Open conversation (seconds)",
+            "type": "text",
+            "helptext": "How often an open conversation asks for new messages. Lower feels more instant and costs more queries."
+        },
+        {
+            "name": "messenger_poll_list_seconds",
+            "default": "12",
+            "group": "messenger_polling",
+            "label": "Conversation list (seconds)",
+            "type": "text",
+            "helptext": "How often the list refreshes when no conversation is open."
+        }
+    ]
+}

@@ -3,7 +3,8 @@
 A per-user encryption identity shared by every feature that seals content the
 server should only read while the user has proven presence. One lock (a
 passkey, a recovery code, or an optional bypass phrase), one bounded unlock
-window, and any number of consumers behind it — mail, chat, and
+window, and any number of consumers behind it — mail, AI chat,
+[protected conversations](social_features.md#protection-levels) and
 [Drive's Private files](drive_encryption.md#private-files--server-custody) seal
 server-custody content; the [password manager](../plugins/vault/docs/overview.md)
 and [Drive's Fortress folders](drive_encryption.md) are client-custody consumers
@@ -365,6 +366,23 @@ and plaintext rows side by side — a Fortress domain's mail and a Standard
 domain's mail are the same model — and only the row knows which it is. A row
 with `{prefix}_content_sealed` false reads and writes as ordinary plaintext and
 costs nothing.
+
+### Many readers: the one variation on the shape
+
+Every model above seals to a **single owner**, whose wrapping lives on the row.
+A conversation has many readers, so the messenger varies exactly that one part
+and nothing else (docs/social_features.md § Protection levels): the key is
+wrapped once per participant in `ckg_conversation_key_grants`, `Message`
+overrides `decryptSealedFieldStatic()` to resolve it through whichever present
+participant's grant opens, and the row's own wrapping columns stay null.
+Everything else is the shipped machinery — `sealColumns()` with a supplied key
+writes the ciphertext, `save()` leaves a sealed row's content columns alone, a
+closed window is `VaultLockedException`, and rotation re-wraps grants without
+rewriting a single message.
+
+A consumer with the same shape (several people reading one item) should copy
+that arrangement rather than inventing a third. A consumer with one owner should
+not: the generic path is less code and less to get wrong.
 
 ### Reading
 

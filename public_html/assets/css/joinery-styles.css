@@ -952,6 +952,50 @@ body.jy-default .jy-app-bar h1 { font-size: var(--jy-text-xl); font-weight: 600;
   margin-bottom: 0;
 }
 
+/* Radio cards — the shape a choice takes when each option carries a promise
+   rather than a label (protection levels, plan tiers). FormWriter emits this
+   markup for radioinput(..., ['card' => true]); the admin theme styles the same
+   markup on its own chrome, and this is the kit's copy for every other surface. */
+.jy-ui .jy-radio-cards {
+  display: flex;
+  flex-direction: column;
+  gap: var(--jy-space-3);
+  margin-bottom: var(--jy-space-2);
+}
+.jy-ui .form-check.jy-radio-card {
+  align-items: flex-start;
+  gap: var(--jy-space-3);
+  margin-bottom: 0;
+  padding: var(--jy-space-3) var(--jy-space-4);
+  border: 1px solid var(--jy-color-border);
+  border-radius: var(--jy-radius-lg);
+  transition: border-color 0.15s ease, background 0.15s ease;
+}
+.jy-ui .form-check.jy-radio-card input[type="radio"] { margin-top: 0.2rem; }
+.jy-ui .form-check.jy-radio-card:has(input[type="radio"]:checked) {
+  border-color: var(--jy-color-primary);
+  background: var(--jy-color-info-bg);
+}
+/* A disabled card is an option this member cannot take right now — say so by
+   fading it, never by hiding it: the reason is written above the list. */
+.jy-ui .form-check.jy-radio-card:has(input[type="radio"]:disabled) {
+  opacity: 0.55;
+}
+.jy-ui .form-check.jy-radio-card .form-check-label {
+  display: flex;
+  flex-direction: column;
+  gap: var(--jy-space-1);
+  font-weight: 600;
+}
+.jy-ui .jy-radio-card-desc {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  font-weight: 400;
+  font-size: var(--jy-text-xs);
+  color: var(--jy-color-text-muted);
+}
+
 /* ─── Cards ───────────────────────────────────────────────────── */
 .jy-ui .card {
   background: var(--jy-color-bg);
@@ -2558,4 +2602,272 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
     .jy-box-focus > .content-box-header { padding: 0.875rem 1rem 0.625rem; }
     .jy-box-focus > .card-body,
     .jy-box-focus > .content-box-body { padding: 1rem; }
+}
+
+/* ─── Chat kit (.jy-chat-*) ──────────────────────────────────
+   The shared look of a conversation: bubbles, the composer, the
+   small furniture around them (system chips, reactions, typing).
+   Consumed by the Messages app and by the AI chat, so the two
+   read as one family. Layout — how a surface arranges a list
+   beside a thread — is each surface's own business and is not
+   here.
+   ─────────────────────────────────────────────────────────── */
+
+.jy-chat-log {
+    display: flex;
+    flex-direction: column;
+    gap: var(--jy-space-1);
+    padding: var(--jy-space-4);
+    overflow-y: auto;
+    overscroll-behavior: contain;
+}
+/* A short conversation sits at the bottom of the pane, where the composer is,
+   rather than floating at the top of an empty column. An auto top margin on
+   the first item does that without justify-content: flex-end, which makes the
+   overflowing top of a long thread unreachable. */
+.jy-chat-log > :first-child { margin-top: auto; }
+
+/* One turn: the bubble plus whatever hangs off it. Mine sits right. The face
+   lines up with the top of the turn, not the bottom — below the bubble sit the
+   reactions and the timestamp, and an avatar level with those reads as
+   belonging to them rather than to the message. */
+.jy-chat-row {
+    display: flex;
+    align-items: flex-start;
+    gap: var(--jy-space-2);
+    max-width: 100%;
+}
+.jy-chat-row + .jy-chat-row { margin-top: var(--jy-space-2); }
+.jy-chat-row--mine { flex-direction: row-reverse; }
+
+.jy-chat-avatar {
+    width: 28px;
+    height: 28px;
+    border-radius: var(--jy-radius-full);
+    object-fit: cover;
+    flex: 0 0 28px;
+    background: var(--jy-color-surface-alt);
+}
+/* Consecutive messages from the same person indent instead of repeating a face. */
+.jy-chat-avatar--spacer { visibility: hidden; }
+
+.jy-chat-stack {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+    max-width: min(72ch, 78%);
+}
+.jy-chat-row--mine .jy-chat-stack { align-items: flex-end; }
+
+.jy-chat-sender {
+    font-size: var(--jy-text-xs);
+    font-weight: 600;
+    color: var(--jy-color-text-muted);
+    padding: 0 var(--jy-space-2);
+}
+
+.jy-chat-bubble {
+    position: relative;
+    padding: var(--jy-space-2) var(--jy-space-3);
+    border-radius: var(--jy-radius-lg);
+    background: var(--jy-color-surface-alt);
+    color: var(--jy-color-text);
+    line-height: var(--jy-leading-base);
+    white-space: pre-wrap;
+    overflow-wrap: anywhere;
+}
+.jy-chat-row--mine .jy-chat-bubble {
+    background: var(--jy-color-primary);
+    color: var(--jy-color-primary-text);
+}
+.jy-chat-bubble--deleted {
+    background: transparent;
+    border: 1px dashed var(--jy-color-border-strong);
+    color: var(--jy-color-text-subtle);
+    font-style: italic;
+}
+.jy-chat-row--mine .jy-chat-bubble--deleted {
+    background: transparent;
+    color: var(--jy-color-text-subtle);
+}
+
+/* A quoted parent, sitting inside the bubble above the reply. */
+.jy-chat-quote {
+    display: block;
+    border-left: 3px solid currentColor;
+    opacity: 0.75;
+    padding: 2px var(--jy-space-2);
+    margin-bottom: var(--jy-space-1);
+    font-size: var(--jy-text-sm);
+    cursor: pointer;
+    background: none;
+    border-top: 0; border-right: 0; border-bottom: 0;
+    text-align: left;
+    color: inherit;
+    width: 100%;
+}
+.jy-chat-quote-sender { font-weight: 600; display: block; }
+.jy-chat-quote-body { display: block; opacity: 0.85; }
+
+.jy-chat-meta {
+    display: flex;
+    align-items: center;
+    gap: var(--jy-space-1);
+    font-size: var(--jy-text-xs);
+    color: var(--jy-color-text-subtle);
+    padding: 0 var(--jy-space-2);
+}
+
+/* "Alice added Bob" — a centred note, not a bubble. */
+.jy-chat-system {
+    align-self: center;
+    max-width: 80%;
+    margin: var(--jy-space-3) auto;
+    padding: var(--jy-space-1) var(--jy-space-3);
+    border-radius: var(--jy-radius-full);
+    background: var(--jy-color-surface-alt);
+    color: var(--jy-color-text-muted);
+    font-size: var(--jy-text-xs);
+    text-align: center;
+}
+
+.jy-chat-reactions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--jy-space-1);
+    padding: 0 var(--jy-space-2);
+}
+.jy-chat-reaction {
+    display: inline-flex;
+    align-items: center;
+    gap: 3px;
+    padding: 1px var(--jy-space-2);
+    border-radius: var(--jy-radius-full);
+    border: 1px solid var(--jy-color-border);
+    background: var(--jy-color-bg);
+    color: var(--jy-color-text-muted);
+    font-size: var(--jy-text-xs);
+    line-height: 1.6;
+    cursor: pointer;
+}
+.jy-chat-reaction--mine {
+    border-color: var(--jy-color-primary);
+    color: var(--jy-color-primary);
+    background: var(--jy-color-info-bg);
+}
+
+/* Attachments: pictures render, everything else is a chip. */
+.jy-chat-media {
+    display: block;
+    max-width: 320px;
+    max-height: 320px;
+    border-radius: var(--jy-radius-md);
+    margin-top: var(--jy-space-1);
+}
+.jy-chat-file {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--jy-space-2);
+    margin-top: var(--jy-space-1);
+    padding: var(--jy-space-2) var(--jy-space-3);
+    border-radius: var(--jy-radius-md);
+    border: 1px solid var(--jy-color-border);
+    background: var(--jy-color-bg);
+    color: var(--jy-color-link);
+    font-size: var(--jy-text-sm);
+    text-decoration: none;
+}
+.jy-chat-file-size { color: var(--jy-color-text-subtle); }
+
+.jy-chat-typing {
+    display: flex;
+    align-items: center;
+    gap: var(--jy-space-2);
+    min-height: 20px;
+    padding: 0 var(--jy-space-4) var(--jy-space-1);
+    font-size: var(--jy-text-xs);
+    color: var(--jy-color-text-muted);
+}
+.jy-chat-typing-dots { display: inline-flex; gap: 3px; }
+.jy-chat-typing-dots i {
+    width: 5px; height: 5px;
+    border-radius: var(--jy-radius-full);
+    background: currentColor;
+    animation: jy-chat-typing-bounce 1.2s infinite ease-in-out;
+}
+.jy-chat-typing-dots i:nth-child(2) { animation-delay: 0.15s; }
+.jy-chat-typing-dots i:nth-child(3) { animation-delay: 0.3s; }
+@keyframes jy-chat-typing-bounce {
+    0%, 60%, 100% { opacity: 0.3; transform: translateY(0); }
+    30%           { opacity: 1;   transform: translateY(-3px); }
+}
+@media (prefers-reduced-motion: reduce) {
+    .jy-chat-typing-dots i { animation: none; opacity: 0.6; }
+}
+
+/* The composer: a growing textarea with its controls on the same line. */
+.jy-chat-composer {
+    display: flex;
+    align-items: flex-end;
+    gap: var(--jy-space-2);
+    padding: var(--jy-space-3) var(--jy-space-4);
+    border-top: 1px solid var(--jy-color-border);
+    background: var(--jy-color-bg);
+}
+.jy-chat-composer textarea {
+    flex: 1 1 auto;
+    resize: none;
+    min-height: var(--jy-control-h-md);
+    max-height: 160px;
+    padding: var(--jy-space-2) var(--jy-space-3);
+    border: 1px solid var(--jy-color-border-strong);
+    border-radius: var(--jy-radius-lg);
+    font: inherit;
+    line-height: var(--jy-leading-base);
+    color: var(--jy-color-text);
+    background: var(--jy-color-bg);
+}
+.jy-chat-composer-btn {
+    flex: 0 0 auto;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    width: var(--jy-control-h-md);
+    height: var(--jy-control-h-md);
+    border-radius: var(--jy-radius-full);
+    border: 1px solid var(--jy-color-border-strong);
+    background: var(--jy-color-bg);
+    color: var(--jy-color-text-muted);
+    cursor: pointer;
+}
+.jy-chat-composer-btn--send {
+    background: var(--jy-color-primary);
+    border-color: var(--jy-color-primary);
+    color: var(--jy-color-primary-text);
+}
+.jy-chat-composer-btn[disabled] { opacity: 0.5; cursor: default; }
+
+/* What the composer is about to send, above the text box. */
+.jy-chat-tray {
+    display: flex;
+    flex-wrap: wrap;
+    gap: var(--jy-space-2);
+    padding: var(--jy-space-2) var(--jy-space-4) 0;
+}
+.jy-chat-tray:empty { display: none; }
+.jy-chat-tray-item {
+    display: inline-flex;
+    align-items: center;
+    gap: var(--jy-space-2);
+    padding: var(--jy-space-1) var(--jy-space-2);
+    border: 1px solid var(--jy-color-border);
+    border-radius: var(--jy-radius-md);
+    background: var(--jy-color-surface);
+    font-size: var(--jy-text-sm);
+}
+.jy-chat-tray-item img {
+    width: 32px; height: 32px;
+    object-fit: cover;
+    border-radius: var(--jy-radius-sm);
 }

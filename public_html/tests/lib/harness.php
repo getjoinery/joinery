@@ -347,6 +347,14 @@ function make_user_row($suffix, $permission = 0) {
 	// either door when activation_required_login is on. Tests about the
 	// activation gate itself set usr_is_activated back to false explicitly.
 	$user->set('usr_is_activated', true);
+	// And already past onboarding, for the same reason. The first-login setup
+	// wizard interrupts EVERY page for an account that has never dismissed it
+	// while the deployment has outstanding steps (SetupSteps::shouldInterrupt),
+	// so without this a fixture's web session is redirected to /setup before it
+	// ever reaches the page under test — which reads as a login failure, or as
+	// a permission gate answering 302 instead of 401, in whichever suite hits
+	// it. Tests about the wizard itself clear this back to null explicitly.
+	$user->set('usr_setup_dismissed_time', gmdate('Y-m-d H:i:s'));
 	$user->save();
 	$user->load();
 	harness_register_user($user);

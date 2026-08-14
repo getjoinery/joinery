@@ -516,10 +516,18 @@ abstract class PublicPageBase {
 		}
 
 		// 5. Messages
+		// The envelope points at whichever messaging surface this deployment
+		// runs — the messenger when its plugin is active, the legacy thread view
+		// otherwise. Conversation::url_for() owns that choice for every link.
+		$messages_link = '/profile/conversations';
+		if (PluginHelper::isPluginActive('messenger')
+				&& Globalvars::get_instance()->get_setting('messenger_active', true, true)) {
+			$messages_link = '/profile/messenger';
+		}
 		$menu_data['messages'] = [
 			'enabled' => false,
 			'unread_count' => 0,
-			'view_all_link' => '/profile/conversations',
+			'view_all_link' => $messages_link,
 		];
 
 		if ($is_logged_in) {
@@ -533,7 +541,7 @@ abstract class PublicPageBase {
 				$menu_data['messages'] = [
 					'enabled' => true,
 					'unread_count' => (int)$msg_unread,
-					'view_all_link' => '/profile/conversations',
+					'view_all_link' => $messages_link,
 				];
 			} catch (Exception $e) {
 				// Conversation system not yet installed — keep disabled

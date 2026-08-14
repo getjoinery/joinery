@@ -45,7 +45,9 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.9.0
+ * @version 1.10.0
+ * @changelog 1.10.0 - SOURCE_MESSENGER_ATTACHMENT: photos and files sent in a
+ *   conversation, gated on that conversation rather than owned privately.
  */
 class File extends SystemBase {	public static $prefix = 'fil';
 	public static $tablename = 'fil_files';
@@ -87,6 +89,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 	const SOURCE_DRIVE            = 'drive';             // member Drive item — the whole Drive surface (listings, trash, purge, quota) scopes to this tag
 	const SOURCE_MAILBOX_SEARCH_INDEX = 'mailbox_search_index'; // sealed FTS5 blob (MailboxIndex) — read server-side only, never streamed via serve_from_path
 	const SOURCE_MAIL_IMPORT_ARCHIVE  = 'mail_import_archive';  // mbox/zip/tar uploaded to be imported into a mailbox — held for the life of the run, not a Drive item
+	const SOURCE_MESSENGER_ATTACHMENT = 'messenger_attachment'; // photo or file sent in a messenger conversation
 
 	/** The catalog key standing in for "no origin tag" (legacy rows). */
 	const SOURCE_UNCLASSIFIED = '_none';
@@ -124,6 +127,7 @@ class File extends SystemBase {	public static $prefix = 'fil';
 			self::SOURCE_ENTITY_PHOTO       => array('label' => 'Photos',               'internal' => false, 'default_view' => true),
 			self::SOURCE_EMAIL_ATTACHMENT   => array('label' => 'Mail attachments',     'internal' => false, 'default_view' => false),
 			self::SOURCE_AI_CHAT_UPLOAD     => array('label' => 'AI chat uploads',      'internal' => false, 'default_view' => false),
+			self::SOURCE_MESSENGER_ATTACHMENT => array('label' => 'Message attachments', 'internal' => false, 'default_view' => false),
 			self::SOURCE_DRIVE              => array('label' => 'Drive',                'internal' => false, 'default_view' => false),
 			// Not internal on purpose: someone uploaded this mbox deliberately.
 			// Either the import run cleans it up or it is sitting there consuming
