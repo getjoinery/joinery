@@ -1,11 +1,28 @@
 {
     "name": "Persona Browser",
-    "version": "0.3.1",
+    "version": "0.8.0",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
     "receives_upgrades": true,
     "included_in_publish": true,
+    "adminMenu": [
+        {
+            "slug": "persona-browser",
+            "title": "Persona Browser",
+            "icon": "rss_feed",
+            "permission": 5,
+            "order": 40,
+            "items": [
+                {
+                    "slug": "persona-blocked-senders",
+                    "title": "Blocked Senders",
+                    "url": "/plugins/persona_browser/admin/admin_persona_blocked_senders",
+                    "order": 1
+                }
+            ]
+        }
+    ],
     "profileMenu": [
         {
             "slug": "persona-browser-feed",
