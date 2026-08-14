@@ -163,6 +163,13 @@ be able to quietly enroll their own key:
   a bypass phrase): require an open unlock window, and code regeneration and
   bypass-phrase changes additionally require a recent step-up.
 
+**The `/setup` wizard mounts these same ceremonies.** The first-login setup
+wizard's sign-in and encryption-key steps drive the identical API actions
+(`passkey_register_*`, the TOTP enrollment actions, `vault_setup_*`), so every
+guard above applies there unchanged. `/setup` is exempt from the admin and
+Fortress 2FA navigation gates for the same reason `/profile/security` is: it
+is a place where the required factor gets enrolled.
+
 **Possession-factor invariant:** a vault holder must always retain a second
 factor beyond memorized secrets — TOTP or at least one live passkey. Both
 mutation points enforce it: disabling TOTP is refused when no live passkey

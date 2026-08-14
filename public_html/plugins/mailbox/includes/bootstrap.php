@@ -21,7 +21,9 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.7
+ * @version 1.8
+ * @changelog 1.8 - registers the mail_receive and mail_import setup wizard
+ *   steps (specs/setup_wizard.md) into the SetupSteps registry.
  * @changelog 1.7 - the reseal callback covers soft-deleted messages: a deleted
  *   row is restorable, and one left on a retired generation would come back
  *   permanently unreadable.
@@ -352,6 +354,76 @@ UploadPurposeRegistry::register('mail_import_archive', array(
 			return 'Mail archive import is switched off on this site.';
 		}
 		return null;
+	},
+));
+
+// ---- Setup wizard steps (specs/setup_wizard.md §§ Step 4-5) ----
+// Registered here (not queried) so the wizard and the admin dashboard read
+// mail state through the same registry; predicates run only when a wizard
+// or pill actually asks.
+require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+
+SetupSteps::register('mail_receive', array(
+	'title' => 'Receiving email',
+	'scope' => 'site',
+	'order' => 40,
+	'copy'  => "Give this site a mail domain and it becomes your mail server. Tell us the domain and your address, and we'll set everything up in one go.",
+	'render_file' => 'plugins/mailbox/includes/setup_steps/mail_receive.php',
+	'home_url' => '/plugins/mailbox/admin/admin_mailbox_setup',
+	'dismiss_line' => 'This site has no mailbox of its own yet.',
+	'status' => function (?User $viewer): string {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		$aliases = new MultiInboundEmailAlias(array(
+			'delivery_mode' => InboundEmailAlias::MODE_STORE,
+			'enabled' => true,
+			'deleted' => false,
+		));
+		if ($aliases->count_all() === 0) {
+			return SetupSteps::STATUS_NONE;
+		}
+		// Amber while DNS still pends; the domain row carries the verdict.
+		$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
+		$domains->load();
+		foreach ($domains as $domain) {
+			if ((string)$domain->get('ied_setup_status') === 'ok') {
+				return SetupSteps::STATUS_GREEN;
+			}
+		}
+		return SetupSteps::STATUS_AMBER;
+	},
+));
+
+SetupSteps::register('mail_import', array(
+	'title' => 'Bring your old mail',
+	'scope' => 'user',
+	'order' => 50,
+	'copy'  => 'You can move your existing mail in — upload an export from Gmail, Outlook, or any mail app, and it lands in your new mailbox with folders intact. An import can be completely undone.',
+	'render_file' => 'plugins/mailbox/includes/setup_steps/mail_import.php',
+	'home_url' => '/profile/mailbox/import',
+	'dismiss_line' => 'Your old mail is not imported (optional).',
+	'decision' => 'user',
+	'active' => function (?User $viewer): bool {
+		if (!Globalvars::get_instance()->get_setting('mailbox_import_enabled')) {
+			return false;
+		}
+		if (!$viewer || !$viewer->key) {
+			return false;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
+		$service = MailImportService::fromSession(SessionControl::get_instance());
+		return count($service->targetableAliases()) > 0;
+	},
+	'status' => function (?User $viewer): string {
+		if (!$viewer || !$viewer->key) {
+			return SetupSteps::STATUS_NONE;
+		}
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
+		$runs = new MultiMailImportRun(array('user_id' => (int)$viewer->key, 'state' => MailImportRun::STATE_DONE));
+		if ($runs->count_all() > 0) {
+			return SetupSteps::STATUS_GREEN;
+		}
+		return SetupSteps::hasDecision('mail_import', (int)$viewer->key)
+			? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 	},
 ));
 ?>

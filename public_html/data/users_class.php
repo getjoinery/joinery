@@ -118,6 +118,9 @@ class User extends SystemBase {	public static $prefix = 'usr';
 	    'usr_is_disabled' => array('type'=>'bool', 'default'=>false),
 	    'usr_lastlogin_time' => array('type'=>'timestamp(6)'),
 	    'usr_terms_accepted_time' => array('type'=>'timestamp(6)'),
+	    // When the user chose "Finish later" on the /setup wizard. Completion is
+	    // never stored — only this dismissal (specs/setup_wizard.md).
+	    'usr_setup_dismissed_time' => array('type'=>'timestamp(6)'),
 	    'usr_pic_picture_id' => array('type'=>'int4'),
 	    'usr_phn_phone_number_id' => array('type'=>'int4'),
 	    'usr_contact_preferences' => array('type'=>'varchar(32)'),

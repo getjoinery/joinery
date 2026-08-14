@@ -49,6 +49,27 @@ abstract class PublicPageBase {
 	}
 
 	/**
+	 * The "Finish setup — n of m" pill (specs/setup_wizard.md § Trigger and
+	 * dismissal). Renders until every setup step in the viewer's scope is
+	 * green, then disappears forever with no state write. Counts come from
+	 * SetupSteps::pillCounts(), which session-caches them — the header never
+	 * runs the step predicates on every page view.
+	 */
+	public function render_setup_pill(string $tag = 'span', string $class = ''): void {
+		$session = SessionControl::get_instance();
+		if (!$session->is_logged_in()) { return; }
+		require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+		$counts = SetupSteps::pillCounts();
+		if ($counts === null) { return; }
+		$class_attr = $class !== '' ? ' class="' . htmlspecialchars($class, ENT_QUOTES, 'UTF-8') . '"' : '';
+		echo '<' . $tag . $class_attr . '>'
+			. '<a href="/setup" style="display:inline-block;padding:2px 10px;border-radius:999px;'
+			. 'background:#fef0c7;color:#93370d;font-size:0.85em;text-decoration:none;white-space:nowrap;">'
+			. 'Finish setup &mdash; ' . (int)$counts['done'] . ' of ' . (int)$counts['total']
+			. '</a></' . $tag . '>';
+	}
+
+	/**
 	 * The visitor's resolved location, as SessionControl reports it.
 	 *
 	 * Declared because the constructor assigns it: creating a property that no

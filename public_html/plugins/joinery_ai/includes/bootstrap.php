@@ -16,7 +16,9 @@
  * (specs/in_window_deferred_work.md): recipes whose job reads sealed mail run
  * in the owner's unlock window rather than on a schedule.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - registers the ai_provider setup wizard step
+ *   (specs/setup_wizard.md § Step 7) into the SetupSteps registry.
  * @changelog 1.2 - the reseal callback covers soft-deleted conversations and
  *   messages: a deleted row is restorable, and one left on a retired generation
  *   would come back permanently unreadable.
@@ -161,4 +163,40 @@ VaultUnlock::onWipe(function (int $user_id, ?string $scope) {
         ChatAsync::clearScratch(intval($mid));
     }
 });
+
+// ---- Setup wizard step (specs/setup_wizard.md § Step 7) ----
+require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
+
+SetupSteps::register('ai_provider', array(
+    'title' => 'AI assistant',
+    'scope' => 'site',
+    'order' => 70,
+    'copy'  => 'Joinery can use an AI assistant to triage mail, draft replies, and manage your calendar — running on your own machine if you have one, so nothing leaves your network. This is optional; everything works without it.',
+    'render_file' => 'plugins/joinery_ai/includes/setup_steps/ai_provider.php',
+    'home_url' => '/admin/admin_settings_plugins',
+    'dismiss_line' => 'No AI assistant is configured (optional).',
+    'decision' => 'site',
+    // The wizard writes these through the generic step_settings_save handler;
+    // declaring them here keeps the allow-list with the plugin that owns them.
+    'settings_source' => 'joinery_ai',
+    'settings_names' => array(
+        'joinery_ai_llm_provider',
+        'joinery_ai_local_base_url',
+        'joinery_ai_local_model',
+        'joinery_ai_anthropic_api_key',
+        'joinery_ai_fireworks_api_key',
+    ),
+    'status' => function (?User $viewer): string {
+        require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+        try {
+            if (count(LlmProviderFactory::allModels()) > 0) {
+                return SetupSteps::STATUS_GREEN;
+            }
+        } catch (Throwable $e) {
+            // fall through — unconfigured is not an error state here
+        }
+        return SetupSteps::hasDecision('ai_provider', NULL)
+            ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+    },
+));
 ?>

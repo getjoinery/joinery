@@ -843,6 +843,27 @@ php /var/www/html/joinerytest/maintenance_scripts/dev_tools/validate_php_file.ph
 - [ ] All admin URLs are extension-less
 - [ ] Mobile / narrow viewports render correctly
 
+## Setup steps (the /setup wizard registry)
+
+`SetupSteps` (`includes/SetupSteps.php`) is the registry behind the first-login
+setup wizard at `/setup`. Core registers its steps when the file loads; plugins
+register theirs from their bootstrap (see the Plugin Developer Guide). A step
+declares `title`, `scope` (`site` renders only for permission 10, `user` for
+everyone), `order`, `copy` (the two-sentence intro), `status()` (a callable
+returning `green`/`amber`/`none`, always derived live — completion is never
+stored), `render_file` (an include-path partial in a non-routable directory),
+and optionally `active()` (hide the step), `home_url` (the control's permanent
+home, linked from the final checklist), `dismiss_line` (the "Finish later"
+dialog's line), and `decision` (`user`/`site` — the step accepts a "not now"
+answer, recorded in `sud_setup_decisions`; real state always outranks the
+decision row).
+
+The login redirect lives in `SessionControl::check_permission()` alongside the
+other interstitials and fires only for accounts that have never dismissed the
+wizard (`usr_setup_dismissed_time`). The "Finish setup — n of m" header pill
+renders from `PublicPageBase::render_setup_pill()`; counts are session-cached
+by `SetupSteps::pillCounts()`.
+
 ## Related Documentation
 
 - [Logic Architecture](logic_architecture.md) — LogicResult pattern in depth
