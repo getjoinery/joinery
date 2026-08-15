@@ -56,6 +56,15 @@ pub struct NetFaults {
     /// Milliseconds the clock advances per call — latency, so timeouts and
     /// expiries are reachable.
     pub latency_ms: u64,
+    /// Lose the answer to one named action, once, then stop.
+    ///
+    /// The rate knobs above are blunt by design, and there is one case they
+    /// cannot reach: the completion call at the end of an upload. A rate high
+    /// enough to hit it also loses the answer to the init before it, so the
+    /// attempt dies early and completion is never reached at all — which is
+    /// exactly why an upload whose *completion* answer went missing went
+    /// untested here while devices wedged on it.
+    pub lose_answer_to: Option<String>,
 }
 
 impl NetFaults {
@@ -75,6 +84,9 @@ impl NetFaults {
             corrupt_chunk: 20,
             truncate_download: 20,
             latency_ms: 5,
+            // Aimed, not random: chaos is about volume, and this one is about
+            // hitting a single call a rate would drown.
+            lose_answer_to: None,
         }
     }
 }
@@ -193,6 +205,19 @@ impl SimNet {
         }
     }
 
+    /// Lose the answer to this one named call, then disarm so the retry gets
+    /// through and the scenario can watch what the client does with it.
+    fn answer_lost_to(&self, name: &str) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.faults.lose_answer_to.as_deref() == Some(name) {
+            inner.faults.lose_answer_to = None;
+            inner.stats.dropped_after += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     fn run(&self, name: &str, body: &Value, key: Option<&str>) -> jd_proto::Result<Value> {
         if let Some(e) = self.before_call() {
             return Err(e);
@@ -203,7 +228,7 @@ impl SimNet {
             None => self.server.action(name, body),
         };
         let value = out.map_err(to_proto)?;
-        if self.answer_lost() {
+        if self.answer_lost() || self.answer_lost_to(name) {
             // Deliberately after the server committed. This is the case the
             // whole idempotency discipline exists for, and the only way to test
             // it is to produce it on purpose.
@@ -323,10 +348,13 @@ impl DriveApi for SimNet {
             }
         }
 
-        let complete_key = params
-            .idempotency_key
-            .clone()
-            .unwrap_or_else(|| format!("complete-{token}"));
+        // Scoped to the token, matching the real client: a retry gets a fresh
+        // token and so sends a different request, which a longer-lived key
+        // would misdescribe.
+        let complete_key = match &params.idempotency_key {
+            Some(key) => format!("{key}-complete-{token}"),
+            None => format!("complete-{token}"),
+        };
         let complete = self.run(
             "drive_upload_complete",
             &params.complete_body(&token),
