@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.16.13",
+  "version": "1.17.0",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -77,15 +77,6 @@
           "order": 7
         }
       ]
-    },
-    {
-      "slug": "system-marketplace",
-      "title": "Marketplace",
-      "url": "/admin/server_manager/marketplace",
-      "permission": 8,
-      "icon": "store",
-      "parent": "server-manager",
-      "order": 4
     }
   ],
   "settingsGroups": {

@@ -1282,3 +1282,23 @@
 	$migration['migration_file'] = 'seed_setup_dismissed_for_existing_accounts.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// 172 is deliberately unused: the IMAP import-scope backfill lives in the
+	// mailbox plugin's own migrations (plugins/mailbox/migrations/migrations.php,
+	// iia_001) because it UPDATEs a plugin-table column that only exists once
+	// plugin sync — a later update_database step than this list — has run.
+
+	// The marketplace menu entry exists disabled on installs that predate the
+	// page living in core (an earlier migration disabled it). The core menu
+	// seed never touches existing rows, so re-enabling and repointing it is a
+	// data change. Fresh installs get the row from admin_menus.json directly.
+	// The test demands the full end state (enabled AND permission 10): v96 can
+	// re-fire wherever the slug is momentarily absent (its recorded hash no
+	// longer matches its edited SQL) and re-inserts the row at permission 8 —
+	// this runs after it in the same pass and corrects whatever it left.
+	$migration = array();
+	$migration['database_version'] = '173';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'system-marketplace' AND amu_disable = 0 AND amu_min_permission = 10";
+	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_disable = 0, amu_defaultpage = 'admin_marketplace', amu_min_permission = 10 WHERE amu_slug = 'system-marketplace'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;
