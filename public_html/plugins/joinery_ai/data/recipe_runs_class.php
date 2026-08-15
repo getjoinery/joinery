@@ -221,24 +221,8 @@ class RecipeRun extends SystemBase {
         return $result;
     }
 
-    /** Targeted UPDATE of exactly these columns — never a full-row save(). */
-    public static function updateColumns(int $run_id, array $columns): void {
-        if ($run_id <= 0 || empty($columns)) {
-            return;
-        }
-        $sets = array();
-        $params = array();
-        foreach ($columns as $col => $value) {
-            if (!array_key_exists($col, static::$field_specifications)) continue;
-            $sets[] = $col . ' = ?';
-            $params[] = $value;
-        }
-        if (empty($sets)) return;
-        $params[] = $run_id;
-        $stmt = DbConnector::get_instance()->get_db_link()->prepare(
-            'UPDATE rcr_recipe_runs SET ' . implode(', ', $sets) . ' WHERE rcr_run_id = ?');
-        $stmt->execute($params);
-    }
+    // Targeted UPDATE of exactly these columns — SystemBase::updateColumns(),
+    // never a full-row save().
 
     /**
      * The tool-call trace as an array, whatever the storage shape. Returns []

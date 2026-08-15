@@ -35,7 +35,11 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - date-boundary seek for day-window feeds (seekCursorForCutoff):
+ *   INTERNALDATE compared in UTC, unparsable dates count as in-window, and an
+ *   empty probe band resolves via the bottom of the range instead of conceding
+ *   unprobed UID space — every inconclusive path fails toward importing more.
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -63,6 +67,13 @@ class ImapIngestor {
 
 	/** evl_event value for the run record. */
 	const RUN_EVENT = 'mailbox_imap_ingest';
+
+	// Date-boundary seek (seekCursorForCutoff). The band absorbs UID gaps left by
+	// deletions; the probe ceiling bounds the seek at roughly log2(UID space) plus
+	// slack for gap skips, so a pathological mailbox costs a bounded number of
+	// round trips instead of hanging the poll.
+	const SEEK_BAND = 64;
+	const SEEK_MAX_PROBES = 48;
 
 	/** @var InboundImapAccount */
 	private $account;
@@ -429,15 +440,19 @@ class ImapIngestor {
 		$lastSeenUid = intval($folder->get('iif_last_seen_uid'));
 
 		// First connect, or the folder was recreated (UIDVALIDITY changed, §7.6):
-		// clear the sync modseq cursor and re-seed. "Future only" (default) seeds to
-		// the current high UID; "Full history" starts at 0 and backfills in batches.
+		// clear the sync modseq cursor and re-seed where the feed's import scope says
+		// to start. "Future only" (default) seeds to the current high UID; "Last N
+		// days" seeks the boundary UID; "Full history" starts at 0. The latter two
+		// fall through to the windowed backfill below.
 		if ($storedUidValidity === null || intval($storedUidValidity) !== $serverUidValidity) {
 			$folder->set('iif_uidvalidity', $serverUidValidity);
 			$folder->set('iif_last_sync_modseq', null);
-			if ($this->account->get('iia_import_history')) {
-				$folder->set('iif_last_seen_uid', 0);
+			$scope = $this->account->importScope();
+			if ($scope === InboundImapAccount::SCOPE_FULL) {
 				$lastSeenUid = 0;
-				// fall through to the windowed fetch below
+			} elseif ($scope === InboundImapAccount::SCOPE_DAYS) {
+				$lastSeenUid = $this->seekCursorForCutoff($client, $folderName,
+					(string)$this->account->importCutoffUtc(), $highUid);
 			} else {
 				$folder->set('iif_last_seen_uid', $highUid);
 				$folder->prepare();
@@ -445,6 +460,7 @@ class ImapIngestor {
 				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0,
 					'failed_detail' => array(), 'status' => $folderName . ': seeded cursor');
 			}
+			$folder->set('iif_last_seen_uid', $lastSeenUid);
 		}
 
 		// Nothing above the cursor → done.
@@ -557,6 +573,115 @@ class ImapIngestor {
 	 * entirely. A numeric (non-`*`) range also avoids the "N:* always matches the
 	 * highest message" caveat. Missing UIDs in the range simply aren't returned.
 	 */
+	/**
+	 * Find where a "last N days" feed should start reading: the cursor just below
+	 * the oldest message still inside the window.
+	 *
+	 * IMAP assigns UIDs in strictly ascending arrival order (RFC 3501 §2.3.1.1), so
+	 * the UID space is sorted by INTERNALDATE and can be bisected. Each probe is a
+	 * FETCH of a narrow UID band asking only for INTERNALDATE — cheap, and on the
+	 * same numeric `UID FETCH` path the ingest window uses. (The obvious
+	 * implementation, `UID SEARCH SINCE`, is not available to us: Gmail advertises
+	 * ESEARCH but rejects the `UID SEARCH RETURN (...)` form Horde emits, which is
+	 * why nothing in this class searches.)
+	 *
+	 * A band rather than a single UID because deletions leave gaps — a lone probe
+	 * often lands on nothing. An empty band proves only that those UIDs are gone
+	 * — nothing about where the date boundary is — so the search never concedes
+	 * unprobed UID space over one; it asks the bottom of the remaining range
+	 * instead, where the answer is definitive.
+	 *
+	 * Returns the seed cursor: one below the oldest in-window UID, or $highUid when
+	 * the whole mailbox predates the cutoff (nothing to backfill). Fail-soft: an
+	 * inconclusive seek returns the best lower bound reached, which imports somewhat
+	 * more than asked rather than silently importing nothing.
+	 */
+	private function seekCursorForCutoff(ImapClient $client, string $folder, string $cutoffUtc, int $highUid): int {
+		if ($cutoffUtc === '' || $highUid < 1) { return max(0, $highUid); }
+
+		$lo = 1;
+		$hi = $highUid;
+		$probes = 0;
+		while ($lo <= $hi && $probes < self::SEEK_MAX_PROBES) {
+			$probes++;
+			$mid = intdiv($lo + $hi, 2);
+			$probe = $this->probeOldestInBand($client, $folder, $mid, min($hi, $mid + self::SEEK_BAND - 1));
+			if ($probe === null) {
+				// Every UID in the band is gone. Deletions cluster, so this says
+				// nothing about the boundary — probe the bottom of the remaining
+				// range instead. Everything below $lo is already proven pre-cutoff
+				// or deleted, so the oldest existing UID at/above $lo settles it.
+				if ($probes >= self::SEEK_MAX_PROBES) { break; }
+				$probes++;
+				$bottom = $this->probeOldestInBand($client, $folder, $lo, min($hi, $lo + self::SEEK_BAND - 1));
+				if ($bottom === null) {
+					$lo = $lo + self::SEEK_BAND; // that band is gone too — a safe advance
+					continue;
+				}
+				if ($bottom['date'] === '' || $bottom['date'] >= $cutoffUtc) {
+					// The oldest message above the proven floor is in-window —
+					// it IS the boundary.
+					return max(0, min($bottom['uid'] - 1, $highUid));
+				}
+				$lo = $bottom['uid'] + 1;
+				continue;
+			}
+			// An unreadable INTERNALDATE ('') counts as in-window: fail toward
+			// importing more rather than silently skipping past real mail.
+			if ($probe['date'] === '' || $probe['date'] >= $cutoffUtc) {
+				$hi = $probe['uid'] - 1;
+			} else {
+				$lo = $probe['uid'] + 1;
+			}
+		}
+
+		// $lo - 1 is always a safe cursor: every UID below $lo is proven either
+		// pre-cutoff or deleted. On full convergence it sits exactly one below the
+		// oldest in-window message; when the probe budget runs out first it
+		// imports somewhat more than asked — the documented fail-soft direction —
+		// never less.
+		return max(0, min($lo - 1, $highUid));
+	}
+
+	/**
+	 * INTERNALDATE of the lowest existing UID in [$from,$to], as
+	 * ['uid'=>int,'date'=>'Y-m-d H:i:s' UTC], or null when the band holds nothing.
+	 */
+	private function probeOldestInBand(ImapClient $client, string $folder, int $from, int $to): ?array {
+		$query = new Horde_Imap_Client_Fetch_Query();
+		$query->imapDate();
+		$res = $client->fetch($folder, $query, array(
+			'ids' => new Horde_Imap_Client_Ids($from . ':' . $to),
+		));
+
+		$lowest = null;
+		foreach ($res->ids() as $uid) {
+			$uid = intval($uid);
+			if ($uid < $from || $uid > $to) { continue; }   // a client that ignores the range
+			if ($lowest === null || $uid < $lowest) { $lowest = $uid; }
+		}
+		if ($lowest === null) { return null; }
+
+		$data = $res[$lowest] ?? null;
+		if ($data === null) { return null; }
+		$date = $data->getImapDate();
+
+		// An unparsable INTERNALDATE (Horde falls back to epoch -1 and flags
+		// error()) reports as '' — the caller treats unknown as in-window.
+		if (!$date || $date->error()) {
+			return array('uid' => $lowest, 'date' => '');
+		}
+
+		// The cutoff being compared against is a UTC string, and INTERNALDATE
+		// carries the source server's own offset — which the DateTime KEEPS (a
+		// constructed DateTime ignores its timezone argument when the string has
+		// an offset), so formatting without converting first would shift the
+		// boundary by up to ±14 hours.
+		$date = clone $date;
+		$date->setTimezone(new DateTimeZone('UTC'));
+		return array('uid' => $lowest, 'date' => $date->format('Y-m-d H:i:s'));
+	}
+
 	private function fetchWindow(ImapClient $client, string $folder, int $startUid, int $endUid) {
 		$query = new Horde_Imap_Client_Fetch_Query();
 		$query->structure();

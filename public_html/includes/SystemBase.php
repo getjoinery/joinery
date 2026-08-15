@@ -217,6 +217,49 @@ abstract class SystemBase {
 	}
 
 	/**
+	 * Targeted single-row UPDATE of exactly the given columns — never a full-row
+	 * save(). For rows some other path writes behind the model's back (sealed
+	 * content columns, adopted attachment bytes), where a full save() from a
+	 * stale in-memory object would clobber what it did not read. Callers that
+	 * only need to flip a few columns use this instead. Unknown column names are
+	 * dropped rather than built into SQL. $columns maps column name => value
+	 * (null allowed).
+	 */
+	public static function updateColumns(int $id, array $columns): void {
+		if ($id <= 0 || empty($columns)) {
+			return;
+		}
+		$sets = array();
+		$params = array();
+		foreach ($columns as $col => $value) {
+			if (!array_key_exists($col, static::$field_specifications)) {
+				continue; // never build SQL from an unknown column name
+			}
+			$sets[] = $col . ' = ?';
+			$params[] = $value;
+		}
+		if (empty($sets)) {
+			return;
+		}
+		$params[] = $id;
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'UPDATE ' . static::$tablename . ' SET ' . implode(', ', $sets)
+			. ' WHERE ' . static::$pkey_column . ' = ?'
+		);
+		// Typed binding: pdo_pgsql stringifies an untyped PHP false to '', which
+		// PostgreSQL rejects for boolean columns (22P02).
+		foreach (array_values($params) as $i => $value) {
+			$type = PDO::PARAM_STR;
+			if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
+			elseif ($value === null) { $type = PDO::PARAM_NULL; }
+			elseif (is_int($value))  { $type = PDO::PARAM_INT; }
+			$stmt->bindValue($i + 1, $value, $type);
+		}
+		$stmt->execute();
+	}
+
+	/**
 	 * @param mixed $key Primary key of the row to represent. NULL (the default)
 	 *                   means a new, unsaved record.
 	 * @param bool $and_load Load the row from the database immediately.

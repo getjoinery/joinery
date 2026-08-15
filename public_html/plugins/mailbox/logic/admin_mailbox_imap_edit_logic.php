@@ -15,7 +15,10 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
- * @version 2.1
+ * @version 2.3
+ * @changelog 2.3 - only a scope change that still reads backward rewinds the
+ *   folder cursors; switching to future-only keeps them, so un-polled mail at
+ *   the source is not skipped.
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -151,14 +154,23 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		$account->set('iia_provider_key', $provider);
 		$account->set('iia_label', trim((string)($input['iia_label'] ?? '')));
 		$account->set('iia_username', trim((string)($input['iia_username'] ?? '')));
-		// Import scope — changeable at any time. Turning ON full history resets the
-		// cursor so the next fetch backfills the existing mailbox (dedup prevents
-		// re-storing already-imported messages). Turning it off leaves
-		// already-imported mail in place and just stops future backfilling.
-		$wantFull = (($input['import_history'] ?? 'future') === 'full');
-		$wasFull = (bool)$account->get('iia_import_history');
-		$account->set('iia_import_history', $wantFull);
-		if ($wantFull && !$wasFull) {
+		// Import scope — changeable at any time. A change that still reads backward
+		// (full, or a day window) re-seeds the feed: widening backfills further
+		// (dedup prevents re-storing mail already imported), a changed day window
+		// moves to its new boundary. Switching to future-only keeps the cursor, so
+		// mail that arrived at the source since the last poll is still picked up.
+		// Already-imported mail is never removed either way.
+		// The per-folder cursor is rewound after the save (below) — it is what the
+		// ingester actually reads, and rewinding it before a save that might fail
+		// would strand the feed with a cleared cursor and the old import scope.
+		$was_scope = $account->importScope();
+		$was_days = $account->importDays();
+		$account->set('iia_import_scope', $input['import_scope'] ?? InboundImapAccount::SCOPE_FUTURE);
+		$account->set('iia_import_days', intval($input['iia_import_days'] ?? 0));
+		// importScope()/importDays() normalize on read, so the comparison is against
+		// the same values prepare() will persist — no need to normalize first.
+		$rewind_for_backfill = $account->importScopeRequiresRewind($was_scope, $was_days);
+		if ($rewind_for_backfill) {
 			$account->set('iia_uidvalidity', null);
 			$account->set('iia_last_seen_uid', null);
 		}
@@ -218,6 +230,14 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			$account->save();
 			$account->load();
 
+			// The scope now reaches backward from a different boundary than the
+			// feed has already read to: rewind every folder cursor so the next
+			// fetch re-seeds against the new scope instead of carrying on from
+			// where it was.
+			if ($rewind_for_backfill) {
+				InboundImapFolder::rewindCursors(intval($account->key));
+			}
+
 			// Combined mode: sync the mailbox's access grants to the submitted set.
 			if ($combined && $resolved_alias_id > 0) {
 				$submitted = array();
@@ -252,6 +272,10 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			$msg = $is_oauth && !$account->hasOAuthToken()
 				? 'Mailbox saved. Click "Connect" to authorize mailbox access.'
 				: 'Mailbox saved.';
+			if ($rewind_for_backfill) {
+				$msg .= ' The feed will re-read from the source, importing '
+					. $account->describeImportScope() . '.';
+			}
 			$session->save_message(new DisplayMessage(
 				$msg, 'Accounts', '~/plugins/mailbox/admin/~',
 				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE

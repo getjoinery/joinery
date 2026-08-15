@@ -111,31 +111,9 @@ class AiMessageAttachment extends SystemBase {
      * the pair would come apart: an orphaned File with nothing pointing at it.
      * Let the exception propagate so link and File stay paired for a retry.
      */
-    /** Targeted raw UPDATE — never save() a sealed attachment (SystemBase::save()
-     *  would decrypt aia_extracted_text via get() and write plaintext back). */
-    public static function updateColumns(int $attachment_id, array $columns): void {
-        if ($attachment_id <= 0 || empty($columns)) return;
-        $sets = array();
-        $params = array();
-        foreach ($columns as $col => $value) {
-            if (!array_key_exists($col, static::$field_specifications)) continue;
-            $sets[] = $col . ' = ?';
-            $params[] = $value;
-        }
-        if (empty($sets)) return;
-        $params[] = $attachment_id;
-        $db = DbConnector::get_instance()->get_db_link();
-        $stmt = $db->prepare('UPDATE aia_message_attachments SET ' . implode(', ', $sets)
-            . ' WHERE aia_attachment_id = ?');
-        foreach (array_values($params) as $i => $value) {
-            $type = PDO::PARAM_STR;
-            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
-            elseif ($value === null) { $type = PDO::PARAM_NULL; }
-            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
-            $stmt->bindValue($i + 1, $value, $type);
-        }
-        $stmt->execute();
-    }
+    // Writes to a sealed attachment go through SystemBase::updateColumns() —
+    // never save(), which would decrypt aia_extracted_text via get() and write
+    // plaintext back.
 
     public function permanent_delete($debug = false) {
         $file_id = (int)$this->get('aia_fil_file_id');

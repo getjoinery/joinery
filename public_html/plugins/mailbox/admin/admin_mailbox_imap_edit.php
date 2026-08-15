@@ -10,7 +10,9 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - the day-window field renders the stored value whatever the
+ *   current scope, so a save while it is hidden cannot reset it.
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -94,14 +96,34 @@ $formwriter->textinput('iia_username', 'Mailbox login (username)', array(
 		: 'The full email address / username used to log in to the IMAP server.',
 ));
 
-// Import scope — changeable at any time. Switching to full history backfills the
-// existing mailbox on the next fetch.
-$formwriter->dropinput('import_history', 'Existing mail', array(
+// Import scope — changeable at any time. Changing how far back the feed reaches
+// re-seeds it on the next fetch; the day window shows only for the middle choice.
+$formwriter->dropinput('import_scope', 'Existing mail', array(
 	'options' => array(
-		'future' => 'Import only future emails',
-		'full'   => 'Import full email history',
+		InboundImapAccount::SCOPE_FUTURE => 'Import only future emails',
+		InboundImapAccount::SCOPE_DAYS   => 'Import the last few days of email',
+		InboundImapAccount::SCOPE_FULL   => 'Import full email history',
 	),
-	'value' => $account->get('iia_import_history') ? 'full' : 'future',
+	'value' => $account->importScope(),
+	'helptext' => 'Reaching further back starts a backfill on the next fetch — mail is imported '
+		. 'oldest-first over many fetches, and mail already imported is never duplicated.',
+	'visibility_rules' => array(
+		InboundImapAccount::SCOPE_FUTURE => array('hide' => array('iia_import_days')),
+		InboundImapAccount::SCOPE_DAYS   => array('show' => array('iia_import_days')),
+		InboundImapAccount::SCOPE_FULL   => array('hide' => array('iia_import_days')),
+	),
+));
+
+$formwriter->numberinput('iia_import_days', 'Days of email to import', array(
+	// Always the STORED window, never the default: the field is submitted even
+	// while hidden (scope full/future), so rendering a default here would
+	// silently overwrite a configured window on any unrelated save.
+	'value' => min(max(intval($account->get('iia_import_days')), 0), InboundImapAccount::IMPORT_DAYS_MAX)
+		?: InboundImapAccount::IMPORT_DAYS_DEFAULT,
+	'min' => 1,
+	'max' => InboundImapAccount::IMPORT_DAYS_MAX,
+	'helptext' => 'How far back to reach, counting from when the feed starts reading. 30 days is '
+		. 'usually enough to work with; the rest of the archive stays on the source untouched.',
 ));
 
 // Password — shown only for password-auth providers (visibility rules above).

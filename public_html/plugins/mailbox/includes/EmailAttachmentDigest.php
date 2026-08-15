@@ -20,7 +20,7 @@
  *
  * specs/joinery_ai_email_attachments.md
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('data/files_class.php'));
@@ -127,7 +127,7 @@ class EmailAttachmentDigest {
 			// hook — open explicitly. Should be unreachable: nextItem() already
 			// excludes sealed messages and attachments seal only when their
 			// message does, but this is a defensive catch, not an assumption.
-			$bytes = InboundEmailMessage::openSealedAttachment($msg, $att, $bytes);
+			$bytes = InboundEmailMessage::openSealedAttachment($msg, $att, $bytes, $file);
 		} catch (Throwable $e) {
 			return '[content unreadable]';
 		}

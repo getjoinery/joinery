@@ -51,7 +51,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
- * @version 1.10
+ * @version 1.11
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -540,7 +540,7 @@ class MailboxSender {
 			// (window closed mid-compose) surfaces as the same "no longer available"
 			// forward failure the caller already handles for a missing part.
 			try {
-				return InboundEmailMessage::openSealedAttachment($source, $att, $bytes);
+				return InboundEmailMessage::openSealedAttachment($source, $att, $bytes, $file);
 			} catch (VaultLockedException $e) {
 				return null;
 			}
@@ -639,12 +639,48 @@ class MailboxSender {
 	}
 
 	/**
+	 * Open one stored draft attachment's bytes for send, whichever sealed shape
+	 * they are in — the ONE place the stored-attachment loops resolve sealed
+	 * state, so "container bytes leave as a real attachment" has a single gate.
+	 *
+	 * A self-sealed File (specs/mailbox_attachment_byte_custody.md) holds its
+	 * bytes under its OWN key, which the draft's DEK cannot open — a draft's
+	 * attachments are always minted by its own upload path, so that shape is
+	 * unreachable today, but it goes through the shared opener anyway. A row
+	 * sealed under the draft's message DEK (ima_is_sealed) opens with the
+	 * preflight DEK directly (no TOCTOU window); a null DEK there throws
+	 * (defensive — unreachable after assertDraftSendable). Plaintext passes
+	 * through. $crypto is the caller's lazily-built VaultCrypto, shared across
+	 * its loop.
+	 */
+	private function openStoredAttachmentBytes(InboundEmailMessage $draft, InboundMessageAttachment $att,
+			File $file, string $bytes, ?string $dek, &$crypto): string {
+		if ($file->get('fil_content_sealed')) {
+			try {
+				return InboundEmailMessage::openSealedAttachment($draft, $att, $bytes, $file);
+			} catch (VaultLockedException $e) {
+				throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+			}
+		}
+		if ($this->isSealedRow($att)) {
+			if ($dek === null) {
+				throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
+			}
+			if ($crypto === null) {
+				require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+				$crypto = new VaultCrypto();
+			}
+			return $crypto->openField($bytes, $dek,
+				InboundEmailMessage::attachmentAd(intval($draft->key), (string)$att->get('ima_mime_part')));
+		}
+		return $bytes;
+	}
+
+	/**
 	 * Re-attach a draft's already-persisted (file-backed) attachments to the outgoing
 	 * message — they were uploaded on an earlier autosave, so they are not in this
-	 * send's $files. A sealed attachment is decrypted with the preflight DEK directly
-	 * (no TOCTOU window); a null DEK on a sealed row throws (defensive — unreachable
-	 * after assertDraftSendable). Plaintext attachments pass through. A missing/gone
-	 * File is skipped (best-effort). Returns bytes added.
+	 * send's $files. Sealed shapes resolve through openStoredAttachmentBytes().
+	 * A missing/gone File is skipped (best-effort). Returns bytes added.
 	 */
 	private function attachStoredAttachments(EmailMessage $email, InboundEmailMessage $draft, ?string $dek = null): int {
 		$manifest = new MultiInboundMessageAttachment(array(
@@ -666,17 +702,7 @@ class MailboxSender {
 			if ($bytes === null) {
 				continue;
 			}
-			if ($this->isSealedRow($att)) {
-				if ($dek === null) {
-					throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
-				}
-				if ($crypto === null) {
-					require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-					$crypto = new VaultCrypto();
-				}
-				$bytes = $crypto->openField($bytes, $dek,
-					InboundEmailMessage::attachmentAd(intval($draft->key), (string)$att->get('ima_mime_part')));
-			}
+			$bytes = $this->openStoredAttachmentBytes($draft, $att, $file, $bytes, $dek, $crypto);
 			$total += strlen($bytes);
 			if ($total > self::MAX_TOTAL_BYTES) {
 				throw new MailboxSenderException('The draft attachments exceed the size limit.');
@@ -718,17 +744,7 @@ class MailboxSender {
 			if ($bytes === null) {
 				continue;
 			}
-			if ($this->isSealedRow($att)) {
-				if ($dek === null) {
-					throw new MailboxLockedException('Your vault is locked — unlock it to send this draft.');
-				}
-				if ($crypto === null) {
-					require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
-					$crypto = new VaultCrypto();
-				}
-				$bytes = $crypto->openField($bytes, $dek,
-					InboundEmailMessage::attachmentAd(intval($draft->key), (string)$att->get('ima_mime_part')));
-			}
+			$bytes = $this->openStoredAttachmentBytes($draft, $att, $file, $bytes, $dek, $crypto);
 			$added += strlen($bytes);
 			if ($runningTotal + $added > self::MAX_TOTAL_BYTES) {
 				throw new MailboxSenderException('The draft attachments exceed the size limit.');

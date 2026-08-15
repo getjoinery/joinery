@@ -103,7 +103,10 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.19
+ * @version 1.20
+ * @changelog 1.20 - openSealedAttachment() understands the self-sealed File
+ *   shape (specs/mailbox_attachment_byte_custody.md) alongside the legacy
+ *   message-DEK one, so no reader can hand back container bytes as plaintext.
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -594,6 +597,22 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
+	 * Whose vault a message's sealed content belongs to: the owner recorded at
+	 * seal time, with a live grantee lookup as the fallback for a row sealed
+	 * before that column existed. Public so a consumer sealing something ONTO an
+	 * existing message (the byte-custody upgrade,
+	 * specs/mailbox_attachment_byte_custody.md) wraps it to the same vault the
+	 * message's own content is under, rather than re-deriving the answer and
+	 * risking a different one.
+	 */
+	public static function sealedOwnerFor(InboundEmailMessage $msg): ?int {
+		return self::sealedOwnerUserId(
+			$msg->get('iem_sealed_owner_user_id'),
+			$msg->get('iem_iea_inbound_email_alias_id')
+		);
+	}
+
+	/**
 	 * Sealed Vault read hooks (docs/sealed_vault.md). Both the loaded-model path
 	 * (SystemBase::get()) and the raw-row path (MailboxService's direct SQL reads,
 	 * joinery_ai's ModelQueryExecutor) are the SystemBase Layer 0 generics; the
@@ -632,14 +651,42 @@ class InboundEmailMessage extends SystemBase {
 	 * implementation the File decrypt hook (plugins/mailbox/includes/
 	 * bootstrap.php), the download endpoints (includes/attachment_retrieval.php)
 	 * and a forward's re-attach path (MailboxSender::readOriginalPartBytes) all
-	 * call, so the owner/window/vault resolution lives once. Whether the bytes
-	 * are sealed is the ATTACHMENT row's ima_is_sealed — a per-file fact (a
-	 * backfilled message's pre-vault Files stay plaintext while its body is
-	 * sealed), never inferred from the message's own flags. Throws
+	 * call, so the owner/window/vault resolution lives once. Throws
 	 * VaultLockedException when the owner's window is closed or no owner is
 	 * resolvable.
+	 *
+	 * TWO SEALED SHAPES, dispatched in this order — self-sealed File, then
+	 * legacy message-DEK, then plaintext:
+	 *
+	 *  - fil_content_sealed on the FILE (specs/mailbox_attachment_byte_custody.md):
+	 *    the bytes are a SealedFileContainer under the File's OWN key, wrapped to
+	 *    the owner's vault. This is the shape every other sealed consumer uses,
+	 *    and the only one that can be written without an open window — which is
+	 *    what lets a background import seal bytes onto an existing message.
+	 *  - ima_is_sealed on the ATTACHMENT row: an AEAD blob under the owning
+	 *    MESSAGE's DEK. A per-file fact (a backfilled message's pre-vault Files
+	 *    stay plaintext while its body is sealed), never inferred from the
+	 *    message's own flags.
+	 *
+	 * The two are never both true on one attachment. $file is optional purely to
+	 * save a re-load: a caller that does not pass it still gets plaintext, never
+	 * container bytes, because the File is resolved from the row.
 	 */
-	public static function openSealedAttachment(InboundEmailMessage $msg, InboundMessageAttachment $att, string $bytes): string {
+	public static function openSealedAttachment(InboundEmailMessage $msg, InboundMessageAttachment $att, string $bytes,
+			?File $file = null): string {
+		// Self-sealed File first: it carries its own key, so nothing about the
+		// message is consulted.
+		$fil_id = intval($att->get('ima_fil_file_id'));
+		if ($fil_id > 0) {
+			if ($file === null || intval($file->key) !== $fil_id) {
+				$file = new File($fil_id, TRUE);
+			}
+			if ($file->key && $file->get('fil_content_sealed')) {
+				$fk = DriveSealed::fileKey($file); // throws VaultLockedException when closed
+				return SealedFileContainer::openBytes($bytes, $fk);
+			}
+		}
+
 		if (!$att->get('ima_is_sealed')) {
 			return $bytes; // stored plaintext - nothing to open
 		}
@@ -858,16 +905,29 @@ class InboundEmailMessage extends SystemBase {
 				$columns[$field] = $crypto->openField($stored, $dek, self::sealAd($message_id, $field));
 			}
 
-			// 2. Decrypt sealed attachment bytes into memory.
+			// 2. Decrypt sealed attachment bytes into memory. Both sealed shapes
+			// have to be lowered here, or a message that has gone plaintext would
+			// keep an attachment that still demands an unlock window.
 			$att_writes = array();
+			$self_sealed = array();
 			$atts = new MultiInboundMessageAttachment(array('message_id' => $message_id));
 			$atts->load();
 			foreach ($atts as $att) {
-				if (!$att->get('ima_is_sealed') || !$att->get('ima_fil_file_id')) {
+				if (!$att->get('ima_fil_file_id')) {
 					continue;
 				}
 				$file = new File(intval($att->get('ima_fil_file_id')), TRUE);
 				if (!$file->key) {
+					continue;
+				}
+				// A self-sealed File (specs/mailbox_attachment_byte_custody.md)
+				// holds its bytes under its OWN key, so this message's DEK cannot
+				// open it and the Drive lower does the work instead.
+				if ($file->get('fil_content_sealed')) {
+					$self_sealed[] = $file;
+					continue;
+				}
+				if (!$att->get('ima_is_sealed')) {
 					continue;
 				}
 				$bytes = $file->read_bytes('original');
@@ -903,6 +963,12 @@ class InboundEmailMessage extends SystemBase {
 				}
 				$w['att']->set('ima_is_sealed', false);
 				$w['att']->save();
+			}
+			// Self-sealed attachment Files lower through the shared Drive helper,
+			// which is idempotent and resumes an interrupted pass — so it obeys
+			// the same "a partial pass stays consistent" rule as the loop above.
+			foreach ($self_sealed as $file) {
+				DriveSealed::unsealExistingFile($file);
 			}
 			if ($raw_plain !== null) {
 				RawMessageStore::write($message_id, $raw_plain);
@@ -1177,48 +1243,12 @@ class InboundEmailMessage extends SystemBase {
 		self::updateColumns($message_id, $columns);
 	}
 
-	/**
-	 * Targeted single-row UPDATE of exactly the given columns — never a full-row
-	 * save(). Sealed-mailbox ingest writes some columns behind the model's back
-	 * (sealAndPersistContent / persistRawAndManifest UPDATE by id), so a full
-	 * save() from a stale in-memory object would clobber the sealed sender/subject/
-	 * body/key/raw-storage descriptor with empty values. Callers that only need to
-	 * flip a few columns (pending-parse clear, spool-id stamp, spam verdict) use
-	 * this instead. $columns maps column name => value (null allowed).
-	 */
-	static function updateColumns(int $message_id, array $columns): void {
-		if ($message_id <= 0 || empty($columns)) {
-			return;
-		}
-		$sets = array();
-		$params = array();
-		foreach ($columns as $col => $value) {
-			if (!array_key_exists($col, static::$field_specifications)) {
-				continue; // never build SQL from an unknown column name
-			}
-			$sets[] = $col . ' = ?';
-			$params[] = $value;
-		}
-		if (empty($sets)) {
-			return;
-		}
-		$params[] = $message_id;
-		$db = DbConnector::get_instance()->get_db_link();
-		$stmt = $db->prepare(
-			'UPDATE iem_inbound_email_messages SET ' . implode(', ', $sets)
-			. ' WHERE iem_inbound_email_message_id = ?'
-		);
-		// Typed binding: pdo_pgsql stringifies an untyped PHP false to '', which
-		// PostgreSQL rejects for boolean columns (22P02).
-		foreach (array_values($params) as $i => $value) {
-			$type = PDO::PARAM_STR;
-			if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
-			elseif ($value === null) { $type = PDO::PARAM_NULL; }
-			elseif (is_int($value))  { $type = PDO::PARAM_INT; }
-			$stmt->bindValue($i + 1, $value, $type);
-		}
-		$stmt->execute();
-	}
+	// Targeted column writes (pending-parse clear, spool-id stamp, spam verdict,
+	// trash stamp) go through SystemBase::updateColumns() — sealed-mailbox ingest
+	// writes columns behind the model's back (sealAndPersistContent /
+	// persistRawAndManifest UPDATE by id), so a full save() from a stale
+	// in-memory object would clobber the sealed sender/subject/body/key/raw-
+	// storage descriptor with empty values.
 
 	/** Backlog cap per run, so a long-neglected Trash drains over several runs. */
 	const PURGE_MAX_PER_RUN = 500;

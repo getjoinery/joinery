@@ -186,38 +186,11 @@ class AiConversationMessage extends SystemBase {
      * transaction (SystemBase::permanent_delete()), so an uncaught failure rolls
      * everything back instead of committing a partial delete.
      */
-    /**
-     * Targeted single-row UPDATE of exactly the given columns — never a full-row
-     * save(). A sealed row must NEVER be save()d: SystemBase::save() rebuilds every
-     * column through get(), which decrypts the sealed fields and would write
-     * plaintext back (unsealing them) or throw when the window is closed. Every
-     * write to a sealed message — seal-on-write, status/token/activity flips,
-     * re-seal — goes through this instead (mirrors InboundEmailMessage::updateColumns).
-     * $columns maps column name => value (null allowed).
-     */
-    public static function updateColumns(int $message_id, array $columns): void {
-        if ($message_id <= 0 || empty($columns)) return;
-        $sets = array();
-        $params = array();
-        foreach ($columns as $col => $value) {
-            if (!array_key_exists($col, static::$field_specifications)) continue;
-            $sets[] = $col . ' = ?';
-            $params[] = $value;
-        }
-        if (empty($sets)) return;
-        $params[] = $message_id;
-        $db = DbConnector::get_instance()->get_db_link();
-        $stmt = $db->prepare('UPDATE aim_conversation_messages SET ' . implode(', ', $sets)
-            . ' WHERE aim_message_id = ?');
-        foreach (array_values($params) as $i => $value) {
-            $type = PDO::PARAM_STR;
-            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
-            elseif ($value === null) { $type = PDO::PARAM_NULL; }
-            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
-            $stmt->bindValue($i + 1, $value, $type);
-        }
-        $stmt->execute();
-    }
+    // A sealed row must NEVER be save()d: SystemBase::save() rebuilds every
+    // column through get(), which decrypts the sealed fields and would write
+    // plaintext back (unsealing them) or throw when the window is closed. Every
+    // write to a sealed message — seal-on-write, status/token/activity flips,
+    // re-seal — goes through SystemBase::updateColumns() instead.
 
     /**
      * Soft-delete via a targeted UPDATE, not the base save() path: on a sealed

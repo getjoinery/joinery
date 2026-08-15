@@ -108,35 +108,10 @@ class AiQueuedAction extends SystemBase {
         }
     }
 
-    /**
-     * Targeted raw UPDATE of operational columns — never save(): save()
-     * rebuilds every column through get(), which decrypts the sealed fields
-     * and would write plaintext back (unsealing them) or throw while locked.
-     * Mirrors AiConversationMessage::updateColumns().
-     */
-    public static function updateColumns(int $action_id, array $columns): void {
-        if ($action_id <= 0 || empty($columns)) return;
-        $sets = array();
-        $params = array();
-        foreach ($columns as $col => $value) {
-            if (!array_key_exists($col, static::$field_specifications)) continue;
-            $sets[] = $col . ' = ?';
-            $params[] = $value;
-        }
-        if (empty($sets)) return;
-        $params[] = $action_id;
-        $db = DbConnector::get_instance()->get_db_link();
-        $stmt = $db->prepare('UPDATE aqa_ai_queued_actions SET ' . implode(', ', $sets)
-            . ' WHERE aqa_ai_queued_action_id = ?');
-        foreach (array_values($params) as $i => $value) {
-            $type = PDO::PARAM_STR;
-            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
-            elseif ($value === null) { $type = PDO::PARAM_NULL; }
-            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
-            $stmt->bindValue($i + 1, $value, $type);
-        }
-        $stmt->execute();
-    }
+    // Operational-column writes go through SystemBase::updateColumns() — never
+    // save(): save() rebuilds every column through get(), which decrypts the
+    // sealed fields and would write plaintext back (unsealing them) or throw
+    // while locked.
 
 }
 
