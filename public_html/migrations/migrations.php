@@ -1302,3 +1302,16 @@
 	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_disable = 0, amu_defaultpage = 'admin_marketplace', amu_min_permission = 10 WHERE amu_slug = 'system-marketplace'";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// The Test Database entry is gated on the debug setting, so it shows on a
+	// development site and not on a production one. admin_menus.json carries
+	// settingActivate for fresh installs; the core menu seed never touches
+	// existing rows, so setting it on an install that already has the row is a
+	// data change. The page refuses the action on its own regardless — this is
+	// about not offering it.
+	$migration = array();
+	$migration['database_version'] = '174';
+	$migration['test'] = "SELECT count(1) as count FROM amu_admin_menus WHERE amu_slug = 'test-database' AND amu_setting_activate = 'debug'";
+	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_setting_activate = 'debug' WHERE amu_slug = 'test-database'";
+	$migration['migration_file'] = NULL;
+	$migrations[] = $migration;

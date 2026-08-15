@@ -1,6 +1,21 @@
 # Minimal test database
 
-**Status:** not built.
+**Status:** built 2026-08-15. Open: `update_database` to land migration 174
+(the menu gate on existing installs), and a live check of the debug-off refusal.
+
+Two things the design did not anticipate, both found while building and both
+handled in the code:
+
+- `pg_get_serial_sequence()` answers from the OWNED BY dependency, and
+  `DatabaseUpdater` creates sequences without one — so it returns NULL for every
+  column on this platform, in live as well as in the copy. The sweep reads the
+  `nextval(...)` column default instead. Built the first way, it silently did
+  nothing and the duplicate-key collision happened exactly as predicted.
+- The exact-match backup exclusion is still not enough on its own, because the
+  two names can **collide**: this development box had `dbname_test =
+  joinerytest_test` beside a site directory whose `dbname` was also
+  `joinerytest_test`. Live always wins, in the backup sweep and in the copy —
+  which now refuses to rebuild a database that is some other site's live one.
 
 ## The problem in plain terms
 

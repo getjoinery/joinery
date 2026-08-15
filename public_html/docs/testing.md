@@ -398,10 +398,31 @@ error output). The runner and the dashboard consume only this:
 
 ## The test database
 
-`test-db` tests run against a copy of the dev database so CRUD is isolated from
-live data. Manage the copy — create it, sync its schema with the live database —
-from `/admin/admin_test_database`. Two suites drive the model estate against
-that copy; if either reports schema errors, sync the test database first:
+`test-db` tests run against a separate database so CRUD is isolated from live
+data. Rebuild it from `/admin/admin_test_database`.
+
+**It carries the schema, not the content.** A rebuild takes the full structure
+of the live database — every table, column, index and foreign key — and seeds
+only the handful of tables the site cannot boot without
+(`TestDatabaseHelper::referenceTables()`: settings, the plugin registry, admin
+menus, and small reference data like zone names and email templates). Every
+other table arrives empty with its constraints intact. Against a 1.3 GB live
+database the copy is about 16 MB, nearly all of which is the floor cost of
+~200 empty tables and their indexes.
+
+Nothing should be written that expects to find real rows there. The model
+suites create their own — see [How the model suite satisfies foreign
+keys](#how-the-model-suite-satisfies-foreign-keys).
+
+A full copy, content included, is a second button on the same page. It exists
+to reproduce a problem against real data; no test needs it, and it duplicates
+mail, sealed content and member records onto the same disk.
+
+Rebuilding is a development action: the page refuses it when the `debug`
+setting is off, and the menu entry is hidden there.
+
+Two suites drive the model estate against the copy; if either reports schema
+errors, rebuild first:
 
 - `tests/models/models_test.php` — every data model's generic CRUD, validation
   and constraint behaviour, one check per model class.
@@ -421,11 +442,16 @@ Options that take a raw SQL fragment cannot be driven from generated data and
 are skipped.
 
 The copy does **not** receive `update_database` — that runs against the live
-database only. After any schema change, resync from `/admin/admin_test_database`
+database only. After any schema change, rebuild from `/admin/admin_test_database`
 so the copy matches; a test database that lags live validates models against a
 schema production does not have. Foreign key constraints in particular are
 materialized on the live database by `update_database`, so a stale copy silently
-loses that coverage.
+loses that coverage. Rebuilding is cheap, so there is no reason to put it off.
+
+`dbname_test` must name a database no site uses. The rebuild drops its target,
+and a rebuild refuses outright when that name turns out to be some other site's
+live database — which is possible, because the installer can provision a
+separate site named `{site}_test` alongside the main one.
 
 Both `test-db` suites declare `needs: [test-db]`. The runner probes the
 connection rather than trusting `dbname_test`, so a checkout with no copy

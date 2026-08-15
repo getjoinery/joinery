@@ -294,7 +294,8 @@
             "url": "admin_test_database",
             "order": 5,
             "permission": 10,
-            "parent": "system"
+            "parent": "system",
+            "settingActivate": "debug"
         },
         {
             "slug": "system-agent-files",
