@@ -1,6 +1,4 @@
 <?php
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-
 /**
  * Plugin Settings tab.
  *
@@ -9,7 +7,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * The write scope is that one plugin's declared settings — nothing else in the
  * POST is written, so a crafted post cannot reach a core or sibling-plugin row.
  *
- * @version 2.0
+ * @version 2.1
+ * @changelog 2.1 - One plugin per view: ?plugin= selects a subtab and a save returns to the plugin it wrote
  * @changelog 2.0 - Saves through SettingsWriter, so scope, validation, credential handling and the vault gate are the same rules every other settings page enforces
  */
 function admin_settings_plugins_logic(array $input): LogicResult {
@@ -27,10 +26,21 @@ function admin_settings_plugins_logic(array $input): LogicResult {
 	// nor writable here.
 	$plugin_sources = SettingsDeclarations::renderableSources();
 
+	// One plugin shows at a time, chosen by its subtab (?plugin=). An unknown
+	// or absent name falls back to the first plugin rather than erroring, so a
+	// stale link still lands somewhere useful.
+	$selected = isset($input['plugin']) ? trim((string)$input['plugin']) : '';
+	if (!in_array($selected, $plugin_sources, true)) {
+		$selected = $plugin_sources[0] ?? null;
+	}
+
 	// Only run the save handler on an actual form POST — $input is never empty
 	// on a GET. See LibraryFunctions::isFormSubmission().
 	if (!LibraryFunctions::isFormSubmission()) {
-		return LogicResult::render(array('plugin_sources' => $plugin_sources));
+		return LogicResult::render(array(
+			'plugin_sources'  => $plugin_sources,
+			'selected_plugin' => $selected,
+		));
 	}
 
 	$target = isset($input['plugin_settings_target'])
@@ -39,7 +49,7 @@ function admin_settings_plugins_logic(array $input): LogicResult {
 	if ($target === '' || !in_array($target, $plugin_sources, true)) {
 		return LogicResult::error(
 			'That save named a plugin with no settings on this site.',
-			array('plugin_sources' => $plugin_sources)
+			array('plugin_sources' => $plugin_sources, 'selected_plugin' => $selected)
 		);
 	}
 
@@ -59,11 +69,11 @@ function admin_settings_plugins_logic(array $input): LogicResult {
 		}
 		return LogicResult::error(
 			'Nothing was saved: ' . implode(' | ', $lines),
-			array('plugin_sources' => $plugin_sources)
+			array('plugin_sources' => $plugin_sources, 'selected_plugin' => $target)
 		);
 	}
 
-	return LogicResult::redirect('/admin/admin_settings_plugins');
+	return LogicResult::redirect('/admin/admin_settings_plugins?plugin=' . urlencode($target));
 }
 
 ?>

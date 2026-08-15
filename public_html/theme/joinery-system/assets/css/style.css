@@ -965,6 +965,28 @@ select.form-control {
 .nav-tabs .nav-link:hover { color: var(--body-color); }
 .nav-tabs .nav-link.active { color: var(--primary); border-bottom-color: var(--primary); font-weight: 600; }
 
+/* Second-level tab strip (pills) — AdminPage::subtab_menu() */
+.subtabs {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.375rem;
+    margin-bottom: 1.25rem;
+}
+.subtabs .subtab {
+    display: block;
+    padding: 0.375rem 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 500;
+    color: var(--muted);
+    background: var(--light);
+    border: 1px solid var(--border);
+    border-radius: 999px;
+    transition: color var(--transition), background var(--transition);
+    white-space: nowrap;
+}
+.subtabs a.subtab:hover { color: var(--body-color); background: var(--lighter); }
+.subtabs .subtab.active { color: #fff; background: var(--primary); border-color: var(--primary); font-weight: 600; }
+
 /* ===== Auth Layout ===== */
 .auth-page {
     min-height: 100vh;

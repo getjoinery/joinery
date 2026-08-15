@@ -297,8 +297,8 @@ if (!$no_vault_uid) {
 		$core                    => '4321',
 	));
 
-	check($result->redirect === '/admin/admin_settings_plugins',
-		'a valid save redirects back to the tab');
+	check($result->redirect === '/admin/admin_settings_plugins?plugin=dns_filtering',
+		'a valid save redirects back to the plugin\'s subtab');
 	check($value_of($own) === $probe, 'the submitting plugin\'s declared setting is written');
 	check($value_of($sibling) === $sibling_before,
 		'a sibling plugin\'s setting in the same POST is ignored', 'was ' . var_export($sibling_before, true));
@@ -367,7 +367,7 @@ $vault_uid = (int)$db->query(
 
 if (!$vault_uid) {
 	harness_skip('no account with a user-scope vault to act as');
-} elseif (!isset($forms['mailbox'])) {
+} elseif (!in_array('mailbox', $sources, true)) {
 	harness_skip('mailbox plugin inactive, so its gated settings are not on the page');
 } else {
 	$_SERVER['REQUEST_METHOD'] = 'POST';
