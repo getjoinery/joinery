@@ -178,6 +178,18 @@ passkey must:
   sets: registration-time signals alone can also prove a credential incapable,
   and must, since a U2F-only key cannot pass a UV-required assertion and so
   could never earn a stamp.
+- **The trust boundary of that evidence is the client.** The assertion
+  signature covers the authenticator data and the client data hash;
+  `clientExtensionResults` — where the PRF output travels — is assembled by
+  the browser and unsigned, and registration-time signals are client-reported
+  too. Remote proof that a credential *cannot* derive does not exist in
+  WebAuthn, so capability evidence is best-effort against accident, not
+  against a client that lies about its own account. Where signed corroboration
+  exists it is used: a CTAP authenticator that evaluated PRF carries the
+  hmac-secret output inside the signed authenticator data, and a missing
+  client result is not stamped when that shows an evaluation happened. The
+  backstops for a wrong stamp are the ceremony gate, the step-up on minting,
+  and the clear-on-success rule.
 - `VaultCeremonies::setup()` re-asks the same question before writing a
   passkeyless vault, and requires a phrase when it does. The gate is in the
   ceremony, not in the page that hides the button, so no other caller can
@@ -513,6 +525,17 @@ locked vault and there is never a reason to store protected content in the clear
 because "the window might close". Reusing an existing row's key means
 *unwrapping* it, which needs the secret, so a sealed-column update against a
 closed window raises `VaultLockedException`, exactly as `get()` does.
+
+That asymmetry is what lets an unattended job add protected content to something
+that already exists. Mail attachment adoption is the worked example: a message
+ingested over IMAP holds only references to its attachments, and an archive
+import that later turns up the real bytes stores them — sealed, in cron, with
+nobody signed in. It can only do that because the bytes go into a **self-sealed
+`File`** carrying its own key wrapped to the owner's vault, the same shape Drive
+uses, rather than borrowing the message's DEK (which would mean opening it, and
+so needing a window). Per-file keys also mean the existing Drive reseal sweep
+re-wraps them on rotation with no new code — the sweep selects on
+`fil_content_sealed` and the generation, deliberately **not** on `fil_source`.
 
 **An update reuses the row's existing key** rather than minting a fresh one.
 Minting would rewrite the wrapping and orphan every sealed column the update did

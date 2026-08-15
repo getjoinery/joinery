@@ -645,6 +645,27 @@ class VaultUnlock {
 	 *   every live credential, which is the safe direction: an empty
 	 *   allowCredentials on the unlock path is a vault lockout.
 	 */
+	/**
+	 * Whether any passkey wrapping exists for this user's vault in this scope.
+	 * False on a phrase-only vault (the compatibility fallback), where a
+	 * passkey ceremony can never produce an unlock — the unlock and rotate
+	 * option actions refuse with a pointer to the phrase instead of minting a
+	 * ceremony that only lists credentials unable to open anything.
+	 */
+	public static function hasPasskeyRoute(int $user_id, string $scope = 'user'): bool {
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		require_once(PathHelper::getIncludePath('data/user_encryption_wrappings_class.php'));
+		$vault = UserEncryptionVault::loadForUser($user_id, $scope);
+		if (!$vault) {
+			return false;
+		}
+		$wrappings = new MultiUserEncryptionWrapping([
+			'vault_id' => $vault->key,
+			'unlocker_type' => UserEncryptionWrapping::TYPE_PASSKEY,
+		]);
+		return $wrappings->count_all() > 0;
+	}
+
 	public static function offerableCredentialIds(int $user_id, string $scope = 'user'): array {
 		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));

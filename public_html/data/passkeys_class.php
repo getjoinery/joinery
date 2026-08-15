@@ -10,6 +10,12 @@ require_once(PathHelper::getIncludePath('includes/Validator.php'));
 
 class PasskeyException extends SystemBaseException {}
 
+/** A verified ceremony produced no PRF output — the hardware-limit refusal.
+ *  Distinct so callers can branch on the type instead of sniffing the
+ *  message; the wizard's fallback routing depends on telling this apart
+ *  from a transport or validation failure. */
+class PasskeyPrfUnsupportedException extends PasskeyException {}
+
 /**
  * One enrolled WebAuthn credential. `pkc_source_json` is the library's
  * serialized CredentialRecord — the authoritative state every ceremony
