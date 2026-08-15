@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.23.0
+ * @version 2.24.0
+ * @changelog 2.24.0 - validateCSRF() accepts the token the session held when this instance was constructed: construction mints a fresh token for the response's render, which had replaced the one the submitted page carried, so a POST handler that constructs the form it is validating always failed. Added getCSRFToken() for single-button action forms that share one form's token
  * @changelog 2.23.0 - fromDescriptor() renders a type 'array' descriptor entry carrying an options map as a checkbox list (posts name[], the stored array pre-checks entries); an array of objects stays unrendered
  * @changelog 2.21.0 - Every form emits a validation error summary container (.jy-error-summary) immediately before its first submit button (end of form when there is none); on a re-render carrying errors, PHP fills it with one linked item per failing field so an off-screen error is named where the person is looking. Form options: error_summary (default true), error_summary_title ({n} placeholder)
  * @changelog 2.20.0 - An input option this class never reads is refused rather than dropped: the known set is derived from the source of the writer and its parents, so a misspelled option (help_text for helptext) stops the page in debug instead of silently rendering a field without it
@@ -36,6 +37,10 @@ abstract class FormWriterV2Base {
     protected $options;
     protected $fields = [];
     protected $csrf_token;
+    // The session's token entry for this form id as it stood when this
+    // instance was constructed — construction replaces it, and this is the
+    // token the submitted page actually carries.
+    protected $inbound_csrf = null;
     protected $validation_rules = [];
     protected $validator;
     protected $values = [];
@@ -278,6 +283,11 @@ abstract class FormWriterV2Base {
 
         // Generate token only if CSRF is enabled
         if ($this->options['csrf'] === true) {
+            // Hold the entry the submitted page's token was checked out of —
+            // the fresh token minted below is for the *next* render, and
+            // validateCSRF() must still honor the one this request arrived with.
+            $this->inbound_csrf = $_SESSION['csrf_tokens'][$this->form_id] ?? null;
+
             $this->csrf_token = bin2hex(random_bytes(32));
 
             // Initialize session array if needed
@@ -322,29 +332,48 @@ abstract class FormWriterV2Base {
 
         $field_name = $this->options['csrf_field'];
         $token = $data[$field_name] ?? '';
-
-        // Check if token exists in session
-        if (!isset($_SESSION['csrf_tokens'][$this->form_id])) {
+        if (!is_string($token) || $token === '') {
             return false;
         }
 
-        $stored = $_SESSION['csrf_tokens'][$this->form_id];
-
-        // Check if expired
-        if ($stored['expires'] < time()) {
-            unset($_SESSION['csrf_tokens'][$this->form_id]);
-            return false;
+        // The current session entry — present when this form was constructed
+        // in an earlier request than the one being validated.
+        if (isset($_SESSION['csrf_tokens'][$this->form_id])) {
+            $stored = $_SESSION['csrf_tokens'][$this->form_id];
+            if ($stored['expires'] < time()) {
+                unset($_SESSION['csrf_tokens'][$this->form_id]);
+            } elseif (hash_equals($stored['token'], $token)) {
+                // Clear token after use (one-time use)
+                unset($_SESSION['csrf_tokens'][$this->form_id]);
+                return true;
+            }
         }
 
-        // Validate token using hash_equals to prevent timing attacks
-        $valid = hash_equals($stored['token'], $token);
-
-        // Clear token after use (one-time use)
-        if ($valid) {
-            unset($_SESSION['csrf_tokens'][$this->form_id]);
+        // The entry construction replaced. A handler constructing the form it
+        // is validating minted a fresh token above the submitted one; the
+        // submitted page carries the prior token, held at construction. A
+        // replay is still refused: the prior token is already gone from the
+        // session, and clearing it here ends this instance's acceptance too.
+        if ($this->inbound_csrf !== null
+                && $this->inbound_csrf['expires'] >= time()
+                && hash_equals($this->inbound_csrf['token'], $token)) {
+            $this->inbound_csrf = null;
+            return true;
         }
 
-        return $valid;
+        return false;
+    }
+
+    /**
+     * The token this instance minted at construction, for embedding in
+     * single-button action forms (hidden inputs + one submit) that share this
+     * form's token instead of drawing a full FormWriter form each. The field
+     * name to post it under is the csrf_field option, '_csrf_token' by default.
+     *
+     * @return string|null Token, or null when CSRF is disabled for this form
+     */
+    public function getCSRFToken() {
+        return $this->csrf_token;
     }
 
     /**

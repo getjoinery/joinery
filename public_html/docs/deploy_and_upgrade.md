@@ -731,16 +731,16 @@ getjoinery keeps `upgrade_source = https://dev.getjoinery.com` permanently, whic
 
 ## Marketplace
 
-The marketplace admin page lets superadmins browse themes and plugins available on the upgrade server and install them with one click.
+The marketplace admin page lets superadmins browse themes and plugins available on the upgrade server and install them with one click. It is the primary way a site adds plugins and themes — the ZIP upload on the Plugins/Themes admin pages is the secondary path, for custom extensions that are in no catalog. Because node upgrades only refresh extensions already on disk, the marketplace is how a site *acquires* one it doesn't have.
 
-**Admin Page:** Server Manager > Marketplace (permission level 8)
-**Files:** `plugins/server_manager/views/admin/marketplace.php`, `plugins/server_manager/logic/admin_marketplace_logic.php`
+**Admin Page:** System > Marketplace, `/admin/admin_marketplace` (permission level 10)
+**Files:** `adm/admin_marketplace.php`, `adm/logic/admin_marketplace_logic.php`, `includes/MarketplaceClient.php`
 
-> **Note:** The old URL `/admin/admin_marketplace` redirects to `/admin/server_manager/marketplace`.
+The client is core and ships to every site; only the *source* site needs the server_manager plugin (it serves the catalog). The same operations are exposed as API actions: `marketplace_catalog` (read) and `marketplace_install` (write), both superadmin-floored — `logic/marketplace_catalog_logic.php`, `logic/marketplace_install_logic.php`.
 
 ### How It Works
 
-1. Fetches catalog from the upgrade server (`publish_theme.php?list=themes` and `?list=plugins`)
+1. `MarketplaceClient` fetches the catalog from the upgrade server (`publish_theme?list=themes` and `?list=plugins`)
 2. Compares with locally installed themes/plugins
 3. Shows a card grid with install buttons for items not yet installed
 4. Install downloads the tar.gz archive and extracts it via `AbstractExtensionManager::installFromTarGz()`

@@ -239,6 +239,15 @@
             "parent": "system"
         },
         {
+            "slug": "system-marketplace",
+            "title": "Marketplace",
+            "url": "admin_marketplace",
+            "order": 3,
+            "permission": 10,
+            "icon": "store",
+            "parent": "system"
+        },
+        {
             "slug": "system-cache",
             "title": "Static Cache",
             "url": "admin_static_cache",

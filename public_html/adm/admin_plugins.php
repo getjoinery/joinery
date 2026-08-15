@@ -23,7 +23,8 @@ $provisioning_plugins = $page_vars['provisioning_plugins'] ?? array();
 // Build Options dropdown links
 $altlinks = array();
 $altlinks['Sync with Filesystem'] = '/admin/admin_plugins?action=sync_filesystem';
-$altlinks['Add New'] = '/admin/admin_plugins?show_upload=1';
+$altlinks['Add New'] = '/admin/admin_marketplace';
+$altlinks['Upload ZIP'] = '/admin/admin_plugins?show_upload=1';
 
 $page->admin_header(array(
     'menu-id' => 'system-plugins',
