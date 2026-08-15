@@ -21,6 +21,16 @@ function vault_rotate_options_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault is not set up yet.');
 	}
 
+	// Rotation is authorized by a passkey that already unlocks the vault. A
+	// phrase-only vault has none, so the ceremony can never succeed — say so
+	// instead of minting one over credentials that open nothing.
+	if (!VaultUnlock::hasPasskeyRoute((int)$user->key, UserEncryptionVault::SCOPE_USER)) {
+		return LogicResult::error(
+			'Rotation needs a passkey that unlocks your vault, and none does yet. Unlock with your bypass phrase, add a passkey from your security page, then rotate.',
+			['no_passkey_route' => true]
+		);
+	}
+
 	try {
 		$service = new PasskeyService();
 		$options = $service->getDerivationOptions($user, 'vault-kek',

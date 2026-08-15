@@ -838,6 +838,22 @@
                         var result = await apiFetch('/api/v1/action/vault_setup_verify', { method: 'POST', body: JSON.stringify(body) });
                         showCodes(result.data.recovery_codes, result.data.key_file);
                     } catch (e) {
+                        // The hardware-limit refusal reveals the compatibility
+                        // fallback here too — this page is the step's permanent
+                        // home. Eligibility stays server-decided: the action
+                        // refuses an account with any working passkey route.
+                        if (e.data && e.data.prf_unsupported) {
+                            if (!await JoineryModal.confirmAsync('This passkey cannot hold an encryption key - a limit of the device or security key itself, not a setting. A passkey from a newer phone, laptop or password manager is the better route. If none of your passkeys can, you can unlock with a memorized bypass phrase instead - weaker than a passkey, offered because the device leaves no better option. If you forget it and lose your recovery codes, the data is gone for good. Use a bypass phrase?', { confirmLabel: 'Use a bypass phrase' })) return;
+                            var phrase = await JoineryModal.promptAsync('Set a bypass phrase (12+ characters):', { inputType: 'password', confirmLabel: 'Create' });
+                            if (!phrase) return;
+                            try {
+                                var created = await apiFetch('/api/v1/action/vault_setup_passphrase', { method: 'POST', body: JSON.stringify({ passphrase: phrase, acknowledged: true }) });
+                                showCodes(created.data.recovery_codes, created.data.key_file);
+                            } catch (e2) {
+                                JoineryModal.alert(e2.message || 'Could not set up your vault.');
+                            }
+                            return;
+                        }
                         JoineryModal.alert(e.message || 'Could not set up your vault.');
                     }
                 });

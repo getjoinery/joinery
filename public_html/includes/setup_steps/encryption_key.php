@@ -5,23 +5,19 @@
  * over the API. Included by views/setup.php with $page, $viewer, $settings,
  * $next_key in scope.
  *
- * @version 1.2
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 
-$setup_vault_passkeys = new MultiPasskey(array('user_id' => (int)$viewer->key));
-$setup_vault_passkey_count = 0;
 // The key is unlocked by a passkey that can derive a PRF secret. A U2F-only
 // authenticator answers 'incapable' and can never hold a wrapping, so an
 // account holding only those cannot make a key however willing it is — that,
-// and a missing account password, are the only ways past this step.
-$setup_vault_can_try = false;
-foreach ($setup_vault_passkeys as $setup_vault_passkey) {
-	$setup_vault_passkey_count++;
-	if ($setup_vault_passkey->vault_capability() !== Passkey::VAULT_INCAPABLE) {
-		$setup_vault_can_try = true;
-	}
-}
+// and a missing account password, are the only ways past this step. The
+// branch question is the ceremony's own gate, asked of the same predicate —
+// this page never hand-rolls a second copy of it.
+$setup_vault_passkey_count = (new MultiPasskey(array('user_id' => (int)$viewer->key)))->count_all();
+$setup_vault_blocked = Passkey::userNeedsPassphraseFallback((int)$viewer->key);
+$setup_vault_phrase_min = (int)SealedBox::PASSPHRASE_MIN_CHARS;
 ?>
 
 <?php if ($setup_vault_passkey_count === 0) { ?>
@@ -32,7 +28,7 @@ foreach ($setup_vault_passkeys as $setup_vault_passkey) {
 	<div class="jy-mt-2">
 		<a class="btn btn-primary" href="/setup?step=signin_security">&larr; Add a passkey</a>
 	</div>
-<?php } elseif (!$setup_vault_can_try) { ?>
+<?php } elseif ($setup_vault_blocked) { ?>
 	<div id="setup-vault-phrase-branch">
 	<div class="jy-callout jy-callout-warning">
 		<div class="jy-callout-title">This device can't hold your key</div>
@@ -45,7 +41,7 @@ foreach ($setup_vault_passkeys as $setup_vault_passkey) {
 	</div>
 
 	<div id="setup-vault-phrase" class="d-none jy-mt-3">
-		<p class="jy-muted">A phrase you type is weaker than a passkey you tap — it can be guessed, and it can be phished. It is here because your device leaves no better option. Use something long and unique, and store it in a password manager if you have one. Minimum 12 characters.</p>
+		<p class="jy-muted">A phrase you type is weaker than a passkey you tap — it can be guessed, and it can be phished. It is here because your device leaves no better option. Use something long and unique, and store it in a password manager if you have one. Minimum <?php echo $setup_vault_phrase_min; ?> characters.</p>
 		<label class="setup-field">
 			<span>Bypass phrase</span>
 			<input type="password" id="setup-vault-phrase-1" autocomplete="new-password">
@@ -92,7 +88,7 @@ document.addEventListener('DOMContentLoaded', function () {
 	});
 
 	function sync() {
-		create.disabled = !(ack.checked && one.value.length >= 12 && one.value === two.value);
+		create.disabled = !(ack.checked && one.value.length >= <?php echo $setup_vault_phrase_min; ?> && one.value === two.value);
 	}
 	[one, two].forEach(function (el) { el.addEventListener('input', sync); });
 	ack.addEventListener('change', sync);
@@ -106,6 +102,12 @@ document.addEventListener('DOMContentLoaded', function () {
 				passphrase_confirm: two.value,
 				acknowledged: 1
 			});
+			// Shared second-factor step-up handling: a 2xx render carrying the
+			// flag redirects to the ceremony, then back to this step.
+			if (result && result.second_factor_required) {
+				window.location = '/verify-stepup?return=' + encodeURIComponent('/setup?step=encryption_key');
+				return;
+			}
 			// The whole step collapses, not just the phrase panel — the
 			// "add a passkey elsewhere" route above it is moot now.
 			window.setupVaultShowResult(result, 'setup-vault-phrase-branch');
@@ -191,7 +193,7 @@ document.addEventListener('DOMContentLoaded', function () {
 			if (e.data && e.data.requires_password) {
 				hint.textContent = 'Your account needs a password before a key can be created — set one on your security page first.';
 				if (blocked) { blocked.classList.remove('d-none'); }
-			} else if (/derived secret|PRF/i.test(e.message || '')) {
+			} else if (e.data && e.data.prf_unsupported) {
 				hint.textContent = 'This passkey cannot hold an encryption key — that is a limit of the device or security key, not a setting. '
 					+ 'A passkey from a phone, laptop or password manager can, and there is another way if none of yours can.';
 				var retry = document.getElementById('setup-vault-retry');

@@ -30,10 +30,12 @@
 	}
 	$next_key = ($current_step !== null) ? _setup_next_key($steps, $current_key) : 'done';
 
-	// Live "what is not done" lines for the dismissal dialog.
+	// Live "what is not done" lines for the dismissal dialog. A declined step
+	// is green only as a decision — the underlying thing is still not set up,
+	// so its line belongs in this list too.
 	$outstanding = array();
 	foreach ($steps as $s) {
-		if ($statuses[$s['key']] !== SetupSteps::STATUS_GREEN) {
+		if ($statuses[$s['key']] !== SetupSteps::STATUS_GREEN || !empty($declined[$s['key']])) {
 			$outstanding[] = $s['dismiss_line'] ?? ($s['title'] . ' is not set up.');
 		}
 	}
@@ -104,7 +106,13 @@
 					<span class="setup-dot <?php echo htmlspecialchars($st); ?>"></span>
 					<span><?php echo htmlspecialchars($s['title']); ?><?php if (!empty($declined[$s['key']])) { ?> <span class="jy-muted">— not set up, by your choice</span><?php } ?></span>
 <?php if (!empty($s['home_url'])) { ?>
-					<a class="setup-home" href="<?php echo htmlspecialchars($s['home_url']); ?>"><?php echo ($st === SetupSteps::STATUS_GREEN) ? 'Manage' : 'Finish'; ?></a>
+					<a class="setup-home" href="<?php echo htmlspecialchars($s['home_url']); ?>"><?php
+						// "Manage" belongs to a thing that exists; a declined
+						// step's thing does not.
+						if (!empty($declined[$s['key']])) { echo 'Set up'; }
+						elseif ($st === SetupSteps::STATUS_GREEN) { echo 'Manage'; }
+						else { echo 'Finish'; }
+					?></a>
 <?php } ?>
 				</li>
 <?php } ?>

@@ -21,6 +21,16 @@ function vault_unlock_options_logic(array $input): LogicResult {
 		return LogicResult::error('Your vault is not set up yet.');
 	}
 
+	// A phrase-only vault (the compatibility fallback) has no passkey wrapping,
+	// so a passkey ceremony can never unlock it. Refuse with a pointer to the
+	// unlocker that works instead of listing credentials that open nothing.
+	if (!VaultUnlock::hasPasskeyRoute((int)$user->key, UserEncryptionVault::SCOPE_USER)) {
+		return LogicResult::error(
+			'No passkey currently unlocks your vault - use your bypass phrase or a recovery code. Adding a passkey from your security page while unlocked gives you the passkey route.',
+			['no_passkey_route' => true]
+		);
+	}
+
 	try {
 		$service = new PasskeyService();
 		$options = $service->getDerivationOptions($user, 'vault-kek',

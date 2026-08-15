@@ -39,6 +39,10 @@ function vault_setup_verify_logic(array $input): LogicResult {
 	try {
 		$service = new PasskeyService();
 		[$derived_user, $passkey, $prf_output] = $service->verifyDerivation(json_encode($credential), 'vault-kek');
+	} catch (PasskeyPrfUnsupportedException $e) {
+		// The hardware-limit refusal, as a flag the client can branch on —
+		// the wizard's fallback routing must not sniff the message text.
+		return LogicResult::error($e->getMessage(), ['prf_unsupported' => true]);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}

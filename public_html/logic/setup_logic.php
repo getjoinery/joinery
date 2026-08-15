@@ -6,7 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 function setup_logic(array $input): LogicResult {
@@ -46,17 +46,23 @@ function setup_logic(array $input): LogicResult {
 	}
 
 	// "Not now" on an optional step: records a decision, never completion.
-	// Only steps that declare a decision scope accept one.
+	// Only steps that declare a decision scope accept one, and the step's own
+	// can_decline predicate is asked here, server-side — a refused decline
+	// re-renders the step rather than settling it.
 	if ($action === 'decline_step') {
 		$key = (string)($input['step_key'] ?? '');
 		$step = SetupSteps::get($key);
 		if ($step && !empty($step['decision'])) {
-			$user_id = ($step['decision'] === 'user') ? (int)$viewer->key : NULL;
-			SetupSteps::recordDecision($key, $user_id);
-			SetupSteps::invalidateSessionCache();
-			return LogicResult::redirect('/setup?step=' . urlencode(_setup_next_key($steps, $key)));
+			if (SetupSteps::canDecline($step, $viewer)) {
+				$user_id = ($step['decision'] === 'user') ? (int)$viewer->key : NULL;
+				SetupSteps::recordDecision($key, $user_id);
+				SetupSteps::invalidateSessionCache();
+				return LogicResult::redirect('/setup?step=' . urlencode(_setup_next_key($steps, $key)));
+			}
+			$error = "This step can't be skipped — your account is able to complete it.";
+		} else {
+			return LogicResult::redirect('/setup');
 		}
-		return LogicResult::redirect('/setup');
 	}
 
 	// Welcome: name + timezone, and the site name for the owner.

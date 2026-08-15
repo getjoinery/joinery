@@ -13,7 +13,7 @@
  * Every VaultCeremonyException message is written to be shown to the user
  * verbatim.
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - the reseal guard no longer refuses rotation for a plugin that
  *   was never activated on this instance (it holds nothing sealed); activation
  *   history keeps deactivated-after-use refusing.
@@ -47,6 +47,13 @@ class VaultCeremonies {
 		if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
 			throw new VaultCeremonyException('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 		}
+		// Already-done wins over every other refusal: a replayed setup (double
+		// click, stale tab) must hear "your vault is already set up", not a
+		// capability verdict about a vault it is not creating.
+		$existing = new MultiUserEncryptionVault(['user_id' => $user->key, 'scope' => UserEncryptionVault::SCOPE_USER]);
+		if ($existing->count_all() > 0) {
+			throw new VaultCeremonyException('Your vault is already set up.');
+		}
 		// A vault with no passkey wrapping is the compatibility fallback for an
 		// account whose every credential has failed a real derivation. The
 		// check lives HERE rather than in the caller so no route into the
@@ -64,11 +71,6 @@ class VaultCeremonies {
 			}
 		}
 		$code_count = max(5, min(20, $code_count));
-
-		$existing = new MultiUserEncryptionVault(['user_id' => $user->key, 'scope' => UserEncryptionVault::SCOPE_USER]);
-		if ($existing->count_all() > 0) {
-			throw new VaultCeremonyException('Your vault is already set up.');
-		}
 
 		$keypair = $this->box->generateKeypair();
 		$salt = $this->box->generateSalt();

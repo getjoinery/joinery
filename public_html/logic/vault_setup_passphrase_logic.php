@@ -9,11 +9,12 @@
  * so that hiding the button is never the only thing standing between an
  * account with a working passkey and a weaker unlocker.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function vault_setup_passphrase_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+	require_once(PathHelper::getIncludePath('includes/RequestLogger.php'));
 	require_once(PathHelper::getIncludePath('includes/VaultCeremonies.php'));
 	require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
@@ -28,11 +29,29 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 	$session->check_permission(0);
 	$user = new User($session->get_user_id(), TRUE);
 
+	if (!RequestLogger::check_rate_limit('vault_setup_passphrase', 5, 900, false)) {
+		return LogicResult::error('Too many attempts. Please wait a few minutes and try again.');
+	}
+
 	if (!$user->get('usr_password')) {
 		return LogicResult::error(
 			'Set an account password before enabling your vault - a vault holder always keeps password sign-in as a second factor.',
 			['requires_password' => true]
 		);
+	}
+
+	// Minting a vault under a memorized phrase is the one setup route with no
+	// possession proof of its own (the passkey route's is the UV assertion),
+	// so it demands the account's second factor: a session rider must not be
+	// able to mint the vault and walk away holding its recovery codes. The
+	// fallback cohort can always satisfy this — a PRF-incapable passkey still
+	// steps up fine. As an API action this can't redirect, so it answers with
+	// the flag and the client runs the ceremony first, then retries.
+	if ($session->user_has_second_factor($user) && !$session->has_recent_second_factor()) {
+		return LogicResult::render([
+			'second_factor_required' => true,
+			'error' => 'Confirm your identity with your second factor, then try again.',
+		]);
 	}
 
 	if (empty($input['acknowledged'])) {
@@ -67,8 +86,10 @@ function vault_setup_passphrase_logic(array $input): LogicResult {
 		// eligibility itself before honouring that.
 		$result = $ceremonies->setup($user, 0, null, '', $passphrase, $code_count);
 	} catch (VaultCeremonyException $e) {
+		RequestLogger::log('vault_setup_passphrase', 'setup', false, ['user_id' => $user->key]);
 		return LogicResult::error($e->getMessage());
 	}
+	RequestLogger::log('vault_setup_passphrase', 'setup', true, ['user_id' => $user->key]);
 
 	return LogicResult::render([
 		'vault_id'       => (int)$result['vault']->key,

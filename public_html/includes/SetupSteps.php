@@ -19,6 +19,10 @@
  *   'decision'    optional 'user'|'site' — the step accepts a "not now" answer,
  *                 which counts as green (the wizard measures decided, not
  *                 enabled). Real state always wins over the decision row.
+ *   'can_decline' optional callable(?User $viewer): bool — asked server-side
+ *                 before a decline is recorded; false refuses it. A step that
+ *                 offers "not now" only to accounts that cannot comply
+ *                 declares the rule here — hiding the button is not a gate.
  *   'real_status' optional callable(?User $viewer): string — the same question
  *                 as status() ignoring any decision, so the wizard can tell a
  *                 step that is truly done from one that was declined
@@ -26,7 +30,7 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 class SetupSteps {
@@ -140,6 +144,26 @@ class SetupSteps {
 			return self::STATUS_NONE;
 		}
 		return in_array($status, array(self::STATUS_GREEN, self::STATUS_AMBER), true) ? $status : self::STATUS_NONE;
+	}
+
+	/**
+	 * Whether a decline may be recorded for this step right now. Without a
+	 * 'can_decline' predicate, a decision-scoped step is always declinable.
+	 * A predicate that throws refuses — the gate fails closed.
+	 */
+	public static function canDecline(array $step, ?User $viewer): bool {
+		if (empty($step['decision'])) {
+			return false;
+		}
+		if (!isset($step['can_decline'])) {
+			return true;
+		}
+		try {
+			return (bool)call_user_func($step['can_decline'], $viewer);
+		} catch (Throwable $e) {
+			error_log('SetupSteps: can_decline predicate for "' . ($step['key'] ?? '?') . '" threw: ' . $e->getMessage());
+			return false;
+		}
 	}
 
 	// ---- Decisions ("not now" answers for optional steps) ----
@@ -329,6 +353,19 @@ class SetupSteps {
 			'home_url' => '/profile/security',
 			'dismiss_line' => 'You have no personal encryption key — private mail, files, passwords and encrypted chats are unavailable.',
 			'decision' => 'user',
+			// Mandatory for any account that can comply: declinable only with
+			// no password to build on, or when every credential is provably
+			// incapable of deriving a key — the same questions the ceremony asks.
+			'can_decline' => function (?User $viewer): bool {
+				if (!$viewer || !$viewer->key) {
+					return false;
+				}
+				if (!$viewer->get('usr_password')) {
+					return true;
+				}
+				require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+				return Passkey::userNeedsPassphraseFallback((int)$viewer->key);
+			},
 			'active' => function (?User $viewer): bool {
 				return (string)Globalvars::get_instance()->get_setting('passkeys_enabled') === '1';
 			},

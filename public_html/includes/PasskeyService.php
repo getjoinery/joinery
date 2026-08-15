@@ -21,7 +21,11 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - A missing PRF output stamps pkc_prf_failed_time only when
+ *   the signed authenticator data carries no PRF/hmac-secret evaluation —
+ *   clientExtensionResults are browser-assembled and unsigned, so a stripped
+ *   result must not mark a provably-evaluating credential incapable.
  * @changelog 1.6 - Registration always requests PRF and credProps, and records
  *   discoverability/attachment, so a credential's vault capability is known at
  *   enrollment (Passkey::vault_capability()). getDerivationOptions() takes an
@@ -447,7 +451,9 @@ class PasskeyService {
 
 		$data = json_decode($client_response_json, true);
 		if (!is_array($data)) {
-			throw new PasskeyException('This passkey did not return a derived secret. It may not support PRF.');
+			// A body that never parsed says nothing about the credential — this
+			// must not share the hardware-limit message or type below.
+			throw new PasskeyException('The passkey response could not be read. Please try again.');
 		}
 
 		$pk_credential = $this->_decodeAssertionResponse($client_response_json);
@@ -460,18 +466,29 @@ class PasskeyService {
 		// requested in the options (getDerivationOptions() asks for 'required' too).
 		$this->_checkAssertion($pk_credential, $passkey, $challenge, 'required');
 
-		// Only NOW is the missing PRF output trustworthy evidence about this
-		// credential: the assertion is verified, so the claim came from the
-		// authenticator itself and not from whoever posted the body. Recording
-		// it before that check would let a forged request mark someone else's
-		// passkey incapable and push their account onto the weaker unlocker.
+		// The verified assertion proves who tapped, and no more: the signature
+		// covers authenticatorData and the clientDataJSON hash, never
+		// clientExtensionResults — the browser assembles those. Verifying first
+		// still matters (a forged request can't stamp someone else's passkey),
+		// but a genuine assertion with stripped or dropped extension results
+		// remains possible, so a missing PRF output is client-attested evidence,
+		// not authenticator-attested. One corroboration IS signed: a CTAP
+		// authenticator that evaluated PRF carries the hmac-secret output inside
+		// authenticatorData. When that shows an evaluation happened, the missing
+		// result is the client's doing and proves nothing about the credential.
 		$prf_output_b64url = $data['clientExtensionResults']['prf']['results']['first'] ?? null;
 		if (!$prf_output_b64url) {
+			if ($this->_signedPrfEvaluated($pk_credential)) {
+				// The credential provably evaluated PRF; the browser dropped the
+				// result. A client fault, not a hardware limit — no stamp, and
+				// not the unsupported type.
+				throw new PasskeyException('Your passkey derived the key, but this browser did not return it. Try again, or use a different browser.');
+			}
 			if (!$passkey->get('pkc_prf_failed_time')) {
 				$passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
 				$passkey->save();
 			}
-			throw new PasskeyException('This passkey did not return a derived secret. It may not support PRF.');
+			throw new PasskeyPrfUnsupportedException('This passkey did not return a derived secret. It may not support PRF.');
 		}
 
 		$user = new User($user_id, TRUE);
@@ -664,6 +681,21 @@ class PasskeyService {
 	/** Fixed, deterministic per-context salt so the same context always evaluates the same PRF input. */
 	private function _prfSalt(string $context): string {
 		return hash('sha256', 'joinery-passkey-prf:' . $context, true);
+	}
+
+	/**
+	 * Whether the SIGNED authenticator data says PRF was evaluated. CTAP
+	 * authenticators return the hmac-secret output inside authenticatorData
+	 * (encrypted, so unusable as the secret — but its presence is
+	 * authenticator-attested proof of capability). Platform authenticators may
+	 * carry nothing here, so false means "no signed evidence", not "incapable".
+	 */
+	private function _signedPrfEvaluated(PublicKeyCredential $pk_credential): bool {
+		$extensions = $pk_credential->response->authenticatorData->extensions ?? null;
+		if ($extensions === null) {
+			return false;
+		}
+		return $extensions->has('hmac-secret') || $extensions->has('prf');
 	}
 
 	private function _decodeAssertionResponse(string $client_response_json): PublicKeyCredential {

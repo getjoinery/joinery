@@ -10,7 +10,8 @@
  * offered — but an account that CANNOT hold one (U2F-only passkey, or no
  * account password) records a decision so it can still finish setup. These
  * check that fallback: it settles the step, the wizard can still tell it from
- * a real key, and a real key outranks the row either way.
+ * a real key, a real key outranks the row either way, and the decline itself
+ * is refused server-side for any account that can comply.
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -24,6 +25,22 @@ require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 $user = make_user('SetupKey');
 $step = SetupSteps::get('encryption_key');
 
+/** A credential row good enough for capability questions. */
+function setupkey_make_passkey(int $user_id, bool $prf_capable, bool $prf_failed = false) {
+	$passkey = new Passkey(NULL);
+	$passkey->set('pkc_usr_user_id', $user_id);
+	$passkey->set('pkc_credential_id', 'cred_' . bin2hex(random_bytes(8)));
+	$passkey->set('pkc_source_json', json_encode(array('uvInitialized' => true)));
+	$passkey->set('pkc_prf_capable', $prf_capable);
+	if ($prf_failed) {
+		$passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
+	}
+	$passkey->set('pkc_transports', json_encode(array('internal')));
+	$passkey->save();
+	harness_register_row('pkc_passkey_credentials', 'pkc_passkey_credential_id', $passkey->key);
+	return $passkey;
+}
+
 section('Registry');
 check(is_array($step), 'the encryption_key step is registered');
 check(($step['decision'] ?? '') === 'user', 'it accepts a per-user decision row',
@@ -36,6 +53,30 @@ check(SetupSteps::statusFor($step, $user) === SetupSteps::STATUS_NONE,
 	'the step is outstanding');
 check(SetupSteps::isDeclinedOnly($step, $user) === false,
 	'and is not reported as declined');
+
+section('The decline is gated server-side');
+check(isset($step['can_decline']), 'the step declares can_decline',
+	'without it, a direct decline_step POST settles the mandatory step for any account');
+check(SetupSteps::canDecline($step, $user) === false,
+	'a passworded account with no passkeys cannot decline — it is sent to enrol one');
+
+$capable_user = make_user('SetupKeyCap');
+setupkey_make_passkey((int)$capable_user->key, true);
+check(SetupSteps::canDecline($step, $capable_user) === false,
+	'an account with a capable passkey cannot decline',
+	'the mandatory step must hold at the handler, not the hidden button');
+
+$blocked_user = make_user('SetupKeyBlk');
+setupkey_make_passkey((int)$blocked_user->key, false, true);
+check(SetupSteps::canDecline($step, $blocked_user) === true,
+	'a proven-incapable account can decline');
+
+$nopass_user = make_user('SetupKeyNoPw');
+$nopass_user->set('usr_password', '');
+$nopass_user->save();
+$nopass_user->load();
+check(SetupSteps::canDecline($step, $nopass_user) === true,
+	'so can an account with no password yet — the other exit the platform cannot solve');
 
 section('Blocked account takes the fallback');
 SetupSteps::recordDecision('encryption_key', (int)$user->key);
