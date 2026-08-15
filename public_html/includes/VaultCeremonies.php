@@ -47,6 +47,22 @@ class VaultCeremonies {
 		if ($passphrase !== '' && strlen($passphrase) < SealedBox::PASSPHRASE_MIN_CHARS) {
 			throw new VaultCeremonyException('Your bypass phrase must be at least ' . SealedBox::PASSPHRASE_MIN_CHARS . ' characters.');
 		}
+		// A vault with no passkey wrapping is the compatibility fallback for an
+		// account whose every credential has failed a real derivation. The
+		// check lives HERE rather than in the caller so no route into the
+		// ceremony — a logic action, a CLI tool, a future client — can create a
+		// phrase-only vault for an account that could have used a passkey.
+		$passkeyless = ($passkey_credential_id <= 0);
+		if ($passkeyless) {
+			require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
+			if (!Passkey::userNeedsPassphraseFallback((int)$user->key)) {
+				throw new VaultCeremonyException(
+					'Your passkey can hold this key, so it must — a bypass phrase alone is only for devices that cannot.');
+			}
+			if ($passphrase === '') {
+				throw new VaultCeremonyException('A bypass phrase is required when no passkey can hold your key.');
+			}
+		}
 		$code_count = max(5, min(20, $code_count));
 
 		$existing = new MultiUserEncryptionVault(['user_id' => $user->key, 'scope' => UserEncryptionVault::SCOPE_USER]);
@@ -71,10 +87,12 @@ class VaultCeremonies {
 			$vault->set('uev_key_generation', 1);
 			$vault->save();
 
-			UserEncryptionWrapping::createWrapped(
-				$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $kek,
-				$passkey_credential_id, $passkey_label, 1
-			);
+			if (!$passkeyless) {
+				UserEncryptionWrapping::createWrapped(
+					$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $keypair['secret'], $kek,
+					$passkey_credential_id, $passkey_label, 1
+				);
+			}
 
 			for ($i = 0; $i < $code_count; $i++) {
 				$code = $this->box->generateRecoveryCode();

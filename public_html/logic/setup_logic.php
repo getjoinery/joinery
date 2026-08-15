@@ -6,7 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 function setup_logic(array $input): LogicResult {
@@ -319,10 +319,14 @@ function setup_logic(array $input): LogicResult {
 		}
 	}
 
-	// Live statuses for every step in scope.
+	// Live statuses for every step in scope, plus the steps that are green
+	// only because the viewer answered "not now" — those still render their
+	// controls, so the choice can be changed in place.
 	$statuses = array();
+	$declined = array();
 	foreach ($steps as $step) {
 		$statuses[$step['key']] = SetupSteps::statusFor($step, $viewer);
+		$declined[$step['key']] = SetupSteps::isDeclinedOnly($step, $viewer);
 	}
 
 	// Current step: an explicit ?step= wins ('done' is the final checklist);
@@ -370,6 +374,7 @@ function setup_logic(array $input): LogicResult {
 		'permission' => $permission,
 		'steps' => $steps,
 		'statuses' => $statuses,
+		'declined' => $declined,
 		'current_key' => $current_key,
 		'current_index' => $current_index,
 		'total' => count($keys),

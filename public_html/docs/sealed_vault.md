@@ -117,6 +117,81 @@ generation keep working in a two-generation state.
 
 Neither table is an API resource; consumers never touch them directly.
 
+## Every account holds one; using it is optional
+
+Holding a vault and using a vault are separate things. A vault that seals
+nothing costs its holder nothing, so the setup wizard's `encryption_key` step
+is mandatory and offers no decline — an estate where every account already
+holds a key needs no capability check before offering a private folder, a
+sealed mailbox, or a protected conversation.
+
+Two conditions stand between an account and a vault, and code that assumes
+universal vaults must still handle them:
+
+- **No PRF-capable passkey.** `Passkey::vault_capability()` answers
+  `incapable` for an authenticator that cannot derive a secret. See the
+  fallback below.
+- **No account password.** `vault_setup_options` refuses with
+  `requires_password`, because a vault holder keeps password sign-in as the
+  second door.
+
+The wizard routes around both with a `SetupDecision` row so the account can
+still finish setup, and keeps offering the ceremony afterwards. What an account
+without a vault is missing, until it has one:
+
+- Mail is stored unsealed — readable to anyone who can reach the database or
+  a backup archive.
+- No private Drive folders (`logic/drive_folder_create_logic.php` refuses) and
+  no saved passwords (the keyring is sealed under this key).
+- No encrypted chat. A conversation cannot be raised to Private or Guarded
+  while any member holds no vault — `Conversation::members_without_vault()`
+  names them, so one member without a key caps the whole conversation.
+
+Creating a vault later turns all of it on; the decision row is only a
+tie-breaker and real state always wins over it.
+
+## When a passkey cannot hold the key
+
+*(Rationale and the rejected alternatives: [specs/vault_passphrase_fallback.md](../specs/vault_passphrase_fallback.md).)*
+
+PRF is a narrower requirement than passkey support: iPhones before iOS 18,
+Windows 10, older Firefox, older Android and most security keys enrol a passkey
+happily and then cannot derive a secret from it. For those accounts a vault is
+bootstrapped under a **bypass phrase** instead — the same
+`TYPE_PASSPHRASE` wrapping the unlocker panel offers, created at setup time
+rather than added later, and with no `TYPE_PASSKEY` wrapping at all.
+
+This is a compatibility fallback, never a preference. A phrase can be guessed
+and phished where a tapped passkey cannot, so an account that could use a
+passkey must:
+
+- `Passkey::userNeedsPassphraseFallback()` is the single gate: the account
+  holds at least one credential **and every one of them is provably
+  incapable**. The count requirement closes the owning-nothing route: an
+  account with no credentials at all is not eligible, so deleting your passkeys
+  is not a way to opt into weaker crypto.
+- The **failure stamp** comes only from a verified ceremony.
+  `PasskeyService::verifyDerivation()` stamps `pkc_prf_failed_time` after the
+  assertion checks out, never before, so a forged request cannot mark someone
+  else's credential incapable. A later success clears the stamp — a firmware
+  or OS update can make a credential capable. The stamp is one of two evidence
+  sets: registration-time signals alone can also prove a credential incapable,
+  and must, since a U2F-only key cannot pass a UV-required assertion and so
+  could never earn a stamp.
+- `VaultCeremonies::setup()` re-asks the same question before writing a
+  passkeyless vault, and requires a phrase when it does. The gate is in the
+  ceremony, not in the page that hides the button, so no other caller can
+  route around it.
+- `logic/vault_setup_passphrase_logic.php` is the only action that reaches
+  this path.
+
+Accepted trade: such a vault is openable with memorized secrets alone (the
+phrase, or a recovery code), which is exactly what the possession-factor
+invariant avoids elsewhere. It is the best available on hardware that cannot do
+better, and it is temporary by design — `vault_add_passkey_*` wraps the same
+key under a real passkey once the holder has a capable device, after which the
+phrase can be removed.
+
 ## Enrollment
 
 All in `logic/vault_*_logic.php`, gated on `passkeys_enabled` and a signed-in
