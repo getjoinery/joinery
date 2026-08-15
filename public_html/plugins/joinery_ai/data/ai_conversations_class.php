@@ -118,38 +118,11 @@ class AiConversation extends SystemBase {
         }
     }
 
-    /**
-     * Targeted single-row UPDATE of exactly the given columns — never a full-row
-     * save(). A sealed conversation must NEVER be save()d: SystemBase::save()
-     * rebuilds every column through get(), which decrypts aic_title/aic_instructions
-     * and would write plaintext back (unsealing them) or throw when locked. Every
-     * write to a protected conversation — token rollups, pin, rename, control edits,
-     * seal/reseal — goes through this instead.
-     * $columns maps column name => value (null allowed).
-     */
-    public static function updateColumns(int $conversation_id, array $columns): void {
-        if ($conversation_id <= 0 || empty($columns)) return;
-        $sets = array();
-        $params = array();
-        foreach ($columns as $col => $value) {
-            if (!array_key_exists($col, static::$field_specifications)) continue;
-            $sets[] = $col . ' = ?';
-            $params[] = $value;
-        }
-        if (empty($sets)) return;
-        $params[] = $conversation_id;
-        $db = DbConnector::get_instance()->get_db_link();
-        $stmt = $db->prepare('UPDATE aic_conversations SET ' . implode(', ', $sets)
-            . ' WHERE aic_conversation_id = ?');
-        foreach (array_values($params) as $i => $value) {
-            $type = PDO::PARAM_STR;
-            if (is_bool($value))     { $type = PDO::PARAM_BOOL; }
-            elseif ($value === null) { $type = PDO::PARAM_NULL; }
-            elseif (is_int($value))  { $type = PDO::PARAM_INT; }
-            $stmt->bindValue($i + 1, $value, $type);
-        }
-        $stmt->execute();
-    }
+    // A sealed conversation must NEVER be save()d: SystemBase::save() rebuilds
+    // every column through get(), which decrypts aic_title/aic_instructions and
+    // would write plaintext back (unsealing them) or throw when locked. Every
+    // write to a protected conversation — token rollups, pin, rename, control
+    // edits, seal/reseal — goes through SystemBase::updateColumns() instead.
 
     /** Whether this conversation seals its content at rest (private or fortress). */
     public function isProtected(): bool {

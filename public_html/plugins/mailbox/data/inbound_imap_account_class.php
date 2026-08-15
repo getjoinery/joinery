@@ -28,7 +28,7 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -56,6 +56,20 @@ class InboundImapAccount extends SystemBase {
 	const ENC_SSL = 'ssl';
 	const ENC_TLS = 'tls';
 	const ENC_NONE = 'none';
+
+	// How far back into the source mailbox a feed reaches. Future-only is the
+	// default: the cursor seeds to the mailbox head, so a ten-year archive and an
+	// empty mailbox cost the same to connect. Days reaches back a fixed window —
+	// enough context to work with, without the whole archive. Full imports
+	// everything, oldest-first.
+	const SCOPE_FUTURE = 'future';
+	const SCOPE_DAYS   = 'days';
+	const SCOPE_FULL   = 'full';
+
+	const IMPORT_DAYS_DEFAULT = 30;
+	// Ten years. A window this wide is "everything" for any real mailbox, and the
+	// ceiling keeps a typo (300000) from turning into a pointless deep seek.
+	const IMPORT_DAYS_MAX = 3650;
 
 	/**
 	 * The preset catalog: every supported host as pure data. The account editor
@@ -155,7 +169,9 @@ class InboundImapAccount extends SystemBase {
 		'iia_last_poll_time'            => array('type'=>'timestamp(6)'),
 		'iia_last_status'               => array('type'=>'varchar(500)'),
 		'iia_needs_reauth'              => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
-		'iia_import_history'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// How far back the feed reaches, and the window size when it is 'days'.
+		'iia_import_scope'              => array('type'=>'varchar(10)', 'default'=>'future', 'is_nullable'=>false, 'allowed_values'=>array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL)),
+		'iia_import_days'               => array('type'=>'int4', 'default'=>'30'),
 		'iia_create_time'               => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'iia_update_time'               => array('type'=>'timestamp(6)'),
 		'iia_delete_time'               => array('type'=>'timestamp(6)'),
@@ -209,6 +225,16 @@ class InboundImapAccount extends SystemBase {
 		}
 		$this->set('iia_sync_mode', $mode);
 
+		// Import scope: a known value, with a sane window when it is day-bounded.
+		$scope = $this->get('iia_import_scope') ?: self::SCOPE_FUTURE;
+		if (!in_array($scope, array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL), true)) {
+			$scope = self::SCOPE_FUTURE;
+		}
+		$this->set('iia_import_scope', $scope);
+		$days = intval($this->get('iia_import_days'));
+		if ($days < 1) { $days = self::IMPORT_DAYS_DEFAULT; }
+		$this->set('iia_import_days', min($days, self::IMPORT_DAYS_MAX));
+
 		$this->set('iia_update_time', gmdate('Y-m-d H:i:s'));
 	}
 
@@ -247,6 +273,64 @@ class InboundImapAccount extends SystemBase {
 	/** Whether the provider's SMTP rewrites the Message-ID on send (Gmail) — drives §9 dedup. */
 	function smtpRewritesMessageId(): bool {
 		return !empty($this->getPreset()['smtp_rewrites_message_id']);
+	}
+
+	// --- Import scope helpers ----------------------------------------------
+
+	/** How far back this feed reaches: future | days | full. */
+	function importScope(): string {
+		$scope = $this->get('iia_import_scope') ?: self::SCOPE_FUTURE;
+		return in_array($scope, array(self::SCOPE_FUTURE, self::SCOPE_DAYS, self::SCOPE_FULL), true)
+			? $scope : self::SCOPE_FUTURE;
+	}
+
+	/** The day window when the scope is day-bounded, else 0. */
+	function importDays(): int {
+		if ($this->importScope() !== self::SCOPE_DAYS) { return 0; }
+		$days = intval($this->get('iia_import_days'));
+		if ($days < 1) { $days = self::IMPORT_DAYS_DEFAULT; }
+		return min($days, self::IMPORT_DAYS_MAX);
+	}
+
+	/** The oldest message time this feed wants, as a UTC timestamp string (or null). */
+	function importCutoffUtc(): ?string {
+		$days = $this->importDays();
+		return $days > 0
+			? LibraryFunctions::time_shift(gmdate('Y-m-d H:i:s'), '-' . $days . ' days', 'Y-m-d H:i:s')
+			: null;
+	}
+
+	/**
+	 * Whether moving from $wasScope/$wasDays to this account's current setting
+	 * changes where the feed should start reading.
+	 */
+	function importScopeChanged(string $wasScope, int $wasDays): bool {
+		if ($this->importScope() !== $wasScope) { return true; }
+		return $this->importScope() === self::SCOPE_DAYS && $this->importDays() !== $wasDays;
+	}
+
+	/**
+	 * Whether a scope change from $wasScope/$wasDays requires the folder cursors
+	 * to rewind so the next poll re-seeds. A change that still reads backward
+	 * (full, or a day window) re-seeds: widening backfills further, and a changed
+	 * day window moves to its new boundary — dedup keeps re-walked mail from
+	 * storing twice. Switching to future-only does NOT rewind: the cursor is
+	 * already where "from now on" continues from, and re-seeding it to the
+	 * mailbox head would permanently skip whatever arrived at the source since
+	 * the last poll.
+	 */
+	function importScopeRequiresRewind(string $wasScope, int $wasDays): bool {
+		return $this->importScopeChanged($wasScope, $wasDays)
+			&& $this->importScope() !== self::SCOPE_FUTURE;
+	}
+
+	/** One-line description of the scope, for confirmations and status lines. */
+	function describeImportScope(): string {
+		switch ($this->importScope()) {
+			case self::SCOPE_FULL: return 'the full mailbox history';
+			case self::SCOPE_DAYS: return 'the last ' . $this->importDays() . ' days of mail';
+			default:               return 'only mail arriving from now on';
+		}
 	}
 
 	// --- Sync helpers (specs/two_way_imap_sync.md §4) -----------------------

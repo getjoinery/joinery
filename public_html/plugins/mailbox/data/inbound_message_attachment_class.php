@@ -24,7 +24,15 @@
  * IMAP ('remote') part fetched on demand via ima_mime_part. Presence of
  * ima_fil_file_id — not the transport — is what dispatch keys on.
  *
- * @version 1.2
+ * BYTE CUSTODY (specs/mailbox_attachment_byte_custody.md). Local bytes win: a
+ * reference is what the platform has when it does not have the bytes. A
+ * reference-backed row (no ima_fil_file_id on a 'remote' message) becomes
+ * file-backed the moment any path turns up the real bytes — an archive import
+ * of the same message adopts them, whichever order the two happened in.
+ *
+ * @version 1.3
+ * @changelog 1.3 - the adoption upgrade rewrites a few columns on a live row
+ *   via SystemBase::updateColumns(), never a full save of a stale object.
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));

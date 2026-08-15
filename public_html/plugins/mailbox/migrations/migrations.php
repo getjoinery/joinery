@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.24.0
+ * @version 1.25.0
  */
 return [
 	[
@@ -603,6 +603,49 @@ return [
 			echo $q->rowCount() > 0
 				? "mailbox_import_batch_size raised from the old factory 200 to 1000.\n"
 				: "mailbox_import_batch_size left alone (not at the old factory 200).\n";
+		},
+	],
+
+	[
+		// An IMAP feed's import history boolean becomes a three-way scope, so a
+		// feed can reach back a fixed number of days instead of only
+		// all-or-nothing. Every feed that was importing history is a 'full' feed.
+		//
+		// Lives HERE rather than in core migrations because iia_import_scope is a
+		// plugin-table column: plugin sync creates it, and plugin migrations run
+		// right after that sync — a core migration would run a step earlier and
+		// fail on the missing column, halting the core migration loop.
+		//
+		// Runs before the deferred column-drop step of update_database, so the
+		// boolean is still there to read. Idempotent, and a no-op once it is gone.
+		'id' => 'iia_001_backfill_import_scope',
+		'version' => '1.93.8',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			// Plugin-table sync adds new columns WITHOUT their
+			// field_specifications DEFAULT (the same gap iem_002/iem_004 close),
+			// so set the defaults, backfill the NULL rows, and finalize NOT NULL
+			// on the scope column the data class declares.
+			$dblink->exec("ALTER TABLE iia_inbound_imap_accounts ALTER COLUMN iia_import_scope SET DEFAULT 'future'");
+			$dblink->exec("ALTER TABLE iia_inbound_imap_accounts ALTER COLUMN iia_import_days SET DEFAULT 30");
+			$dblink->exec("UPDATE iia_inbound_imap_accounts SET iia_import_scope = 'future' WHERE iia_import_scope IS NULL");
+			$dblink->exec("UPDATE iia_inbound_imap_accounts SET iia_import_days = 30 WHERE iia_import_days IS NULL");
+
+			$has_bool = (int)$dblink->query(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'iia_inbound_imap_accounts'
+				   AND column_name = 'iia_import_history'")->fetchColumn();
+			if ($has_bool) {
+				$q = $dblink->query(
+					"UPDATE iia_inbound_imap_accounts SET iia_import_scope = 'full'
+					 WHERE iia_import_history = true AND iia_import_scope IS DISTINCT FROM 'full'");
+				echo "iia_inbound_imap_accounts: " . $q->rowCount() . " feed(s) recorded as full-history.\n";
+			} else {
+				echo "iia_import_history already dropped, nothing to carry over.\n";
+			}
+
+			$dblink->exec("ALTER TABLE iia_inbound_imap_accounts ALTER COLUMN iia_import_scope SET NOT NULL");
 		},
 	],
 ];

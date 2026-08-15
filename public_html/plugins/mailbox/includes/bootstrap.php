@@ -3,9 +3,10 @@
  * Mailbox plugin bootstrap - the plugin's declared load point (the top-level
  * `bootstrap` key in plugin.json), loaded once per request by the plugin
  * bootstrap loader (PluginBootstraps) whenever the plugin is active. Wires
- * mail into the Sealed Vault's two generic consumer hooks (docs/sealed_vault.md
- * § The consumer contract): the File decrypt hook for sealed attachments, and
- * the rotation re-seal / window-wipe callbacks.
+ * mail into the Sealed Vault's generic consumer hooks (docs/sealed_vault.md
+ * § The consumer contract): the File decrypt hooks for sealed attachments —
+ * whole-bytes for the message-DEK shape, streaming for the self-sealed one —
+ * and the rotation re-seal / window-wipe callbacks.
  *
  * The sealed-field model hook ($sealed_fields on InboundEmailMessage) needs no
  * registration here — it is declared directly on the model class, which is
@@ -21,7 +22,10 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.8
+ * @version 1.9
+ * @changelog 1.9 - registers the streaming decrypt hook for self-sealed
+ *   attachment Files (specs/mailbox_attachment_byte_custody.md), so an adopted
+ *   attachment answers ranges and a closed vault is a 423 before any header.
  * @changelog 1.8 - registers the mail_receive and mail_import setup wizard
  *   steps (specs/setup_wizard.md) into the SetupSteps registry.
  * @changelog 1.7 - the reseal callback covers soft-deleted messages: a deleted
@@ -100,9 +104,22 @@ File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (string $ciphe
 	if (!$msg->key) {
 		throw new VaultLockedException(); // dangling manifest row - nothing to open
 	}
-	// openSealedAttachment() keys on ima_is_sealed — a plaintext File (a
+	// openSealedAttachment() dispatches on the sealed shape — a plaintext File (a
 	// pre-vault attachment on a since-backfilled message) streams as-is.
-	return InboundEmailMessage::openSealedAttachment($msg, $att, $ciphertext);
+	return InboundEmailMessage::openSealedAttachment($msg, $att, $ciphertext, $file);
+});
+
+// --- Streaming decrypt hook for self-sealed attachment Files ---------------
+// An attachment whose bytes were adopted from an archive carries its OWN key
+// (specs/mailbox_attachment_byte_custody.md), which is the same container shape
+// Drive serves — so it can answer a Range and stream rather than being read
+// whole. Returning null for anything else drops through to the whole-bytes hook
+// above, which is how legacy message-DEK files and plaintext files keep serving
+// exactly as they did. Keying on fil_content_sealed, not File::is_sealed(): the
+// column that literally means "these bytes are a container" is the one that
+// decides whether to open one.
+File::registerStreamingDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, function (File $file, $size_key = null) {
+	return $file->get('fil_content_sealed') ? new DriveSealedStream($file, $size_key) : null;
 });
 
 // --- Rotation re-seal callback (docs/sealed_vault.md § Key rotation) ---

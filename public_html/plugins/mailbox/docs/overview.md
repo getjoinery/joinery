@@ -907,6 +907,33 @@ file-backed rows, `ima_fil_file_id` pointing at its `File`. Dispatch everywhere 
 | no `ima_fil_file_id`, driver `remote` | the IMAP source | fetch the part on demand (`ImapIngestor::fetchPart`) |
 | no `ima_fil_file_id`, stored raw | inside the raw (legacy / fallback row) | `getRawMimePart($section)` |
 
+**Local bytes win.** A reference is what the platform has when it does not have
+the bytes, so any path that turns up the message's raw bytes for a
+reference-backed row takes them and the row becomes file-backed
+(`AttachmentByteCustody::adopt()`). Concretely: a message ingested over IMAP
+keeps only a manifest; importing an archive that holds the same message
+deduplicates the message *and* adopts its attachment bytes; a live SMTP
+delivery (Postfix or webhook) that dedupes against an IMAP-fed row — a combined
+alias — hands its bytes over the same way from `storeMessage`'s dedup return;
+and a Joinery Direct delivery does too (`adoptParts()` — Direct delivers
+decoded parts rather than a raw document, so its parts are matched by
+Content-ID or filename+type). The reverse order already keeps them — the
+ingester only adds a server locator and leaves the manifest alone — so
+connecting a mailbox, importing an archive, or receiving the same mail live
+reach the same end state in any order, and the user never has to know which to
+do first. Adoption streams each part to disk (never a whole-attachment string)
+and is a bonus on top of dedup, never a condition of it.
+
+The upgrade only touches rows whose bytes genuinely live elsewhere: a row with no
+`File` on a message whose raw is stored locally is a **section pointer into that
+raw**, so its bytes are already local and copying them out would duplicate
+custody. A soft-deleted message is never upgraded, and a part that cannot be
+matched to a manifest row **uniquely on both sides** — by Content-ID, then MIME
+section plus type, then filename plus type — is skipped and logged rather than
+guessed at, because attaching the wrong bytes to a row is worse than leaving a
+working reference alone. Identity columns are never rewritten; `ima_size_bytes`
+becomes the decoded size, which is what it means on every file-backed row.
+
 **Attachment access has two doors, one rule each.** The member download endpoint
 (`/profile/mailbox/attachment`) authorizes by **mailbox grant** for both
 backings: the viewer may access the alias of the attachment's message
@@ -1262,14 +1289,42 @@ SQL reads (`listThreads()`, `getThread()`) batch-decrypt through
 `plugins/joinery_ai/includes/ModelQueryExecutor.php`'s raw-row hook), catching a locked
 vault into a `[locked - unlock your vault to view]` placeholder rather than an error.
 Attachments decrypt through `InboundEmailMessage::openSealedAttachment()` — the one
-opener keyed on the manifest row's `ima_is_sealed` (plaintext Files stream as-is) —
-reached three ways: the generic `File` decrypt hook
+opener, which dispatches over **two sealed shapes** and plaintext, in that order:
+
+| Shape | Flag | Key | Opened by |
+|---|---|---|---|
+| Self-sealed `File` | `fil_content_sealed` on the `File` | the File's own DEK (`fil_sealed_key`), wrapped to the owner's vault | `DriveSealed::fileKey()` + `SealedFileContainer` |
+| Message-DEK blob | `ima_is_sealed` on the manifest row | the owning message's DEK (`iem_sealed_key`) | `VaultCrypto::openField()` |
+
+The two are never both set on one attachment. The self-sealed shape is the same
+one Drive and every other consumer uses, and it is the only one that can be
+**written without an open window** — sealing needs a public key, so a background
+import can seal bytes onto protected mail with nobody signed in. That is what
+makes byte adoption possible on a sealed mailbox at all. An attachment is sealed
+only when its message is, so a plaintext message keeps plaintext bytes even on a
+mailbox whose current policy would seal new mail.
+
+Because a self-sealed attachment answers ranges, it also registers a **streaming**
+decryptor (`File::registerStreamingDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, …)`)
+which hands back a `DriveSealedStream`; it returns `null` for the other two shapes,
+so they fall through to the whole-bytes hook. Resolving the key in `prepare()` is
+what turns a closed vault into a clean `423` before any header is written, rather
+than a `200` full of container bytes.
+
+The opener is reached five ways, and every one of them goes through it rather than
+inspecting a flag itself — which is what stops any of them handing back a sealed
+container as a successful read: the generic `File` decrypt hook
 (`File::registerDecryptHook(File::SOURCE_EMAIL_ATTACHMENT, …)`, registered by
 `plugins/mailbox/includes/bootstrap.php`, called by `File::serve_from_path()` between
 reading the on-disk ciphertext and streaming the response), the per-attachment download
 endpoints (`includes/attachment_retrieval.php` opens explicitly after
-`File::read_bytes()`, which bypasses the serve hook), and a forward's re-attach path
-(`MailboxSender::readOriginalPartBytes()`). A locked vault becomes a generic
+`File::read_bytes()`, which bypasses the serve hook), a forward's re-attach path
+(`MailboxSender::readOriginalPartBytes()`), the forward message synthesis
+(`InboundEmailRouter`), and the unattended attachment digest
+(`EmailAttachmentDigest`, a defensive catch that should never meet sealed bytes).
+Each passes the `File` it already holds, purely to save a re-load — a caller that
+does not still gets plaintext, because the opener resolves the `File` from the row.
+A locked vault becomes a generic
 `423 Locked` on the serve path and a clean "Unlock your vault" message on the download
 endpoints — never a raw error or leaked ciphertext. The admin single-message
 viewer (`admin_mailbox_message.php`) gates on the same key-possession rule as anyone
@@ -3395,17 +3450,41 @@ The **PollImapAccounts** scheduled task is the heartbeat. It runs every cron pas
 (`every_run`) as a **floor**; each account's own `iia_poll_interval_seconds`
 (default 300) is the **actual cadence** — the task self-throttles per account, and
 claims each account with an atomic stamp so two runs can't race the same cursor.
-**First connect** behaviour is a per-mailbox choice set at creation
-(`iia_import_history`):
+**Existing mail** is a per-mailbox choice (`iia_import_scope`) on the feed
+editor — how far back into the source the feed reaches:
 - **Future only** (default) — the cursor seeds to the folder's current high UID,
   so a 50 GB archive and an empty mailbox behave identically; only mail arriving
   after hookup is ingested.
-- **Full history** — the cursor starts at 0 and the mailbox is backfilled
+- **Last N days** (`iia_import_days`, default 30, capped at `IMPORT_DAYS_MAX`) —
+  the cursor seeds to the boundary between mail inside the window and mail older
+  than it, and the window backfills oldest-first. The window is anchored when the
+  feed starts reading, not rolling.
+- **Full history** — the cursor starts at 0 and the whole mailbox backfills
   oldest-first.
 
-Either way each fetch walks **one bounded UID window** (`(cursor+1):(cursor+max_per_account)`,
-a numeric `UID FETCH` range — never `SEARCH`, which Gmail's ESEARCH rejects), so a
-full-history backfill of a large mailbox imports in batches across successive
+**Finding the day boundary.** IMAP assigns UIDs in strictly ascending arrival
+order (RFC 3501 §2.3.1.1), so the UID space is sorted by INTERNALDATE and can be
+bisected. `ImapIngestor::seekCursorForCutoff()` probes narrow UID bands
+(`SEEK_BAND`) asking only for INTERNALDATE, on the same numeric `UID FETCH` path
+the ingest window uses — bands rather than single UIDs because deletions leave
+gaps a lone probe would land in. `SEEK_MAX_PROBES` bounds the seek; an
+inconclusive one falls back to the best lower bound reached, importing somewhat
+more than asked rather than silently importing nothing. (`UID SEARCH SINCE` is the
+obvious implementation and is not available here — see the `UID FETCH` note below.)
+
+The choice is editable at any time. **Any** change to it — a different scope, or a
+different day count — rewinds every folder cursor of that feed
+(`InboundImapFolder::rewindCursors()`) so the next fetch re-seeds: widening
+reaches further back, narrowing skips forward to the new boundary. The per-folder
+`iif_` cursor is what the ingester reads, so rewinding the account-level one alone
+would leave the feed positioned and skip the re-seed entirely. Dedup keeps a
+re-walk from storing a second copy of mail already in the mailbox, and
+already-imported mail is never removed by narrowing.
+
+Whatever the scope, each fetch walks **one bounded UID window** (`(cursor+1):(cursor+max_per_account)`,
+a numeric `UID FETCH` range — never `SEARCH`: Gmail advertises ESEARCH but rejects
+the `UID SEARCH RETURN (...)` form Horde emits, so nothing in the ingest path
+searches), so a backfill of a large mailbox imports in batches across successive
 fetches rather than one enormous fetch. A UIDVALIDITY change re-seeds per the same
 choice. Failures are per-account and non-fatal: one unreachable mailbox or expired
 token never stops the rest, and the reason is recorded in the account's last status
@@ -3812,6 +3891,14 @@ this by going through the same store path. Unlike an IMAP feed, which is
 reference-backed and fetches parts from the source on demand, an imported message is
 **self-contained**: the archive is the only copy of those bytes, so they are stored.
 A large Gmail archive is therefore a real disk commitment.
+
+A message the mailbox **already holds as references** — ingested over IMAP — gets its
+attachment bytes too. The import still counts as a deduplication (no second copy of
+the message, no run tag, so undo still cannot remove mail the run did not create),
+but the bytes it was holding are kept rather than dropped. On a protected mailbox
+they land sealed, which works even though an import runs in the background with
+nobody signed in: sealing needs only the vault's public key. See **Attachment &
+message storage** for the matching rules and what is deliberately never upgraded.
 
 Those Files are tagged `email_attachment` (`fil_source`), which is what keeps them
 out of the member's Drive listing and away from their Drive quota — an attachment is

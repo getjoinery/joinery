@@ -15,7 +15,7 @@
  * (the admin endpoint per its backing rules, the member endpoint via
  * MailboxViewer scope) and only then retrieves.
  *
- * @version 1.2.0
+ * @version 1.3.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
@@ -53,9 +53,9 @@ function mailbox_retrieve_attachment_bytes(InboundMessageAttachment $att, Inboun
 		}
 		// read_bytes() returns raw on-disk bytes, bypassing File's decrypt hook
 		// (which only fires through serve_from_path()) — a sealed attachment
-		// (ima_is_sealed) must be opened explicitly before streaming.
+		// must be opened explicitly before streaming, in either sealed shape.
 		try {
-			$content = InboundEmailMessage::openSealedAttachment($message, $att, $content);
+			$content = InboundEmailMessage::openSealedAttachment($message, $att, $content, $file);
 		} catch (VaultLockedException $e) {
 			return $fail('Unlock your vault to download this attachment.', true);
 		}

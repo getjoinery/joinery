@@ -17,7 +17,7 @@
  *
  * See specs/two_way_imap_sync.md (§5, §6) and ImapSyncer.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -223,6 +223,31 @@ class InboundImapFolder extends SystemBase {
 		$folder->save();
 		$folder->load();
 		return $folder;
+	}
+
+	/**
+	 * Rewind every folder cursor of one feed so the next poll re-seeds from scratch
+	 * — what turning "Import full email history" on has to do to a feed that has
+	 * already been polled. The ingester reads the iif_ cursor, not the legacy
+	 * account-level one, so clearing only the latter leaves the folder positioned
+	 * and the backfill never happens. Dedup keeps the re-walk from storing a second
+	 * copy of mail already in the mailbox. Returns the number of folders rewound.
+	 */
+	static function rewindCursors(int $accountId): int {
+		if ($accountId <= 0) { return 0; }
+		$folders = new MultiInboundImapFolder(array('account_id' => $accountId));
+		$folders->load();
+		$rewound = 0;
+		foreach ($folders as $row) {
+			$folder = new InboundImapFolder($row->key, TRUE);
+			$folder->set('iif_uidvalidity', null);
+			$folder->set('iif_last_seen_uid', null);
+			$folder->set('iif_last_sync_modseq', null);
+			$folder->prepare();
+			$folder->save();
+			$rewound++;
+		}
+		return $rewound;
 	}
 }
 

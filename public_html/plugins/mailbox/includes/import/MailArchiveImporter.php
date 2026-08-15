@@ -29,7 +29,14 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.1
+ * @version 1.3
+ * @changelog 1.3 - the adoption machinery moved to AttachmentByteCustody so
+ *   the live SMTP dedup path adopts too; parts now stream to disk instead of
+ *   materializing in memory.
+ * @changelog 1.2 - a deduped message hands over its attachment bytes rather
+ *   than dropping them (specs/mailbox_attachment_byte_custody.md), so
+ *   connecting IMAP and importing an archive reach the same end state in
+ *   either order.
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
@@ -364,8 +371,17 @@ class MailArchiveImporter {
 		// always answerable.
 		$existing = self::existingMessageId($messageId, intval($alias->key), $direction);
 		if ($existing !== null) {
+			// Holding this message's real bytes. If the copy already here is only a
+			// reference to somebody else's mailbox, take them
+			// (specs/mailbox_attachment_byte_custody.md) — otherwise which of the
+			// two things the user did first would decide whether they keep their
+			// own attachments.
+			$adopted = AttachmentByteCustody::adopt($existing, $raw, $this->router());
 			MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_DEDUP,
-				'Already in this mailbox.', $existing);
+				$adopted > 0
+					? 'Already in this mailbox — attachment bytes taken.'
+					: 'Already in this mailbox.',
+				$existing);
 			return 'dedup';
 		}
 
@@ -414,6 +430,10 @@ class MailArchiveImporter {
 		MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_STORED, null, $messageRowId);
 		return 'stored';
 	}
+
+	// The byte-custody machinery (part matching, adoption, sealing) is shared
+	// with every other dedup site that can be holding a message's real bytes —
+	// see AttachmentByteCustody.
 
 	/**
 	 * Reproduce the source's filing. A folder becomes a label of the same name, so

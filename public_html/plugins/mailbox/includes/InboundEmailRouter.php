@@ -84,7 +84,13 @@
  * senderDisplayString() owns the decode-and-sanitize; the IMAP and archive paths get
  * the same shape from Horde's envelope.
  *
- * @version 1.29
+ * Byte custody (specs/mailbox_attachment_byte_custody.md): a dedup hit while
+ * this path is HOLDING the message's real bytes hands them to the stored copy
+ * when that copy is only a reference to a source mailbox — storeMessage's
+ * dedup return adopts from the raw in hand, storeDirectMessage's from the
+ * delivered parts. See AttachmentByteCustody.
+ *
+ * @version 1.32
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -528,6 +534,17 @@ class InboundEmailRouter {
 			// already uses.
 			if ($this->isUniqueViolation($e)
 					|| $this->duplicateMessageExists($message_id_header, $row['iem_recipient'], $direction)) {
+				// Local bytes win (specs/mailbox_attachment_byte_custody.md): this
+				// path is holding the message's real bytes. If the copy already
+				// stored is only a reference to a source mailbox — an alias
+				// delivered over SMTP while also fed over IMAP, or an archive
+				// import deduping against another mailbox's IMAP row — hand the
+				// bytes over before reporting the dedup. Never throws, and a
+				// no-op for a self-contained copy.
+				$dup_id = $this->duplicateMessageId($message_id_header, $row['iem_recipient'], $direction);
+				if ($dup_id !== null) {
+					AttachmentByteCustody::adopt($dup_id, $raw_email, $this);
+				}
 				return ['message' => null, 'dedup' => true];
 			}
 			throw $e;
@@ -878,6 +895,16 @@ class InboundEmailRouter {
 			}
 			if ($this->isUniqueViolation($e)
 					|| $this->duplicateMessageExists($message_id_header, $row['iem_recipient'], 'inbound')) {
+				// Local bytes win (specs/mailbox_attachment_byte_custody.md):
+				// Direct delivered the decoded parts, so if the stored copy is an
+				// IMAP reference they land as its Files. Never throws, and a
+				// no-op for a self-contained copy.
+				if (!empty($attachments)) {
+					$dup_id = $this->duplicateMessageId($message_id_header, $row['iem_recipient'], 'inbound');
+					if ($dup_id !== null) {
+						AttachmentByteCustody::adoptParts($dup_id, $attachments, $this);
+					}
+				}
 				$this->logTransaction(array('from' => $sealing ? '' : $sender), $alias,
 					InboundEmailLog::STATUS_STORED, $envelope_recipient,
 					'duplicate (Message-ID already stored)', null, $domain->key);
@@ -1313,8 +1340,13 @@ class InboundEmailRouter {
 	 *  - a shared alias (several grantees) or an ownerless catch-all/NULL alias →
 	 *    User::USER_SYSTEM, which matches no human, so only admins see them
 	 *    (the accepted shared-mailbox tradeoff; see the spec's Access model).
+	 *
+	 * Public for the same reason enumerateNonTextParts() is: a File adopted onto
+	 * an existing message later (specs/mailbox_attachment_byte_custody.md) has to
+	 * be visible to exactly the same people as one the receive path minted, and
+	 * two copies of this rule would eventually disagree.
 	 */
-	private function attachmentOwnerId($alias): int {
+	public function attachmentOwnerId($alias): int {
 		if ($alias && $alias->key) {
 			$grantees = InboundEmailMailboxGrant::user_ids_for_alias(intval($alias->key));
 			if (count($grantees) === 1) {
@@ -1331,9 +1363,15 @@ class InboundEmailRouter {
 	 * non-multipart part is returned. Shared by the lean-record split and the
 	 * fallback manifest writer so both see exactly the same part set.
 	 *
+	 * Public because the byte-custody upgrade
+	 * (specs/mailbox_attachment_byte_custody.md) matches an archive's parts
+	 * against manifest rows written from an IMAP BODYSTRUCTURE, and "attachment"
+	 * has to mean the same thing on both paths or the two would disagree about
+	 * which parts even exist.
+	 *
 	 * @return Horde_Mime_Part[]
 	 */
-	private function enumerateNonTextParts(string $raw_email): array {
+	public function enumerateNonTextParts(string $raw_email): array {
 		require_once(PathHelper::getComposerAutoloadPath());
 
 		$message = Horde_Mime_Part::parseMessage($raw_email);
@@ -1566,11 +1604,21 @@ class InboundEmailRouter {
 	 * that path only ever stores inbound.
 	 */
 	private function duplicateMessageExists(?string $message_id_header, string $recipient, ?string $direction = null): bool {
+		return $this->duplicateMessageId($message_id_header, $recipient, $direction) !== null;
+	}
+
+	/**
+	 * The id of an already-stored message with this (message-id, recipient[,
+	 * direction]) identity, or null. The dedup paths use it to find the row a
+	 * unique violation collided with — the copy that may be about to receive
+	 * this delivery's bytes (AttachmentByteCustody).
+	 */
+	private function duplicateMessageId(?string $message_id_header, string $recipient, ?string $direction = null): ?int {
 		if ($message_id_header === null || $message_id_header === '') {
-			return false;
+			return null;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
-		$sql = "SELECT 1 FROM iem_inbound_email_messages
+		$sql = "SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_message_id_header = ? AND iem_recipient = ?";
 		$params = array($message_id_header, $recipient);
 		if ($direction !== null) {
@@ -1579,7 +1627,8 @@ class InboundEmailRouter {
 		}
 		$stmt = $db->prepare($sql . ' LIMIT 1');
 		$stmt->execute($params);
-		return (bool)$stmt->fetchColumn();
+		$id = $stmt->fetchColumn();
+		return $id === false ? null : intval($id);
 	}
 
 	/** True if the throwable is (or wraps) a SQLSTATE 23505 unique violation. */
@@ -1981,7 +2030,7 @@ class InboundEmailRouter {
 				// Decrypts a sealed attachment in-window; returns bytes as-is for an
 				// unsealed one. A sealed attachment we cannot open aborts the whole
 				// synthesis rather than forwarding a message missing a part.
-				$bytes = InboundEmailMessage::openSealedAttachment($msg, $att, $bytes);
+				$bytes = InboundEmailMessage::openSealedAttachment($msg, $att, $bytes, $file);
 			} catch (VaultLockedException $e) {
 				return null;
 			}
