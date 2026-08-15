@@ -19,7 +19,15 @@
  * heartbeat/IP-change policy, a permission cap — is always a consumer
  * *policy* decision; this class only makes wiping callable (lock/lockAll).
  *
- * @version 1.7
+ * Every open and close is recorded to the event log through VaultAudit, which
+ * is the only durable trace a window leaves — see docs/sealed_vault.md
+ * § The audit log.
+ *
+ * @version 1.8
+ * @changelog 1.8 - open()/close()/lock()/lockAll() record the window's arming
+ *   and its end (with the reason) via VaultAudit; an APCu expiry, which runs no
+ *   code of its own, is noticed and logged by the next read of the owning
+ *   session (observeClosed()).
  * @changelog 1.7 - loadConsumerBootstraps() delegates to PluginBootstraps, the
  *   loader for every plugin's top-level `bootstrap` key; same call sites, same
  *   invariant, generalized beyond vault consumers.
@@ -120,7 +128,8 @@ class VaultUnlock {
 	 * existing caller gets the caps automatically. Records the arming metadata a
 	 * read-time check enforces.
 	 */
-	public static function open(int $user_id, string $secret_key, string $scope = 'user', ?array $caps = null): void {
+	public static function open(int $user_id, string $secret_key, string $scope = 'user', ?array $caps = null,
+			string $via = VaultAudit::VIA_UNKNOWN): void {
 		if ($caps === null) {
 			$caps = self::capsForUser($user_id);
 		}
@@ -135,6 +144,8 @@ class VaultUnlock {
 			'abs_cap'    => $caps['absolute'] ?? null,
 		), self::idleSeconds());
 		self::touchWindowMarker($user_id, $scope);
+		self::rememberOpen($user_id, $scope, $via, $now);
+		VaultAudit::opened($user_id, $scope, $via, $caps, $sid);
 	}
 
 	/**
@@ -218,7 +229,11 @@ class VaultUnlock {
 
 	public static function isOpen(int $user_id, string $scope = 'user'): bool {
 		$sid = self::currentSessionIdOrNull();
-		if ($sid === null || !apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		if ($sid === null) {
+			return false;
+		}
+		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+			self::observeClosed($user_id, $scope);
 			return false;
 		}
 		return !self::endedByPolicy($sid, $user_id, $scope);
@@ -238,6 +253,7 @@ class VaultUnlock {
 		$key = self::apcuKey($sid, $user_id, $scope);
 		$value = apcu_fetch($key, $success);
 		if (!$success) {
+			self::observeClosed($user_id, $scope);
 			return null;
 		}
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
@@ -283,7 +299,14 @@ class VaultUnlock {
 	 */
 	public static function heartbeat(int $user_id, string $scope = 'user'): bool {
 		$sid = self::currentSessionIdOrNull();
-		if ($sid === null || !apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+		if ($sid === null) {
+			return false;
+		}
+		// The beat is normally what NOTICES an expiry: it is the only thing
+		// still asking once the human has gone, so it closes the audit trail
+		// within one beat interval rather than whenever someone next visits.
+		if (!apcu_exists(self::apcuKey($sid, $user_id, $scope))) {
+			self::observeClosed($user_id, $scope);
 			return false;
 		}
 		if (self::endedByPolicy($sid, $user_id, $scope)) {
@@ -322,24 +345,26 @@ class VaultUnlock {
 			return false;
 		}
 		$now = time();
-		$ended = false;
+		$reason = null;
 		if (!empty($meta['abs_cap']) && ($now - (int)($meta['armed'] ?? $now)) > (int)$meta['abs_cap']) {
-			$ended = true;
+			$reason = VaultAudit::REASON_ABSOLUTE_CAP;
 		} elseif (!empty($meta['idle_cap']) && ($now - (int)($meta['content'] ?? $now)) > (int)$meta['idle_cap']) {
-			$ended = true;
+			$reason = VaultAudit::REASON_IDLE_CAP;
 		} elseif (isset($meta['hb']) && $meta['hb'] !== null
 				&& ($now - (int)$meta['hb']) > self::HEARTBEAT_MAX_STALE_SECONDS) {
-			$ended = true;
+			$reason = VaultAudit::REASON_HEARTBEAT_STALE;
 		}
-		if ($ended) {
-			self::lock($user_id, $sid, $scope);
+		if ($reason !== null) {
+			self::lock($user_id, $sid, $scope, $reason);
+			return true;
 		}
-		return $ended;
+		return false;
 	}
 
 	/** Close the current session's window. */
-	public static function close(int $user_id, string $scope = 'user'): void {
-		self::lock($user_id, self::currentSessionId(), $scope);
+	public static function close(int $user_id, string $scope = 'user',
+			string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
+		self::lock($user_id, self::currentSessionId(), $scope, $reason);
 	}
 
 	/**
@@ -347,7 +372,11 @@ class VaultUnlock {
 	 * events call (a credential event, a heartbeat/IP-change trigger, an
 	 * explicit lock button). Not necessarily the calling session.
 	 */
-	public static function lock(int $user_id, string $session_id, string $scope = 'user'): void {
+	public static function lock(int $user_id, string $session_id, string $scope = 'user',
+			string $reason = VaultAudit::REASON_EXPLICIT_LOCK): void {
+		$meta = apcu_fetch(self::metaKey($session_id, $user_id, $scope), $had_meta);
+		$was_open = apcu_exists(self::apcuKey($session_id, $user_id, $scope));
+
 		apcu_delete(self::apcuKey($session_id, $user_id, $scope));
 		apcu_delete(self::metaKey($session_id, $user_id, $scope));
 		// Wiping the window has to take the DEKs unwrapped under it as well, or a
@@ -357,23 +386,44 @@ class VaultUnlock {
 		if (class_exists('VaultCrypto', false)) {
 			VaultCrypto::forgetItemDeks();
 		}
+		// Only a window that was actually open produces an audit row — lock() is
+		// called defensively on paths where there may be nothing to close, and a
+		// log full of closes for windows that never opened teaches nobody anything.
+		if ($was_open) {
+			$armed = ($had_meta && is_array($meta)) ? (int)($meta['armed'] ?? 0) : 0;
+			VaultAudit::closed($user_id, $scope, $reason, $session_id,
+				$armed > 0 ? time() - $armed : null);
+			self::noteClosed($user_id, $session_id, $scope, $reason);
+		}
 		self::runWipeCallbacks($user_id, $scope);
 	}
 
 	/** Wipe every scope's window, across every session, for a user (e.g. on password change). */
-	public static function lockAll(int $user_id): void {
+	public static function lockAll(int $user_id, string $reason = VaultAudit::REASON_CREDENTIAL_EVENT): void {
 		// APCUIterator's constructor THROWS where APCu is disabled (a CLI
 		// process without apc.enable_cli) — and a disabled store holds no
 		// windows to wipe, so skipping it is correct, not lossy.
+		$closed = array();
 		if (class_exists('APCUIterator') && function_exists('apcu_enabled') && apcu_enabled()) {
 			// Both the window keys (vault:) and their metadata (vaultmeta:).
 			$pattern = '/^vault(?:meta)?:[^:]*:' . preg_quote((string)$user_id, '/') . ':[^:]*$/';
+			$window = '/^vault:([^:]*):' . preg_quote((string)$user_id, '/') . ':([^:]*)$/';
 			foreach (new APCUIterator($pattern) as $entry) {
+				// One row per (session, scope) rather than a single summary: a
+				// credential event that closes three devices at once should read
+				// as three windows ending, which is what it was.
+				if (preg_match($window, (string)$entry['key'], $m)) {
+					$closed[] = array($m[1], $m[2]);
+				}
 				apcu_delete($entry['key']);
 			}
 		}
 		foreach (glob('/dev/shm/vault_window_' . $user_id . '_*') ?: array() as $marker) {
 			@unlink($marker); // every scope's window is gone — the markers with them
+		}
+		foreach ($closed as $pair) {
+			VaultAudit::closed($user_id, $pair[1], $reason, $pair[0]);
+			self::noteClosed($user_id, $pair[0], $pair[1], $reason);
 		}
 		self::runWipeCallbacks($user_id, null);
 	}
@@ -416,6 +466,83 @@ class VaultUnlock {
 	/** Stamp the marker with the window's current expiry (mtime = now + idle TTL). */
 	private static function touchWindowMarker(int $user_id, string $scope): void {
 		@touch(self::windowMarkerPath($user_id, $scope), time() + self::idleSeconds());
+	}
+
+	// ---- Audit bookkeeping (docs/sealed_vault.md § The audit log) ----
+	//
+	// A window can end three ways, and only two of them run any code: an
+	// explicit lock and a policy cap both go through lock(), which writes the
+	// row itself. The third — the APCu entry simply aging out — happens inside
+	// the cache with nothing to hook. So the closing row for an expiry has to be
+	// written by whoever NOTICES, which means the session has to remember that
+	// it had a window at all. That is what these three helpers carry.
+
+	/** How long a close is remembered for the benefit of the session that owned it. */
+	const CLOSE_TOMBSTONE_SECONDS = 900;
+
+	/** This session armed a window; remember enough to attribute its end. */
+	private static function rememberOpen(int $user_id, string $scope, string $via, int $armed): void {
+		if (session_status() !== PHP_SESSION_ACTIVE) {
+			return;
+		}
+		$_SESSION['vault_windows'][$user_id . ':' . $scope] = array('armed' => $armed, 'via' => $via);
+	}
+
+	/** Drop this session's record of a window, returning it if there was one. */
+	private static function forgetOpen(int $user_id, string $scope): ?array {
+		if (session_status() !== PHP_SESSION_ACTIVE) {
+			return null;
+		}
+		$key = $user_id . ':' . $scope;
+		$record = $_SESSION['vault_windows'][$key] ?? null;
+		unset($_SESSION['vault_windows'][$key]);
+		return is_array($record) ? $record : null;
+	}
+
+	/**
+	 * A close has been logged. When the locking session is not the one that
+	 * owns the window — lockAll() on a password change, a consumer policy event
+	 * reaching across sessions — leave a tombstone, so when the owning session
+	 * next looks and finds its key gone it reports what actually happened
+	 * instead of assuming it idled out.
+	 */
+	private static function noteClosed(int $user_id, string $session_id, string $scope, string $reason): void {
+		if ($session_id === self::currentSessionIdOrNull()) {
+			self::forgetOpen($user_id, $scope);
+			return;
+		}
+		apcu_store(self::tombstoneKey($session_id, $user_id, $scope), $reason, self::CLOSE_TOMBSTONE_SECONDS);
+	}
+
+	/**
+	 * This session's window key is gone. If something already logged the close,
+	 * consume its tombstone and stay quiet; otherwise this is the APCu entry
+	 * aging out, which nothing else will ever report.
+	 *
+	 * Costs nothing on the common path: a session that never opened a window has
+	 * no record to find, and the check is an isset() on $_SESSION.
+	 */
+	private static function observeClosed(int $user_id, string $scope): void {
+		if (session_status() !== PHP_SESSION_ACTIVE
+				|| !isset($_SESSION['vault_windows'][$user_id . ':' . $scope])) {
+			return;
+		}
+		$sid = self::currentSessionIdOrNull();
+		$record = self::forgetOpen($user_id, $scope);
+		if ($sid !== null) {
+			$tombstone = self::tombstoneKey($sid, $user_id, $scope);
+			if (apcu_exists($tombstone)) {
+				apcu_delete($tombstone);
+				return; // lock()/lockAll() already wrote the row, with the real reason
+			}
+		}
+		VaultAudit::closed($user_id, $scope, VaultAudit::REASON_IDLE_EXPIRED, $sid,
+			$record ? time() - (int)$record['armed'] : null);
+	}
+
+	/** Marks a close for a session that was not the one doing the locking. */
+	private static function tombstoneKey(string $session_id, int $user_id, string $scope): string {
+		return 'vaultclosed:' . $session_id . ':' . $user_id . ':' . $scope;
 	}
 
 	/**
@@ -759,6 +886,9 @@ class VaultUnlock {
 		self::$wipe_callbacks = array();
 		self::$window_cap_providers = array();
 		self::$activity_suppressed = false;
+		if (session_status() === PHP_SESSION_ACTIVE) {
+			unset($_SESSION['vault_windows']);
+		}
 		require_once(PathHelper::getIncludePath('includes/PluginBootstraps.php'));
 		PluginBootstraps::resetForTests();
 	}

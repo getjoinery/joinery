@@ -48,7 +48,7 @@ function vault_unlock_passphrase_logic(array $input): LogicResult {
 		return LogicResult::error($e->getMessage());
 	}
 
-	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER);
+	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSPHRASE);
 	RequestLogger::log('vault_unlock_passphrase', 'verify', true, ['user_id' => $user->key]);
 
 	return LogicResult::render(['unlocked' => true]);

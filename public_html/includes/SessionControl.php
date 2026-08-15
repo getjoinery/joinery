@@ -751,7 +751,7 @@ class SessionControl{
 		if ($this->get_user_id()) {
 			try {
 				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-				VaultUnlock::close($this->get_user_id());
+				VaultUnlock::close($this->get_user_id(), 'user', VaultAudit::REASON_LOGOUT);
 			} catch (\Throwable $e) {
 				error_log('logout: vault window close failed: ' . $e->getMessage());
 			}
@@ -1345,7 +1345,7 @@ class SessionControl{
 				if (!empty($_SESSION['usr_user_id'])) {
 					try {
 						require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-						VaultUnlock::close((int)$_SESSION['usr_user_id']);
+						VaultUnlock::close((int)$_SESSION['usr_user_id'], 'user', VaultAudit::REASON_IP_CHANGE);
 					} catch (\Throwable $e) {}
 				}
 				return 0;
