@@ -35,6 +35,9 @@ class PersonaFeedItem extends SystemBase {
         'pfi_image_alt' => array('type'=>'text'),
         'pfi_link' => array('type'=>'text'),
         'pfi_media' => array('type'=>'text'),
+        // Raw outerHTML of the captured post node (the most complete capture
+        // seen), kept for troubleshooting the extractor against real markup.
+        'pfi_raw_html' => array('type'=>'text'),
         // Capture metadata read from the post's header/footer markup at fetch
         // time (see FacebookFeedExtractor). Empty/NULL = captured before these
         // fields existed, or the marker was absent from the markup.
