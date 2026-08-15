@@ -13,9 +13,11 @@
  *
  * Output item shape matches what PersonaBrowserClient::get_feed() returns and
  * FetchFeedTask consumes: {dedup_key, author, message, image_alt, link, media[],
- * relation, group_name, author_link, author_verified, post_type, audience,
- * reactions, comment_count, share_count} where media[] are the service's cached
- * image filenames (served via /media). The metadata fields are read from the
+ * raw_html, relation, group_name, author_link, author_verified, post_type,
+ * audience, reactions, comment_count, share_count} where media[] are the
+ * service's cached image filenames (served via /media) and raw_html is the
+ * post node's captured markup, kept so the extractor can be debugged against
+ * the real thing. The metadata fields are read from the
  * post's header/footer markup — see the corresponding pfi_ columns in
  * PersonaFeedItem for what each means.
  */
@@ -47,6 +49,11 @@ class FacebookFeedExtractor {
                 $out[$key]['media'] = array_values(array_unique(
                     array_merge($out[$key]['media'], $item['media'])
                 ));
+                // Keep the fullest capture: a post can be snapshotted before
+                // Facebook finishes hydrating it, so the longer markup wins.
+                if (strlen($item['raw_html']) > strlen($out[$key]['raw_html'])) {
+                    $out[$key]['raw_html'] = $item['raw_html'];
+                }
                 if ($out[$key]['image_alt'] === '' && $item['image_alt'] !== '') {
                     $out[$key]['image_alt'] = $item['image_alt'];
                 }
@@ -61,7 +68,60 @@ class FacebookFeedExtractor {
             }
         }
 
-        return array_values($out);
+        return self::mergeSamePosts(array_values($out));
+    }
+
+    /**
+     * Second pass: the same post can surface under two different keys — a
+     * capture taken before the timestamp permalink hydrated keys on the
+     * photo's fbid, while one taken after keys on the post permalink. Same
+     * author plus the same cached images (or the same substantial body) is
+     * the same post: collapse the pair, keeping the permalink-keyed identity.
+     */
+    private static function mergeSamePosts(array $items): array {
+        $merged = [];
+        foreach ($items as $item) {
+            foreach ($merged as $i => $kept) {
+                if ($item['author'] === '' || $kept['author'] !== $item['author']) continue;
+                // Within one capture batch an exact same non-empty body from
+                // the same author is the same post — this is what pairs up the
+                // two sightings of a video post, which has no images to match.
+                $same_media = count($item['media']) > 0
+                           && count(array_intersect($kept['media'], $item['media'])) > 0;
+                $same_body  = $item['message'] !== ''
+                           && $item['message'] === $kept['message'];
+                if (!$same_media && !$same_body) continue;
+                $merged[$i] = self::mergeItems($kept, $item);
+                continue 2;
+            }
+            $merged[] = $item;
+        }
+        return $merged;
+    }
+
+    /** How canonical an item's identity is: post permalink > other real id > text hash. */
+    private static function keyRank(array $item): int {
+        if (strncmp($item['dedup_key'], 'post:', 5) === 0) return 3;
+        if (strncmp($item['dedup_key'], 'h:', 2) !== 0)    return 2;
+        return 1;
+    }
+
+    /** Collapse two sightings of the same post into one item. */
+    private static function mergeItems(array $a, array $b): array {
+        // The more canonical identity carries the key and link.
+        if (self::keyRank($b) > self::keyRank($a)) { [$a, $b] = [$b, $a]; }
+
+        $a['media'] = array_values(array_unique(array_merge($a['media'], $b['media'])));
+        if (mb_strlen($b['message']) > mb_strlen($a['message'])) $a['message'] = $b['message'];
+        if (strlen($b['raw_html']) > strlen($a['raw_html']))     $a['raw_html'] = $b['raw_html'];
+        if ($a['link'] === '' && $b['link'] !== '')              $a['link'] = $b['link'];
+        foreach (['image_alt', 'relation', 'group_name', 'author_link', 'audience', 'post_type'] as $k) {
+            if ($a[$k] === '' && $b[$k] !== '') $a[$k] = $b[$k];
+        }
+        foreach (['author_verified', 'reactions', 'comment_count', 'share_count'] as $k) {
+            if ($a[$k] === null && $b[$k] !== null) $a[$k] = $b[$k];
+        }
+        return $a;
     }
 
     /**
@@ -154,6 +214,13 @@ class FacebookFeedExtractor {
             return null;
         }
 
+        // A capture with no permalink, no body, and no images is an
+        // un-hydrated shell of a post another capture will carry in full —
+        // storing it would only seed a contentless duplicate.
+        if ($id === '' && $message === '' && $image_alt === '' && count($media_files) === 0) {
+            return null;
+        }
+
         $dedup_key = $id !== '' ? $id : ('h:' . $author . '|' . mb_substr($message, 0, 80));
 
         if (strncmp($id, 'reel:', 5) === 0)        { $post_type = 'reel'; }
@@ -168,6 +235,7 @@ class FacebookFeedExtractor {
             'image_alt' => $image_alt,
             'link'      => $link,
             'media'     => $media_files,
+            'raw_html'  => $html,
             'post_type' => $post_type,
             'audience'  => self::audience($xp),
         ], $head['meta'], self::engagement($xp));
@@ -352,18 +420,21 @@ class FacebookFeedExtractor {
             $hrefs[] = $a->getAttribute('href');
         }
 
+        // Post ids come in two shapes: numeric, and the newer opaque "pfbid…"
+        // strings (posts and story_fbid values both use them).
         $id = '';
         foreach ($hrefs as $h) {
-            if (preg_match('#/reel/(\d+)#', $h, $m))          { $id = 'reel:' . $m[1]; break; }
-            if (preg_match('#/videos/(\d+)#', $h, $m))        { $id = 'video:' . $m[1]; break; }
-            if (preg_match('#/posts/(\d+)#', $h, $m))         { $id = 'post:' . $m[1]; break; }
-            if (preg_match('#story_fbid=(\d+)#', $h, $m))     { $id = 'post:' . $m[1]; break; }
-            if (preg_match('#[?&]fbid=(\d+)#', $h, $m))       { $id = 'photo:' . $m[1]; break; }
+            if (preg_match('#/reel/(\d+)#', $h, $m))                 { $id = 'reel:' . $m[1]; break; }
+            if (preg_match('#/videos/(\d+)#', $h, $m))               { $id = 'video:' . $m[1]; break; }
+            if (preg_match('#/watch/?\?v=(\d+)#', $h, $m))           { $id = 'video:' . $m[1]; break; }
+            if (preg_match('#/posts/([A-Za-z0-9]+)#', $h, $m))       { $id = 'post:' . $m[1]; break; }
+            if (preg_match('#story_fbid=([A-Za-z0-9]+)#', $h, $m))   { $id = 'post:' . $m[1]; break; }
+            if (preg_match('#[?&]fbid=(\d+)#', $h, $m))              { $id = 'photo:' . $m[1]; break; }
         }
 
         $link = '';
         foreach ($hrefs as $h) {
-            if (!preg_match('#/reel/|/videos/|/posts/|story_fbid=|[?&]fbid=|/permalink#', $h)) continue;
+            if (!preg_match('#/reel/|/videos/|/watch/?\?v=|/posts/|story_fbid=|[?&]fbid=|/permalink#', $h)) continue;
             $link = self::canonicalLink($h);
             break;
         }
@@ -382,6 +453,9 @@ class FacebookFeedExtractor {
 
         if (preg_match('#/reel/#', $path)) {
             return $origin . $path;
+        }
+        if (preg_match('#^/watch/?$#', $path) && !empty($q['v'])) {
+            return $origin . '/watch/?v=' . $q['v'];
         }
         if (!empty($q['fbid'])) {
             return $origin . '/photo/?fbid=' . $q['fbid'];

@@ -71,7 +71,41 @@ class FetchFeedTask implements ScheduledTaskInterface {
                     $match->set('pfi_dedup_key', $key);
                     $changed = true;
                 }
+                // A post first snapshotted before Facebook hydrated it can be
+                // missing its permalink and images — fill them from the fuller
+                // capture. Never overwrite: an already-stored link or image set
+                // stays as it is.
+                if ((string)$match->get('pfi_link') === '' && (string)$item['link'] !== '') {
+                    $match->set('pfi_link', (string)$item['link']);
+                    $changed = true;
+                }
+                if ((string)$match->get('pfi_image_alt') === '' && (string)$item['image_alt'] !== '') {
+                    $match->set('pfi_image_alt', (string)$item['image_alt']);
+                    $changed = true;
+                }
+                if (count($match->media_files()) === 0 && count($item['media']) > 0) {
+                    $healed_media = [];
+                    foreach ($item['media'] as $file) {
+                        $dest = $cache_dir . '/' . basename($file);
+                        if ($client->fetch_media($file, $dest)) {
+                            @chmod($dest, 0666);
+                            $healed_media[] = basename($file);
+                            $media_saved++;
+                        }
+                    }
+                    if ($healed_media) {
+                        $match->set('pfi_media', json_encode($healed_media));
+                        $changed = true;
+                    }
+                }
                 if (self::applyCaptureMeta($match, $item)) {
+                    $changed = true;
+                }
+                // Keep the fullest raw capture on file: a longer snapshot of
+                // the same post means Facebook had hydrated more of it.
+                $raw = (string)$item['raw_html'];
+                if (strlen($raw) > strlen((string)$match->get('pfi_raw_html'))) {
+                    $match->set('pfi_raw_html', $raw);
                     $changed = true;
                 }
                 if ($changed) { $match->save(); $refreshed++; }
@@ -98,6 +132,7 @@ class FetchFeedTask implements ScheduledTaskInterface {
             $row->set('pfi_image_alt', $item['image_alt']);
             $row->set('pfi_link', $item['link']);
             $row->set('pfi_media', json_encode($local_media));
+            $row->set('pfi_raw_html', (string)$item['raw_html']);
             $row->set('pfi_first_seen_time', gmdate('Y-m-d H:i:s'));
             self::applyCaptureMeta($row, $item);
             $row->save();
@@ -199,10 +234,11 @@ class FetchFeedTask implements ScheduledTaskInterface {
     /**
      * Locate the stored row for an incoming item. Matches on the exact dedup
      * key first; failing that, on author + the first 150 characters of the
-     * whitespace-normalised body. The second pass is what lets a post with no
-     * Facebook permalink (keyed by a hash of its text) be healed in place rather
-     * than re-inserted as a duplicate: reformatting the body changes the hash,
-     * so the key no longer matches, but the normalised opening still does.
+     * whitespace-normalised body, or author + a shared cached-image filename.
+     * The fallbacks are what let a post whose key changed shape — a hash key
+     * after its text reformatted, a photo:fbid key after the post permalink
+     * became readable — be healed in place rather than re-inserted as a
+     * duplicate.
      */
     private static function findStored(string $persona, array $item): ?PersonaFeedItem {
         $byKey = new MultiPersonaFeedItem([
@@ -215,14 +251,25 @@ class FetchFeedTask implements ScheduledTaskInterface {
         }
 
         $author = trim((string)$item['author']);
+        if ($author === '') {
+            return null;
+        }
         $needle = mb_substr(self::normalizeText($item['message']), 0, 150);
-        // Too little text to match on safely — don't risk healing the wrong row.
-        if ($author === '' || mb_strlen($needle) < 40) {
+        // A short body is too little text to match on safely; images take over
+        // as the identity signal below.
+        if (mb_strlen($needle) < 40) {
+            $needle = null;
+        }
+        // The cached-image filenames are derived from the source image URLs, so
+        // a shared file means the same post — this is what re-finds a photo post
+        // whose key changed shape (e.g. photo:fbid → the post permalink).
+        $incoming_files = array_map('basename', (array)$item['media']);
+        if ($needle === null && !$incoming_files) {
             return null;
         }
 
         $db = DbConnector::get_instance()->get_db_link();
-        $q = $db->prepare("SELECT pfi_persona_feed_item_id AS id, pfi_message AS msg
+        $q = $db->prepare("SELECT pfi_persona_feed_item_id AS id, pfi_message AS msg, pfi_media AS media
                            FROM pfi_persona_feed_items
                            WHERE pfi_delete_time IS NULL
                              AND pfi_owner_user_id = ?
@@ -230,8 +277,14 @@ class FetchFeedTask implements ScheduledTaskInterface {
                              AND pfi_author = ?");
         $q->execute([PersonaFeedItem::OWNER_INSTANCE, $persona, $author]);
         foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $r) {
-            if (mb_substr(self::normalizeText($r['msg']), 0, 150) === $needle) {
+            if ($needle !== null && mb_substr(self::normalizeText($r['msg']), 0, 150) === $needle) {
                 return new PersonaFeedItem((int)$r['id'], true);
+            }
+            if ($incoming_files) {
+                $stored_files = json_decode((string)$r['media'], true);
+                if (is_array($stored_files) && array_intersect($stored_files, $incoming_files)) {
+                    return new PersonaFeedItem((int)$r['id'], true);
+                }
             }
         }
         return null;

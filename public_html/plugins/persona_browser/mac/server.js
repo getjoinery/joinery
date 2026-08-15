@@ -107,6 +107,24 @@ async function readFeed(persona) {
     const wantedSrcs = new Set();
 
     for (let step = 0; step < 9; step++) {
+      // Facebook leaves a post's permalink un-hydrated — the timestamp anchor
+      // carries a bare "?__cft__=…" query-only href — until the pointer passes
+      // over it. Hover each such anchor in the mounted posts so the real
+      // permalink is in the markup we snapshot.
+      const bare = await page.$$('[aria-posinset] a[href^="?"]');
+      for (const a of bare.slice(0, 30)) {
+        try {
+          await a.hover({ timeout: 1500 });
+          await page.waitForFunction(
+            el => !(el.getAttribute('href') || '?').startsWith('?'),
+            a, { timeout: 1200 }
+          ).catch(() => {});
+        } catch { /* detached mid-scroll or unhoverable — skip */ }
+      }
+      // Park the pointer so no hovercard overlay ends up inside a capture.
+      await page.mouse.move(0, 0);
+      await page.waitForTimeout(200);
+
       const batch = await page.$$eval('[aria-posinset]', nodes => nodes.map(node => {
         const large = [];
         node.querySelectorAll('img').forEach(img => {
