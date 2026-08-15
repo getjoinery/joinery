@@ -1,4 +1,8 @@
 #!/usr/bin/env bash
+#Version 3.7 - Config parsing anchored to the assignment statement; a commented-out
+#              line or a trailing comment can no longer supply the database name
+#Version 3.6 - The all-databases sweep skips each site's configured dbname_test,
+#              matched exactly (a *_test glob would drop real test SITES)
 #Version 3.5 - Help reads its version from the header rather than restating it; the
 #              restated copy had drifted to 3.0 while the file carried 3.4
 #Version 3.4 - --key-file names the key to use; envelope runs mint one per backup
@@ -163,6 +167,43 @@ backup_database() {
     fi
 }
 
+# Databases that are some site's configured test copy.
+#
+# A test copy holds no content of its own — it is rebuilt from live on demand —
+# so backing one up ships a second encrypted copy of the site's data to the
+# bucket for nothing.
+#
+# The match must be EXACT, read from each site's own config. A `*_test` glob
+# would look equivalent and is a data-loss trap: install.sh's create_test_site()
+# provisions a whole separate SITE named "${main_site}_test", with its own
+# database of that name and its own real content. Dropping that from backups
+# silently would be far worse than the waste being avoided here.
+#
+# Exact matching is still not enough on its own, because the two names can
+# COLLIDE: a site whose dbname_test is "foo_test" sitting beside a real site
+# whose dbname is "foo_test" describes one database that is a throwaway copy to
+# one config and a live database to the other. Live always wins — any name that
+# is some site's dbname is never treated as a test copy, whatever another
+# config calls it. Backing up a copy needlessly costs disk; skipping a live
+# database costs the site.
+test_copy_databases() {
+    local cfg name live_names
+    live_names=""
+    for cfg in /var/www/html/*/config/Globalvars_site.php; do
+        [ -f "$cfg" ] || continue
+        name=$(sed -n "s/^[[:space:]]*\$this->settings\['dbname'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)
+        [ -n "$name" ] && live_names="${live_names}${name}"$'\n'
+    done
+
+    for cfg in /var/www/html/*/config/Globalvars_site.php; do
+        [ -f "$cfg" ] || continue
+        name=$(sed -n "s/^[[:space:]]*\$this->settings\['dbname_test'\][[:space:]]*=[[:space:]]*'\([^']*\)'.*/\1/p" "$cfg" | head -1)
+        [ -z "$name" ] && continue
+        echo "$live_names" | grep -qxF "$name" && continue
+        echo "$name"
+    done
+}
+
 # Function to backup all databases
 backup_all_databases() {
     local backup_type
@@ -194,16 +235,43 @@ backup_all_databases() {
     
     # Remove leading/trailing whitespace and convert to array
     databases=$(echo "$databases" | tr -d ' ')
-    
+
     if [ -z "$databases" ]; then
         echo "No user databases found to backup."
         exit 0
     fi
-    
+
+    # Drop any database that is a site's configured test copy. Skips are named
+    # in the output — a database missing from a backup summary with no
+    # explanation is how a real backup gap survives unnoticed.
+    local test_copies keep skipped db_candidate
+    test_copies=$(test_copy_databases)
+    keep=""
+    skipped=""
+    for db_candidate in $databases; do
+        if [ -n "$test_copies" ] && echo "$test_copies" | grep -qxF "$db_candidate"; then
+            skipped="${skipped}${db_candidate}"$'\n'
+        else
+            keep="${keep}${db_candidate}"$'\n'
+        fi
+    done
+    databases=$(echo "$keep" | sed '/^$/d')
+
+    if [ -n "$skipped" ]; then
+        echo "↷ Skipping test copies (rebuilt from live on demand, nothing of their own):"
+        echo "$skipped" | sed '/^$/d' | sed 's/^/  - /'
+        echo ""
+    fi
+
+    if [ -z "$databases" ]; then
+        echo "No user databases found to backup."
+        exit 0
+    fi
+
     echo "✓ Found databases to backup:"
     echo "$databases" | sed 's/^/  - /'
     echo ""
-    
+
     if [ "$NON_INTERACTIVE" = false ]; then
         if [ "$ENCRYPT_BACKUPS" = true ] && [ -z "$ENCRYPTION_KEY" ]; then
             echo "💡 Each database will prompt for an encryption password."

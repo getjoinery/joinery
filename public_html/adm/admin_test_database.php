@@ -4,9 +4,9 @@
  *
  * Admin page to manage the test database:
  * - Detect schema differences between live and test databases
- * - Copy live database to test database
+ * - Rebuild the test database from live (structure, or a full copy)
  *
- * Version: 1.1
+ * Version: 2.1
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -21,24 +21,33 @@ $page = new AdminPage();
 // Get database names from config
 $live_db = $settings->get_setting('dbname');
 $test_db = $settings->get_setting('dbname_test');
-$db_user = $settings->get_setting('dbusername');
+
+// A test database is a development facility. On a production node it is a
+// second copy of everyone's content, sitting on the same disk and swept into
+// the same backups, serving suites that never run there. The `debug` setting is
+// the platform's development/production discriminator (the same question
+// /tests/ asks), and the refusal lives HERE, in the handler — hiding the menu
+// entry is presentation, not a control.
+$debug_on = (bool)$settings->get_setting('debug');
 
 // Handle actions
-$action = $_POST['action'] ?? $_GET['action'] ?? '';
+$action = $_POST['action'] ?? '';
 $message = '';
 $message_type = '';
 
 if ($action === 'copy_live_to_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
-    // Safety check: ensure test_db is different from live_db and contains "test"
-    if ($test_db === $live_db) {
-        $message = 'SAFETY BLOCK: Test database name is the same as live database. Aborting.';
-        $message_type = 'danger';
-    } elseif (strpos($test_db, 'test') === false && strpos($test_db, '_test') === false) {
-        $message = 'SAFETY BLOCK: Test database name does not contain "test". Aborting.';
+    if (!$debug_on) {
+        $message = 'Refused: rebuilding the test database is a development action, and the '
+                 . 'debug setting is off on this site. A test database here would be a second '
+                 . 'copy of live content on the same disk. Turn debug on in Settings if this '
+                 . 'really is a development site.';
         $message_type = 'danger';
     } else {
+        $mode = ($_POST['mode'] ?? '') === TestDatabaseHelper::MODE_FULL
+            ? TestDatabaseHelper::MODE_FULL
+            : TestDatabaseHelper::MODE_STRUCTURE;
         try {
-            $result = copyLiveToTest($live_db, $test_db, $db_user);
+            $result = TestDatabaseHelper::copy($mode);
             $message = $result['message'];
             $message_type = $result['success'] ? 'success' : 'danger';
         } catch (Exception $e) {
@@ -48,210 +57,13 @@ if ($action === 'copy_live_to_test' && $_SERVER['REQUEST_METHOD'] === 'POST') {
     }
 }
 
-// Get schema comparison
-$schema_diff = compareSchemas($live_db, $test_db, $db_user);
+// Get schema comparison (TestDatabaseHelper owns the comparison; it caches, and
+// copy() clears that cache, so a rebuild above is reflected below.)
+$schema_diff = TestDatabaseHelper::getSchemaComparison();
 
-/**
- * Compare schemas between two databases
- */
-function compareSchemas($live_db, $test_db, $db_user) {
-    $diff = [
-        'live_only_tables' => [],
-        'test_only_tables' => [],
-        'column_differences' => [],
-        'is_in_sync' => true
-    ];
-
-    try {
-        // Get live database tables and columns
-        $live_schema = getDatabaseSchema($live_db, $db_user);
-        $test_schema = getDatabaseSchema($test_db, $db_user);
-
-        if ($live_schema === false || $test_schema === false) {
-            $diff['error'] = 'Could not connect to one or both databases';
-            $diff['is_in_sync'] = false;
-            return $diff;
-        }
-
-        // Find tables only in live
-        $diff['live_only_tables'] = array_diff(array_keys($live_schema), array_keys($test_schema));
-
-        // Find tables only in test
-        $diff['test_only_tables'] = array_diff(array_keys($test_schema), array_keys($live_schema));
-
-        // Compare columns in shared tables
-        $shared_tables = array_intersect(array_keys($live_schema), array_keys($test_schema));
-        foreach ($shared_tables as $table) {
-            $live_columns = $live_schema[$table];
-            $test_columns = $test_schema[$table];
-
-            $live_only_cols = array_diff($live_columns, $test_columns);
-            $test_only_cols = array_diff($test_columns, $live_columns);
-
-            if (!empty($live_only_cols) || !empty($test_only_cols)) {
-                $diff['column_differences'][$table] = [
-                    'live_only' => $live_only_cols,
-                    'test_only' => $test_only_cols
-                ];
-            }
-        }
-
-        // Determine if in sync
-        if (!empty($diff['live_only_tables']) ||
-            !empty($diff['test_only_tables']) ||
-            !empty($diff['column_differences'])) {
-            $diff['is_in_sync'] = false;
-        }
-
-    } catch (Exception $e) {
-        $diff['error'] = $e->getMessage();
-        $diff['is_in_sync'] = false;
-    }
-
-    return $diff;
-}
-
-/**
- * Get schema (tables and columns) for a database
- */
-function getDatabaseSchema($dbname, $db_user) {
-    $settings = Globalvars::get_instance();
-    $password = $settings->get_setting('dbpassword');
-
-    try {
-        $pdo = new PDO(
-            "pgsql:host=localhost;port=5432;dbname={$dbname}",
-            $db_user,
-            $password
-        );
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-        // Get all tables
-        $sql = "SELECT table_name FROM information_schema.tables
-                WHERE table_schema = 'public' AND table_type = 'BASE TABLE'
-                ORDER BY table_name";
-        $stmt = $pdo->query($sql);
-        $tables = $stmt->fetchAll(PDO::FETCH_COLUMN);
-
-        $schema = [];
-        foreach ($tables as $table) {
-            // Get columns for each table
-            $sql = "SELECT column_name FROM information_schema.columns
-                    WHERE table_schema = 'public' AND table_name = ?
-                    ORDER BY ordinal_position";
-            $stmt = $pdo->prepare($sql);
-            $stmt->execute([$table]);
-            $schema[$table] = $stmt->fetchAll(PDO::FETCH_COLUMN);
-        }
-
-        return $schema;
-
-    } catch (PDOException $e) {
-        return false;
-    }
-}
-
-/**
- * Copy live database to test database using pg_dump/psql.
- *
- * The restore lands in a staging database first, with ON_ERROR_STOP and
- * pipefail so any failed statement fails the whole copy loudly — a plain
- * `pg_dump | psql` into the final name reports psql's exit code (0 even when
- * statements error mid-stream) and, worse, a test run holding connections
- * during the restore can make constraint DDL fail silently, leaving a copy
- * with missing primary keys that every test-db suite then trips over. Once
- * staging restores cleanly, the swap (terminate, drop, rename) takes under a
- * second, so concurrent test runs get a torn moment instead of a torn copy.
- */
-function copyLiveToTest($live_db, $test_db, $db_user) {
-    $settings = Globalvars::get_instance();
-    $password = $settings->get_setting('dbpassword');
-
-    // Set password for PostgreSQL commands
-    putenv("PGPASSWORD={$password}");
-
-    // Escape all shell arguments up front
-    $esc_user    = escapeshellarg($db_user);
-    $esc_test    = escapeshellarg($test_db);
-    $esc_live    = escapeshellarg($live_db);
-    $staging_db  = $test_db . '_staging';
-    $esc_staging = escapeshellarg($staging_db);
-
-    $terminate = function ($dbname) use ($db_user, $password) {
-        try {
-            $pdo = new PDO("pgsql:host=localhost;port=5432;dbname=postgres", $db_user, $password);
-            $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-            $stmt = $pdo->prepare("SELECT pg_terminate_backend(pid) FROM pg_stat_activity WHERE datname = ? AND pid <> pg_backend_pid()");
-            $stmt->execute([$dbname]);
-        } catch (PDOException $e) {
-            // Non-fatal — the drop below will surface a real blocker
-        }
-    };
-
-    $fail = function ($message) use ($esc_user, $esc_staging) {
-        exec("dropdb -U {$esc_user} --if-exists {$esc_staging} 2>&1");
-        putenv("PGPASSWORD");
-        return ['success' => false, 'message' => $message];
-    };
-
-    $output = [];
-    $return_var = 0;
-
-    // Step 1: Fresh staging database
-    $terminate($staging_db);
-    exec("dropdb -U {$esc_user} --if-exists {$esc_staging} 2>&1", $output, $return_var);
-    if ($return_var !== 0) {
-        return $fail("Failed to drop stale staging database. Output: " . implode("\n", $output));
-    }
-    $output = [];
-    exec("createdb -U {$esc_user} {$esc_staging} 2>&1", $output, $return_var);
-    if ($return_var !== 0) {
-        return $fail("Failed to create staging database. Output: " . implode("\n", $output));
-    }
-
-    // Step 2: Dump live and restore into staging. pipefail + ON_ERROR_STOP:
-    // the first failed statement (or a failed dump) fails the copy.
-    $pipeline = "set -o pipefail; pg_dump -U {$esc_user} {$esc_live} | psql -q -v ON_ERROR_STOP=1 -U {$esc_user} -d {$esc_staging} 2>&1";
-    $output = [];
-    exec('bash -c ' . escapeshellarg($pipeline), $output, $return_var);
-    if ($return_var !== 0) {
-        return $fail("Restore into staging failed (nothing replaced — the previous test copy is untouched). Output tail: "
-            . implode("\n", array_slice($output, -15)));
-    }
-
-    // Step 3: Swap staging into place (short window; retry once if a test
-    // run reconnects between terminate and drop).
-    for ($attempt = 1; $attempt <= 3; $attempt++) {
-        $terminate($test_db);
-        $output = [];
-        exec("dropdb -U {$esc_user} --if-exists {$esc_test} 2>&1", $output, $return_var);
-        if ($return_var === 0) {
-            break;
-        }
-        sleep(2);
-    }
-    if ($return_var !== 0) {
-        return $fail("Could not drop the old test database to swap in the fresh copy (connections keep grabbing it). Output: "
-            . implode("\n", $output));
-    }
-
-    try {
-        $pdo = new PDO("pgsql:host=localhost;port=5432;dbname=postgres", $db_user, $password);
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-        // Identifiers can't be bound — quote defensively even though both
-        // names come from config, not user input.
-        $quote_ident = function ($name) { return '"' . str_replace('"', '""', $name) . '"'; };
-        $pdo->exec("ALTER DATABASE " . $quote_ident($staging_db) . " RENAME TO " . $quote_ident($test_db));
-    } catch (PDOException $e) {
-        return $fail("Restored copy is ready in '{$staging_db}' but the rename failed: " . $e->getMessage());
-    }
-
-    putenv("PGPASSWORD");
-    return [
-        'success' => true,
-        'message' => "Successfully copied '{$live_db}' to '{$test_db}'. Test database is now in sync with live."
-    ];
-}
+$live_size = TestDatabaseHelper::liveDatabaseSize();
+$test_size = TestDatabaseHelper::testDatabaseSize();
+$reference_tables = TestDatabaseHelper::referenceTables();
 
 // Start output
 $page->admin_header(array(
@@ -268,7 +80,7 @@ $page->admin_header(array(
 <div class="container-fluid">
     <div class="row">
         <div class="col-12">
-            <p class="text-muted">Manage the test database used for automated testing.</p>
+            <p class="text-muted">Manage the test database used by the model test suites.</p>
 
             <?php if ($message): ?>
             <div class="alert alert-<?php echo $message_type; ?>" role="alert">
@@ -286,11 +98,23 @@ $page->admin_header(array(
                     <div class="row">
                         <div class="col-md-6">
                             <h6>Live Database</h6>
-                            <p class="mb-0"><code><?php echo htmlspecialchars($live_db); ?></code></p>
+                            <p class="mb-0">
+                                <code><?php echo htmlspecialchars($live_db); ?></code>
+                                <?php if ($live_size !== false): ?>
+                                <span class="text-muted">— <?php echo htmlspecialchars($live_size); ?></span>
+                                <?php endif; ?>
+                            </p>
                         </div>
                         <div class="col-md-6">
                             <h6>Test Database</h6>
-                            <p class="mb-0"><code><?php echo htmlspecialchars($test_db); ?></code></p>
+                            <p class="mb-0">
+                                <code><?php echo htmlspecialchars($test_db); ?></code>
+                                <?php if ($test_size !== false): ?>
+                                <span class="text-muted">— <?php echo htmlspecialchars($test_size); ?></span>
+                                <?php else: ?>
+                                <span class="text-muted">— not provisioned</span>
+                                <?php endif; ?>
+                            </p>
                         </div>
                     </div>
                 </div>
@@ -388,32 +212,79 @@ $page->admin_header(array(
             <!-- Actions -->
             <div class="card mb-4">
                 <div class="card-header">
-                    <h5 class="mb-0"><i class="fas fa-tools"></i> Actions</h5>
+                    <h5 class="mb-0"><i class="fas fa-tools"></i> Rebuild the test database</h5>
                 </div>
                 <div class="card-body">
-                    <form method="POST" id="copy_live_to_test_form">
-                        <input type="hidden" name="action" value="copy_live_to_test">
 
-                        <div class="mb-3">
-                            <h6>Copy Live Database to Test</h6>
-                            <p class="text-muted">
-                                This will:
+                    <?php if (!$debug_on): ?>
+                    <div class="alert alert-secondary mb-0">
+                        <i class="fas fa-lock"></i>
+                        Rebuilding is off because the <strong>debug</strong> setting is off, which is
+                        how this platform tells a development site from a production one. A test
+                        database on a production node is a second copy of live content on the same
+                        disk, and the suites that use it do not run there.
+                    </div>
+
+                    <?php else: ?>
+                    <div class="row">
+                        <div class="col-md-6 mb-3">
+                            <h6>Structure only <span class="badge bg-success">recommended</span></h6>
+                            <p class="text-muted mb-2">
+                                Every table, column, index and foreign key from
+                                <code><?php echo htmlspecialchars($live_db); ?></code>, with no content.
+                                The model suites create their own rows, so this is all they need.
                             </p>
-                            <ol class="text-muted">
-                                <li>Terminate all connections to the test database</li>
-                                <li>Drop the test database entirely</li>
-                                <li>Create a fresh copy of the live database as the test database</li>
-                            </ol>
-                            <div class="alert alert-warning">
-                                <i class="fas fa-exclamation-triangle"></i>
-                                <strong>Warning:</strong> All data in the test database will be permanently deleted.
-                            </div>
+                            <p class="text-muted mb-2">
+                                These tables are seeded with data, because the site cannot boot against
+                                the copy without them:
+                                <code><?php echo implode('</code>, <code>', array_map('htmlspecialchars', $reference_tables)); ?></code>.
+                            </p>
+                            <?php
+                            echo AdminPage::action_button('Rebuild structure only', '/admin/admin_test_database', array(
+                                'hidden' => array(
+                                    'action' => 'copy_live_to_test',
+                                    'mode'   => TestDatabaseHelper::MODE_STRUCTURE,
+                                ),
+                                'class'   => 'btn btn-primary',
+                                'confirm' => 'This drops the test database and rebuilds it as an empty copy of the live schema. Continue?',
+                            ));
+                            ?>
                         </div>
 
-                        <button type="button" class="btn btn-danger" onclick="JoineryModal.confirm('This will DROP the test database and replace it with a copy of the live database. All test data will be lost. Continue?', function(){ document.getElementById('copy_live_to_test_form').submit(); })">
-                            <i class="fas fa-copy"></i> Copy Live to Test Database
-                        </button>
-                    </form>
+                        <div class="col-md-6 mb-3">
+                            <h6>Full copy, content and all</h6>
+                            <p class="text-muted mb-2">
+                                Every row of every table<?php if ($live_size !== false): ?> —
+                                <strong><?php echo htmlspecialchars($live_size); ?></strong> right now<?php endif; ?>,
+                                including mail, sealed content and member records, duplicated onto this
+                                disk and into anything that backs it up.
+                            </p>
+                            <p class="text-muted mb-2">
+                                Only worth it to reproduce something against real data. No test needs it.
+                            </p>
+                            <?php
+                            echo AdminPage::action_button('Rebuild with a full copy', '/admin/admin_test_database', array(
+                                'hidden' => array(
+                                    'action' => 'copy_live_to_test',
+                                    'mode'   => TestDatabaseHelper::MODE_FULL,
+                                ),
+                                'class'   => 'btn btn-danger',
+                                'confirm' => 'This duplicates all live content'
+                                    . ($live_size !== false ? ' (' . $live_size . ')' : '')
+                                    . ' into the test database. Type COPY to confirm.',
+                                'confirm_typed' => 'COPY',
+                            ));
+                            ?>
+                        </div>
+                    </div>
+
+                    <p class="text-muted mb-0">
+                        Either way the test database is dropped and replaced; anything in it is lost.
+                        The rebuild restores into a staging database first, so a failed restore leaves
+                        the existing copy untouched.
+                    </p>
+                    <?php endif; ?>
+
                 </div>
             </div>
 

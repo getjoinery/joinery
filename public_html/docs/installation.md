@@ -580,6 +580,14 @@ gunzip -c backup.sql.gz | docker exec -i mysite psql -U postgres -d mysite
 ./maintenance_scripts/sysadmin_tools/restore_database.sh mysite backup.sql
 ```
 
+Run `backup_database.sh` with no database name and it backs up every database on
+the machine, except any that a site's config names as its `dbname_test`. A test
+database holds no content of its own — it is rebuilt from live on demand — so
+backing one up would ship a second encrypted copy of the site's data for
+nothing. The skips are listed in the run's output. The match is exact and a
+database that is some site's live `dbname` is never skipped, so a separate test
+**site** (`{site}_test`, with real content of its own) is always backed up.
+
 ### Update application code
 
 **Docker** — stop and re-create the container; volumes persist:
