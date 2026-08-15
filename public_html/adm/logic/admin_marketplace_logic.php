@@ -1,6 +1,4 @@
 <?php
-require_once(__DIR__ . '/../../includes/PathHelper.php');
-
 function admin_marketplace_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 	require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -64,11 +62,12 @@ function admin_marketplace_handle_install(array $input, $session): LogicResult {
 
 		$admin_page = $type === 'plugin' ? '/admin/admin_plugins' : '/admin/admin_themes';
 		$session->save_message(new DisplayMessage(
-			ucfirst($type) . " '" . htmlspecialchars($installed_name) . "' installed successfully. <a href=\"$admin_page\">Go to " . ucfirst($type) . "s</a> to activate it.",
+			ucfirst($type) . " '" . htmlspecialchars($installed_name) . "' installed successfully. Activate it below.",
 			'Installed',
 			NULL,
 			DisplayMessage::MESSAGE_ANNOUNCEMENT
 		));
+		return LogicResult::redirect($admin_page);
 	} catch (Exception $e) {
 		$session->save_message(new DisplayMessage(
 			'Install failed: ' . htmlspecialchars($e->getMessage()),

@@ -173,7 +173,7 @@ SetupSteps::register('ai_provider', array(
     'order' => 70,
     'copy'  => 'Joinery can use an AI assistant to triage mail, draft replies, and manage your calendar — running on your own machine if you have one, so nothing leaves your network. This is optional; everything works without it.',
     'render_file' => 'plugins/joinery_ai/includes/setup_steps/ai_provider.php',
-    'home_url' => '/admin/admin_settings_plugins',
+    'home_url' => '/admin/admin_settings_plugins?plugin=joinery_ai',
     'dismiss_line' => 'No AI assistant is configured (optional).',
     'decision' => 'site',
     // The wizard writes these through the generic step_settings_save handler;

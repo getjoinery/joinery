@@ -813,8 +813,9 @@ Fields match `profileMenu` (minus `visibility` and `nativeScreen` — the rail i
 ### Plugin Settings (Declarative)
 
 Declaring a setting in `plugin.json` is the whole job: it seeds the row, gives
-the plugin a section on the **Plugin Settings** tab
-(`/admin/admin_settings_plugins`), and defines what a save is allowed to write.
+the plugin its own subtab on the **Plugin Settings** tab
+(`/admin/admin_settings_plugins?plugin={name}`), and defines what a save is
+allowed to write.
 There is no form file. On activate and on every sync, PluginManager seeds any
 declared row that doesn't already exist in `stg_settings`; existing values are
 never overwritten.

@@ -1,7 +1,6 @@
 <?php
 require_once(__DIR__ . '/PathHelper.php');
 
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/PublicPageJoinerySystem.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('data/admin_menus_class.php'));
@@ -61,6 +60,26 @@ class AdminPage extends PublicPage {
 			$tab_menus['Plugin Settings'] = '/admin/admin_settings_plugins';
 		}
 		return static::tab_menu($tab_menus, $current);
+	}
+
+	/**
+	 * Render a second-level tab strip (pills) below a page's main tabs.
+	 *
+	 * @param array $tab_menus Associative array of label => url
+	 * @param string|null $current Label of the active subtab
+	 * @return string HTML
+	 */
+	public static function subtab_menu($tab_menus, $current = NULL) {
+		$output = '<nav class="subtabs" aria-label="Section tabs">';
+		foreach ($tab_menus as $name => $link) {
+			if ($name == $current) {
+				$output .= '<span class="subtab active" aria-current="page">' . htmlspecialchars($name) . '</span>';
+			} else {
+				$output .= '<a class="subtab" href="' . htmlspecialchars($link) . '">' . htmlspecialchars($name) . '</a>';
+			}
+		}
+		$output .= '</nav>';
+		return $output;
 	}
 
 	public function admin_header($options=array()) {

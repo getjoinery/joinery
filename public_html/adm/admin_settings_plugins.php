@@ -14,6 +14,11 @@
 
 	require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 	$plugin_sources = $page_vars['plugin_sources'];
+	$selected_plugin = $page_vars['selected_plugin'] ?? ($plugin_sources[0] ?? null);
+
+	$plugin_label = function ($plugin) {
+		return ucwords(str_replace('_', ' ', $plugin));
+	};
 
 	$page = new AdminPage();
 	$page->admin_header(
@@ -43,16 +48,22 @@
 		echo '<p>No active plugin has settings to configure.</p>';
 	}
 
-	// One independent form per plugin, each with its own Save. A field one plugin
-	// cannot validate must not be able to block saving another — which is why
-	// these are siblings and not one page-wide form.
-	//
-	// The fields come from the plugin's declarations, so a plugin appears here
+	// One subtab per plugin; only the selected plugin's form renders. The
+	// fields come from the plugin's declarations, so a plugin appears here
 	// because it declares settings, not because it remembered to ship a form.
-	foreach ($plugin_sources as $plugin) {
+	if (!empty($plugin_sources)) {
+		$subtabs = array();
+		foreach ($plugin_sources as $plugin) {
+			$subtabs[$plugin_label($plugin)] = '/admin/admin_settings_plugins?plugin=' . urlencode($plugin);
+		}
+		echo AdminPage::subtab_menu($subtabs, $plugin_label($selected_plugin));
+	}
+
+	if ($selected_plugin !== null) {
+		$plugin = $selected_plugin;
 
 		echo '<div class="plugin-settings-section" id="plugin-' . htmlspecialchars($plugin) . '">';
-		echo '<h3>' . htmlspecialchars(ucfirst($plugin)) . ' Plugin</h3>';
+		echo '<h3>' . htmlspecialchars($plugin_label($plugin)) . ' Plugin</h3>';
 
 		$formwriter = $page->getFormWriter('plugin_settings_' . $plugin);
 		$formwriter->begin_form();
@@ -62,11 +73,10 @@
 
 		SettingsFieldRenderer::renderSource($formwriter, $plugin);
 
-		$formwriter->submitbutton('submit_' . $plugin, 'Save ' . ucfirst($plugin) . ' Settings');
+		$formwriter->submitbutton('submit_' . $plugin, 'Save ' . $plugin_label($plugin) . ' Settings');
 		$formwriter->end_form();
 
 		echo '</div>';
-		echo '<hr>';
 	}
 
 	$page->end_box();
