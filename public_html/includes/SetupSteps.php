@@ -16,11 +16,17 @@
  *   'status'      callable(?User $viewer): 'green'|'amber'|'none'
  *   'render_file' include-path of the step's form partial (non-routable dir)
  *   'active'      optional callable(?User $viewer): bool — hidden when false
+ *   'decision'    optional 'user'|'site' — the step accepts a "not now" answer,
+ *                 which counts as green (the wizard measures decided, not
+ *                 enabled). Real state always wins over the decision row.
+ *   'real_status' optional callable(?User $viewer): string — the same question
+ *                 as status() ignoring any decision, so the wizard can tell a
+ *                 step that is truly done from one that was declined
  *
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class SetupSteps {
@@ -99,6 +105,30 @@ class SetupSteps {
 	/** A single registered step, or null. */
 	public static function get(string $key): ?array {
 		return self::$steps[$key] ?? null;
+	}
+
+	/**
+	 * Whether a step is green only because its question was answered "not now"
+	 * — the underlying thing is still not set up. Steps that want this
+	 * distinction declare 'real_status', a predicate that ignores decisions;
+	 * the wizard renders their controls with a "you chose not to" note rather
+	 * than the "already done" row, so declining stays reversible in place.
+	 */
+	public static function isDeclinedOnly(array $step, ?User $viewer): bool {
+		if (empty($step['decision']) || empty($step['real_status'])) {
+			return false;
+		}
+		try {
+			$real = call_user_func($step['real_status'], $viewer);
+		} catch (Throwable $e) {
+			error_log('SetupSteps: real_status predicate for "' . ($step['key'] ?? '?') . '" threw: ' . $e->getMessage());
+			return false;
+		}
+		if ($real === self::STATUS_GREEN) {
+			return false;
+		}
+		$user_id = ($step['decision'] === 'user' && $viewer) ? (int)$viewer->key : NULL;
+		return self::hasDecision((string)($step['key'] ?? ''), $user_id);
 	}
 
 	/** A step's live status. A predicate that throws reads as 'none', never a fatal. */
@@ -276,27 +306,44 @@ class SetupSteps {
 			},
 		));
 
+		// Shared by this step's two predicates: 'real_status' is the vault
+		// itself, 'status' additionally accepts an answered "not now".
+		$vault_present = function (?User $viewer): string {
+			if (!$viewer) {
+				return SetupSteps::STATUS_NONE;
+			}
+			require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+			$vaults = new MultiUserEncryptionVault(array(
+				'user_id' => (int)$viewer->key,
+				'scope' => UserEncryptionVault::SCOPE_USER,
+			));
+			return $vaults->count_all() > 0 ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+		};
+
 		self::register('encryption_key', array(
-			'title' => 'Your encryption key',
+			'title' => 'Your personal encryption key',
 			'scope' => 'user',
 			'order' => 20,
-			'copy'  => "Your private mail, files, and passwords are encrypted with a key only you hold — we can't read them and we can't recover them. If you lose every way to unlock it, that data is gone for good.",
+			'copy'  => "Every account gets one: a key held only by you, which locks anything you choose to keep private (it is not the site's backup key). Creating it now changes nothing about how you use the site — it simply sits there until you want one of the things below.",
 			'render_file' => 'includes/setup_steps/encryption_key.php',
 			'home_url' => '/profile/security',
-			'dismiss_line' => 'Your encryption key is not set up.',
+			'dismiss_line' => 'You have no personal encryption key — private mail, files, passwords and encrypted chats are unavailable.',
+			'decision' => 'user',
 			'active' => function (?User $viewer): bool {
 				return (string)Globalvars::get_instance()->get_setting('passkeys_enabled') === '1';
 			},
-			'status' => function (?User $viewer): string {
+			'real_status' => $vault_present,
+			// Real state wins: creating the key later makes the decision row
+			// irrelevant, exactly as it does for the other optional steps.
+			'status' => function (?User $viewer) use ($vault_present): string {
 				if (!$viewer) {
 					return SetupSteps::STATUS_NONE;
 				}
-				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
-				$vaults = new MultiUserEncryptionVault(array(
-					'user_id' => (int)$viewer->key,
-					'scope' => UserEncryptionVault::SCOPE_USER,
-				));
-				return $vaults->count_all() > 0 ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+				if (call_user_func($vault_present, $viewer) === SetupSteps::STATUS_GREEN) {
+					return SetupSteps::STATUS_GREEN;
+				}
+				return SetupSteps::hasDecision('encryption_key', (int)$viewer->key)
+					? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 			},
 		));
 

@@ -446,8 +446,7 @@ class PasskeyService {
 		}
 
 		$data = json_decode($client_response_json, true);
-		$prf_output_b64url = $data['clientExtensionResults']['prf']['results']['first'] ?? null;
-		if (!is_array($data) || !$prf_output_b64url) {
+		if (!is_array($data)) {
 			throw new PasskeyException('This passkey did not return a derived secret. It may not support PRF.');
 		}
 
@@ -461,13 +460,29 @@ class PasskeyService {
 		// requested in the options (getDerivationOptions() asks for 'required' too).
 		$this->_checkAssertion($pk_credential, $passkey, $challenge, 'required');
 
+		// Only NOW is the missing PRF output trustworthy evidence about this
+		// credential: the assertion is verified, so the claim came from the
+		// authenticator itself and not from whoever posted the body. Recording
+		// it before that check would let a forged request mark someone else's
+		// passkey incapable and push their account onto the weaker unlocker.
+		$prf_output_b64url = $data['clientExtensionResults']['prf']['results']['first'] ?? null;
+		if (!$prf_output_b64url) {
+			if (!$passkey->get('pkc_prf_failed_time')) {
+				$passkey->set('pkc_prf_failed_time', gmdate('Y-m-d H:i:s'));
+				$passkey->save();
+			}
+			throw new PasskeyException('This passkey did not return a derived secret. It may not support PRF.');
+		}
+
 		$user = new User($user_id, TRUE);
 		$prf_output = Base64UrlSafe::decodeNoPadding($prf_output_b64url);
 
 		// Evidence beats registration-time reporting: this credential just
-		// evaluated PRF, so correct a false-at-creation capability flag.
-		if (!$passkey->get('pkc_prf_capable')) {
+		// evaluated PRF, so correct a false-at-creation capability flag — and
+		// clear any earlier failure, which a firmware or OS update can undo.
+		if (!$passkey->get('pkc_prf_capable') || $passkey->get('pkc_prf_failed_time')) {
 			$passkey->set('pkc_prf_capable', true);
+			$passkey->set('pkc_prf_failed_time', null);
 			$passkey->save();
 		}
 

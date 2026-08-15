@@ -8,6 +8,7 @@
 	$settings = Globalvars::get_instance();
 	$steps = $page_vars['steps'];
 	$statuses = $page_vars['statuses'];
+	$declined = $page_vars['declined'] ?? array();
 	$current_key = $page_vars['current_key'];
 	$current_index = $page_vars['current_index'];
 	$total = $page_vars['total'];
@@ -54,6 +55,12 @@
 .setup-card h1 { margin-top: 0; font-size: 1.4em; }
 .setup-copy { color: var(--jy-muted, #475467); margin-bottom: 20px; }
 .setup-nav { display: flex; justify-content: space-between; align-items: center; margin-top: 24px; }
+/* A step whose answer is one-or-the-other puts both answers on one row. */
+.setup-choice { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+.setup-choice form { margin: 0; }
+.setup-field { display: block; }
+.setup-field > span { display: block; font-weight: 600; margin-bottom: 4px; }
+.setup-field > input { width: 100%; max-width: 360px; }
 .setup-nav .setup-skip { color: var(--jy-muted, #667085); }
 .setup-done-row { display: flex; align-items: center; gap: 10px; padding: 14px; border: 1px solid var(--jy-border, #e4e7ec); border-radius: 8px; background: #f6fef9; }
 .setup-checklist { list-style: none; margin: 0; padding: 0; }
@@ -95,7 +102,7 @@
 <?php foreach ($steps as $s) { $st = $statuses[$s['key']]; ?>
 				<li>
 					<span class="setup-dot <?php echo htmlspecialchars($st); ?>"></span>
-					<span><?php echo htmlspecialchars($s['title']); ?></span>
+					<span><?php echo htmlspecialchars($s['title']); ?><?php if (!empty($declined[$s['key']])) { ?> <span class="jy-muted">— not set up, by your choice</span><?php } ?></span>
 <?php if (!empty($s['home_url'])) { ?>
 					<a class="setup-home" href="<?php echo htmlspecialchars($s['home_url']); ?>"><?php echo ($st === SetupSteps::STATUS_GREEN) ? 'Manage' : 'Finish'; ?></a>
 <?php } ?>
@@ -112,7 +119,8 @@
 
 <?php
 		$force_render = ($page_vars['force_render_step'] ?? '') === $current_key;
-		if ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$force_render) {
+		$was_declined = !empty($declined[$current_key]);
+		if ($statuses[$current_key] === SetupSteps::STATUS_GREEN && !$force_render && !$was_declined) {
 ?>
 			<div class="setup-done-row">
 				<span class="setup-dot green"></span>
@@ -120,6 +128,14 @@
 			</div>
 <?php
 		} else {
+			if ($was_declined) {
+?>
+			<div class="jy-callout jy-callout-info">
+				<div class="jy-callout-title">You chose not to set this up</div>
+				<p>The wizard will stop asking. You can change your mind here or at <a href="<?php echo htmlspecialchars($current_step['home_url'] ?? '/profile'); ?>">its permanent home</a> whenever you like.</p>
+			</div>
+<?php
+			}
 			$render_file = $current_step['render_file'] ?? '';
 			$render_path = $render_file !== '' ? PathHelper::getIncludePath($render_file) : '';
 			if ($render_path !== '' && file_exists($render_path)) {

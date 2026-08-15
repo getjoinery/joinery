@@ -103,7 +103,7 @@ Owner flow, in order. Scope `user` steps are the member flow.
 |---|-----|-------|-------|-----------|
 | 0 | `welcome` | Welcome | user (+site fields for owner) | name + timezone set; owner: site name set |
 | 1 | `signin_security` | Sign-in security | user | `SessionControl::user_has_second_factor()` |
-| 2 | `encryption_key` | Your encryption key | user | `vault_status` reports an active vault |
+| 2 | `encryption_key` | Your personal encryption key | user | a user-scope vault exists (mandatory — the decision row is a capability fallback, not an opt-out) |
 | 3 | `mail_send` | Sending email | site | `EmailSender::transactionalSendBlocker() === null` **and** a test send has succeeded |
 | 4 | `mail_receive` | Receiving email | site | domain registered + a store-mode alias exists + `mailbox/setup_status` = ok (amber while DNS pends) |
 | 5 | `mail_import` | Bring your old mail | user | any completed import run, or explicitly skipped (skip = green here; importing is optional forever) |
@@ -120,6 +120,15 @@ decision store (`sud_setup_decisions`, below): the row records that the
 question was answered, never completion. Real state always wins — a resolving
 provider or a completed import run makes the row irrelevant, and the
 dashboard card for that area remains the place that shows the real state.
+
+A declined step is green but not *done*, and the wizard says so rather than
+pretending. A step that wants the distinction declares `real_status` — the
+same predicate as `status` with the decision ignored — and
+`SetupSteps::isDeclinedOnly()` uses it. Such a step keeps rendering its
+controls (under a "You chose not to set this up" note linking to its
+permanent home) instead of the "already done" row, and the final checklist
+labels it *not set up, by your choice*. Declining is therefore reversible in
+the same place it was chosen.
 
 ### Step 0 — Welcome
 
@@ -146,19 +155,96 @@ On confirm, the ten backup codes render in-step with copy/download and an
 "I've saved these" gate. New passkeys auto-attempt vault activation exactly as
 the security page does today (`runVaultActivation` chain).
 
-### Step 2 — Your encryption key
+### Step 2 — Your personal encryption key
 
-> Your private mail, files, and passwords are encrypted with a key only you
-> hold — we can't read them and we can't recover them. If you lose every way
-> to unlock it, that data is gone for good.
+> Every account gets one: a key held only by you, which locks anything you
+> choose to keep private (it is not the site's backup key). Creating it now
+> changes nothing about how you use the site — it simply sits there until you
+> want one of the things below.
+
+**Holding a key is universal; using it is optional.** A key that is never used
+costs its holder nothing, and an estate where everyone already holds one makes
+every later feature simpler — no per-user capability check before offering a
+private folder, a sealed mailbox, or a protected conversation, and no cohort
+that has to be onboarded a second time. So the step does not offer a decline.
+The page is framed accordingly: not "do you want this?" but "here is your key,
+and here is what it will protect when you want it to."
+
+The step is deliberately short: one sentence on what the key is, the bulleted
+**What it will protect, if you want it to**, and the acknowledgement. Nobody
+reads a wall of warning, and the acknowledgement is the part that must land.
+
+The title says **personal** and the copy disowns the backup key by name: a
+deployment that has set the backup recovery key for scheduled backups reads
+"your encryption key" as already done, and then cannot tell why the wizard
+disagrees. These are two unrelated keys — one site-wide over backup archives,
+one per account over that account's own content — and the wording carries the
+difference.
 
 Controls: the existing vault ceremony (`vault_setup_options` /
 `vault_setup_verify`): permanent-loss acknowledgement checkbox, create, then
 the recovery codes + **Download key file** with an "I've saved these" gate.
 Prerequisite (a passkey) is guaranteed by step 1; if step 1 was skipped, this
-step says so and offers to go back. The step states plainly that passwordless
-sign-in turns off for vault holders — that consequence exists today and this
-is the moment to say it.
+step says so and offers to go back.
+
+The vault-activation flip (passwordless sign-in is withdrawn once an account
+holds a key — [Account Security § The role split](../docs/account_security.md))
+is **not** stated on this step. Every phrasing tried here read as a riddle at
+the moment of decision, and the flip changes nothing the person is choosing
+between: it changes what next sign-in looks like. It belongs where sign-in is
+the subject, not where the key is.
+
+The bullets lead — private mail, private Drive folders, saved passwords,
+encrypted chats — because they are what the key is *for*, and the
+acknowledgement below them is meaningless without knowing what is at stake.
+
+### Mandatory, but never a trap
+
+No decline is offered. But two conditions make a key genuinely impossible, and
+neither is something the holder can talk themselves out of, so the step routes
+around both rather than stranding the account:
+
+| Condition | Detected by | What the step shows |
+|---|---|---|
+| No passkey at all | passkey count = 0 | "A passkey comes first" → back to step 1. Not an escape: the account can hold a key once it has one. |
+| Every enrolled passkey is `incapable` | `Passkey::vault_capability()` — an authenticator that cannot derive a PRF secret, and no setting or PIN changes that | The hardware limit stated plainly, **Add a passkey elsewhere** as the primary action, **Use a bypass phrase instead** as the compatibility route, and **Continue without one** last |
+| Account has no password | `vault_setup_options` answers `requires_password` | The hint says to set one; **Continue without one** is revealed alongside it |
+| The passkey turns out not to support PRF | the ceremony fails with *"did not return a derived secret"* (`PasskeyService::verifyDerivation()`) | Same: the hardware limit in plain words, and **Continue without one** revealed |
+
+**The bypass-phrase route is the answer for the largest blocked group.** PRF
+support is narrower than passkey support — iPhones before iOS 18, Windows 10,
+older Firefox and Android — so "your passkey cannot derive a key" is a mass
+condition, not an edge case, and telling those users to buy a new phone is not
+a product. They get a vault unlocked by a memorized phrase instead, and can
+upgrade to a passkey wrapping whenever they have a capable device. The gate,
+the evidence rule and the accepted trade are specified in
+[Sealed Vault § When a passkey cannot hold the key](../docs/sealed_vault.md) —
+the important half is that eligibility is decided by the credentials on the
+server, never offered as a choice, so this can never become "the easy way out"
+for someone holding a working passkey.
+
+That last row is the one that cannot be predicted. `vault_capability()` returns
+`incapable` only where it can prove it and `unknown` otherwise, and PRF support
+is only truly provable by attempting a derivation — so a passkey that looks
+usable can still fail at the ceremony. That failure is a supported outcome of
+this step, not an error to report: **every refusal the page cannot talk the
+user out of reveals the fallback.** A mandatory step must never become a dead
+end.
+
+The fallback records the same `decision` = `user` row the optional steps use,
+which is what lets a blocked account still reach all-green. It is a capability
+fallback, not a preference — it appears only when the platform has proven the
+key cannot be created, never as an alternative to creating one.
+
+`real_status` remains the vault itself, so an account that took the fallback
+keeps being offered **Create my encryption key** whenever it returns, under the
+"You chose not to set this up" note. Fixing the hardware or setting a password
+turns the step green for real.
+
+An account that neither creates a key nor is blocked stays non-green and keeps
+its place in the "Finish setup — n of m" pill. **Skip for now** still moves the
+wizard along, because navigation is not a decision — that is the difference
+between deferring the step and settling it.
 
 ### Step 3 — Sending email
 

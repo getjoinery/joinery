@@ -52,6 +52,10 @@ class Passkey extends SystemBase {
 		'pkc_transports'            => array('type'=>'text', 'is_nullable'=>true),
 		'pkc_aaguid'                => array('type'=>'varchar(64)', 'is_nullable'=>true),
 		'pkc_prf_capable'           => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Stamped when a VERIFIED derivation ceremony returned no PRF output —
+		// the only proof an authenticator cannot hold a vault key. Distinct
+		// from pkc_prf_capable=false, which merely means "never demonstrated".
+		'pkc_prf_failed_time'       => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'pkc_discoverable'          => array('type'=>'bool', 'is_nullable'=>true),
 		'pkc_attachment'            => array('type'=>'varchar(16)', 'is_nullable'=>true),
 		'pkc_label'                 => array('type'=>'varchar(255)', 'is_nullable'=>true),
@@ -126,6 +130,12 @@ class Passkey extends SystemBase {
 			return self::VAULT_CAPABLE;
 		}
 
+		// A verified ceremony that produced no PRF output is the strongest
+		// evidence there is — stronger than any registration-time signal.
+		if ($this->get('pkc_prf_failed_time')) {
+			return self::VAULT_INCAPABLE;
+		}
+
 		$discoverable = $this->get('pkc_discoverable');
 		$attachment   = $this->get('pkc_attachment');
 		if ($discoverable !== null && !$discoverable && $attachment === 'cross-platform') {
@@ -166,6 +176,42 @@ class Passkey extends SystemBase {
 			return true;
 		}
 		return in_array('internal', $transports, true);
+	}
+
+	/**
+	 * Whether this account has any credential that could still hold a vault
+	 * key — `capable`, or `unknown` and therefore worth attempting.
+	 *
+	 * This is the gate for the bypass-phrase compatibility fallback
+	 * (docs/sealed_vault.md § When a passkey cannot hold the key). It answers
+	 * FALSE only when every live credential is provably incapable, so the
+	 * weaker unlocker can never be reached by an account that has a working
+	 * passkey route. Read it on the server before honouring any phrase-first
+	 * request — a hidden button is not a gate.
+	 */
+	public static function userHasVaultCapableOption(int $user_id): bool {
+		$passkeys = new MultiPasskey(array('user_id' => $user_id));
+		foreach ($passkeys as $passkey) {
+			if ($passkey->vault_capability() !== self::VAULT_INCAPABLE) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
+	 * Whether the bypass-phrase bootstrap is permitted for this account: it
+	 * holds at least one passkey and every one of them is provably incapable.
+	 *
+	 * The count requirement is what keeps this a compatibility fallback rather
+	 * than a preference — an account with no passkeys at all is sent to enrol
+	 * one, and only becomes eligible if that credential then fails a real
+	 * derivation. Nobody can reach the weaker unlocker by simply owning
+	 * nothing.
+	 */
+	public static function userNeedsPassphraseFallback(int $user_id): bool {
+		$passkeys = new MultiPasskey(array('user_id' => $user_id));
+		return $passkeys->count_all() > 0 && !self::userHasVaultCapableOption($user_id);
 	}
 }
 
