@@ -263,18 +263,20 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
         // Deleted here, edited there. The edit wins: bring it back. The delete
         // is recoverable from the OS trash if it really was intended; the edit
         // would not have been.
-        (Delta::Deleted, r) if r.touched_content() => Resolution::just(Action::Download)
-            .with_issue(Issue::DeleteLostToEdit { side: Side::Local }),
+        (Delta::Deleted, r) if r.touched_content() => {
+            Resolution::just(restore_locally(entry, r))
+                .with_issue(Issue::DeleteLostToEdit { side: Side::Local })
+        }
 
         // Deleted here, moved there. A move proves someone is working with the
         // file, but it is not an edit — so the delete may proceed, and only if
         // the content is exactly what we last agreed on. If the bytes moved
         // too, there is an edit hiding behind the move and the edit wins.
-        (Delta::Deleted, Delta::Moved { .. }) => {
+        (Delta::Deleted, r @ Delta::Moved { .. }) => {
             if content_matches_last_agreement(entry) {
                 Resolution::just(Action::TrashRemote)
             } else {
-                Resolution::just(Action::Download)
+                Resolution::just(restore_locally(entry, r))
                     .with_issue(Issue::DeleteLostToEdit { side: Side::Local })
             }
         }
@@ -292,21 +294,57 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
                 .cloned()
                 .or_else(|| entry.synced_placement.clone())
                 .unwrap_or_else(|| entry.remote.clone());
-            Resolution::just(Action::UploadAsNew { placement })
+            Resolution::just(restore_remotely(entry, placement))
                 .with_issue(Issue::DeleteLostToEdit { side: Side::Remote })
         }
 
         // Gone there, moved here. The content is untouched, but the user did
         // something deliberate with it, so it is re-created where they put it
         // rather than vanishing out from under them.
-        (Delta::Moved { to }, Delta::Deleted) => Resolution::just(Action::UploadAsNew {
-            placement: to.clone(),
-        })
-        .with_issue(Issue::DeleteLostToEdit { side: Side::Remote }),
+        (Delta::Moved { to }, Delta::Deleted) => {
+            Resolution::just(restore_remotely(entry, to.clone()))
+                .with_issue(Issue::DeleteLostToEdit { side: Side::Remote })
+        }
 
         // Any remaining shape reduces to one of the above; treat an unexpected
         // pairing as "do nothing" rather than improvising a destructive guess.
         _ => Resolution::nothing(),
+    }
+}
+
+/// Bring an entity back on this computer after a local delete lost.
+///
+/// A folder is not restored by fetching anything — there is nothing to fetch,
+/// and asking for it is not a slow path but a dead one: the executor withdraws
+/// the download for want of a content hash, the folder keeps whatever name it
+/// had on disk before the delete, and every sibling waiting for that name stays
+/// parked behind it forever. The soak rig held a whole subtree that way, with a
+/// second folder parked `DuplicateName` against a name whose owner the server
+/// had long since renamed.
+///
+/// The destination is the server's, since it is the server's version that won.
+fn restore_locally(entry: &Entry, remote: &Delta) -> Action {
+    match entry.id.entity_type {
+        crate::model::EntityType::File => Action::Download,
+        crate::model::EntityType::Folder => Action::CreateLocalFolder {
+            placement: remote
+                .placement()
+                .cloned()
+                .unwrap_or_else(|| entry.remote.clone()),
+        },
+    }
+}
+
+/// Put an entity back on the server after a remote delete lost.
+///
+/// The counterpart of [`restore_locally`], and the same distinction: a folder
+/// has no content to send as a new version, so it is made rather than uploaded.
+/// Either way the old server id is gone and cannot be resurrected, so what
+/// arrives is a new entity at the place the entity was last known to live.
+fn restore_remotely(entry: &Entry, placement: Placement) -> Action {
+    match entry.id.entity_type {
+        crate::model::EntityType::File => Action::UploadAsNew { placement },
+        crate::model::EntityType::Folder => Action::CreateRemoteFolder { placement },
     }
 }
 
@@ -882,6 +920,69 @@ mod tests {
             r.actions,
             vec![Action::UploadAsNew {
                 placement: placement(Some(7), "moved.txt")
+            }]
+        );
+    }
+
+    // ---- a folder is not a file ---------------------------------------------
+
+    /// A folder that has completed a sync. No content on either side, ever —
+    /// which is the whole point: every content-shaped answer below is wrong for
+    /// it, and a rule that only ever saw files will give one anyway.
+    fn established_folder(id: i64, name: &str) -> Entry {
+        let mut e = established(name, "");
+        e.id = EntityId::folder(id);
+        e.remote_content = None;
+        e.synced_content = None;
+        e
+    }
+
+    #[test]
+    fn a_deleted_folder_the_server_renamed_is_made_again_not_downloaded() {
+        // A folder has no bytes, so the agreement can never be shown to hold and
+        // the delete always loses — correctly. What it loses to matters: asking
+        // to download a folder is not a slow way back, it is no way back. The
+        // executor withdraws it for want of a content hash, the folder keeps its
+        // old name on disk, and anything waiting on that name waits forever.
+        let e = established_folder(8138, "Projects (9)");
+        let r = reconcile(
+            &e,
+            &Delta::Deleted,
+            &Delta::Moved {
+                to: placement(None, "Projects (9) (11) (15)"),
+            },
+            &ctx(),
+        );
+        assert_eq!(
+            r.actions,
+            vec![Action::CreateLocalFolder {
+                placement: placement(None, "Projects (9) (11) (15)")
+            }],
+            "a folder comes back by being made, at the name the server won with"
+        );
+        assert_eq!(
+            r.issues,
+            vec![Issue::DeleteLostToEdit { side: Side::Local }]
+        );
+    }
+
+    #[test]
+    fn a_folder_moved_here_and_deleted_there_is_created_not_uploaded() {
+        // The mirror image, and the same category error: there is no content to
+        // send as a new file, so the rescue has to be a folder creation.
+        let e = established_folder(8138, "Projects");
+        let r = reconcile(
+            &e,
+            &Delta::Moved {
+                to: placement(Some(7), "Projects"),
+            },
+            &Delta::Deleted,
+            &ctx(),
+        );
+        assert_eq!(
+            r.actions,
+            vec![Action::CreateRemoteFolder {
+                placement: placement(Some(7), "Projects")
             }]
         );
     }

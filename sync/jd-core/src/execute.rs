@@ -1058,8 +1058,11 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         size_bytes: fingerprint.size,
         sha256: sha.clone(),
         mime_type: None,
-        // Journaled before the first byte went out. This is what stops a lost
-        // completion answer from producing a second copy of the file.
+        // Journaled before the first byte went out, and scoped per attempt at
+        // the point of use: an upload cannot be resumed across attempts, so the
+        // completion of each one is its own request. A lost completion answer
+        // is kept from producing a second copy by dedup at init, which matches
+        // the retry on content hash.
         idempotency_key: Some(op.idempotency_key.clone()),
         encrypted_metadata: None,
         wrapped_file_keys: Vec::new(),
@@ -1568,6 +1571,36 @@ fn move_remote(
             "the server has moved it since this was planned".into(),
         ));
     }
+    // The folder this is moving INTO may not exist on the server yet, and a
+    // provisional id names nothing the server can look up. Uploading and
+    // creating a folder both already wait for this; moving did not, and sent
+    // the negative id as a real one. The server cannot honour it, the file
+    // stays where it was, and the rename that follows then asks for a name its
+    // old neighbours are still using — which comes back `name_taken`, the one
+    // refusal this client waits on forever. The soak rig had it on sixteen
+    // attempts with the destination folder still uncreated.
+    if let Some(p) = to.parent.filter(|p| *p < 0) {
+        // Still waiting to be created: this is the ordinary case, and waiting
+        // is right.
+        if require_entry(env, EntityId::folder(p))?.is_some() {
+            return Ok(OpOutcome::Retry(
+                "the folder it belongs in is not on the server yet".into(),
+            ));
+        }
+        // The entry is gone, so the folder took a real id or was folded into
+        // one that already had it. A provisional id is local and is never
+        // reissued, which means nothing will ever answer to this one and
+        // waiting for it is waiting forever. Uploads sidestep this by reading
+        // the parent as it stands now rather than as it was planned; a move
+        // cannot, because its destination lives in the op rather than on the
+        // entry. So the plan is stale and the next scan re-derives it from
+        // what is actually on the disk and the server. The soak rig had five
+        // of these between two devices, at up to nineteen attempts, every one
+        // pointed at a provisional id with no entry left behind it.
+        return Ok(OpOutcome::Overtaken(
+            "the folder it was going into has changed since this was planned".into(),
+        ));
+    }
     let t = op.entity.entity_type.to_string();
 
     // Rename and reparent are separate calls, and a crash between them leaves
@@ -1575,7 +1608,12 @@ fn move_remote(
     // correctly and finishes, which is why they do not need to be one call.
     if entry.remote.parent != to.parent {
         let mut body = json!({ "entity_type": t, "entity_id": op.entity.server_id });
-        body["folder_id"] = match to.parent {
+        // `parent_id`, which is the only destination key `drive_move` declares.
+        // Sending anything else is not a rejected request -- an undeclared key
+        // is simply not read, so the move is taken as one to the drive root and
+        // the file lands there. It succeeds, it is silent, and the file is gone
+        // from where the user put it.
+        body["parent_id"] = match to.parent {
             Some(p) => json!(p),
             None => Value::Null,
         };

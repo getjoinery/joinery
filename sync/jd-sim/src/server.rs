@@ -144,8 +144,12 @@ struct ServerState {
     uploads: BTreeMap<String, UploadSession>,
     signed: BTreeMap<String, SignedUrl>,
     next_url: u64,
-    /// Idempotency key → the response first produced for it.
-    idempotency: BTreeMap<String, Value>,
+    /// Idempotency key → the action and body it was first used with, and the
+    /// response that produced. The request is kept because the key alone is not
+    /// the promise: the platform stores a body hash beside the key and refuses a
+    /// second, different request that reuses it (`ApiLogicEndpoint`
+    /// § idempotencyResolveExisting).
+    idempotency: BTreeMap<String, (String, Value, Value)>,
     quota_bytes: Option<u64>,
     next_token: u64,
     /// Who is calling. Set by the network layer per device.
@@ -599,16 +603,31 @@ impl MockServer {
     /// after restart carries the same key and gets the same answer — one
     /// upload, one folder, one move, no matter how many times the machine died
     /// trying.
+    /// Reusing a key for a *different* request is refused rather than answered,
+    /// which is what the platform does and is not a detail: the check runs ahead
+    /// of every other branch, so a key whose request has changed can never be
+    /// taken over or retried. It fails the same way forever. A mock that
+    /// replayed the first answer instead would let a client ship a key that
+    /// outlives the request it names, and every scenario here would pass while
+    /// real devices wedged.
     pub fn action_idempotent(&self, name: &str, body: &Value, key: &str) -> ServerResult {
-        if let Some(prior) = self.state.lock().unwrap().idempotency.get(key) {
-            return Ok(prior.clone());
+        if let Some((prior_action, prior_body, prior_response)) =
+            self.state.lock().unwrap().idempotency.get(key)
+        {
+            if prior_action != name || prior_body != body {
+                return Err(refuse(
+                    409,
+                    "ActionError",
+                    "This Idempotency-Key was already used with a different request",
+                ));
+            }
+            return Ok(prior_response.clone());
         }
         let out = self.action(name, body)?;
-        self.state
-            .lock()
-            .unwrap()
-            .idempotency
-            .insert(key.to_string(), out.clone());
+        self.state.lock().unwrap().idempotency.insert(
+            key.to_string(),
+            (name.to_string(), body.clone(), out.clone()),
+        );
         Ok(out)
     }
 
@@ -935,7 +954,20 @@ impl MockServer {
 
     fn drive_move(&self, body: &Value) -> ServerResult {
         let (t, id) = Self::target(body)?;
-        let dest = body.get("folder_id").and_then(Value::as_i64);
+        // `parent_id`, matching what the platform's `drive_move` declares. This
+        // read was `folder_id` for as long as the client sent `folder_id`, so
+        // the two agreed with each other and disagreed with the server: every
+        // move passed here and went to the root out there, and no scenario
+        // could see it. A key the real endpoint does not read is not a
+        // destination, so an unrecognized one is refused rather than guessed at.
+        if body.get("folder_id").is_some() {
+            return Err(refuse(
+                400,
+                "ValidationError",
+                "drive_move takes parent_id; folder_id is not read.",
+            ));
+        }
+        let dest = body.get("parent_id").and_then(Value::as_i64);
         let mut st = self.state.lock().unwrap();
         if let Some(d) = dest {
             match st.folders.get(&d) {

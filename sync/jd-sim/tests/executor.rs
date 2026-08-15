@@ -395,6 +395,184 @@ fn a_lost_answer_to_an_upload_does_not_make_two_files() {
 }
 
 #[test]
+fn an_upload_retried_after_the_file_changed_is_not_refused_over_its_key() {
+    // The window the rig kept finding, and it needs both halves.
+    //
+    // First the bytes go up, the server takes the completion, and only the
+    // answer is lost. Then -- because a person is still working -- the file
+    // changes again before the retry runs. The retry therefore uploads
+    // different content, so the server cannot recognise it as the same upload
+    // and short-circuit; it opens a new upload and is issued a new token.
+    //
+    // That completion is a genuinely different request. A key written down
+    // before the first attempt now names two of them, and the platform refuses
+    // that ahead of every other branch -- including the takeover of an
+    // abandoned original -- so it fails the same way forever. On the rig this
+    // was upload_version sitting at ten attempts while the file never arrived.
+    let (clock, server, device) = world();
+    device.fs.user_write("once.txt", b"the first thing that was written");
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(id, None, "once.txt", LocalStatus::PendingUpload))
+        .unwrap();
+
+    // Only the completion answer, so the attempt reaches the end before it is
+    // cut. A blanket drop rate loses the init instead and never gets here.
+    device.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_upload_complete".into()),
+        ..NetFaults::none()
+    });
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UploadAsNew {
+            placement: Placement {
+                parent: None,
+                name: "once.txt".into(),
+            },
+        },
+    );
+    assert_eq!(report.retrying, 1, "a lost answer is a retry, not a failure");
+
+    // The user carries on typing. This is what stops the retry being waved
+    // through by dedup, and it is the ordinary case rather than a corner.
+    device
+        .fs
+        .user_write("once.txt", b"and then it was edited again, at length");
+
+    clock.advance_secs(30 * 60);
+    let now = device.now();
+    let e = env(&device, &now);
+    run_queued(&e).unwrap();
+
+    for op in device.store.queued_ops().unwrap() {
+        let err = op.last_error.clone().unwrap_or_default();
+        assert!(
+            !err.contains("Idempotency-Key"),
+            "the completion was refused over its key, which no retry can ever \
+             get past: {err}"
+        );
+    }
+}
+
+#[test]
+fn a_move_into_a_folder_the_server_has_never_heard_of_waits_instead_of_asking() {
+    // A provisional id is a local placeholder. It names nothing the server can
+    // look up, so a move that sends one as a destination cannot land -- and the
+    // file stays where it was. The rename that follows then asks for a name in
+    // the OLD folder, where the old neighbours are still sitting, and that
+    // comes back `name_taken`: the one refusal this client waits on forever,
+    // because waiting is right when a sibling is genuinely on its way and this
+    // sibling never was.
+    //
+    // Uploading and creating a folder both already check this. Moving did not.
+    // On the rig it was three move_remote ops at sixteen, fifteen and ten
+    // attempts, each with a negative destination parent, holding two devices
+    // apart for every remaining cycle of the campaign.
+    let (_clock, server, device) = world();
+    let folder = server.seed_folder(None, "Projects");
+    let file_id = server.seed_file(Some(folder), "doc-8.txt", b"the one being moved");
+    let id = EntityId::file(file_id);
+    device
+        .store
+        .put_entry(&fresh(
+            id,
+            Some(folder),
+            "doc-8.txt",
+            LocalStatus::Synced,
+        ))
+        .unwrap();
+
+    // The neighbour that makes a degenerate move fail as `name_taken` rather
+    // than fail quietly -- exactly the collision the rig kept landing on.
+    server.seed_file(Some(folder), "doc-8 (copy).txt", b"the neighbour");
+
+    // Created here a moment ago, and not yet on the server.
+    let destination = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(
+            destination,
+            None,
+            "Projects (2)",
+            LocalStatus::PendingUpload,
+        ))
+        .unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: Some(destination.server_id),
+                name: "doc-8.txt".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.done, 0, "there is nowhere on the server to move it to");
+    assert_eq!(report.retrying, 1, "the folder is coming; this waits for it");
+
+    let queued = device.store.queued_ops().unwrap();
+    assert_eq!(queued.len(), 1);
+    let err = queued[0].last_error.clone().unwrap_or_default();
+    assert!(
+        !err.contains("already using that name"),
+        "it asked anyway and got stuck on a name no arriving sibling can free: {err}"
+    );
+    assert!(
+        err.contains("not on the server yet"),
+        "it should be waiting on the folder, not on something else: {err}"
+    );
+}
+
+#[test]
+fn a_move_into_a_provisional_folder_that_no_longer_exists_is_replanned_not_awaited() {
+    // The other half. A provisional id is local and is never reissued, so once
+    // the entry holding it is gone -- the folder took a real id, or was folded
+    // into one that already had it -- nothing will ever answer to it again.
+    // Waiting is then waiting forever, and the honest move is to drop the plan
+    // and let the next scan write a new one from what is really there.
+    //
+    // The rig had five of these across two devices at up to nineteen attempts,
+    // every one naming a provisional parent with no entry left behind it.
+    let (_clock, server, device) = world();
+    let folder = server.seed_folder(None, "Projects");
+    let file_id = server.seed_file(Some(folder), "doc-7.txt", b"still wanted");
+    let id = EntityId::file(file_id);
+    device
+        .store
+        .put_entry(&fresh(id, Some(folder), "doc-7.txt", LocalStatus::Synced))
+        .unwrap();
+
+    // A provisional id that nothing is tracking: no entry is ever put for it.
+    let vanished = device.store.next_provisional_id().unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: Some(vanished),
+                name: "doc-7.txt".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.done, 0, "there was nowhere to put it");
+    assert_eq!(
+        report.retrying, 0,
+        "waiting on an id that can never come back is waiting forever"
+    );
+    assert!(
+        device.store.queued_ops().unwrap().is_empty(),
+        "the stale plan is dropped so the next scan can write a real one"
+    );
+}
+
+#[test]
 fn an_interrupted_remote_move_that_actually_landed_is_recognized_not_repeated() {
     // The crash window. The op is in flight, the machine dies, and on restart
     // the journal cannot say whether the server got it. Asking the server is

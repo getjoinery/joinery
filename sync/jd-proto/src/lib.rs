@@ -437,14 +437,25 @@ impl Client {
             }
         }
 
+        // Scoped to this attempt, because that is what it is. A retry cannot
+        // resume an upload — it starts again at init and is issued a fresh
+        // token — so the completion it sends names a different upload and is a
+        // genuinely different request. A key outliving the token would arrive
+        // attached to a request it no longer describes, and the platform
+        // refuses that ahead of every other branch, including the takeover of
+        // an abandoned original: it fails the same way forever.
+        //
+        // What stops a lost completion answer from producing a second copy is
+        // dedup at init, not this key. The retry offers the same content hash
+        // and the server short-circuits to the file it already has.
+        let complete_key = match &params.idempotency_key {
+            Some(key) => format!("{key}-complete-{token}"),
+            None => Self::new_idempotency_key(),
+        };
         let complete = self.action_idempotent(
             "drive_upload_complete",
             params.complete_body(&token),
-            params
-                .idempotency_key
-                .clone()
-                .unwrap_or_else(Self::new_idempotency_key)
-                .as_str(),
+            &complete_key,
         )?;
         let file = complete
             .get("file")
