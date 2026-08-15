@@ -98,7 +98,7 @@ class VaultCeremonies {
 		}
 
 		if ($open_window) {
-			VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);
+			VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_SETUP);
 		}
 
 		return [
@@ -246,7 +246,7 @@ class VaultCeremonies {
 		$this->drainAndRetire($user, $live_wrappings, $old_secret_key, $old_generation, $keypair['public'], $new_generation);
 
 		if ($open_window) {
-			VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER);
+			VaultUnlock::open($user->key, $keypair['secret'], UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_ROTATE);
 		}
 
 		return [
@@ -330,7 +330,7 @@ class VaultCeremonies {
 		}
 
 		if ($open_window && $current_secret !== null) {
-			VaultUnlock::open($user->key, $current_secret, UserEncryptionVault::SCOPE_USER);
+			VaultUnlock::open($user->key, $current_secret, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_REENROLL);
 		}
 
 		return [
@@ -526,7 +526,7 @@ class VaultCeremonies {
 		// this session. A stolen code evicts the thief's pre-existing windows.
 		VaultUnlock::lockAll($user->key);
 		if ($open_window) {
-			VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER);
+			VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_RECOVERY);
 		}
 
 		$remaining = new MultiUserEncryptionWrapping([

@@ -851,6 +851,69 @@ missing on disk (a partial deploy) never got to register its provider, so
 failed to load. A real Fortress user sees no difference; everyone else gets a
 tighter-than-usual window until the deploy is fixed.
 
+## The audit log
+
+The window lives in APCu and a `/dev/shm` marker. Both vanish without trace, so
+nothing about a past window is recoverable from the running system: whether it
+was open at a given moment, how it was armed, or why it ended. `VaultAudit`
+writes that down, into the platform's general event log (`evl_event_logs`)
+alongside the rest of the audit trail.
+
+Two events, one row per state **transition**:
+
+| Event | Written when |
+|---|---|
+| `vault_window_opened` | `VaultUnlock::open()` arms a window |
+| `vault_window_closed` | the window ends, for any reason |
+
+A beacon beats every 25 seconds for as long as a tab is open. Those are not
+transitions and are not logged — burying the two facts that matter under
+thousands that do not is how an audit log stops being read.
+
+Each opened row records `via`: `passkey`, `passphrase`, `recovery`, `setup`,
+`rotate`, `reenroll`, or `unknown`. It also records the caps this window
+resolved to and the configured `vault_unlock_idle_minutes`, because between
+them those decide how late a legitimate read can arrive.
+
+Each closed row records `reason` and `open_seconds`:
+
+| Reason | Meaning |
+|---|---|
+| `idle_cap` | a cap fired: no content decrypt within the consumer's idle limit |
+| `absolute_cap` | a cap fired: armed too long ago, however much it was used |
+| `heartbeat_stale` | the browser stopped answering |
+| `idle_expired` | the key aged out of APCu after `vault_unlock_idle_minutes` |
+| `explicit_lock` | someone pressed Lock now |
+| `logout` / `ip_change` | the session ended, or moved network |
+| `credential_event` | password change or reset, recovery-code use, 2FA change |
+
+The three end-events run code and write their own row. An APCu expiry does not
+— it happens inside the cache with nothing to hook — so the row is written by
+whoever next **notices**, which is why a session remembers in `$_SESSION` that
+it armed a window at all. Normally the beacon notices within one beat, because
+it is the only thing still asking once the user has gone.
+
+Where a window is wiped by a session other than the one that owns it —
+`lockAll()` on a credential event — the locking session writes the row and
+leaves a short-lived tombstone, so the owning session reports nothing rather
+than mistaking the vanished key for an expiry. `lockAll()` writes one row per
+`(session, scope)`: a credential event that closes three devices reads as three
+windows ending, which is what it was.
+
+**What is never written:** the secret key, any wrapping, any sealed content, and
+the session id. A session id is a bearer credential; the log carries
+`VaultAudit::handle()` instead — a truncated one-way digest, enough to tie an
+open to its close and useless to anyone reading the log.
+
+Losing a row must never break the request that noticed, so the write is wrapped
+in `SystemBase::server_initiated_write()` (a close is an observation the server
+makes on whatever request happened to see it, often a GET) and any failure is
+swallowed to `error_log`.
+
+`evl_event_logs` has no retention policy, so these rows persist until something
+prunes them. At one row per open and one per close, that is a handful per user
+per day.
+
 ## Deferred work in the window
 
 Some work over sealed content cannot happen when the user asks for it — mail
@@ -937,7 +1000,7 @@ sign-in is withdrawn.
 ## Tests
 
 The vault test estate lives in `tests/vault/` (crypto refusals, the unlock
-window, ceremony state machines, rotation crash-injection) plus
+window, the audit trail, ceremony state machines, rotation crash-injection) plus
 `plugins/mailbox/tests/mailbox_reseal_test.php` (the consumer contract
 against real rows); shared fixtures in `tests/lib/vault_fixtures.php`. The
 window suite exercises APCu and skips under plain CLI — run it directly with

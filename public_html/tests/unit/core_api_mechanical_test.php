@@ -245,6 +245,7 @@ $permitted = array(
 	'data/api_keys_class.php'                                 => 'API key last-used tracking, on read requests',
 	'data/general_errors_class.php'                           => 'error rows, recorded on whatever request failed',
 	'includes/RequestLogger.php'                              => 'request log rows, including for reads',
+	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',
 	'logic/oauth_callback_logic.php'                          => 'OAuth provider redirect — persisting the grant IS the request',
 	'plugins/mailbox/includes/InboundEmailSetupCheck.php'     => 'relay status folded into the row on a setup view',
 	'plugins/mailbox/includes/relay_admin.php'                => 'relay/shard reconciliation from node facts',

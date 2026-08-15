@@ -71,7 +71,7 @@ function vault_unlock_passkey_logic(array $input): LogicResult {
 		return LogicResult::error('Could not unlock your vault with this passkey.');
 	}
 
-	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER);
+	VaultUnlock::open($user->key, $secret_key, UserEncryptionVault::SCOPE_USER, null, VaultAudit::VIA_PASSKEY);
 
 	return LogicResult::render(['unlocked' => true]);
 }
