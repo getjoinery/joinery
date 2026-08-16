@@ -34,7 +34,8 @@
  *     live. If the sender could look up "am I allowed to send Direct to bob@you"
  *     that would be an oracle leaking the recipient's contact and block lists.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - send() verifies the SENDER domain's own DNS publication before the wire — both halves of the handshake are checked, not just the recipient's
  */
 
 require_once(PathHelper::getIncludePath('includes/SafeHttpClient.php'));
@@ -166,6 +167,16 @@ class JoineryDirect {
 		// for the test estate; real same-instance mail is delivered locally.
 		if (!empty($options['loopback'])) {
 			return self::sendLoopback($recipient_address, $sender, $kind, $parts, $options);
+		}
+
+		// Our own half of the DNS handshake. The recipient verifies our
+		// signature against the key OUR domain publishes, so a send from an
+		// unpublished domain can only be refused on the far end — checked here
+		// with the same lookup and cache, aimed at ourselves, instead of
+		// trusting the operator to have published before enabling.
+		if (DirectCapability::publicKeyFor($sender_domain, DirectSigningIdentity::keyIdFor($sender_domain)) === null) {
+			return new DirectSendResult(DirectSendResult::NO_CAPABILITY,
+				array('detail' => 'The Joinery Direct DNS records for ' . $sender_domain . ' are not published.'));
 		}
 
 		// 1. Discovery. No record → no_capability, and the caller falls back.

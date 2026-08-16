@@ -317,6 +317,7 @@
 .msgr-person:hover { background: var(--jy-color-surface-alt); }
 .msgr-person img { width: 32px; height: 32px; border-radius: var(--jy-radius-full); object-fit: cover; }
 .msgr-person-name { flex: 1 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.msgr-person-address { flex: 0 1 auto; min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; color: var(--jy-color-text-muted); font-size: var(--jy-text-sm); }
 
 .msgr-chips { display: flex; flex-wrap: wrap; gap: var(--jy-space-2); margin-bottom: var(--jy-space-2); }
 .msgr-chip {
@@ -415,21 +416,32 @@
     color: var(--jy-color-text-muted);
 }
 
-/* Cross-site chat */
+/* Cross-site chat — inline resolution in the unified picker */
 
-.msgr-remote { margin-top: var(--jy-space-3); font-size: var(--jy-text-sm); }
-.msgr-remote summary { cursor: pointer; color: var(--jy-color-link); }
-.msgr-remote .msgr-field { margin-top: var(--jy-space-2); }
-.msgr-remote-status {
-    display: flex;
-    flex-direction: column;
-    gap: 2px;
-    margin: 0 0 var(--jy-space-2);
+.msgr-pick-status {
+    margin: var(--jy-space-2) 0 0;
+    font-size: var(--jy-text-sm);
+    color: var(--jy-color-text-muted);
+}
+.msgr-pick-status a { margin-left: 2px; }
+.msgr-site-notice {
+    margin: var(--jy-space-2) 0 0;
     font-size: var(--jy-text-xs);
     color: var(--jy-color-text-muted);
 }
-.msgr-remote-status--ok { color: var(--jy-color-success); }
-.msgr-remote-status--no { color: var(--jy-color-warning); }
+.msgr-remote-level-note {
+    margin: var(--jy-space-3) 0 0;
+    font-size: var(--jy-text-sm);
+    color: var(--jy-color-text-muted);
+}
+.msgr-person--blocked { opacity: 0.5; cursor: not-allowed; }
+.msgr-person-blocked-line {
+    display: block;
+    padding: 0 var(--jy-space-2) var(--jy-space-1);
+    font-size: var(--jy-text-xs);
+    color: var(--jy-color-text-muted);
+}
+.msgr-chip-address { color: var(--jy-color-text-muted); font-size: var(--jy-text-xs); }
 
 /* Delivery ticks — only ever on a message that has to cross to another site. */
 .msgr-tick { display: inline-flex; align-items: center; }

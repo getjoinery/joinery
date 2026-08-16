@@ -9,7 +9,8 @@
  *
  * Not an API action: this is a page, so it has no descriptor.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Ships structured federation state (site_ready / member_can_send / admin_notice) so the picker explains the next unfinished step instead of hiding
  */
 
 
@@ -29,7 +30,9 @@ function messenger_page_logic(array $input): LogicResult {
 			'conversations' => array(),
 			'open'          => null,
 			'client'        => Messenger::clientSettings(),
-			'federation_available' => false,
+			'federation'    => array(
+				'site_ready' => false, 'member_can_send' => false, 'admin_notice' => '',
+			),
 		));
 	}
 
@@ -64,10 +67,42 @@ function messenger_page_logic(array $input): LogicResult {
 		}
 	}
 
-	// Whether this deployment can chat across sites at all — the affordance for
-	// it is only shown where it would work.
-	$federation_available = MessengerFederation::available()
-		&& MessengerFederation::addressFor($user_id) !== null;
+	// Cross-site chat state, in the picker's terms (the reachability spec):
+	// site_ready      — the SITE can chat across instances (S1–S3 false it)
+	// member_can_send — this member holds a mailbox on a signable domain (S4)
+	// admin_notice    — silence reads as breakage, so a superadmin (who can
+	//                   reach the switch and the Setup tab) is pointed at the
+	//                   next unfinished step instead:
+	//                   'not_set_up'  — the switch is off, or no mailbox (S1, S2)
+	//                   'unpublished' — the switch is ON but the DNS half is
+	//                                   not done (S3's missing identity is an
+	//                                   implementation detail: the Setup tab
+	//                                   mints it while planning, so the fix
+	//                                   for S3 and S6 is the same tab)
+	$site_ready = MessengerFederation::siteReady();
+	$federation = array(
+		'site_ready'      => $site_ready,
+		'member_can_send' => $site_ready && MessengerFederation::addressFor($user_id) !== null,
+		'admin_notice'    => '',
+	);
+	if ($session->get_permission() >= 10) {
+		if (!MessengerFederation::available()) {
+			$federation['admin_notice'] = 'not_set_up';
+		} elseif (!$site_ready) {
+			$federation['admin_notice'] = 'unpublished';
+		} else {
+			// One capability lookup per identity domain, served from the same
+			// cache the send path uses — a page load costs a DNS query only
+			// when the cache has expired, and only for superadmins.
+			foreach (new MultiDirectIdentity(array('is_active' => true)) as $identity) {
+				$capability = DirectCapability::lookup((string)$identity->get('jdi_domain'));
+				if ($capability === null || !isset($capability['keys'][(string)$identity->get('jdi_key_id')])) {
+					$federation['admin_notice'] = 'unpublished';
+					break;
+				}
+			}
+		}
+	}
 
 	return LogicResult::render(array(
 		'session'       => $session,
@@ -76,7 +111,7 @@ function messenger_page_logic(array $input): LogicResult {
 		'conversations' => $rows,
 		'open'          => $open,
 		'client'        => Messenger::clientSettings(),
-		'federation_available' => $federation_available,
+		'federation'    => $federation,
 	));
 }
 ?>

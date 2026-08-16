@@ -281,6 +281,29 @@ class MailboxReaderTest {
 		}
 		$this->ok($beth_box && $beth_box['unread'] === 2 && $beth_box['total'] === 2, 'beth@ unread/total = 2/2');
 		$this->ok($legal_box && $legal_box['unread'] === 1, 'legal@ unread = 1');
+
+		section('the Inbox is inbound: a sent-only thread waits in All Mail');
+
+		// A conversation beth just started (one outbound row, no reply yet),
+		// and one where she wrote and the other side answered. Own rows, own
+		// thread keys, deleted below — later sections count T1/T2 exactly.
+		$sent_only = $this->insertMsg($this->beth_alias, '<sentonly@x>', 'sent only', true, false, 5);
+		$replied_out = $this->insertMsg($this->beth_alias, '<answered@x>', 'question', true, false, 10);
+		$replied_in = $this->insertMsg($this->beth_alias, '<answered@x>', 're: question', false, false, 1);
+		$mark_outbound = $this->db->prepare(
+			"UPDATE iem_inbound_email_messages SET iem_direction = 'outbound' WHERE iem_inbound_email_message_id = ?");
+		$mark_outbound->execute([$sent_only]);
+		$mark_outbound->execute([$replied_out]);
+
+		$inbox_keys = $this->threadKeys($svc->listThreads(null, array('inbox' => true), 1, 50));
+		$this->ok(!in_array('<sentonly@x>', $inbox_keys, true), 'a sent-only thread is not in the Inbox');
+		$this->ok(in_array('<answered@x>', $inbox_keys, true), 'the answer is what puts a thread in the Inbox');
+
+		$all_keys = $this->threadKeys($svc->listThreads(null, array(), 1, 50));
+		$this->ok(in_array('<sentonly@x>', $all_keys, true), 'the sent-only thread lives in All Mail');
+
+		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?, ?)')
+			->execute([$sent_only, $replied_out, $replied_in]);
 	}
 
 	// ---- unmatched ----

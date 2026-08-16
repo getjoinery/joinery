@@ -42,6 +42,7 @@ section('A. What the boundary covers');
 
 $reserved = array(
 	'_csrf_token', '__route', 'edit_primary_key_value', 'plugin_settings_target',
+	'plugin',
 	'g-recaptcha-response', 'h-captcha-response', 'submit_button', 'btn_submit',
 	'webDir_readonly', 'baseDir_readonly', 'site_template_readonly',
 );

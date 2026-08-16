@@ -49,7 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.22
+ * @version 1.23
+ * @changelog 1.23 - The Inbox view excludes outbound rows: a sent-only thread lives in All Mail until a reply arrives
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -774,8 +775,15 @@ class MailboxService {
 		// view passes no inbox flag, so archived conversations remain reachable.
 		// IS NOT TRUE (not "= false") so a NULL iem_is_archived counts as not-archived
 		// — messages stored before the column existed are never-archived, not hidden.
+		//
+		// Outbound rows are not inbox material either: a conversation the member
+		// just started lives in All Mail (tagged Sent) until a reply arrives —
+		// the reply row is what puts the thread in the Inbox. Row-level filter,
+		// thread-level effect: a thread with any qualifying inbound row still
+		// lists, with its full history in the thread view.
 		if (!$trash && !empty($filters['inbox'])) {
 			$where[] = "iem_is_archived IS NOT TRUE";
+			$where[] = "iem_direction IS DISTINCT FROM 'outbound'";
 		}
 
 		// Label dimension: restrict to messages carrying the chosen custom label.

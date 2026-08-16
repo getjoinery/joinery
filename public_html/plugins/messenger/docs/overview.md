@@ -47,7 +47,45 @@ all of that and touches no message.
 Cross-instance chat additionally needs the **mailbox** plugin (it supplies the
 member's address, the contact list that authorizes an incoming message, and the
 Direct endpoint) and a Direct signing identity for the sending domain. Without
-those the app works normally and simply does not offer cross-site chat.
+those the app works normally and does not offer cross-site chat — and a
+superadmin opening the picker sees one line saying cross-site chat isn't set
+up, linking to the Joinery Direct switch on General Settings, so absence never
+reads as breakage.
+
+## Starting a conversation — the one search box
+
+The New-message dialog has a single search field that resolves everything a
+member might mean:
+
+- **Members** match by name (never by email — partials cannot enumerate who
+  holds an address here).
+- **The member's own mailbox contacts** match by name or address and are shown
+  with the address. They appear whenever the site can chat cross-site; a member
+  who lacks a sendable mailbox is told exactly that at pick time.
+- **A typed full address** is always usable as a "Use address" row.
+
+Picking a contact or address resolves its state inline, before anything is
+committed: an address on this site's own mail domains opens a plain **local**
+conversation with the member behind it (exact address only, and only when one
+live member holds the mailbox — a shared mailbox stays email-only); a domain
+that publishes the `chat` capability becomes a remote chip; anything else says
+it cannot be reached by chat and offers **Send an email instead** plus
+**Check again**, which re-resolves past the reachability cache (rate-limited)
+so a network blip's cached "no" cannot answer for the retry. Both halves of
+the DNS handshake are verified before anything sends: if this site's own
+records aren't published yet, the pick says exactly that — our state, not
+theirs — and `JoineryDirect::send()` refuses before the wire regardless of
+surface.
+
+Cross-site conversations are one-to-one and Standard: a remote chip freezes
+further picks and pins the level, with the reason shown, at the moment of the
+click. Enter in the search box picks the first result; it never closes the
+dialog. Opening a chat never creates a contact — a contact is an
+inbound-permission grant and only a deliberate add mints one.
+
+Every cross-site "no" reads the same on the wire (a refusal, a missing
+capability record and a too-old instance are indistinguishable by design), so
+reachability reports whether, never why.
 
 ## Settings
 

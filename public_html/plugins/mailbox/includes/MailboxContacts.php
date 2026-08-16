@@ -33,7 +33,8 @@
  * them. The address hash is a keyed blind index for sealed rows (never leaks the sealed
  * address) and a plain SHA-256 otherwise.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - listForUser(): the user's whole contact store for surfaces not scoped to one mailbox (Messenger people picker)
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -356,6 +357,49 @@ class MailboxContacts {
 				$by_address[$addr] = $entry;
 			} elseif ($entry['name'] !== '' && $by_address[$addr]['name'] === '') {
 				$by_address[$addr]['name'] = $entry['name'];
+			}
+		}
+		return array('contacts' => array_values($by_address));
+	}
+
+	/**
+	 * Every contact the user holds, across all their mailboxes — for surfaces
+	 * that are not scoped to one mailbox, like the Messenger people picker.
+	 *
+	 * Decryption is per row: a sealed row whose vault window is closed is
+	 * silently absent rather than blocking the readable rest, matching how a
+	 * closed window reads everywhere else (absent, never an error).
+	 */
+	public function listForUser(int $user_id): array {
+		if ($user_id <= 0) {
+			return array('contacts' => array());
+		}
+
+		$stmt = $this->db()->prepare('SELECT * FROM imc_mailbox_contacts
+			WHERE imc_usr_user_id = ?
+			ORDER BY imc_use_count DESC, imc_last_used_time DESC LIMIT ' . self::MAX_LIST);
+		$stmt->execute(array($user_id));
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		$by_address = array();
+		foreach ($rows as $r) {
+			try {
+				$addr = (string)MailboxContact::decryptSealedFieldStatic('imc_address', $r['imc_address'], $r);
+				$name = (string)MailboxContact::decryptSealedFieldStatic('imc_display_name', $r['imc_display_name'], $r);
+			} catch (VaultLockedException $e) {
+				continue;
+			}
+			$addr = strtolower(trim($addr));
+			if ($addr === '') {
+				continue;
+			}
+			if (!isset($by_address[$addr])) {
+				$by_address[$addr] = array(
+					'address' => $addr,
+					'name'    => $name,
+				);
+			} elseif ($name !== '' && $by_address[$addr]['name'] === '') {
+				$by_address[$addr]['name'] = $name;
 			}
 		}
 		return array('contacts' => array_values($by_address));

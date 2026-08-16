@@ -95,7 +95,7 @@ returns a **typed result**, never a behavior:
 |---|---|
 | `delivered` | Accepted and transferred; the result records whether parts were sealed and to which key generation |
 | `declined` | The receiver answered `declined` — this recipient does not accept this kind from this sender |
-| `no_capability` | The recipient domain publishes no capability record, or this deployment holds no signing identity for the sender |
+| `no_capability` | A missing precondition on either half of the handshake: the recipient domain publishes no capability record, this deployment holds no signing identity for the sender, or the sender domain's own DNS records are not published — checked before the wire, since the recipient verifies our signature against the key our domain publishes |
 | `no_sealing` | The caller passed `require_sealed` and the preflight returned no recipient key — refused between preflight and transfer, so no content byte crossed the wire |
 | `failed` | Connection, timeout, or verification failure at any step |
 

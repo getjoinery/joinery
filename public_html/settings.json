@@ -1342,7 +1342,7 @@
       "group": "joinery_direct",
       "label": "Deliver Joinery to Joinery directly",
       "type": "checkbox",
-      "helptext": "When a message is addressed to someone whose account is on another Joinery instance, hand it straight to that instance over a signed, sealed channel instead of email. It only ever carries mail the recipient already asked for — the sender has to be in their contacts — and everything else falls back to ordinary email unchanged. Turn this on only once the domain's Joinery Direct DNS records are published; publishing them is the last step of enabling it, never the first."
+      "helptext": "Enable Joinery to Joinery encrypted messaging."
     },
     {
       "name": "joinery_direct_max_parts",
