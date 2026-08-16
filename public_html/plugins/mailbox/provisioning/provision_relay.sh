@@ -10,6 +10,13 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
+# Version: 2.7 - the firewall admits the Direct egress port (8442/tcp) on the
+#                WireGuard interface. Default-deny was eating it: the listener
+#                binds the tunnel address and was healthy, but every tenant
+#                egress POST was silently dropped, so a fronted deployment's
+#                Direct sends always read as a transport failure and retried
+#                forever. Scoped to the tunnel interface — reaching it still
+#                requires a WireGuard peer key the relay issued.
 # Version: 2.5 - the relay serves JOINERY DIRECT for its tenants (docs/joinery_direct.md).
 #                At Fortress the relay IS the Direct endpoint, because an SRV record
 #                pointing at the origin box would advertise the address the relay
@@ -77,7 +84,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="2.6"
+RELAY_VERSION="2.7"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -975,8 +982,12 @@ ufw allow 22/tcp        >/dev/null 2>&1 || true
 # path, and a tenant that has not enabled Direct has no capability record
 # published, so nothing sends here.
 ufw allow 443/tcp       >/dev/null 2>&1 || true
+# The Direct egress proxy for tenants. The listener already binds the tunnel
+# address only; this rule is scoped to the tunnel interface so the port is
+# never reachable from the public side even if the bind ever loosened.
+ufw allow in on "${WG_IF}" to any port 8442 proto tcp >/dev/null 2>&1 || true
 ufw --force enable      >/dev/null 2>&1 || true
-echo "firewall: default-deny; allow 25/tcp, 443/tcp, ${WG_PORT}/udp, 22/tcp"
+echo "firewall: default-deny; allow 25/tcp, 443/tcp, ${WG_PORT}/udp, 22/tcp, 8442/tcp on ${WG_IF}"
 
 # --- 9. validate + restart Postfix -------------------------------------------
 if postfix check; then

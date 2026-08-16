@@ -16,7 +16,9 @@
  * that signed the request. A stranger cannot open a conversation with you, for
  * exactly the reason a stranger cannot send you direct mail.
  *
- * @version 1.2.0
+ * @version 1.2.2
+ * @changelog 1.2.2 - a LOCKED send (vault-sealed signing key, owner absent) defers until presence like a sealed body read, instead of burning the retry budget on attempts nobody can make succeed
+ * @changelog 1.2.1 - addressFor() prefers a PUBLISHED domain over a merely signable one: the Setup tab mints an identity for every enabled domain, so first-with-an-identity picked arbitrary unpublished domains and every send refused at the self-check
  * @changelog 1.2.0 - Reachability spec: siteReady() (identity minted, not just enabled), senderPublished() (our own DNS half, checked before the recipient's), fresh re-checks past the capability cache, and local-address resolution so a member's own site's addresses never go over the wire
  * @changelog 1.1.0 - People picker contacts
  */
@@ -154,7 +156,15 @@ class MessengerFederation {
 
 	/**
 	 * The address a member sends chat from: the first mailbox they hold on a
-	 * domain this deployment can sign as.
+	 * domain this deployment can sign as AND currently publishes in DNS —
+	 * because the recipient verifies the sender's signature against what that
+	 * domain publishes, an unpublished domain can only be refused.
+	 *
+	 * Every enabled domain tends to hold a signing identity (the Setup tab
+	 * mints them while planning records), so signability alone does not pick a
+	 * usable sender. A signable-but-unpublished address is only returned when
+	 * NO published one exists, so the send still fails with the honest
+	 * "records not published" reason naming a real domain.
 	 *
 	 * Null means they have no Joinery address, which is the honest reason a
 	 * member cannot chat across instances — not a failure, a missing mailbox.
@@ -167,6 +177,7 @@ class MessengerFederation {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
 
+		$signable = null;
 		$viewer = MailboxViewer::forUser($user_id, 0);
 		foreach ($viewer->accessibleAliasIds() as $alias_id) {
 			try {
@@ -179,11 +190,17 @@ class MessengerFederation {
 			}
 			$address = strtolower((string)$alias->get_full_address());
 			$domain = DirectProtocol::domainOf($address);
-			if ($domain !== '' && DirectSigningIdentity::hasIdentity($domain)) {
+			if ($domain === '' || !DirectSigningIdentity::hasIdentity($domain)) {
+				continue;
+			}
+			if (self::senderPublished($address)) {
 				return $address;
 			}
+			if ($signable === null) {
+				$signable = $address;
+			}
 		}
-		return null;
+		return $signable;
 	}
 
 	/**
@@ -395,6 +412,13 @@ class MessengerFederation {
 			}
 			if ($result->delivered()) {
 				continue;
+			}
+			if ($result->status === DirectSendResult::LOCKED) {
+				// The signing key is sealed and nobody who can open it is here.
+				// Not the recipient's fault and not a spent attempt: the send
+				// becomes possible the moment the member is back, exactly like a
+				// sealed body — so it waits the same way.
+				return self::deferUntilPresent($message);
 			}
 			$all_delivered = false;
 			if ($result->status === DirectSendResult::DECLINED

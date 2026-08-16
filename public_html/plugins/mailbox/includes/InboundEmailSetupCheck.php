@@ -25,6 +25,7 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.42 - the Direct PASS row names Cloudflare's _dc-srv SRV-target rewrite when the zone shows it, so the odd-looking record reads as normal
  * @version 1.41 - colocated SRV targets the WEB host (the endpoint is a web route and the cert covers the web host, not the mail hostname); the card probes the published endpoint over verified HTTPS, so a wrong target reads as broken instead of PASS
  * @version 1.40 - a Joinery Direct check row per domain: OPTIONAL, absent is INFO (never needs-attention), fresh lookup so the tab shows the truth right after publishing
  * @version 1.39 - the Joinery Direct capability record joins the plan
@@ -691,9 +692,20 @@ class InboundEmailSetupCheck {
 				));
 		}
 
+		// A proxied target rewritten by Cloudflare looks alarming in the zone
+		// (_dc-srv.<hash>...) while working fine — senders decode it back to
+		// the domain. Saying so here keeps the operator from "fixing" it.
+		$srv_target = (string)($capability['srv_target'] ?? '');
+		$detail = '';
+		if (strpos($srv_target, '_dc-srv.') === 0) {
+			$detail = 'The zone shows the SRV target as ' . $srv_target
+				. ' — Cloudflare rewrites a proxied target this way, and senders decode it back to '
+				. $domain . '. No change needed.';
+		}
 		return $this->r('domain.direct', $domain, 'domain', 'Joinery Direct (optional)',
 			self::OPTIONAL, self::PASS,
-			'Published — other Joinery instances can deliver mail and chat to ' . $domain . ' directly.');
+			'Published — other Joinery instances can deliver mail and chat to ' . $domain . ' directly.',
+			$detail);
 	}
 
 	private function directRecords(DnsRecordPlan $plan, string $domain, bool $fronted, string $mx_target): void {

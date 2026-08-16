@@ -20,9 +20,23 @@
  * partially-upgraded-federation behavior falls out with no special case, and the
  * refusal is request-level, issued before any handler code runs.
  *
- * @version 1.1
+ * A kind also declares WHO it can land on with `recipient` — a requirement over
+ * the facts `DirectRecipients::resolve()` reports, judged by the framework at
+ * every gate site, so no kind re-implements it and no kind can skip it:
+ *
+ *   (absent)        any existing recipient
+ *   "owner"         a single consenting user must resolve (chat needs a person
+ *                   whose conversation list the message lands in)
+ *   "email_store"   email delivered here must land in a local store and only a
+ *                   local store (mail declines a forwarding alias and falls back
+ *                   to SMTP, which runs both legs)
+ *
+ * @version 1.2
  * @changelog 1.1 - a leading-underscore key in a registry file is a JSON
  *   comment, not a kind; left in, the served set advertised one.
+ * @changelog 1.2 - declarative `recipient` requirement; an unknown requirement
+ *   word makes the declaration unusable (the kind refuses as unserved) rather
+ *   than silently meaning "anyone".
  */
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
@@ -33,6 +47,10 @@ class DirectKinds {
 	/** The canned gate name a kind declares instead of writing its own. */
 	const GATE_CONTACTS = 'contacts';
 
+	/** The recipient-requirement vocabulary a kind may declare. */
+	const RECIPIENT_OWNER       = 'owner';
+	const RECIPIENT_EMAIL_STORE = 'email_store';
+
 	/** @var array<string,array>|null request-scoped registry cache */
 	private static $registry = null;
 
@@ -40,7 +58,7 @@ class DirectKinds {
 	private static $handlers = array();
 
 	/**
-	 * kind => ['handler' => path, 'gate' => name|'', 'plugin' => name|'']
+	 * kind => ['handler' => path, 'gate' => name|'', 'recipient' => requirement|'', 'plugin' => name|'']
 	 *
 	 * Core entries first, plugin entries after, so a plugin can deliberately
 	 * take over a kind name the same way it can override a core signal.
@@ -110,6 +128,32 @@ class DirectKinds {
 	}
 
 	/**
+	 * Can this kind land on this resolved recipient? Judged wherever the gate
+	 * runs — live at Standard, at commit or unlock at the sealed tiers — and a
+	 * failure folds into the gate's own decline, so it is never a third answer.
+	 */
+	public static function recipientAcceptable(string $kind, array $resolved): bool {
+		$declaration = self::declaration($kind);
+		if ($declaration === null) {
+			return false;
+		}
+		return self::recipientMeets((string)($declaration['recipient'] ?? ''), $resolved);
+	}
+
+	/** One requirement word against one resolved-recipient fact set. */
+	public static function recipientMeets(string $requirement, array $resolved): bool {
+		switch ($requirement) {
+			case '':
+				return true;
+			case self::RECIPIENT_OWNER:
+				return (int)($resolved['user_id'] ?? 0) > 0;
+			case self::RECIPIENT_EMAIL_STORE:
+				return !empty($resolved['stores_email']);
+		}
+		return false;
+	}
+
+	/**
 	 * The handler for one kind, instantiated once per request.
 	 *
 	 * Returns null when the kind is not served or its handler file is missing or
@@ -172,12 +216,21 @@ class DirectKinds {
 			error_log('[DirectKinds] kind "' . $kind . '" declares no handler; skipped.');
 			return null;
 		}
+		$recipient = (string)($declaration['recipient'] ?? '');
+		if (!in_array($recipient, array('', self::RECIPIENT_OWNER, self::RECIPIENT_EMAIL_STORE), true)) {
+			// A requirement word this framework does not know cannot mean
+			// "anyone" — that would drop the kind's own precondition on a typo.
+			error_log('[DirectKinds] kind "' . $kind . '" declares unknown recipient requirement "'
+				. $recipient . '"; skipped.');
+			return null;
+		}
 		return array(
-			'kind'    => $kind,
-			'handler' => (string)$declaration['handler'],
-			'class'   => (string)($declaration['class'] ?? ''),
-			'gate'    => (string)($declaration['gate'] ?? ''),
-			'plugin'  => $plugin,
+			'kind'      => $kind,
+			'handler'   => (string)$declaration['handler'],
+			'class'     => (string)($declaration['class'] ?? ''),
+			'gate'      => (string)($declaration['gate'] ?? ''),
+			'recipient' => $recipient,
+			'plugin'    => $plugin,
 		);
 	}
 

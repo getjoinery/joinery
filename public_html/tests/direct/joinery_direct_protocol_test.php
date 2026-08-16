@@ -195,6 +195,15 @@ check(DirectCapability::parseKeyRecords(array('v=joinery9; k=k1; p=' . $public))
 check(DirectCapability::srvRecordValue('Direct.Example.com.', 443) === '0 5 443 direct.example.com',
 	'the published SRV value is canonical');
 
+check(DirectCapability::decodeSrvTarget('example.com', 'example.com') === 'example.com',
+	'an ordinary SRV target passes through the decode untouched');
+check(DirectCapability::decodeSrvTarget('relay1.getjoinery.com', 'example.com') === 'relay1.getjoinery.com',
+	'a relay target is not the domain, and stays exactly what the record says');
+check(DirectCapability::decodeSrvTarget('_dc-srv.0bd1a8c73c02._joinery._tcp.example.com', 'example.com') === 'example.com',
+	'Cloudflare\'s rewrite of a proxied target decodes back to the domain — the only host its edge certificate covers');
+check(DirectCapability::decodeSrvTarget('a_dc-srv.example.com', 'example.com') === 'a_dc-srv.example.com',
+	'the marker only counts as a leading label, not as a substring');
+
 // ---------------------------------------------------------------------------
 section('Decoy keys are valid, deterministic, and generation 1');
 // ---------------------------------------------------------------------------
@@ -244,6 +253,24 @@ if (in_array('mail', $served, true)) {
 } else {
 	check(true, 'mail is not served here (mailbox plugin inactive) — the registry says so cleanly');
 }
+
+// ---------------------------------------------------------------------------
+section('The declared recipient requirement, judged over resolver facts');
+// ---------------------------------------------------------------------------
+
+$facts_owner = array('exists' => true, 'user_id' => 42, 'stores_email' => false);
+$facts_store = array('exists' => true, 'user_id' => 0,  'stores_email' => true);
+
+check(DirectKinds::recipientMeets('', $facts_store),
+	'a kind that declares nothing accepts any existing recipient');
+check(DirectKinds::recipientMeets(DirectKinds::RECIPIENT_OWNER, $facts_owner)
+		&& !DirectKinds::recipientMeets(DirectKinds::RECIPIENT_OWNER, $facts_store),
+	'owner means a single consenting user resolves — a person to land on, not an email route');
+check(DirectKinds::recipientMeets(DirectKinds::RECIPIENT_EMAIL_STORE, $facts_store)
+		&& !DirectKinds::recipientMeets(DirectKinds::RECIPIENT_EMAIL_STORE, $facts_owner),
+	'email_store means email lands in a local store with no forwarding leg');
+check(!DirectKinds::recipientMeets('unknown_word', $facts_store),
+	'an unknown requirement word never degrades to "anyone"');
 
 // ---------------------------------------------------------------------------
 section('The typed envelope handlers see');
