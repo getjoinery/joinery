@@ -53,31 +53,43 @@ function lists_logic(array $input): LogicResult {
 				return LogicResult::error($errormsg);
 			}	
 		}
-		
-		//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
-		if($session->get_user_id()){ 
-			$user = new User($session->get_user_id(), TRUE);
+
+		//NOTHING TICKED IS NOT A SUBSCRIPTION - SAY SO BEFORE AN ACCOUNT GETS CREATED FOR IT
+		$selected_lists = $_POST['new_list_subscribes'] ?? array();
+		if(empty($selected_lists)){
+			$page_vars['messages'] = array(array(
+				'message_type' => 'warn',
+				'message_title' => 'Nothing selected',
+				'message' => 'Check at least one list to subscribe to.',
+			));
 		}
-		else if(!$user = User::GetByEmail($_POST['usr_email'])){
-			$data = array(
-				'usr_first_name' => $_POST['usr_first_name'],
-				'usr_last_name' => $_POST['usr_last_name'],
-				'usr_email' => $_POST['usr_email'],
-				'usr_nickname' => $_POST['usr_nickname'],
-				'usr_timezone' => $_POST['usr_timezone'],
-				'password' => $_POST['usr_password'],
-				'send_emails' => false
-			);
-			$user = User::CreateNew($data);
-			if (!empty($_POST['privacy'])) {
-				$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
-				$user->save();
+		else{
+			//IF USER IS LOGGED IN, LOAD THEIR INFO...IF NOT SEE IF THERE IS EXISTING USER...IF NOT CREATE ONE
+			if($session->get_user_id()){
+				$user = new User($session->get_user_id(), TRUE);
 			}
+			else if(!$user = User::GetByEmail($_POST['usr_email'])){
+				//A COMPACT SIGNUP FORM ASKS ONLY FOR AN EMAIL - NAME THEM FROM IT
+				$guessed = User::guessNameFromEmail($_POST['usr_email'] ?? '');
+				$data = array(
+					'usr_first_name' => !empty($_POST['usr_first_name']) ? $_POST['usr_first_name'] : $guessed['first_name'],
+					'usr_last_name' => !empty($_POST['usr_last_name']) ? $_POST['usr_last_name'] : $guessed['last_name'],
+					'usr_email' => $_POST['usr_email'] ?? '',
+					'usr_nickname' => $_POST['usr_nickname'] ?? '',
+					'usr_timezone' => $_POST['usr_timezone'] ?? '',
+					'password' => $_POST['usr_password'] ?? '',
+					'send_emails' => false
+				);
+				$user = User::CreateNew($data);
+				if (!empty($_POST['privacy'])) {
+					$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
+					$user->save();
+				}
+			}
+			$page_vars['user'] = $user;
+
+			$page_vars['messages'] = $user->add_user_to_mailing_lists($selected_lists);
 		}
-		$page_vars['user'] = $user;
-
-		$page_vars['messages'] = $user->add_user_to_mailing_lists($_POST['new_list_subscribes']);
-
 	}
 
 	

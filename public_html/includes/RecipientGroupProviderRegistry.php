@@ -55,6 +55,8 @@ class RecipientGroupProviderRegistry {
     public static function registerCoreDefaults(): void {
         require_once(PathHelper::getIncludePath('includes/recipient_group_providers/GroupRecipientProvider.php'));
         self::register(new GroupRecipientProvider());
+        require_once(PathHelper::getIncludePath('includes/recipient_group_providers/MailingListRecipientProvider.php'));
+        self::register(new MailingListRecipientProvider());
         // The event + event_waiting_list providers register from event_manager's
         // serve.php when that plugin is active.
     }

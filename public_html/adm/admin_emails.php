@@ -31,11 +31,12 @@
 	$search_criteria = array();
 	$search_criteria['status'] = Email::EMAIL_QUEUED;
 
+	// Only the count of queued emails is wanted here, so no sort and no paging.
 	$emails = new MultiEmail(
 		$search_criteria,
-		array($asort=>$asdirection),
-		$numperpage,
-		$aoffset,
+		NULL,
+		NULL,
+		NULL,
 		'OR');
 	$numqueued = $emails->count_all();
 
