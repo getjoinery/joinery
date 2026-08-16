@@ -243,7 +243,14 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// leave the server — so it cannot be the one that slips through
 		// unchecked. Turning either OFF is always allowed: withdrawing consent
 		// must never be harder than giving it.
-		if (($new_ai && !$old_ai) || ($new_cloud && !$old_cloud)) {
+		// Only on an actual grant to an EXISTING domain, for the same reason the
+		// level gate above says: choosing this while creating a domain is an
+		// initial choice, not a change, and there is no mail under it yet for the
+		// consent to expose. Stepping up here also cost the operator the domain
+		// entirely — the POST is dropped by the redirect, and a new domain has no
+		// key to come back to, so the return URL carried id=0 and landed on a row
+		// that never existed.
+		if ($domain->key && (($new_ai && !$old_ai) || ($new_cloud && !$old_cloud))) {
 			// Same ceremony the level change above uses: redirect to the step-up,
 			// return to this editor, and let the operator re-submit now confirmed.
 			// BOTH flags ride the return URL, so whichever boxes they ticked are
@@ -474,11 +481,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// with nothing after it, or a stale hidden field, arrives as set. Guarding on
 	// isset() alone built an object for a row that does not exist and handed it to
 	// the editor as though it were one.
-	if (!empty($input['ied_inbound_email_domain_id'])) {
+	$asked_for_domain = !empty($input['ied_inbound_email_domain_id']);
+	if ($asked_for_domain) {
 		$edit_domain = new InboundEmailDomain($input['ied_inbound_email_domain_id'], TRUE);
 		// A key survives only a load that found something, so this is also the
-		// "that domain is gone" branch — fall through to the add form rather than
-		// editing a record that is not there.
+		// "that domain is gone" branch.
 		if (!$edit_domain->key) {
 			$edit_domain = null;
 		} elseif ($edit_domain->get('ied_is_imap_source')) {
@@ -491,6 +498,20 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// the add/edit form is served here; any bare visit bounces to Accounts.
 	$is_add = (($input['action'] ?? '') === 'add');
 	if (!$edit_domain && !$is_add) {
+		// Asking for a domain by id and getting nothing is a different event from
+		// arriving with no id at all, and it must not look the same. A bare visit
+		// belongs on Accounts; a dead id means something sent the operator here
+		// with a link to a domain that is not there, and bouncing them silently
+		// reads as "my save did nothing".
+		if ($asked_for_domain) {
+			$session->save_message(new DisplayMessage(
+				'That domain could not be found — it may have been deleted. Nothing was changed.',
+				'Domain not found',
+				'~/plugins/mailbox/admin/~',
+				DisplayMessage::MESSAGE_ERROR,
+				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+			));
+		}
 		return LogicResult::redirect($accounts_url);
 	}
 
