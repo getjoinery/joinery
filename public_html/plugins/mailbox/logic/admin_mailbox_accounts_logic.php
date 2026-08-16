@@ -11,7 +11,9 @@
  * through the existing per-object editors (domain, alias, IMAP) which highlight
  * the Accounts tab.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - Reports which OAuth providers have app credentials, so the
+ *   page can offer the setup step rather than a Connect button that cannot work.
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -109,6 +111,21 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
 	$setup_hints = mailbox_setup_hints($tree);
 
+	// Connecting a Gmail/Microsoft feed sends the operator to that provider to
+	// approve THIS deployment's own registered app — so it cannot even begin until
+	// the app credentials have been entered once. Knowing which providers are ready
+	// lets the page offer that missing step instead of a button that can only fail.
+	$oauth_providers = array();
+	if ($can_imap) {
+		require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+		foreach (OAuth2ProviderRegistry::all() as $pkey => $pclass) {
+			$oauth_providers[$pkey] = array(
+				'label'      => $pclass::getLabel(),
+				'configured' => $pclass::isConfigured(),
+			);
+		}
+	}
+
 	return LogicResult::render(array(
 		'session'            => $session,
 		'settings'           => $settings,
@@ -117,6 +134,7 @@ function admin_mailbox_accounts_logic(array $input): LogicResult {
 		'deleted_domains'    => $deleted_domains,
 		'can_imap'           => $can_imap,
 		'presets'            => InboundImapAccount::PRESETS,
+		'oauth_providers'    => $oauth_providers,
 		'fetch_task_warning' => $fetch_task_warning,
 	));
 }

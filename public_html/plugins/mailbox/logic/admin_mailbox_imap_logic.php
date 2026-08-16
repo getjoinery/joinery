@@ -6,7 +6,10 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Failures no longer arrive as green announcements, and a
+ *   connect attempt for a provider with no app credentials leads to the page
+ *   that supplies them instead of reporting a dead end.
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -51,25 +54,31 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 		if ($action === 'test' || $action === 'poll_now') {
 			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 			$ingestor = new ImapIngestor($account);
+			// A green banner saying the connection failed is a contradiction the eye
+			// reads before the words, so every outcome carries its own level.
+			$level = SessionControl::MESSAGE_ANNOUNCEMENT;
 			if ($action === 'test') {
 				$res = $ingestor->testConnection();
 				$msg = $res['ok'] ? ('Connection OK. ' . $res['message']) : ('Connection failed: ' . $res['message']);
+				$level = $res['ok'] ? SessionControl::MESSAGE_ANNOUNCEMENT : SessionControl::MESSAGE_ERROR;
 				$account->recordStatus($res['ok'] ? ('Test OK: ' . $res['message']) : ('Test failed: ' . $res['message']));
 			} else {
 				if (!$account->isConnectable()) {
-					$msg = 'Account is not fully credentialed yet — connect/authorize it first.';
+					$msg = 'This mailbox has not been connected yet — connect it first, then fetch.';
+					$level = SessionControl::MESSAGE_WARNING;
 				} else {
 					try {
 						$res = $ingestor->poll(50);
 						$msg = 'Fetch complete. ' . ($res['status'] ?? '');
 					} catch (Throwable $e) {
 						$msg = 'Fetch error: ' . $e->getMessage();
+						$level = SessionControl::MESSAGE_ERROR;
 						$account->recordStatus('Fetch error: ' . substr($e->getMessage(), 0, 400));
 					}
 				}
 			}
 			$ingestor->close();
-			return _imap_msg_redirect($session, $msg, $list_url);
+			return _imap_msg_redirect($session, $msg, $list_url, $level);
 		}
 
 		if ($action === 'connect') {
@@ -89,10 +98,27 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
  */
 function _imap_begin_consent(InboundImapAccount $account, $session, string $list_url): LogicResult {
 	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
+	require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
 
 	$providerKey = $account->getOAuthProviderKey();
 	if (!$account->isOAuth() || !$providerKey) {
-		return _imap_msg_redirect($session, 'This account does not use OAuth.', $list_url);
+		return _imap_msg_redirect($session, 'This account does not use OAuth.', $list_url,
+			SessionControl::MESSAGE_WARNING);
+	}
+
+	// Consent means sending the operator to the provider to approve this site's own
+	// registered app. With no app credentials there is nothing to approve, so send
+	// them to the one page that fixes it rather than back to a list with an error.
+	$providerClass = OAuth2ProviderRegistry::get($providerKey);
+	if ($providerClass !== null && !$providerClass::isConfigured()) {
+		$label = $providerClass::getLabel();
+		return _imap_msg_redirect($session,
+			$label . ' has to know about this site before it will let anyone sign in to it. '
+				. 'Enter the ' . $label . ' app details here once, then come back and connect this mailbox.',
+			'/admin/admin_oauth_providers?return=' . urlencode($list_url)
+				. '#oauth-' . urlencode($providerKey),
+			SessionControl::MESSAGE_WARNING,
+			'One-time setup');
 	}
 
 	// One consent grants BOTH directions (§6 unified onboarding): IMAP read for the
@@ -119,7 +145,8 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 		);
 		return LogicResult::redirect($consentUrl);
 	} catch (Throwable $e) {
-		return _imap_msg_redirect($session, 'Could not start the connect flow: ' . $e->getMessage(), $list_url);
+		return _imap_msg_redirect($session, 'Could not start the connect flow: ' . $e->getMessage(), $list_url,
+			SessionControl::MESSAGE_ERROR);
 	}
 }
 
@@ -133,12 +160,20 @@ function _imap_has_reference_backed(int $account_id): bool {
 	return (bool)$stmt->fetchColumn();
 }
 
-function _imap_msg_redirect($session, string $message, string $url): LogicResult {
+/**
+ * Redirect carrying a flash message. The level is explicit because a failure
+ * dressed as an announcement reads as success — the banner is green. The message
+ * is pinned to the page being redirected to, so a message that leads somewhere
+ * else (say, to enter OAuth app details) still arrives with the operator.
+ */
+function _imap_msg_redirect($session, string $message, string $url,
+		int $level = SessionControl::MESSAGE_ANNOUNCEMENT, string $title = 'IMAP Accounts'): LogicResult {
+	$path = parse_url($url, PHP_URL_PATH) ?: $url;
 	$session->save_message(new DisplayMessage(
 		$message,
-		'IMAP Accounts',
-		'~/plugins/mailbox/admin/~',
-		DisplayMessage::MESSAGE_ANNOUNCEMENT,
+		$title,
+		'~' . preg_quote($path, '~') . '~',
+		$level,
 		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 	));
 	return LogicResult::redirect($url);

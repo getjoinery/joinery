@@ -4,13 +4,16 @@
  *
  * Permission 10. Every provider in the registry renders from its own
  * configFields() declaration, so a new provider appears here with no edit to
- * this file. Client ids are plain settings; client secrets are written through
- * SecretBox and never rendered back (a "set" affordance is shown instead of the
- * value). The read-only Redirect URI is the exact string to paste into each
- * provider's console — derived from the same helper exchangeCode() uses, so it
- * matches byte-for-byte.
+ * this file. The fields themselves are drawn by SettingsFieldRenderer, since
+ * they are declared settings; this page decides which ones to show, in what
+ * order, under which heading, and with which registration guide beside them.
+ * Client ids are plain settings; client secrets are written through SecretBox
+ * and never rendered back. The read-only Redirect URI is the exact string to
+ * paste into each provider's console — derived from the same helper
+ * exchangeCode() uses, so it matches byte-for-byte.
  *
- * @version 2.0
+ * @version 2.1
+ * @changelog 2.1 - Fields come from SettingsFieldRenderer. Hand-drawing them stopped the whole page on any deployment with debug on, because these settings are declared in settings.json
  * @changelog 2.0 - Registry-driven fields and per-provider registration guides; the previous hardcoded field list omitted DigitalOcean and DNSimple, leaving them unconfigurable anywhere
  */
 
@@ -20,6 +23,8 @@
     require_once(PathHelper::getIncludePath('adm/logic/admin_oauth_providers_logic.php'));
     require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Client.php'));
     require_once(PathHelper::getIncludePath('includes/oauth/OAuth2ProviderRegistry.php'));
+    require_once(PathHelper::getIncludePath('includes/SettingsDeclarations.php'));
+    require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
     $page_vars = process_logic(admin_oauth_providers_logic(array_merge($_GET, $_POST)));
 
@@ -27,6 +32,7 @@
     $settings = Globalvars::get_instance();
 
     $error_message = $page_vars['error_message'] ?? null;
+    $return_url    = $page_vars['return_url'] ?? '';
     $redirect_uri  = OAuth2Client::redirectUri();
 
     $page = new AdminPage();
@@ -68,32 +74,11 @@ field carries a link explaining where to register the app.</p>
     $formwriter = $page->getFormWriter('form1');
     $formwriter->begin_form();
 
-    // Render a client-secret field. When a secret is already stored we show a
-    // masked "saved" note with an Edit link and keep the real password input
-    // hidden until the admin opts to replace it. A blank submit keeps the stored
-    // value (see the logic), so hiding the field is purely cosmetic.
-    $secret_field = function ($input_name, $label, $is_set, $options = []) use ($formwriter) {
-        if (!$is_set) {
-            $formwriter->passwordinput($input_name, $label, array_merge([
-                'autocomplete' => 'new-password',
-                'helptext'     => 'Not set',
-            ], $options));
-            return;
-        }
-        echo '<div id="' . htmlspecialchars($input_name) . '_note" class="form-group">';
-        echo '<label>' . htmlspecialchars($label) . '</label>';
-        echo '<div style="display:flex;align-items:center;gap:.75rem;">';
-        echo '<span style="color:#2e7d32;">•••••••• saved</span>';
-        echo '<button type="button" class="oauth-secret-edit" data-target="' . htmlspecialchars($input_name) . '"'
-           . ' style="background:none;border:none;color:#1565c0;cursor:pointer;padding:0;text-decoration:underline;">Edit</button>';
-        echo '</div></div>';
-        echo '<div id="' . htmlspecialchars($input_name) . '_wrap" style="display:none;">';
-        $formwriter->passwordinput($input_name, $label, array_merge([
-            'autocomplete' => 'new-password',
-            'helptext'     => 'Enter a new secret to replace the stored one. Leave blank to keep the current one.',
-        ], $options));
-        echo '</div>';
-    };
+    // Whoever sent the admin here is waiting for one of these credentials; saving
+    // hands them back rather than ending the errand on this page.
+    if ($return_url !== '') {
+        $formwriter->hiddeninput('return', '', array('value' => $return_url));
+    }
 
     // One block per provider, from the registry. The registration guide hangs off
     // the provider's first field, so "how do I get this?" is next to the thing it
@@ -105,7 +90,10 @@ field carries a link explaining where to register the app.</p>
         }
         $first_provider = false;
 
-        echo '<h3>' . htmlspecialchars($provider_class::getLabel()) . ' ' . (isset($configured[$key])
+        // Anchored by key so a feature that needs this provider can link straight
+        // at it (e.g. an unconnectable Gmail feed on the mailbox Accounts page).
+        echo '<h3 id="oauth-' . htmlspecialchars($key) . '">'
+            . htmlspecialchars($provider_class::getLabel()) . ' ' . (isset($configured[$key])
             ? '<span style="font-size:.7em;color:#2e7d32;">(configured)</span>'
             : '<span style="font-size:.7em;color:#b71c1c;">(not configured)</span>') . '</h3>';
 
@@ -114,16 +102,43 @@ field carries a link explaining where to register the app.</p>
             $label   = $spec['label'] ?? $setting;
             $options = [];
             if (!empty($spec['help'])) {
-                $options['helptext'] = $spec['help'];
+                // Added to whatever the manifest says rather than replacing it:
+                // the declaration owns the wording, the provider adds its own note.
+                $options['helptext_append'] = $spec['help'];
             }
             if ($guide !== null) {
                 $options['help_modal'] = $guide;
                 $guide = null;
             }
+            // These are declared settings, so the field belongs to the manifest
+            // and is drawn by the one renderer that knows how — the page supplies
+            // only the context around it. A provider whose settings are declared
+            // nowhere still has to be configurable, so it falls back to a
+            // hand-drawn field, which the manifest rule permits.
+            $declaration = SettingsDeclarations::get($setting);
+            $is_secret = !empty($declaration['secret']) || !empty($spec['secret']);
+            if ($is_secret) {
+                // Credentials here are written by OAuth2ProviderConfig, not
+                // SettingsWriter, so the renderer's Clear box would do nothing.
+                // (Only a secret field has one; offering the option elsewhere is
+                // a field option nothing reads, which FormWriter refuses.)
+                $options['clearable'] = false;
+            }
+            if ($declaration !== null) {
+                SettingsFieldRenderer::renderGroup($formwriter, $declaration['_group'], [
+                    'only'          => [$setting],
+                    'field_options' => [$setting => $options],
+                ]);
+                continue;
+            }
 
-            if (!empty($spec['secret'])) {
-                $is_set = (string)$settings->get_setting($setting, false, true) !== '';
-                $secret_field($setting, $label, $is_set, $options);
+            unset($options['helptext_append']);
+            if (!empty($spec['help'])) {
+                $options['helptext'] = $spec['help'];
+            }
+            if ($is_secret) {
+                SettingsFieldRenderer::secretField($formwriter, $setting, $label,
+                    $settings->get_setting($setting, false, true), $options);
                 continue;
             }
             $formwriter->textinput($setting, $label, array_merge([
@@ -135,19 +150,6 @@ field carries a link explaining where to register the app.</p>
     $formwriter->submitbutton('submit_button', 'Save');
     $formwriter->end_form();
 ?>
-
-<script>
-// Reveal a hidden client-secret input when its "Edit" link is clicked.
-document.querySelectorAll('.oauth-secret-edit').forEach(function (btn) {
-    btn.addEventListener('click', function () {
-        var target = btn.getAttribute('data-target');
-        var note = document.getElementById(target + '_note');
-        var wrap = document.getElementById(target + '_wrap');
-        if (note) { note.style.display = 'none'; }
-        if (wrap) { wrap.style.display = ''; }
-    });
-});
-</script>
 
 <?php
     $page->end_box();

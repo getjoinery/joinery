@@ -13,7 +13,9 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - An OAuth feed whose provider has no app credentials offers the
+ *   setup step instead of a Connect button that cannot start.
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -70,8 +72,25 @@ $mode_label = function ($alias) {
 // Connect/Reconnect affordance for an OAuth feed: "Connect" when never connected,
 // "Reconnect" only when the stored token is known-broken, and nothing at all when
 // the connection is healthy.
-$connect_button = function ($imap) use ($imap_action) {
+//
+// Connecting sends the operator to Google/Microsoft to approve this deployment's
+// own registered app. Until those app credentials exist, consent cannot start at
+// all — so the button becomes the step that is actually missing rather than one
+// that can only come back with an error.
+$connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 	if (!$imap || !$imap->isOAuth()) { return; }
+	$provider_key = $imap->getOAuthProviderKey();
+	$provider = $oauth_providers[$provider_key] ?? null;
+	if ($provider && !$provider['configured']) {
+		echo '<a class="btn btn-sm btn-warning"'
+			. ' href="/admin/admin_oauth_providers?return='
+			. htmlspecialchars(urlencode('/plugins/mailbox/admin/admin_mailbox_accounts'))
+			. '#oauth-' . htmlspecialchars(urlencode($provider_key)) . '"'
+			. ' title="' . htmlspecialchars($provider['label']) . ' has to know about this site before it will '
+			. 'let anyone sign in to it. That is a one-time setup, done here.">Set up '
+			. htmlspecialchars($provider['label']) . ' access</a>';
+		return;
+	}
 	if (!$imap->hasOAuthToken()) {
 		$label = 'Connect';
 	} elseif ($imap->needsReauth()) {
