@@ -2128,6 +2128,51 @@ fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
 }
 
 #[test]
+fn a_file_moved_here_and_deleted_there_is_rescued_from_where_it_actually_is() {
+    // The delete loses to the move, so the file goes back up at the place the
+    // user put it. The rescue is an upload of a *new* server entity, and the
+    // executor has to read the bytes off this disk to send them.
+    //
+    // It looked for them at the last agreed placement — which is precisely the
+    // empty spot the user moved the file out of. Finding nothing there it
+    // reported the operation overtaken and dropped it, leaving the entry
+    // untouched, so the next pass planned the same rescue and the pass after
+    // that. No error, no queued work, no end: the client never went quiet
+    // again. Eight of a hundred and sixty random workloads ended that way.
+    let world = World::new(84, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Archive");
+    laptop.fs.user_write("note.txt", b"worth keeping");
+    committed.note("note.txt", b"worth keeping");
+    assert!(world.settle().is_some());
+    assert!(desktop.fs.peek("note.txt").is_some());
+
+    // The laptop goes quiet and files the note away.
+    laptop.net.set_faults(NetFaults {
+        drop_before: u64::MAX,
+        ..NetFaults::none()
+    });
+    laptop.fs.user_rename("note.txt", "Archive/note.txt");
+
+    // Meanwhile the desktop deletes it.
+    desktop.fs.user_remove("note.txt");
+    world.pass(desktop);
+
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it has to stop, not plan forever");
+
+    assert_invariants(&world, &committed);
+    assert!(
+        world.server.tree().contains_key("Archive/note.txt"),
+        "the rescued file should be on the server where the user put it: {:?}",
+        world.server.tree().keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
 fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
     // The laptop hears about a file and its download does not get through. The
     // file is then deleted on the server, so there is nothing left to fetch and

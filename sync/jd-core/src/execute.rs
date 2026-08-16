@@ -1014,14 +1014,60 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             "the entry is no longer tracked".into(),
         ));
     };
-    let path = match local_path(env, &entry)? {
-        Placed::At(p) => p,
-        Placed::Not(why) => return Ok(why.outcome()),
+    // Where the bytes are on this computer.
+    //
+    // Usually the agreed placement, and for an ordinary upload that is right.
+    // For one that rescues a file the server deleted it is exactly wrong: the
+    // rescue happens *because* the user moved the file, so the agreed placement
+    // is the empty spot they moved it out of. Looking only there finds nothing,
+    // the operation is reported overtaken and dropped, the entry is left
+    // untouched — and the next pass plans the same rescue, and the pass after
+    // that. No error, no queued work, no end; the client simply never goes
+    // quiet again.
+    //
+    // The plan's placement is where the file actually is in every case that
+    // produces one: a local creation names the path it was found at, and both
+    // rescue rules name where the user moved it to. So that is tried first, and
+    // the agreed placement stays the fallback.
+    // ...but only if the file sitting there is ours. A placement another live
+    // entry already claims holds that entry's bytes, and sending them up under
+    // this entry's rescue would put one file on the server twice under two
+    // identities — the expensive way to be wrong, and invisible afterwards.
+    let planned = match as_new.as_ref() {
+        Some(p) => {
+            let claimed_by_another = env.store.every_entry()?.into_iter().any(|e| {
+                e.id != op.entity
+                    && !e.remote_deleted
+                    && e.id.entity_type == EntityType::File
+                    && e.local_placement() == p
+            });
+            if claimed_by_another {
+                None
+            } else {
+                match path_for(env, p)? {
+                    Placed::At(candidate) => {
+                        env.vfs.fingerprint(&candidate)?.map(|fp| (candidate, fp))
+                    }
+                    Placed::Not(_) => None,
+                }
+            }
+        }
+        None => None,
     };
-    let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
-        return Ok(OpOutcome::Overtaken(
-            "the file is no longer on this computer".into(),
-        ));
+    let (path, fingerprint) = match planned {
+        Some(found) => found,
+        None => {
+            let path = match local_path(env, &entry)? {
+                Placed::At(p) => p,
+                Placed::Not(why) => return Ok(why.outcome()),
+            };
+            let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
+                return Ok(OpOutcome::Overtaken(
+                    "the file is no longer on this computer".into(),
+                ));
+            };
+            (path, fingerprint)
+        }
     };
 
     let sha = match env

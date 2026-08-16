@@ -285,44 +285,40 @@ private static function UcName($string) {
 
 	}
 
-	//ALL CONTACT TYPE FUNCTIONS BELOW ARE UNUSED
-	
 	//RETURNS AN ARRAY OF CONTACT TYPES THE USER HAS UNSUBSCRIBED FROM
+	//A USER WHO HAS NEVER UNSUBSCRIBED FROM ANYTHING HAS NO STORED VALUE, WHICH
+	//IS THE SAME ANSWER AS AN EMPTY LIST - SAY SO IN ONE PLACE SO EVERY CALLER
+	//BELOW IS HANDED A REAL ARRAY
 	public function get_contact_type_unsubscribes(){
-		return json_decode($this->get('usr_contact_type_unsubscribes'));
+		$unsubscribes = json_decode((string)$this->get('usr_contact_type_unsubscribes'));
+		return is_array($unsubscribes) ? $unsubscribes : array();
 	}
-	
+
 	//WILL RETURN TRUE IF THE USER IS UNSUBSCRIBED FROM THAT CONTACT TYPE
 	public function is_unsubscribed_to_contact_type($contact_type_id){
-		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
-		if(in_array($contact_type_id, $unsubscribes)){
-			return true;
-		}
-		else{
-			return false;
-		}
+		return in_array($contact_type_id, $this->get_contact_type_unsubscribes());
 	}
-	
+
 	//ADDS AN ENTRY TO usr_contact_type_unsubscribes
 	public function unsubscribe_from_contact_type($contact_type_id){
-		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
+		$unsubscribes = $this->get_contact_type_unsubscribes();
 		if(!in_array($contact_type_id, $unsubscribes)){
 			$unsubscribes[] = $contact_type_id;
 		}
 		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
-		
+
 		return true;
 	}
-	
+
 	//REMOVES THE AN ENTRY FROM usr_contact_type_unsubscribes
 	public function subscribe_to_contact_type($contact_type_id){
-		$unsubscribes = json_decode($this->get('usr_contact_type_unsubscribes'));
+		$unsubscribes = $this->get_contact_type_unsubscribes();
 		if(($key = array_search($contact_type_id, $unsubscribes)) !== false){
 			unset($unsubscribes[$key]);
-		}		
-		$this->set('usr_contact_type_unsubscribes', json_encode($unsubscribes));
+		}
+		$this->set('usr_contact_type_unsubscribes', json_encode(array_values($unsubscribes)));
 		$this->set('usr_contact_preference_last_changed', 'NOW()');
 		$this->save();
 		
