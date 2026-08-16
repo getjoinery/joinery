@@ -785,7 +785,10 @@ fn make_room(
     let Some(fingerprint) = env.vfs.fingerprint(path)? else {
         return Ok(());
     };
-    let existing = match env.store.cached_hash(fingerprint)? {
+    let existing = match env
+        .store
+        .cached_hash(fingerprint, env.vfs.personality().mtime_granularity_ns)?
+    {
         Some(h) => h,
         None => env.vfs.hash(path)?,
     };
@@ -981,8 +984,12 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Err(e) => return Err(e.into()),
     };
 
-    env.store
-        .cache_hash(fingerprint, &arrived.plain.sha256, Some(op.entity))?;
+    env.store.cache_hash(
+        fingerprint,
+        &arrived.plain.sha256,
+        Some(op.entity),
+        (env.now_ms)().saturating_mul(1_000_000),
+    )?;
 
     let mut entry = entry;
     entry.remote_content = Some(arrived.cipher.clone());
@@ -1017,11 +1024,19 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         ));
     };
 
-    let sha = match env.store.cached_hash(fingerprint)? {
+    let sha = match env
+        .store
+        .cached_hash(fingerprint, env.vfs.personality().mtime_granularity_ns)?
+    {
         Some(s) => s,
         None => {
             let s = env.vfs.hash(&path)?;
-            env.store.cache_hash(fingerprint, &s, Some(op.entity))?;
+            env.store.cache_hash(
+                fingerprint,
+                &s,
+                Some(op.entity),
+                (env.now_ms)().saturating_mul(1_000_000),
+            )?;
             s
         }
     };
@@ -1716,7 +1731,12 @@ fn move_local(
         let moving = env
             .vfs
             .fingerprint(&from)?
-            .and_then(|fp| env.store.cached_hash(fp).ok().flatten());
+            .and_then(|fp| {
+                env.store
+                    .cached_hash(fp, env.vfs.personality().mtime_granularity_ns)
+                    .ok()
+                    .flatten()
+            });
         make_room(env, &dest, moving.as_deref())?;
         match env.vfs.rename(&from, &dest) {
             Ok(()) => {}
@@ -1837,6 +1857,27 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     };
     let path = match local_path(env, &entry)? {
         Placed::At(p) => p,
+        // No chain of folders left to build a path from, so there is provably
+        // nothing on this disk to put in the trash — and the record has to go
+        // with that conclusion rather than survive it. Returning here and
+        // leaving the entry is how a device ends up planning the same trash
+        // every pass forever: the operation is dropped as overtaken, nothing
+        // changes, and the entry keeps saying it is waiting on work that can
+        // never happen.
+        //
+        // An unplugged drive is the opposite case and keeps waiting. The whole
+        // point of telling the two apart is that a volume that is not there
+        // must never be read as "every file is gone".
+        Placed::Not(Unplaced::AncestorMissing) => {
+            if op.entity.entity_type == EntityType::Folder {
+                env.store.delete_subtree(op.entity)?;
+            } else {
+                env.store.delete_entry(op.entity)?;
+            }
+            return Ok(OpOutcome::Overtaken(
+                "the folder it was in is no longer tracked".into(),
+            ));
+        }
         Placed::Not(why) => return Ok(why.outcome()),
     };
     if op.entity.entity_type == EntityType::Folder {
@@ -1927,11 +1968,19 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             "the file is no longer on this computer".into(),
         ));
     };
-    let local_sha = match env.store.cached_hash(fingerprint)? {
+    let local_sha = match env
+        .store
+        .cached_hash(fingerprint, env.vfs.personality().mtime_granularity_ns)?
+    {
         Some(s) => s,
         None => {
             let s = env.vfs.hash(&path)?;
-            env.store.cache_hash(fingerprint, &s, Some(op.entity))?;
+            env.store.cache_hash(
+                fingerprint,
+                &s,
+                Some(op.entity),
+                (env.now_ms)().saturating_mul(1_000_000),
+            )?;
             s
         }
     };

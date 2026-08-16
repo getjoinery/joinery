@@ -122,7 +122,25 @@ pub fn to_local_name(remote_name: &str, p: &Personality) -> LocalName {
         return LocalName::Unsyncable(UnsyncableReason::ReservedPrefix);
     }
 
-    let normalized = nfc(remote_name);
+    // Composing is for a disk that decomposes anyway: there, the composed form
+    // is what `read_dir` hands back, so recording it keeps the engine's idea of
+    // the name and the disk's in step.
+    //
+    // On a disk that keeps the bytes it is given, composing invents a rename
+    // nobody performs. The server holds `cafe` + combining-acute; this says the
+    // local name should be the composed spelling; nothing renames the file,
+    // because renaming a user's file to respell it is not something the engine
+    // does. Every scan then finds the file missing from where it was recorded,
+    // pairs it by content at the decomposed path, and reads that as the user
+    // moving it — so the client asks the server to rename the file to the name
+    // the server already has. The server answers `name_taken`, against the file
+    // itself, and the client waits for a sibling that does not exist. The soak
+    // rig held nineteen files that way, one op per accented name, forever.
+    let normalized = if p.decomposes_unicode {
+        nfc(remote_name)
+    } else {
+        remote_name.to_string()
+    };
     let mut escaped = String::with_capacity(normalized.len());
     let mut reason: Option<EscapeReason> = None;
 
@@ -332,6 +350,44 @@ mod tests {
                 LocalName::AsIs("Report.txt".into())
             );
         }
+    }
+
+    #[test]
+    fn a_decomposed_server_name_is_left_alone_where_the_disk_will_keep_it() {
+        // The engine may only ask for a spelling the disk will still be holding
+        // when it looks again. ext4, APFS and NTFS keep what they are given, so
+        // the server's spelling is the local name and there is nothing to map.
+        //
+        // Composing here is not cosmetic. Nothing renames the file to match, so
+        // the next scan finds it missing from the composed path, pairs it by
+        // content at the decomposed one, and calls that a move by the user — and
+        // the client asks the server to rename the file to the name it already
+        // has. That comes back `name_taken`, against the file itself, and is
+        // retried until somebody looks.
+        for p in [
+            Personality::linux(),
+            Personality::macos(),
+            Personality::windows(),
+        ] {
+            assert_eq!(
+                to_local_name("cafe\u{301} notes.txt", &p),
+                LocalName::AsIs("cafe\u{301} notes.txt".into()),
+                "a preserving volume gets the server's spelling"
+            );
+        }
+    }
+
+    #[test]
+    fn a_decomposing_volume_is_told_the_composed_name() {
+        // The other half: HFS+ will decompose whatever it is handed and hand
+        // back the decomposed form, which `OsVfs` composes on the way in. The
+        // composed spelling is therefore the one that matches what the engine
+        // will see, and recording it is what stops the round trip reading as a
+        // rename.
+        assert_eq!(
+            to_local_name("cafe\u{301} notes.txt", &Personality::hfs_plus()),
+            LocalName::AsIs("caf\u{e9} notes.txt".into())
+        );
     }
 
     #[test]

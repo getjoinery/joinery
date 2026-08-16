@@ -31,7 +31,7 @@ use rusqlite::{params, Connection, OptionalExtension};
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// Bumped when the schema changes in a way an older engine could misread.
-pub const SCHEMA_VERSION: i64 = 3;
+pub const SCHEMA_VERSION: i64 = 4;
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -195,6 +195,10 @@ impl Store {
                 sha256      TEXT NOT NULL,
                 entity_type TEXT,
                 server_id   INTEGER,
+                -- When the hash was taken. A fingerprint only becomes evidence
+                -- once the file is older than the clock's resolution; see
+                -- `cached_hash`.
+                cached_at_ns INTEGER,
                 PRIMARY KEY (file_id, size, mtime_ns)
             );
 
@@ -223,6 +227,7 @@ impl Store {
         ] {
             store.add_column_if_missing("entries", column, ddl)?;
         }
+        store.add_column_if_missing("local_index", "cached_at_ns", "INTEGER")?;
         match store.get_meta("schema_version")? {
             None => store.set_meta("schema_version", &SCHEMA_VERSION.to_string())?,
             Some(v) => {
@@ -913,14 +918,17 @@ impl Store {
         fp: jd_vfs::Fingerprint,
         sha256: &str,
         entity: Option<EntityId>,
+        now_ns: u64,
     ) -> StoreResult<()> {
         self.conn.execute(
-            "INSERT INTO local_index (file_id, size, mtime_ns, sha256, entity_type, server_id)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "INSERT INTO local_index
+                (file_id, size, mtime_ns, sha256, entity_type, server_id, cached_at_ns)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(file_id, size, mtime_ns) DO UPDATE SET
                 sha256 = excluded.sha256,
                 entity_type = excluded.entity_type,
-                server_id = excluded.server_id",
+                server_id = excluded.server_id,
+                cached_at_ns = excluded.cached_at_ns",
             params![
                 fp.file_id as i64,
                 fp.size as i64,
@@ -928,24 +936,51 @@ impl Store {
                 sha256,
                 entity.map(|e| e.entity_type.to_string()),
                 entity.map(|e| e.server_id),
+                now_ns as i64,
             ],
         )?;
         Ok(())
     }
 
-    /// The cached hash for exactly this fingerprint, if we have one.
+    /// The cached hash for exactly this fingerprint, if we have one we can
+    /// still vouch for.
     ///
     /// The lookup is exact on all three fields on purpose. A cache keyed on the
     /// inode alone would happily hand back the hash of a file that has since
     /// been rewritten in place — which would then be adopted as agreement, and
     /// the user's edit would be silently discarded.
-    pub fn cached_hash(&self, fp: jd_vfs::Fingerprint) -> StoreResult<Option<String>> {
+    ///
+    /// All three are not enough by themselves. A file written twice inside one
+    /// tick of the clock the filesystem records times with, to the same length,
+    /// keeps the same fingerprint through the second write — so the row cached
+    /// against the first body answers for the second. The engine then sees an
+    /// unchanged file, never uploads the edit, and records the entry as agreeing
+    /// with a server copy it does not match. Nothing revisits it, because
+    /// nothing believes anything is wrong. The simulator found it as two
+    /// nineteen-byte edits either side of one download.
+    ///
+    /// So a row is evidence only if the file was already older than that tick
+    /// when the hash was taken. Inside the window, and for rows from a build
+    /// that did not record when it looked, the answer is no and the bytes get
+    /// read again.
+    pub fn cached_hash(
+        &self,
+        fp: jd_vfs::Fingerprint,
+        granularity_ns: u64,
+    ) -> StoreResult<Option<String>> {
         Ok(self
             .conn
             .query_row(
                 "SELECT sha256 FROM local_index
-                  WHERE file_id = ?1 AND size = ?2 AND mtime_ns = ?3",
-                params![fp.file_id as i64, fp.size as i64, fp.mtime_ns as i64],
+                  WHERE file_id = ?1 AND size = ?2 AND mtime_ns = ?3
+                    AND cached_at_ns IS NOT NULL
+                    AND cached_at_ns - mtime_ns >= ?4",
+                params![
+                    fp.file_id as i64,
+                    fp.size as i64,
+                    fp.mtime_ns as i64,
+                    granularity_ns.max(1) as i64,
+                ],
                 |r| r.get(0),
             )
             .optional()?)
@@ -1499,10 +1534,10 @@ mod tests {
             mtime_ns: 5000,
             file_id: 42,
         };
-        s.cache_hash(fp, "sha-of-those-bytes", Some(EntityId::file(1)))
+        s.cache_hash(fp, "sha-of-those-bytes", Some(EntityId::file(1)), 9000)
             .unwrap();
         assert_eq!(
-            s.cached_hash(fp).unwrap().as_deref(),
+            s.cached_hash(fp, 1).unwrap().as_deref(),
             Some("sha-of-those-bytes")
         );
 
@@ -1513,11 +1548,19 @@ mod tests {
             mtime_ns: 6000,
             ..fp
         };
-        assert_eq!(s.cached_hash(rewritten).unwrap(), None);
+        assert_eq!(s.cached_hash(rewritten, 1).unwrap(), None);
 
         // Same inode and mtime but a different size is also a different file.
         let resized = jd_vfs::Fingerprint { size: 101, ..fp };
-        assert_eq!(s.cached_hash(resized).unwrap(), None);
+        assert_eq!(s.cached_hash(resized, 1).unwrap(), None);
+
+        // And the row is only evidence once the file was older than the clock's
+        // own resolution when it was read. Taken 4000ns after the file was
+        // written, it answers for a filesystem that times to the nanosecond and
+        // refuses for one that times in ten-microsecond steps — where a second
+        // write of the same length would have kept this very fingerprint.
+        assert_eq!(s.cached_hash(fp, 4_000).unwrap().as_deref(), Some("sha-of-those-bytes"));
+        assert_eq!(s.cached_hash(fp, 4_001).unwrap(), None);
     }
 
     #[test]
@@ -1528,7 +1571,7 @@ mod tests {
             mtime_ns: 1,
             file_id: 777,
         };
-        s.cache_hash(fp, "sha", Some(EntityId::file(12))).unwrap();
+        s.cache_hash(fp, "sha", Some(EntityId::file(12)), 2).unwrap();
         assert_eq!(s.entity_for_file_id(777).unwrap(), Some(EntityId::file(12)));
         assert_eq!(s.entity_for_file_id(778).unwrap(), None);
     }

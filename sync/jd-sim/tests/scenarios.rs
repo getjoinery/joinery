@@ -75,6 +75,46 @@ fn a_file_edited_locally_sends_the_new_version_and_keeps_the_old_one() {
 }
 
 #[test]
+fn an_edit_the_same_length_as_what_arrived_is_still_an_edit() {
+    // The download writes the file; the user edits it before the clock has
+    // moved, to a body of exactly the same length. Size, modification time and
+    // file id are all unchanged, so the fingerprint is unchanged — and a hash
+    // cached against what arrived answers for what the user wrote.
+    //
+    // The engine then sees a file that has not changed. It uploads nothing, and
+    // records the entry as agreeing with the server's copy. Both sides believe
+    // they are in sync while holding different bytes, and nothing ever looks
+    // again, because nothing believes anything is wrong. It took two devices
+    // and a rename to notice at all.
+    // Passes are driven by hand rather than through `settle`, which advances
+    // the clock between rounds and so hands every write a distinct time. The
+    // whole point here is the write that does not get one.
+    let world = World::new(77, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    desktop.fs.user_write("notes.txt", b"aaaa");
+    committed.note("notes.txt", b"aaaa");
+    world.pass(desktop);
+    world.pass(laptop);
+
+    // It arrived. Now edit it, same length, at the same instant it landed.
+    assert_eq!(laptop.fs.peek("notes.txt").as_deref(), Some(&b"aaaa"[..]));
+    laptop.fs.user_write("notes.txt", b"bbbb");
+    committed.note("notes.txt", b"bbbb");
+    world.pass(laptop);
+
+    assert!(world.settle().is_some());
+    assert_invariants(&world, &committed);
+    assert_eq!(
+        world.device("desktop").fs.peek("notes.txt").as_deref(),
+        Some(&b"bbbb"[..]),
+        "the edit has to reach the other computer"
+    );
+}
+
+#[test]
 fn a_rename_is_a_rename_and_not_a_delete_plus_an_upload() {
     let world = World::new(4, &["laptop"]);
     let mut committed = Committed::default();
@@ -775,6 +815,134 @@ fn a_file_deleted_on_one_computer_goes_from_the_other_too() {
     assert!(world.device("desktop").fs.peek("shared.txt").is_none());
 }
 
+// ---------------------------------------------------------------------------
+// A download: a file that lives for a while under a name it will not keep
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_cancelled_download_does_not_leave_its_partial_on_the_server() {
+    // A browser writes `thing.zip.crdownload`, the user cancels, and the
+    // partial is deleted. If the client uploaded it in between, the delete has
+    // to follow it: otherwise the server keeps a partial file forever, under a
+    // name whose owner no longer exists on any disk, and no device will ever
+    // pull it back down to notice.
+    //
+    // This is the shape the soak rig has been failing `audited-green` on for
+    // several campaigns — one `download-001.zip.crdownload` on the server and
+    // on neither device.
+    let world = World::new(78, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+
+    laptop.fs.user_write("thing.zip.crdownload", b"first 40%");
+    assert!(world.settle().is_some());
+
+    laptop.fs.user_remove("thing.zip.crdownload");
+    assert!(world.settle().is_some());
+
+    assert_converged(&world);
+    assert!(
+        !world.server.tree().contains_key("thing.zip.crdownload"),
+        "the cancelled partial must not outlive itself on the server: {:?}",
+        world.server.tree().keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_finished_download_leaves_only_the_name_it_ended_up_with() {
+    // The other ending: the partial is renamed to the real name once the bytes
+    // are all there. One file arrives on the other computer, under the name the
+    // user will actually see, and the working name does not survive anywhere.
+    let world = World::new(79, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    laptop.fs.user_write("thing.zip.crdownload", b"all of it, eventually");
+    assert!(world.settle().is_some());
+
+    laptop
+        .fs
+        .user_rename("thing.zip.crdownload", "thing.zip");
+    committed.note("thing.zip", b"all of it, eventually");
+    assert!(world.settle().is_some());
+
+    assert_invariants(&world, &committed);
+    let names: Vec<String> = world.server.tree().into_keys().collect();
+    assert_eq!(names, vec!["thing.zip".to_string()]);
+    assert!(world.device("desktop").fs.peek("thing.zip").is_some());
+}
+
+#[test]
+fn a_partial_whose_upload_landed_unheard_comes_back_rather_than_stranding() {
+    // The upload of the partial reaches the server and the answer saying so is
+    // lost, so the server holds `thing.zip.crdownload` and the client has no
+    // record of it at all. The user then cancels and the partial leaves the
+    // disk.
+    //
+    // What happens next is worth pinning down, because there are two ways to be
+    // wrong and only one of them is safe. The client could decide the server
+    // copy is its own orphaned upload and trash it — which means deleting
+    // server content on the strength of a guess, and the guess is wrong the
+    // moment somebody else put that file there. Or it can do what it does: read
+    // an entity it has no record of as somebody else's, and bring it down.
+    //
+    // So the cancelled download reappears. That is a surprise, but it is a
+    // recoverable one — the user deletes it again, this time with the client
+    // watching. The alternative, stranding it on the server where no device
+    // will ever pull it down, is the one that cannot be recovered from, and
+    // this test exists to catch a change that trades one for the other.
+    let world = World::new(81, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+
+    laptop.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_upload_complete".into()),
+        ..NetFaults::none()
+    });
+    laptop.fs.user_write("thing.zip.crdownload", b"most of the way");
+    world.pass(laptop);
+
+    laptop.net.set_faults(NetFaults::none());
+    laptop.fs.user_remove("thing.zip.crdownload");
+
+    assert!(world.settle().is_some());
+    // Whatever it decided, both sides agree about it and nobody is holding
+    // something the other cannot see.
+    assert_converged(&world);
+    assert!(
+        world
+            .device("laptop")
+            .fs
+            .peek("thing.zip.crdownload")
+            .is_some(),
+        "it came back, rather than being left where nothing can reach it"
+    );
+}
+
+#[test]
+fn a_download_cancelled_while_its_upload_is_in_flight_still_leaves_nothing() {
+    // The same cancel, with the network dropping answers underneath it — so the
+    // upload may have landed on the server while the client never heard that it
+    // did. The partial is gone from the disk either way, and the server must not
+    // be left holding it.
+    let world = World::new(80, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    laptop.net.set_faults(NetFaults::chaos());
+
+    laptop.fs.user_write("thing.zip.crdownload", b"most of the way");
+    world.pass(laptop);
+    world.pass(laptop);
+
+    laptop.net.set_faults(NetFaults::default());
+    laptop.fs.user_remove("thing.zip.crdownload");
+    assert!(world.settle().is_some());
+
+    assert_converged(&world);
+    assert!(
+        !world.server.tree().contains_key("thing.zip.crdownload"),
+        "server still holds the partial: {:?}",
+        world.server.tree().keys().collect::<Vec<_>>()
+    );
+}
+
 #[test]
 fn a_file_deleted_before_it_ever_uploaded_leaves_nothing_needing_attention() {
     // Somebody saves a file and thinks better of it a moment later, while the
@@ -1116,30 +1284,13 @@ fn random_workloads_on_a_clean_network() {
 
 #[test]
 fn random_workloads_on_a_hostile_network() {
-    // Stops at 216 because 216, 225 and 229 do not pass yet. They are not
-    // skipped quietly — see `seeds_that_still_fail` below, which runs exactly
-    // those and is the honest record of where the engine still gets this wrong.
-    for seed in 200..216 {
-        random_scenario(seed, 18, &["laptop", "desktop"], true);
-    }
-}
-
-/// The seeds the engine does not survive yet.
-///
-/// Ignored so the suite stays green, and named so nothing is pretending
-/// otherwise. Run them with `cargo test -p jd-sim -- --ignored`.
-///
-/// All three end the same way: after everything settles, the server holds a
-/// file that never reached one of the devices, or a device holds one that never
-/// reached the server. Nothing is *lost* — the no-loss invariant holds
-/// throughout, and it is checked around every single pass — but the two sides
-/// stop short of agreeing. The common thread is two devices independently
-/// creating the same name, which leaves the server with two entities competing
-/// for one path that a filesystem can only give to one of them.
-#[test]
-#[ignore]
-fn seeds_that_still_fail() {
-    for seed in [216_u64, 225, 229] {
+    // The whole range, including 216, 225 and 229, which spent a long time in
+    // an ignored list described as a naming race. They were nothing of the
+    // kind: each ended with the server holding a file one device had not caught
+    // up to yet, because the harness counted a pass that could not reach the
+    // server as a pass with nothing to do, and two of those in a row read as
+    // settled. See `World::attempt_pass`.
+    for seed in 200..232 {
         random_scenario(seed, 18, &["laptop", "desktop"], true);
     }
 }
@@ -1165,6 +1316,12 @@ fn frozen_regression_seeds() {
         // Found the stale move source: both sides moved a file, the server won,
         // and the executor looked for it at the agreed path it had already left.
         (1071, 21, 3, false),
+        // Found the hash cache vouching for bytes it had not read: a download,
+        // then an edit of the same length inside the same tick of the clock,
+        // and the fingerprint never moved. The edit was never uploaded and the
+        // entry recorded itself as agreeing with a file it did not match.
+        (350, 24, 2, false),
+        (845, 30, 3, false),
     ];
     for (seed, steps, count, chaos) in seeds {
         let names: Vec<&str> = ["a", "b", "c"][..*count].to_vec();
@@ -1968,6 +2125,90 @@ fn a_folder_going_to_the_trash_does_not_take_unuploaded_work_with_it() {
     // would be holding the engine to a stricter policy than the one it chose.
     assert_nothing_lost(&world, &committed);
     assert_converged(&world);
+}
+
+#[test]
+fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
+    // The laptop hears about a file and its download does not get through. The
+    // file is then deleted on the server, so there is nothing left to fetch and
+    // nothing here to remove — the record is the only trace of it left.
+    //
+    // The engine used to plan a local trash for it anyway. The executor found no
+    // file, called the operation overtaken and dropped it, and nothing touched
+    // the entry — so the next pass planned the same trash, forever, with the
+    // entry sitting in `pending_download` waiting for bytes that no longer
+    // existed. Silent, free, and endless, except that a device holding one never
+    // reports itself settled again. The soak rig failed convergence on every
+    // cycle of every campaign over six files in exactly this state.
+    // The state is written straight into the store rather than raced into
+    // existence. Getting there for real takes a download deferred behind a
+    // folder that has not materialized and a delete arriving in the gap — the
+    // soak rig reaches it a few times a campaign and it is not worth staging
+    // here. What matters is what the engine does once a device holds one, and
+    // that does not depend on how it arrived.
+    let world = World::new(82, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+
+    let id = world.server.seed_file(None, "doomed.txt", b"here and then not");
+    world.pass(laptop);
+    laptop.fs.user_remove("doomed.txt");
+    world.pass(laptop);
+
+    let orphan = jd_core::model::Entry {
+        id: jd_core::model::EntityId::file(id + 5000),
+        remote: jd_core::model::Placement {
+            // In a folder this device has no record of — which is how the soak
+            // rig's six always looked, the whole subtree having been deleted
+            // before any of it materialized. It matters: with no chain of
+            // folders to build a path from, the trash has nowhere to look, and
+            // the executor used to return on that without dropping the record.
+            parent: Some(999_111),
+            name: "never-arrived.txt".into(),
+        },
+        remote_content: Some(jd_core::model::ContentId {
+            sha256: "0".repeat(64),
+            size: 12,
+        }),
+        remote_modified_time: None,
+        head_change_id: 1,
+        remote_deleted: true,
+        is_encrypted: false,
+        content_id: None,
+        synced_remote_content: None,
+        synced_content: None,
+        synced_placement: None,
+        synced_fingerprint: None,
+        local_name: None,
+        status: jd_core::model::LocalStatus::PendingDownload,
+        wrapped_file_key: None,
+    };
+    laptop.store.put_entry(&orphan).unwrap();
+    assert!(
+        !orphan.is_established(),
+        "the premise: it never landed on this disk"
+    );
+
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+
+    let waiting: usize = laptop
+        .store
+        .status_counts()
+        .unwrap()
+        .into_iter()
+        .filter(|(state, _)| {
+            !matches!(
+                state.as_str(),
+                "synced" | "out_of_scope" | "unsyncable" | "pending_key"
+            )
+        })
+        .map(|(_, n)| n)
+        .sum();
+    assert_eq!(
+        waiting, 0,
+        "the laptop is still carrying work for a file that no longer exists: {:?}",
+        laptop.store.status_counts().unwrap()
+    );
 }
 
 #[test]

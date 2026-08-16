@@ -86,6 +86,75 @@ fn a_composed_name_from_the_server_is_not_renamed_back_by_a_decomposing_volume()
     assert_converged(&world);
 }
 
+#[test]
+fn a_decomposed_name_typed_on_a_preserving_volume_is_left_the_way_it_was_typed() {
+    // The case the soak rig wedged on, and the one no scenario here covered:
+    // the *user* types the decomposed spelling, on a volume that keeps whatever
+    // it is given. Every test above starts from the composed form, so the only
+    // decomposed names in the estate were ones a volume produced.
+    //
+    // Recording the composed spelling as the local name is what breaks it. The
+    // file on disk keeps the spelling the user typed, nothing renames it, and
+    // every pass afterwards finds the file missing from where it was recorded,
+    // pairs it by content at the spelling that is really there, and calls that
+    // a move — asking the server to rename the file to the name it already has.
+    // The server refuses over the name, the client waits for the sibling that
+    // supposedly holds it, and the pass never goes quiet again.
+    let world = World::of(12, &[("pc", Platform::Linux)]);
+    let mut committed = Committed::default();
+
+    let body = b"an espresso, spelled the long way";
+    world.device("pc").fs.user_write("cafe\u{301}.txt", body);
+    committed.note("cafe\u{301}.txt", body);
+
+    assert!(world.settle().is_some(), "it must settle, not oscillate");
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(
+        server_names(&world),
+        vec!["cafe\u{301}.txt".to_string()],
+        "the server keeps the spelling the user typed"
+    );
+    assert_eq!(
+        paths(&world, "pc"),
+        vec!["cafe\u{301}.txt".to_string()],
+        "and so does the disk — the engine renames nothing"
+    );
+    assert_eq!(
+        world.server.all_versions().len(),
+        1,
+        "one version, not one per pass"
+    );
+    assert_converged(&world);
+}
+
+#[test]
+fn two_preserving_volumes_do_not_respell_a_decomposed_name_at_each_other() {
+    // The same name, now with somewhere to bounce to. A respelling that only
+    // one device believes in is a rename each device keeps undoing.
+    let world = World::of(
+        13,
+        &[("pc", Platform::Linux), ("laptop", Platform::MacOs)],
+    );
+    let mut committed = Committed::default();
+
+    let body = b"resume, typed the long way";
+    world
+        .device("pc")
+        .fs
+        .user_write("re\u{301}sume\u{301}.txt", body);
+    committed.note("re\u{301}sume\u{301}.txt", body);
+
+    assert!(world.settle().is_some());
+    assert_nothing_lost(&world, &committed);
+    assert_eq!(
+        server_names(&world),
+        vec!["re\u{301}sume\u{301}.txt".to_string()]
+    );
+    assert_eq!(paths(&world, "laptop"), paths(&world, "pc"));
+    assert_eq!(world.server.all_versions().len(), 1);
+    assert_converged(&world);
+}
+
 // ---------------------------------------------------------------------------
 // macOS and Windows: two names the volume cannot tell apart
 // ---------------------------------------------------------------------------

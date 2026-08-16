@@ -319,11 +319,17 @@ impl MemFs {
     /// decomposing filesystem hands back a different sequence of code points
     /// than the one written to it, and an engine that compares raw bytes reads
     /// that as a rename of every file with an accent in its name.
+    /// A filesystem that does not decompose does not compose either: ext4 and
+    /// APFS store the bytes they are handed. Composing here made the simulator
+    /// kinder than any real disk — a decomposed name written to a simulated
+    /// Linux volume came back composed, so the engine's composed idea of the
+    /// name always matched and the mismatch that wedges a real client could not
+    /// be reproduced at all.
     fn store_name(&self, name: &str) -> String {
         if self.personality.decomposes_unicode {
             name.nfd().collect()
         } else {
-            name.nfc().collect()
+            name.to_string()
         }
     }
 
@@ -498,12 +504,16 @@ impl Vfs for MemFs {
                 continue;
             }
             out.push(DirEntry {
-                // Composed on the way out, exactly as `OsVfs` does it — the
-                // `Vfs` contract is that the engine only ever sees NFC. A
-                // simulator that handed back the stored spelling would be
-                // reproducing macOS's behavior at the wrong layer and failing
-                // scenarios the real client passes.
-                name: jd_vfs::nfc(rest),
+                // Composed on the way out only where `OsVfs` composes: on a
+                // volume that decomposes whatever it is given, so that the
+                // round trip is not read as a rename. Elsewhere the stored
+                // spelling is the answer, because that is what a real
+                // `read_dir` returns.
+                name: if self.personality.decomposes_unicode {
+                    jd_vfs::nfc(rest)
+                } else {
+                    rest.to_string()
+                },
                 kind: match node {
                     Node::Dir => EntryKind::Directory,
                     Node::File { .. } => EntryKind::File,
@@ -827,11 +837,11 @@ mod tests {
 
     #[test]
     fn a_decomposing_filesystem_stores_decomposed_and_reports_composed() {
-        // Both halves are the contract. macOS really does store `café` in
-        // decomposed form — that is why `all_paths` shows it — but the `Vfs`
-        // trait promises the engine only ever sees NFC, so `read_dir` composes
-        // on the way out exactly as `OsVfs` does. A simulator that leaked the
-        // stored spelling would fail scenarios the real client passes.
+        // Both halves are the contract. An HFS+ volume really does store `café`
+        // in decomposed form — that is why `all_paths` shows it — and `OsVfs`
+        // composes what it reads back from such a volume, so that the round trip
+        // is not read as a rename. The simulator has to do the same, or it fails
+        // scenarios the real client passes.
         let f = MemFs::hfs_plus(SimClock::new());
         f.user_write("caf\u{e9}.txt", b"x");
 
@@ -849,6 +859,36 @@ mod tests {
         // ...and it is still the same file when asked for by either spelling.
         assert!(f.fingerprint(&p("caf\u{e9}.txt")).unwrap().is_some());
         assert!(f.fingerprint(&p("cafe\u{301}.txt")).unwrap().is_some());
+    }
+
+    #[test]
+    fn a_preserving_filesystem_hands_back_the_spelling_it_was_given() {
+        // ext4 and APFS store bytes. A name written decomposed is still
+        // decomposed when it is read back, and no layer between the disk and
+        // the engine quietly composes it.
+        //
+        // The simulator used to compose here, on both the write and the read,
+        // and that kindness cost the soak rig nineteen wedged files: with the
+        // spelling silently agreed on both sides, nothing in the simulated
+        // world could show the engine recording one spelling while the disk
+        // held the other.
+        let f = fs();
+        f.user_write("cafe\u{301}.txt", b"x");
+
+        let names: Vec<String> = f
+            .read_dir(&p(""))
+            .unwrap()
+            .into_iter()
+            .map(|e| e.name)
+            .collect();
+        assert_eq!(
+            names,
+            vec!["cafe\u{301}.txt"],
+            "the engine is handed what the disk holds"
+        );
+        // And the composed spelling is a different file here, not the same one.
+        assert!(f.fingerprint(&p("cafe\u{301}.txt")).unwrap().is_some());
+        assert!(f.fingerprint(&p("caf\u{e9}.txt")).unwrap().is_none());
     }
 
     #[test]
