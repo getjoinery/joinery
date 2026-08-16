@@ -22,7 +22,9 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - the shared dedup reason vocabulary, so the importer and the
+ *   reconciliation agree on what a duplicate meant.
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -45,6 +47,29 @@ class MailImportEntry extends SystemBase {
 	const CLASS_NORMAL = 'normal';
 	const CLASS_SPAM   = 'spam';
 	const CLASS_TRASH  = 'trash';
+
+	/**
+	 * Stable opening words for the dedup reasons the reconciliation reads back
+	 * (specs/mail_import_loss_proof.md). A duplicate is not one outcome: most are
+	 * ordinary, but two of them can mean "this mailbox does not hold it", and the
+	 * report has to tell them apart. Matching a prefix rather than a whole string
+	 * lets each reason carry the colliding id in its tail while staying findable.
+	 *
+	 * Anything that reads these matches with a prefix test, never equality — so
+	 * no constant here may be a prefix of another one.
+	 */
+	const REASON_DEDUP_HERE         = 'Already in this mailbox';
+	const REASON_DEDUP_RACE         = 'Stored by another process during this run';
+	const REASON_DEDUP_ELSEWHERE    = 'Already stored on this site, in another mailbox';
+	const REASON_DEDUP_UNRESOLVABLE = 'Already stored on this site — the colliding copy could not be identified';
+	const REASON_DEDUP_NO_MANIFEST  = 'The stored copy lists no attachments';
+
+	/** The dedup reasons that mean "look at this one" — the report's suspicious buckets. */
+	const SUSPICIOUS_REASONS = array(
+		self::REASON_DEDUP_ELSEWHERE,
+		self::REASON_DEDUP_UNRESOLVABLE,
+		self::REASON_DEDUP_NO_MANIFEST,
+	);
 
 	protected static $foreign_key_actions = array(
 		'mie_mir_mail_import_run_id' => array('action' => 'cascade'),

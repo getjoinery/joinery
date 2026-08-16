@@ -3521,6 +3521,51 @@ A failed message leaves the folder cursor below it, so the next poll retries it 
 a permanently-broken message therefore records a failure every pass until it is
 dealt with.
 
+**A message and its attachment manifest are one write.** Both go in a single
+transaction, so a poll interrupted part-way through leaves nothing behind rather
+than a message that lists no attachments. This matters beyond tidiness: the
+cursor has not advanced past an uncommitted message, so the retry stores it
+whole, and every other path can treat "the message is here" as "its attachments
+are here too". A collision the *database* raises — as opposed to one caught by
+the pre-validate check before any insert — surfaces as
+`InboundStoreCollisionException` rather than a reported duplicate, because
+Postgres has aborted the transaction and the caller cannot carry on inside it.
+The message rolls back, the UID retries, and the retry resolves the same
+collision cleanly.
+
+### Proving where a day-windowed feed started reading
+
+A feed set to **Last N days** bisects the UID space for the oldest message still
+inside the window and starts just below it. That decision is made once per
+folder and it decides what the user will and will not receive, so each seek
+writes a row to `isp_inbound_imap_seed_proofs`: the cutoff and high UID that went
+in, the cursor that came out, how many probes it took, whether the bisection
+converged or ran out of budget, and two boundary probes.
+
+- **below** — the newest message at or under the cursor. Its date should be
+  *older* than the cutoff. If it is not, the seek started too high and skipped
+  mail, and the row is written to the error log as well.
+- **above** — the oldest message over the cursor, which should be *inside* the
+  window. This measures tightness, not safety: over-importing is the fail-soft
+  direction and costs only time.
+
+The boundary check is exactly that — a check of the boundary the bisection chose,
+not a statement about the whole region beneath it. INTERNALDATE does not
+reliably rise with UID, because a message copied or imported into an account
+gets a fresh high UID carrying whatever date it already had. Proving the region
+needs every date below the cursor, which is what
+`maintenance_scripts/dev_tools/imap_window_audit.php` does on demand:
+
+```bash
+php maintenance_scripts/dev_tools/imap_window_audit.php --account=12
+```
+
+It reports, per folder, every message the feed has read past that has no stored
+row, and every message below the cursor whose date falls inside the window.
+Soft-deleted rows count as present — a Trash arrival is stored as a deleted row.
+Deliberately expensive; it is the instrument for verifying a feed, not something
+a poll does.
+
 ### Reference-backed storage + the attachment list
 
 IMAP-sourced messages are **reference-backed**, not copied whole. Unlike a pushed
@@ -3718,6 +3763,28 @@ resumable, reportable and reversible.
 renamed one is still caught. Reading them needs an external binary, which would break
 the zero-config install. The refusal names the way that does work: connect the account
 as an IMAP feed, which also keeps working as new mail arrives.
+
+**One archive is one run.** An export delivered as several parts is imported a
+part at a time, which works as long as each part is self-contained. A part whose
+mbox member was cut mid-message is not. The cut costs one message, silently, in
+two halves: the earlier part still holds the message's separator and headers, so
+it imports **truncated** — stored under its real Message-ID with however much
+body the cut left it — and the later part's leading orphan bytes are **dropped**,
+because `MboxSplitter` only starts a message at a separator. Nothing reports
+either half, and the truncated copy is the worse one: it looks imported. Before
+importing a multi-part export, check which shape it is:
+
+```bash
+php maintenance_scripts/dev_tools/takeout_parts_probe.php /path/to/export/
+```
+
+It lists every member with its uncompressed size, names any member appearing in
+more than one part (those overwrite each other on extraction), and says for each
+mbox whether it begins at a message boundary or part-way through one. Zips are
+read from the central directory plus a 4 KB prefix; a `.tgz` gets one streaming
+pass over the tar headers; a bare `.mbox` beside the parts is read directly.
+Nothing is extracted, so it is safe to point at an export wherever it sits. It
+exits `2` if it finds a cut. Reassembling a cut mbox is not built.
 
 Saved messages inside a zip are read **in place** through `zip://` — a 50GB archive of
 small messages is never expanded, which would otherwise double the disk this feature
@@ -3948,6 +4015,61 @@ The reconciliation tripwire applies here too: `stored + duplicates + skipped + f
 must equal what was seen. A shortfall is reported as `unaccounted` and marks the batch
 unsuccessful, because a message that vanishes without a reason is exactly the failure a
 set of counters alone hides.
+
+**Every duplicate names what it duplicated.** A duplicate is not one outcome, and
+the differences decide whether the message is actually in the mailbox:
+
+| Reason | What it means |
+| --- | --- |
+| `Already in this mailbox` | The ordinary case. The entry carries the message id, and `— attachment bytes taken.` when the archive copy handed its bytes over. |
+| `Stored by another process during this run` | The copy arrived between this entry's own check and its insert — a poll running alongside the import. Still here. |
+| `Already stored on this site, in another mailbox` | The site-wide unique key collided with a row belonging to a **different** alias. This is the one that can mean the mailbox does not hold it. |
+| `Already stored on this site — the colliding copy could not be identified` | The collision is real but the row cannot be resolved by lookup, which is what a sealed recipient looks like. |
+| `The stored copy lists no attachments` | The stored copy has an empty manifest while the archive copy carries parts. The two disagree about what the message is. |
+
+The last three are the report's **suspicious buckets**, defined once in
+`MailImportEntry::SUSPICIOUS_REASONS` and matched by prefix so a reason can carry
+the colliding id in its tail. A finished run holding any of them says so on its
+row in the run list; the detail belongs to the reconciliation below.
+
+### Proving nothing was lost
+
+The counters above are self-consistent, but their denominator is the importer's
+own scan — a message its reader never emitted is missing from all of them. The
+denominator therefore comes from outside, and comparison is a two-step:
+
+```bash
+python3 maintenance_scripts/dev_tools/mail_archive_inventory.py archive.mbox -o inventory.jsonl
+php maintenance_scripts/dev_tools/reconcile_mail_import.php --run=42 --inventory=inventory.jsonl
+```
+
+The inventory is Python because it must **not** be this codebase: it finds
+message boundaries with the stdlib `mailbox` module and parses MIME with
+`email`, so a bug in `MboxSplitter` or in Horde cannot hide from the report meant
+to catch it. A disagreement between the two is itself a finding.
+
+The reconciliation prints identifiers, never bare counts — a count comparison
+passes whenever two errors cancel. It checks four things:
+
+- **By Message-ID** — source ids with no row in the target mailbox. Soft-deleted
+  rows count as present, since mail the source had in its bin is correctly
+  stored as a deleted row.
+- **By byte offset** — a message with no Message-ID is stored under a synthesized
+  id derived from its bytes, which the inventory cannot reproduce, so those are
+  matched by position instead: the inventory records each message's body offset
+  and mbox locators are `offset:length` against the same file. This also
+  localises exactly where the two splitters diverged. Offsets are unique only
+  *within* a file, so an archive holding several mboxes needs `--member=NAME` to
+  say which one the inventory covers; without it the comparison is skipped and
+  reported as skipped rather than guessed at.
+- **By attachment count** — per message present on both sides, the source's part
+  count against the stored manifest's rows. Catches a dropped attachment on a
+  message that is otherwise fine. Count, not filename: the two sides name and
+  de-duplicate parts differently.
+- **By ledger reason** — the suspicious buckets above.
+
+It exits `0` when nothing is outstanding and `2` when there are findings, and
+writes each full list to a file beside the inventory.
 
 ### What happens to the archive afterwards
 

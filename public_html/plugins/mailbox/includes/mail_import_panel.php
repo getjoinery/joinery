@@ -23,7 +23,9 @@
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - a finished run with something worth checking says so on its
+ *   own row; a clean one stays a single line.
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailImportService.php'));
@@ -237,6 +239,27 @@ function mailbox_import_runs_html(array $runs): string {
 		if ($run['dedup'] > 0)   { $html .= ', ' . number_format($run['dedup']) . ' already here'; }
 		if ($run['skipped'] > 0) { $html .= ', ' . number_format($run['skipped']) . ' left out'; }
 		if ($run['failed'] > 0)  { $html .= ', ' . number_format($run['failed']) . ' failed'; }
+
+		// The reconciliation line. It appears only when there IS something to
+		// look at, so its presence is the signal — a run with nothing to say
+		// stays a single tidy line (specs/mail_import_loss_proof.md).
+		$attention = (array)($run['attention'] ?? array());
+		if ($attention) {
+			$notes = array();
+			if (isset($attention['unaccounted'])) {
+				$notes[] = number_format(abs($attention['unaccounted']))
+					. ' unaccounted for';
+			}
+			// Covers all three flagged reasons — collided with another mailbox,
+			// unresolvable, and a stored copy listing no attachments — so the
+			// label stays generic; the CLI report names each one.
+			if (isset($attention['flagged'])) {
+				$notes[] = number_format($attention['flagged'])
+					. ' suspicious duplicate(s)';
+			}
+			$html .= '<br><span class="jy-warning">Needs checking: '
+				. htmlspecialchars(implode('; ', $notes)) . '</span>';
+		}
 		$html .= '</td>';
 
 		$html .= '<td>';

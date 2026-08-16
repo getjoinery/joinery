@@ -1883,6 +1883,9 @@ dialog.jy-ui::backdrop { background: rgba(0, 0, 0, 0.45); }
 
 /* ─── Generic reusable helpers (continued) ─── */
 .jy-ui .jy-muted { color: var(--jy-color-text-muted); }
+/* Inline counterpart to jy-callout-warning, for a line inside a table cell
+   where a full callout block would break the row. */
+.jy-ui .jy-warning { color: var(--jy-color-warning); font-size: var(--jy-text-sm); }
 .jy-ui .jy-scroll-x { overflow-x: auto; }
 .jy-ui .jy-w-full { width: 100%; }
 

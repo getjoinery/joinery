@@ -14,7 +14,10 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - describe() carries an `attention` block for a finished run:
+ *   the reconciliation tripwire and the duplicates whose recorded reason says
+ *   they may not be in this mailbox (specs/mail_import_loss_proof.md).
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mail_import_run_class.php'));
@@ -402,7 +405,57 @@ class MailImportService {
 			// Only offered when the run is over AND still holds an archive — there
 			// is nothing to reclaim once it has been discarded or swept.
 			'can_discard' => ($run->isFinished() && intval($run->get('mir_fil_file_id')) > 0),
+			// The numbers that mean "look here" (specs/mail_import_loss_proof.md).
+			// Only for a finished run: mid-run they are just work not done yet.
+			'attention'   => $run->isFinished() ? self::attention($run) : array(),
 		);
+	}
+
+	/**
+	 * What on this run wants a human's eye.
+	 *
+	 * Two things qualify. UNACCOUNTED is the reconciliation tripwire: every entry
+	 * should have landed in exactly one bucket, so a shortfall means messages went
+	 * missing with nothing reporting it. FLAGGED counts the duplicates whose own
+	 * recorded reason says they may not be in this mailbox at all — a copy that
+	 * collided with another mailbox's, one that could not be identified, or one
+	 * whose stored copy lists no attachments.
+	 *
+	 * Counts only. The detail belongs to reconcile_mail_import.php, which can name
+	 * every message; a table cell that tried would be unreadable.
+	 */
+	private static function attention(MailImportRun $run): array {
+		$out = array();
+
+		$processed = intval($run->get('mir_processed'));
+		$accounted = intval($run->get('mir_stored')) + intval($run->get('mir_dedup'))
+			+ intval($run->get('mir_skipped')) + intval($run->get('mir_failed'));
+		if ($processed !== $accounted) {
+			$out['unaccounted'] = $processed - $accounted;
+		}
+
+		$flagged = 0;
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$clauses = array();
+			$params = array(intval($run->key));
+			foreach (MailImportEntry::SUSPICIOUS_REASONS as $prefix) {
+				$clauses[] = 'mie_reason LIKE ?';
+				$params[] = $prefix . '%';
+			}
+			$stmt = $db->prepare('SELECT COUNT(*) FROM mie_mail_import_entries
+				WHERE mie_mir_mail_import_run_id = ? AND (' . implode(' OR ', $clauses) . ')');
+			$stmt->execute($params);
+			$flagged = intval($stmt->fetchColumn());
+		} catch (\Throwable $e) {
+			// A panel that cannot count is not a reason to fail the page.
+			error_log('MailImportService::attention: ' . $e->getMessage());
+		}
+		if ($flagged > 0) {
+			$out['flagged'] = $flagged;
+		}
+
+		return $out;
 	}
 
 	/** What each state means, in words the user asked their question in. */

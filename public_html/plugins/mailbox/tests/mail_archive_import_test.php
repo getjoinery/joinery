@@ -30,7 +30,9 @@
  *
  * Run: php tests/run.php db --filter=mail_archive_import
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - D2: every duplicate names which message it duplicated, and a
+ *   cross-mailbox collision says so in a reason the reconciliation recognises.
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -534,6 +536,68 @@ class MailArchiveImportTest {
 		$stmt->execute(array(intval($run->key)));
 		check(stripos((string)$stmt->fetchColumn(), 'already') !== false,
 			'cross-mailbox: the entry says so in words the user can act on');
+
+		// D2 (specs/mail_import_loss_proof.md). This is the ONE dedup outcome that
+		// can legitimately mean "this mailbox does not hold it", so it must never be
+		// recorded blind. Every entry has to name the row it collided with, and say
+		// that the row lives somewhere else.
+		$stmt = $this->db->prepare("SELECT mie_reason, mie_iem_inbound_email_message_id
+			FROM mie_mail_import_entries
+			WHERE mie_mir_mail_import_run_id = ? AND mie_state = 'dedup'");
+		$stmt->execute(array(intval($run->key)));
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		$named = 0;
+		$elsewhere = 0;
+		foreach ($rows as $row) {
+			if (intval($row['mie_iem_inbound_email_message_id']) > 0) { $named++; }
+			if (strncmp((string)$row['mie_reason'], MailImportEntry::REASON_DEDUP_ELSEWHERE,
+					strlen(MailImportEntry::REASON_DEDUP_ELSEWHERE)) === 0) {
+				$elsewhere++;
+			}
+		}
+		check($named === count($rows) && count($rows) > 0,
+			'cross-mailbox: every duplicate names WHICH message it duplicated',
+			$named . ' of ' . count($rows) . ' carry a message id');
+		check($elsewhere === count($rows),
+			'cross-mailbox: and says the copy is in another mailbox, which is the finding',
+			$elsewhere . ' of ' . count($rows));
+
+		// The reconciliation reads these back by prefix, so a reason that drifts out
+		// of the shared set would silently empty a report section.
+		foreach ($rows as $row) {
+			$matched = false;
+			foreach (MailImportEntry::SUSPICIOUS_REASONS as $prefix) {
+				if (strncmp((string)$row['mie_reason'], $prefix, strlen($prefix)) === 0) {
+					$matched = true;
+					break;
+				}
+			}
+			check($matched, 'cross-mailbox: the reason is one the reconciliation recognises',
+				(string)$row['mie_reason']);
+			break;
+		}
+
+		// Prefix matching is only sound while no reason opens with another one's
+		// text. Break that and a report section silently absorbs the wrong rows —
+		// which reads as a clean run rather than as a bug.
+		$reasons = array(
+			MailImportEntry::REASON_DEDUP_HERE,
+			MailImportEntry::REASON_DEDUP_RACE,
+			MailImportEntry::REASON_DEDUP_ELSEWHERE,
+			MailImportEntry::REASON_DEDUP_UNRESOLVABLE,
+			MailImportEntry::REASON_DEDUP_NO_MANIFEST,
+		);
+		$collisions = array();
+		foreach ($reasons as $a) {
+			foreach ($reasons as $b) {
+				if ($a !== $b && strncmp($a, $b, strlen($b)) === 0) {
+					$collisions[] = "\"$b\" is a prefix of \"$a\"";
+				}
+			}
+		}
+		check(!$collisions, 'dedup reasons: no reason opens with another one, so prefix matching is sound',
+			implode('; ', $collisions));
 
 		try { $second->permanent_delete(); } catch (\Throwable $e) {}
 	}
