@@ -253,7 +253,7 @@ class RecipeRunner {
         }
         if (!$eval['tainted_capable']) return null;
 
-        return 'Taint gate triggered at run start: ' . TaintGate::describeDrift($eval);
+        return 'Stopped before the run began: ' . TaintGate::describeDrift($eval);
     }
 
     /**

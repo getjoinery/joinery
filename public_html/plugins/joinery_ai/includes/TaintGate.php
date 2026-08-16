@@ -112,20 +112,31 @@ class TaintGate {
     /**
      * Drift-detection variant for run-start. Same predicate, but framed as
      * "what newly triggered the gate since save?" — names the specific
-     * model + field that became untrusted, since that's the actionable
-     * detail for the admin.
+     * source that became untrusted, since that's the actionable detail for
+     * the admin. Person-facing (failure email, run detail page): same
+     * vocabulary rule as explain() — standing approval and outside
+     * influence, never the internal gate terms.
      */
     public static function describeDrift(array $eval): string {
+        // Pipeline mode: the job's item digest is the whole surface — say so
+        // plainly rather than presenting it as a phantom "allowed model".
+        if (in_array('record_verdict', $eval['write_tools'], true)) {
+            return 'since this recipe was last saved, its job began reading content '
+                 . "written by other people, and a message could try to steer the AI's "
+                 . 'verdicts. Runs stay stopped until you open the recipe and give it '
+                 . 'your standing approval to act on that content.';
+        }
         $parts = [];
         if (!empty($eval['untrusted_models'])) {
-            $parts[] = 'allowed model(s) now declare untrusted fields: '
-                     . implode(', ', $eval['untrusted_models']);
+            $parts[] = 'it began reading content written by other people ('
+                     . implode(', ', $eval['untrusted_models']) . ')';
         }
         if (!empty($eval['workspace_present'])) {
-            $parts[] = 'workspace from prior runs is non-empty';
+            $parts[] = 'it carries notes from its own earlier runs';
         }
-        return implode('; ', $parts)
-             . '. Re-acknowledge rcp_allow_tainted_writes on the recipe to allow continued operation.';
+        return 'since this recipe was last saved, ' . implode(' and ', $parts)
+             . ', so outside text could try to steer what it changes. Runs stay '
+             . 'stopped until you open the recipe and renew your standing approval.';
     }
 
 }
