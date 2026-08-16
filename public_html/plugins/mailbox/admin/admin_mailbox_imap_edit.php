@@ -148,22 +148,24 @@ $formwriter->dropinput('iia_imap_encryption', 'Encryption', array(
 	'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)', 'none' => 'None'),
 ));
 
-// Once the source has been read, its folders are known and picking one from a
-// list beats typing a name whose capitalisation has to match. Before that, a
-// plain field with the near-universal default.
-$folder_help = 'Mail is collected from this folder. Inbox is what most people want: '
-	. 'it is where new mail arrives. Choosing another folder collects that folder instead, '
-	. 'not as well.';
+// Folder names come from the server, with their real capitalisation and in the
+// account's own language — a German Gmail's folders are not the English ones —
+// so there is no honest list to offer before connecting, and no useful decision
+// to ask for either: new mail arrives in the inbox, which is the default. The
+// field appears once the folders are known.
+//
+// Hidden rather than absent: FormWriter posts what it renders, and a field that
+// vanished would save the model's default over a configured folder.
 if (!empty($folder_names)) {
 	$formwriter->dropinput('iia_imap_folder', 'Collect mail from', array(
 		'options' => $folder_names,
 		'value'   => $account->get('iia_imap_folder') ?: 'INBOX',
-		'helptext' => $folder_help,
+		'helptext' => 'Inbox is where new mail arrives, and is what most people want. '
+			. 'Choosing another folder collects that folder instead, not as well.',
 	));
 } else {
-	$formwriter->textinput('iia_imap_folder', 'Collect mail from', array(
-		'helptext' => $folder_help . ' The list of folders on the server appears here once this '
-			. 'mailbox has connected for the first time.',
+	$formwriter->hiddeninput('iia_imap_folder', '', array(
+		'value' => $account->get('iia_imap_folder') ?: 'INBOX',
 	));
 }
 
@@ -173,36 +175,45 @@ $formwriter->numberinput('iia_poll_interval_seconds', 'Check for new mail every 
 
 $formwriter->checkboxinput('iia_is_enabled', 'Enabled', array());
 
-// Sync (specs/two_way_imap_sync.md §8). Read-only / Two-way appear only on a
-// CONDSTORE feed; the deletes + compose gates reveal via visibility_rules when sync
-// is on. Guided controls only — no explainer prose.
-// "Not checked yet" and "your provider cannot do this" are different facts and
-// must not read the same. The flag behind them is a cached probe that starts
-// false, so a mailbox that has never connected would otherwise be told its
-// provider was incapable before anything had been asked.
+// A dropdown holding one value is not a choice, and it was rendering as one
+// whenever the answer was not yet known. Whether a server can keep two copies in
+// step is a capability it advertises on connection, not something the provider
+// name reliably predicts — and offering a mode the server turns out to refuse is
+// worse than offering it a moment later. So the control appears only once there
+// is something to choose between.
 if ($sync_supported) {
-	$sync_help = 'Off: bring mail in once and leave the original alone. '
-		. 'Read-only: keep this copy matching the original, following it as mail is read, filed or deleted there. '
-		. 'Two-way: changes made here are sent back to the original as well.';
-} elseif (!$sync_checked) {
-	$sync_help = 'Keeping this copy in step with the original needs a feature not every mail provider offers. '
-		. 'That is checked the first time this mailbox connects, and the choices appear here if it is available.';
+	$formwriter->dropinput('iia_sync_mode', 'Keep in step with the original', array(
+		'options' => $sync_options,
+		'value' => $account->get('iia_sync_mode') ?: 'off',
+		'visibility_rules' => $sync_visibility,
+		'helptext' => 'Off: bring mail in once and leave the original alone. '
+			. 'Read-only: keep this copy matching the original, following it as mail is read, filed or deleted there. '
+			. 'Two-way: changes made here are sent back to the original as well.',
+	));
+	// Both of these only mean anything while sync is on, and the sync control's
+	// own visibility rules reveal them. They are rendered here so those rules
+	// have something to act on.
+	$formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
+		'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
+	));
+	$formwriter->checkboxinput('iia_show_compose', 'Enable compose / Sent sync', array(
+		'helptext' => 'Show reply/forward in the reader and file sent copies into the source Sent folder.',
+	));
 } else {
-	$sync_help = 'This provider cannot keep the two copies in step, so mail is brought in once '
-		. 'and the original is left as it is.';
+	// Same reason as the folder field: hidden, not absent, so a save cannot
+	// reset settings that are already stored. Without the sync control there are
+	// no visibility rules to hide these two, and shown on their own they offer to
+	// sync deletions for a mailbox that does not sync at all.
+	$formwriter->hiddeninput('iia_sync_mode', '', array(
+		'value' => $account->get('iia_sync_mode') ?: InboundImapAccount::SYNC_OFF,
+	));
+	$formwriter->hiddeninput('iia_sync_deletes', '', array(
+		'value' => $account->get('iia_sync_deletes') ? '1' : '',
+	));
+	$formwriter->hiddeninput('iia_show_compose', '', array(
+		'value' => $account->get('iia_show_compose') ? '1' : '',
+	));
 }
-$formwriter->dropinput('iia_sync_mode', 'Keep in step with the original', array(
-	'options' => $sync_options,
-	'value' => $account->get('iia_sync_mode') ?: 'off',
-	'visibility_rules' => $sync_visibility,
-	'helptext' => $sync_help,
-));
-$formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
-	'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
-));
-$formwriter->checkboxinput('iia_show_compose', 'Enable compose / Sent sync', array(
-	'helptext' => 'Show reply/forward in the reader and file sent copies into the source Sent folder.',
-));
 
 // Tracked folders (membership). The \All coverage view is tracked silently and is
 // not in this list. Appears once folders are discovered (after a Test or poll).
