@@ -391,6 +391,7 @@
 			'cloud_storage',
 			'oauth',
 			'dns',
+			'joinery_direct',
 			'mobile_apps',
 		), array('heading_level' => 'h5'));
 

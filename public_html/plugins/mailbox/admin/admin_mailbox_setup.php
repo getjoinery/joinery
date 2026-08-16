@@ -25,6 +25,8 @@
  * mailbox or domain: a form that posts to the bare path loses the focus and the
  * redirect lands the operator back on the picker.
  *
+ * @version 3.14 - SRV fields are their own columns (Priority/Weight/Port), matching provider forms
+ * @version 3.13 - a fix can carry several records (dns_records): one table, one row each
  * @version 3.12 - the machine sender ceremony (specs/mailbox_machine_sender_card.md):
  *                 register mail.<domain>, publish its records, switch system
  *                 mail — with the switch offered only once the checks verify
@@ -118,19 +120,38 @@ $render_fix = function ($fix) use ($address) {
 	if (!empty($fix['command'])) {
 		echo '<pre class="bg-light p-2 mb-2"><code>' . htmlspecialchars($fix['command']) . '</code></pre>';
 	}
-	if (!empty($fix['dns_record'])) {
-		$rec = $fix['dns_record'];
-		$has_priority = array_key_exists('priority', $rec);
-		echo '<table class="table table-sm table-bordered mb-2 iem-table-760">';
-		echo '<thead><tr><th>Type</th><th>Name</th>'
-			. ($has_priority ? '<th>Priority</th>' : '') . '<th>Value</th></tr></thead><tbody><tr>';
-		echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
-		echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
-		if ($has_priority) {
-			echo '<td><code>' . htmlspecialchars((string)$rec['priority']) . '</code></td>';
+	// One record or several — the same table either way. Columns appear when
+	// any row carries the field: MX brings Priority; SRV brings Priority,
+	// Weight and Port, with its target in the Value column — one input per
+	// field the DNS provider's form asks for, never a crammed value string.
+	$fix_records = !empty($fix['dns_records']) ? $fix['dns_records']
+		: (!empty($fix['dns_record']) ? array($fix['dns_record']) : array());
+	if (!empty($fix_records)) {
+		$numeric_columns = array('priority' => 'Priority', 'weight' => 'Weight', 'port' => 'Port');
+		$present = array();
+		foreach ($numeric_columns as $key => $label) {
+			foreach ($fix_records as $rec) {
+				if (array_key_exists($key, $rec)) { $present[$key] = $label; break; }
+			}
 		}
-		echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
-		echo '</tr></tbody></table>';
+		echo '<table class="table table-sm table-bordered mb-2 iem-table-760">';
+		echo '<thead><tr><th>Type</th><th>Name</th>';
+		foreach ($present as $label) {
+			echo '<th>' . $label . '</th>';
+		}
+		echo '<th>Value</th></tr></thead><tbody>';
+		foreach ($fix_records as $rec) {
+			echo '<tr>';
+			echo '<td>' . htmlspecialchars($rec['type']) . '</td>';
+			echo '<td><code>' . htmlspecialchars($rec['name']) . '</code></td>';
+			foreach (array_keys($present) as $key) {
+				echo '<td>' . (array_key_exists($key, $rec)
+					? '<code>' . htmlspecialchars((string)$rec[$key]) . '</code>' : '') . '</td>';
+			}
+			echo '<td>' . PublicPageBase::copy_field($rec['value']) . '</td>';
+			echo '</tr>';
+		}
+		echo '</tbody></table>';
 	}
 	if (!empty($fix['link'])) {
 		echo '<p class="mb-2"><a class="btn btn-sm btn-outline-secondary" href="'

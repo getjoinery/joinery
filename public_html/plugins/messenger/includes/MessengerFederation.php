@@ -16,7 +16,9 @@
  * that signed the request. A stranger cannot open a conversation with you, for
  * exactly the reason a stranger cannot send you direct mail.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - Reachability spec: siteReady() (identity minted, not just enabled), senderPublished() (our own DNS half, checked before the recipient's), fresh re-checks past the capability cache, and local-address resolution so a member's own site's addresses never go over the wire
+ * @changelog 1.1.0 - People picker contacts
  */
 
 class MessengerFederation {
@@ -47,6 +49,107 @@ class MessengerFederation {
 			return false;
 		}
 		return DirectSettings::enabled();
+	}
+
+	/**
+	 * Can this SITE chat across instances at all: Direct on AND at least one
+	 * signing identity minted. The three ways this is false are S1–S3 of
+	 * specs/messenger_reachability_states.md; a permission-5 member is told
+	 * which surface to fix rather than shown silence.
+	 */
+	public static function siteReady(): bool {
+		if (!self::available()) {
+			return false;
+		}
+		return count(new MultiDirectIdentity(array('is_active' => true))) > 0;
+	}
+
+	/**
+	 * Is $domain one of this site's own (enabled) inbound mail domains?
+	 * An address here never goes over the wire — it resolves internally.
+	 */
+	public static function localDomain(string $domain): bool {
+		$domain = strtolower(trim($domain));
+		if ($domain === '' || !PluginHelper::isPluginActive('mailbox')) {
+			return false;
+		}
+		$domains = new MultiInboundEmailDomain(array('domain' => $domain, 'enabled' => true));
+		return count($domains) > 0;
+	}
+
+	/**
+	 * The member behind a local address, or null.
+	 *
+	 * Resolves only when exactly ONE live member holds the mailbox: a shared
+	 * mailbox (info@) with several grantees is nobody in particular, and opening
+	 * a 1:1 with an arbitrary holder would be wrong — it stays email-only.
+	 *
+	 * The reveal is bounded by design: callers only reach this with an exact
+	 * full address the member typed, never a partial (see the spec's R1 note).
+	 *
+	 * @return array{user_id:int,name:string,avatar:string}|null
+	 */
+	public static function resolveLocalMember(string $address): ?array {
+		$address = strtolower(trim($address));
+		$at = strrpos($address, '@');
+		if ($at === false || !self::localDomain(substr($address, $at + 1))) {
+			return null;
+		}
+		$local_part = substr($address, 0, $at);
+		$domain     = substr($address, $at + 1);
+
+		$holder = null;
+		$aliases = new MultiInboundEmailAlias(array('alias' => $local_part, 'enabled' => true));
+		foreach ($aliases as $alias) {
+			if (strtolower((string)$alias->get_full_address()) !== $address) {
+				continue;
+			}
+			$grants = new MultiInboundEmailMailboxGrant(array('alias_id' => (int)$alias->key));
+			foreach ($grants as $grant) {
+				$uid = (int)$grant->get('ieg_usr_user_id');
+				if ($uid <= 0 || $uid === User::USER_SYSTEM || $uid === User::USER_DELETED) {
+					continue;
+				}
+				try {
+					$user = new User($uid, TRUE);
+				} catch (Exception $e) {
+					continue;
+				}
+				if (!$user->key || $user->get('usr_delete_time')
+					|| $user->get('usr_is_disabled') || $user->get('usr_is_admin_disabled')) {
+					continue;
+				}
+				if ($holder !== null && $holder['user_id'] !== $uid) {
+					return null; // shared mailbox — nobody in particular
+				}
+				$holder = array(
+					'user_id' => $uid,
+					'name'    => $user->display_name(),
+					'avatar'  => $user->get_picture_link('avatar'),
+				);
+			}
+		}
+		return $holder;
+	}
+
+	/**
+	 * Is the sending address's own domain actually published in DNS — the
+	 * SRV endpoint and the key the recipient will verify our signature
+	 * against? An identity in the database is not enough: unpublished, every
+	 * send can only be refused on the far end. Same lookup and cache as a
+	 * recipient check, aimed at ourselves.
+	 */
+	public static function senderPublished(string $address, bool $fresh = false): bool {
+		$domain = DirectProtocol::domainOf($address);
+		if ($domain === '') {
+			return false;
+		}
+		$key_id = DirectSigningIdentity::keyIdFor($domain);
+		if ($key_id === '') {
+			return false;
+		}
+		$capability = DirectCapability::lookup($domain, false, $fresh);
+		return $capability !== null && isset($capability['keys'][$key_id]);
 	}
 
 	/**
@@ -93,9 +196,12 @@ class MessengerFederation {
 	 * reports reachability and never a reason that would leak the recipient's
 	 * choices.
 	 *
+	 * @param bool $fresh resolve past the capability cache — the member asked
+	 *        to check again, and a cached "no" from a blip must not answer for
+	 *        the retry. Callers rate-limit.
 	 * @return array{reachable:bool, reason:string}
 	 */
-	public static function reachability(string $address): array {
+	public static function reachability(string $address, bool $fresh = false): array {
 		$address = strtolower(trim($address));
 		if (!self::available()) {
 			return array('reachable' => false, 'reason' => 'This site does not have cross-site chat set up.');
@@ -105,7 +211,7 @@ class MessengerFederation {
 			return array('reachable' => false, 'reason' => 'That does not look like an address.');
 		}
 
-		$capability = DirectCapability::lookup($domain);
+		$capability = DirectCapability::lookup($domain, false, $fresh);
 		if ($capability === null) {
 			return array('reachable' => false,
 				'reason' => 'That address cannot be reached by chat. You can send an email instead.');

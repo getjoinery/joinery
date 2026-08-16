@@ -1,14 +1,4 @@
 <?php
-require_once(__DIR__ . '/../includes/PathHelper.php');
-
-require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
-require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
-require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/SingleRowAccessor.php'));
-require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
-require_once(PathHelper::getIncludePath('includes/Validator.php'));
-require_once(PathHelper::getIncludePath('data/users_class.php'));
-
 class SettingException extends SystemBaseException {}
 
 class Setting extends SystemBase {	public static $prefix = 'stg';
@@ -119,6 +109,7 @@ private function _check_for_duplicate_setting() {
 			'__route',                // serve.php rewrite parameter
 			'edit_primary_key_value', // FormWriter record-id hidden field
 			'plugin_settings_target', // Plugin Settings tab section marker
+			'plugin',                 // Plugin Settings subtab selector (?plugin=), rides the form action's query string
 			'g-recaptcha-response',   // reCAPTCHA widget
 			'h-captcha-response',     // hCaptcha widget
 			'submit_button',

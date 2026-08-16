@@ -8,7 +8,8 @@
  * newest page, embedded as JSON — so the app draws immediately with no
  * round-trip. Everything after that arrives through messenger_poll.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Unified picker (remote panel folded into the one search box); pick status line, standard-only note, admin not-set-up notice
  */
 
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -43,6 +44,7 @@ $boot = array(
 	'settings'      => $client,
 	'conversations' => $conversations,
 	'open'          => $open,
+	'federation'    => $federation,
 );
 ?>
 <div class="jy-ui msgr" id="msgr" data-pane="<?php echo $open ? 'thread' : 'list'; ?>">
@@ -115,23 +117,19 @@ $boot = array(
 			<div class="msgr-chips" id="msgr-picked"></div>
 			<label class="msgr-field">
 				<span>Find people</span>
-				<input type="search" id="msgr-people-search" placeholder="Search by name" autocomplete="off">
+				<input type="search" id="msgr-people-search" placeholder="<?php echo $federation['site_ready'] ? 'Search by name, contact, or address' : 'Search by name'; ?>" autocomplete="off">
 			</label>
 			<ul class="msgr-people" id="msgr-people-results"></ul>
-
-			<?php if ($federation_available): ?>
-			<details class="msgr-remote" id="msgr-remote">
-				<summary>Someone on another Joinery site</summary>
-				<label class="msgr-field">
-					<span>Their Joinery address</span>
-					<input type="text" id="msgr-remote-address" inputmode="email"
-						placeholder="name@theirsite.com" autocomplete="off">
-				</label>
-				<p class="msgr-remote-status" id="msgr-remote-status"></p>
-				<button type="button" class="btn btn-sm btn-outline" id="msgr-remote-check">Check</button>
-			</details>
+			<p class="msgr-pick-status" id="msgr-pick-status" hidden></p>
+			<?php if (($federation['admin_notice'] ?? '') === 'not_set_up'): ?>
+			<p class="msgr-site-notice">Cross-site chat isn't set up on this site.
+				<a href="/admin/admin_settings">Set up Joinery Direct</a></p>
+			<?php elseif (($federation['admin_notice'] ?? '') === 'unpublished'): ?>
+			<p class="msgr-site-notice">Joinery Direct is on, but this site's DNS records aren't published yet.
+				<a href="/plugins/mailbox/admin/admin_mailbox_setup">Publish them on the Setup tab</a></p>
 			<?php endif; ?>
 
+			<p class="msgr-remote-level-note" id="msgr-remote-level-note" hidden>Cross-site conversations are Standard.</p>
 			<div class="msgr-level-picker" id="msgr-new-level-picker">
 				<?php
 				// The shared protection-level cards — the same control, and the

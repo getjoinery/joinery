@@ -116,6 +116,24 @@ function admin_settings_logic(array $input): LogicResult {
 			StaticPageCache::clearAll();
 		}
 
+		// Turning Joinery Direct ON is half the job: the domain's records have
+		// to be published in DNS before any other instance can verify this
+		// site's signature. Say where the other half lives at the exact moment
+		// the operator is wondering what happens next. (Flash messages render
+		// escaped, so this names the destination rather than linking it; the
+		// messenger picker's notice carries the actual link.)
+		if (isset($changed['joinery_direct_enabled']) && !empty($input['joinery_direct_enabled'])) {
+			$where = PluginHelper::isPluginActive('mailbox')
+				? 'Publish its DNS records from the Mailbox admin\'s Setup tab — they are part of each domain\'s record plan there.'
+				: 'It needs the mailbox plugin for addresses and DNS records — activate it, then publish the records from its Setup tab.';
+			$session->save_message(new DisplayMessage(
+				'Joinery Direct is on. ' . $where,
+				'One step left',
+				NULL,
+				DisplayMessage::MESSAGE_ANNOUNCEMENT
+			));
+		}
+
 		return LogicResult::redirect('/admin/admin_settings');
 	}
 

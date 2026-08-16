@@ -208,37 +208,6 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= '</div>';
                 }
 
-                // Warn if an active plugin's settings are all still blank or
-                // at their factory default — a plugin declares settings, so
-                // having any is what makes the check meaningful.
-                if (
-                    $plugin['plugin'] &&
-                    $plugin['plugin']->get('plg_status') === 'active'
-                ) {
-                    try {
-                        $ph = PluginHelper::getInstance($plugin['name']);
-                        $declared = $ph->getDeclaredSettings();
-                        if (!empty($declared)) {
-                            $all_default = true;
-                            foreach ($declared as $s) {
-                                $current = $settings->get_setting($s['name'], true, true);
-                                $default = $s['default'] ?? '';
-                                if ($current !== '' && $current !== null && (string)$current !== (string)$default) {
-                                    $all_default = false;
-                                    break;
-                                }
-                            }
-                            if ($all_default) {
-                                $status_cell .= '<br><div class="alert alert-warning p-1 mt-1 mb-0" style="font-size: 0.8em;">';
-                                $status_cell .= '⚠ <a href="/admin/admin_settings_plugins?plugin=' . urlencode($plugin['name']) . '">Settings not configured</a>';
-                                $status_cell .= '</div>';
-                            }
-                        }
-                    } catch (Exception $e) {
-                        // Skip if plugin helper unavailable
-                    }
-                }
-
                 // Provisioning setup indicator — resolved asynchronously by
                 // the script at the bottom of the page.
                 if (in_array($plugin['name'], $provisioning_plugins, true)) {

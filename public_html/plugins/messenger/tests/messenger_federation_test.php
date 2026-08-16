@@ -27,11 +27,18 @@
  *    to probe whose contacts you are in;
  *  - reactions and deletes cross; a delete only touches the sender's own message;
  *  - an address that publishes no capability record reads as not-chat-reachable,
- *    with email offered rather than silently substituted.
+ *    with email offered rather than silently substituted;
+ *  - the sender-side ladder of specs/messenger_reachability_states.md: S2
+ *    (Direct off) and S3 (no identity) offer no contacts, an identity opens
+ *    the address book, S4 is a member-level absence not a site one; and R1 —
+ *    an exact local address names its member, partials never do, and an
+ *    own-site address opens a LOCAL conversation, never a wire.
  *
  * Run: php tests/run.php db --filter=messenger_federation
  *
- * @version 1.0
+ * @version 1.2
+ * @changelog 1.2 - Sender-side ladder (S2-S4) and R1 local resolution
+ * @changelog 1.1 - People picker contacts section
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -268,5 +275,220 @@ check(strpos(strtolower($reach['reason']), 'email') !== false,
 
 $reach = MessengerFederation::reachability('not-an-address');
 check($reach['reachable'] === false, 'and neither is something that is not an address');
+
+
+section('the picker\'s sender-side ladder: S2, S3, ready (spec: messenger_reachability_states)');
+
+require_once(PathHelper::getIncludePath('plugins/messenger/logic/messenger_people_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/messenger/logic/messenger_action_logic.php'));
+require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
+
+/**
+ * Flip a Direct setting for this run — the row AND the settings singleton's
+ * in-memory copy, because get_setting() caches what it has already read
+ * (same device as tests/direct/joinery_direct_receive_test.php).
+ */
+function fed_test_set(string $name, ?string $value): void {
+	$db = DbConnector::get_instance()->get_db_link();
+	if ($value === null) {
+		$db->prepare('DELETE FROM stg_settings WHERE stg_name = ?')->execute(array($name));
+	} else {
+		$db->prepare("INSERT INTO stg_settings (stg_name, stg_value, stg_create_time, stg_update_time)
+			VALUES (?, ?, now(), now()) ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value")
+			->execute(array($name, $value));
+	}
+	$prop = new ReflectionProperty('Globalvars', 'settings');
+	$prop->setAccessible(true);
+	$live = $prop->getValue(Globalvars::get_instance());
+	if ($value === null) { unset($live[$name]); } else { $live[$name] = $value; }
+	$prop->setValue(Globalvars::get_instance(), $live);
+}
+
+if (!PluginHelper::isPluginActive('mailbox')) {
+	harness_skip('the picker ladder', 'mailbox plugin inactive here (S1)');
+} else {
+	$db = DbConnector::get_instance()->get_db_link();
+
+	// The enabled flag goes back exactly as found, whatever happens mid-test.
+	$enabled_before = $db->query("SELECT stg_value FROM stg_settings WHERE stg_name = 'joinery_direct_enabled'")->fetchColumn();
+	harness_defer(function () use ($enabled_before) {
+		fed_test_set('joinery_direct_enabled', $enabled_before === false ? null : (string)$enabled_before);
+	});
+
+	// A mailbox of Bob's own to hold the contact.
+	$domain = new InboundEmailDomain(NULL);
+	$domain->set('ied_domain', 'picker-' . strtolower($suffix) . '.example');
+	$domain->set('ied_is_enabled', true);
+	$domain->save();
+	$domain_id = (int)$domain->key;
+	harness_defer(function () use ($db, $domain_id) {
+		$db->prepare('DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = ?')->execute(array($domain_id));
+	});
+
+	$alias = new InboundEmailAlias(NULL);
+	$alias->set('iea_ied_inbound_email_domain_id', $domain_id);
+	$alias->set('iea_alias', 'picker' . strtolower($suffix));
+	$alias->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
+	$alias->set('iea_is_enabled', true);
+	$alias->prepare();
+	$alias->save();
+	$alias_id = (int)$alias->key;
+	harness_defer(function () use ($db, $alias_id) {
+		$db->prepare('DELETE FROM iea_inbound_email_aliases WHERE iea_inbound_email_alias_id = ?')->execute(array($alias_id));
+	});
+
+	$grant = new InboundEmailMailboxGrant(NULL);
+	$grant->set('ieg_iea_inbound_email_alias_id', $alias_id);
+	$grant->set('ieg_usr_user_id', (int)$bob->key);
+	$grant->save();
+	$grant_id = (int)$grant->key;
+	harness_defer(function () use ($db, $grant_id) {
+		$db->prepare('DELETE FROM ieg_inbound_email_mailbox_grants WHERE ieg_inbound_email_mailbox_grant_id = ?')->execute(array($grant_id));
+	});
+
+	$store = new MailboxContacts();
+	check($store->manualAdd((int)$bob->key, 'Remote Tester <remote.tester@far-away.example>', $alias_id),
+		'the contact lands in the address book');
+	$bob_id = (int)$bob->key;
+	harness_defer(function () use ($db, $bob_id) {
+		$db->prepare('DELETE FROM imc_mailbox_contacts WHERE imc_usr_user_id = ?')->execute(array($bob_id));
+	});
+
+	$_SERVER['REQUEST_METHOD'] = 'POST';
+	$_SESSION = array('usr_user_id' => $bob_id, 'loggedin' => true, 'permission' => 1);
+
+	// ---- S2: Direct off. The address book is full; the picker offers nothing.
+	fed_test_set('joinery_direct_enabled', '0');
+	check(MessengerFederation::siteReady() === false, 'S2: Direct off is not site-ready');
+	$s2 = messenger_people_logic(array('q' => 'remote.tes'));
+	check(empty($s2->data['contacts']), 'S2: with Direct off the picker offers no contacts');
+
+	// ---- S3: Direct on, but no signing identity for this run's domain set.
+	fed_test_set('joinery_direct_enabled', '1');
+	$identities_before = (int)$db->query('SELECT count(*) FROM jdi_direct_identities WHERE jdi_is_active')->fetchColumn();
+	if ($identities_before > 0) {
+		harness_skip('S3', 'this deployment already holds a signing identity');
+	} else {
+		check(MessengerFederation::siteReady() === false, 'S3: enabled but identity-less is not site-ready');
+		$s3 = messenger_people_logic(array('q' => 'remote.tes'));
+		check(empty($s3->data['contacts']), 'S3: still no contacts before an identity exists');
+	}
+
+	// ---- Ready: mint an identity for the fixture domain. Now the site can
+	// speak, and the address book surfaces.
+	DirectSigningIdentity::ensureFor('picker-' . strtolower($suffix) . '.example');
+	DirectSigningIdentity::resetForTests();
+	harness_defer(function () use ($db, $suffix) {
+		$db->prepare('DELETE FROM jdi_direct_identities WHERE jdi_domain = ?')
+		   ->execute(array('picker-' . strtolower($suffix) . '.example'));
+	});
+	check(MessengerFederation::siteReady() === true, 'an identity makes the site ready');
+
+	$by_address = messenger_people_logic(array('q' => 'remote.tes'));
+	check(in_array('remote.tester@far-away.example',
+		array_column($by_address->data['contacts'] ?? array(), 'address'), true),
+		'a partial address finds the contact', $by_address->error ?? '');
+
+	$by_name = messenger_people_logic(array('q' => 'remote test'));
+	check(in_array('remote.tester@far-away.example',
+		array_column($by_name->data['contacts'] ?? array(), 'address'), true),
+		'a case-insensitive name match finds it too', $by_name->error ?? '');
+
+	$miss = messenger_people_logic(array('q' => 'nobody-by-that-name'));
+	check(empty($miss->data['contacts']), 'a non-matching term offers nothing');
+
+	// The address book is the member's own: the same search as somebody else
+	// must come back empty.
+	$alice = make_user('FedA' . $suffix);
+	$alice_id = (int)$alice->key;
+	$_SESSION['usr_user_id'] = $alice_id;
+	$other = messenger_people_logic(array('q' => 'remote.tes'));
+	check(empty($other->data['contacts']), 'another member never sees them');
+
+	// ---- S4: the site is ready, but Alice holds no mailbox on a signable
+	// domain — the definition of "cannot send", which the picker explains at
+	// pick time rather than by hiding her contacts.
+	check(MessengerFederation::addressFor($alice_id) === null,
+		'S4: a member without a signable mailbox has no sending address');
+	check(MessengerFederation::addressFor($bob_id) !== null,
+		'while the mailbox holder has one');
+
+
+	section('R1: an address on this site resolves internally, never over the wire');
+
+	$bob_address = 'picker' . strtolower($suffix) . '@picker-' . strtolower($suffix) . '.example';
+
+	// The exact typed address names Bob in the people search (via_address).
+	$as_alice = messenger_people_logic(array('q' => $bob_address));
+	$resolved = null;
+	foreach (($as_alice->data['people'] ?? array()) as $person) {
+		if (!empty($person['via_address'])) { $resolved = $person; }
+	}
+	check($resolved !== null && (int)$resolved['user_id'] === $bob_id,
+		'an exact typed address resolves to the member behind the mailbox');
+
+	$partial = messenger_people_logic(array('q' => substr($bob_address, 0, 12)));
+	$leaked = false;
+	foreach (($partial->data['people'] ?? array()) as $person) {
+		if ((int)$person['user_id'] === $bob_id) { $leaked = true; }
+	}
+	check($leaked === false, 'a partial address never matches a member — no enumeration');
+
+	// Reachability answers "local member", and open_remote opens the LOCAL
+	// conversation rather than putting an own-site address on the wire.
+	$reach = messenger_action_logic(array('action' => 'reachability', 'address' => $bob_address));
+	check(($reach->data['local_member']['user_id'] ?? 0) === $bob_id,
+		'reachability names the local member', json_encode($reach->data));
+
+	$opened = messenger_action_logic(array('action' => 'open_remote', 'address' => $bob_address));
+	$conversation_id = (int)($opened->data['conversation_id'] ?? 0);
+	check($conversation_id > 0, 'open_remote with a local address opens a conversation', $opened->error ?? '');
+	harness_defer(function () use ($db, $conversation_id) {
+		if ($conversation_id <= 0) { return; }
+		$db->prepare('DELETE FROM msg_messages WHERE msg_cnv_conversation_id = ?')->execute(array($conversation_id));
+		$db->prepare('DELETE FROM cnp_conversation_participants WHERE cnp_cnv_conversation_id = ?')->execute(array($conversation_id));
+		$db->prepare('DELETE FROM cnv_conversations WHERE cnv_conversation_id = ?')->execute(array($conversation_id));
+	});
+	$peer_rows = (int)$db->query('SELECT count(*) FROM crp_conversation_remote_peers WHERE crp_cnv_conversation_id = ' . $conversation_id)->fetchColumn();
+	check($peer_rows === 0, 'and that conversation is local — no remote peer row');
+
+	$again = messenger_action_logic(array('action' => 'open_remote', 'address' => $bob_address));
+	check((int)($again->data['conversation_id'] ?? 0) === $conversation_id,
+		'opening the same address again resumes the same conversation');
+
+	// An own-domain address that maps to no mailbox is email-only (R1 → R3).
+	$nobody = messenger_action_logic(array('action' => 'reachability',
+		'address' => 'nobody-here@picker-' . strtolower($suffix) . '.example'));
+	check(($reach_ok = ($nobody->data['reachable'] ?? null)) === false,
+		'an own-domain address with no member behind it is not chat-reachable');
+	check(strpos(strtolower((string)($nobody->data['reason'] ?? '')), 'email') !== false,
+		'and offers email instead');
+
+
+	section('S6: an identity in the database is not a publication in DNS');
+
+	// Bob's domain holds a minted identity but publishes nothing — the fixture
+	// domain has no DNS at all. A pick must answer with OUR state, before any
+	// recipient lookup happens.
+	$_SESSION['usr_user_id'] = $bob_id;
+	$s6 = messenger_action_logic(array('action' => 'reachability', 'address' => 'someone@far-away.example'));
+	check(($s6->data['reachable'] ?? null) === false,
+		'an unpublished sender is not offered chat, however reachable the other side');
+	check(strpos((string)($s6->data['reason'] ?? ''), 'not published') !== false,
+		'and the reason names OUR missing DNS records, not theirs', (string)($s6->data['reason'] ?? ''));
+
+	$s6_open = messenger_action_logic(array('action' => 'open_remote', 'address' => 'someone@far-away.example'));
+	check($s6_open->error !== null && strpos((string)$s6_open->error, 'not published') !== false,
+		'open_remote refuses with the same reason', (string)$s6_open->error);
+
+	// The send path enforces the same thing below every surface.
+	$blocked = JoineryDirect::send('someone@far-away.example', 'chat',
+		array(array('role' => DirectProtocol::ROLE_BODY_TEXT, 'content_type' => 'text/plain', 'bytes' => 'hi')),
+		array('sender' => $bob_address));
+	check($blocked->status === DirectSendResult::NO_CAPABILITY
+		&& strpos($blocked->detail, 'not published') !== false,
+		'JoineryDirect::send() refuses before the wire for an unpublished sender',
+		$blocked->status . ' ' . $blocked->detail);
+}
 
 harness_finish();

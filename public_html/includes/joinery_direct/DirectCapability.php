@@ -26,7 +26,8 @@
  * so it is not the SSRF surface SafeHttpClient addresses — the concern here is
  * the VOLUME of attacker-driven lookups.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - lookup() takes $fresh: a member-triggered re-check resolves past the cache (callers rate-limit)
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -59,19 +60,24 @@ class DirectCapability {
 	 *
 	 * @param bool $peer_limited true on the receive path, where the domain is
 	 *        attacker-chosen and resolver work must be capped per connecting peer.
+	 * @param bool $fresh skip the memo and the row cache and resolve now — for a
+	 *        member-triggered re-check, where a cached "no" from a network blip
+	 *        would otherwise be served back on every retry. The result is still
+	 *        stored, so a fresh answer refreshes the cache for everyone. Callers
+	 *        must rate-limit; this parameter is resolver work on demand.
 	 * @return array{host:string,port:int,keys:array<string,string>}|null
 	 */
-	public static function lookup(string $domain, bool $peer_limited = false): ?array {
+	public static function lookup(string $domain, bool $peer_limited = false, bool $fresh = false): ?array {
 		$domain = strtolower(trim($domain));
 		if ($domain === '' || !self::looksLikeDomain($domain)) {
 			return null;
 		}
-		if (array_key_exists($domain, self::$memo)) {
+		if (!$fresh && array_key_exists($domain, self::$memo)) {
 			return self::$memo[$domain];
 		}
 
 		$row = DirectCapabilityCache::forDomain($domain);
-		if ($row !== null && $row->isFresh()) {
+		if (!$fresh && $row !== null && $row->isFresh()) {
 			return self::$memo[$domain] = self::fromRow($row);
 		}
 
@@ -191,9 +197,21 @@ class DirectCapability {
 		return 'v=joinery1; k=' . $key_id . '; p=' . $public_key_b64;
 	}
 
+	/** The SRV fields this deployment publishes, separately — DNS provider
+	 *  forms ask for priority, weight, port and target as their own inputs. */
+	public static function srvRecordFields(string $host, int $port): array {
+		return array(
+			'priority' => 0,
+			'weight'   => 5,
+			'port'     => $port,
+			'target'   => rtrim(strtolower(trim($host)), '.'),
+		);
+	}
+
 	/** The SRV RDATA this deployment publishes: priority weight port target. */
 	public static function srvRecordValue(string $host, int $port): string {
-		return '0 5 ' . $port . ' ' . rtrim(strtolower(trim($host)), '.');
+		$fields = self::srvRecordFields($host, $port);
+		return $fields['priority'] . ' ' . $fields['weight'] . ' ' . $fields['port'] . ' ' . $fields['target'];
 	}
 
 	private static function fromRow(DirectCapabilityCache $row): ?array {

@@ -16,7 +16,8 @@
  * brings it back. Leaving a group is a membership change and lives in
  * messenger_group.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - Reachability spec: local addresses resolve internally (R1), `fresh` re-checks past the capability cache (rate-limited)
  */
 
 
@@ -57,7 +58,78 @@ function messenger_action_logic(array $input): LogicResult {
 	// conversation lookup because neither starts from one.
 	if ($action === 'reachability' || $action === 'open_remote') {
 		$address = strtolower(trim((string)($input['address'] ?? '')));
-		$reach = MessengerFederation::reachability($address);
+		$email_url = '/profile/mailbox/mailbox?compose=' . rawurlencode($address);
+
+		// An address on this site's own mail domains resolves internally and
+		// never goes over the wire (spec R1). It either names a member — one
+		// live holder of that mailbox — or it is email-only, exactly like a
+		// domain that publishes nothing.
+		$domain = DirectProtocol::domainOf($address);
+		if ($domain !== '' && MessengerFederation::localDomain($domain)) {
+			$member = MessengerFederation::resolveLocalMember($address);
+			if ($action === 'reachability') {
+				return LogicResult::render(array(
+					'action'       => 'reachability',
+					'address'      => $address,
+					'reachable'    => $member !== null,
+					'reason'       => $member !== null ? ''
+						: 'That address cannot be reached by chat. You can send an email instead.',
+					'local_member' => $member,
+					'email_url'    => $email_url,
+				));
+			}
+			if ($member === null) {
+				return LogicResult::error('That address cannot be reached by chat. You can send an email instead.');
+			}
+			if ($member['user_id'] === $user_id) {
+				return LogicResult::error('You cannot message yourself.');
+			}
+			try {
+				$conversation = Conversation::get_or_create_conversation($user_id, $member['user_id']);
+			} catch (ConversationException $e) {
+				return LogicResult::error($e->getMessage());
+			}
+			return LogicResult::render(array(
+				'action'          => 'open_remote',
+				'conversation_id' => (int)$conversation->key,
+				'conversation'    => Messenger::conversationPayload($conversation, $user_id),
+			));
+		}
+
+		// A member-triggered re-check resolves past the capability cache, so a
+		// blip's cached "no" cannot answer for the retry. Over the cap it
+		// quietly falls back to the cached answer — never an error.
+		$fresh = !empty($input['fresh']);
+		if ($fresh && !RequestLogger::check_rate_limit('messenger_fresh_check', 10, 300)) {
+			$fresh = false;
+		}
+		if ($fresh) {
+			RequestLogger::log('messenger_fresh_check', 'fresh_reachability', true);
+		}
+
+		// Our own half of the handshake, checked before the recipient's: the
+		// recipient verifies our signature against the key OUR domain
+		// publishes in DNS, so an unpublished sender fails every send however
+		// reachable the other side is. This is our state, not theirs — the
+		// reason says so plainly, email still works meanwhile, and Check
+		// again re-resolves this half past the cache too, so an operator who
+		// just published is not stuck behind the negative cache.
+		$sender_address = MessengerFederation::addressFor($user_id);
+		if ($sender_address !== null && !MessengerFederation::senderPublished($sender_address, $fresh)) {
+			$our_reason = 'This site\'s Joinery Direct DNS records are not published yet. You can send an email instead.';
+			if ($action === 'reachability') {
+				return LogicResult::render(array(
+					'action'    => 'reachability',
+					'address'   => $address,
+					'reachable' => false,
+					'reason'    => $our_reason,
+					'email_url' => $email_url,
+				));
+			}
+			return LogicResult::error($our_reason);
+		}
+
+		$reach = MessengerFederation::reachability($address, $fresh);
 
 		if ($action === 'reachability') {
 			return LogicResult::render(array(
@@ -66,7 +138,7 @@ function messenger_action_logic(array $input): LogicResult {
 				'reachable' => $reach['reachable'],
 				'reason'    => $reach['reason'],
 				// The honest alternative, offered rather than silently taken.
-				'email_url' => '/profile/mailbox/mailbox?compose=' . rawurlencode($address),
+				'email_url' => $email_url,
 			));
 		}
 
@@ -292,7 +364,8 @@ function messenger_action_logic_descriptor(): array {
 			'message_id'      => array('type' => 'int',    'required' => false, 'label' => 'Message'),
 			'emoji'           => array('type' => 'string', 'required' => false, 'label' => 'Reaction emoji'),
 			'protection_level' => array('type' => 'string', 'required' => false, 'label' => 'Protection level to raise to'),
-			'address'         => array('type' => 'string', 'required' => false, 'label' => 'Address on another Joinery site'),
+			'address'         => array('type' => 'string', 'required' => false, 'label' => 'Address to reach (reachability / open_remote)'),
+			'fresh'           => array('type' => 'int',    'required' => false, 'label' => 'Re-check past the reachability cache (rate-limited)'),
 		),
 	);
 }

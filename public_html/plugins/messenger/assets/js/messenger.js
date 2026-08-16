@@ -11,7 +11,9 @@
  * with a conversation open, slow on the list alone, paused while the tab is
  * hidden, and poked immediately after the member does something.
  *
- * @version 1.0.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - Unified picker: one search box resolves members, contacts and typed addresses inline (chat / email-only / local member); remote panel removed; Enter picks instead of closing; 1:1 rule enforced at the click; Check again resolves past the cache
+ * @changelog 1.1.0 - People picker offers the member's own mailbox contacts
  */
 (function () {
 	'use strict';
@@ -45,6 +47,7 @@
 	var state = {
 		me: boot.user_id,
 		settings: boot.settings || {},
+		federation: boot.federation || { site_ready: false, member_can_send: false },
 		conversations: boot.conversations || [],
 		openId: null,
 		messages: [],
@@ -107,10 +110,8 @@
 		protectNote: document.getElementById('msgr-protect-note'),
 		protectSave: document.getElementById('msgr-protect-save'),
 		newLevelPicker: document.getElementById('msgr-new-level-picker'),
-		remote: document.getElementById('msgr-remote'),
-		remoteAddress: document.getElementById('msgr-remote-address'),
-		remoteStatus: document.getElementById('msgr-remote-status'),
-		remoteCheck: document.getElementById('msgr-remote-check')
+		pickStatus: document.getElementById('msgr-pick-status'),
+		remoteLevelNote: document.getElementById('msgr-remote-level-note')
 	};
 
 	// ---- Small helpers -----------------------------------------------
@@ -822,9 +823,12 @@
 		el.groupName.value = '';
 		el.groupName.parentElement.hidden = (mode === 'add');
 		el.peopleSearch.value = '';
+		el.peopleSearch.disabled = false;
 		el.peopleResults.textContent = '';
 		el.picked.textContent = '';
 		el.peopleConfirm.textContent = mode === 'add' ? 'Add' : 'Start';
+		pickerNote('');
+		el.remoteLevelNote.hidden = true;
 		// Adding people to a conversation that already exists does not get to
 		// choose its protection — that is a raise, and it lives in its own
 		// dialog with its own warning.
@@ -834,7 +838,40 @@
 		el.peopleSearch.focus();
 	}
 
+	/** The one status line under the results. Returns the element so a caller
+	 *  can append links; '' clears and hides it. */
+	function pickerNote(message) {
+		el.pickStatus.textContent = '';
+		el.pickStatus.hidden = !message;
+		if (message) { el.pickStatus.appendChild(node('span', null, message)); }
+		return el.pickStatus;
+	}
+
+	function hasRemoteChip() {
+		return picking.chosen.some(function (c) { return c.remote; });
+	}
+
+	/**
+	 * The 1:1 rule and the Standard-only rule, applied the moment they hold:
+	 * a remote chip freezes the search (cross-site chats are one-to-one) and
+	 * pins the level to Standard. Removing the chip undoes both.
+	 */
+	function updatePickerLocks() {
+		var remote = hasRemoteChip();
+		el.peopleSearch.disabled = remote;
+		if (remote) {
+			el.peopleResults.textContent = '';
+			pickerNote('Cross-site chats are one-to-one — remove them to add other people.');
+		}
+		if (picking.mode !== 'add') {
+			el.newLevelPicker.hidden = remote;
+			el.remoteLevelNote.hidden = !remote;
+		}
+	}
+
 	var searchTimer = null;
+	var EMAIL_SHAPE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 	function searchPeople() {
 		clearTimeout(searchTimer);
 		searchTimer = setTimeout(function () {
@@ -845,28 +882,133 @@
 				payload.exclude_conversation_id = state.openId;
 			}
 			api('messenger_people', payload).then(function (data) {
+				// A slower earlier answer must not paint over a newer search.
+				if (el.peopleSearch.value.trim() !== q) { return; }
 				el.peopleResults.textContent = '';
+				var via_address = false;
 				(data.people || []).forEach(function (person) {
+					if (person.via_address) { via_address = true; }
 					if (picking.chosen.some(function (c) { return c.user_id === person.user_id; })) { return; }
-					var li = node('li');
-					var btn = node('button', 'msgr-person');
-					btn.type = 'button';
-					var img = node('img');
-					img.src = person.avatar;
-					img.alt = '';
-					btn.appendChild(img);
-					btn.appendChild(node('span', 'msgr-person-name', person.name));
-					btn.addEventListener('click', function () {
-						picking.chosen.push(person);
-						renderPicked();
-						el.peopleSearch.value = '';
-						el.peopleResults.textContent = '';
-					});
-					li.appendChild(btn);
-					el.peopleResults.appendChild(li);
+					el.peopleResults.appendChild(personRow(person));
 				});
+				// Contacts and raw addresses start cross-site 1:1s; a group
+				// add stays members-only.
+				if (picking.mode !== 'add') {
+					var address_listed = false;
+					(data.contacts || []).forEach(function (contact) {
+						if (contact.address === q.toLowerCase()) { address_listed = true; }
+						el.peopleResults.appendChild(contactRow(contact.name || contact.address, contact.address));
+					});
+					// A typed full address is usable even when nothing matches
+					// it — unless it already resolved to a member (via_address)
+					// or an identical contact row is on offer.
+					if (state.federation.site_ready && EMAIL_SHAPE.test(q)
+						&& !via_address && !address_listed) {
+						el.peopleResults.appendChild(contactRow('Use address', q.toLowerCase()));
+					}
+				}
 			}).catch(fail);
 		}, 220);
+	}
+
+	function personRow(person) {
+		var li = node('li');
+		var btn = node('button', 'msgr-person');
+		btn.type = 'button';
+		var img = node('img');
+		img.src = person.avatar;
+		img.alt = '';
+		btn.appendChild(img);
+		btn.appendChild(node('span', 'msgr-person-name', person.name));
+		btn.addEventListener('click', function () {
+			picking.chosen.push({ user_id: person.user_id, name: person.name, avatar: person.avatar });
+			renderPicked();
+			el.peopleSearch.value = '';
+			el.peopleResults.textContent = '';
+			pickerNote('');
+		});
+		li.appendChild(btn);
+		return li;
+	}
+
+	/** A result row that starts a cross-site 1:1 — a contact, or a raw typed
+	 *  address. With anyone already picked it is unpickable ON SIGHT, with the
+	 *  reason under it: the impossible click is blocked at the click. */
+	function contactRow(name, address) {
+		var li = node('li');
+		var btn = node('button', 'msgr-person');
+		btn.type = 'button';
+		btn.appendChild(node('span', 'msgr-person-name', name));
+		btn.appendChild(node('span', 'msgr-person-address', address));
+		if (picking.chosen.length) {
+			btn.disabled = true;
+			btn.classList.add('msgr-person--blocked');
+			li.appendChild(btn);
+			li.appendChild(node('span', 'msgr-person-blocked-line',
+				'Cross-site chats are one-to-one — remove other people to message them.'));
+			return li;
+		}
+		btn.addEventListener('click', function () { resolveAddress(address, name); });
+		li.appendChild(btn);
+		return li;
+	}
+
+	/**
+	 * What picking an address means, resolved before anything is committed:
+	 * a member of this site (chip added, plain local chat), reachable by chat
+	 * (remote chip, Standard), or not reachable — in which case the honest
+	 * alternative is offered, plus a Check again that resolves past the cache
+	 * so a network blip's "no" cannot answer for the retry.
+	 */
+	function resolveAddress(address, name, fresh) {
+		if (picking.chosen.length) { updatePickerLocks(); return; }
+		if (!state.federation.member_can_send) {
+			var s4 = pickerNote('You need a Joinery email address on this site to chat across sites. ');
+			var mailbox = node('a', null, 'Open your mailbox');
+			mailbox.href = '/profile/mailbox/mailbox';
+			s4.appendChild(mailbox);
+			return;
+		}
+		pickerNote('Checking ' + address + '…');
+		api('messenger_action', { action: 'reachability', address: address, fresh: fresh ? 1 : 0 })
+			.then(function (data) {
+				if (data.local_member) {
+					if (data.local_member.user_id === state.me) {
+						pickerNote('That address is yours.');
+						return;
+					}
+					picking.chosen.push({
+						user_id: data.local_member.user_id,
+						name:    data.local_member.name,
+						avatar:  data.local_member.avatar
+					});
+				} else if (data.reachable) {
+					picking.chosen.push({
+						remote:  true,
+						address: address,
+						name:    (name && name !== 'Use address') ? name : address
+					});
+				} else {
+					var no = pickerNote(data.reason + ' ');
+					var email = node('a', null, 'Send an email instead');
+					email.href = data.email_url;
+					no.appendChild(email);
+					no.appendChild(node('span', null, ' · '));
+					var again = node('a', null, 'Check again');
+					again.href = '#';
+					again.addEventListener('click', function (event) {
+						event.preventDefault();
+						resolveAddress(address, name, true);
+					});
+					no.appendChild(again);
+					return;
+				}
+				renderPicked();
+				el.peopleSearch.value = '';
+				el.peopleResults.textContent = '';
+				pickerNote('');
+				updatePickerLocks();
+			}).catch(function (err) { pickerNote(''); fail(err); });
 	}
 
 	function renderPicked() {
@@ -874,12 +1016,17 @@
 		picking.chosen.forEach(function (person, index) {
 			var chip = node('span', 'msgr-chip');
 			chip.appendChild(node('span', null, person.name));
+			if (person.remote && person.name !== person.address) {
+				chip.appendChild(node('span', 'msgr-chip-address', person.address));
+			}
 			var remove = node('button', null, '✕');
 			remove.type = 'button';
 			remove.setAttribute('aria-label', 'Remove ' + person.name);
 			remove.addEventListener('click', function () {
 				picking.chosen.splice(index, 1);
 				renderPicked();
+				pickerNote('');
+				updatePickerLocks();
 			});
 			chip.appendChild(remove);
 			el.picked.appendChild(chip);
@@ -890,6 +1037,18 @@
 
 	function confirmPeople() {
 		if (!picking.chosen.length) { return; }
+
+		// A remote pick is always alone — the picker enforced that at the click.
+		if (picking.chosen[0].remote) {
+			api('messenger_action', { action: 'open_remote', address: picking.chosen[0].address })
+				.then(function (data) {
+					el.peopleDialog.close();
+					mergeConversations([data.conversation], false);
+					openConversation(data.conversation_id);
+				}).catch(fail);
+			return;
+		}
+
 		var ids = picking.chosen.map(function (p) { return p.user_id; });
 
 		if (picking.mode === 'add') {
@@ -943,68 +1102,6 @@
 			mergeConversations([data.conversation], false);
 			openConversation(data.conversation_id);
 		}).catch(fail);
-	}
-
-	/**
-	 * Chatting with someone on another Joinery site.
-	 *
-	 * The compose surface says what will happen BEFORE the member commits: an
-	 * address that cannot be reached by chat says so and offers to send an
-	 * email instead. A chat message is never quietly turned into an email —
-	 * that would be a different thing arriving in a different place under the
-	 * member's name.
-	 */
-	/** The address the last check said yes to, or null. */
-	var remoteChecked = null;
-
-	function remoteButton() {
-		var address = el.remoteAddress.value.trim();
-		// One button, two jobs, and which one it is depends on whether this
-		// exact address has already been checked — so the label a member reads
-		// and the thing the click does cannot disagree.
-		if (remoteChecked !== null && remoteChecked === address) {
-			startRemote(address);
-		} else {
-			checkRemote();
-		}
-	}
-
-	function checkRemote() {
-		var address = el.remoteAddress.value.trim();
-		if (!address) { return; }
-		el.remoteStatus.textContent = 'Checking…';
-		el.remoteStatus.className = 'msgr-remote-status';
-		el.remoteCheck.disabled = true;
-
-		api('messenger_action', { action: 'reachability', address: address })
-			.then(function (data) {
-				el.remoteCheck.disabled = false;
-				if (data.reachable) {
-					el.remoteStatus.textContent = 'Reachable by chat.';
-					el.remoteStatus.className = 'msgr-remote-status msgr-remote-status--ok';
-					el.remoteCheck.textContent = 'Start chat';
-					remoteChecked = address;
-					return;
-				}
-				el.remoteStatus.textContent = '';
-				el.remoteStatus.className = 'msgr-remote-status msgr-remote-status--no';
-				el.remoteStatus.appendChild(node('span', null, data.reason));
-				var email = node('a', null, 'Send an email instead');
-				email.href = data.email_url;
-				el.remoteStatus.appendChild(email);
-			}).catch(function (err) {
-				el.remoteCheck.disabled = false;
-				fail(err);
-			});
-	}
-
-	function startRemote(address) {
-		api('messenger_action', { action: 'open_remote', address: address })
-			.then(function (data) {
-				el.peopleDialog.close();
-				mergeConversations([data.conversation], false);
-				openConversation(data.conversation_id);
-			}).catch(fail);
 	}
 
 	function openInfoDialog() {
@@ -1340,16 +1437,17 @@
 
 	el.protectSave.addEventListener('click', saveProtection);
 
-	if (el.remoteCheck) {
-		el.remoteCheck.addEventListener('click', remoteButton);
-		el.remoteAddress.addEventListener('input', function () {
-			// A changed address is a different question: the answer, and the
-			// button that acts on it, both go back to un-asked.
-			el.remoteStatus.textContent = '';
-			el.remoteCheck.textContent = 'Check';
-			remoteChecked = null;
-		});
-	}
+	// Enter must never close the picker: the dialog is a method="dialog" form,
+	// so an unhandled Enter would submit it shut. In the search box it picks
+	// the first offered result instead.
+	el.peopleDialog.querySelector('form').addEventListener('keydown', function (event) {
+		if (event.key !== 'Enter' || event.target.tagName === 'TEXTAREA') { return; }
+		event.preventDefault();
+		if (event.target === el.peopleSearch) {
+			var first = el.peopleResults.querySelector('button.msgr-person:not(:disabled)');
+			if (first) { first.click(); }
+		}
+	});
 
 	el.menu.querySelectorAll('[data-msgr-menu]').forEach(function (btn) {
 		btn.addEventListener('click', function () { menuAction(this.dataset.msgrMenu); });

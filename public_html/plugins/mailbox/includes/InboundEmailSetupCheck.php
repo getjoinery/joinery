@@ -14,7 +14,9 @@
  *
  * Each result is an associative array:
  *   id, scope, layer, label, severity, status, summary, detail, fix, recheckable
- * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?].
+ * where fix is null or ['text'=>, 'command'=>?, 'dns_record'=>['type','name','value']?,
+ * 'dns_records'=>[...same shape, several]?]. A record may carry 'priority',
+ * 'weight' and 'port' as separate fields (SRV/MX) — the value is then the target.
  *
  * TOPOLOGY-AWARE (specs/mailbox_setup_topology_aware.md): every prescription
  * derives from the deployment's receive topology — colocated (the box is the
@@ -23,6 +25,8 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.41 - colocated SRV targets the WEB host (the endpoint is a web route and the cert covers the web host, not the mail hostname); the card probes the published endpoint over verified HTTPS, so a wrong target reads as broken instead of PASS
+ * @version 1.40 - a Joinery Direct check row per domain: OPTIONAL, absent is INFO (never needs-attention), fresh lookup so the tab shows the truth right after publishing
  * @version 1.39 - the Joinery Direct capability record joins the plan
  * @version 1.38 - the automated mail identity (machine sender) card family
  *                 (specs/mailbox_machine_sender_card.md): derived on/off, the
@@ -559,6 +563,139 @@ class InboundEmailSetupCheck {
 	 * during a rotation a sender that cached the record may still be quoting the
 	 * old key id, and both answering is what makes rotation a non-event.
 	 */
+	/**
+	 * The Joinery Direct check row for one domain — or null when the channel
+	 * is off, in which case the mail tab says nothing about it.
+	 *
+	 * Optional by doctrine: unpublished means "not turned on for this domain",
+	 * never a fault, so the absent state is INFO and can never raise the
+	 * needs-attention banner. The lookup is FRESH on purpose — visiting the
+	 * tab right after publishing must show the truth, not the negative cache,
+	 * and the fresh answer refreshes that cache for the send path too.
+	 */
+	/**
+	 * The host the Direct SRV must name: whoever serves the HTTPS endpoint
+	 * with a certificate that matches. Fronted, that is the relay. Colocated,
+	 * it is the SITE's web hostname — the endpoint is a web route
+	 * (/.well-known/joinery-direct on serve.php), and the web host is what
+	 * the TLS certificate actually covers; the mail hostname generally is
+	 * not, and a sender verifying TLS would refuse it.
+	 */
+	private function directTarget(bool $fronted, string $mx_target): string {
+		if ($fronted) {
+			return $mx_target;
+		}
+		return strtolower(trim((string)$this->settings->get_setting('webDir')));
+	}
+
+	private function directResult(string $domain) {
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectCapability.php'));
+		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectIdentity.php'));
+		require_once(PathHelper::getIncludePath('data/direct_identities_class.php'));
+
+		if (!DirectSettings::enabled()) {
+			return null;
+		}
+
+		// The same records the plan publishes, in cut-and-paste form — the fix
+		// must show the actual rows like every other check here, not point at
+		// them. Same target rule and same idempotent identity mint as
+		// directRecords(): asking what to publish IS the moment a key is needed.
+		$fronted = $this->fronted();
+		$target = $this->directTarget($fronted, (string)($this->topology()['mx_hostname'] ?? ''));
+		$records = array();
+		if (trim($target) !== '') {
+			try {
+				DirectSigningIdentity::ensureFor($domain);
+			} catch (\Throwable $e) {
+				error_log('InboundEmailSetupCheck: could not mint a Direct signing identity for '
+					. $domain . ': ' . $e->getMessage());
+			}
+			// SRV fields ride separately — provider forms have an input per
+			// field, and a crammed value string cannot be pasted into them.
+			$srv = DirectCapability::srvRecordFields($target, 443);
+			$records[] = array('type' => 'SRV', 'name' => '_joinery._tcp.' . $domain,
+				'priority' => $srv['priority'], 'weight' => $srv['weight'],
+				'port' => $srv['port'], 'value' => $srv['target']);
+			foreach (DirectIdentity::publishableFor($domain) as $identity) {
+				$records[] = array('type' => 'TXT', 'name' => '_joinery-key.' . $domain,
+					'value' => DirectCapability::keyRecordValue(
+						(string)$identity->get('jdi_key_id'), (string)$identity->get('jdi_public_key')));
+			}
+		}
+
+		$capability = null;
+		try {
+			$capability = DirectCapability::lookup($domain, false, true);
+		} catch (\Throwable $e) {
+			// A resolver hiccup on an optional row is not worth a status.
+		}
+
+		if ($capability === null) {
+			return $this->r('domain.direct', $domain, 'domain', 'Joinery Direct (optional)',
+				self::OPTIONAL, self::INFO,
+				$domain . ' does not publish Joinery Direct records yet — mail keeps arriving over SMTP, and cross-site chat is off for this domain.',
+				'Two records advertise Direct: an SRV naming the endpoint and a TXT carrying the signing key other instances verify this site against.',
+				array(
+					'text' => 'Publish these at your DNS provider, or from this domain\'s record plan below.',
+					'dns_records' => $records,
+				));
+		}
+
+		$key_id = DirectSigningIdentity::keyIdFor($domain);
+		if ($key_id !== '' && !isset($capability['keys'][$key_id])) {
+			return $this->r('domain.direct', $domain, 'domain', 'Joinery Direct (optional)',
+				self::OPTIONAL, self::INFO,
+				$domain . ' publishes Direct records, but not this site\'s current signing key — other instances cannot verify a send until the key record is updated.',
+				'The key record in DNS does not include key id ' . $key_id . '.',
+				array(
+					'text' => 'Publish the current records at your DNS provider, or from this domain\'s record plan below.',
+					'dns_records' => $records,
+				));
+		}
+
+		// A record can be present and still name a host that cannot answer —
+		// a target outside the TLS certificate fails every real sender, while
+		// the DNS half looks perfect. Ask the published endpoint the way a
+		// sender would (verified HTTPS); it is POST-only, so 405 IS healthy.
+		$endpoint_host = (string)$capability['host'];
+		$endpoint_ok = false;
+		try {
+			require_once(PathHelper::getIncludePath('includes/SafeHttpClient.php'));
+			require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
+			$probe = new SafeHttpClient(array(
+				'allowed_ports'      => SafeHttpClient::directPortPolicy(),
+				'allow_redirects'    => false,
+				'connect_timeout'    => 5,
+				'timeout'            => 8,
+				'max_response_bytes' => 8192,
+				'user_agent'         => 'Joinery/SetupCheck',
+			));
+			$answer = $probe->get('https://' . $endpoint_host . ':' . intval($capability['port'])
+				. DirectProtocol::ENDPOINT_PATH);
+			$endpoint_ok = in_array($answer->status, array(200, 405), true);
+		} catch (\Throwable $e) {
+			// Unreachable, refused, or a certificate that does not cover the
+			// target — all the same answer a sender would get.
+		}
+		if (!$endpoint_ok) {
+			return $this->r('domain.direct', $domain, 'domain', 'Joinery Direct (optional)',
+				self::OPTIONAL, self::INFO,
+				$domain . ' publishes Direct records, but the endpoint they point at (' . $endpoint_host
+				. ') does not answer over verified HTTPS — other instances cannot deliver until the SRV names the right host.',
+				'The SRV target must be a host that serves this site over HTTPS with a matching certificate. The current correct records:',
+				array(
+					'text' => 'Update the records at your DNS provider, or from this domain\'s record plan below.',
+					'dns_records' => $records,
+				));
+		}
+
+		return $this->r('domain.direct', $domain, 'domain', 'Joinery Direct (optional)',
+			self::OPTIONAL, self::PASS,
+			'Published — other Joinery instances can deliver mail and chat to ' . $domain . ' directly.');
+	}
+
 	private function directRecords(DnsRecordPlan $plan, string $domain, bool $fronted, string $mx_target): void {
 		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectSettings.php'));
 		require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectCapability.php'));
@@ -567,8 +704,8 @@ class InboundEmailSetupCheck {
 		if (!DirectSettings::enabled()) {
 			return;
 		}
-		$target = $fronted ? $mx_target : $this->mailHostname;
-		if (trim((string)$target) === '') {
+		$target = $this->directTarget($fronted, $mx_target);
+		if (trim($target) === '') {
 			return;
 		}
 		// Minting the keypair here is deliberate and idempotent: asking what this
@@ -1543,6 +1680,19 @@ class InboundEmailSetupCheck {
 						$domain . ' has no DMARC record.',
 						'DMARC is optional but recommended once SPF and DKIM pass.',
 						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+			}
+		}
+
+		// Joinery Direct — the domain's cross-site records (SRV endpoint and
+		// signing key), peers of DKIM in kind. Deliberately OPTIONAL and never
+		// worse than INFO: a domain that publishes nothing keeps receiving
+		// over SMTP unchanged, and the messenger says so at pick time — so
+		// absence is a feature not yet finished, not a fault, and must not put
+		// a "needs attention" banner on a working mailbox.
+		if ($model && $model->get('ied_is_enabled')) {
+			$direct_row = $this->directResult($domain);
+			if ($direct_row !== null) {
+				$out[] = $direct_row;
 			}
 		}
 
