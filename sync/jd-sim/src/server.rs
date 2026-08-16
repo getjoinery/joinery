@@ -976,6 +976,40 @@ impl MockServer {
                 Some(_) => {}
             }
         }
+        // Something of that name is already living there. The real server
+        // refuses this — `drive_move_logic` checks `folder_name_taken` and
+        // `file_name_taken` against the destination and answers `name_taken`,
+        // exactly as creating and renaming do — and the mock did not.
+        //
+        // So a move could put two live entities under one name in one folder,
+        // a state the real server cannot be talked into, and the rig then spent
+        // its time on what that produced: one entry parked `DuplicateName`
+        // forever, the two devices holding different bytes at one path, and
+        // both of them calling it synced. Meanwhile the refusal the client
+        // really gets on a move was never once exercised. Trashed siblings do
+        // not count, exactly as on the other two paths.
+        let occupied = if t == "folder" {
+            let name = match st.folders.get(&id) {
+                Some(f) => f.name.clone(),
+                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+            };
+            st.folders
+                .values()
+                .any(|f| f.id != id && !f.trashed && f.parent == dest && f.name == name)
+        } else {
+            let name = match st.files.get(&id) {
+                Some(f) => f.name.clone(),
+                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+            };
+            st.files
+                .values()
+                .any(|f| f.id != id && !f.trashed && f.folder == dest && f.name == name)
+        };
+        if occupied {
+            return Err(name_taken(
+                "Something with that name already exists in the destination.",
+            ));
+        }
         if t == "folder" {
             // A folder inside itself detaches the whole subtree from the tree
             // and makes it unreachable — no listing walks into it, so it is

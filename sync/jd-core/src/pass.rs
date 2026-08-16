@@ -947,8 +947,15 @@ fn detect_folder_moves(
 }
 
 /// What the engine last recorded about each file it tracks.
+///
+/// Returned with the entries the server still has ahead of the ones it has
+/// deleted. Pairing gives each file on disk to the first entry that claims it,
+/// so where two entries name one path this decides which of them the file
+/// belongs to — and a file sitting at a path a live entry is synced at is that
+/// entry's, not a dead entry's memory of having once been there.
 fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
     let mut out = Vec::new();
+    let mut deleted = Vec::new();
     for entry in all_entries(env)? {
         if entry.id.entity_type != EntityType::File {
             continue;
@@ -971,13 +978,20 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
         let Some(path) = relative_path(env, &entry)? else {
             continue;
         };
-        out.push(KnownLocal {
+        let known = KnownLocal {
             id: entry.id,
             path,
             fingerprint: entry.synced_fingerprint,
             sha256: entry.synced_content.as_ref().map(|c| c.sha256.clone()),
-        });
+            server_deleted: entry.remote_deleted,
+        };
+        if entry.remote_deleted {
+            deleted.push(known);
+        } else {
+            out.push(known);
+        }
     }
+    out.append(&mut deleted);
     Ok(out)
 }
 

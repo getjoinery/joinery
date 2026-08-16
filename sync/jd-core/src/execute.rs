@@ -271,7 +271,10 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 
     let outcome = match perform(env, op) {
         Ok(o) => o,
-        Err(e) => classify(&e),
+        Err(e) => {
+            note_the_parent_is_in_the_trash(env, op, &e)?;
+            classify(&e)
+        }
     };
 
     match &outcome {
@@ -310,14 +313,31 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 /// and useless.
 fn classify(e: &ExecError) -> OpOutcome {
     // A refused name is not a broken operation, and it is not something to give
-    // up on and tell somebody about: the server is holding a live sibling with
-    // this name, this device will be told about that sibling on the next index
-    // walk, and landing it is what moves our copy aside and frees the name. The
-    // thing that resolves this is already on its way.
+    // up on and tell somebody about. It is a plan that has gone out of date: a
+    // name was chosen against what this device knew a moment ago, and the server
+    // has just said that picture is wrong. Nothing about *this* operation can
+    // improve, because the name it carries is fixed — so it is dropped, and the
+    // next pass chooses again knowing what it knows then.
+    //
+    // Waiting was tried, on the reasoning that the sibling holding the name
+    // would arrive on a later index walk and landing it would move our copy
+    // aside. That holds only when the name we want is one our own copy is
+    // sitting on. It is false for every other case, and the two that matter are
+    // ordinary: the occupant is a live entry already in this store, so nothing
+    // is on its way; or the name is a conflict copy's, chosen from the siblings
+    // we had heard of, and the other device minted the same one at the same
+    // moment. Nothing will ever free that name. The operation waited anyway —
+    // four hundred attempts, in every unsettled seed of a fifteen-hundred-seed
+    // sweep, with no error a person could see and no queue that appeared to be
+    // growing.
+    //
+    // Choosing the next free name is emphatically the planner's job and not
+    // this one's: the convention for what a copy is called lives with naming,
+    // and the executor has no business inventing one.
     if let ExecError::Proto(p) = e {
         if p.name_taken() {
-            return OpOutcome::Retry(
-                "something here is already using that name; waiting to be told what it is".into(),
+            return OpOutcome::Overtaken(
+                "something else is using that name; choosing again from what is there now".into(),
             );
         }
         // The destination went to the server's trash while we were working
@@ -354,6 +374,54 @@ fn classify(e: &ExecError) -> OpOutcome {
         ExecError::Store(m) => OpOutcome::Retry(m.to_string()),
         ExecError::Io(m) => OpOutcome::Retry(m.to_string()),
     }
+}
+
+/// Write down what a `parent_trashed` refusal just told us.
+///
+/// Calling the operation overtaken is right — somebody else's delete got there
+/// first — but it is only half an answer. The other half is that the server has
+/// just said, plainly, that a folder this device still believes in is in its
+/// trash. Throwing that away leaves the belief standing, so the next pass plans
+/// the same work into the same trashed folder and hears the same refusal, and
+/// the one after that.
+///
+/// It resolves eventually *if* the delete turns up on the change feed, which is
+/// what the classification quietly assumes. When it has not turned up yet the
+/// loop is unbounded, and it costs a device that never reports itself settled:
+/// on the rig, a folder created here and deleted from the other machine held a
+/// file at three hundred and forty-seven attempts.
+///
+/// Recording it starts the ordinary handling of a remote delete — the local
+/// folder goes to the trash, and anything inside it the server never took is
+/// rescued on the way out — instead of waiting for the feed to say the same
+/// thing later.
+fn note_the_parent_is_in_the_trash(
+    env: &ExecEnv,
+    op: &Op,
+    e: &ExecError,
+) -> Result<(), ExecError> {
+    let ExecError::Proto(p) = e else {
+        return Ok(());
+    };
+    if !p.parent_trashed() {
+        return Ok(());
+    }
+    let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+    let Some(parent) = params.get("parent").and_then(Value::as_i64) else {
+        return Ok(());
+    };
+    // A provisional parent is not on the server at all, so the refusal cannot
+    // have been about it.
+    if parent < 0 {
+        return Ok(());
+    }
+    if let Some(mut folder) = env.store.get_entry(EntityId::folder(parent))? {
+        if !folder.remote_deleted {
+            folder.remote_deleted = true;
+            env.store.put_entry(&folder)?;
+        }
+    }
+    Ok(())
 }
 
 fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
@@ -1016,58 +1084,87 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     };
     // Where the bytes are on this computer.
     //
-    // Usually the agreed placement, and for an ordinary upload that is right.
-    // For one that rescues a file the server deleted it is exactly wrong: the
-    // rescue happens *because* the user moved the file, so the agreed placement
-    // is the empty spot they moved it out of. Looking only there finds nothing,
-    // the operation is reported overtaken and dropped, the entry is left
-    // untouched — and the next pass plans the same rescue, and the pass after
-    // that. No error, no queued work, no end; the client simply never goes
-    // quiet again.
+    // Three places are worth looking, and every one of them can be the stale
+    // one, so this takes whichever actually has a file rather than trusting any
+    // of them:
     //
-    // The plan's placement is where the file actually is in every case that
-    // produces one: a local creation names the path it was found at, and both
-    // rescue rules name where the user moved it to. So that is tried first, and
-    // the agreed placement stays the fallback.
-    // ...but only if the file sitting there is ours. A placement another live
-    // entry already claims holds that entry's bytes, and sending them up under
-    // this entry's rescue would put one file on the server twice under two
-    // identities — the expensive way to be wrong, and invisible afterwards.
-    let planned = match as_new.as_ref() {
-        Some(p) => {
-            let claimed_by_another = env.store.every_entry()?.into_iter().any(|e| {
-                e.id != op.entity
-                    && !e.remote_deleted
-                    && e.id.entity_type == EntityType::File
-                    && e.local_placement() == p
-            });
-            if claimed_by_another {
-                None
-            } else {
-                match path_for(env, p)? {
-                    Placed::At(candidate) => {
-                        env.vfs.fingerprint(&candidate)?.map(|fp| (candidate, fp))
-                    }
-                    Placed::Not(_) => None,
+    // - **The plan's placement**, when there is one. This is where the file
+    //   really is in every case that produces one: a local creation names the
+    //   path it was found at, and both rescue rules name where the user moved
+    //   it to.
+    // - **The agreed placement**, which is right for an ordinary upload and
+    //   exactly wrong for a rescue — the rescue happens *because* the user
+    //   moved the file, so the agreement points at the spot they moved it out
+    //   of.
+    // - **The server's placement**, for the mirror case: a rename that has
+    //   already been applied here, where the agreement still names the old
+    //   spelling and the file has been sitting under the new one all along.
+    //
+    // Looking in only one of them and giving up is not a slow path but an
+    // endless one. Nothing is wrong, so nothing is reported; the operation is
+    // called overtaken and dropped without touching the entry, and the next
+    // pass plans the same upload against the same empty path. No error, no
+    // queued work, no end — the client simply never goes quiet again.
+    //
+    // A placement another live entry already claims is skipped whatever it
+    // holds. Those are that entry's bytes, and sending them up under this one's
+    // identity would put a single file on the server twice — the expensive way
+    // to be wrong, and invisible once done.
+    let mine = |p: &Placement| -> Result<bool, ExecError> {
+        Ok(!env.store.every_entry()?.into_iter().any(|e| {
+            e.id != op.entity
+                && !e.remote_deleted
+                && e.id.entity_type == EntityType::File
+                && e.local_placement() == p
+        }))
+    };
+    let mut found = None;
+    let candidates = [
+        as_new.clone(),
+        Some(entry.local_placement().clone()),
+        Some(entry.remote.clone()),
+    ];
+    let mut unplaced = None;
+    for candidate in candidates.iter().flatten() {
+        if !mine(candidate)? {
+            continue;
+        }
+        match path_for(env, candidate)? {
+            Placed::At(path) => {
+                if let Some(fp) = env.vfs.fingerprint(&path)? {
+                    found = Some((path, fp));
+                    break;
                 }
             }
+            // Remembered rather than returned. An unplaceable candidate is not
+            // the answer while another candidate may still have the file, and
+            // the reason only matters if none of them do.
+            Placed::Not(why) => unplaced = unplaced.or(Some(why)),
         }
-        None => None,
-    };
-    let (path, fingerprint) = match planned {
-        Some(found) => found,
-        None => {
-            let path = match local_path(env, &entry)? {
-                Placed::At(p) => p,
-                Placed::Not(why) => return Ok(why.outcome()),
-            };
-            let Some(fingerprint) = env.vfs.fingerprint(&path)? else {
-                return Ok(OpOutcome::Overtaken(
-                    "the file is no longer on this computer".into(),
-                ));
-            };
-            (path, fingerprint)
+    }
+    let Some((path, fingerprint)) = found else {
+        if let Some(why) = unplaced {
+            return Ok(why.outcome());
         }
+        // A provisional entry exists for exactly one reason: a file was found on
+        // this disk that nothing was tracking. It has no server side, so nothing
+        // will ever arrive to resolve it — and with no file of its own left
+        // anywhere, there is nothing it can ever be about. Keeping it means
+        // planning this upload again on every pass, forever, over a file that is
+        // gone or was never ours.
+        //
+        // Letting it go is safe in the direction that matters: if a file for it
+        // does turn up, the next scan finds it as something new and uploads it,
+        // which costs a transfer and loses nothing.
+        if op.entity.is_provisional() {
+            env.store.delete_entry(op.entity)?;
+            return Ok(OpOutcome::Overtaken(
+                "nothing here to upload, and nothing on the server waiting for it".into(),
+            ));
+        }
+        return Ok(OpOutcome::Overtaken(
+            "the file is no longer on this computer".into(),
+        ));
     };
 
     let sha = match env
@@ -1667,7 +1764,7 @@ fn move_remote(
     // Rename and reparent are separate calls, and a crash between them leaves
     // the entry renamed but not moved. That is a state the next round reads
     // correctly and finishes, which is why they do not need to be one call.
-    if entry.remote.parent != to.parent {
+    let reparent = || -> Result<(), ExecError> {
         let mut body = json!({ "entity_type": t, "entity_id": op.entity.server_id });
         // `parent_id`, which is the only destination key `drive_move` declares.
         // Sending anything else is not a rejected request -- an undeclared key
@@ -1680,38 +1777,109 @@ fn move_remote(
         };
         env.api
             .action_idempotent("drive_move", body, &format!("{}-move", op.idempotency_key))?;
-    }
-    if entry.remote.name != to.name {
-        // An encrypted FILE has no plaintext name to send. Its name lives inside
-        // the metadata blob, so renaming it means decrypting that blob, changing
-        // one field, and encrypting it again under the same file key — the
-        // server stores the result without ever learning either name. Sending
-        // the name itself would hand over the one thing the whole arrangement
-        // exists to keep, and the server refuses it outright.
-        //
-        // Folders are not encrypted this way: a vault folder's own name is
-        // plaintext on the server, and only its contents are private.
-        let body = if entry.is_encrypted && op.entity.entity_type == EntityType::File {
-            match reseal_metadata(env, &entry, &to.name)? {
-                Ok(blob) => json!({
-                    "entity_type": t,
-                    "entity_id": op.entity.server_id,
-                    "encrypted_metadata": blob,
-                }),
-                Err(why) => return Ok(why),
-            }
-        } else {
+        Ok(())
+    };
+    // An encrypted FILE has no plaintext name to send. Its name lives inside
+    // the metadata blob, so renaming it means decrypting that blob, changing
+    // one field, and encrypting it again under the same file key — the server
+    // stores the result without ever learning either name. Sending the name
+    // itself would hand over the one thing the whole arrangement exists to
+    // keep, and the server refuses it outright.
+    //
+    // Folders are not encrypted this way: a vault folder's own name is
+    // plaintext on the server, and only its contents are private.
+    let rename_body = if entry.is_encrypted && op.entity.entity_type == EntityType::File {
+        match reseal_metadata(env, &entry, &to.name)? {
+            Ok(blob) => json!({
+                "entity_type": t,
+                "entity_id": op.entity.server_id,
+                "encrypted_metadata": blob,
+            }),
+            Err(why) => return Ok(why),
+        }
+    } else {
+        json!({
+            "entity_type": t,
+            "entity_id": op.entity.server_id,
+            "name": to.name,
+        })
+    };
+    let rename = || -> Result<(), ExecError> {
+        env.api.action_idempotent(
+            "drive_rename",
+            rename_body.clone(),
+            &format!("{}-rename", op.idempotency_key),
+        )?;
+        Ok(())
+    };
+    // The way through when both intermediate states are occupied: step aside
+    // into a name nothing can be using. `.jd-` is refused for real files, so a
+    // swap name cannot collide with a user's file even deliberately, and it is
+    // the same device the rename planner uses to break a cycle of renames.
+    //
+    // An encrypted file is left out. Its name lives inside a sealed blob, and
+    // parking it would mean two extra reseals to hide a name the server never
+    // learns anyway — so it takes the ordinary two orders and, if both are
+    // refused, goes back to the planner.
+    let park = || -> Result<(), ExecError> {
+        if entry.is_encrypted && op.entity.entity_type == EntityType::File {
+            return Err(ExecError::Contract(
+                "an encrypted file cannot be parked under a scratch name".into(),
+            ));
+        }
+        env.api.action_idempotent(
+            "drive_rename",
             json!({
                 "entity_type": t,
                 "entity_id": op.entity.server_id,
-                "name": to.name,
-            })
-        };
-        env.api.action_idempotent(
-            "drive_rename",
-            body,
-            &format!("{}-rename", op.idempotency_key),
+                "name": crate::order::swap_name(&op.idempotency_key),
+            }),
+            &format!("{}-park", op.idempotency_key),
         )?;
+        Ok(())
+    };
+
+    let reparenting = entry.remote.parent != to.parent;
+    let renaming = entry.remote.name != to.name;
+    match (reparenting, renaming) {
+        // Both. Two calls means one intermediate state, and there is no order
+        // that cannot land in an occupied one: move first and the OLD name
+        // arrives among the destination's siblings; rename first and the NEW
+        // name arrives among the old neighbours. Neither can be assumed free —
+        // a contested name is usually the whole reason for the rename.
+        //
+        // So it takes the order that puts the chosen name in the place it was
+        // chosen for. A conflict copy's name is picked from what the
+        // destination already holds, which says nothing about the folder it is
+        // leaving, so renaming first is the half that was actually checked. If
+        // the old neighbours refuse it, the other order gets its turn.
+        //
+        // Moving first unconditionally is what this used to do, and the server
+        // that let it — the mock, not the real one — hid it completely. Against
+        // a server that refuses, every combined move-and-rename out of a folder
+        // whose name the destination also used stalled: fifteen seeds of a
+        // fifteen-hundred-seed sweep, all of them this.
+        //
+        // Both can be occupied at once, and then neither order works while the
+        // destination the file is actually going to sits free. Stepping aside
+        // into a scratch name first costs one extra call and always works, so it
+        // is the last resort rather than the rule.
+        (true, true) => match rename() {
+            Ok(()) => reparent()?,
+            Err(ExecError::Proto(p)) if p.name_taken() => match reparent() {
+                Ok(()) => rename()?,
+                Err(ExecError::Proto(p)) if p.name_taken() => {
+                    park()?;
+                    reparent()?;
+                    rename()?;
+                }
+                Err(e) => return Err(e),
+            },
+            Err(e) => return Err(e),
+        },
+        (true, false) => reparent()?,
+        (false, true) => rename()?,
+        (false, false) => {}
     }
 
     entry.remote = to;
@@ -1764,6 +1932,36 @@ fn move_local(
                 .and_then(Placed::reason)
                 .or_else(|| agreed.reason())
                 .unwrap_or(Unplaced::SyncFolderGone);
+            if matches!(why, Unplaced::AncestorMissing) {
+                // The record of where this file sits here hangs off a folder
+                // this device has stopped tracking, so it cannot be turned into
+                // a path — not now and not on any later attempt, because
+                // nothing is going to put that folder back.
+                //
+                // Reporting the move overtaken and leaving the record alone is
+                // what makes that permanent: the next pass reads the same
+                // unusable placement, plans the same move, and gets the same
+                // answer. It costs no error and no queued work, so nothing
+                // shows it, and the device simply never goes quiet again.
+                //
+                // Forgetting where it was says the true thing — this file has
+                // no known place on this disk — and leaves the entry to be
+                // materialized fresh at the place the server now has it.
+                //
+                // The whole agreement goes, not just the placement. Half of one
+                // is worse than none: an entry still holding a content
+                // agreement reads as established, an established entry's remote
+                // side reads as unchanged, and the pass then has nothing to do
+                // about a file that is not on this disk at all. It would go
+                // quiet — correctly, by its own lights — while silently short a
+                // file.
+                entry.synced_placement = None;
+                entry.synced_fingerprint = None;
+                entry.synced_content = None;
+                entry.synced_remote_content = None;
+                entry.status = LocalStatus::PendingDownload;
+                env.store.put_entry(&entry)?;
+            }
             return Ok(why.outcome());
         }
     };

@@ -780,3 +780,256 @@ fn an_outcome_is_one_of_three_things_and_never_a_silent_success() {
         OpOutcome::Done | OpOutcome::Withdrawn(_) | OpOutcome::Retry(_)
     ));
 }
+
+#[test]
+fn a_name_held_by_something_we_already_know_about_is_not_waited_on() {
+    // `name_taken` earns a wait because of what the client does *not* know: the
+    // server is holding a sibling nobody has told this device about, hearing
+    // about it is what moves our copy aside, and until then there is nothing to
+    // do but wait.
+    //
+    // Here the occupant is already in the store, live and settled. Nothing is on
+    // its way, so the wait is forever — and forever costs a device that never
+    // reports itself settled over an operation the next scan throws away. The
+    // rig had these at four hundred attempts apiece.
+    let (_clock, server, device) = world();
+    let mover = EntityId::file(server.seed_file(None, "draft.txt", b"the one being renamed"));
+    let occupant = EntityId::file(server.seed_file(None, "final.txt", b"already here"));
+    for (id, name) in [(mover, "draft.txt"), (occupant, "final.txt")] {
+        device
+            .store
+            .put_entry(&fresh(id, None, name, LocalStatus::Synced))
+            .unwrap();
+    }
+
+    let report = do_one(
+        &device,
+        mover,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: None,
+                name: "final.txt".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.retrying, 0, "it has to stop, not wait forever");
+    assert_eq!(report.overtaken, 1, "somebody else got there first");
+    assert!(
+        device.store.queued_ops().unwrap().is_empty(),
+        "the op is stale, so it goes; the next pass plans from what is there now"
+    );
+    assert!(
+        device
+            .store
+            .open_issues()
+            .unwrap()
+            .iter()
+            .all(|i| i.kind != "withdrawn"),
+        "there is nothing here for a person to decide"
+    );
+}
+
+#[test]
+fn a_folder_the_server_says_is_in_its_trash_is_recorded_as_deleted() {
+    // The refusal carries a fact: a folder this device still believes in is in
+    // the server's trash. Calling the operation overtaken and throwing the fact
+    // away leaves the belief standing, so the next pass plans the same work
+    // into the same folder and hears the same refusal — resolved only if and
+    // when the delete turns up on the change feed, and unbounded until it does.
+    //
+    // On the rig it did not: a folder made here and deleted from the other
+    // machine held a file at three hundred and forty-seven attempts, and the
+    // device never went quiet.
+    let (_clock, server, device) = world();
+    let folder = server.seed_folder(None, "Projects");
+    device
+        .store
+        .put_entry(&fresh(
+            EntityId::folder(folder),
+            None,
+            "Projects",
+            LocalStatus::Synced,
+        ))
+        .unwrap();
+    server
+        .action(
+            "drive_trash",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": folder }),
+        )
+        .expect("trash");
+
+    // Something of ours was still on its way into it.
+    let child = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(
+            child,
+            Some(folder),
+            "Drafts",
+            LocalStatus::PendingUpload,
+        ))
+        .unwrap();
+    device.fs.user_mkdir("Projects/Drafts");
+
+    let report = do_one(
+        &device,
+        child,
+        Action::CreateRemoteFolder {
+            placement: Placement {
+                parent: Some(folder),
+                name: "Drafts".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.overtaken, 1, "somebody else's delete got there first");
+    assert!(
+        device
+            .store
+            .get_entry(EntityId::folder(folder))
+            .unwrap()
+            .expect("the folder record is still there")
+            .remote_deleted,
+        "the server just said this folder is in its trash; believing it is what \
+         starts the delete being handled instead of planned around forever"
+    );
+}
+
+#[test]
+fn a_move_with_nowhere_to_move_from_forgets_where_it_thought_the_file_was() {
+    // The server moved a file into a folder this device has. Applying that move
+    // means renaming the local file — but the record of where it sits here
+    // hangs off a folder the store no longer has, so no path can be built for
+    // it. Not on this attempt and not on any later one: nothing is going to put
+    // that folder back.
+    //
+    // Reporting the move overtaken and leaving the record alone made that
+    // permanent. The next pass read the same unusable placement, planned the
+    // same move, and got the same answer — no error, no queued work, nothing to
+    // show for it, and a device that never went quiet again.
+    let (_clock, server, device) = world();
+    let destination = server.seed_folder(None, "Sorted");
+    let file = server.seed_file(Some(destination), "receipt.pdf", b"a receipt");
+    device
+        .store
+        .put_entry(&fresh(
+            EntityId::folder(destination),
+            None,
+            "Sorted",
+            LocalStatus::Synced,
+        ))
+        .unwrap();
+
+    // Synced under folder 4242, which is not in the store at all.
+    let id = EntityId::file(file);
+    let mut entry = fresh(id, Some(destination), "receipt.pdf", LocalStatus::Synced);
+    entry.synced_placement = Some(Placement {
+        parent: Some(4242),
+        name: "receipt.pdf".into(),
+    });
+    entry.synced_content = Some(jd_core::model::ContentId {
+        sha256: "whatever-we-last-agreed".into(),
+        size: 9,
+    });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyRemoteMove {
+            to: Placement {
+                parent: Some(destination),
+                name: "receipt.pdf".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.overtaken, 1);
+    let after = device.store.get_entry(id).unwrap().expect("still tracked");
+    assert!(
+        after.synced_placement.is_none() && after.synced_content.is_none(),
+        "the whole agreement has to go, not half of it: an entry still holding \
+         a content agreement reads as established, and an established entry \
+         with an unchanged remote gives the pass nothing to do about a file \
+         that is not on this disk at all"
+    );
+    assert_eq!(after.status, LocalStatus::PendingDownload);
+}
+
+#[test]
+fn a_move_that_is_also_a_rename_does_not_stall_on_a_name_it_is_leaving_behind() {
+    // Two calls means one intermediate state, and the order decides which one.
+    // Moving first parks the file under its OLD name among the destination's
+    // siblings — and the old name is a contested one, which is usually the
+    // whole reason a rename is happening. Here `Sorted` already has a
+    // `notes.txt`, so the intermediate is refused even though the name the file
+    // is actually going to is free.
+    //
+    // The mock let this through for as long as it existed, so no scenario could
+    // see it. Against a server that refuses — which the real one does — every
+    // combined move-and-rename out of a folder whose name the destination also
+    // used stalled: fifteen seeds of a fifteen-hundred-seed sweep.
+    let (_clock, server, device) = world();
+    let sorted = server.seed_folder(None, "Sorted");
+    server.seed_file(Some(sorted), "notes.txt", b"the one already there");
+    let id = EntityId::file(server.seed_file(None, "notes.txt", b"the one being moved"));
+    device
+        .store
+        .put_entry(&fresh(id, None, "notes.txt", LocalStatus::Synced))
+        .unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: Some(sorted),
+                name: "notes (conflicted copy).txt".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.done, 1, "the name it is going to is free");
+    let tree = server.tree();
+    assert!(tree.contains_key("Sorted/notes (conflicted copy).txt"));
+    assert!(
+        tree.contains_key("Sorted/notes.txt"),
+        "and the file that was already there is untouched"
+    );
+}
+
+#[test]
+fn a_move_that_is_also_a_rename_falls_back_when_the_old_neighbours_hold_the_new_name() {
+    // The mirror case, and why neither order can simply be preferred: renaming
+    // first parks the file under its NEW name among the neighbours it has not
+    // left yet, and one of them is already using it. Moving first is fine here,
+    // because the destination has nothing called `draft.txt`.
+    let (_clock, server, device) = world();
+    let sorted = server.seed_folder(None, "Sorted");
+    server.seed_file(None, "final.txt", b"the neighbour it is leaving");
+    let id = EntityId::file(server.seed_file(None, "draft.txt", b"the one being moved"));
+    device
+        .store
+        .put_entry(&fresh(id, None, "draft.txt", LocalStatus::Synced))
+        .unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: Some(sorted),
+                name: "final.txt".into(),
+            },
+        },
+    );
+
+    assert_eq!(report.done, 1, "one order is refused; the other is not");
+    let tree = server.tree();
+    assert!(tree.contains_key("Sorted/final.txt"));
+    assert!(
+        tree.contains_key("final.txt"),
+        "and the neighbour that held the name at the old address keeps it"
+    );
+}
