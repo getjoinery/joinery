@@ -34,7 +34,8 @@
  *     live. If the sender could look up "am I allowed to send Direct to bob@you"
  *     that would be an oracle leaking the recipient's contact and block lists.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - a vault-locked signing key is its own result (LOCKED), not a generic failure: nothing about the recipient or the network is wrong, so a caller with a retry queue can wait for the member instead of burning attempts nobody can make succeed
  * @changelog 1.2 - send() verifies the SENDER domain's own DNS publication before the wire — both halves of the handshake are checked, not just the recipient's
  */
 
@@ -66,6 +67,13 @@ class DirectSendResult {
 	const NO_SEALING    = 'no_sealing';
 	/** Connection, timeout, or verification failure at either step. */
 	const FAILED        = 'failed';
+	/**
+	 * The sender's signing key is vault-sealed and no member who can open it is
+	 * present. Nothing about the recipient or the network is wrong: the send
+	 * becomes possible the moment the owner is back, so a caller with a retry
+	 * queue should wait for presence rather than spend attempts on it.
+	 */
+	const LOCKED        = 'locked';
 
 	/** @var string one of the constants above */
 	public $status;
@@ -244,6 +252,9 @@ class JoineryDirect {
 		try {
 			$signed = DirectSigningIdentity::sign($sender_domain,
 				DirectProtocol::preflightSigningBytes($envelope, $manifest));
+		} catch (VaultLockedException $e) {
+			return new DirectSendResult(DirectSendResult::LOCKED,
+				array('detail' => 'The signing key for ' . $sender_domain . ' is sealed and its owner is not present.'));
 		} catch (\Throwable $e) {
 			return self::failed('preflight signing failed: ' . $e->getMessage());
 		}
@@ -306,6 +317,11 @@ class JoineryDirect {
 		try {
 			$commit_signature = DirectSigningIdentity::sign($sender_domain,
 				DirectProtocol::transferSigningBytes($envelope['nonce'], $hashes));
+		} catch (VaultLockedException $e) {
+			// The window closed between preflight and commit. The spent nonce is
+			// lost; a later re-send preflights afresh.
+			return new DirectSendResult(DirectSendResult::LOCKED,
+				array('detail' => 'The signing key for ' . $sender_domain . ' sealed mid-send.'));
 		} catch (\Throwable $e) {
 			return self::failed('transfer signing failed: ' . $e->getMessage());
 		}

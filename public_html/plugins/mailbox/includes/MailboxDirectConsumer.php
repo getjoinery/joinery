@@ -20,7 +20,11 @@
  *     question DKIM already asks, answered the same way, so a Fortress domain
  *     cannot sign in anyone's name from a locked box.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - resolveAddress reports identity (`exists`) and routing
+ *   (`stores_email`) as separate facts; the store-only rule became the mail
+ *   kind's declared `email_store` requirement instead of unaddressing the
+ *   recipient for every kind.
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
@@ -59,6 +63,7 @@ class MailboxDirectConsumer {
 			'domain_id'     => intval($domain->key),
 			'seals_content' => $domain->seals_content(),
 			'exists'        => false,
+			'stores_email'  => false,
 			'user_id'       => 0,
 			'alias_id'      => 0,
 			'vault_public_key' => null,
@@ -74,21 +79,19 @@ class MailboxDirectConsumer {
 			return $answer;
 		}
 
-		// Only a STORE-ONLY mailbox receives on this channel. Direct is not a
-		// forwarding path: a Direct message never becomes a MIME document, so
-		// forwardStoredMessage has nothing to relay. A forward-only alias plainly
-		// has nowhere to store; a forward-AND-store alias is the trap — Direct would
-		// store its copy but drop the forward silently, a partial delivery the
-		// sender cannot see. So a forwarding alias of either kind is NOT a Direct
-		// recipient: it resolves as absent, the sender is declined (or handed a
-		// decoy at a sealed tier), and falls back to SMTP, which does BOTH halves.
-		$mode = (string)$alias->get('iea_delivery_mode');
-		if ($mode !== InboundEmailAlias::MODE_STORE) {
-			return $answer;
-		}
-
-		$answer['exists']   = true;
-		$answer['alias_id'] = intval($alias->key);
+		// Any live alias is an addressable IDENTITY — exists is about who, never
+		// about email routing. What each kind needs from that identity is the
+		// kind's own declared requirement, which the framework judges: chat needs
+		// only a consenting owner, so a forwarding alias chats fine; mail needs
+		// `stores_email`, because a Direct payload never becomes a MIME document,
+		// so forwardStoredMessage has nothing to relay — a forward-only alias has
+		// nowhere to store, and forward-AND-store would keep the copy but drop the
+		// forward silently, a partial delivery the sender cannot see. Mail's
+		// decline sends it back to SMTP, which runs BOTH legs.
+		$answer['exists']       = true;
+		$answer['alias_id']     = intval($alias->key);
+		$answer['stores_email'] =
+			(string)$alias->get('iea_delivery_mode') === InboundEmailAlias::MODE_STORE;
 
 		// A single-owner mailbox names that owner as the consenting user and, on a
 		// sealing domain, seals to their vault. A shared mailbox — several grantees,

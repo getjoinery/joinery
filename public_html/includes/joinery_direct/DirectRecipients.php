@@ -17,7 +17,16 @@
  * resolver that could only speak about addresses it recognised would have leaked
  * existence before the decoy ever ran.
  *
- * @version 1.0
+ * `exists` is an IDENTITY fact — "is there an addressable recipient behind this
+ * local part" — never a routing preference. Whether a particular KIND can land on
+ * that recipient is the kind's own declaration (`recipient` in its registry
+ * entry), judged by the framework wherever the gate runs; a resolver that folded
+ * one kind's deliverability into `exists` would silently unaddress the recipient
+ * for every other kind.
+ *
+ * @version 1.1
+ * @changelog 1.1 - `stores_email` fact; `exists` is pure identity, per-kind
+ *   deliverability moved to the kind's declared recipient requirement.
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
@@ -34,7 +43,11 @@ class DirectRecipients {
 	 *   hosts_domain     bool   always true when non-null
 	 *   domain_id        int
 	 *   seals_content    bool   Private or Fortress — the posture switch
-	 *   exists           bool   is there a live mailbox for this local part
+	 *   exists           bool   is there an addressable recipient for this local
+	 *                           part — identity, regardless of email routing
+	 *   stores_email     bool   does email delivered here land in a local store
+	 *                           and ONLY a local store (no forwarding leg) — what
+	 *                           the mail kind's `email_store` requirement reads
 	 *   user_id          int    whose consent gates it, 0 when none resolves
 	 *   alias_id         int
 	 *   vault_public_key ?string  b64url, null when the recipient holds no vault
@@ -79,6 +92,7 @@ class DirectRecipients {
 			'domain_id'        => (int)($resolved['domain_id'] ?? 0),
 			'seals_content'    => !empty($resolved['seals_content']),
 			'exists'           => !empty($resolved['exists']),
+			'stores_email'     => !empty($resolved['stores_email']),
 			'user_id'          => (int)($resolved['user_id'] ?? 0),
 			'alias_id'         => (int)($resolved['alias_id'] ?? 0),
 			'vault_public_key' => isset($resolved['vault_public_key']) && $resolved['vault_public_key'] !== ''

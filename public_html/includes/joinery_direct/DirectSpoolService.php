@@ -23,9 +23,12 @@
  * was considered and rejected: it could lose a legitimate contact's sealed mail,
  * where a request-level refusal loses nothing.
  *
- * @version 1.1
+ * @version 1.2
  * @changelog 1.1 - a kind's ingest may throw DirectDeferIngest at commit; the
  *   delivery is HELD with its parts and drained at the recipient's next unlock.
+ * @changelog 1.2 - gateFor() judges the kind's declared recipient requirement
+ *   (fresh resolution) before the contact/handler gate, so the deferred sites
+ *   apply the same precondition the Standard preflight does.
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
@@ -308,9 +311,22 @@ class DirectSpoolService {
 	 * kind's own — against the row's recipient identity. The same decision whether
 	 * it runs at commit (an unencrypted mailbox, plaintext book) or at unlock (a
 	 * sealed mailbox drained by DirectSpoolDrain); only the moment differs.
+	 *
+	 * The kind's declared recipient requirement is judged here first, against a
+	 * FRESH resolution — the same moment-of-disposition reading the contact gate
+	 * itself takes. It could not run at accept: a sealed-tier preflight answers
+	 * identically for every address, so "this kind cannot land here" has to be a
+	 * local disposition, and it rides the gate's own decline (`gate_accepted`
+	 * false into ingest — mail files the message, chat discards it) rather than
+	 * inventing a third outcome. A recipient that stopped resolving since accept
+	 * declines the same way.
 	 */
 	public static function gateFor(DirectSpool $spool): bool {
 		$kind = (string)$spool->get('jdp_kind');
+		$resolved = DirectRecipients::resolve((string)$spool->get('jdp_recipient'));
+		if ($resolved === null || !$resolved['exists'] || !DirectKinds::recipientAcceptable($kind, $resolved)) {
+			return false;
+		}
 		$envelope = self::envelopeFor($spool, null);
 		if (DirectKinds::usesContactGate($kind)) {
 			return DirectContactGate::allows($envelope);

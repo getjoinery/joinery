@@ -146,8 +146,13 @@ runs:
    unimplemented protocol version — is refused at request level.
 6. Recipient resolution. A domain this deployment does not host is a request-level
    refusal, because it is a fact about the deployment rather than about a
-   recipient.
-7. The kind's authorization gate — at Standard only (see **Security tiers**).
+   recipient. `exists` is an identity fact — is there an addressable recipient
+   behind this local part — never one kind's routing preference.
+7. The kind's declared recipient requirement, then its authorization gate — at
+   Standard only (see **Security tiers**), both folded into one `declined`: a
+   stranger, a nonexistent address, and a recipient this kind cannot land on
+   (mail to a forwarding alias, chat to a shared mailbox) are indistinguishable.
+   At the sealed tiers both defer to the same local disposition moment.
 8. On accept: the key answer and a single-use delivery session holding the admitted
    manifest; parts arrive one request each and are enforced against it; the commit
    redeems the session once, verifies every sealed-byte hash, and then either
@@ -166,13 +171,34 @@ A plugin puts a payload on the pipe by declaring it in `plugin.json`:
 
 ```json
 "directKinds": {
-  "chat": { "handler": "includes/ChatDirectHandler.php", "gate": "contacts" }
+  "chat": { "handler": "includes/ChatDirectHandler.php", "gate": "contacts", "recipient": "owner" }
 }
 ```
 
 The string shorthand `"chat": "includes/ChatDirectHandler.php"` is equivalent and
 means the handler supplies its own `gate`; `class` names the handler class when it
-differs from the filename. Core kinds are declared the same way in
+differs from the filename.
+
+**`recipient` declares who the kind can land on** — a requirement over the facts
+the address resolver reports, judged by the framework at every gate site so no
+handler re-implements it:
+
+- absent — any existing recipient.
+- `"owner"` — a single consenting user must resolve. Chat declares this: a
+  message needs a person whose conversation list it lands in, so a shared
+  mailbox declines while a forwarding alias with one grantee chats fine —
+  forwarding is an email routing choice, not an identity fact.
+- `"email_store"` — email delivered here must land in a local store and only a
+  local store. Mail declares this: a Direct payload never becomes a MIME
+  document, so a forwarding leg cannot run; the decline sends the message back
+  to SMTP, which runs both legs. An unknown requirement word makes the
+  declaration unusable (the kind refuses as unserved) rather than silently
+  meaning "anyone".
+
+A failed requirement is never a third wire answer: at Standard it folds into the
+same `declined` a stranger gets; at the sealed tiers it defers with the gate and
+becomes a local disposition (`gate_accepted` false into ingest — mail files the
+message through ordinary classification, chat discards it). Core kinds are declared the same way in
 `direct_kinds.json` at the `public_html/` root. Mail is declared by the **mailbox
 plugin**, which is what makes deactivating that plugin remove the kind from the
 served set. The registry is plain instance configuration, readable without loading

@@ -31,7 +31,12 @@
  * signature over the ordered hashes of the SEALED bytes before anything is
  * ingested.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - the kind's declared recipient requirement is judged with the
+ *   gate: live here at Standard, folded into the same `declined`; at the sealed
+ *   tiers it defers with the gate (DirectSpoolService::gateFor), because a live
+ *   decline there would distinguish a real-but-unsuitable address from the
+ *   decoy-accepted nonexistent one.
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectProtocol.php'));
@@ -193,11 +198,15 @@ class DirectReceiver {
 		$defer = false;
 		$gate_at_commit = false;
 		if (!$sealed_tier) {
-			if (!$resolved['exists'] || !$this->runGate($kind, $envelope, $verified_domain, $resolved)) {
-				// Stranger, removed contact, blocked sender, and an address that
-				// does not exist are ONE answer. A block removes the contact, so a
-				// blocked sender already fails the contact check — there is no
-				// separate block branch and no gate-time block lookup.
+			if (!$resolved['exists']
+					|| !DirectKinds::recipientAcceptable($kind, $resolved)
+					|| !$this->runGate($kind, $envelope, $verified_domain, $resolved)) {
+				// Stranger, removed contact, blocked sender, an address that does
+				// not exist, and a recipient this KIND cannot land on (mail to a
+				// forwarding alias, chat to a shared mailbox) are ONE answer. A
+				// block removes the contact, so a blocked sender already fails the
+				// contact check — there is no separate block branch and no
+				// gate-time block lookup.
 				return array('answer' => DirectProtocol::ANSWER_DECLINED);
 			}
 			// No key at Standard: a Standard mailbox is server-readable end to end,

@@ -19,6 +19,11 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
+ * @version 1.8 - completion clears the map hash and force-pushes the fragment:
+ *                a rebuilt relay holds no tenant map, and the hash-skip read the
+ *                unchanged fragment as delivered — leaving the relay blank (no
+ *                alias routing, no Direct) until a domain change happened to
+ *                force a push.
  * @version 1.7 - the instance image is the INSTANCE_IMAGE constant. It was read
  *                from a setting no manifest declared, so no admin could reach
  *                it and the fallback was the only value it ever had.
@@ -436,6 +441,21 @@ class RelayCloudProvisioner {
 				error_log('RelayCloudProvisioner: main-box WireGuard peer add failed (' . $peer_code . '): '
 					. $peer_out . ' — run plugins/mailbox/provisioning/provision_relay_main.sh');
 			}
+		}
+
+		// The freshly built relay holds NO tenant fragment — alias routing and
+		// the whole Direct config ride the map push, and the hash-skip that
+		// makes the periodic push cheap would read an unchanged fragment as
+		// already delivered, leaving the relay blank forever. Clear the stored
+		// hash FIRST, so even if this immediate push fails (the tunnel may still
+		// be handshaking), every reconcile pass retries until one lands.
+		$relay->set('mrl_map_content_hash', null);
+		$relay->save();
+		try {
+			RelayMapSync::push($relay, true);
+		} catch (\Throwable $e) {
+			error_log('RelayCloudProvisioner: post-provision map push failed: ' . $e->getMessage()
+				. ' — the relay routes nothing until the reconcile lands one.');
 		}
 
 		// Reverse DNS through the provider API. Providers require the forward

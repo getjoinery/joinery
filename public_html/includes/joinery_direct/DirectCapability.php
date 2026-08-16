@@ -26,7 +26,8 @@
  * so it is not the SSRF surface SafeHttpClient addresses — the concern here is
  * the VOLUME of attacker-driven lookups.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - decode Cloudflare's _dc-srv SRV-target rewrite back to the domain, so a proxied colocated site stays deliverable
  * @changelog 1.1 - lookup() takes $fresh: a member-triggered re-check resolves past the cache (callers rate-limit)
  */
 
@@ -135,14 +136,15 @@ class DirectCapability {
 			return null;
 		}
 		$target = $srv[0];
-		$host = rtrim(trim((string)$target['host']), '.');
+		$srv_target = rtrim(trim((string)$target['host']), '.');
 		$port = (int)$target['port'];
-		if ($host === '' || $host === '.') {
+		if ($srv_target === '' || $srv_target === '.') {
 			return null; // the RFC 2782 "service decidedly not available" form
 		}
 		if ($port <= 0 || $port > 65535) {
 			$port = 443;
 		}
+		$host = self::decodeSrvTarget($srv_target, $domain);
 
 		try {
 			$txt = DnsResolver::getTxt(DirectProtocol::KEY_PREFIX . $domain);
@@ -156,7 +158,29 @@ class DirectCapability {
 			return null;
 		}
 
-		return array('host' => $host, 'port' => $port, 'keys' => $keys);
+		return array('host' => $host, 'port' => $port, 'keys' => $keys, 'srv_target' => $srv_target);
+	}
+
+	/**
+	 * The host a sender should actually connect to, given what the zone serves.
+	 *
+	 * Cloudflare rewrites any SRV whose target is one of its proxied hostnames
+	 * to a synthetic `_dc-srv.<hash>.<record name>` pointing straight at the
+	 * origin IP — a name no certificate covers, so verified TLS can never
+	 * succeed against it. The original target is not recoverable from the
+	 * record, but the intent is: the operator pointed Direct at a host that
+	 * domain's proxy serves, and the domain itself rides that same proxy with a
+	 * valid certificate on 443. Connecting there reaches the same origin route,
+	 * verified. (A proxied target on some other hostname behind the same zone
+	 * decodes to the domain too; if the domain's edge does not route to the
+	 * Joinery box, the send fails TLS-or-404 exactly as before and the Setup
+	 * tab's endpoint probe reports it.)
+	 */
+	public static function decodeSrvTarget(string $srv_target, string $domain): string {
+		if (strpos($srv_target, '_dc-srv.') === 0) {
+			return $domain;
+		}
+		return $srv_target;
 	}
 
 	/**
