@@ -18,7 +18,9 @@
  * a bonus on top of dedup, never a condition of it, and a total failure leaves
  * the dedup outcome exactly as it was.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - manifestRowCount(), so a caller can ask whether a stored copy
+ *   lists any attachments at all before paying to parse a MIME document.
  * @changelog 1.1 - adoptParts() so Joinery Direct's decoded parts adopt too;
  *   Direct parts carry no MIME section, so only the Content-ID and
  *   filename+type matching rules can claim them.
@@ -59,6 +61,25 @@ class AttachmentByteCustody {
 			}
 			return $parts;
 		});
+	}
+
+	/**
+	 * How many attachments a message lists, whatever shape they are in.
+	 *
+	 * Zero on a message whose source copy plainly HAS attachments is a
+	 * discrepancy, not an absence — a manifest that was never written. It is one
+	 * cheap COUNT so a caller can ask before paying to parse a MIME document
+	 * (D3, specs/mail_import_loss_proof.md).
+	 */
+	public static function manifestRowCount(int $message_id): int {
+		if ($message_id <= 0) {
+			return 0;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('SELECT COUNT(*) FROM ima_inbound_message_attachments
+			WHERE ima_iem_inbound_email_message_id = ?');
+		$stmt->execute(array($message_id));
+		return intval($stmt->fetchColumn());
 	}
 
 	/**

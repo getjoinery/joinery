@@ -35,7 +35,11 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
- * @version 1.7
+ * @version 1.8
+ * @changelog 1.8 - a message and its attachment manifest are stored in ONE
+ *   transaction (D1, specs/mail_import_loss_proof.md), so a committed row always
+ *   carries its manifest and a half-stored message never survives a crash or a
+ *   concurrent reader; seekCursorForCutoff records a durable seed proof.
  * @changelog 1.7 - date-boundary seek for day-window feeds (seekCursorForCutoff):
  *   INTERNALDATE compared in UTC, unparsable dates count as in-window, and an
  *   empty probe band resolves via the bottom of the range instead of conceding
@@ -599,6 +603,18 @@ class ImapIngestor {
 	private function seekCursorForCutoff(ImapClient $client, string $folder, string $cutoffUtc, int $highUid): int {
 		if ($cutoffUtc === '' || $highUid < 1) { return max(0, $highUid); }
 
+		$found = $this->seekCursorInner($client, $folder, $cutoffUtc, $highUid);
+		$this->recordSeedProof($client, $folder, $cutoffUtc, $highUid, $found);
+		return $found['cursor'];
+	}
+
+	/**
+	 * The bisection itself. Split from its caller so that every way out of it —
+	 * there are three — is recorded, rather than only the one at the bottom.
+	 *
+	 * @return array{cursor:int,probes:int,converged:bool}
+	 */
+	private function seekCursorInner(ImapClient $client, string $folder, string $cutoffUtc, int $highUid): array {
 		$lo = 1;
 		$hi = $highUid;
 		$probes = 0;
@@ -621,7 +637,8 @@ class ImapIngestor {
 				if ($bottom['date'] === '' || $bottom['date'] >= $cutoffUtc) {
 					// The oldest message above the proven floor is in-window —
 					// it IS the boundary.
-					return max(0, min($bottom['uid'] - 1, $highUid));
+					return array('cursor' => max(0, min($bottom['uid'] - 1, $highUid)),
+						'probes' => $probes, 'converged' => true);
 				}
 				$lo = $bottom['uid'] + 1;
 				continue;
@@ -640,7 +657,58 @@ class ImapIngestor {
 		// oldest in-window message; when the probe budget runs out first it
 		// imports somewhat more than asked — the documented fail-soft direction —
 		// never less.
-		return max(0, min($lo - 1, $highUid));
+		return array('cursor' => max(0, min($lo - 1, $highUid)),
+			'probes' => $probes, 'converged' => ($probes < self::SEEK_MAX_PROBES));
+	}
+
+	/**
+	 * Leave the evidence behind for where this folder started reading
+	 * (specs/mail_import_loss_proof.md § B). Two extra probes bracket the chosen
+	 * cursor — the newest message under it, which should predate the cutoff, and
+	 * the oldest over it, which should not — so the decision can be checked later
+	 * instead of taken on trust.
+	 *
+	 * Best effort throughout: this is a record of a poll, never a condition of
+	 * one, so a probe or a write that fails is logged and the mail still flows.
+	 */
+	private function recordSeedProof(ImapClient $client, string $folder, string $cutoffUtc,
+			int $highUid, array $found): void {
+		try {
+			$cursor = $found['cursor'];
+			$below = ($cursor >= 1)
+				? $this->probeNewestInBand($client, $folder, max(1, $cursor - self::SEEK_BAND + 1), $cursor)
+				: null;
+			$above = ($cursor < $highUid)
+				? $this->probeOldestInBand($client, $folder, $cursor + 1, min($highUid, $cursor + self::SEEK_BAND))
+				: null;
+
+			$proof = InboundImapSeedProof::record(array(
+				'isp_iia_inbound_imap_account_id' => intval($this->account->key),
+				'isp_folder'      => substr($folder, 0, 255),
+				'isp_scope'       => $this->account->importScope(),
+				'isp_cutoff_time' => $cutoffUtc,
+				'isp_high_uid'    => $highUid,
+				'isp_cursor_uid'  => $cursor,
+				'isp_probes'      => intval($found['probes']),
+				'isp_converged'   => (bool)$found['converged'],
+				'isp_below_uid'   => $below !== null ? $below['uid'] : null,
+				// '' is an unreadable INTERNALDATE; stored as NULL, because unknown
+				// must never read as evidence either way.
+				'isp_below_time'  => ($below !== null && $below['date'] !== '') ? $below['date'] : null,
+				'isp_above_uid'   => $above !== null ? $above['uid'] : null,
+				'isp_above_time'  => ($above !== null && $above['date'] !== '') ? $above['date'] : null,
+			));
+
+			// A broken boundary means the feed skipped mail the window claims, which
+			// is the one outcome nobody should have to go looking for.
+			if ($proof !== null && $proof->boundaryHolds() === false) {
+				error_log('ImapIngestor: seed proof for account ' . $this->account->key
+					. ' — ' . $proof->describe());
+			}
+		} catch (Throwable $e) {
+			error_log('ImapIngestor::recordSeedProof failed for account ' . $this->account->key
+				. ' folder ' . $folder . ': ' . $e->getMessage());
+		}
 	}
 
 	/**
@@ -648,28 +716,49 @@ class ImapIngestor {
 	 * ['uid'=>int,'date'=>'Y-m-d H:i:s' UTC], or null when the band holds nothing.
 	 */
 	private function probeOldestInBand(ImapClient $client, string $folder, int $from, int $to): ?array {
+		return $this->probeEdgeInBand($client, $folder, $from, $to, false);
+	}
+
+	/**
+	 * INTERNALDATE of the HIGHEST existing UID in [$from,$to] — the other end of
+	 * the same question. The seed proof needs it: the newest message at or below
+	 * the chosen cursor is the one whose date has to predate the cutoff for the
+	 * boundary to hold.
+	 */
+	private function probeNewestInBand(ImapClient $client, string $folder, int $from, int $to): ?array {
+		return $this->probeEdgeInBand($client, $folder, $from, $to, true);
+	}
+
+	/**
+	 * One end or the other of a UID band, with its INTERNALDATE in UTC.
+	 * Shared so the timezone handling below exists exactly once.
+	 */
+	private function probeEdgeInBand(ImapClient $client, string $folder, int $from, int $to,
+			bool $newest): ?array {
+		if ($from > $to) { return null; }
+
 		$query = new Horde_Imap_Client_Fetch_Query();
 		$query->imapDate();
 		$res = $client->fetch($folder, $query, array(
 			'ids' => new Horde_Imap_Client_Ids($from . ':' . $to),
 		));
 
-		$lowest = null;
+		$edge = null;
 		foreach ($res->ids() as $uid) {
 			$uid = intval($uid);
 			if ($uid < $from || $uid > $to) { continue; }   // a client that ignores the range
-			if ($lowest === null || $uid < $lowest) { $lowest = $uid; }
+			if ($edge === null || ($newest ? $uid > $edge : $uid < $edge)) { $edge = $uid; }
 		}
-		if ($lowest === null) { return null; }
+		if ($edge === null) { return null; }
 
-		$data = $res[$lowest] ?? null;
+		$data = $res[$edge] ?? null;
 		if ($data === null) { return null; }
 		$date = $data->getImapDate();
 
 		// An unparsable INTERNALDATE (Horde falls back to epoch -1 and flags
 		// error()) reports as '' — the caller treats unknown as in-window.
 		if (!$date || $date->error()) {
-			return array('uid' => $lowest, 'date' => '');
+			return array('uid' => $edge, 'date' => '');
 		}
 
 		// The cutoff being compared against is a UTC string, and INTERNALDATE
@@ -679,7 +768,7 @@ class ImapIngestor {
 		// boundary by up to ±14 hours.
 		$date = clone $date;
 		$date->setTimezone(new DateTimeZone('UTC'));
-		return array('uid' => $lowest, 'date' => $date->format('Y-m-d H:i:s'));
+		return array('uid' => $edge, 'date' => $date->format('Y-m-d H:i:s'));
 	}
 
 	private function fetchWindow(ImapClient $client, string $folder, int $startUid, int $endUid) {
@@ -700,6 +789,11 @@ class ImapIngestor {
 	 * an `ilm_` label membership for ($folder) is attached (present_local = present_base
 	 * = true) on both the new-row and dedup paths — the dedup path is where a message
 	 * already stored from another folder gains its second label (§7.3).
+	 *
+	 * ALL OR NOTHING. The fetches happen first and outside any transaction; every
+	 * write then lands inside one, so a message never commits without its manifest
+	 * and "already stored" always means "stored completely". That is what the dedup
+	 * path's decision not to rewrite the manifest rests on.
 	 */
 	private function ingestOne($client, InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
 			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership = false): array {
@@ -707,7 +801,6 @@ class ImapIngestor {
 		$folderName = (string)$folder->get('iif_name');
 
 		$structure = $data->getStructure();
-		$envelope = $data->getEnvelope();
 
 		// Classify parts: pick the first inline text/plain & text/html as the body;
 		// everything else non-multipart is an attachment-manifest entry.
@@ -742,6 +835,58 @@ class ImapIngestor {
 		}
 
 		$headers = $this->parseHeaderText((string)$data->getHeaderText());
+
+		// Everything from here down is ONE unit of work
+		// (specs/mail_import_loss_proof.md D1). The message row and its attachment
+		// manifest used to be separate statements, so a crash or a concurrent
+		// reader could see — or permanently leave — a message with no attachments:
+		// on retry the row already existed, storeExtracted reported dedup, and the
+		// manifest write is skipped on the dedup path by design. A committed row
+		// now always carries its manifest, which is what lets every other path
+		// treat "the message is here" as "its attachments are here too".
+		//
+		// The transaction opens AFTER the body fetches above: those are network
+		// round trips to the source server, and a transaction must never be held
+		// open across them.
+		$db = DbConnector::get_instance()->get_db_link();
+		$owns_tx = !$db->inTransaction();
+		if ($owns_tx) {
+			$db->beginTransaction();
+		}
+
+		try {
+			$outcome = $this->ingestOneStored($folder, $uid, $data, $router,
+				$alias, $domain, $recipient, $serverUidValidity, $recordMembership,
+				$attachParts, $plain, $html, $headers);
+			if ($owns_tx) {
+				$db->commit();
+			}
+			return $outcome;
+		} catch (Throwable $e) {
+			// Roll the whole message back and let it out. ingestFolder counts it as
+			// a failure and holds the cursor below this UID, so the next poll
+			// retries it — which is also how an InboundStoreCollisionException
+			// resolves: the retry's pre-validate SELECT reads cleanly (it runs
+			// before any INSERT, so nothing has aborted the transaction) and
+			// reports an ordinary dedup.
+			if ($owns_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+	}
+
+	/**
+	 * The stored half of ingestOne: everything that writes, run inside the
+	 * caller's transaction. Split out so the transaction boundary is one
+	 * try/catch rather than wrapped around two hundred lines.
+	 */
+	private function ingestOneStored(InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
+			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership,
+			array $attachParts, string $plain, string $html, array $headers): array {
+
+		$folderName = (string)$folder->get('iif_name');
+		$envelope = $data->getEnvelope();
 
 		$msg = array(
 			'sender'  => $this->addrString($envelope->from),
@@ -784,7 +929,10 @@ class ImapIngestor {
 		$messageId = 0;
 		if (!$result['dedup'] && $result['message'] !== null) {
 			$messageId = intval($result['message']->key);
-			// Write the manifest only for a freshly-stored row (dedup ⇒ already has one).
+			// Write the manifest only for a freshly-stored row. On the dedup path the
+			// existing row already has its own, and since both are written in one
+			// transaction that is now a guarantee rather than an assumption — a
+			// half-stored message never commits (D1).
 			$this->writeManifest($messageId, $attachParts);
 			// A brand-new Sent-folder message is mail the user sent — mark it outbound
 			// so the reader renders it as a sent message (native-client or Gmail

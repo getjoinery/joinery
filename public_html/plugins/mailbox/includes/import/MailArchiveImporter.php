@@ -29,7 +29,12 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - every duplicate names WHICH message it duplicated and where
+ *   that message lives (D2/D3, specs/mail_import_loss_proof.md). A site-wide
+ *   collision is no longer recorded blind, and a stored copy that lists no
+ *   attachments under an archive copy that has some is called out rather than
+ *   accepted.
  * @changelog 1.3 - the adoption machinery moved to AttachmentByteCustody so
  *   the live SMTP dedup path adopts too; parts now stream to disk instead of
  *   materializing in memory.
@@ -378,10 +383,7 @@ class MailArchiveImporter {
 			// own attachments.
 			$adopted = AttachmentByteCustody::adopt($existing, $raw, $this->router());
 			MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_DEDUP,
-				$adopted > 0
-					? 'Already in this mailbox — attachment bytes taken.'
-					: 'Already in this mailbox.',
-				$existing);
+				$this->dedupReason($existing, $raw, $adopted), $existing);
 			return 'dedup';
 		}
 
@@ -412,8 +414,16 @@ class MailArchiveImporter {
 			// The store's own dedup, which is mailbox-agnostic: the platform holds a
 			// message once. Reached when the same message was already brought in under
 			// another address or into another mailbox.
+			//
+			// This is the ONE outcome that can legitimately mean "this mailbox does
+			// not hold it", so it must never be recorded blind (D2,
+			// specs/mail_import_loss_proof.md). Resolve the row it collided with
+			// using the same lookup the store used, and say which of the three
+			// things happened. No adoption here: storeMessage already handed the
+			// bytes over on this path whenever it could resolve the row.
+			list($reason, $collided) = $this->collisionOutcome($messageId, $recipient, $direction, $alias);
 			MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_DEDUP,
-				'Already stored on this site.');
+				$reason, $collided);
 			return 'dedup';
 		}
 
@@ -429,6 +439,66 @@ class MailArchiveImporter {
 
 		MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_STORED, null, $messageRowId);
 		return 'stored';
+	}
+
+	/**
+	 * Why this entry was a duplicate of a message already in THIS mailbox.
+	 *
+	 * Ordinary in every case — but when the stored copy lists no attachments at
+	 * all and the archive copy plainly has some, the two disagree about what the
+	 * message is, and that is worth naming (D3). Since a message and its manifest
+	 * are written in one transaction, the shape cannot be a half-finished write
+	 * caught mid-flight; it is persistent — a row from before that guarantee, or
+	 * one stored by a path that writes no manifest.
+	 *
+	 * The cheap COUNT gates the expensive part enumeration, so an ordinary
+	 * duplicate never pays to parse a MIME document it has no question about.
+	 */
+	private function dedupReason(int $existing, string $raw, int $adopted): string {
+		if ($adopted > 0) {
+			return MailImportEntry::REASON_DEDUP_HERE . ' — attachment bytes taken.';
+		}
+		if (AttachmentByteCustody::manifestRowCount($existing) === 0) {
+			try {
+				$parts = $this->router()->enumerateNonTextParts($raw);
+				if (count($parts) > 0) {
+					return MailImportEntry::REASON_DEDUP_NO_MANIFEST . ', but the archive copy has '
+						. count($parts) . '. Message ' . $existing . '.';
+				}
+			} catch (\Throwable $e) {
+				// An unparsable archive copy is not evidence of anything about the
+				// stored one — fall through to the ordinary reason.
+			}
+		}
+		return MailImportEntry::REASON_DEDUP_HERE . '.';
+	}
+
+	/**
+	 * Which message the site-wide unique key collided with, and what that means.
+	 *
+	 * Three shapes, and the difference is the whole point of asking:
+	 *   - the row is in this run's alias — the message IS here; the poll or another
+	 *     writer stored it between this entry's own check and its insert;
+	 *   - the row is in a different mailbox — this mailbox may genuinely not hold
+	 *     it, which is the finding the reconciliation exists to surface;
+	 *   - nothing resolves — a known shape rather than a bug: a sealed recipient
+	 *     cannot be matched by this lookup, which is exactly why the router guards
+	 *     its own adoption on this path the same way.
+	 *
+	 * @return array{0:string,1:?int} the reason, and the colliding id when known.
+	 */
+	private function collisionOutcome(string $messageId, string $recipient, string $direction, $alias): array {
+		$collided = $this->router()->duplicateMessageId($messageId, $recipient, $direction);
+		if ($collided === null) {
+			return array(MailImportEntry::REASON_DEDUP_UNRESOLVABLE . '.', null);
+		}
+
+		$row = new InboundEmailMessage($collided, TRUE);
+		$row_alias = $row->key ? intval($row->get('iem_iea_inbound_email_alias_id')) : 0;
+		if ($row_alias === intval($alias->key)) {
+			return array(MailImportEntry::REASON_DEDUP_RACE . '. Message ' . $collided . '.', $collided);
+		}
+		return array(MailImportEntry::REASON_DEDUP_ELSEWHERE . '. Message ' . $collided . '.', $collided);
 	}
 
 	// The byte-custody machinery (part matching, adoption, sealing) is shared

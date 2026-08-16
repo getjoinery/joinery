@@ -90,7 +90,13 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
- * @version 1.32
+ * @version 1.33
+ * @changelog 1.33 - a database-raised unique violation in storeExtracted() now
+ *   throws InboundStoreCollisionException instead of being reported as a dedup:
+ *   it aborts the enclosing Postgres transaction, so a caller storing a message
+ *   and its manifest as one unit has to roll back and retry, not carry on
+ *   (D1, specs/mail_import_loss_proof.md). duplicateMessageId() made public so
+ *   the archive importer can name the row it collided with.
  */
 
 require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
@@ -107,6 +113,17 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/RawMessageStor
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/AuthenticationResults.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/SRSRewriter.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+
+/**
+ * A store lost the race for a (Message-ID, recipient) that another process
+ * inserted first, and the database — not the pre-validate SELECT — raised it.
+ *
+ * It exists because that distinction is not cosmetic: a database-raised unique
+ * violation aborts the enclosing Postgres transaction, so a caller storing a
+ * message and its attachments as one unit cannot recover inline. Catching this
+ * means "roll this message back and let it be retried", never "carry on".
+ */
+class InboundStoreCollisionException extends RuntimeException {}
 
 class InboundEmailRouter {
 
@@ -1583,12 +1600,28 @@ class InboundEmailRouter {
 			$saved = InboundEmailMessage::CreateEntry($row);
 			return array('message' => $saved, 'dedup' => false);
 		} catch (\Throwable $e) {
-			// Dedup can surface two ways: SystemBase::save() pre-validates the
-			// unique_with (iem_message_id_header, iem_recipient) and throws a
-			// DisplayableUserException, OR a concurrent insert trips the DB UNIQUE
-			// (SQLSTATE 23505). Either way, if the duplicate row genuinely exists
-			// it is a successful dedup; otherwise the error is real — rethrow.
-			if ($this->duplicateMessageExists($message_id_header, $row['iem_recipient']) || $this->isUniqueViolation($e)) {
+			// Dedup surfaces two ways, and the difference matters because the caller
+			// now stores the message and its manifest in one transaction (D1,
+			// specs/mail_import_loss_proof.md).
+			//
+			// A DATABASE-raised unique violation (SQLSTATE 23505) aborts the whole
+			// Postgres transaction: every later statement fails until it unwinds,
+			// including the "does the row exist?" question below. So it cannot be
+			// answered here and the message must not be reported as stored. Let it
+			// out instead — the caller rolls its message unit back, and the retry
+			// resolves the same collision through the pre-validate path, which reads
+			// cleanly because it runs before any INSERT. A savepoint would preserve
+			// the old catch-and-continue, but at the cost of the guarantee the
+			// transaction exists to give.
+			if ($this->isUniqueViolation($e)) {
+				throw new InboundStoreCollisionException(
+					'Another process stored this message first; it resolves on the next pass.', 0, $e);
+			}
+			// SystemBase::save() pre-validates the unique_with
+			// (iem_message_id_header, iem_recipient) and throws a
+			// DisplayableUserException before attempting the INSERT, so nothing has
+			// aborted and the row genuinely exists: an ordinary dedup.
+			if ($this->duplicateMessageExists($message_id_header, $row['iem_recipient'])) {
 				return array('message' => null, 'dedup' => true);
 			}
 			throw $e;
@@ -1612,8 +1645,14 @@ class InboundEmailRouter {
 	 * direction]) identity, or null. The dedup paths use it to find the row a
 	 * unique violation collided with — the copy that may be about to receive
 	 * this delivery's bytes (AttachmentByteCustody).
+	 *
+	 * Public because the archive importer asks the same question for a different
+	 * reason: to name, on the entry it is about to mark as a duplicate, WHICH
+	 * message it duplicated (D2, specs/mail_import_loss_proof.md). Both callers
+	 * must resolve the collision the same way or the ledger would disagree with
+	 * the store about what happened.
 	 */
-	private function duplicateMessageId(?string $message_id_header, string $recipient, ?string $direction = null): ?int {
+	public function duplicateMessageId(?string $message_id_header, string $recipient, ?string $direction = null): ?int {
 		if ($message_id_header === null || $message_id_header === '') {
 			return null;
 		}

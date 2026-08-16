@@ -29,7 +29,9 @@
  *
  * Run: php tests/run.php db --filter=mailbox_attachment_byte_custody
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - D3: a stored copy that lists no attachments under an archive
+ *   copy that has some is named in the ledger, not accepted as a clean duplicate.
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -383,6 +385,73 @@ check(SealedFileContainer::openBytes($sealed_file->read_bytes('original'), $fk_d
 check(!SealedEgressGuard::isHot(),
 	'the import never opened sealed content, so the egress guard stayed cold',
 	implode(', ', SealedEgressGuard::sources()));
+
+// =========================================================================
+section('A stored copy that lists no attachments is called out, not accepted');
+// =========================================================================
+
+// D3 (specs/mail_import_loss_proof.md). A duplicate normally means "we already
+// have this, nothing to do". But when the stored copy lists NO attachments and
+// the archive copy plainly has some, the two disagree about what the message is
+// — and silently accepting that is how an attachment goes missing with every
+// counter still reading clean.
+//
+// Since a message and its manifest are now written in one transaction, this
+// shape can no longer be a half-finished write caught mid-flight. It is
+// persistent: a row from before that guarantee, or one stored by a path that
+// writes no manifest. So there is nothing to retry — the job is to NAME it.
+//
+// THIS SECTION SITS HERE ON PURPOSE, above the first sealed READ. Opening
+// sealed content arms the egress guard for the rest of the process, which then
+// refuses any write longer than 64 characters — and these reasons are long,
+// because carrying the colliding message id is the entire point of them.
+
+$gap_mid = 'custody-manifest-gap';
+$gap_msg = $make_remote_message($gap_mid, array());   // deliberately no manifest rows
+check(AttachmentByteCustody::manifestRowCount((int)$gap_msg->key) === 0,
+	'gap: the stored copy lists no attachments at all');
+
+$gap_raw = $build_raw($gap_mid, array(
+	array('name' => 'statement.pdf', 'type' => 'application/pdf', 'bytes' => $pdf),
+));
+$gap_totals = $import_raw($gap_raw, 'manifest-gap.eml');
+
+check($gap_totals['dedup'] === 1 && $gap_totals['stored'] === 0,
+	'gap: the message is still recognised as one we already hold', json_encode($gap_totals));
+
+$stmt = $db->prepare("SELECT mie_reason, mie_iem_inbound_email_message_id
+	FROM mie_mail_import_entries
+	WHERE mie_iem_inbound_email_message_id = ? OR mie_reason LIKE ?
+	ORDER BY mie_mail_import_entry_id DESC LIMIT 1");
+$stmt->execute(array((int)$gap_msg->key, MailImportEntry::REASON_DEDUP_NO_MANIFEST . '%'));
+$gap_row = $stmt->fetch(PDO::FETCH_ASSOC) ?: array();
+$gap_reason = (string)($gap_row['mie_reason'] ?? '');
+
+check(strncmp($gap_reason, MailImportEntry::REASON_DEDUP_NO_MANIFEST,
+		strlen(MailImportEntry::REASON_DEDUP_NO_MANIFEST)) === 0,
+	'gap: THE LEDGER NAMES THE MISMATCH instead of recording a clean duplicate', $gap_reason);
+check(strpos($gap_reason, 'archive copy has 1') !== false,
+	'gap: and says how many the archive copy carried, so the report can be acted on', $gap_reason);
+
+// An ORDINARY duplicate must not be dragged into the same bucket, or the report
+// section would fill with noise and stop meaning anything.
+$plain_mid = 'custody-plain-dupe';
+$plain_msg = $make_remote_message($plain_mid, array(
+	array('ima_filename' => 'statement.pdf', 'ima_content_type' => 'application/pdf',
+		'ima_mime_part' => '2', 'ima_size_bytes' => strlen($pdf)),
+));
+$plain_raw = $build_raw($plain_mid, array(
+	array('name' => 'statement.pdf', 'type' => 'application/pdf', 'bytes' => $pdf),
+));
+$import_raw($plain_raw, 'plain-dupe.eml');
+
+$stmt = $db->prepare("SELECT mie_reason FROM mie_mail_import_entries
+	WHERE mie_iem_inbound_email_message_id = ? ORDER BY mie_mail_import_entry_id DESC LIMIT 1");
+$stmt->execute(array((int)$plain_msg->key));
+$plain_reason = (string)$stmt->fetchColumn();
+check(strncmp($plain_reason, MailImportEntry::REASON_DEDUP_NO_MANIFEST,
+		strlen(MailImportEntry::REASON_DEDUP_NO_MANIFEST)) !== 0,
+	'gap: a duplicate whose manifest was there is NOT flagged', $plain_reason);
 
 // =========================================================================
 section('A locked read reports locked, never ciphertext');
