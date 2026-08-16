@@ -283,7 +283,27 @@ fn reconcile_with_delete(entry: &Entry, local: &Delta, remote: &Delta) -> Resolu
 
         // Gone there, untouched here: remove it locally — to the OS trash, so a
         // wrong call costs a trip to the trash rather than a file.
-        (Delta::None, Delta::Deleted) => Resolution::just(Action::TrashLocal),
+        //
+        // Unless it was never here to remove. An entity this device heard about
+        // but never materialized — the download had not run yet, or was still
+        // waiting behind something — has nothing on disk to trash, and asking
+        // for one is not merely wasted work: the executor finds no file, calls
+        // the operation overtaken and drops it, and the entry is left exactly as
+        // it was. So the next pass plans the same trash, and the pass after
+        // that, while the entry sits in `pending_download` forever waiting for
+        // bytes the server no longer has.
+        //
+        // It costs nothing visible and never stops. The soak rig read it the
+        // only way it could — a device with entries still in flight has not
+        // settled — and failed convergence on every cycle of every campaign for
+        // as long as the rig has existed, over six files nobody could see.
+        (Delta::None, Delta::Deleted) => {
+            if entry.is_established() {
+                Resolution::just(Action::TrashLocal)
+            } else {
+                Resolution::just(Action::Forget)
+            }
+        }
 
         // Gone there, edited here. Edit wins. The old server entry is gone and
         // cannot be resurrected under its id, so the rescued content goes up as
@@ -837,6 +857,31 @@ mod tests {
         assert_eq!(
             reconcile(&e, &Delta::None, &Delta::Deleted, &ctx()).actions,
             vec![Action::TrashLocal]
+        );
+    }
+
+    #[test]
+    fn a_delete_of_something_never_materialized_here_is_forgotten_not_trashed() {
+        // The server mentioned a file, this device recorded it, and the download
+        // had not run when the server trashed it. There is nothing on this disk
+        // to put in the trash.
+        //
+        // Asking for one anyway is not harmless. The executor finds no file,
+        // reports the operation overtaken and drops it, and nothing touches the
+        // entry — so the next pass plans the same trash, and every pass after
+        // it, while the entry stays in `pending_download` for good. It never
+        // errors and never finishes, and a client with one of these never
+        // reports itself settled again.
+        let mut e = established("doc-13.txt", "aaa");
+        e.synced_content = None;
+        e.synced_placement = None;
+        e.status = LocalStatus::PendingDownload;
+        assert!(!e.is_established(), "the premise: it never landed here");
+
+        assert_eq!(
+            reconcile(&e, &Delta::None, &Delta::Deleted, &ctx()).actions,
+            vec![Action::Forget],
+            "nothing to trash, so the record goes rather than the loop starting"
         );
     }
 

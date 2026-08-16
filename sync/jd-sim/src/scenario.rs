@@ -154,6 +154,25 @@ impl World {
     /// a loss and never registers as one, because the snapshot is taken after
     /// they did it. What is left is exactly the engine's own removals.
     pub fn pass(&self, device: &Device) -> jd_core::pass::PassOutcome {
+        self.attempt_pass(device).unwrap_or_default()
+    }
+
+    /// The same pass, with the failure still attached.
+    ///
+    /// Settling needs the difference and nothing else does. A pass that could
+    /// not reach the server produces the same empty outcome as a pass that
+    /// found nothing to do, and an empty outcome reports itself quiet — so two
+    /// unlucky rounds in a row on a hostile network made the harness announce
+    /// that everything had converged while a device was still a change behind.
+    /// Three seeds sat in the ignored list for that, described as a naming race
+    /// they had nothing to do with.
+    ///
+    /// The real client does not make this mistake — it records the error as a
+    /// blocker — which is the argument for the harness not making it either.
+    fn attempt_pass(
+        &self,
+        device: &Device,
+    ) -> Result<jd_core::pass::PassOutcome, jd_core::execute::ExecError> {
         let before = held_by(device);
         let outcome = self.run_pass_on(device);
         let after = held_by(device);
@@ -171,7 +190,10 @@ impl World {
         outcome
     }
 
-    fn run_pass_on(&self, device: &Device) -> jd_core::pass::PassOutcome {
+    fn run_pass_on(
+        &self,
+        device: &Device,
+    ) -> Result<jd_core::pass::PassOutcome, jd_core::execute::ExecError> {
         let ctx = Context {
             date: "2026-07-31".into(),
             device_name: device.name.clone(),
@@ -186,9 +208,7 @@ impl World {
         let e: ExecEnv = env(device, &now);
         let mut keys = device.key_source();
         let mut tokens = |id: EntityId| format!("{}-{}", device.name, id.server_id.abs());
-        // A pass that errors is a finding, not a crash: report it as a pass that
-        // did nothing, and let settling time out if it never recovers.
-        run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens).unwrap_or_default()
+        run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens)
     }
 
     /// Run passes on every device until nothing changes any more.
@@ -204,9 +224,12 @@ impl World {
                 // scenario with any retry in it would deadlock against its own
                 // exponential backoff and look like a convergence failure.
                 self.clock.advance_secs(20 * 60);
-                let outcome = self.pass(device);
-                if !outcome.quiet() {
-                    any_work = true;
+                // A pass that failed is not a quiet one. It is a device that
+                // has not been able to look, and calling that settled is how a
+                // world converges on paper while a file is still missing.
+                match self.attempt_pass(device) {
+                    Ok(outcome) if outcome.quiet() => {}
+                    _ => any_work = true,
                 }
             }
             if any_work {
@@ -248,12 +271,23 @@ pub fn disk_tree(device: &Device) -> BTreeMap<String, Option<String>> {
             continue;
         }
         let hash = device.fs.peek(&path).map(|b| crate::sha256_hex(&b));
-        // Composed, because that is the spelling the `Vfs` contract promises
-        // and therefore the only one the engine ever works in. Reading the raw
-        // stored keys here would report a decomposing volume as diverging from
-        // the server over a file both of them hold correctly — the harness
-        // failing the engine for obeying its own contract.
-        out.insert(jd_vfs::nfc(&path), hash);
+        // Composed only where the volume decomposed it in the first place, and
+        // therefore only where the engine itself works in the composed spelling.
+        // Reading the raw stored keys on such a volume would report it as
+        // diverging from the server over a file both of them hold correctly.
+        //
+        // Composing everywhere is the opposite error and the more expensive one:
+        // it makes a device holding a decomposed name look like it holds the
+        // composed one, which is precisely the disagreement between the disk and
+        // the engine's record that wedges a real client. The harness would
+        // report convergence while the client renamed the file at the server
+        // forever.
+        let path = if jd_vfs::Vfs::personality(&device.fs).decomposes_unicode {
+            jd_vfs::nfc(&path)
+        } else {
+            path
+        };
+        out.insert(path, hash);
     }
     out
 }

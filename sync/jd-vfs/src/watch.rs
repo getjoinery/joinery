@@ -182,12 +182,17 @@ impl Watcher {
 
 /// Put an event path into the form the rest of the engine speaks.
 ///
-/// macOS delivers decomposed names, so `café.txt` arrives spelled differently
-/// than the engine wrote it and the dirty path matches nothing it knows about.
-/// Composing here means one spelling reaches every comparison. On a platform
-/// that does not decompose this is the identity function, which is why it is
-/// unconditional — a `#[cfg]` here would make the macOS path the only one never
-/// exercised by a test.
+/// A decomposing volume delivers decomposed names, so `café.txt` arrives
+/// spelled differently than the engine wrote it. Composing here means one
+/// spelling reaches every comparison.
+///
+/// Unconditional, and safe to be: a dirty path is only ever a *trigger*. The
+/// pass it wakes walks the whole tree, so the spelling recorded here is never
+/// compared against anything the engine knows. It is emphatically not the
+/// identity function elsewhere — a file genuinely named in decomposed form on
+/// ext4 is composed here into a path that does not exist — which costs nothing
+/// while the set is a doorbell, and would cost a missed change the day anything
+/// starts reading these paths as names.
 pub fn normalize_event_path(path: &Path) -> PathBuf {
     let s = path.to_string_lossy();
     let composed = crate::names::nfc(&s);

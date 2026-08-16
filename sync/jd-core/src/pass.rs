@@ -703,6 +703,8 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     let mut out = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
     let mut guard = 0;
+    let now_ns = (env.now_ms)().saturating_mul(1_000_000);
+    let granularity = env.vfs.personality().mtime_granularity_ns.max(1);
     while let Some((dir, rel)) = queue.pop() {
         guard += 1;
         if guard > 100_000 {
@@ -724,11 +726,11 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                     let Some(fingerprint) = env.vfs.fingerprint(&full)? else {
                         continue;
                     };
-                    let sha = match env.store.cached_hash(fingerprint)? {
+                    let sha = match env.store.cached_hash(fingerprint, granularity)? {
                         Some(s) => s,
                         None => {
                             let s = env.vfs.hash(&full)?;
-                            env.store.cache_hash(fingerprint, &s, None)?;
+                            env.store.cache_hash(fingerprint, &s, None, now_ns)?;
                             s
                         }
                     };
@@ -1085,9 +1087,6 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
         // tried once and cost seven files — they are what ties a local file to
         // what the server holds. They stay; they just stop being read as a
         // fault.
-        if entry.remote_deleted {
-            continue;
-        }
         let Some(parent) = entry.local_placement().parent else {
             continue;
         };
@@ -1095,6 +1094,21 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
             continue;
         }
         if entry.id.is_provisional() {
+            env.store.delete_subtree(entry.id)?;
+        } else if entry.remote_deleted {
+            // Deleted on the server *and* with no folder left here to reach it
+            // through. The reason these records are kept does not apply: what
+            // they are for is tying a local file to what the server holds, and
+            // the server holds nothing. Nothing can find this entry either —
+            // every pass walks down from the root, so an entry under a folder
+            // that is gone is never visited, never decided about, never
+            // cleared. It sat in `pending_download` claiming to be waiting for
+            // bytes, and the client reported itself unsettled for the life of
+            // the process because of it.
+            //
+            // Dropping it is safe in the direction that matters. If a local
+            // file for it does turn up, the next scan finds it as something new
+            // and uploads it, which costs a transfer and loses nothing.
             env.store.delete_subtree(entry.id)?;
         } else {
             real_stranded += 1;
