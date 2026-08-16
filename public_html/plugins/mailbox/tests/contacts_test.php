@@ -102,10 +102,13 @@ foreach ((new ReflectionClass('MailboxContacts'))->getMethods(ReflectionMethod::
 	$public[] = $m->getName();
 }
 sort($public);
-// addressHash, aliasHasContact, listForMailbox and lookup are READERS; the only
-// writers are manualAdd() and import(). aliasHasContact answers the Direct contact
-// gate for a shared mailbox and writes nothing.
-$expected = array('addressHash', 'aliasHasContact', 'deleteContact', 'import', 'listForMailbox', 'lookup', 'manualAdd');
+// addressHash, aliasHasContact, listForMailbox, listForUser and lookup are
+// READERS; the only writers are manualAdd() and import(). aliasHasContact answers
+// the Direct contact gate for a shared mailbox and writes nothing. listForUser
+// spans every mailbox the user holds, for surfaces that are not scoped to one
+// (the Messenger people picker) — a SELECT and per-row decryption, nothing more.
+$expected = array('addressHash', 'aliasHasContact', 'deleteContact', 'import', 'listForMailbox',
+	'listForUser', 'lookup', 'manualAdd');
 check($public === $expected,
 	'the only public writers are manualAdd() and import() — no traffic-driven entry point',
 	implode(',', $public));
