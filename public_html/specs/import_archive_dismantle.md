@@ -75,14 +75,26 @@ that cannot be written blocks release of that region rather than discarding it.
 `pending` blocks release outright. `stored`, `dedup` and `skipped` are
 disposable.
 
-## Consent, not ownership
+## Whose archive it is
 
-A Drive-picked file explicitly belongs to the user and is never touched — and
-since the web upload ceiling is far below any real archive, Drive is the only way
-a large archive reaches the importer. Refusing on ownership grounds would refuse
-every case this is for.
+Most archives are already the importer's own. An archive uploaded on the import
+page arrives through the platform's chunked transport under the
+`mail_import_archive` purpose and is tagged `File::SOURCE_MAIL_IMPORT_ARCHIVE` —
+private working material for one run, deliberately kept out of the member's Drive
+listing and off their Drive quota. Consuming it needs no special permission: it
+is what the retention sweep already deletes on a timer.
 
-So the gate is consent, taken at start-run, off by default:
+**A Drive-picked archive is the exception**, and it is the user's own file, which
+the importer never touches. Two defensible answers, and this spec takes the
+second:
+
+1. Refuse to dismantle a Drive-picked archive. Simple, and costs nothing in the
+   common case.
+2. Offer it, with consent, because a user who has the original elsewhere would
+   rather have the disk space.
+
+So the gate is consent, taken at start-run, off by default, and shown only when
+the chosen archive is one the importer does not already own:
 
 > **Reclaim space as it imports.** The archive is consumed as its messages are
 > stored, and will not exist when the run finishes. Without this, the import
@@ -90,9 +102,17 @@ So the gate is consent, taken at start-run, off by default:
 
 The estimate shown is the real one (see *Disk estimate*, below).
 
-**The user's Drive must not be left holding a lie.** When a run completes having
-consumed its archive, the File row is deleted, with the reason recorded on the
-run — not left listed at its original size pointing at nothing.
+**Nothing may be left holding a lie.** When a run completes having consumed its
+archive, the File row is deleted, with the reason recorded on the run — not left
+listed at its original size pointing at nothing. That applies to an
+importer-owned archive as much as a Drive-picked one; the difference is only
+whether anyone was asked first.
+
+**Uploading should be guarded too.** `drive_upload_init` already knows
+`fup_expected_bytes` before a single chunk arrives, and checks nothing against
+free space — so a large archive can fill a disk on the way in, before the import
+guard ever runs. That is a gap independent of this spec and its natural fix is
+the same `DiskSpace` call the importer makes.
 
 ## What this costs
 

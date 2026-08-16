@@ -85,6 +85,35 @@ check($immediate->get('qst_question') === 'HarnessTest lifecycle ' . $RUN,
 	'Passing TRUE loads on construction');
 
 
+section('Loading a row that is not there');
+
+// The codebase's universal existence check is `if (!$obj->key)`. It only means
+// anything if a load that found nothing clears the key — otherwise the id the
+// caller asked for sits there answering "found" for a row that does not exist,
+// and the mistake surfaces much later, somewhere else, as a fatal on null.
+$missing_id = intval($saved->key) + 100000000;
+$missing = new Question($missing_id, TRUE);
+check($missing->key === NULL,
+	'A load that finds nothing clears the key',
+	'`if (!$obj->key)` is how every caller asks "did this exist?"');
+
+// Emptied, not left NULL: a stray read after a failed load should say "absent",
+// not take the request down.
+check($missing->get('qst_question') === NULL,
+	'and reading a field answers NULL rather than fatalling');
+check(sbl_threw(function () use ($missing) { $missing->set('qst_question', 'x'); }) === false,
+	'and writing a field does not fatal either');
+
+// An explicit load() reports the miss to a caller that checks it.
+$missing_explicit = new Question($missing_id);
+check($missing_explicit->load() === false, 'load() returns false when the row is absent');
+check($missing_explicit->key === NULL, 'and clears the key the same way');
+
+// The row that does exist is unaffected by any of the above.
+$still_there = new Question($saved->key, TRUE);
+check($still_there->key !== NULL && $still_there->get('qst_question') === 'HarnessTest lifecycle ' . $RUN,
+	'A row that does exist still loads normally');
+
 section('Identity');
 
 // There is no getter for the primary key — the property is the API. Code that

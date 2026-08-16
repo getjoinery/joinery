@@ -66,6 +66,28 @@ class FileUpload extends SystemBase {
 		return $dir;
 	}
 
+	/**
+	 * Why an upload of this size will not fit, or '' when it will.
+	 *
+	 * Asked before a single chunk is accepted, because the size is declared up
+	 * front: an upload with nowhere to land should be refused while refusing is
+	 * still cheap, rather than filling the disk and failing part-way with bytes
+	 * to reclaim and every other subsystem on that filesystem failing too.
+	 *
+	 * Both directories are measured — the scratch directory the chunks append
+	 * into, and the upload directory the finished file is moved to. A deployment
+	 * that mounts them separately is exactly the one where checking only the near
+	 * side would miss the full disk.
+	 */
+	public static function space_refusal($expected_bytes) {
+		$paths = array(self::scratch_dir());
+		$uploads = (string)Globalvars::get_instance()->get_setting('upload_dir');
+		if ($uploads !== '') {
+			$paths[] = $uploads;
+		}
+		return DiskSpace::shortfallMessage(max(0, (int)$expected_bytes), $paths);
+	}
+
 	/** Absolute path of this upload's scratch part-file. */
 	public function part_path() {
 		return self::scratch_dir() . '/' . (int)$this->key . '.part';
