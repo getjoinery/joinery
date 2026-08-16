@@ -21,7 +21,11 @@
  * pending entries of this run", so a crash mid-batch costs at most that batch, and
  * even re-running it is safe because storing an already-stored message dedups.
  *
- * @version 1.2
+ * Disk: an import writes far more than it reads, so a pass will not start a batch
+ * the filesystem cannot take. See diskHold() — the run holds where it is and
+ * resumes by itself, rather than filling the disk and failing mid-message.
+ *
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -148,6 +152,12 @@ class RunMailImports implements ScheduledTaskInterface {
 
 	/** Store one batch, and finish the run when there is nothing pending left. */
 	private function importPass(MailImportRun $run, MailArchiveImporter $importer, int $batchSize): array {
+		$hold = $this->diskHold($run, $batchSize);
+		if ($hold !== null) {
+			return $hold;
+		}
+		$this->clearDiskHold($run);
+
 		$counts = $importer->importBatch($batchSize);
 
 		if (!empty($counts['exhausted'])) {
@@ -165,6 +175,80 @@ class RunMailImports implements ScheduledTaskInterface {
 		return array('status' => 'success', 'message' => 'Import run #' . $run->key . ': stored '
 			. $counts['stored'] . ', duplicates ' . $counts['dedup'] . ', failed ' . $counts['failed']
 			. ' this batch (' . $run->get('mir_processed') . '/' . $run->get('mir_total_entries') . ' done).');
+	}
+
+	// ---------------------------------------------------------------- disk hold
+
+	/**
+	 * Marks a note on the run as this task's, so a hold can be cleared when it
+	 * lifts without touching a note something else wrote (the scan's nested-archive
+	 * warning lives in the same column).
+	 */
+	const DISK_HOLD_PREFIX = 'Paused for disk space:';
+
+	/**
+	 * Refuse a batch the disk cannot take, and say so — or NULL to carry on.
+	 *
+	 * The check at startRun sized the WHOLE import, but that was a promise made
+	 * before hours of work: a large import shares its machine, and the space it was
+	 * offered can be eaten by a backup, a log, or another import while it runs. So
+	 * every pass asks again, for the batch it is about to do.
+	 *
+	 * Holding is not failing. The run keeps its state, its pending entries stay
+	 * pending, and nothing is rolled back — the next pass finds room and simply
+	 * continues. That is the difference between a resumable pause and an import
+	 * that has to be started over.
+	 *
+	 * Reported as an ERROR, though the run is unharmed, because the machine is not:
+	 * a disk this close to full will be breaking other things, and a hold that
+	 * reported success would be a stalled import nobody was told about.
+	 */
+	private function diskHold(MailImportRun $run, int $batchSize): ?array {
+		$entries = intval($run->get('mir_total_entries'));
+		$bytes   = intval($run->get('mir_bytes_total'));
+		// Per-entry size from what this very archive measured. An archive whose size
+		// is unknown falls back to the batch alone being unpredictable, so only the
+		// reserve floor applies — still the check that matters most.
+		$perEntry = ($entries > 0 && $bytes > 0) ? intdiv($bytes, $entries) : 0;
+		$batchBytes = MailArchiveImporter::estimatedStorageBytes($perEntry * max(1, $batchSize));
+
+		$shortfall = DiskSpace::shortfallMessage($batchBytes, MailArchiveImporter::storageTargets());
+		if ($shortfall === '') {
+			return null;
+		}
+
+		$note = self::DISK_HOLD_PREFIX . ' ' . $shortfall
+			. ' The import is unharmed and continues by itself once there is room.';
+		$this->noteOnRun($run, $note);
+		error_log('RunMailImports: run ' . $run->key . ' held — ' . $shortfall);
+
+		return array('status' => 'error',
+			'message' => 'Import run #' . $run->key . ' held. ' . $note);
+	}
+
+	/**
+	 * Take a spent disk-hold note off the run.
+	 *
+	 * Only ever removes THIS task's note: a hold that has lifted must not read as
+	 * still holding, and the scan's nested-archive warning in the same column is
+	 * not ours to discard.
+	 */
+	private function clearDiskHold(MailImportRun $run): void {
+		$note = (string)$run->get('mir_error');
+		if ($note === '' || strncmp($note, self::DISK_HOLD_PREFIX, strlen(self::DISK_HOLD_PREFIX)) !== 0) {
+			return;
+		}
+		$this->noteOnRun($run, '');
+	}
+
+	/** Write a note to the run without ever letting the note cost the run. */
+	private function noteOnRun(MailImportRun $run, string $note): void {
+		try {
+			$run->set('mir_error', $note);
+			$run->save();
+		} catch (Throwable $e) {
+			error_log('RunMailImports: could not note on run ' . $run->key . ' — ' . $e->getMessage());
+		}
 	}
 
 	/**

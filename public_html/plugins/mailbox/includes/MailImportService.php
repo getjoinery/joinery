@@ -14,7 +14,9 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - startRun refuses an archive the disk cannot hold, naming the
+ *   numbers, while the user is still there to be told.
  * @changelog 1.2 - describe() carries an `attention` block for a finished run:
  *   the reconciliation tripwire and the duplicates whose recorded reason says
  *   they may not be in this mailbox (specs/mail_import_loss_proof.md).
@@ -313,6 +315,17 @@ class MailImportService {
 		$refusal = $reader->refusal();
 		if ($refusal !== null) {
 			throw new RuntimeException($refusal);
+		}
+
+		// Room to put it, checked while the user is still here to be told. An import
+		// that runs the disk to zero does not just fail itself — it takes down
+		// everything else sharing the filesystem, and leaves a half-stored mailbox
+		// nobody can safely tidy. Refusing costs the user a sentence.
+		$shortfall = DiskSpace::shortfallMessage(
+			MailArchiveImporter::estimatedStorageBytes((int)@filesize($path)),
+			MailArchiveImporter::storageTargets());
+		if ($shortfall !== '') {
+			throw new RuntimeException($shortfall);
 		}
 
 		$run = new MailImportRun(NULL);
