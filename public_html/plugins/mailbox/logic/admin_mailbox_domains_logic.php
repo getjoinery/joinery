@@ -470,9 +470,18 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// Load domain for editing, and derive the "Type" the editor's dropdown shows.
 	$edit_domain = null;
 	$domain_type = 'custom';
-	if (isset($input['ied_inbound_email_domain_id'])) {
+	// Present-but-empty is not a request to edit anything: an `?ied_inbound_email_domain_id=`
+	// with nothing after it, or a stale hidden field, arrives as set. Guarding on
+	// isset() alone built an object for a row that does not exist and handed it to
+	// the editor as though it were one.
+	if (!empty($input['ied_inbound_email_domain_id'])) {
 		$edit_domain = new InboundEmailDomain($input['ied_inbound_email_domain_id'], TRUE);
-		if ($edit_domain->get('ied_is_imap_source')) {
+		// A key survives only a load that found something, so this is also the
+		// "that domain is gone" branch — fall through to the add form rather than
+		// editing a record that is not there.
+		if (!$edit_domain->key) {
+			$edit_domain = null;
+		} elseif ($edit_domain->get('ied_is_imap_source')) {
 			$reverse = array_flip($imap_type_domains);
 			$domain_type = $reverse[strtolower((string)$edit_domain->get('ied_domain'))] ?? 'imap_generic';
 		}

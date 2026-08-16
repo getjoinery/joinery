@@ -134,6 +134,14 @@ function drive_upload_init_logic(array $input): LogicResult {
 		return LogicResult::error('That upload would exceed the storage quota.');
 	}
 
+	// A quota is what the owner is allowed; this is what the machine can actually
+	// hold. Both have to be true, and the second is the one whose failure takes
+	// the rest of the deployment down with it.
+	$no_room = FileUpload::space_refusal($size_bytes);
+	if ($no_room !== '') {
+		return LogicResult::error($no_room);
+	}
+
 	// A new file cannot take a name a live sibling already holds, and the
 	// question is asked HERE as well as at completion — before a byte is sent,
 	// rather than after the whole file has crossed the wire only to be refused.
@@ -267,6 +275,11 @@ function drive_upload_init_for_purpose(string $purpose, int $user_id, array $inp
 	}
 	if ($size_bytes <= 0) {
 		return LogicResult::error('A file size is required.');
+	}
+
+	$no_room = FileUpload::space_refusal($size_bytes);
+	if ($no_room !== '') {
+		return LogicResult::error($no_room);
 	}
 
 	$refusal = UploadPurposeRegistry::authorize($purpose, $user_id, $input);

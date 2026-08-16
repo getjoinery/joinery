@@ -1787,10 +1787,21 @@ abstract class SystemBase {
 			$this->key, PDO::PARAM_INT, SINGLE_ROW_ALL_COLUMNS);
 		if ($this->data === NULL) {
 			error_log('This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
+			// A row that is not there leaves an object that is NOT a loaded record,
+			// and it has to say so in the one place every caller already looks. The
+			// codebase's universal existence check is `if (!$obj->key)`; leaving the
+			// requested id sitting on ->key made that check answer "found" for a row
+			// that does not exist, and the mistake then surfaced much later as
+			// "Attempt to assign property on null" from set()/get(), naming neither
+			// the table nor the id.
+			//
+			// data is emptied rather than left NULL for the same reason: a stray
+			// get() on a failed load should read as absent, not fatal.
+			$this->key = NULL;
+			$this->data = new StdClass;
 			return false;
-			//throw new Exception('This '.static::$tablename.' row ('.static::$pkey_column.'='.$this->key.') does not exist');
-		}		
-		
+		}
+
 	}
 
 	function soft_delete(){
