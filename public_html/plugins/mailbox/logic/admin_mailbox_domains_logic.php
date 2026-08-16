@@ -117,6 +117,11 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$domain = new InboundEmailDomain(NULL);
 		}
 
+		// Remembered before the save assigns a key, because several decisions
+		// below turn on "did this domain exist a moment ago" and none of them can
+		// ask afterwards.
+		$is_new_domain = !$domain->key;
+
 		$type = $input['domain_type'];
 		$is_imap = ($type !== 'custom');
 		$domain_name = isset($imap_type_domains[$type])
@@ -316,7 +321,13 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			// exception is a zero-backlog Fortress raise, which has nothing to
 			// seal and a required next step — it routes straight into the
 			// protect ceremony below.
-			if ($raising && $new_seals) {
+			// Creating a domain at a sealing level is not a raise. There is no
+			// earlier mail to converge — the domain did not exist — so the receipt
+			// would report sealing a backlog of nothing, on a page with nothing to
+			// do, when what the operator wants next is the account they came to
+			// add. A domain created this way goes back to Accounts like any other
+			// save; the receipt is for domains that already held mail.
+			if ($raising && $new_seals && !$is_new_domain) {
 				$fortress_handoff = ($new_level === InboundEmailDomain::LEVEL_FORTRESS
 					&& !$domain->is_protected_identity());
 				if (mailbox_protection_backlog_count((int)$domain->key) > 0 || !$fortress_handoff) {
