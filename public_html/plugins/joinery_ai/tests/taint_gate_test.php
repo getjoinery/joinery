@@ -133,8 +133,13 @@ try {
 	check(strpos($explain, WRITE_TOOL) !== false && strpos($explain, UNTRUSTED_MODEL) !== false,
 		'explain() names both the write tool and the untrusted source');
 	$drift = TaintGate::describeDrift($eval);
-	check(strpos($drift, UNTRUSTED_MODEL) !== false && stripos($drift, 're-acknowledge') !== false,
-		'describeDrift() names the drifted model and asks to re-acknowledge');
+	check(strpos($drift, UNTRUSTED_MODEL) !== false && stripos($drift, 'standing approval') !== false,
+		'describeDrift() names the drifted model and asks for standing approval');
+	check(stripos($drift, 'taint') === false && stripos($drift, 'rcp_') === false,
+		'describeDrift() copy carries no internal gate terms or column names');
+	$pipeline_drift = TaintGate::describeDrift(TaintGate::evaluate([], [], '', true));
+	check(stripos($pipeline_drift, 'model') === false && stripos($pipeline_drift, 'standing approval') !== false,
+		'pipeline-mode drift copy speaks of the job, not phantom allowed models');
 
 	// -------------------------------------------------------------------------
 	section('Save-time gate is wired through admin_edit_logic');
@@ -188,7 +193,7 @@ try {
 	};
 
 	$msg = $drift_method->invoke(null, $mk_recipe(false, UNTRUSTED_MODEL));
-	check(is_string($msg) && strpos($msg, 'run start') !== false,
+	check(is_string($msg) && strpos($msg, 'Stopped before the run began') !== false,
 		'drift: a tainted-capable recipe without opt-in is blocked at run-start', var_export($msg, true));
 	$msg = $drift_method->invoke(null, $mk_recipe(true, UNTRUSTED_MODEL));
 	check($msg === null, 'drift: the opt-in clears the run-start block');
