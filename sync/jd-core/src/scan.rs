@@ -53,6 +53,11 @@ pub struct KnownLocal {
     pub fingerprint: Option<jd_vfs::Fingerprint>,
     /// The content both sides last agreed on.
     pub sha256: Option<String>,
+    /// The server has deleted this, and its record keeps a local path only as a
+    /// memory of where it used to be. Matters when a live entry is sitting at
+    /// that same path: the file there is the live one's, and this entry has
+    /// nothing on this disk at all.
+    pub server_deleted: bool,
 }
 
 /// What the scan concluded about one tracked file.
@@ -109,24 +114,67 @@ pub fn pair(known: &[KnownLocal], observed: &[ObservedFile]) -> ScanOutcome {
         .map(|(i, o)| (o.path.as_str(), i))
         .collect();
 
-    for k in known {
-        // 1. Same path. Checked first and without consulting the inode, because
-        //    the safe-save dance replaces the inode at a stable path and that is
-        //    an edit, not a new file.
-        if let Some(obs) = by_path.get(k.path.as_str()) {
-            claimed[index_of[obs.path.as_str()]] = true;
-            let same_content = k.sha256.as_deref() == Some(obs.sha256.as_str());
+    // 1. Same path, for every entry, before anybody is allowed to go looking
+    //    elsewhere. Checked without consulting the inode, because the safe-save
+    //    dance replaces the inode at a stable path and that is an edit, not a
+    //    new file.
+    //
+    //    Doing the whole of this step first is what makes it a precedence rather
+    //    than a preference. Interleaved with the search rules it was only the
+    //    first rule *per entry*, so an entry that thought it had moved somewhere
+    //    could reach that path by content and claim it before the entry actually
+    //    recorded as living there ever got its turn. The file is then read as
+    //    two things at once: a move by one entry and, on the next pass, still
+    //    the other's. The move is refused — the server will not put two live
+    //    files under one name — and the record that provoked it is untouched, so
+    //    the next pass plans exactly the same thing. No error, no queued work,
+    //    no end.
+    //
+    //    A path can still be wanted by two entries, and only one file is there:
+    //    a case-twin on a filesystem that cannot tell them apart, or an entry
+    //    the server has deleted whose old spot a live one now occupies. What the
+    //    loser gets said about it is the careful part, and it is not "look for
+    //    it somewhere else" — hunting by hash from here would let it pair with
+    //    an unrelated file and drag two identities into one another. An entry
+    //    the server has deleted has nothing on this disk, so it is gone and can
+    //    be let go of. A live one is a naming problem, which naming already
+    //    handles, so the scan says nothing changed rather than inventing a
+    //    deletion that would take the file off the server.
+    let mut settled: Vec<bool> = vec![false; known.len()];
+    for (n, k) in known.iter().enumerate() {
+        let Some(obs) = by_path.get(k.path.as_str()) else {
+            continue;
+        };
+        let i = index_of[obs.path.as_str()];
+        settled[n] = true;
+        if claimed[i] {
             out.changes.push((
                 k.id,
-                if same_content {
-                    LocalChange::Unchanged
+                if k.server_deleted {
+                    LocalChange::Deleted
                 } else {
-                    LocalChange::Edited {
-                        sha256: obs.sha256.clone(),
-                        fingerprint: obs.fingerprint,
-                    }
+                    LocalChange::Unchanged
                 },
             ));
+            continue;
+        }
+        claimed[i] = true;
+        let same_content = k.sha256.as_deref() == Some(obs.sha256.as_str());
+        out.changes.push((
+            k.id,
+            if same_content {
+                LocalChange::Unchanged
+            } else {
+                LocalChange::Edited {
+                    sha256: obs.sha256.clone(),
+                    fingerprint: obs.fingerprint,
+                }
+            },
+        ));
+    }
+
+    for (n, k) in known.iter().enumerate() {
+        if settled[n] {
             continue;
         }
 
@@ -228,6 +276,7 @@ mod tests {
             path: path.into(),
             fingerprint: Some(fp(file_id, 10, 100)),
             sha256: Some(sha.into()),
+            server_deleted: false,
         }
     }
 
@@ -444,6 +493,7 @@ mod tests {
                 path: "a.txt".into(),
                 fingerprint: None,
                 sha256: None,
+                server_deleted: false,
             }],
             &[observed("elsewhere.txt", 900, "sha-x")],
         );
@@ -452,6 +502,96 @@ mod tests {
             Some(&LocalChange::Deleted)
         );
         assert_eq!(out.created.len(), 1);
+    }
+
+    #[test]
+    fn a_file_belongs_to_the_entry_that_is_still_on_the_server() {
+        // Two entries remember living at one path: file 1, which the server has
+        // deleted, and file 2, which is there now. There is one file on disk and
+        // it is file 2's.
+        //
+        // Both used to be told it was theirs. File 1 then read its neighbour's
+        // bytes as an edit of its own, lost that edit to the server's delete,
+        // and set about rescuing bytes it had no claim to — which the server
+        // refused, because file 2 was using the name. It waited for a sibling it
+        // had already been told about, four hundred times over.
+        let out = pair(
+            &[
+                known(2, "shared.txt", 200, "sha-live"),
+                KnownLocal {
+                    server_deleted: true,
+                    ..known(1, "shared.txt", 100, "sha-old")
+                },
+            ],
+            &[observed("shared.txt", 200, "sha-live")],
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(2)),
+            Some(&LocalChange::Unchanged)
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(1)),
+            Some(&LocalChange::Deleted),
+            "a deleted entry has nothing at a path somebody else is using"
+        );
+        assert!(out.created.is_empty());
+    }
+
+    #[test]
+    fn a_file_at_its_own_path_is_claimed_before_anybody_goes_looking() {
+        // File 1 was moved on top of file 2. Both rules could fire on
+        // `Report.txt`: file 2 is recorded as living there, and file 1 can reach
+        // it by content from where it used to be. Only the first is evidence —
+        // the other is a guess that happens to match.
+        //
+        // Applied per entry, the guess got there first whenever it came first in
+        // the list, and the same file was read as two things at once. The move
+        // it produced is one the server will not perform, because it will not
+        // put two live files under one name, and nothing about the record that
+        // produced it changes when the refusal comes back. Five of four hundred
+        // random workloads planned that same move on every pass, forever.
+        let out = pair(
+            &[
+                known(1, "old-name.txt", 100, "sha-a"),
+                known(2, "Report.txt", 200, "sha-b"),
+            ],
+            &[observed("Report.txt", 100, "sha-a")],
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(2)),
+            Some(&LocalChange::Edited {
+                sha256: "sha-a".into(),
+                fingerprint: fp(100, 10, 100),
+            }),
+            "the file at this path is the entry recorded at this path"
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(1)),
+            Some(&LocalChange::Deleted),
+            "the one that was moved away is gone, not moved on top of a sibling"
+        );
+    }
+
+    #[test]
+    fn two_live_entries_over_one_file_is_a_naming_problem_not_a_deletion() {
+        // A filesystem that cannot tell `Report.txt` from `report.txt` gives
+        // both entries the same path, and only one of them can have the file.
+        // The other holds different content, so being handed those bytes reads
+        // as an edit — and it would push its neighbour's file to the server as
+        // a new version of itself. Neither has been deleted by anybody, so
+        // reporting a deletion instead would be worse still.
+        let out = pair(
+            &[
+                known(1, "Report.txt", 100, "sha-a"),
+                known(2, "Report.txt", 100, "sha-b"),
+            ],
+            &[observed("Report.txt", 100, "sha-a")],
+        );
+        assert_eq!(
+            out.change_for(EntityId::file(2)),
+            Some(&LocalChange::Unchanged),
+            "the one that missed out is left alone for naming to sort out"
+        );
     }
 
     #[test]
