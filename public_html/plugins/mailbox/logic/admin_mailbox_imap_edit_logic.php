@@ -15,7 +15,9 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
- * @version 2.3
+ * @version 2.4
+ * @changelog 2.4 - a sealing domain holds one reader, enforced where grants are
+ *   written; "not checked yet" is told apart from "your provider cannot".
  * @changelog 2.3 - only a scope change that still reads backward rewinds the
  *   folder cursors; switching to future-only keeps them, so un-polled mail at
  *   the source is not skipped.
@@ -115,7 +117,14 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	// Sync settings (specs/two_way_imap_sync.md §8). Read-only / Two-way are
 	// offered only when the server advertised CONDSTORE (cached on a prior
 	// connect/Test); otherwise only Off, with a short note in the view.
+	//
+	// NOT KNOWN IS NOT NOT-SUPPORTED. The flag is a cached probe result that
+	// starts false, so a mailbox that has never connected looks identical to one
+	// whose provider genuinely cannot do it — and the form told the operator their
+	// provider was incapable when nothing had been asked yet. The two states are
+	// separated here so the view can say which one it is.
 	$sync_supported = $account->supportsCondstore();
+	$sync_checked   = $account->key && ($account->get('iia_last_poll_time') || $sync_supported);
 	$sync_options = $sync_supported
 		? array(
 			InboundImapAccount::SYNC_OFF  => 'Off',
@@ -133,14 +142,28 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	// silently (a coverage source, not a membership folder, §6.1) and excluded.
 	$folder_options = array();
 	$tracked_folder_ids = array();
+	// The same folders keyed by NAME, for the "which folder does mail come from"
+	// picker. Once the source has been read once there is no reason to make
+	// somebody type a folder name and guess at its capitalisation — outside the
+	// special Inbox, IMAP folder names are case-sensitive and a near miss simply
+	// finds nothing.
+	$folder_names = array();
 	if ($account->key) {
 		$folders = new MultiInboundImapFolder(array('account_id' => intval($account->key)), array('iif_name' => 'ASC'));
 		$folders->load();
 		foreach ($folders as $f) {
+			$name = (string)$f->get('iif_name');
+			if ($name !== '') { $folder_names[$name] = $name; }
 			if ($f->get('iif_role') === InboundImapFolder::ROLE_ALL) { continue; }
-			$folder_options[intval($f->key)] = $f->get('iif_name');
+			$folder_options[intval($f->key)] = $name;
 			if ($f->get('iif_is_tracked')) { $tracked_folder_ids[] = intval($f->key); }
 		}
+	}
+	// A configured folder that is no longer on the server still has to be
+	// selectable, or saving any other field would silently move the feed.
+	$configured_folder = (string)($account->get('iia_imap_folder') ?: 'INBOX');
+	if ($folder_names && !isset($folder_names[$configured_folder])) {
+		$folder_names[$configured_folder] = $configured_folder . ' (not found on the server)';
 	}
 
 	// Save.
@@ -241,10 +264,26 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			// Combined mode: sync the mailbox's access grants to the submitted set.
 			if ($combined && $resolved_alias_id > 0) {
 				$submitted = array();
-				if (isset($input['users_with_access']) && is_array($input['users_with_access'])) {
-					foreach ($input['users_with_access'] as $uid) {
-						$submitted[] = intval($uid);
+				// A list from the checkboxes, a single id from the sealing-domain
+				// picker. Both mean the same thing — who holds this mailbox — so both
+				// arrive under one name rather than the caller having to know which
+				// control rendered.
+				if (isset($input['users_with_access'])) {
+					foreach ((array)$input['users_with_access'] as $uid) {
+						if (intval($uid) > 0) { $submitted[] = intval($uid); }
 					}
+				}
+				// A sealing domain holds ONE reader, and the rule has to be enforced
+				// where the grants are written. Mail on a Private or Fortress domain
+				// is sealed to a single holder's vault at the moment it arrives, so a
+				// second grantee would hold a mailbox they cannot decrypt — and the
+				// domain editor's own refusal to RAISE a multi-grant domain implies
+				// this rule while stopping none of it, because grants are written
+				// here.
+				if ($domain && $domain->seals_content() && count(array_unique($submitted)) > 1) {
+					return LogicResult::error('This mailbox is on a ' . htmlspecialchars($domain->security_level())
+						. ' domain, so its mail is encrypted to one person and only that person can read it. '
+						. 'Choose a single user, or move the mailbox to a Standard domain to share it.');
 				}
 				InboundEmailMailboxGrant::sync_for_alias($resolved_alias_id, $submitted);
 			}
@@ -290,6 +329,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				'granted_user_ids' => $granted_user_ids,
 				'sync_supported' => $sync_supported, 'sync_options' => $sync_options,
 				'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
+				'folder_names' => $folder_names, 'sync_checked' => $sync_checked,
 				'tracked_folder_ids' => $tracked_folder_ids,
 				'error' => $e->getMessage(),
 			));
@@ -329,6 +369,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		'granted_user_ids' => $granted_user_ids,
 		'sync_supported' => $sync_supported, 'sync_options' => $sync_options,
 		'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
+				'folder_names' => $folder_names, 'sync_checked' => $sync_checked,
 		'tracked_folder_ids' => $tracked_folder_ids,
 	));
 }

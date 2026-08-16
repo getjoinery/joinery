@@ -10,7 +10,7 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
- * @version 1.3
+ * @version 1.4
  * @changelog 1.3 - the day-window field renders the stored value whatever the
  *   current scope, so a save while it is hidden cannot reset it.
  */
@@ -89,11 +89,15 @@ if ($combined) {
 	));
 }
 
-$formwriter->textinput('iia_username', 'Mailbox login (username)', array(
+// Every provider in the catalog signs in with the email address itself. Only a
+// self-hosted server might want something else, so that is the only case that
+// mentions a username at all.
+$formwriter->textinput('iia_username', 'Email address', array(
 	'validation' => array('required' => true),
 	'helptext' => $combined
-		? 'The full email address to poll (e.g. me@' . $domain->get('ied_domain') . ') — this becomes the mailbox.'
-		: 'The full email address / username used to log in to the IMAP server.',
+		? 'The address whose mail is collected (e.g. me@' . $domain->get('ied_domain') . ') — this becomes the mailbox.'
+		: 'The address whose mail is collected. Some self-hosted servers sign in with a plain '
+			. 'username instead; use that if yours does.',
 ));
 
 // Import scope — changeable at any time. Changing how far back the feed reaches
@@ -144,12 +148,27 @@ $formwriter->dropinput('iia_imap_encryption', 'Encryption', array(
 	'options' => array('ssl' => 'SSL/TLS (993)', 'tls' => 'STARTTLS (143)', 'none' => 'None'),
 ));
 
-$formwriter->textinput('iia_imap_folder', 'Folder', array(
-	'helptext' => 'The folder to poll. Default INBOX.',
-));
+// Once the source has been read, its folders are known and picking one from a
+// list beats typing a name whose capitalisation has to match. Before that, a
+// plain field with the near-universal default.
+$folder_help = 'Mail is collected from this folder. Inbox is what most people want: '
+	. 'it is where new mail arrives. Choosing another folder collects that folder instead, '
+	. 'not as well.';
+if (!empty($folder_names)) {
+	$formwriter->dropinput('iia_imap_folder', 'Collect mail from', array(
+		'options' => $folder_names,
+		'value'   => $account->get('iia_imap_folder') ?: 'INBOX',
+		'helptext' => $folder_help,
+	));
+} else {
+	$formwriter->textinput('iia_imap_folder', 'Collect mail from', array(
+		'helptext' => $folder_help . ' The list of folders on the server appears here once this '
+			. 'mailbox has connected for the first time.',
+	));
+}
 
-$formwriter->numberinput('iia_poll_interval_seconds', 'Fetch interval (seconds)', array(
-	'helptext' => 'How often this mailbox is fetched. Default 300 (5 minutes).',
+$formwriter->numberinput('iia_poll_interval_seconds', 'Check for new mail every (seconds)', array(
+	'helptext' => 'How often this mailbox is checked. 300 (5 minutes) suits almost everyone.',
 ));
 
 $formwriter->checkboxinput('iia_is_enabled', 'Enabled', array());
@@ -157,13 +176,26 @@ $formwriter->checkboxinput('iia_is_enabled', 'Enabled', array());
 // Sync (specs/two_way_imap_sync.md §8). Read-only / Two-way appear only on a
 // CONDSTORE feed; the deletes + compose gates reveal via visibility_rules when sync
 // is on. Guided controls only — no explainer prose.
-$formwriter->dropinput('iia_sync_mode', 'Sync', array(
+// "Not checked yet" and "your provider cannot do this" are different facts and
+// must not read the same. The flag behind them is a cached probe that starts
+// false, so a mailbox that has never connected would otherwise be told its
+// provider was incapable before anything had been asked.
+if ($sync_supported) {
+	$sync_help = 'Off: bring mail in once and leave the original alone. '
+		. 'Read-only: keep this copy matching the original, following it as mail is read, filed or deleted there. '
+		. 'Two-way: changes made here are sent back to the original as well.';
+} elseif (!$sync_checked) {
+	$sync_help = 'Keeping this copy in step with the original needs a feature not every mail provider offers. '
+		. 'That is checked the first time this mailbox connects, and the choices appear here if it is available.';
+} else {
+	$sync_help = 'This provider cannot keep the two copies in step, so mail is brought in once '
+		. 'and the original is left as it is.';
+}
+$formwriter->dropinput('iia_sync_mode', 'Keep in step with the original', array(
 	'options' => $sync_options,
 	'value' => $account->get('iia_sync_mode') ?: 'off',
 	'visibility_rules' => $sync_visibility,
-	'helptext' => $sync_supported
-		? 'Off: one-time import. Read-only: Joinery follows the source. Two-way: changes sync both ways.'
-		: 'This server does not advertise CONDSTORE, so only one-time import is available. Run Test to re-check.',
+	'helptext' => $sync_help,
 ));
 $formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
 	'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
@@ -184,12 +216,25 @@ if (!empty($folder_options)) {
 }
 
 // Combined mode folds the mailbox's access grants into this one editor.
+// On a sealing domain this is a single choice, not a list: mail is encrypted to
+// one person as it arrives, so a second grantee would hold a mailbox they cannot
+// read. Offering checkboxes there invites a state the platform refuses.
 if ($combined && !empty($user_options)) {
-	$formwriter->checkboxList('users_with_access', 'Users with access', array(
-		'options' => $user_options,
-		'checked' => $granted_user_ids ?? array(),
-		'helptext' => 'Staff who can read this mailbox in the reader. Superadmins always see every mailbox.',
-	));
+	if ($domain->seals_content()) {
+		$formwriter->dropinput('users_with_access', 'Who reads this mailbox', array(
+			'options' => $user_options,
+			'value' => $granted_user_ids[0] ?? '',
+			'empty_option' => '-- Select a person --',
+			'helptext' => 'Mail here is encrypted to one person as it arrives, so one person reads it. '
+				. 'To share a mailbox, put it on a Standard domain instead.',
+		));
+	} else {
+		$formwriter->checkboxList('users_with_access', 'Users with access', array(
+			'options' => $user_options,
+			'checked' => $granted_user_ids ?? array(),
+			'helptext' => 'Staff who can read this mailbox in the reader. Superadmins always see every mailbox.',
+		));
+	}
 }
 
 $formwriter->submitbutton('btn_submit', $combined ? 'Save Mailbox' : 'Save Account');
