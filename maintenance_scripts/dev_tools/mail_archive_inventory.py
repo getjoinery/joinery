@@ -33,12 +33,15 @@ Usage:
 
 See specs/mail_import_loss_proof.md.
 
-@version 1.0
+@version 1.1
+@changelog 1.1 - unfold X-Gmail-Labels before splitting; a fold landing inside a
+  label name split it in two and counted the same label under two spellings.
 """
 
 import argparse
 import json
 import mailbox
+import re
 import sys
 
 
@@ -100,10 +103,18 @@ def attachments_of(message):
 def labels_of(message):
     """Gmail's X-Gmail-Labels, split. Informational — the reconciliation does
     not key on it, because the platform folds these into folders and pseudo-
-    labels by its own rules."""
+    labels by its own rules.
+
+    A long label list arrives FOLDED across several lines, and a fold can land
+    inside a single label: "Category\\n Updates" is one label, not two, and not a
+    label whose name contains a newline. Unfold first, the way the platform's
+    parseHeaders does — continuation whitespace becomes one space — or the same
+    label is counted under two spellings.
+    """
     raw = message.get('X-Gmail-Labels')
     if not raw:
         return []
+    raw = re.sub(r'\r?\n[ \t]+', ' ', raw)
     return [item.strip() for item in raw.split(',') if item.strip()]
 
 

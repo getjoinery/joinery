@@ -29,7 +29,10 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - estimatedStorageBytes()/storageTargets(): what an import will
+ *   cost on disk and where it lands, so the run can be refused before it starts
+ *   and held mid-flight rather than filling the filesystem.
  * @changelog 1.4 - every duplicate names WHICH message it duplicated and where
  *   that message lives (D2/D3, specs/mail_import_loss_proof.md). A site-wide
  *   collision is no longer recorded blind, and a stored copy that lists no
@@ -171,6 +174,52 @@ class MailArchiveImporter {
 	// window (docs/sealed_vault.md). Refused rather than half-worked.
 	const SEALED_FILE_REASON = 'That file is in a Private folder, so it can only be opened while you are '
 		. 'signed in and unlocked — an import runs in the background. Put a copy in a Standard folder and import that.';
+
+	// ------------------------------------------------------------- disk budget
+
+	/**
+	 * Bytes an import writes for every byte of archive it reads.
+	 *
+	 * An archive is not copied — it is unpacked into more places than it came
+	 * from, and the total is larger than the source:
+	 *
+	 *   - the RFC822 raw of every stored message, which is essentially the archive
+	 *     again minus its separators (RawMessageStore, {site_root}/storage/)
+	 *   - every attachment, extracted and stored as its own File. Those bytes are
+	 *     already inside the raw, so they are stored TWICE overall — and they
+	 *     shrink on the way out, since MIME carries them base64-encoded at about
+	 *     4 bytes per 3
+	 *   - the message rows themselves: headers and the plain/html bodies
+	 *
+	 * Measured against a real Gmail Takeout rather than guessed: a 6.3 GB archive
+	 * of 98,296 messages carried 3.33 GB of decoded attachments, so raw + attachments
+	 * alone came to about 1.5x, and the body columns take it past that. 2x is the
+	 * honest round number, and erring high is the safe direction for a check whose
+	 * whole purpose is to refuse before the disk is gone.
+	 */
+	const STORAGE_MULTIPLIER = 2;
+
+	/** What importing an archive of this size will cost on disk, in bytes. */
+	public static function estimatedStorageBytes(int $archiveBytes): int {
+		return max(0, $archiveBytes) * self::STORAGE_MULTIPLIER;
+	}
+
+	/**
+	 * The directories an import writes into, for a free-space question.
+	 *
+	 * Two of them, and they are not guaranteed to share a filesystem: raw messages
+	 * go to {site_root}/storage/, attachments to the configured upload directory.
+	 * A deployment that mounts one of those separately is exactly the deployment
+	 * where checking only the other would miss the full disk.
+	 */
+	public static function storageTargets(): array {
+		$paths = array(rtrim(PathHelper::getSiteRoot(), '/') . '/storage/');
+		$uploads = (string)Globalvars::get_instance()->get_setting('upload_dir');
+		if ($uploads !== '') {
+			$paths[] = $uploads;
+		}
+		return $paths;
+	}
 
 	/** The mailbox this run files into, and the domain that governs its protection. */
 	private function target(): array {

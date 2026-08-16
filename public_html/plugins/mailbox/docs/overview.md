@@ -4071,6 +4071,41 @@ passes whenever two errors cancel. It checks four things:
 It exits `0` when nothing is outstanding and `2` when there are findings, and
 writes each full list to a file beside the inventory.
 
+### Room to put it
+
+An import writes considerably more than it reads, so free disk space is checked
+against the size of the archive before a run is accepted, and again before every
+batch while it works.
+
+The estimate is **twice the archive**, and the reason it is not "the same size" is
+that an archive is unpacked into more places than it came from: the RFC822 raw of
+every message lands under `{site_root}/storage/`, every attachment is extracted
+into its own File, and the message rows carry the headers and both body columns.
+Attachments are therefore held twice over — once inside the raw, once on their
+own — which alone takes a Gmail Takeout to roughly one and a half times its size
+before the body columns are counted. `MailArchiveImporter::estimatedStorageBytes()`
+owns that ratio; `DiskSpace` only ever answers whether a given number of bytes
+fits.
+
+Raw messages and attachments can sit on different filesystems, so both are
+measured and the tighter one decides. A **1 GiB reserve** is held back on top of
+whatever the job needs, because a disk with nothing spare stops Postgres
+journalling and stops the error log recording why anything failed.
+
+`MailImportService::startRun()` refuses an archive that will not fit, naming what
+is needed, what is free, and how much to clear — a person is present at that
+moment and can act on it. `RunMailImports` asks again each pass, because a run
+lasting hours shares its machine with everything else: when a batch will not fit,
+the run **holds** rather than fails. Its state, its pending entries and its stored
+mail are untouched, the reason is written to the run, and the next pass continues
+by itself once there is room. The task reports the hold as an error even though
+the run is healthy — the machine is not, and a stalled import nobody was told
+about is the outcome worth avoiding.
+
+Where free space cannot be measured at all, the job is allowed. The check is a
+safety net over the disks it can see, not an entitlement gate that a host hiding
+`disk_free_space` could turn into a permanent refusal.
+
 ### What happens to the archive afterwards
 
 The uploaded archive is **kept for a grace period after the run finishes**, not
