@@ -15,7 +15,10 @@
  * The mailbox itself is built by ImapFeedProvisioner, the one path a pulled-in
  * mailbox comes into being by; this page collects answers and nothing more.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - the configure step offers Keep in step with the original
+ *   (with its deletion and compose follow-ons) when the server supports sync,
+ *   and states the one-way fact plainly when it does not
  * @changelog 1.3 - the address survives a refused password sign-in, so a retry
  *   retypes one field, not two
  * @changelog 1.2 - sign-in shows the easiest method first: an app password
@@ -427,6 +430,33 @@ $formwriter->numberinput('iia_import_days', 'Days of mail to bring in', array(
 	'min' => 1,
 	'max' => InboundImapAccount::IMPORT_DAYS_MAX,
 ));
+
+// The ongoing relationship with the source, offered only when the server just
+// said it can keep two copies in step — the same choice, words and follow-on
+// toggles as the mailbox editor, so meeting it later is meeting an old friend.
+// When the server cannot, the one-way fact is stated instead of implied.
+if (!empty($sync_supported)) {
+	$formwriter->dropinput('iia_sync_mode', 'Keep in step with the original', array(
+		'options' => $sync_options,
+		'value' => InboundImapAccount::SYNC_OFF,
+		'visibility_rules' => $sync_visibility,
+		'helptext' => 'Off: bring mail in once and leave the original alone. '
+			. 'Read-only: keep this copy matching the original, following it as mail is read, filed or deleted there. '
+			. 'Two-way: changes made here are sent back to the original as well. '
+			. 'Changeable later, from the mailbox itself.',
+	));
+	$formwriter->checkboxinput('iia_sync_deletes', 'Also sync deletions', array(
+		'helptext' => 'Deleting here moves the source message to Trash; a deletion in the source removes it here.',
+	));
+	$formwriter->checkboxinput('iia_show_compose', 'Enable compose / Sent sync', array(
+		'helptext' => 'Show reply/forward in the reader and file sent copies into the source Sent folder.',
+	));
+} elseif ($is_connected) {
+	?>
+	<p>This is a one-way import: mail is brought in and the original mailbox is
+	never changed. This server does not support keeping the two in step.</p>
+	<?php
+}
 
 $formwriter->submitbutton('save_configure', 'Finish');
 $formwriter->end_form();
