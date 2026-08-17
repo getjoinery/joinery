@@ -7,7 +7,8 @@
  *
  * Phase 1: Standalone implementation (no breaking changes to v1)
  *
- * @version 2.24.0
+ * @version 2.25.0
+ * @changelog 2.25.0 - A help_modal step may be an array (text/url/url_label) so a guide can link each step to the exact vendor page it happens on; same https-only guard as the bottom link
  * @changelog 2.24.0 - validateCSRF() accepts the token the session held when this instance was constructed: construction mints a fresh token for the response's render, which had replaced the one the submitted page carried, so a POST handler that constructs the form it is validating always failed. Added getCSRFToken() for single-button action forms that share one form's token
  * @changelog 2.23.0 - fromDescriptor() renders a type 'array' descriptor entry carrying an options map as a checkbox list (posts name[], the stored array pre-checks entries); an array of objects stays unrendered
  * @changelog 2.21.0 - Every form emits a validation error summary container (.jy-error-summary) immediately before its first submit button (end of form when there is none); on a re-render carrying errors, PHP fills it with one linked item per failing field so an off-screen error is named where the person is looking. Form options: error_summary (default true), error_summary_title ({n} placeholder)
@@ -3437,7 +3438,9 @@ document.addEventListener("DOMContentLoaded", function() {
      * kit's base.js opens it with JoineryModal. Nothing per-form is wired, and
      * a page with JS off simply shows no trigger rather than broken markup.
      *
-     * The guide array: title, steps (ordered strings), optional caution (a
+     * The guide array: title, steps (ordered; a string, or an array of
+     * text/url/url_label when the step should link to the exact vendor page it
+     * happens on), optional caution (a
      * wrong-credential warning, kept out of the numbered steps), optional url +
      * url_label, optional copy (rows of label/value the vendor's own form needs
      * from us — a callback URL, an allowlist IP — offered as copy buttons so
@@ -3470,6 +3473,19 @@ document.addEventListener("DOMContentLoaded", function() {
 
         $html .= '<ol class="jy-help-guide-steps">';
         foreach ($steps as $step) {
+            if (is_array($step)) {
+                $html .= '<li>' . htmlspecialchars((string)($step['text'] ?? ''));
+                // Same https-only guard as the bottom link: a guide is authored
+                // data, and no step may smuggle javascript: into a href.
+                $step_url = trim((string)($step['url'] ?? ''));
+                if ($step_url !== '' && stripos($step_url, 'https://') === 0) {
+                    $html .= ' <a href="' . htmlspecialchars($step_url) . '"'
+                        . ' target="_blank" rel="noopener noreferrer">'
+                        . htmlspecialchars((string)($step['url_label'] ?? 'Open this page')) . '</a>';
+                }
+                $html .= '</li>';
+                continue;
+            }
             $html .= '<li>' . htmlspecialchars((string)$step) . '</li>';
         }
         $html .= '</ol>';

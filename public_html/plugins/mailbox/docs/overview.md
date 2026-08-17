@@ -247,9 +247,17 @@ step in the URL:
 | State | Shown when | Asks |
 |---|---|---|
 | `provider` | nothing chosen yet | where does this mail live — nothing else |
-| `register` | the chosen provider is OAuth and this site is not registered with it | that provider's app credentials, inline, plus the callback URL to paste |
+| `register` | the chosen sign-in is OAuth and this site is not registered with that provider | that provider's app credentials, inline, plus the callback URL to paste |
 | `signin` | the provider is ready | sign in; who reads the mailbox; what protection it gets |
 | `configure` | a connected feed exists | the real folder list, how much history to bring in, what to call it |
+
+**The easiest sign-in comes first.** The signin step offers the preset's default
+method — an app password wherever the host honors one, with a guided **How do I
+get this?** modal linking to the host's own app-password pages. A host that also
+supports OAuth (Gmail) keeps it behind **Other options** (`method=oauth2`),
+because OAuth costs a one-time app registration in the provider's developer
+console; the register step, when it appears, offers the app-password way back.
+Microsoft is OAuth-only — outlook.com retired basic auth.
 
 The order is the point: each question is asked at the first moment it can be answered.
 The folder list is a fact about a connected account, so it comes after signing in; the
@@ -3516,8 +3524,8 @@ sibling mailboxes under the one `gmail.com` domain.
 
 | Provider | IMAP host | Auth |
 |----------|-----------|------|
-| Gmail / Google Workspace | `imap.gmail.com:993` | **OAuth2** (App Passwords retired) |
-| Microsoft 365 / Outlook.com | `outlook.office365.com:993` | **OAuth2** (basic auth disabled) |
+| Gmail / Google Workspace | `imap.gmail.com:993` | app password (default) or OAuth2 |
+| Microsoft 365 / Outlook.com | `outlook.office365.com:993` | **OAuth2** (basic auth retired) |
 | Yahoo / AOL | `imap.mail.yahoo.com:993` | app password |
 | iCloud | `imap.mail.me.com:993` | app-specific password |
 | Fastmail | `imap.fastmail.com:993` | app password |
@@ -3525,11 +3533,13 @@ sibling mailboxes under the one `gmail.com` domain.
 
 Connection details are **data, not code**: the `InboundImapAccount::PRESETS`
 catalog is the single inventory of every supported host (host/port/encryption/auth
-and, for OAuth hosts, the OAuth provider key). Gmail and Microsoft are not special
-— they are simply the rows whose auth is `oauth2`. Adding a host is a one-line edit
-there. Authentication is a single branch in `ImapIngestor`: `password` LOGIN vs.
-`XOAUTH2` with a bearer token. The IMAP library (`horde/imap_client`) is wrapped
-entirely behind `ImapIngestor`.
+and, for OAuth hosts, the OAuth provider key). A row's `auth` is the **default**
+sign-in — the easiest one that works for that host — and a row carrying an OAuth
+provider key supports OAuth besides (`authMethodsFor()`); each account records
+which method *it* signed in with (`iia_auth_method`, stamped by the credential
+setters). Adding a host is a one-line edit there. Authentication is a single
+branch in `ImapIngestor`: `password` LOGIN vs. `XOAUTH2` with a bearer token. The
+IMAP library (`horde/imap_client`) is wrapped entirely behind `ImapIngestor`.
 
 ### OAuth accounts (Gmail / Microsoft)
 
@@ -3716,24 +3726,31 @@ The live connect/fetch path is wrapped behind Horde; unit tests cover the platfo
 side (model + encryption, reference-backed store + dedup, manifest + grant parity,
 poller summary). To connect a real Gmail account:
 
-1. **Google Cloud Console (one-time).** Create/select a project → **OAuth consent
-   screen** (External; app name + support email; add scope `https://mail.google.com/`;
-   keep status Testing and add the target Gmail as a **Test user**) → **Credentials →
-   Create OAuth client ID → Web application**, and under Authorized redirect URIs paste
-   the exact value shown on `/admin/admin_oauth_providers` (`https://<host>/oauth_callback`).
-   Copy the Client ID + secret. (No need to "enable the Gmail API" — IMAP uses
-   `imap.gmail.com` with XOAUTH2; the scope authorizes it.)
-2. **Platform credentials.** Paste the Client ID + secret on `/admin/admin_oauth_providers`.
-3. **Gmail prep.** In Gmail: Settings → Forwarding and POP/IMAP → **Enable IMAP** → Save.
-4. **Accounts tree.** **+ Add Domain** → Type **IMAP — Gmail** (domain `gmail.com` is
-   implied; no MX needed) → save. Then **+ Mailbox** on the `gmail.com` row, enter the
-   full address as the username (this creates the mailbox and its feed together) → save
-   → **Connect** and grant consent as the test user.
-5. **Verify.** Click **Test**, then **Fetch now**. The first fetch seeds the cursor to
+1. **Gmail prep.** In Gmail: Settings → Forwarding and POP/IMAP → **Enable IMAP** →
+   Save.
+2. **App password.** With 2-Step Verification on the Google account, create an app
+   password at `myaccount.google.com/apppasswords` — the wizard's **How do I get
+   this?** modal links every step.
+3. **Connect.** **+ Connect a mailbox** on the Accounts tab → **Gmail / Google
+   Workspace** → enter the address and the app password, choose the reader and the
+   protection level → **Connect** → finish the configure step (folder, history,
+   name).
+4. **Verify.** Click **Test**, then **Fetch now**. The first fetch seeds the cursor to
    "now" and ingests nothing — send a **new** email to the Gmail afterward, **Fetch now**
    again, and confirm it appears under the mailbox in the **Mailboxes** reader; open it
    and download an attachment. For hands-off fetching, activate the **Fetch inbound IMAP
    mail** scheduled task.
+
+**OAuth instead of an app password.** The signin step's **Other options** switches
+to signing in at Google, which stores a token here rather than a password. That
+path needs a one-time app registration, collected in place by the wizard's
+register step: in Google Cloud's Auth Platform, create an OAuth client (**Web
+application**), paste the callback URL the wizard shows under Authorized redirect
+URIs, and copy the client ID + secret back. Two Google-side rules matter: while
+the app's publishing status is **Testing**, only listed test users can consent
+*and Google expires refresh tokens after 7 days* — publish the app to Production
+for a durable connection. (No need to "enable the Gmail API" — IMAP uses
+`imap.gmail.com` with XOAUTH2; the scope authorizes it.)
 
 ### Sync (read-only and two-way)
 

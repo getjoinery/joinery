@@ -14,10 +14,16 @@
  *
  * Per-host connection details are DATA, not behavior — the PRESETS catalog below
  * is the single inventory of every supported host (host/port/encryption/auth and,
- * for OAuth hosts, the OAuth provider key). Gmail and Microsoft are not special:
- * they are simply the rows whose auth is 'oauth2'. Adding a host is a one-line
- * edit here. The editor reads PRESETS to fill the form; ImapIngestor reads the
- * account's own stored connection columns (the preset only seeds them).
+ * for OAuth hosts, the OAuth provider key). A row's 'auth' is the DEFAULT
+ * sign-in — the easiest one that works for that host — and a row carrying an
+ * oauth_provider supports OAuth besides (authMethodsFor() is the derivation).
+ * Gmail defaults to an app password precisely because that path needs no app
+ * registration; Microsoft is 'oauth2' only because outlook.com retired basic
+ * auth. Each account stores which method IT signed in with (iia_auth_method,
+ * stamped by the credential setters) — the catalog says what is possible, the
+ * account says what happened. Adding a host is a one-line edit here. The editor
+ * reads PRESETS to fill the form; ImapIngestor reads the account's own stored
+ * connection columns (the preset only seeds them).
  *
  * Secrets (IMAP password, OAuth access/refresh tokens) are encrypted at rest with
  * the core SecretBox helper. The *_enc columns are never read directly by callers
@@ -28,6 +34,10 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.3 - the catalog's 'auth' is the default (easiest) method, not the
+ *   only one: Gmail defaults to app password with OAuth still supported;
+ *   iia_auth_method is per-account truth, stamped by setPassword/setOAuthToken
+ *   and validated (never overwritten) by prepare()
  * @version 1.2
  */
 
@@ -96,12 +106,12 @@ class InboundImapAccount extends SystemBase {
 	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool,smtp_rewrites_message_id:bool}>
 	 */
 	const PRESETS = array(
-		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'google',    'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>true),
-		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false, 'smtp_rewrites_message_id'=>false),
+		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>'google',    'app_password_url'=>'https://myaccount.google.com/apppasswords',              'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>true),
+		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'app_password_url'=>null,                                                     'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://login.yahoo.com/myaccount/security/app-password', 'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://account.apple.com/account/manage',                'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://app.fastmail.com/settings/security',              'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
+		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>null,                                                     'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false, 'smtp_rewrites_message_id'=>false),
 	);
 
 	/**
@@ -192,8 +202,14 @@ class InboundImapAccount extends SystemBase {
 		}
 		$this->set('iia_provider_key', $provider);
 
-		// Auth method is derived from the preset — the catalog is authoritative.
-		$this->set('iia_auth_method', self::PRESETS[$provider]['auth']);
+		// Auth method: one the catalog supports for this host, defaulting to the
+		// preset's own (easiest) method. A stored value survives — the credential
+		// setters keep it truthful — so a host offering both app password and
+		// OAuth keeps whichever sign-in this account actually made.
+		$method = (string)$this->get('iia_auth_method');
+		if (!in_array($method, self::authMethodsFor($provider), true)) {
+			$this->set('iia_auth_method', self::PRESETS[$provider]['auth']);
+		}
 
 		$enc = $this->get('iia_imap_encryption') ?: self::ENC_SSL;
 		if (!in_array($enc, array(self::ENC_SSL, self::ENC_TLS, self::ENC_NONE), true)) {
@@ -244,6 +260,20 @@ class InboundImapAccount extends SystemBase {
 	function getPreset(): array {
 		$key = $this->get('iia_provider_key') ?: 'imap_generic';
 		return self::PRESETS[$key] ?? self::PRESETS['imap_generic'];
+	}
+
+	/**
+	 * The auth methods the catalog supports for a preset: its default first,
+	 * plus oauth2 whenever the host has an OAuth provider. The order matters —
+	 * index 0 is the method a new connection should offer.
+	 */
+	static function authMethodsFor(string $preset_key): array {
+		$preset = self::PRESETS[$preset_key] ?? self::PRESETS['imap_generic'];
+		$methods = array($preset['auth']);
+		if (!empty($preset['oauth_provider']) && !in_array(self::AUTH_OAUTH2, $methods, true)) {
+			$methods[] = self::AUTH_OAUTH2;
+		}
+		return $methods;
 	}
 
 	function isOAuth(): bool {
@@ -440,6 +470,9 @@ class InboundImapAccount extends SystemBase {
 			return;
 		}
 		$this->set('iia_password_enc', (new SecretBox())->encrypt($plaintext));
+		// The credential defines the method: a stored password IS a password
+		// sign-in, whatever the host's default.
+		$this->set('iia_auth_method', self::AUTH_PASSWORD);
 	}
 
 	function getPassword(): ?string {
@@ -478,6 +511,9 @@ class InboundImapAccount extends SystemBase {
 		}
 		// A freshly granted/refreshed token clears any prior re-auth flag.
 		$this->set('iia_needs_reauth', false);
+		// The credential defines the method: a granted token IS an OAuth
+		// sign-in, whatever the host's default.
+		$this->set('iia_auth_method', self::AUTH_OAUTH2);
 	}
 
 	/** True when the stored token is known-broken (refresh/auth failed) and the

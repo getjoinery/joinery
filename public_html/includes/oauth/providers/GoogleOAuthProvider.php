@@ -7,6 +7,10 @@
  * issues a refresh token only on the very first consent and omits it
  * thereafter).
  *
+ * @version 1.1 - configGuide rewritten against the Google Auth Platform console
+ *   (clients no longer live under APIs & Services > Credentials), with a direct
+ *   link on every step that has its own page, including the Testing-mode
+ *   test-user step that otherwise fails consent with access_denied
  * @version 1.0
  */
 
@@ -24,15 +28,36 @@ class GoogleOAuthProvider implements OAuth2Provider {
     public static function configGuide(): ?array {
         return [
             'title'     => 'Create a Google OAuth client',
-            'url'       => 'https://console.cloud.google.com/apis/credentials',
-            'url_label' => 'Open Google Cloud credentials',
+            'url'       => 'https://console.cloud.google.com/auth/clients',
+            'url_label' => 'Open Google Auth Platform — Clients',
             'steps'     => [
-                'Pick the Google Cloud project that holds what you are connecting, or create one.',
-                'Configure the OAuth consent screen once if the project has none.',
-                'Under Clients (APIs & Services) choose Create client, type Web application.',
-                'Add the callback URL below under Authorized redirect URIs — it must match exactly.',
-                'Create it, then copy the client ID and client secret.',
-                'For Cloud DNS, also enable the Cloud DNS API in this project.',
+                [
+                    'text'      => 'Sign in to Google Cloud Console and pick a project from the selector at the top of the page, or create one. Any project works — it just holds the OAuth client.',
+                    'url'       => 'https://console.cloud.google.com/projectcreate',
+                    'url_label' => 'Create a project',
+                ],
+                [
+                    'text'      => 'If the project has never used OAuth, the Auth Platform overview shows a Get started button — it asks for an app name, a support email, and an audience (choose External for personal Gmail accounts).',
+                    'url'       => 'https://console.cloud.google.com/auth/overview',
+                    'url_label' => 'Auth Platform overview',
+                ],
+                [
+                    'text'      => 'Open Clients and choose Create client, application type Web application. (Clients live under Google Auth Platform, not under APIs & Services.)',
+                    'url'       => 'https://console.cloud.google.com/auth/clients',
+                    'url_label' => 'OAuth clients',
+                ],
+                'Under Authorized redirect URIs, add the callback URL below — it must match exactly.',
+                'Create it, then copy the client ID and client secret from the confirmation dialog into the fields on this page. The secret is shown once; download the JSON if you want a spare copy.',
+                [
+                    'text'      => 'While the app\'s publishing status is Testing, only listed test users can sign in — add each Google account you will connect under Audience, or consent ends in access_denied.',
+                    'url'       => 'https://console.cloud.google.com/auth/audience',
+                    'url_label' => 'Audience & test users',
+                ],
+                [
+                    'text'      => 'For Cloud DNS connections only, also enable the Cloud DNS API in this project. Collecting Gmail over IMAP needs no API enabled.',
+                    'url'       => 'https://console.cloud.google.com/apis/library/dns.googleapis.com',
+                    'url_label' => 'Cloud DNS API',
+                ],
             ],
             'copy'      => [self::callbackCopyRow()],
         ];

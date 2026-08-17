@@ -6,6 +6,8 @@
  * default 'common'): common | organizations | consumers | a specific tenant id.
  * Scopes must include offline_access to receive a refresh token.
  *
+ * @version 1.2 - configGuide steps link straight to the Entra pages they
+ *   happen on instead of narrating the portal menu path
  * @version 1.1 - a guest UPN (#EXT#) is a sign-in name, not a mailbox address;
  *   identity reports none rather than minting an onmicrosoft.com mailbox
  * @version 1.0
@@ -41,11 +43,16 @@ class MicrosoftOAuthProvider implements OAuth2Provider {
             'url'       => 'https://portal.azure.com/#view/Microsoft_AAD_IAM/ActiveDirectoryMenuBlade/~/RegisteredApps',
             'url_label' => 'Open Entra ID app registrations',
             'steps'     => [
-                'In the Azure portal open Microsoft Entra ID, then App registrations, then New registration.',
-                'Name it, and under Redirect URI choose Web and paste the callback URL below.',
-                'Register it — the Application (client) ID is on the Overview page.',
-                'Open Certificates & secrets, choose New client secret, then copy the Value column immediately.',
-                'Copy the Directory (tenant) ID from Overview if you want to lock this to one tenant.',
+                [
+                    'text'      => 'Open App registrations in the Entra admin center and choose New registration.',
+                    'url'       => 'https://entra.microsoft.com/#view/Microsoft_AAD_RegisteredApps/ApplicationsListBlade',
+                    'url_label' => 'App registrations',
+                ],
+                'Name it; under Supported account types pick who may sign in (personal Microsoft accounts included, for outlook.com mailboxes).',
+                'Under Redirect URI choose Web and paste the callback URL below, then Register.',
+                'The Application (client) ID is on the app\'s Overview page — that is the client ID field here.',
+                'Open Certificates & secrets, choose New client secret, then copy the Value column immediately — it is shown only once.',
+                'Copy the Directory (tenant) ID from Overview if you want to lock this to one tenant; blank means any.',
                 'For Azure DNS, give the account you will consent as the DNS Zone Contributor role on the zone.',
             ],
             'copy'      => [self::callbackCopyRow()],

@@ -24,7 +24,13 @@
  * per-object editors, unchanged, and the mailbox itself is built by
  * ImapFeedProvisioner — the one path a pulled-in mailbox comes into being by.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - sign-in offers the easiest method that works first: a host
+ *   supporting both (Gmail) defaults to its app password, with OAuth behind an
+ *   explicit method=oauth2 choice, so nobody is sent to a developer console who
+ *   never asked for one; app passwords from preset hosts are stored without
+ *   their display spacing; a delegated OAuth-capable mailbox is stamped oauth2
+ *   so its Connect button appears
  * @changelog 1.1 - a refusable intent (missing reader, Private with no vault)
  *   is refused before the consent round trip; every provisioning failure is
  *   stated on the form rather than only the provisioner's own exception type;
@@ -64,6 +70,18 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 	$oauth_key   = $preset['oauth_provider'] ?? null;
 	$oauth_class = ($oauth_key !== null) ? OAuth2ProviderRegistry::get($oauth_key) : null;
 
+	// Which sign-in this flow is making. The preset's default is the easiest
+	// method that works for the host — an app password wherever the host still
+	// honors one — and OAuth is chosen, never imposed, via method=oauth2. The
+	// choice rides the URL so a reload or a form round trip stays on the path
+	// the operator picked.
+	$auth_methods = $provider_key !== '' ? InboundImapAccount::authMethodsFor($provider_key) : array();
+	$method = (string)($input['method'] ?? '');
+	if (!in_array($method, $auth_methods, true)) {
+		$method = $auth_methods[0] ?? '';
+	}
+	$use_oauth = ($oauth_class !== null && $method === InboundImapAccount::AUTH_OAUTH2);
+
 	// Who can be named as the mailbox's reader. Defaults to the operator, who is
 	// the answer nearly every time — they are connecting their own account.
 	$staff = new MultiUser(
@@ -91,7 +109,9 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 				. ' app details above are still needed before anyone can sign in.';
 		}
 		if ($error === '') {
-			return LogicResult::redirect($wizard_url . '?provider=' . rawurlencode($provider_key));
+			// Registration only happens on the OAuth path; keep the flow on it.
+			return LogicResult::redirect($wizard_url . '?provider=' . rawurlencode($provider_key)
+				. '&method=' . rawurlencode(InboundImapAccount::AUTH_OAUTH2));
 		}
 	}
 
@@ -104,8 +124,8 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 		$intent_error = _connect_intent_error($intent);
 		if ($intent_error !== null) {
 			$error = $intent_error;
-		} elseif ($oauth_class === null) {
-			// A password provider has no consent step: the app password IS the
+		} elseif (!$use_oauth) {
+			// A password sign-in has no consent step: the app password IS the
 			// sign-in, so the mailbox can be built the moment it is entered.
 			return _connect_password_signin($input, $provider_key, $intent, $session, $wizard_url);
 		} else {
@@ -144,6 +164,14 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 			try {
 				$notes = array();
 				$account = ImapFeedProvisioner::provision($provider_key, $address, $intent, null, $notes);
+				// Delegation exists so the owner can consent later — the Connect
+				// button that finishes it only appears on an OAuth account, so the
+				// method is decided here, not by the host's default.
+				if ($oauth_class !== null
+						&& $account->get('iia_auth_method') !== InboundImapAccount::AUTH_OAUTH2) {
+					$account->set('iia_auth_method', InboundImapAccount::AUTH_OAUTH2);
+					$account->save();
+				}
 				foreach ($notes as $note) {
 					$session->save_message(new DisplayMessage(
 						htmlspecialchars($note), 'Protection', '~/plugins/mailbox/admin/~',
@@ -261,7 +289,9 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 		}
 	}
 	if ($state !== 'configure' && $provider_key !== '') {
-		$state = ($oauth_class !== null && !$oauth_class::isConfigured()) ? 'register' : 'signin';
+		// Registration is a fact about the OAUTH path only. A host whose default
+		// sign-in is an app password never routes through it uninvited.
+		$state = ($use_oauth && !$oauth_class::isConfigured()) ? 'register' : 'signin';
 	}
 	if (!empty($input['provision_error']) && $error === null) {
 		$error = (string)$input['provision_error'];
@@ -307,6 +337,8 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 		'presets'         => InboundImapAccount::PRESETS,
 		'oauth_key'       => $oauth_key,
 		'oauth_class'     => $oauth_class,
+		'signin_method'   => $method,
+		'auth_methods'    => $auth_methods,
 		'reader_options'  => $reader_options,
 		'acting_user_id'  => $acting_user_id,
 		'account'         => $account,
@@ -375,6 +407,12 @@ function _connect_password_signin(array $input, string $provider_key, array $int
 		$session, string $wizard_url): LogicResult {
 	$address  = strtolower(trim((string)($input['address'] ?? '')));
 	$password = (string)($input['imap_password'] ?? '');
+	// Hosts display app passwords in spaced groups (abcd efgh …) that are not
+	// part of the password; people paste them as shown. A generic IMAP server's
+	// password is kept verbatim — only there could a space be real.
+	if ($provider_key !== 'imap_generic') {
+		$password = str_replace(' ', '', $password);
+	}
 	if ($password === '') {
 		$session->save_message(new DisplayMessage(
 			'Enter the app password for ' . ($address !== '' ? htmlspecialchars($address) : 'this mailbox')

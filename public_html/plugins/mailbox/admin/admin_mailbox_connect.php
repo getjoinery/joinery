@@ -15,7 +15,11 @@
  * The mailbox itself is built by ImapFeedProvisioner, the one path a pulled-in
  * mailbox comes into being by; this page collects answers and nothing more.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - sign-in shows the easiest method first: an app password
+ *   wherever the host honors one, with a guided modal linking to the host's own
+ *   app-password pages, and OAuth behind Other options; the register step
+ *   offers the app-password way out
  * @changelog 1.1 - the delegate form asks the protection question too; the
  *   configure step says honestly whether the feed is connected; a Standard
  *   mailbox about to take an import is told what that order costs
@@ -53,6 +57,49 @@ $provider_label = ($provider_key !== '' && isset($presets[$provider_key]))
 	? $presets[$provider_key]['label'] : '';
 $oauth_label = ($oauth_class !== null) ? $oauth_class::getLabel() : '';
 
+/**
+ * The "How do I get this?" guide for a preset's app password — steps that link
+ * straight to the host's own pages, because that is where the making happens.
+ */
+function _connect_app_password_guide(string $provider_key, array $preset): ?array {
+	$url = $preset['app_password_url'] ?? null;
+	if (!$url) {
+		return null;
+	}
+	if ($provider_key === 'imap_gmail') {
+		return array(
+			'title' => 'Create a Gmail app password',
+			'steps' => array(
+				array(
+					'text'      => 'App passwords need 2-Step Verification on the Google account — turn it on first if it is off.',
+					'url'       => 'https://myaccount.google.com/signinoptions/twosv',
+					'url_label' => '2-Step Verification',
+				),
+				array(
+					'text'      => 'Open the app passwords page, name the new one (Joinery is a fine name), and choose Create.',
+					'url'       => $url,
+					'url_label' => 'App passwords',
+				),
+				'Copy the 16-character password Google shows and paste it here — with or without its spaces.',
+			),
+			'caution' => 'A Google Workspace administrator can switch app passwords off. If the page refuses to make one, use the sign-in under Other options instead.',
+		);
+	}
+	$label = (string)$preset['label'];
+	return array(
+		'title' => 'Create a ' . $label . ' app password',
+		'steps' => array(
+			array(
+				'text'      => 'Open the account\'s security settings and find app passwords (some hosts call them app-specific passwords).',
+				'url'       => $url,
+				'url_label' => 'Open ' . $label . ' security settings',
+			),
+			'Create one and name it — Joinery is a fine name.',
+			'Copy the password it shows — most hosts show it exactly once — and paste it here.',
+		),
+	);
+}
+
 // ---------------------------------------------------------------- provider
 if ($state === 'provider') {
 	$page->begin_box(array('title' => 'Where does this mail live?'));
@@ -82,6 +129,14 @@ if ($state === 'register') {
 	heard of, so this site has to be registered with it once. Enter the app details below and you will
 	come straight back here to sign in. It is one-time, for every <?php echo htmlspecialchars($oauth_label); ?>
 	mailbox this site will ever collect.</p>
+
+	<?php if (in_array(InboundImapAccount::AUTH_PASSWORD, $auth_methods ?? array(), true)): ?>
+	<div class="alert alert-info">
+		There is a simpler way that skips this registration entirely: an app password, created in the
+		account's own settings in about a minute.
+		<a href="?provider=<?php echo rawurlencode($provider_key); ?>">Use an app password instead</a>.
+	</div>
+	<?php endif; ?>
 
 	<div class="alert alert-info" style="margin-bottom:1.25rem;">
 		<strong>Callback URL</strong> &mdash; paste this exact value into the
@@ -150,26 +205,34 @@ if ($state === 'register') {
 
 // ------------------------------------------------------------------ signin
 if ($state === 'signin') {
-	$is_oauth = ($oauth_class !== null);
+	// The method the flow is on, not the host's capability: a host supporting
+	// both shows its app password first and OAuth behind Other options.
+	$is_oauth = ($oauth_class !== null && $signin_method === InboundImapAccount::AUTH_OAUTH2);
 	$page->begin_box(array('title' => 'Sign in to ' . $provider_label));
 
 	$formwriter = $page->getFormWriter('signin_form');
 	$formwriter->begin_form();
 	$formwriter->hiddeninput('provider', '', array('value' => $provider_key));
+	$formwriter->hiddeninput('method', '', array('value' => $signin_method));
 
 	if (!$is_oauth) {
-		// A password provider has no consent round trip: the app password IS the
+		// A password sign-in has no consent round trip: the app password IS the
 		// sign-in, so the address has to be typed. Nothing can confirm it for us.
 		$formwriter->textinput('address', 'Email address', array(
 			'validation' => array('required' => true),
 			'helptext' => 'The address whose mail is collected. It is also the username the '
 				. 'connection signs in with.',
 		));
-		$formwriter->passwordinput('imap_password', 'App password', array(
+		$app_pw_options = array(
 			'helptext' => 'Not the account password: create an app-specific password in '
 				. $provider_label . ' and paste it here. It is stored encrypted.',
 			'autocomplete' => 'new-password',
-		));
+		);
+		$app_pw_guide = _connect_app_password_guide($provider_key, $presets[$provider_key] ?? array());
+		if ($app_pw_guide !== null) {
+			$app_pw_options['help_modal'] = $app_pw_guide;
+		}
+		$formwriter->passwordinput('imap_password', 'App password', $app_pw_options);
 		if ($provider_key === 'imap_generic') {
 			$formwriter->textinput('iia_imap_host', 'IMAP host', array(
 				'validation' => array('required' => true),
@@ -245,9 +308,29 @@ if ($state === 'signin') {
 		));
 		$formwriter2->submitbutton('delegate', 'Create it, unconnected');
 		$formwriter2->end_form();
+		if (in_array(InboundImapAccount::AUTH_PASSWORD, $auth_methods ?? array(), true)) {
+			?>
+			<p style="margin-top:1rem;">An app password is the simpler way to connect —
+			<a href="?provider=<?php echo rawurlencode($provider_key); ?>">use an app password instead</a>.</p>
+			<?php
+		}
 	} else {
 		$formwriter->submitbutton('begin_signin', 'Connect');
 		$formwriter->end_form();
+		if ($oauth_class !== null) {
+			?>
+			<div style="margin-top:1.5rem;">
+				<strong>Other options</strong>
+				<p style="margin-top:.25rem;">Prefer to approve access on <?php echo htmlspecialchars($oauth_label); ?>'s
+				own sign-in page instead of creating an app password?
+				<a href="?provider=<?php echo rawurlencode($provider_key); ?>&amp;method=<?php
+					echo rawurlencode(InboundImapAccount::AUTH_OAUTH2); ?>">Sign in with
+				<?php echo htmlspecialchars($oauth_label); ?> (OAuth)</a>. It is more setup: this site has
+				to be registered with <?php echo htmlspecialchars($oauth_label); ?> once, in their
+				developer console.</p>
+			</div>
+			<?php
+		}
 	}
 	?>
 	<p style="margin-top:1rem;"><a href="?">&larr; Choose a different service</a></p>
