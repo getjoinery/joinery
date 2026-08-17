@@ -760,6 +760,21 @@ impl SpoolFile for MemSpool {
             }
         }
 
+        // No agreement at all means the engine has never seen whatever is at
+        // this path: it belongs to the user and may be the only copy. The real
+        // filesystem refuses this outright rather than trusting that the caller
+        // cleared the way, and so must this one.
+        //
+        // Leaving it out is not a harmless simplification. Every download onto
+        // an occupied path took the happy route here and the refusing one on a
+        // real disk, so the whole branch the engine runs on that refusal went
+        // unexercised — and what lived in it was a file the engine asked for
+        // forever because the bytes were already on the disk. Eighteen thousand
+        // seeds passed over it; the rig found it in a day.
+        if expect.is_none() && st.nodes.contains_key(&key) {
+            return Err(VfsError::AlreadyExists(target.to_path_buf()));
+        }
+
         MemFs::ensure_parents(&mut st, &key);
         // Replacing a file keeps its id — the rename lands on top of it, which
         // is what a real filesystem does and what makes "same inode, new

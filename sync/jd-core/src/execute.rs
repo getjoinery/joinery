@@ -1109,26 +1109,73 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // stale fingerprint, which is recorded so the next attempt gets
             // past. If they do differ, the local edit is real and the scan will
             // meet it as a conflict on the next pass.
-            let unseen_edit = match env.vfs.fingerprint(&path)? {
-                Some(fp) => {
-                    let here = env.vfs.hash(&path)?;
-                    let agreed = entry.synced_content.as_ref().map(|c| c.sha256.as_str());
-                    if agreed == Some(here.as_str()) {
-                        let mut entry = entry.clone();
-                        entry.synced_fingerprint = Some(fp);
-                        env.store.put_entry(&entry)?;
-                        false
-                    } else {
-                        true
-                    }
-                }
-                None => true,
+            let Some(fp) = env.vfs.fingerprint(&path)? else {
+                return Ok(OpOutcome::Overtaken(
+                    "the file changed here while it was downloading".into(),
+                ));
             };
-            return Ok(if unseen_edit {
-                OpOutcome::Overtaken("the file changed here while it was downloading".into())
-            } else {
-                OpOutcome::Retry("the file was rewritten with the same content".into())
-            });
+            let here = env.vfs.hash(&path)?;
+
+            // Is the file already the one that just arrived? Then there is
+            // nothing to write and nothing wrong — the bytes are here, and all
+            // that is missing is the record saying so.
+            //
+            // This is the case `make_room` walks away from a few lines above:
+            // it is handed the incoming hash, finds the same content already at
+            // the path, and correctly leaves it alone rather than shoving a
+            // file aside to replace it with itself. The commit then refuses,
+            // because with no agreement there is no fingerprint to guard the
+            // swap with, and the two decisions disagree.
+            //
+            // Reading that refusal as an unseen edit is what made it endless.
+            // An entry that has never synced has NO agreed content, so the
+            // comparison below could never once be true for one — the answer
+            // was always "somebody edited this", always Overtaken, and
+            // Overtaken drops the operation without touching the record that
+            // asked for it. So the next pass planned the same download, and the
+            // one after that. On the rig it was thirteen files at a time, on a
+            // device with an empty queue, no error and no issue raised: the
+            // bytes were already on the disk, byte for byte, and the engine
+            // went on asking for them for the whole run.
+            if here == arrived.plain.sha256 {
+                let mut entry = entry.clone();
+                entry.remote_content = Some(arrived.cipher.clone());
+                entry.head_change_id = item
+                    .get("head_change_id")
+                    .and_then(Value::as_i64)
+                    .unwrap_or(entry.head_change_id);
+                entry.synced_remote_content = entry.is_encrypted.then(|| arrived.cipher.clone());
+                agree(&mut entry, Some(arrived.plain), Some(fp));
+                env.store.put_entry(&entry)?;
+                env.store.cache_hash(
+                    fp,
+                    &here,
+                    Some(op.entity),
+                    (env.now_ms)().saturating_mul(1_000_000),
+                )?;
+                return Ok(OpOutcome::Done);
+            }
+
+            // Still the bytes both sides last agreed on, so the only thing that
+            // moved is the fingerprint — an application that saves by writing a
+            // temporary and renaming it over the original leaves the same
+            // content behind a new inode and a new mtime. Record the new
+            // fingerprint so the next attempt gets past the guard.
+            let agreed = entry.synced_content.as_ref().map(|c| c.sha256.as_str());
+            if agreed == Some(here.as_str()) {
+                let mut entry = entry.clone();
+                entry.synced_fingerprint = Some(fp);
+                env.store.put_entry(&entry)?;
+                return Ok(OpOutcome::Retry(
+                    "the file was rewritten with the same content".into(),
+                ));
+            }
+
+            // Neither what arrived nor what was agreed: a real edit nobody has
+            // seen. Leave it for the scan, which meets it as a conflict.
+            return Ok(OpOutcome::Overtaken(
+                "the file changed here while it was downloading".into(),
+            ));
         }
         Err(e) => return Err(e.into()),
     };
@@ -1416,7 +1463,29 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     match settled {
         Some(fp) => agree(&mut entry, Some(content), Some(fp)),
         None => {
-            entry.status = LocalStatus::PendingUpload;
+            // The file moved on while its bytes were going up. What the server
+            // took is still a real version of it, and this device is what sent
+            // it, so there IS an agreement to record — about the content, and
+            // emphatically not about the file now on the disk.
+            //
+            // Leaving the fingerprint off is what keeps those two apart. The
+            // fingerprint is only ever a licence to skip reading the file, so
+            // an entry without one is re-hashed by the next scan, which finds
+            // bytes that differ from the agreed hash and sends them. Nothing
+            // newer is lost by calling this agreed.
+            //
+            // Recording nothing at all was the alternative, and it is how an
+            // entry goes invisible. `known_local` offers the scanner only
+            // entries with an agreed placement, so one without a placement has
+            // no path to be looked for at — and the file sitting on the disk
+            // then belongs to nothing the engine knows. Every pass reads it as
+            // a brand-new file, mints an identity, uploads it, and folds the
+            // result back into this entry, which is never repaired, so the
+            // pass after does the same. The rig had it as a device that stayed
+            // busy for a whole run against a tree that already matched the
+            // server: nothing queued, nothing wrong, never quiet.
+            agree(&mut entry, Some(content), None);
+            entry.synced_fingerprint = None;
         }
     }
     env.store.put_entry(&entry)?;

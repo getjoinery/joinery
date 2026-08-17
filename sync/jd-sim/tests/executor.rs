@@ -409,7 +409,7 @@ fn an_upload_retried_after_the_file_changed_is_not_refused_over_its_key() {
     // that ahead of every other branch -- including the takeover of an
     // abandoned original -- so it fails the same way forever. On the rig this
     // was upload_version sitting at ten attempts while the file never arrived.
-    let (clock, server, device) = world();
+    let (clock, _server, device) = world();
     device.fs.user_write("once.txt", b"the first thing that was written");
     let id = EntityId::file(device.store.next_provisional_id().unwrap());
     device
@@ -1211,4 +1211,141 @@ fn a_folder_create_whose_answer_was_lost_does_not_collide_with_its_own_folder() 
         Some(real),
         "and what was inside it now hangs off the folder that really exists"
     );
+}
+
+/// The user saves the file again while it is going up.
+///
+/// The bytes that landed are a real version of the file and this device sent
+/// them, so the upload has not failed and there is nothing to tell anyone
+/// about. What matters is that the entry comes out of it **findable**: the
+/// scanner is offered only entries with an agreed placement, so an entry left
+/// without one has no path to be looked for at, and the file sitting on the
+/// disk stops belonging to anything the engine knows.
+///
+/// From there the client never goes quiet again. Each pass reads those bytes as
+/// a brand-new file, mints an identity, uploads it, and the server — which
+/// allows one name per folder — hands back the id this entry already has, so
+/// the record folds away and this one is left exactly as it was. Nothing is
+/// queued, nothing is wrong, and the tree matches the server the whole time;
+/// the device simply never reports itself settled. The soak rig ran a full
+/// campaign like that before this was understood.
+#[test]
+fn a_file_saved_again_mid_upload_is_still_a_file_the_scanner_can_find() {
+    let (_clock, server, device) = world();
+    let first = b"the version that goes up";
+    let second = b"the version the user saved over it while it was going";
+    device.fs.user_write("notes.txt", first);
+
+    // The save happens at the one instant the client cannot see: the bytes are
+    // the server's, and the answer has not come back yet.
+    let disk = device.fs.clone();
+    server.while_completing_an_upload(move || {
+        disk.user_write("notes.txt", second);
+    });
+
+    let id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(id, None, "notes.txt", LocalStatus::PendingUpload))
+        .unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UploadAsNew {
+            placement: Placement {
+                parent: None,
+                name: "notes.txt".into(),
+            },
+        },
+    );
+    assert_eq!(report.done, 1, "the bytes landed, so the upload is done");
+    assert_eq!(server.blob(&sha256_hex(first)).unwrap(), first);
+
+    let entries = device.store.children_of(None).unwrap();
+    assert_eq!(entries.len(), 1);
+    let entry = &entries[0];
+    assert!(!entry.id.is_provisional(), "the server named it");
+
+    // The whole point: an agreed placement, so the next scan has somewhere to
+    // look and the file on the disk is claimed rather than discovered afresh.
+    assert_eq!(
+        entry.synced_placement.as_ref().map(|p| p.name.as_str()),
+        Some("notes.txt"),
+        "an entry with no agreed placement is invisible to the scanner"
+    );
+    assert_eq!(
+        entry.synced_content.as_ref().map(|c| c.sha256.as_str()),
+        Some(sha256_hex(first).as_str()),
+        "the agreement is about the bytes the server actually took"
+    );
+
+    // And no fingerprint, which is what stops the newer save being lost. A
+    // fingerprint is only ever permission to skip reading the file; without one
+    // the next scan re-hashes it, sees bytes that differ from the agreement,
+    // and sends them.
+    assert!(
+        entry.synced_fingerprint.is_none(),
+        "recording a fingerprint here would let the next scan skip the file and \
+         the user's newer save would never go up"
+    );
+    assert_eq!(device.fs.peek("notes.txt").unwrap(), second);
+}
+
+/// The bytes are already on the disk, and the engine has no record of it.
+///
+/// An ordinary way to arrive here: the same file reaches the folder from two
+/// directions, or a device is re-linked over a drive folder it already has. The
+/// download runs, `make_room` is handed the incoming hash, finds exactly those
+/// bytes at the path and correctly leaves them alone — and the commit then
+/// refuses, because an entry with no agreement has no fingerprint to guard the
+/// swap with.
+///
+/// What that refusal means is "this file is already here", and it used to be
+/// read as "somebody edited this while it was downloading". An entry that has
+/// never synced has no agreed content to compare against, so that reading was
+/// not merely wrong, it was unreachable-by-construction: the answer was always
+/// an unseen edit, always Overtaken, and Overtaken drops the operation without
+/// touching the record that asked for it. The next pass planned the same
+/// download, and so did the one after.
+///
+/// The rig had it as thirteen files at once on a settled device — empty queue,
+/// no error, no issue raised, and every one of those files sitting on the disk
+/// at exactly the right size for the whole run.
+#[test]
+fn a_file_already_on_disk_is_adopted_rather_than_downloaded_forever() {
+    let (_clock, server, device) = world();
+    let body = b"the same bytes, arrived by some other road";
+    let file_id = server.seed_file(None, "report.txt", body);
+
+    // Already there, and nothing in the store knows it.
+    device.fs.user_write("report.txt", body);
+
+    let id = EntityId::file(file_id);
+    let mut entry = fresh(id, None, "report.txt", LocalStatus::PendingDownload);
+    entry.remote_content = Some(ContentId {
+        sha256: sha256_hex(body),
+        size: body.len() as u64,
+    });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(&device, id, Action::Download);
+    assert_eq!(
+        report.done, 1,
+        "the bytes are already here, so the download has nothing left to do"
+    );
+
+    // The whole point: the record now says so, and the next pass plans nothing.
+    let after = device.store.get_entry(id).unwrap().expect("the entry");
+    assert_eq!(after.status, LocalStatus::Synced);
+    assert_eq!(
+        after.synced_content.as_ref().map(|c| c.sha256.as_str()),
+        Some(sha256_hex(body).as_str()),
+        "an entry with no agreement is one the next pass downloads again"
+    );
+    assert!(
+        after.synced_fingerprint.is_some(),
+        "without a fingerprint the commit guard refuses the same way next time"
+    );
+    assert_eq!(device.fs.peek("report.txt").unwrap(), body);
 }
