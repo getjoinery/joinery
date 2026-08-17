@@ -84,16 +84,27 @@ impl Status {
     /// has not finished, and a device holding any of it has not settled however
     /// empty its queue looks.
     pub fn entries_in_flight(&self) -> u64 {
+        self.in_flight_by_state().iter().map(|(_, n)| *n).sum()
+    }
+
+    /// The same entries, still broken down by which state they are stuck in.
+    ///
+    /// A convergence failure has to say what it was waiting for. Reporting the
+    /// queue depth alone describes a device with an empty queue and nine
+    /// unfinished downloads as having nothing outstanding, and the run then
+    /// reads as a mystery that needs a database query to explain.
+    pub fn in_flight_by_state(&self) -> Vec<(String, u64)> {
         self.entries
             .iter()
-            .filter(|(state, _)| {
-                !matches!(
-                    state.as_str(),
-                    "synced" | "out_of_scope" | "unsyncable" | "pending_key"
-                )
+            .filter(|(state, n)| {
+                **n > 0
+                    && !matches!(
+                        state.as_str(),
+                        "synced" | "out_of_scope" | "unsyncable" | "pending_key"
+                    )
             })
-            .map(|(_, n)| *n)
-            .sum()
+            .map(|(state, n)| (state.clone(), *n))
+            .collect()
     }
 
     pub fn is_stopped(&self) -> bool {

@@ -302,9 +302,67 @@ pub fn server_tree(server: &MockServer) -> BTreeMap<String, Option<String>> {
 /// Panics with the difference rather than a bare false, because "they did not
 /// converge" is not a useful thing to read at three in the morning.
 pub fn assert_converged(world: &World) {
+    // Before the trees, because a stale record is usually the CAUSE of a tree
+    // that does not match and the tree is only where it surfaces. Reported the
+    // other way round, every one of these reads as an unexplained missing file
+    // and sends you looking at transfers.
+    assert_records_agree_with_the_server(world);
     let server = server_tree(&world.server);
     for device in &world.devices {
         let disk = disk_tree(device);
+        // A volume that rewrites the spelling of a name holds one file where
+        // two spellings exist, and `disk_tree` has already folded its side to
+        // the composed form to say so. The server's side has to be folded the
+        // same way, or every decomposed name the server was legitimately given
+        // reads as a file the device is missing -- while the device is in fact
+        // holding it, under the only spelling that volume has.
+        //
+        // What this cannot settle is two names on the server that one volume
+        // genuinely cannot tell apart. That is the naming layer's decision, it
+        // is made by parking one of them, and it is what `platforms.rs` is for;
+        // the no-loss oracle still covers the content either way.
+        // Content this device has told the user it will not be holding. An
+        // entry parked `Unsyncable` is a resting place, not a failure to
+        // converge -- the name cannot exist on this filesystem, the device says
+        // so by name, and expecting the tree to contain it anyway is asking the
+        // device to do the impossible. `PendingKey` is the same bargain for a
+        // different reason.
+        //
+        // Matched on content rather than on path, because the two sides of the
+        // difference are spelt differently by construction: the server holds the
+        // name the device refused, and the device may hold the same bytes under
+        // a conflict-copy name it chose when the slot was taken.
+        let declined: std::collections::HashSet<String> = device
+            .store
+            .every_entry()
+            .unwrap()
+            .iter()
+            .filter(|e| {
+                matches!(
+                    e.status,
+                    jd_core::model::LocalStatus::Unsyncable(_)
+                        | jd_core::model::LocalStatus::PendingKey
+                )
+            })
+            .filter_map(|e| e.remote_content.as_ref().map(|c| c.sha256.clone()))
+            .collect();
+        let held_back = |h: &Option<String>| h.as_ref().is_some_and(|h| declined.contains(h));
+        let disk: BTreeMap<String, Option<String>> =
+            disk.into_iter().filter(|(_, h)| !held_back(h)).collect();
+
+        let server = if jd_vfs::Vfs::personality(&device.fs).decomposes_unicode {
+            server
+                .iter()
+                .filter(|(_, h)| !held_back(h))
+                .map(|(p, h)| (jd_vfs::nfc(p), h.clone()))
+                .collect()
+        } else {
+            server
+                .iter()
+                .filter(|(_, h)| !held_back(h))
+                .map(|(p, h)| (p.clone(), h.clone()))
+                .collect()
+        };
         if disk != server {
             let only_disk: Vec<_> = disk.keys().filter(|k| !server.contains_key(*k)).collect();
             let only_server: Vec<_> = server.keys().filter(|k| !disk.contains_key(*k)).collect();
@@ -318,6 +376,58 @@ pub fn assert_converged(world: &World) {
                 device.name
             );
         }
+    }
+}
+
+/// Every settled record says where its file actually is.
+///
+/// The trees can match while the bookkeeping behind them does not, and that is
+/// not a cosmetic difference. The last-agreed placement is what the next scan
+/// searches and what naming counts as this entry's claim on a name, so a record
+/// left pointing at a folder its file has left holds a name nothing is using.
+/// The file that legitimately wants that name is then treated as a duplicate of
+/// something that is not there and parked for good — and because both trees
+/// still agree at the moment it happens, every other invariant here passes.
+///
+/// Checked only once a device has settled, where a difference can no longer be
+/// work in progress.
+pub fn assert_records_agree_with_the_server(world: &World) {
+    for device in &world.devices {
+        let mut stale = Vec::new();
+        for e in device.store.every_entry().unwrap() {
+            if e.remote_deleted || e.id.is_provisional() {
+                continue;
+            }
+            // Resting places, not agreements: nothing on this machine is going
+            // to move these, and both are reported to the user by name.
+            if matches!(
+                e.status,
+                jd_core::model::LocalStatus::Unsyncable(_)
+                    | jd_core::model::LocalStatus::PendingKey
+                    | jd_core::model::LocalStatus::OutOfScope
+            ) {
+                continue;
+            }
+            if let Some(agreed) = &e.synced_placement {
+                if *agreed != e.remote {
+                    stale.push(format!(
+                        "{:?} {} is recorded at {:?}/{:?} but the server has it at {:?}/{:?}",
+                        e.id.entity_type,
+                        e.id.server_id,
+                        agreed.parent,
+                        agreed.name,
+                        e.remote.parent,
+                        e.remote.name
+                    ));
+                }
+            }
+        }
+        assert!(
+            stale.is_empty(),
+            "{} agrees with the server about the tree but not about where things are, \
+             so it is holding names it is not using: {stale:?}",
+            device.name
+        );
     }
 }
 

@@ -220,6 +220,7 @@ fn encode(action: &Action) -> (&'static str, Value) {
         Action::PreserveLocalAs { name } => ("preserve_local_as", json!({ "name": name })),
         Action::Forget => ("forget", json!({})),
         Action::Adopt => ("adopt", json!({})),
+        Action::AdoptPlacement { to } => ("adopt_placement", place(to)),
         Action::RemoveFromScope => ("remove_from_scope", json!({})),
     }
 }
@@ -472,6 +473,7 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             Ok(OpOutcome::Done)
         }
         "adopt" => adopt(env, op),
+        "adopt_placement" => adopt_placement(env, op, read_place(&params)?),
         "remove_from_scope" => {
             if let Some(mut entry) = env.store.get_entry(op.entity)? {
                 entry.status = LocalStatus::OutOfScope;
@@ -850,18 +852,39 @@ fn make_room(
     path: &std::path::Path,
     incoming: Option<&str>,
 ) -> Result<(), ExecError> {
-    let Some(fingerprint) = env.vfs.fingerprint(path)? else {
-        return Ok(());
-    };
-    let existing = match env
-        .store
-        .cached_hash(fingerprint, env.vfs.personality().mtime_granularity_ns)?
-    {
-        Some(h) => h,
-        None => env.vfs.hash(path)?,
-    };
-    if Some(existing.as_str()) == incoming {
-        return Ok(());
+    match env.vfs.fingerprint(path)? {
+        Some(fingerprint) => {
+            let existing = match env
+                .store
+                .cached_hash(fingerprint, env.vfs.personality().mtime_granularity_ns)?
+            {
+                Some(h) => h,
+                None => env.vfs.hash(path)?,
+            };
+            if Some(existing.as_str()) == incoming {
+                return Ok(());
+            }
+        }
+        // Not a file. A *folder* can be in the way just as much as a file, and
+        // this used to walk straight past one — there is no fingerprint for a
+        // directory, so it read as an empty spot.
+        //
+        // What happened next depended entirely on the filesystem. A real one
+        // refuses to rename a folder over a non-empty folder, so the operation
+        // failed and was retried forever against a name that was never going to
+        // free itself. The simulated one merged the two instead, and the merge
+        // silently overwrote a file inside that had never been uploaded
+        // anywhere — the rig's own oracle caught it as content the engine
+        // removed that nobody could find again.
+        //
+        // Moving it aside is the same answer a file in the way gets, and it
+        // keeps everything underneath: the user ends up with both folders, one
+        // under a conflict name, rather than one folder and a hole in it.
+        None => {
+            if env.vfs.read_dir(path).is_err() {
+                return Ok(());
+            }
+        }
     }
     let name = path
         .file_name()
@@ -911,14 +934,38 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Placed::Not(why) => return Ok(why.outcome()),
     };
 
+    // Abandoning the download is right in both cases below -- there is nothing
+    // to fetch. Abandoning it and saying nothing is what was wrong: the record
+    // that asked for these bytes is left exactly as it was, so the next pass
+    // reads the same entry, wants the same bytes, and asks again. No attempt
+    // count rises and nothing stays queued between passes, so it looks like an
+    // idle client that merely never goes quiet -- the soak rig had a download
+    // journalled, run and gone every few seconds for a whole campaign.
+    //
+    // Writing down what the server said hands the entry to the ordinary
+    // deletion path, which knows what to do with it: forget it if there is
+    // nothing here, and rescue the bytes to a new file if the user still has
+    // them on this disk.
+    let gone = |why: &str| -> Result<OpOutcome, ExecError> {
+        let mut entry = entry.clone();
+        entry.remote_deleted = true;
+        env.store.put_entry(&entry)?;
+        Ok(OpOutcome::Overtaken(why.into()))
+    };
+    //
+    // Only ever on a plain answer from the server. A refusal it could not
+    // deliver -- an outage, a rate limit, a dropped connection -- comes back as
+    // an error and is retried; `None` here means the server looked and has no
+    // such file, which is the only footing on which a record should be retired.
+    //
     // A signed link is minted here rather than remembered, because a link that
     // was fresh when the round was planned may not be by the time a queue of
     // large files reaches this one.
     let Some(item) = stat(env, op.entity, true)? else {
-        return Ok(OpOutcome::Overtaken("the server no longer has it".into()));
+        return gone("the server no longer has it");
     };
     if item.get("deleted").and_then(Value::as_bool) == Some(true) {
-        return Ok(OpOutcome::Overtaken("it is in the server's trash".into()));
+        return gone("it is in the server's trash");
     }
     let want_sha = item
         .get("content_sha256")
@@ -1045,9 +1092,43 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let fingerprint = match spool.commit(&path, entry.synced_fingerprint) {
         Ok(fp) => fp,
         Err(jd_vfs::VfsError::AlreadyExists(_)) => {
-            return Ok(OpOutcome::Overtaken(
-                "the file changed here while it was downloading".into(),
-            ))
+            // The guard fired. It compares fingerprints, and a fingerprint
+            // drifts for reasons that are not edits — an application that saves
+            // by writing a temporary and renaming it over the original leaves
+            // the same bytes behind a new inode and a new mtime.
+            //
+            // The scan reads that correctly, because it compares content, and
+            // reports nothing changed. So the two disagree about what "changed"
+            // means, and the disagreement does not resolve: the pass keeps
+            // planning a download the guard keeps refusing, with no error and
+            // nothing queued to show for it.
+            //
+            // Asking the question the guard was really asking — is there an
+            // edit here nobody has seen? — settles it. If the bytes still match
+            // the agreement then there is not, and the only thing wrong is a
+            // stale fingerprint, which is recorded so the next attempt gets
+            // past. If they do differ, the local edit is real and the scan will
+            // meet it as a conflict on the next pass.
+            let unseen_edit = match env.vfs.fingerprint(&path)? {
+                Some(fp) => {
+                    let here = env.vfs.hash(&path)?;
+                    let agreed = entry.synced_content.as_ref().map(|c| c.sha256.as_str());
+                    if agreed == Some(here.as_str()) {
+                        let mut entry = entry.clone();
+                        entry.synced_fingerprint = Some(fp);
+                        env.store.put_entry(&entry)?;
+                        false
+                    } else {
+                        true
+                    }
+                }
+                None => true,
+            };
+            return Ok(if unseen_edit {
+                OpOutcome::Overtaken("the file changed here while it was downloading".into())
+            } else {
+                OpOutcome::Retry("the file was rewritten with the same content".into())
+            });
         }
         Err(e) => return Err(e.into()),
     };
@@ -1184,16 +1265,29 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         }
     };
 
-    // The name comes from the plan; the destination folder comes from the entry
-    // as it stands NOW. Those differ whenever the folder was created in the
-    // same round: the plan was written against a provisional id, and the folder
-    // acquired its real one a few operations ago.
+    // Name and destination folder come from the same decision, because the name
+    // was chosen for that folder and means nothing anywhere else. A rescue name
+    // is picked to be free among the siblings the file is landing beside; using
+    // it in a different folder asks the server for a name that folder may well
+    // already have, and `name_taken` sends the whole thing back to the planner,
+    // which re-derives the identical plan from an unchanged tree. That is a
+    // client that never goes quiet again, with nothing queued and nothing
+    // wrong — the sweep had it as a rescue aimed at a subfolder being posted to
+    // the drive root, where a file of that name already sat.
+    //
+    // The entry answers instead when the plan named a folder that did not exist
+    // on the server yet: the plan was written against a provisional id and the
+    // folder has since acquired a real one, which the entry already knows.
+    let planned_parent = as_new
+        .as_ref()
+        .map(|p| p.parent)
+        .filter(|p| !p.is_some_and(|id| id < 0));
     let placement = Placement {
         name: as_new
             .as_ref()
             .map(|p| p.name.clone())
             .unwrap_or_else(|| entry.remote.name.clone()),
-        parent: entry.remote.parent,
+        parent: planned_parent.unwrap_or(entry.remote.parent),
     };
     if placement.parent.map(|p| p < 0).unwrap_or(false) {
         return Ok(OpOutcome::Retry(
@@ -1291,6 +1385,15 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         server_id: new_id,
     };
     if target != entry.id {
+        // The same collision a folder create can hit, for the same reason: the
+        // upload landed, the answer was lost, and an index walk has since taken
+        // the file up under its real id. The bytes are on the server either
+        // way, so this is done — what is left is two records of one file, and
+        // folding them is the whole repair.
+        if env.store.get_entry(target)?.is_some() {
+            env.store.merge_file(entry.id, target)?;
+            return Ok(OpOutcome::Done);
+        }
         env.store.rekey_entry(entry.id, target)?;
         entry.id = target;
     }
@@ -1661,6 +1764,26 @@ fn create_remote_folder(
     };
     let target = EntityId::folder(new_id);
     if target != entry.id {
+        // The id may already be in this store, and then re-keying onto it is
+        // not a rename but a collision: two rows claiming one identity, which
+        // the database refuses outright. It happens when the create landed and
+        // the answer did not arrive — the retry replays the same answer, and by
+        // then an index walk has picked the folder up under its real id.
+        //
+        // The repair that folds a stray provisional into its real twin matches
+        // on name and parent, and cannot help here: whoever moved the folder in
+        // the meantime is exactly why the two records no longer look alike. So
+        // this settles it with the one fact that repair does not have — the
+        // server has just said, by id, that these are the same folder.
+        //
+        // Left alone it is a store error on every attempt forever, and it takes
+        // the whole subtree with it: everything queued underneath waits on a
+        // parent that can never be created. The sweep found it at 347 attempts
+        // with four uploads and a folder stacked up behind it.
+        if env.store.get_entry(target)?.is_some() {
+            env.store.merge_folder(entry.id, target)?;
+            return Ok(OpOutcome::Done);
+        }
         env.store.rekey_entry(entry.id, target)?;
         entry.id = target;
     }
@@ -2241,6 +2364,34 @@ fn adopt(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     Ok(OpOutcome::Done)
 }
 
+/// Write down that this computer and the server put the file in the same place.
+///
+/// Nothing is moved, uploaded or downloaded — the file is already where both
+/// sides want it. What changes is the record of where the engine believes it
+/// lives, which is what the next scan searches and what naming treats as this
+/// entry's claim on a name.
+///
+/// Guarded on the server's placement being the one that was agreed to, because
+/// between planning this and running it somebody may have moved the file again;
+/// recording an agreement that has already lapsed is how a record starts
+/// describing a folder the file is not in, which is the very thing this exists
+/// to prevent.
+fn adopt_placement(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, ExecError> {
+    let Some(mut entry) = require_entry(env, op.entity)? else {
+        return Ok(OpOutcome::Overtaken(
+            "the entry is no longer tracked".into(),
+        ));
+    };
+    if entry.remote != to {
+        return Ok(OpOutcome::Overtaken(
+            "the server has moved it since this was planned".into(),
+        ));
+    }
+    entry.synced_placement = Some(to);
+    env.store.put_entry(&entry)?;
+    Ok(OpOutcome::Done)
+}
+
 // ---------------------------------------------------------------------------
 // Recovery
 // ---------------------------------------------------------------------------
@@ -2281,6 +2432,7 @@ fn already_satisfied(env: &ExecEnv, op: &Op) -> Result<bool, ExecError> {
         | "move_local"
         | "trash_local"
         | "adopt"
+        | "adopt_placement"
         | "remove_from_scope"
         | "forget"
         | "preserve_local_as"

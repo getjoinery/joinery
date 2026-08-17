@@ -563,8 +563,32 @@ impl Vfs for MemFs {
         let t = self.key_for(to)?;
         self.check_failure(FsOp::Rename, &f, from)?;
         let mut st = self.state.lock().unwrap();
-        if !st.nodes.contains_key(&f) {
+        let Some(source) = st.nodes.get(&f).cloned() else {
             return Err(VfsError::NotFound(from.to_path_buf()));
+        };
+        // A directory does not silently land on top of another one. Renaming
+        // over a non-empty directory is `ENOTEMPTY` on every real filesystem
+        // this runs on, and a file and a directory never replace each other at
+        // all.
+        //
+        // This used to merge the two and overwrite whatever collided. Nothing
+        // reported it, because on the surface the rename succeeded — and a
+        // folder move that landed on a folder of the same name took a file
+        // inside it that had never been uploaded anywhere. The rig's own oracle
+        // caught it as content the engine removed and nobody could find again.
+        if let Some(dest) = st.nodes.get(&t) {
+            let dest_is_dir = matches!(dest, Node::Dir);
+            if matches!(source, Node::Dir) != dest_is_dir {
+                return Err(VfsError::NotADirectory(to.to_path_buf()));
+            }
+            if dest_is_dir
+                && st
+                    .nodes
+                    .keys()
+                    .any(|k| k.starts_with(&format!("{t}/")))
+            {
+                return Err(VfsError::AlreadyExists(to.to_path_buf()));
+            }
         }
         Self::ensure_parents(&mut st, &t);
         Self::move_subtree(&mut st, &f, &t);

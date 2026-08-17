@@ -89,11 +89,18 @@ pub enum UnsyncableReason {
 /// `remote_name` always keeps the server's exact bytes; this is only ever the
 /// key used to compare, never what gets written or uploaded.
 pub fn comparison_key(name: &str, p: &Personality) -> String {
-    let nfc: String = name.nfc().collect();
-    if p.case_insensitive {
-        nfc.to_lowercase()
+    // Only where the filesystem itself ignores the spelling. Folding on a
+    // volume that does not is how a name a disk can hold perfectly well ends up
+    // parked as one it cannot.
+    let folded: String = if p.normalization_insensitive {
+        name.nfc().collect()
     } else {
-        nfc
+        name.to_string()
+    };
+    if p.case_insensitive {
+        folded.to_lowercase()
+    } else {
+        folded
     }
 }
 
@@ -102,6 +109,11 @@ pub fn comparison_key(name: &str, p: &Personality) -> String {
 /// stored `é`; those are the same name and a rename of neither.
 pub fn nfc(name: &str) -> String {
     name.nfc().collect()
+}
+
+/// The NFD form, for asking a volume whether it can tell two spellings apart.
+pub fn nfd(name: &str) -> String {
+    name.nfd().collect()
 }
 
 /// True for names the engine owns: download spools, swap temporaries.
@@ -489,13 +501,36 @@ mod tests {
 
     #[test]
     fn unicode_clash_is_reported_as_such_not_as_a_case_clash() {
+        // On a volume that ignores the spelling, the two are one slot, and the
+        // loser has to say WHICH kind of clash it lost -- the user renames a
+        // file over this, and renaming the case of a name that clashed on its
+        // accents fixes nothing.
         let names = vec!["caf\u{e9}.txt".to_string(), "cafe\u{301}.txt".to_string()];
-        let out = resolve_siblings(&names, &Personality::linux());
+        let out = resolve_siblings(&names, &Personality::macos());
         assert!(matches!(out[0].outcome, LocalName::AsIs(_)));
         assert!(matches!(
             &out[1].outcome,
             LocalName::Unsyncable(UnsyncableReason::UnicodeClash { .. })
         ));
+    }
+
+    #[test]
+    fn two_spellings_of_one_word_are_two_files_where_the_volume_says_they_are() {
+        // ext4 compares bytes, so a user may quite reasonably have both -- and
+        // NTFS compares UTF-16 code units, so may a Windows user. Parking one
+        // of them `UnicodeClash` tells them it cannot exist here, which is
+        // untrue, and it never appears. The platform sweep found this on Linux,
+        // the filesystem with no naming restrictions at all.
+        let names = vec!["caf\u{e9}.txt".to_string(), "cafe\u{301}.txt".to_string()];
+        for p in [Personality::linux(), Personality::windows()] {
+            let out = resolve_siblings(&names, &p);
+            assert!(
+                matches!(out[0].outcome, LocalName::AsIs(_))
+                    && matches!(out[1].outcome, LocalName::AsIs(_)),
+                "both spellings should be held as they are: {:?}",
+                out.iter().map(|r| &r.outcome).collect::<Vec<_>>()
+            );
+        }
     }
 
     #[test]

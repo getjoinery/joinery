@@ -198,10 +198,31 @@ pub fn await_convergence(
         .iter()
         .filter(|d| !settled_at.contains_key(&d.name))
         .map(|d| match last.get(&d.name).and_then(|s| s.clone()) {
-            Some(s) => format!(
-                "{} is {} ({} queued): {}",
-                d.name, s.indicator, s.pending_ops, s.summary
-            ),
+            Some(s) => {
+                // Say which of the three settling conditions is unmet, because
+                // they fail for different reasons and want different questions
+                // asked next. A queue that is still draining is work in motion;
+                // entries in flight with nothing queued for them is the silent
+                // stall this rig exists to find; a bad indicator is the daemon
+                // saying it cannot sync at all.
+                let mut waiting_on = Vec::new();
+                if s.indicator != "green" && s.indicator != "attention" {
+                    waiting_on.push(format!("indicator {}", s.indicator));
+                }
+                if s.pending_ops > 0 {
+                    waiting_on.push(format!("{} queued", s.pending_ops));
+                }
+                for (state, n) in s.in_flight_by_state() {
+                    waiting_on.push(format!("{n} {state}"));
+                }
+                format!(
+                    "{} is {} (waiting on {}): {}",
+                    d.name,
+                    s.indicator,
+                    waiting_on.join(", "),
+                    s.summary
+                )
+            }
             None => format!("{} never answered its control channel", d.name),
         })
         .collect();

@@ -57,6 +57,9 @@ pub enum Action {
     /// The two sides already agree. Record the agreement (last-agreed state
     /// advances) and move no bytes.
     Adopt,
+    /// Both sides moved it to the same place. Record where it now lives and
+    /// move nothing.
+    AdoptPlacement { to: Placement },
     /// Stop materializing this locally, but keep tracking it.
     RemoveFromScope,
 }
@@ -198,7 +201,26 @@ pub fn reconcile(entry: &Entry, local: &Delta, remote: &Delta, ctx: &Context) ->
                     local_wanted: l.clone(),
                 });
             }
-            // Same target: they agree. Nothing to move.
+            // Same target: they agree. Nothing to move — but the agreement
+            // still has to be written down, and that is not a formality.
+            //
+            // The last-agreed placement is what the engine believes about where
+            // this file sits on this disk. Every later pass reads it: the scan
+            // looks for the file there, and naming counts it as a sibling of
+            // whatever else is in that folder. Leaving it pointing at the folder
+            // the file has left means the entry holds a name it is not using,
+            // and any real file that wants that name is parked
+            // `Unsyncable(DuplicateName)` against a rival that is not there —
+            // permanently, because nothing about a settled tree ever changes to
+            // release it. The soak sweep had it as a file that simply never
+            // appeared on one device out of three.
+            //
+            // Only when the record is actually out of date. Two sides creating
+            // the same path have no agreement to correct, and the content axis
+            // below establishes one either way.
+            else if entry.synced_placement.as_ref().is_some_and(|p| p != r) {
+                res.actions.push(Action::AdoptPlacement { to: r.clone() });
+            }
         }
         (Some(l), None) => res.actions.push(Action::ApplyLocalMove { to: l.clone() }),
         (None, Some(r)) => res.actions.push(Action::ApplyRemoteMove { to: r.clone() }),
@@ -697,11 +719,39 @@ mod tests {
         let r = reconcile(
             &e,
             &Delta::Moved { to: target.clone() },
-            &Delta::Moved { to: target },
+            &Delta::Moved { to: target.clone() },
             &ctx(),
         );
-        assert!(r.is_empty());
+        // Agreeing is not a conflict, and nothing is moved. But agreeing is
+        // also not nothing: unless the new placement is written down, the
+        // entry goes on claiming a name in the folder it has left.
+        assert_eq!(r.actions, vec![Action::AdoptPlacement { to: target }]);
         assert!(r.issues.is_empty());
+    }
+
+    #[test]
+    fn a_file_both_sides_moved_the_same_way_stops_claiming_its_old_name() {
+        // The shape the soak sweep found: one device's user moves a file into
+        // another folder, and the move reaches the server. The device then sees
+        // its own move and the server's as the same move, agrees, and — before
+        // this — left its record pointing at the folder the file came from.
+        //
+        // What made that fatal rather than untidy is that the stale record is a
+        // claim on a name. A different file legitimately arriving at the old
+        // path finds a rival that is not there, and is parked against it for
+        // good.
+        let e = established("contested.txt", "aaa");
+        let moved = placement(Some(12), "contested.txt");
+        let r = reconcile(
+            &e,
+            &Delta::Moved { to: moved.clone() },
+            &Delta::Moved { to: moved.clone() },
+            &ctx(),
+        );
+        match r.actions.as_slice() {
+            [Action::AdoptPlacement { to }] => assert_eq!(*to, moved),
+            other => panic!("the agreement was never recorded: {other:?}"),
+        }
     }
 
     #[test]

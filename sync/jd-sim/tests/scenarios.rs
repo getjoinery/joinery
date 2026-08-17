@@ -2482,3 +2482,268 @@ fn an_issue_about_a_state_is_withdrawn_when_the_state_ends() {
 
     assert_nothing_lost(&world, &committed);
 }
+
+#[test]
+fn a_file_two_people_filed_the_same_way_stops_holding_its_old_name() {
+    // Two people tidy the same document into the same folder. That is not a
+    // conflict — both sides want it in exactly the same place — and the engine
+    // is right to move nothing. What it also has to do is write down where the
+    // file now lives, and this is the case where it did not.
+    //
+    // The damage is not to that file, which is fine on every disk. It is to the
+    // NEXT file: the engine goes on believing the moved document still occupies
+    // its old path, so anything that legitimately arrives there is treated as a
+    // duplicate of a file that is not there, parked, and never uploaded. On a
+    // settled tree nothing ever changes to release it.
+    let world = World::new(101, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Inbox");
+    laptop.fs.user_mkdir("Filed");
+    laptop.fs.user_write("Inbox/report.txt", b"the quarterly report");
+    committed.note("Inbox/report.txt", b"the quarterly report");
+    assert!(world.settle().is_some(), "the setup should settle");
+
+    // Both of them file it, into the same folder, before either has heard about
+    // the other.
+    desktop.fs.user_rename("Inbox/report.txt", "Filed/report.txt");
+    laptop.fs.user_rename("Inbox/report.txt", "Filed/report.txt");
+
+    // The desktop's move reaches the server first, so when the laptop next runs
+    // it sees its own move and the server's as one and the same move.
+    world.clock.advance_secs(60);
+    world.pass(desktop);
+    world.clock.advance_secs(60);
+    world.pass(laptop);
+
+    // Somebody now starts a new report where the old one used to be.
+    laptop.fs.user_write("Inbox/report.txt", b"the next quarter");
+    committed.note("Inbox/report.txt", b"the next quarter");
+
+    assert!(
+        world.settle().is_some(),
+        "the new file has to reach the server; if the moved one is still \
+         claiming that name it never will"
+    );
+    assert_invariants(&world, &committed);
+
+    let tree = world.server.tree();
+    assert!(
+        tree.contains_key("Inbox/report.txt"),
+        "the new report never reached the server: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert!(tree.contains_key("Filed/report.txt"), "and so did the old one");
+    for device in [laptop, desktop] {
+        let disk = disk_tree(device);
+        assert!(
+            disk.iter().any(|(p, _)| p == "Inbox/report.txt"),
+            "{} never saw the new report: {:?}",
+            device.name,
+            disk.iter().map(|(p, _)| p).collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_file_already_on_disk_is_adopted_rather_than_shadowed_by_a_new_one_every_pass() {
+    // An entry the server has told this device about, whose file is already
+    // sitting at the path it belongs at, with no agreement recorded between
+    // them. It is reachable in ordinary use -- a download that landed while the
+    // record of it did not, or an agreement cleared because the folder it named
+    // had gone.
+    //
+    // The scan deliberately does not look for a file belonging to an entry that
+    // has never been downloaded: there is no local file to have moved away
+    // from, and counting one would read the entry as deleted. The cost, when
+    // the file IS there, is that nothing claims it -- so it reads as brand new,
+    // gets a fresh identity, and the duplicate-file repair folds that identity
+    // away again. The real entry is untouched, and the next pass does it all
+    // over. Nothing is queued, nothing is wrong, and the client never goes
+    // quiet: the soak rig ran four consecutive cycles with the same two entries
+    // pending and the provisional beside them renumbered every time.
+    let world = World::new(202, &["laptop", "desktop"]);
+    let mut committed = Committed::default();
+
+    let body = b"the file that is already here";
+    world.device("laptop").fs.user_write("report.txt", body);
+    committed.note("report.txt", body);
+    assert!(world.settle().is_some(), "the setup should settle");
+
+    // Take the agreement away from the desktop, leaving the file where it is.
+    let desktop = world.device("desktop");
+    let entry = desktop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "report.txt")
+        .expect("the desktop should be tracking it");
+    let id = entry.id;
+    desktop
+        .store
+        .put_entry(&jd_core::model::Entry {
+            synced_placement: None,
+            synced_content: None,
+            synced_fingerprint: None,
+            synced_remote_content: None,
+            status: jd_core::model::LocalStatus::PendingUpload,
+            ..entry
+        })
+        .unwrap();
+    // And give the file a fingerprint nothing has seen, so the hash cache
+    // cannot quietly answer the question the scan is failing to ask. That is
+    // the state on the rig: no cached fingerprint for it under any identity.
+    desktop.fs.set_mtime_ns("report.txt", 99_000_000_000);
+
+    let before = desktop.store.next_provisional_id().unwrap();
+    assert!(
+        world.settle().is_some(),
+        "it has to come back to rest; the file is on the disk and on the server \
+         and the two agree"
+    );
+    let after = desktop.store.next_provisional_id().unwrap();
+
+    assert_invariants(&world, &committed);
+    assert_eq!(
+        desktop
+            .store
+            .get_entry(id)
+            .unwrap()
+            .expect("the entry should still be there")
+            .status,
+        jd_core::model::LocalStatus::Synced,
+        "the file that was already there should have been adopted"
+    );
+    assert!(
+        (before - after).abs() <= 2,
+        "a new identity was minted for the same file over and over: {before} to {after}"
+    );
+    assert_eq!(
+        world.server.live_counts(),
+        (0, 1),
+        "and exactly one file on the server, not one per pass"
+    );
+}
+
+#[test]
+fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
+    // The server is asked for a file and says it has no such file. The download
+    // is abandoned -- correctly, there is nothing to fetch -- but the record
+    // that asked for it is left exactly as it was, so the next pass reads the
+    // same entry, wants the same bytes, and asks again. Nothing is queued
+    // between passes and no attempt count ever rises, so it looks like a
+    // perfectly idle client that simply never goes quiet.
+    //
+    // The soak rig has this on a live device: a download journalled, run,
+    // and gone within seconds, over and over, with the entry never gaining an
+    // agreement and `attempts` never leaving zero.
+    let world = World::new(303, &["laptop"]);
+    let mut committed = Committed::default();
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("real.txt", b"a file that does exist");
+    committed.note("real.txt", b"a file that does exist");
+    assert!(world.settle().is_some(), "the setup should settle");
+
+    // A record for a file the server has never heard of.
+    let ghost = jd_core::model::EntityId::file(987_654);
+    laptop
+        .store
+        .put_entry(&jd_core::model::Entry {
+            id: ghost,
+            remote: jd_core::model::Placement {
+                parent: None,
+                name: "ghost.txt".into(),
+            },
+            remote_content: Some(jd_core::model::ContentId {
+                sha256: jd_sim::sha256_hex(b"bytes nobody has"),
+                size: 16,
+            }),
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: jd_core::model::LocalStatus::PendingDownload,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    assert!(
+        world.settle().is_some(),
+        "a file the server does not have cannot be fetched, and asking again \
+         forever is not a plan"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+#[test]
+fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
+    // The other half of the same rule, and the half that matters. Writing down
+    // that the server has lost a file hands the entry to the deletion path --
+    // so that path had better rescue what is still on this disk rather than
+    // tidy the record away and leave the user's only copy untracked.
+    let world = World::new(304, &["laptop"]);
+    let mut committed = Committed::default();
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_write("keep.txt", b"an unrelated file");
+    committed.note("keep.txt", b"an unrelated file");
+    assert!(world.settle().is_some());
+
+    let orphan_body = b"the only copy of this is right here";
+    laptop.fs.user_write("orphan.txt", orphan_body);
+    committed.note("orphan.txt", orphan_body);
+
+    // A record claiming those bytes belong to a server file that does not exist.
+    let ghost = jd_core::model::EntityId::file(987_655);
+    laptop
+        .store
+        .put_entry(&jd_core::model::Entry {
+            id: ghost,
+            remote: jd_core::model::Placement {
+                parent: None,
+                name: "orphan.txt".into(),
+            },
+            remote_content: Some(jd_core::model::ContentId {
+                sha256: jd_sim::sha256_hex(b"whatever the server was said to hold"),
+                size: 36,
+            }),
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: None,
+            synced_fingerprint: None,
+            local_name: None,
+            status: jd_core::model::LocalStatus::PendingDownload,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    assert!(world.settle().is_some(), "it has to settle");
+    assert_invariants(&world, &committed);
+    // Checked against the live tree rather than `locate`, which answers
+    // `ServerHistory` for anything ever uploaded and so cannot tell "the user
+    // can still open it" from "it is only in the version log".
+    let want = jd_sim::sha256_hex(orphan_body);
+    let live = world.server.tree();
+    assert!(
+        live.values().any(|h| h.as_deref() == Some(want.as_str())),
+        "the bytes the user still had should be a file on the server, not just \
+         a line in its history: {:?}",
+        live.keys().collect::<Vec<_>>()
+    );
+}

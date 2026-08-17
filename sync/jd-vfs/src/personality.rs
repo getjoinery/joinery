@@ -18,9 +18,25 @@ pub struct Personality {
     /// Do `Report.txt` and `report.txt` name the same file?
     pub case_insensitive: bool,
     /// Does the filesystem hand back decomposed (NFD) names regardless of what
-    /// was written? macOS does; the engine compares in NFC either way, but this
-    /// tells the scanner not to treat the round-trip as a rename.
+    /// was written? HFS+ does, and some network shares; this tells the scanner
+    /// not to treat the round-trip as a rename.
     pub decomposes_unicode: bool,
+    /// Do `caf\u{e9}` and `cafe\u{301}` name the same file?
+    ///
+    /// Separate from `decomposes_unicode`, and the distinction is the whole
+    /// point: HFS+ REWRITES the name, APFS keeps the bytes it was given and
+    /// merely COMPARES without regard to spelling, and ext4 and NTFS do
+    /// neither — there, the two spellings are two files, and a user may quite
+    /// reasonably have both.
+    ///
+    /// Folding them everywhere is what this replaced, and it does not fail
+    /// quietly: two names that differ only in normalization look like one slot
+    /// with two claimants, so the loser is parked `UnicodeClash` — which says
+    /// the file *cannot exist here* — on a disk where it plainly can. It never
+    /// materializes, and nothing about a settled tree ever releases it. The
+    /// platform sweep found it on Linux, which has no naming restrictions at
+    /// all.
+    pub normalization_insensitive: bool,
     /// Characters the filesystem refuses outright.
     pub illegal_chars: &'static [char],
     /// Stems that name a device rather than a file, whatever the extension.
@@ -60,6 +76,7 @@ impl Personality {
         Personality {
             case_insensitive: false,
             decomposes_unicode: false,
+            normalization_insensitive: false,
             illegal_chars: POSIX_ILLEGAL,
             reserved_stems: &[],
             strips_trailing_dots_and_spaces: false,
@@ -88,6 +105,8 @@ impl Personality {
         Personality {
             case_insensitive: true,
             decomposes_unicode: false,
+            // APFS keeps the spelling and ignores it when comparing.
+            normalization_insensitive: true,
             illegal_chars: POSIX_ILLEGAL,
             reserved_stems: &[],
             strips_trailing_dots_and_spaces: false,
@@ -116,6 +135,8 @@ impl Personality {
         Personality {
             case_insensitive: true,
             decomposes_unicode: false,
+            // NTFS compares UTF-16 code units. Two spellings, two files.
+            normalization_insensitive: false,
             illegal_chars: WINDOWS_ILLEGAL,
             reserved_stems: WINDOWS_RESERVED,
             strips_trailing_dots_and_spaces: true,
@@ -189,6 +210,18 @@ impl Personality {
                     break;
                 }
             }
+        }
+
+        // Does asking for the same name in the other normal form find it? A
+        // volume that rewrites the spelling necessarily cannot hold both, so it
+        // answers yes here too -- but a volume that merely compares without
+        // regard to spelling answers yes while changing nothing, and that is
+        // the case no other question here reaches.
+        let respelled = dir.join(crate::names::nfd(&base));
+        if respelled != path {
+            p.normalization_insensitive = std::fs::metadata(&respelled).is_ok();
+        } else {
+            p.normalization_insensitive = p.decomposes_unicode;
         }
 
         let _ = std::fs::remove_file(&path);
