@@ -109,12 +109,27 @@ class InboundImapAccountTest {
 	private function testPresets() {
 		section('Presets');
 		$gmail = $this->makeAccount('imap_gmail');
-		$this->ok($gmail->get('iia_auth_method') === 'oauth2', 'Gmail preset → oauth2 auth');
-		$this->ok($gmail->isOAuth(), 'Gmail isOAuth() true');
+		$this->ok($gmail->get('iia_auth_method') === 'password', 'Gmail defaults to the app password');
+		$this->ok(!$gmail->isOAuth(), 'Gmail isOAuth() false until an OAuth sign-in happens');
 		$this->ok($gmail->getOAuthProviderKey() === 'google', 'Gmail oauth provider key = google');
+		$this->ok(InboundImapAccount::authMethodsFor('imap_gmail') === array('password', 'oauth2'),
+			'Gmail supports app password first, OAuth besides');
+		$this->ok(InboundImapAccount::authMethodsFor('imap_microsoft') === array('oauth2'),
+			'Microsoft is OAuth only');
+		$this->ok(InboundImapAccount::authMethodsFor('imap_yahoo') === array('password'),
+			'Yahoo is password only');
+
+		// The credential defines the method, and prepare() keeps a supported
+		// stored method instead of resetting it to the preset default.
+		$gmail->setOAuthToken(new OAuth2Token('A-' . $this->suffix, 'R-' . $this->suffix,
+			gmdate('Y-m-d H:i:s', time() + 3600)));
+		$this->ok($gmail->get('iia_auth_method') === 'oauth2', 'setOAuthToken stamps oauth2');
+		$gmail->prepare();
+		$this->ok($gmail->get('iia_auth_method') === 'oauth2', 'prepare() keeps the stored method');
 
 		$ms = $this->makeAccount('imap_microsoft');
 		$this->ok($ms->getOAuthProviderKey() === 'microsoft', 'Microsoft oauth provider key = microsoft');
+		$this->ok($ms->get('iia_auth_method') === 'oauth2', 'Microsoft defaults to oauth2');
 
 		$yahoo = $this->makeAccount('imap_yahoo');
 		$this->ok($yahoo->get('iia_auth_method') === 'password', 'Yahoo preset → password auth');
