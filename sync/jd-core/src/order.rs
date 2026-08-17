@@ -183,7 +183,12 @@ fn stage_for(action: &Action) -> Stage {
         | Action::UploadVersion
         | Action::UploadAsNew { .. }
         | Action::PreserveLocalAs { .. }
-        | Action::Adopt => Stage::Transfer,
+        | Action::Adopt
+        // Touches no file and no server, so it belongs to no stage in
+        // particular. Kept out of Move deliberately: the move stage orders
+        // itself around who is vacating which name, and an entry that is
+        // already where it is going vacates nothing.
+        | Action::AdoptPlacement { .. } => Stage::Transfer,
         Action::TrashLocal | Action::TrashRemote | Action::Forget | Action::RemoveFromScope => {
             Stage::Delete
         }

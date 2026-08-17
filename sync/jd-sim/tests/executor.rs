@@ -1033,3 +1033,182 @@ fn a_move_that_is_also_a_rename_falls_back_when_the_old_neighbours_hold_the_new_
         "and the neighbour that held the name at the old address keeps it"
     );
 }
+
+#[test]
+fn a_rescue_lands_in_the_folder_its_name_was_chosen_for() {
+    // The server deleted this file while the user had it open somewhere else,
+    // so the content is rescued as a new file. The rescue name is picked to be
+    // free among the siblings it is landing beside -- and that is the only
+    // place it means anything. Posting it to the folder the deleted entry used
+    // to live in asks for a name that folder may already hold, and the refusal
+    // that comes back sends the whole thing to the planner, which reads an
+    // unchanged tree and decides on the identical rescue again.
+    let (_clock, server, device) = world();
+    let folder = server.seed_folder(None, "Sub 30 renamed");
+    let rescue_name = "contested (conflicted copy 2026-07-31 from laptop).txt";
+    // The root already has something by that name, and it is nothing to do with
+    // this file.
+    server.seed_file(None, rescue_name, b"an unrelated file of the same name");
+
+    let body = b"the work that must not be lost";
+    device.fs.user_mkdir("Sub 30 renamed");
+    device
+        .fs
+        .user_write(&format!("Sub 30 renamed/{rescue_name}"), body);
+
+    let mut tracked_folder = fresh(
+        EntityId::folder(folder),
+        None,
+        "Sub 30 renamed",
+        LocalStatus::Synced,
+    );
+    tracked_folder.synced_placement = Some(Placement {
+        parent: None,
+        name: "Sub 30 renamed".into(),
+    });
+    device.store.put_entry(&tracked_folder).unwrap();
+
+    // The entry as a rescue finds it: the server has deleted it, and the
+    // agreement still points at the drive root where it used to be.
+    let id = EntityId::file(1);
+    let mut entry = fresh(id, None, "contested.txt", LocalStatus::Synced);
+    entry.remote_deleted = true;
+    entry.synced_placement = Some(Placement {
+        parent: None,
+        name: "contested.txt".into(),
+    });
+    device.store.put_entry(&entry).unwrap();
+
+    let report = do_one(
+        &device,
+        id,
+        Action::UploadAsNew {
+            placement: Placement {
+                parent: Some(folder),
+                name: rescue_name.into(),
+            },
+        },
+    );
+
+    assert_eq!(report.done, 1, "the rescue should land, not bounce");
+    let tree = server.tree();
+    assert_eq!(
+        tree.get(&format!("Sub 30 renamed/{rescue_name}")),
+        Some(&Some(sha256_hex(body))),
+        "the rescued content should be in the folder the name was chosen for: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        tree.get(rescue_name),
+        Some(&Some(sha256_hex(b"an unrelated file of the same name"))),
+        "and the unrelated file at the root keeps its name and its bytes"
+    );
+}
+
+#[test]
+fn a_folder_create_whose_answer_was_lost_does_not_collide_with_its_own_folder() {
+    // The create landed; the answer did not come back. Before the retry gets
+    // its replayed answer, an index walk picks the folder up under its real id
+    // -- and somebody has moved it in the meantime, so the repair that folds a
+    // stray provisional into its real twin cannot recognise the pair by name
+    // and parent. The retry then tries to take an id its own store already
+    // holds, which the database refuses, on every attempt, forever. Everything
+    // queued underneath waits on a parent that can never exist.
+    let (clock, server, device) = world();
+    let elsewhere = server.seed_folder(None, "Sorted");
+
+    let provisional = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(provisional, None, "Projects", LocalStatus::PendingUpload))
+        .unwrap();
+    let child = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(
+            child,
+            Some(provisional.server_id),
+            "Inner",
+            LocalStatus::PendingUpload,
+        ))
+        .unwrap();
+
+    // The create reaches the server and does its work; the answer is lost.
+    device.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_folder_create".into()),
+        ..NetFaults::none()
+    });
+    let first = do_one(
+        &device,
+        provisional,
+        Action::CreateRemoteFolder {
+            placement: Placement {
+                parent: None,
+                name: "Projects".into(),
+            },
+        },
+    );
+    assert_eq!(first.retrying, 1, "the answer was lost, so it retries");
+    device.net.set_faults(NetFaults::none());
+    assert!(
+        server.tree().contains_key("Projects"),
+        "but the folder is on the server: {:?}",
+        server.tree().keys().collect::<Vec<_>>()
+    );
+
+    // Another device moves it, so the stray provisional and the real folder no
+    // longer look alike by name and parent.
+    let real = elsewhere + 1;
+    server
+        .action(
+            "drive_move",
+            &serde_json::json!({
+                "entity_type": "folder",
+                "entity_id": real,
+                "parent_id": elsewhere,
+            }),
+        )
+        .expect("the move should be accepted");
+
+    // And an index walk takes the folder up under its real id.
+    let mut adopted = fresh(
+        EntityId::folder(real),
+        Some(elsewhere),
+        "Projects",
+        LocalStatus::Synced,
+    );
+    adopted.synced_placement = Some(Placement {
+        parent: Some(elsewhere),
+        name: "Projects".into(),
+    });
+    device.store.put_entry(&adopted).unwrap();
+
+    // Now the retry gets its replayed answer, naming an id this store has.
+    clock.advance_secs(30 * 60);
+    let now = device.now();
+    let e: ExecEnv = env(&device, &now);
+    let report = run_queued(&e).expect("run");
+
+    assert_eq!(
+        report.done, 1,
+        "the folder is on the server; saying so is the only honest outcome"
+    );
+    let left: Vec<i64> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .iter()
+        .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+        .map(|e| e.id.server_id)
+        .collect();
+    assert!(
+        !left.contains(&provisional.server_id),
+        "the duplicate record should be folded away, not left to retry: {left:?}"
+    );
+    let inner = device.store.get_entry(child).unwrap().expect("the child");
+    assert_eq!(
+        inner.remote.parent,
+        Some(real),
+        "and what was inside it now hangs off the folder that really exists"
+    );
+}
