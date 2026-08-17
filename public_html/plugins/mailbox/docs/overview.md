@@ -295,6 +295,13 @@ The feed is created **disabled** and starts fetching when the configure step is
 finished, so an abandoned flow leaves a mailbox that is visibly not enabled rather than
 one quietly collecting mail nobody finished asking for.
 
+**The configure step asks about sync too.** The discovery connection that lists the
+server's folders also detects its sync capabilities, so when the server can keep two
+copies in step the wizard offers the same **Keep in step with the original** choice
+(Off / Read-only / Two-way, with the deletion and compose toggles) that the mailbox
+editor carries — see [Sync](#sync-read-only-and-two-way). When the server cannot, the
+step says plainly that the feed is a one-way import that never changes the original.
+
 ## Server Setup
 
 On apt-based systems, run `provisioning/install_email.sh` as root, once per

@@ -24,7 +24,11 @@
  * per-object editors, unchanged, and the mailbox itself is built by
  * ImapFeedProvisioner — the one path a pulled-in mailbox comes into being by.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - the configure step offers the sync choice (Off / Read-only /
+ *   Two-way) when the just-connected server supports it: capabilities are
+ *   detected on the same connection that discovers folders, and the saved mode
+ *   still passes prepare()'s capability check
  * @changelog 1.3 - a password sign-in proves itself against the mail server
  *   before anything is created: a refused credential fails on the signin form
  *   with the server's reason (and the typed address kept), never as a fetch
@@ -253,6 +257,17 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 			?: InboundImapAccount::IMPORT_DAYS_DEFAULT);
 		$account->set('iia_imap_folder', trim((string)($input['iia_imap_folder'] ?? 'INBOX')) ?: 'INBOX');
 		$account->set('iia_label', trim((string)($input['iia_label'] ?? '')) ?: (string)$account->get('iia_username'));
+		// The sync choice, offered only when the server said it could (the form
+		// omits the control otherwise, so these default to Off). prepare() below
+		// re-checks against the cached capability, so a forged mode cannot stick.
+		$sync_mode = (string)($input['iia_sync_mode'] ?? InboundImapAccount::SYNC_OFF);
+		if (!in_array($sync_mode, array(InboundImapAccount::SYNC_OFF,
+				InboundImapAccount::SYNC_PULL, InboundImapAccount::SYNC_BOTH), true)) {
+			$sync_mode = InboundImapAccount::SYNC_OFF;
+		}
+		$account->set('iia_sync_mode', $sync_mode);
+		$account->set('iia_sync_deletes', !empty($input['iia_sync_deletes']));
+		$account->set('iia_show_compose', !empty($input['iia_show_compose']));
 		// This is the moment the feed becomes real: everything it needs has been
 		// answered, so it starts fetching.
 		$account->set('iia_is_enabled', true);
@@ -317,6 +332,10 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 			try {
 				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
 				$ingestor = new ImapIngestor($account);
+				// Same connection answers both questions: what folders exist, and
+				// whether the server can keep two copies in step (CONDSTORE) — the
+				// capability that decides whether the sync choice below is real.
+				$ingestor->detectCapabilities();
 				$ingestor->discoverFolders();
 				$ingestor->close();
 			} catch (Throwable $e) {
@@ -332,6 +351,23 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 			if ($name !== '') { $folder_names[$name] = $name; }
 		}
 	}
+
+	// Whether to offer the sync choice on the configure form. The capability was
+	// stamped by detectCapabilities() on the discovery connection just above, so
+	// on the normal path this is a fresh answer, not a stale cache. Same shapes
+	// as the editor (admin_mailbox_imap_edit_logic) so the two forms match.
+	$sync_supported = ($state === 'configure' && $account !== null && $account->key)
+		? $account->supportsCondstore() : false;
+	$sync_visibility = array(
+		InboundImapAccount::SYNC_OFF  => array('hide' => array('iia_sync_deletes', 'iia_show_compose')),
+		InboundImapAccount::SYNC_PULL => array('show' => array('iia_sync_deletes', 'iia_show_compose')),
+		InboundImapAccount::SYNC_BOTH => array('show' => array('iia_sync_deletes', 'iia_show_compose')),
+	);
+	$sync_options = array(
+		InboundImapAccount::SYNC_OFF  => 'Off',
+		InboundImapAccount::SYNC_PULL => 'Read-only (follow the source)',
+		InboundImapAccount::SYNC_BOTH => 'Two-way (full sync)',
+	);
 
 	return LogicResult::render(array(
 		'session'         => $session,
@@ -350,6 +386,9 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 		'has_held_grant'  => ($held !== null),
 		'ask_address'     => !empty($input['ask_address']),
 		'folder_names'    => $folder_names,
+		'sync_supported'  => $sync_supported,
+		'sync_options'    => $sync_options,
+		'sync_visibility' => $sync_visibility,
 		'redirect_uri'    => OAuth2Client::redirectUri(),
 		'error'           => ($error !== null && $error !== '') ? $error : null,
 	));
