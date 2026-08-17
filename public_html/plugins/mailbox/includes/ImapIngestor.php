@@ -35,6 +35,20 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * @version 1.11
+ * @changelog 1.11 - one fetch per mailbox at a time: poll() takes a per-account
+ *   advisory try-lock at the chokepoint both the scheduled poller and Fetch now
+ *   pass through; a second fetch fails fast as ImapFetchBusyException instead
+ *   of racing the cursors and holding a second worker
+ * @version 1.10
+ * @changelog 1.10 - a decades-old Gmail folder is mostly deleted UIDs, and both
+ *   walkers now cross that desert instead of crawling it: the day-boundary seek
+ *   doubles its advance over proven-empty bands (48 fixed-band probes reached
+ *   UID 1,536 of 270,948), and the ingest walk doubles an empty window inside
+ *   one poll instead of conceding 50 UIDs per 5 minutes for eighteen days
+ * @version 1.9
+ * @changelog 1.9 - a login failure carries the server's own reason when Horde
+ *   has it (Exception->details), so 'denied authentication' can say why
  * @version 1.8
  * @changelog 1.8 - a message and its attachment manifest are stored in ONE
  *   transaction (D1, specs/mail_import_loss_proof.md), so a committed row always
@@ -63,6 +77,10 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailRunRecord.
 
 class ImapIngestorException extends Exception {}
 
+/** The mailbox is being fetched by someone else right now — not a failure,
+ *  a "the work is already happening". Callers show it softly. */
+class ImapFetchBusyException extends ImapIngestorException {}
+
 class ImapIngestor {
 
 	/** Generous text-body ceiling. Bodies over this are truncated-and-marked,
@@ -78,6 +96,13 @@ class ImapIngestor {
 	// round trips instead of hanging the poll.
 	const SEEK_BAND = 64;
 	const SEEK_MAX_PROBES = 48;
+	/** Ceiling for the doubling empty-band advance: bounds the one heavy case, a
+	 *  probe that lands in dense mail and returns a band's worth of dates. */
+	const SEEK_BAND_MAX = 32768;
+
+	/** Advisory-lock class for the per-account fetch lock (sibling of the grant
+	 *  sync's 74211; arbitrary, fixed). */
+	const FETCH_LOCK_CLASS = 74212;
 
 	/** @var InboundImapAccount */
 	private $account;
@@ -142,8 +167,13 @@ class ImapIngestor {
 			if ($this->account->isOAuth() && $e->getCode() === Horde_Imap_Client_Exception::LOGIN_AUTHENTICATIONFAILED) {
 				$this->account->markNeedsReauth();
 			}
-			// Horde messages are credential-free (status + server text).
-			throw new ImapIngestorException('IMAP login failed: ' . $e->getMessage());
+			// Horde messages are credential-free (status + server text). The
+			// details field, when set, is the server's own response line — e.g.
+			// Gmail's Invalid credentials — which is the difference between an
+			// answerable error and a shrug.
+			$detail = trim((string)($e->details ?? ''));
+			throw new ImapIngestorException('IMAP login failed: ' . $e->getMessage()
+				. ($detail !== '' ? ' (' . $detail . ')' : ''));
 		} catch (Throwable $e) {
 			throw new ImapIngestorException('IMAP connection failed: ' . $e->getMessage());
 		}
@@ -324,8 +354,34 @@ class ImapIngestor {
 	 * Returns ['stored'=>int, 'dedup'=>int, 'seen'=>int, 'failed'=>int,
 	 * 'failed_detail'=>array, 'status'=>string].
 	 * Throws ImapIngestorException on connect/auth failure (the poller records it).
+	 *
+	 * One fetch per mailbox at a time, enforced here at the chokepoint every
+	 * fetch path passes through (the scheduled poller AND the Fetch now button):
+	 * a per-account advisory try-lock, held for the whole ingest. A second
+	 * caller fails fast with ImapFetchBusyException — before any IMAP
+	 * connection is made — instead of racing the first on the folder cursors
+	 * and holding a second worker for the duration.
 	 */
 	public function poll(int $maxPerRun): array {
+		$account_id = intval($this->account->key);
+		$db = DbConnector::get_instance()->get_db_link();
+		$lock = $db->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$lock->execute(array(self::FETCH_LOCK_CLASS, $account_id));
+		if (!$lock->fetchColumn()) {
+			throw new ImapFetchBusyException(
+				'A fetch for this mailbox is already running; it finishes on its own.');
+		}
+		try {
+			return $this->pollLocked($maxPerRun);
+		} finally {
+			// Session advisory locks are reentrant per connection, so this unlock
+			// pairs exactly with the acquire above whatever the body did.
+			$unlock = $db->prepare('SELECT pg_advisory_unlock(?, ?)');
+			$unlock->execute(array(self::FETCH_LOCK_CLASS, $account_id));
+		}
+	}
+
+	private function pollLocked(int $maxPerRun): array {
 		$alias = $this->resolveAlias();
 		$domain = new InboundEmailDomain($alias->get('iea_ied_inbound_email_domain_id'), TRUE);
 		$recipient = strtolower($alias->get_full_address());
@@ -477,15 +533,10 @@ class ImapIngestor {
 		}
 
 		// Walk forward one bounded UID window per run (oldest-first). A numeric UID
-		// FETCH range (not SEARCH) avoids the ESEARCH form Gmail rejects.
-		$windowEnd = min($highUid, $lastSeenUid + max(1, $maxPerRun));
-		$metaFetch = $this->fetchWindow($client, $folderName, $lastSeenUid + 1, $windowEnd);
-		$uids = array();
-		foreach ($metaFetch->ids() as $uid) {
-			$uid = intval($uid);
-			if ($uid > $lastSeenUid && $uid <= $windowEnd) { $uids[] = $uid; }
-		}
-		sort($uids, SORT_NUMERIC);
+		// FETCH range (not SEARCH) avoids the ESEARCH form Gmail rejects. The
+		// window search jumps deserts — see nextOccupiedWindow.
+		list($lastSeenUid, $windowEnd, $uids, $metaFetch) =
+			$this->nextOccupiedWindow($client, $folderName, $lastSeenUid, $highUid, max(1, $maxPerRun));
 
 		$router = new InboundEmailRouter();
 
@@ -618,6 +669,7 @@ class ImapIngestor {
 		$lo = 1;
 		$hi = $highUid;
 		$probes = 0;
+		$stride = self::SEEK_BAND;
 		while ($lo <= $hi && $probes < self::SEEK_MAX_PROBES) {
 			$probes++;
 			$mid = intdiv($lo + $hi, 2);
@@ -629,11 +681,19 @@ class ImapIngestor {
 				// or deleted, so the oldest existing UID at/above $lo settles it.
 				if ($probes >= self::SEEK_MAX_PROBES) { break; }
 				$probes++;
-				$bottom = $this->probeOldestInBand($client, $folder, $lo, min($hi, $lo + self::SEEK_BAND - 1));
+				$bottom = $this->probeOldestInBand($client, $folder, $lo, min($hi, $lo + $stride - 1));
 				if ($bottom === null) {
-					$lo = $lo + self::SEEK_BAND; // that band is gone too — a safe advance
+					// That band is gone too — a safe advance, and a DOUBLING one:
+					// at Gmail scale the deleted region below the live mail can be
+					// hundreds of thousands of UIDs, and a fixed advance crawls it
+					// linearly until the probe budget dies (48 probes of 64 reach
+					// UID 1,536 of 270,948). Doubling makes the desert logarithmic;
+					// any advance still only ever covers proven-empty bands.
+					$lo = $lo + $stride;
+					$stride = min($stride * 2, self::SEEK_BAND_MAX);
 					continue;
 				}
+				$stride = self::SEEK_BAND;
 				if ($bottom['date'] === '' || $bottom['date'] >= $cutoffUtc) {
 					// The oldest message above the proven floor is in-window —
 					// it IS the boundary.
@@ -643,6 +703,7 @@ class ImapIngestor {
 				$lo = $bottom['uid'] + 1;
 				continue;
 			}
+			$stride = self::SEEK_BAND;
 			// An unreadable INTERNALDATE ('') counts as in-window: fail toward
 			// importing more rather than silently skipping past real mail.
 			if ($probe['date'] === '' || $probe['date'] >= $cutoffUtc) {
@@ -769,6 +830,46 @@ class ImapIngestor {
 		$date = clone $date;
 		$date->setTimezone(new DateTimeZone('UTC'));
 		return array('uid' => $edge, 'date' => $date->format('Y-m-d H:i:s'));
+	}
+
+	/**
+	 * The next UID window at/above $lastSeenUid that actually holds messages,
+	 * as [cursor floor, window end, sorted uids, metaFetch].
+	 *
+	 * A window that fetches empty proves only that those UIDs are deleted —
+	 * routine at Gmail scale, where archiving leaves the folder's UID space a
+	 * desert — so the floor advances over it and the window doubles, inside one
+	 * poll. An empty-range UID FETCH costs the server nothing; without the jump,
+	 * a 270,000-UID desert takes weeks of polls to cross at $maxPerRun a time.
+	 * Every advance covers only fetched-and-empty ranges, so no message is ever
+	 * jumped over.
+	 *
+	 * A jump that lands in dense mail is trimmed back to $maxPerRun messages
+	 * (window end pulled to the last uid kept), so one poll never ingests more
+	 * than a normal window — the next poll continues from there.
+	 */
+	private function nextOccupiedWindow(ImapClient $client, string $folderName,
+			int $lastSeenUid, int $highUid, int $maxPerRun): array {
+		$span = $maxPerRun;
+		while (true) {
+			$windowEnd = min($highUid, $lastSeenUid + $span);
+			$metaFetch = $this->fetchWindow($client, $folderName, $lastSeenUid + 1, $windowEnd);
+			$uids = array();
+			foreach ($metaFetch->ids() as $uid) {
+				$uid = intval($uid);
+				if ($uid > $lastSeenUid && $uid <= $windowEnd) { $uids[] = $uid; }
+			}
+			sort($uids, SORT_NUMERIC);
+			if (!empty($uids) || $windowEnd >= $highUid) {
+				if (count($uids) > $maxPerRun) {
+					$uids = array_slice($uids, 0, $maxPerRun);
+					$windowEnd = intval($uids[count($uids) - 1]);
+				}
+				return array($lastSeenUid, $windowEnd, $uids, $metaFetch);
+			}
+			$lastSeenUid = $windowEnd;
+			$span *= 2;
+		}
 	}
 
 	private function fetchWindow(ImapClient $client, string $folder, int $startUid, int $endUid) {

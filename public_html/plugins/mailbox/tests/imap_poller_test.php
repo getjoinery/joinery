@@ -219,6 +219,31 @@ class ImapPollerTest {
 		$this->ok($reloaded->get('iia_last_poll_time') !== null, 'uncredentialed account was claimed (poll time stamped)');
 		$this->ok(stripos((string)$reloaded->get('iia_last_status'), 'credential') !== false,
 			'uncredentialed account status explains why it was skipped');
+
+		// One fetch per mailbox at a time: while a rival connection holds the
+		// account's fetch lock (a Fetch now mid-run, from poll()'s perspective),
+		// a second poll refuses fast — before any IMAP connection — with the
+		// busy exception, not a generic error.
+		section('Fetch lock');
+		$settings = Globalvars::get_instance();
+		$rival = new PDO('pgsql:host=localhost port=5432 dbname=' . $settings->get_setting('dbname')
+			. ' user=' . $settings->get_setting('dbusername')
+			. ' password=' . $settings->get_setting('dbpassword'));
+		$take = $rival->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$take->execute(array(ImapIngestor::FETCH_LOCK_CLASS, intval($acct->key)));
+		$this->ok((bool)$take->fetchColumn(), 'rival connection takes the fetch lock');
+		$busy = false;
+		try {
+			(new ImapIngestor(new InboundImapAccount($acct->key, TRUE)))->poll(5);
+		} catch (ImapFetchBusyException $e) {
+			$busy = true;
+		} catch (Throwable $e) {
+			// any other failure mode means the guard did not fire first
+		}
+		$this->ok($busy, 'poll() refuses while another fetch holds the lock');
+		$rival->prepare('SELECT pg_advisory_unlock(?, ?)')
+			->execute(array(ImapIngestor::FETCH_LOCK_CLASS, intval($acct->key)));
+		$rival = null;
 	}
 
 	/**

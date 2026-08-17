@@ -253,7 +253,11 @@ step in the URL:
 
 **The easiest sign-in comes first.** The signin step offers the preset's default
 method — an app password wherever the host honors one, with a guided **How do I
-get this?** modal linking to the host's own app-password pages. A host that also
+get this?** modal linking to the host's own app-password pages. A password
+sign-in proves itself against the mail server before anything is created: a
+refused credential fails on the signin form with the server's reason, and no
+mailbox exists until the login has succeeded (the OAuth path is verified by its
+consent round trip). A host that also
 supports OAuth (Gmail) keeps it behind **Other options** (`method=oauth2`),
 because OAuth costs a one-time app registration in the provider's developer
 console; the register step, when it appears, offers the app-password way back.

@@ -24,7 +24,11 @@
  * per-object editors, unchanged, and the mailbox itself is built by
  * ImapFeedProvisioner — the one path a pulled-in mailbox comes into being by.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - a password sign-in proves itself against the mail server
+ *   before anything is created: a refused credential fails on the signin form
+ *   with the server's reason (and the typed address kept), never as a fetch
+ *   error after the wizard has finished
  * @changelog 1.2 - sign-in offers the easiest method that works first: a host
  *   supporting both (Gmail) defaults to its app password, with OAuth behind an
  *   explicit method=oauth2 choice, so nobody is sent to a developer console who
@@ -339,6 +343,7 @@ function admin_mailbox_connect_logic(array $input): LogicResult {
 		'oauth_class'     => $oauth_class,
 		'signin_method'   => $method,
 		'auth_methods'    => $auth_methods,
+		'prefill_address' => strtolower(trim((string)($input['address'] ?? ''))),
 		'reader_options'  => $reader_options,
 		'acting_user_id'  => $acting_user_id,
 		'account'         => $account,
@@ -421,6 +426,59 @@ function _connect_password_signin(array $input, string $provider_key, array $int
 			DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
 		return LogicResult::redirect($wizard_url . '?provider=' . rawurlencode($provider_key));
 	}
+	$back_url = $wizard_url . '?provider=' . rawurlencode($provider_key)
+		. ($address !== '' ? '&address=' . rawurlencode($address) : '');
+	if (strpos($address, '@') === false) {
+		$session->save_message(new DisplayMessage(
+			'Enter the full email address — it is also the username the connection signs in with.',
+			'Address needed', '~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_WARNING, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($back_url);
+	}
+
+	// The sign-in IS the credential check: prove the mail server accepts this
+	// address and password before any row exists. A mistyped password — or an
+	// account password where only an app password works — fails here, on the
+	// form it was typed into, never as a fetch error after the wizard has
+	// finished. The probe account is never saved; it exists to carry the
+	// connection details to one login.
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
+	$preset = InboundImapAccount::PRESETS[$provider_key];
+	$probe = new InboundImapAccount(NULL);
+	$probe->set('iia_provider_key', $provider_key);
+	$probe->set('iia_auth_method', InboundImapAccount::AUTH_PASSWORD);
+	$probe->set('iia_username', $address);
+	if ($provider_key === 'imap_generic') {
+		$probe->set('iia_imap_host', trim((string)($input['iia_imap_host'] ?? '')));
+		$probe->set('iia_imap_port', intval($input['iia_imap_port'] ?? 993) ?: 993);
+		$enc = (string)($input['iia_imap_encryption'] ?? 'ssl');
+		$probe->set('iia_imap_encryption', in_array($enc, array('ssl', 'tls', 'none'), true) ? $enc : 'ssl');
+	} else {
+		$probe->set('iia_imap_host', $preset['host']);
+		$probe->set('iia_imap_port', $preset['port']);
+		$probe->set('iia_imap_encryption', $preset['encryption']);
+	}
+	$probe->setPassword($password);
+	try {
+		$tester = new ImapIngestor($probe);
+		try {
+			$tester->getClient();
+		} finally {
+			$tester->close();
+		}
+	} catch (Throwable $e) {
+		$hint = !empty($preset['app_password_url'])
+			? ' Check that the password is an app password created on exactly this account — the '
+				. 'account password itself is always refused, and an app password made while signed '
+				. 'in to a different account belongs to that account.'
+			: '';
+		$session->save_message(new DisplayMessage(
+			'Nothing was created. ' . htmlspecialchars($address) . ' could not sign in: '
+				. htmlspecialchars($e->getMessage()) . $hint,
+			'Sign-in refused', '~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+		return LogicResult::redirect($back_url);
+	}
 
 	try {
 		$notes = array();
@@ -447,7 +505,7 @@ function _connect_password_signin(array $input, string $provider_key, array $int
 		$session->save_message(new DisplayMessage($e->getMessage(), 'Could not create the mailbox',
 			'~/plugins/mailbox/admin/~', DisplayMessage::MESSAGE_ERROR,
 			DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
-		return LogicResult::redirect($wizard_url . '?provider=' . rawurlencode($provider_key));
+		return LogicResult::redirect($back_url);
 	}
 
 	return LogicResult::redirect($wizard_url . '?state=configure&account_id='
