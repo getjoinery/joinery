@@ -18,6 +18,7 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class DigitalOceanOAuthProvider implements OAuth2Provider {
 
     use DeclaresOAuthConfigFields;
+    use DeclaresNoOAuthIdentity;
 
     public static function getKey(): string { return 'digitalocean'; }
     public static function getLabel(): string { return 'DigitalOcean'; }

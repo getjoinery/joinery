@@ -24,7 +24,20 @@
  * signatureFor()/saveSignature() and inserted client-side at compose time. Personal, not
  * mailbox administration — never sealed, no admin surface.
  *
- * @version 1.3
+ * A SEALING mailbox is the exception to "one alias can have several grants":
+ * sealing encrypts to one person, so it must have exactly one holder and that
+ * holder must have a vault (specs/mailbox_connect_flow.md § E). The rule lives
+ * in sync_for_alias(), which every grant-writing path goes through, because a
+ * mailbox that seals with nobody to seal to writes PLAINTEXT — silently, on a
+ * mailbox whose whole promise is that it does not. The protection ceremony
+ * checks both at the raise; this is what holds them afterwards.
+ *
+ * @version 1.5
+ * @changelog 1.5 - sync_for_alias serialises per mailbox on an advisory lock
+ *   (two concurrent syncs could each pass the one-holder check and each
+ *   insert); the delete backstop also refuses leaving a sole holder without a
+ *   vault
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -41,7 +54,12 @@ class InboundEmailMailboxGrant extends SystemBase {
 
 	protected static $foreign_key_actions = [
 		'ieg_iea_inbound_email_alias_id' => ['action' => 'cascade'],
-		'ieg_usr_user_id'                => ['action' => 'cascade'],
+		// permanent_delete, not cascade: the user cascade is the one grant write
+		// that does not pass through sync_for_alias, and a flat SQL delete would
+		// take the last holder off a sealing mailbox without anything noticing.
+		// This action loads each row as a model and calls its permanent_delete(),
+		// which refuses that case (see below).
+		'ieg_usr_user_id'                => ['action' => 'permanent_delete'],
 	];
 
 	public static $field_specifications = array(
@@ -128,14 +146,112 @@ class InboundEmailMailboxGrant extends SystemBase {
 	}
 
 	/**
+	 * The refusal message for setting a sealing mailbox's holder set to
+	 * $user_ids, or null when the change is fine. THE rule, stated once: a
+	 * mailbox that seals content has exactly one holder, and that holder holds a
+	 * vault to seal to. Every caller that writes grants — the alias editor, the
+	 * combined IMAP editor, headless provisioning, the ceremony's inline fixes —
+	 * resolves to this, so the refusal cannot be routed around.
+	 *
+	 * $seals is the mailbox's effective posture (InboundEmailAlias::seals_content()).
+	 * A non-sealing mailbox has no constraint at all: shared team inboxes are
+	 * ordinary there.
+	 */
+	static function grant_set_error(bool $seals, array $user_ids): ?string {
+		if (!$seals) {
+			return null;
+		}
+		$ids = array();
+		foreach ($user_ids as $uid) {
+			$uid = intval($uid);
+			if ($uid > 0) {
+				$ids[$uid] = true;
+			}
+		}
+		if (count($ids) > 1) {
+			return 'This mailbox is protected, and protected mail is sealed to one person\'s key — '
+				. 'it can have exactly one member. To share it, set this mailbox to Standard first.';
+		}
+		if (count($ids) === 0) {
+			return 'This mailbox is protected, so it needs its owner from the start — mail arriving '
+				. 'with no one to seal to would be stored unprotected. Pick exactly one member.';
+		}
+
+		// The holder's vault is the key the mail seals TO. Without it a protected
+		// mailbox stores plaintext, so "has a member" is not enough on its own.
+		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+		require_once(PathHelper::getIncludePath('data/users_class.php'));
+		$holder_id = intval(array_key_first($ids));
+		if (UserEncryptionVault::loadForUser($holder_id) === null) {
+			$user = new User($holder_id, TRUE);
+			$name = trim((string)$user->get('usr_first_name') . ' ' . (string)$user->get('usr_last_name'));
+			if ($name === '') {
+				$name = (string)$user->get('usr_email');
+			}
+			if ($name === '') {
+				$name = 'That member';
+			}
+			return $name . ' has no vault yet, and a protected mailbox seals its mail to its member\'s '
+				. 'vault — without one the mail would be stored unprotected. Only they can create it, '
+				. 'from their Security page. Set this mailbox to Standard first if you need it now.';
+		}
+		return null;
+	}
+
+	/**
 	 * Make the grant set for an alias exactly match $user_ids: insert grants for
 	 * newly-added users, delete grants for removed ones, leave unchanged ones be.
 	 * Used by the alias editor's "Users with access" control.
 	 *
+	 * Refuses outright on a sealing mailbox when the result would break the
+	 * one-holder-with-a-vault rule — see grant_set_error(). Every surface that
+	 * writes grants comes through here, so the invalid state is unreachable
+	 * rather than merely discouraged.
+	 *
 	 * @param int   $alias_id
 	 * @param int[] $user_ids the complete desired set of grantees
+	 * @throws InboundEmailMailboxGrantException
 	 */
 	static function sync_for_alias(int $alias_id, array $user_ids): void {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+
+		// One sync per mailbox at a time. The rule below is check-then-write, and
+		// two concurrent syncs that each read an empty grant set would each pass
+		// the one-holder check and each insert — two holders on a sealing
+		// mailbox, the exact state this method exists to make unreachable. The
+		// advisory lock is transaction-scoped, so it releases itself however this
+		// call ends.
+		$db = DbConnector::get_instance()->get_db_link();
+		$own_tx = !$db->inTransaction();
+		if ($own_tx) {
+			$db->beginTransaction();
+		}
+		try {
+			$lock = $db->prepare('SELECT pg_advisory_xact_lock(?, ?)');
+			$lock->execute(array(self::SYNC_LOCK_CLASS, $alias_id));
+			self::sync_for_alias_locked($alias_id, $user_ids);
+			if ($own_tx) {
+				$db->commit();
+			}
+		} catch (\Throwable $e) {
+			if ($own_tx && $db->inTransaction()) {
+				$db->rollBack();
+			}
+			throw $e;
+		}
+	}
+
+	/** The advisory-lock class sync_for_alias() serialises on (arbitrary, fixed). */
+	const SYNC_LOCK_CLASS = 74211;
+
+	/** The body of sync_for_alias(), entered only under the per-alias lock. */
+	private static function sync_for_alias_locked(int $alias_id, array $user_ids): void {
+		$alias = new InboundEmailAlias($alias_id, TRUE);
+		$error = self::grant_set_error($alias->key ? $alias->seals_content() : false, $user_ids);
+		if ($error !== null) {
+			throw new InboundEmailMailboxGrantException($error);
+		}
+
 		$desired = array();
 		foreach ($user_ids as $uid) {
 			$uid = intval($uid);
@@ -153,15 +269,11 @@ class InboundEmailMailboxGrant extends SystemBase {
 			$current[$uid] = $g;
 		}
 
-		// Delete grants no longer wanted. The grant table has no delete_time
-		// column — a removed grant is a hard delete (permanent_delete handles it).
-		foreach ($current as $uid => $grant) {
-			if (!isset($desired[$uid])) {
-				$grant->permanent_delete();
-			}
-		}
-
-		// Insert grants newly wanted.
+		// Insert first, THEN remove. Handing a sealing mailbox from one holder to
+		// another is a legitimate edit, and removing the outgoing holder first
+		// would take it through zero holders — which the last-holder refusal
+		// below would (correctly) stop. Adding first means the mailbox always has
+		// someone to seal to, including mid-call.
 		foreach ($desired as $uid => $_) {
 			if (!isset($current[$uid])) {
 				$grant = new InboundEmailMailboxGrant(NULL);
@@ -170,6 +282,54 @@ class InboundEmailMailboxGrant extends SystemBase {
 				$grant->save();
 			}
 		}
+
+		// Delete grants no longer wanted. The grant table has no delete_time
+		// column — a removed grant is a hard delete (permanent_delete handles it).
+		foreach ($current as $uid => $grant) {
+			if (!isset($desired[$uid])) {
+				$grant->permanent_delete();
+			}
+		}
+	}
+
+	/**
+	 * Removing one grant, refusing to take the last holder off a sealing
+	 * mailbox. This is the backstop for the write that does NOT come through
+	 * sync_for_alias: deleting a user cascades their grant rows away, and doing
+	 * that to the sole holder of a protected mailbox would leave every message
+	 * arriving after it stored in plaintext.
+	 */
+	public function permanent_delete($debug = false) {
+		$alias_id = intval($this->get('ieg_iea_inbound_email_alias_id'));
+		if ($alias_id > 0 && !$debug) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			if ($alias->key && $alias->seals_content()) {
+				$remaining = array();
+				foreach (self::user_ids_for_alias($alias_id) as $uid) {
+					if (intval($uid) !== intval($this->get('ieg_usr_user_id'))) {
+						$remaining[] = intval($uid);
+					}
+				}
+				if (count($remaining) === 0) {
+					throw new SystemDisplayableError(
+						$alias->get_full_address() . ' is a protected mailbox and this is its only member. '
+						. 'Mail arriving with no one to seal to would be stored unprotected — set that '
+						. 'mailbox to Standard, or give it another member, first.');
+				}
+				// The other half of the invariant, held here too: on a (legacy)
+				// multi-holder sealing mailbox, removing a grant is fine while it
+				// moves TOWARD one holder with a vault — but not when the one it
+				// would leave behind has no vault to seal to.
+				if (count($remaining) === 1) {
+					$err = self::grant_set_error(true, $remaining);
+					if ($err !== null) {
+						throw new SystemDisplayableError($alias->get_full_address() . ': ' . $err);
+					}
+				}
+			}
+		}
+		return parent::permanent_delete($debug);
 	}
 }
 

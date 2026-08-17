@@ -23,6 +23,7 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class LinodeOAuthProvider implements OAuth2Provider {
 
     use DeclaresOAuthConfigFields;
+    use DeclaresNoOAuthIdentity;
 
     public static function getKey(): string { return 'linode'; }
     public static function getLabel(): string { return 'Linode'; }

@@ -1001,13 +1001,11 @@ class InboundEmailMessage extends SystemBase {
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 		try {
+			// The mailbox's own posture where it has one, the domain's otherwise
+			// (specs/mailbox_connect_flow.md § D).
 			$alias = new InboundEmailAlias($alias_id, TRUE);
-			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
-			if ($domain_id) {
-				$domain = new InboundEmailDomain($domain_id, TRUE);
-				if ($domain->key && $domain->seals_content()) {
-					return true;
-				}
+			if ($alias->key && $alias->seals_content()) {
+				return true;
 			}
 		} catch (\Throwable $e) {
 			return true; // unresolvable — fail toward the sealed path, never a silent leak

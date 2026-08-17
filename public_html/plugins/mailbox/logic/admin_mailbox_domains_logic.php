@@ -52,7 +52,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// --- Protection ceremony inline fixes (specs/mailbox_protection_ceremony.md) ---
 	// Both act on a domain being edited and land back on its editor so the
 	// checklist re-evaluates immediately.
-	if ($input && ($input['action'] ?? '') === 'ceremony_remove_grant') {
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_remove_grant') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$alias = new InboundEmailAlias(intval($input['alias_id'] ?? 0), TRUE);
 		if ($alias->key && intval($alias->get('iea_ied_inbound_email_domain_id')) === $domain_id) {
@@ -62,7 +62,17 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 					$remaining[] = intval($uid);
 				}
 			}
-			InboundEmailMailboxGrant::sync_for_alias($alias->key, $remaining);
+			try {
+				InboundEmailMailboxGrant::sync_for_alias($alias->key, $remaining);
+			} catch (InboundEmailMailboxGrantException $e) {
+				// Already-sealing mailbox: this removal would leave it with no one
+				// to seal to, or with a member who has no vault. Say so instead of
+				// failing the page — the checklist row that offered the button is
+				// still there, and the message names the way out.
+				$session->save_message(new DisplayMessage(
+					$e->getMessage(), 'Access not changed', '~/plugins/mailbox/admin/~',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			}
 		}
 		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id);
 	}
@@ -73,7 +83,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	// picker that could hand someone else's key duty to them without their
 	// knowledge. Refused when the domain already has an owner, so it can never
 	// be used to take a domain from someone.
-	if ($input && ($input['action'] ?? '') === 'ceremony_set_domain_owner') {
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_set_domain_owner') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$claim = new InboundEmailDomain($domain_id, TRUE);
 		$acting = intval($session->get_user_id());
@@ -83,7 +93,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		}
 		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id);
 	}
-	if ($input && ($input['action'] ?? '') === 'ceremony_seal_batch') {
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_seal_batch') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$domain = new InboundEmailDomain($domain_id, TRUE);
 		if ($domain->key && $domain->seals_content()) {
@@ -92,7 +102,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		return LogicResult::redirect($editor_base . '?ied_inbound_email_domain_id=' . $domain_id
 			. '&sealed_now=1');
 	}
-	if ($input && ($input['action'] ?? '') === 'ceremony_unseal_batch') {
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_unseal_batch') {
 		$domain_id = intval($input['ied_inbound_email_domain_id'] ?? 0);
 		$domain = new InboundEmailDomain($domain_id, TRUE);
 		if ($domain->key && !$domain->seals_content()) {
@@ -110,7 +120,7 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 	$imap_type_domains = InboundImapAccount::PROVIDER_EMAIL_DOMAINS;
 
 	// Handle form submission (add/edit domain)
-	if ($input && isset($input['domain_type'])) {
+	if (LibraryFunctions::isFormSubmission() && isset($input['domain_type'])) {
 		if (isset($input['edit_primary_key_value']) && $input['edit_primary_key_value']) {
 			$domain = new InboundEmailDomain($input['edit_primary_key_value'], TRUE);
 		} else {
@@ -127,6 +137,19 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		$domain_name = isset($imap_type_domains[$type])
 			? $imap_type_domains[$type]
 			: trim((string)($input['ied_domain'] ?? ''));
+
+		// A NEW pulled-in domain comes into existence one way: through the
+		// connect wizard, whose provisioner shapes it correctly and attaches the
+		// mailbox in the same breath (specs/mailbox_connect_flow.md, rule 1).
+		// This editor keeps editing existing domains of every type.
+		if ($is_new_domain && $is_imap) {
+			$session->save_message(new DisplayMessage(
+				'A mailbox collected from ' . htmlspecialchars($domain_name !== '' ? $domain_name : 'a provider')
+					. ' is set up by connecting the mailbox itself — the domain comes with it.',
+				'Connect the mailbox instead', '~/plugins/mailbox/admin/~',
+				DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_connect');
+		}
 
 		$domain->set('ied_domain', $domain_name);
 		$domain->set('ied_is_enabled', isset($input['ied_is_enabled']) ? true : false);
@@ -148,11 +171,12 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		if (!isset($level_rank[$new_level])) {
 			$new_level = InboundEmailDomain::LEVEL_STANDARD;
 		}
-		// Fortress is meaningless for an IMAP-source domain — the picker hides the
-		// card, but the save guards it too (a stale POST cannot smuggle it in).
-		// Fall back to Standard (the no-obligations default), never silently to a
-		// different protected level the user did not choose.
-		if ($is_imap && $new_level === InboundEmailDomain::LEVEL_FORTRESS) {
+		// A provider domain — gmail.com — is not an identity this deployment
+		// holds, so it makes no protection claim at all (specs/mailbox_connect_flow.md
+		// § D): it is forced Standard, and each pulled-in mailbox under it carries
+		// its own level instead. The picker is hidden for these domains; the save
+		// guards it too, so a stale POST cannot smuggle a level in.
+		if ($is_imap) {
 			$new_level = InboundEmailDomain::LEVEL_STANDARD;
 		}
 

@@ -37,7 +37,9 @@
  * wrapper differs.
  *
  * @see specs/implemented/inbound_email_filters.md
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - forwarding consent follows the MAILBOX's protection level;
+ *   a domain-scoped filter needs it as soon as any mailbox under it seals
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -130,15 +132,33 @@ class InboundEmailFilter extends SystemBase {
 	/**
 	 * Does this filter need a written acknowledgment before it may forward?
 	 *
-	 * Only when it forwards at all AND its domain seals content. Forwarding off
-	 * a standard domain is ordinary mail routing and needs nothing.
+	 * Only when it forwards at all AND the mail it would forward is sealed.
+	 * Forwarding plaintext mail is ordinary routing and needs nothing.
+	 *
+	 * A filter scoped to ONE mailbox asks that mailbox, whose level may be its
+	 * own (specs/mailbox_connect_flow.md § D); a domain-scoped filter asks the
+	 * domain, and needs an acknowledgment as soon as any mailbox under it seals —
+	 * the filter reaches all of them, so the strictest one governs.
 	 */
 	function forwardNeedsAcknowledgment(): bool {
 		if (trim((string)$this->get('fil_action_forward_to')) === '') {
 			return false;
 		}
-		$domain = new InboundEmailDomain(intval($this->get('fil_ied_inbound_email_domain_id')), TRUE);
-		return $domain->key ? $domain->seals_content() : false;
+		$alias_id = intval($this->get('fil_iea_inbound_email_alias_id'));
+		if ($alias_id > 0) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+			$alias = new InboundEmailAlias($alias_id, TRUE);
+			return $alias->key ? $alias->seals_content() : false;
+		}
+		$domain_id = intval($this->get('fil_ied_inbound_email_domain_id'));
+		if ($domain_id <= 0) {
+			return false;
+		}
+		$domain = new InboundEmailDomain($domain_id, TRUE);
+		if ($domain->key && $domain->seals_content()) {
+			return true;
+		}
+		return InboundEmailAlias::domainHasSealingMailbox($domain_id);
 	}
 
 	/**

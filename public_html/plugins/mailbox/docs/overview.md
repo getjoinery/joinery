@@ -208,12 +208,16 @@ every domain, the mailboxes (aliases) nested under it, how each mailbox routes
 (stored / forwarded / both), and any IMAP feed pulling mail into it. A domain is
 either MX-hosted (mail pushed in) or an **IMAP source** (mail pulled in per
 mailbox — e.g. `gmail.com`, no MX needed); both nest identically. The tree is the
-overview and entry point; **+ Domain**, **+ Mailbox**, and every **Edit** open the
-per-object editor with context pre-filled. Under an **IMAP-source** domain the
-mailbox *is* its feed: **+ Mailbox** and **Edit** open one combined editor that
-manages the mailbox name, its access grants, and the IMAP feed together (creating
-the feed if the mailbox doesn't have one yet) — there is no separate feed object
-to add. Hosted (MX) domains keep a distinct **+ IMAP feed** per mailbox.
+overview and entry point; **+ Domain** and every **Edit** open the per-object editor
+with context pre-filled. Under an **IMAP-source** domain the mailbox *is* its feed:
+**Edit** opens one combined editor that manages the mailbox name, its reader, its
+protection level and the IMAP feed together — there is no separate feed object.
+Hosted (MX) domains keep a distinct **+ IMAP feed** per mailbox, which opens the
+connect wizard — the feed is created there, attached to the hosted mailbox.
+
+**+ Connect a mailbox** is how a pulled-in mailbox is created, and the only way
+(`admin_mailbox_connect`); **+ Mailbox** on an IMAP-source domain leads there too.
+See *Connecting a mailbox* below.
 
 ### Adding a Domain
 
@@ -222,14 +226,62 @@ The Setup tab can register a domain for you (a one-click action on the
 click **+ Add Domain**, enter the name
 and save — Postfix picks it up immediately (the inbound domain list is read live
 from the database; no host command, no per-domain Postfix config). Then use the
-Setup tab to verify and publish the domain's DNS records. Tick **IMAP source** on
-a domain whose mail arrives by IMAP poll rather than MX.
+Setup tab to verify and publish the domain's DNS records. **+ Add Domain**
+creates hosted domains only: an IMAP-source domain (`gmail.com`) comes into
+existence through the connect wizard, together with its first mailbox.
 
 ### Adding an Alias (mailbox)
 
-1. On the **Accounts** tab, click **+ Mailbox** on the domain you want
+1. On the **Accounts** tab, click **+ Mailbox** on the hosted domain you want
 2. Enter the alias name, delivery mode, and destinations (for forwarding)
 3. Save
+
+### Connecting a mailbox
+
+A mailbox whose mail lives somewhere else — Gmail, Microsoft 365, Yahoo/AOL, iCloud,
+Fastmail, or any IMAP host — is created by the connect wizard
+(`admin_mailbox_connect`, permission 10), reached from **+ Connect a mailbox** on the
+Accounts tab. It is one page in four states, chosen by what is known rather than by a
+step in the URL:
+
+| State | Shown when | Asks |
+|---|---|---|
+| `provider` | nothing chosen yet | where does this mail live — nothing else |
+| `register` | the chosen provider is OAuth and this site is not registered with it | that provider's app credentials, inline, plus the callback URL to paste |
+| `signin` | the provider is ready | sign in; who reads the mailbox; what protection it gets |
+| `configure` | a connected feed exists | the real folder list, how much history to bring in, what to call it |
+
+The order is the point: each question is asked at the first moment it can be answered.
+The folder list is a fact about a connected account, so it comes after signing in; the
+provider registration is asked for only when it is missing, and only for the provider
+being used.
+
+**Consent creates the mailbox.** The flow payload carries the operator's *intent* —
+provider, reader, protection level — and no ids, because none of those rows exist yet.
+`InboundImapOAuthConsumer` creates the mailbox on success through
+`ImapFeedProvisioner::provision()`, which is the one path a pulled-in domain, alias,
+grant and feed come into being by; the combined editor edits what it made. A grant that
+carries `account_id` instead is a **reconnect**, and stores the token on the feed that
+already exists.
+
+**The address comes from the provider.** Google and Microsoft report which account
+consented (`OAuth2Client::fetchIdentity()`), and that answer is authoritative — it is
+the address the IMAP session will authenticate as, so a typed one that disagrees is
+simply wrong. Where a provider cannot say, the wizard asks, with the grant already held
+in the session; losing the convenience never loses the connection.
+
+**Someone else can sign in.** Choosing that creates the mailbox with no token: it
+appears on the Accounts tree switched off with its normal **Connect** button, finished
+later by a permission-10 admin on the owner's device.
+
+**Protection is asked before the import, deliberately.** Sealing happens per message at
+store time, so a mailbox set to Private *before* its archive is imported seals every
+message as it lands, at no extra cost. Set afterwards, the same end state means the
+backlog pass rewriting every stored row, 200 at a time, from the browser.
+
+The feed is created **disabled** and starts fetching when the configure step is
+finished, so an abandoned flow leaves a mailbox that is visibly not enabled rather than
+one quietly collecting mail nobody finished asking for.
 
 ## Server Setup
 
@@ -1061,11 +1113,36 @@ row is recoverable).
 
 ## Security levels
 
-Each **domain** carries a security level (`ied_security_level`), the single switch
-that selects each mechanism's plaintext-vs-sealed branch. Every mailbox and alias on
-the domain inherits it — MX, SPF, DMARC, and DKIM are domain-level facts, so the level
-attaches to the domain, never to an individual mailbox. It is chosen on the domain
-editor as a required three-card picker (outcome language only, default **Standard**).
+**Protection attaches to the identity that owns the mail.**
+
+For **hosted mail** that identity is the domain: MX, SPF, DMARC and DKIM are
+domain-level facts, so the level lives on the domain (`ied_security_level`) and every
+mailbox under it inherits. It is chosen on the domain editor as a required three-card
+picker (outcome language only, default **Standard**).
+
+For **pulled-in mail** — a mailbox collected over IMAP — that identity is the mailbox.
+`gmail.com` is not an identity this deployment holds; it is somebody else's domain that
+we hold one account on, and two people pulling their own Gmail into one site have
+nothing in common to share a setting with. So a pulled-in mailbox carries its own level
+(`iea_security_level`), chosen in the mailbox editor, and its provider domain carries
+none at all: it is forced Standard, its picker is hidden, and the Accounts tree shows no
+badge on it. **Fortress is domain-only** — it is an identity guarantee (relay-side
+sealing, inverted DNS, in-app signing), and none of it exists for mail on somebody
+else's server; a pulled-in mailbox offers Standard and Private.
+
+This is deliberately *not* a general per-mailbox override. A hosted domain keeps exactly
+one answer, because its DNS-shaped guarantees cannot vary per mailbox.
+
+`InboundEmailAlias::security_level()` / `seals_content()` are **the** resolver — own
+value when set, the domain's otherwise. Every content-sealing decision asks the alias;
+nothing else reads `iea_security_level`, and nothing else reimplements the inherit rule.
+Domain identity — DKIM, the protected sending identity, the DNS shape, the relay map —
+keeps asking the domain.
+
+The level switch itself is the same either way, and so is the ceremony: raising or
+lowering a pulled-in mailbox runs the checklist, the server-side re-verification, the
+receipt card and the backlog sealing that a domain does, scoped to that one mailbox.
+There is no second ceremony.
 
 | | **Standard** | **Private** | **Fortress** |
 |---|---|---|---|
@@ -1079,9 +1156,13 @@ editor as a required three-card picker (outcome language only, default **Standar
 
 **Where the level switches behavior:**
 
-- **Ingest** — `InboundEmailRouter::storeMessage()` seals only when the owner holds a
-  vault **and** `$domain->seals_content()` (Private or Fortress). A Standard domain
-  stores plaintext even when its owner has a vault.
+- **Ingest** — every store path resolves one answer through
+  `InboundEmailRouter::resolveSealTarget()`: the MAILBOX's posture decides, and mail
+  with no mailbox asks the domain. A Standard mailbox stores plaintext even when its
+  owner has a vault. A sealing mailbox that cannot produce a key **declines the
+  message** rather than writing it in the clear — see *A sealing mailbox always has
+  someone to seal to* below. This covers pushed mail (`storeMessage`), Direct
+  (`storeDirectMessage`) and IMAP-polled mail (`storeExtracted`) alike.
 - **Relay seal target** — `RelayMapExporter::sealTargetForAlias()` seals to the owner's
   vault key (`key_kind=user`, producing Fortress pending-parse rows) **only** for a
   Fortress domain; every other posture seals to the ambient transport key, which
@@ -1190,12 +1271,39 @@ readable after the domain's level changes — the read hooks key off the row, no
 domain. Lowering a level changes future ingest only, and never unseals: sealed
 rows stay sealed and readable in-window.
 
-**IMAP-source domains** offer Standard and Private only — the remote provider holds the
-plaintext and the sending identity, and there is no MX to move, so the picker hides the
-Fortress card for them. **Group-collaboration mailboxes are Standard-only** (the
-one-operator/one-key model every protected level rests on doesn't cover multi-reader
-sealing); the domain editor refuses to raise a domain whose alias has more than one
-live grant.
+**Group-collaboration mailboxes are Standard-only** (the one-operator/one-key model every
+protected level rests on doesn't cover multi-reader sealing); the domain editor refuses
+to raise a domain whose alias has more than one live grant.
+
+### A sealing mailbox always has someone to seal to
+
+A mailbox that seals encrypts to **exactly one holder**, and that holder must have a
+vault. With neither, sealing has no key — and a message stored in plaintext on a
+protected mailbox is the worst outcome available, because the read path dispatches on
+the row's own `iem_content_sealed` column, so a row that lands plaintext renders
+plaintext forever.
+
+Two things hold the rule, and between them the bad state is unreachable rather than
+repairable:
+
+- **`InboundEmailMailboxGrant::sync_for_alias()`** refuses any change to a sealing
+  mailbox that would leave other than one holder, or a holder without a vault. Every
+  grant-writing surface goes through it — the alias editor, the combined mailbox editor,
+  headless provisioning, the ceremony's inline fixes. The one write that does not is the
+  user-delete cascade, so deleting the sole holder of a sealing mailbox is refused too,
+  at the moment the deletion is attempted.
+- **Store time declines rather than downgrades.** If a sealing mailbox somehow cannot
+  produce a key, the message is not stored — and declining always means *try again
+  later*, never a bounce: the Postfix pipe exits tempfail, the webhook answers 503, the
+  IMAP feed leaves the message on the source and reports why it stopped, a Direct
+  delivery is held with its parts, and the relay blob stays on the relay un-acked. Once
+  the mailbox is repaired, the held mail flows in on its own.
+
+The Setup tab's **Protected mail can be sealed** row
+(`InboundEmailHealth::checkSealingMailboxHolders()`) names any mailbox in that state,
+so it is seen well inside the shortest sender retry window rather than after it.
+
+There is no sweep and no janitor: with the invariant enforced there is nothing to sweep.
 
 **Automated mail on a Fortress domain** uses the subdomain pattern: put the automated
 senders on `mail.<domain>` at Standard. Under Fortress's strict DMARC alignment the

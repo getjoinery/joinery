@@ -16,6 +16,7 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class GoogleOAuthProvider implements OAuth2Provider {
 
     use DeclaresOAuthConfigFields;
+    use DeclaresNoOAuthIdentity;
 
     public static function getKey(): string { return 'google'; }
     public static function getLabel(): string { return 'Google'; }
@@ -71,5 +72,22 @@ class GoogleOAuthProvider implements OAuth2Provider {
             'access_type' => 'offline',
             'prompt'      => 'consent',
         ];
+    }
+
+    // --- Identity -----------------------------------------------------------
+    // Google will say which account just consented, which is what stops an
+    // operator typing one address and signing in as another.
+
+    public static function identityScopes(): array {
+        return ['openid', 'email'];
+    }
+
+    public static function getIdentityEndpoint(): ?string {
+        return 'https://www.googleapis.com/oauth2/v3/userinfo';
+    }
+
+    public static function identityFromProfile(array $profile): ?string {
+        $email = trim((string)($profile['email'] ?? ''));
+        return $email !== '' ? $email : null;
     }
 }

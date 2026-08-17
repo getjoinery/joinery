@@ -172,6 +172,15 @@ class RunMailImports implements ScheduledTaskInterface {
 				. $run->get('mir_skipped') . ' skipped, ' . $run->get('mir_failed') . ' failed.');
 		}
 
+		if (!empty($counts['held_reason'])) {
+			// The store refused to write plaintext into a protected mailbox that
+			// cannot seal right now. The remaining entries stay pending and this
+			// pass says why; once the mailbox is repaired (the Setup tab names
+			// it), the next pass imports them unchanged.
+			return array('status' => 'success', 'message' => 'Import run #' . $run->key
+				. ' is held, not failed: ' . $counts['held_reason']);
+		}
+
 		return array('status' => 'success', 'message' => 'Import run #' . $run->key . ': stored '
 			. $counts['stored'] . ', duplicates ' . $counts['dedup'] . ', failed ' . $counts['failed']
 			. ' this batch (' . $run->get('mir_processed') . '/' . $run->get('mir_total_entries') . ' done).');

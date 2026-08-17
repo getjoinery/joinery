@@ -3,7 +3,24 @@
  * InboundEmailAlias - Virtual mailbox aliases that forward to real addresses
  * or store the message locally.
  *
- * @version 1.3
+ * iea_security_level is this ONE mailbox's protection posture, and NULL — the
+ * value every hosted mailbox carries — means "inherit the domain's"
+ * (specs/mailbox_connect_flow.md § D). Protection attaches to the identity that
+ * owns the mail: for hosted mail that identity is the domain (MX, SPF, DMARC and
+ * DKIM are domain-level facts, and every mailbox under it inherits); for mail
+ * pulled in over IMAP the identity is the mailbox, because gmail.com is not an
+ * identity this deployment holds. Two people pulling their own Gmail into one
+ * site would otherwise share a single setting, and sealed mail encrypts to one
+ * person.
+ *
+ * security_level()/seals_content() are THE resolver — nothing else reads the
+ * column, and nothing else reimplements the inherit rule. Every content-sealing
+ * decision asks the alias; domain identity (DKIM, protected identity, DNS shape,
+ * relay export) keeps asking the domain.
+ *
+ * @version 1.5 - the SQL level helpers normalise case exactly as the PHP
+ *   resolver does, so the two can never disagree on a stored value
+ * @version 1.4
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -37,6 +54,10 @@ class InboundEmailAlias extends SystemBase {
 		'iea_delivery_mode'      => array('type'=>'varchar(20)', 'default'=>'forward', 'is_nullable'=>false),
 		'iea_description'        => array('type'=>'varchar(500)'),
 		'iea_is_enabled'         => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
+		// This mailbox's own protection posture, or NULL to inherit the domain's
+		// (specs/mailbox_connect_flow.md § D). NULL is what every existing row
+		// means, so there is nothing to migrate. Read through security_level().
+		'iea_security_level'     => array('type'=>'varchar(16)', 'is_nullable'=>true),
 		'iea_forward_count'      => array('type'=>'int4', 'default'=>'0'),
 		'iea_last_forward_time'  => array('type'=>'timestamp(6)'),
 		'iea_create_time'        => array('type'=>'timestamp(6)', 'default'=>'now()'),
@@ -159,6 +180,92 @@ class InboundEmailAlias extends SystemBase {
 		$this->set('iea_forward_count', intval($this->get('iea_forward_count')) + 1);
 		$this->set('iea_last_forward_time', gmdate('Y-m-d H:i:s'));
 		$this->save();
+	}
+
+	/**
+	 * This mailbox's protection level (specs/mailbox_connect_flow.md § D) — the
+	 * one answer every content-sealing decision asks for. Its own value when it
+	 * has one, otherwise the domain's, and Standard for a stored value that is
+	 * not a level at all (the same rule the domain applies; the column is only
+	 * ever written through validated pickers).
+	 */
+	function security_level() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		$own = strtolower(trim((string)$this->get('iea_security_level')));
+		if ($own !== '') {
+			return in_array($own, array(InboundEmailDomain::LEVEL_STANDARD,
+				InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true)
+				? $own : InboundEmailDomain::LEVEL_STANDARD;
+		}
+		return self::domainLevel(intval($this->get('iea_ied_inbound_email_domain_id')));
+	}
+
+	/** True when this mailbox seals stored content at rest (Private or Fortress). */
+	function seals_content() {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		return in_array($this->security_level(),
+			array(InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true);
+	}
+
+	/** True when this mailbox carries a level of its own rather than inheriting. */
+	function has_own_security_level(): bool {
+		return trim((string)$this->get('iea_security_level')) !== '';
+	}
+
+	/**
+	 * The domain's level, read fresh every time.
+	 *
+	 * NOT memoized, deliberately. A level is mutable — a raise or a lowering
+	 * changes it mid-request, and the code that acts on the change is running in
+	 * that same request. A cache here answered "private" to everything after a
+	 * lowering, so a mailbox that had just converged still claimed to be sealed.
+	 * A stale posture is the one kind of wrong answer this resolver must never
+	 * give, and one extra row read is not a price worth paying to risk it.
+	 */
+	private static function domainLevel(int $domain_id): string {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		if ($domain_id <= 0) {
+			return InboundEmailDomain::LEVEL_STANDARD;
+		}
+		$domain = new InboundEmailDomain($domain_id, TRUE);
+		return $domain->key ? $domain->security_level() : InboundEmailDomain::LEVEL_STANDARD;
+	}
+
+	/**
+	 * True when any live mailbox on this domain carries a sealing level of its
+	 * own — the question a domain-wide surface has to ask before deciding that
+	 * "the domain is Standard" settles anything.
+	 */
+	static function domainHasSealingMailbox(int $domain_id): bool {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+		if ($domain_id <= 0) {
+			return false;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			'SELECT 1 FROM iea_inbound_email_aliases
+			 WHERE iea_ied_inbound_email_domain_id = ? AND iea_delete_time IS NULL
+			   AND LOWER(TRIM(iea_security_level)) IN (?, ?) LIMIT 1');
+		$stmt->execute(array($domain_id, InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS));
+		return (bool)$stmt->fetchColumn();
+	}
+
+	/**
+	 * The effective-level SQL expression for a query that has joined a message
+	 * to its alias and its domain: the alias's own value when it has one, the
+	 * domain's otherwise. The one place the inherit rule is expressed in SQL, so
+	 * a set-based query and the PHP resolver can never disagree.
+	 *
+	 * $alias_tbl / $domain_tbl are the query's table aliases. A message with no
+	 * mailbox (the catch-all) has no alias row, so the LEFT JOIN's NULL falls
+	 * through to the domain — which is exactly whose mail it is.
+	 */
+	static function effectiveLevelSql(string $alias_tbl, string $domain_tbl): string {
+		// LOWER/TRIM mirror the PHP resolver's normalisation, so a value that
+		// only a hand edit could have miscased still reads as the same level
+		// here as it does there.
+		return "COALESCE(NULLIF(LOWER(TRIM($alias_tbl.iea_security_level)), ''),"
+			. " LOWER(TRIM($domain_tbl.ied_security_level)))";
 	}
 
 	/**

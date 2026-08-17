@@ -8,13 +8,16 @@
  * never hardcoded. The grant mechanics in OAuth2Client are identical across
  * providers — only the values these methods return differ.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Added the identity contract (identityScopes, getIdentityEndpoint, identityFromProfile): a provider that knows who signed in declares how to ask, so no consumer has to build a profile lookup of its own
  * @changelog 1.1 - Added configFields() and configGuide(): a provider declares the settings its app registration is made of, so every surface that collects one renders from one declaration
  */
 
-// The default configFields() implementation every provider uses. Required here
-// so implementing this interface is enough to pick it up.
+// The default configFields() implementation every provider uses, and the
+// "no identity" defaults for the providers that report none. Required here so
+// implementing this interface is enough to pick both up.
 require_once(PathHelper::getIncludePath('includes/oauth/DeclaresOAuthConfigFields.php'));
+require_once(PathHelper::getIncludePath('includes/oauth/DeclaresNoOAuthIdentity.php'));
 
 interface OAuth2Provider {
     /** Stable key, also the settings prefix, e.g. 'google' | 'microsoft'. */
@@ -63,4 +66,26 @@ interface OAuth2Provider {
      * access_type=offline&prompt=consent to reliably receive a refresh token).
      */
     public static function extraAuthorizeParams(array $scopes): array;
+
+    // --- Identity: who signed in --------------------------------------------
+    //
+    // Asking the person to type the address they are about to sign in AS invites
+    // a mismatch that surfaces much later as an opaque authentication failure —
+    // the address is used verbatim as the SASL username. A provider that can
+    // simply report it declares how to ask, here, once. `DeclaresNoOAuthIdentity`
+    // supplies the "cannot" answers for every provider reached for a capability
+    // rather than for a person.
+    //
+    // This is deliberately a PROVIDER declaration plus a bearer GET in the
+    // client, exactly like the token endpoints — not identity logic in the grant
+    // engine, and not a lookup each consumer rebuilds.
+
+    /** Extra scopes the identity lookup needs, merged into the consent request. */
+    public static function identityScopes(): array;
+
+    /** The profile endpoint to GET with the access token, or NULL when unsupported. */
+    public static function getIdentityEndpoint(): ?string;
+
+    /** The email address in a decoded profile payload, or NULL if it holds none. */
+    public static function identityFromProfile(array $profile): ?string;
 }

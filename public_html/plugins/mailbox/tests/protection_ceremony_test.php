@@ -21,7 +21,9 @@
  *
  * Run: php tests/run.php db --filter=protection_ceremony
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - a member with no vault is refused too: the vault is the key
+ *   the mail seals to, so "has a member" was never the whole rule
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -189,8 +191,25 @@ try {
 		'a second member on a protected mailbox is refused');
 	check(mailbox_protected_grant_error($dom, array()) !== null,
 		'a holderless mailbox on a protected domain is refused');
-	check(mailbox_protected_grant_error($dom, array(1)) === null,
-		'exactly one member is the accepted shape');
+
+	// One member is the accepted shape only when that member has a VAULT: it is
+	// the key the mail seals to, and without one a protected mailbox would store
+	// plaintext (specs/mailbox_connect_flow.md § E).
+	$novault = make_user('PcNoVault');
+	check(mailbox_protected_grant_error($dom, array(intval($novault->key))) !== null,
+		'one member with no vault is refused — there is nothing to seal to');
+
+	$member = make_user('PcMember');
+	$member_keys = sodium_crypto_box_keypair();
+	$member_vault = new UserEncryptionVault(NULL);
+	$member_vault->set('uev_usr_user_id', intval($member->key));
+	$member_vault->set('uev_public_key', SealedBox::b64url(sodium_crypto_box_publickey($member_keys)));
+	$member_vault->set('uev_salt', SealedBox::b64url(random_bytes(16)));
+	$member_vault->save();
+	$member_vault->load();
+	harness_register_row('uev_user_encryption_vaults', 'uev_user_encryption_vault_id', intval($member_vault->key));
+	check(mailbox_protected_grant_error($dom, array(intval($member->key))) === null,
+		'exactly one member, holding a vault, is the accepted shape');
 
 	$std = new InboundEmailDomain(NULL);
 	$std->set('ied_domain', 'pc-standard-' . bin2hex(random_bytes(3)) . '.example');
@@ -225,8 +244,14 @@ try {
 	$alias->load();
 	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', intval($alias->key));
 	InboundEmailMailboxGrant::sync_for_alias($alias->key, array(intval($owner->key)));
+	// Cleared directly, not through sync_for_alias: emptying the holder list of a
+	// sealing mailbox is exactly what the invariant refuses, and teardown is not
+	// a place to argue with it.
 	harness_defer(function () use ($alias) {
-		InboundEmailMailboxGrant::sync_for_alias($alias->key, array());
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare('DELETE FROM ieg_inbound_email_mailbox_grants
+			WHERE ieg_iea_inbound_email_alias_id = ?');
+		$stmt->execute(array(intval($alias->key)));
 	});
 
 	// Facts gathering against real rows — the row-evaluation sections above

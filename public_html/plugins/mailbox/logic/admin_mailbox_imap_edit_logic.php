@@ -15,7 +15,13 @@
  * Connection details for a known provider come from the preset catalog; the
  * app/basic password is a non-model field stored encrypted via setPassword().
  *
- * @version 2.4
+ * @version 2.6
+ * @changelog 2.6 - edit-only, enforced: any arrival that resolves no existing
+ *   feed is handed to the connect wizard, POSTs included; the ceremony actions
+ *   (grant removal, seal/unseal batches) answer only to a POST.
+ * @changelog 2.5 - a pulled-in mailbox carries its OWN protection level
+ *   (specs/mailbox_connect_flow.md § D), raised and lowered through the same
+ *   ceremony the domain uses, scoped to this one mailbox.
  * @changelog 2.4 - a sealing domain holds one reader, enforced where grants are
  *   written; "not checked yet" is told apart from "your provider cannot".
  * @changelog 2.3 - only a scope change that still reads backward rewinds the
@@ -39,7 +45,70 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	$session->check_permission(10);
 	$settings = Globalvars::get_instance();
 
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+	require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
 	$list_url = '/plugins/mailbox/admin/admin_mailbox_accounts';
+	$editor_base = '/plugins/mailbox/admin/admin_mailbox_imap_edit';
+
+	// --- Ceremony inline fixes and batch loops, scoped to one mailbox ---
+	// The checklist this page renders offers the same in-place fixes the domain
+	// editor's does, and they post back here — so the action is handled here.
+	// Actions are POSTs, never links: a GET arrives with the session cookie
+	// whenever any page tells the browser to fetch it, cross-site included.
+	if (LibraryFunctions::isFormSubmission() && ($input['action'] ?? '') === 'ceremony_remove_grant') {
+		$fix_alias = new InboundEmailAlias(intval($input['alias_id'] ?? 0), TRUE);
+		$back = $list_url;
+		if ($fix_alias->key) {
+			$back = $editor_base . '?domain_id=' . intval($fix_alias->get('iea_ied_inbound_email_domain_id'))
+				. '&alias_id=' . intval($fix_alias->key);
+			$remaining = array();
+			foreach (InboundEmailMailboxGrant::user_ids_for_alias(intval($fix_alias->key)) as $uid) {
+				if (intval($uid) !== intval($input['user_id'] ?? 0)) {
+					$remaining[] = intval($uid);
+				}
+			}
+			try {
+				InboundEmailMailboxGrant::sync_for_alias(intval($fix_alias->key), $remaining);
+			} catch (InboundEmailMailboxGrantException $e) {
+				// An already-sealing mailbox: this removal would leave it with no
+				// one to seal to. Say so rather than failing the page — the row
+				// that offered the button is still there, and the message names
+				// the way out.
+				$session->save_message(new DisplayMessage(
+					$e->getMessage(), 'Access not changed', '~/plugins/mailbox/admin/~',
+					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+			}
+		}
+		return LogicResult::redirect($back);
+	}
+
+	// The no-JS fallbacks behind the raise/lowering receipt cards, which render on
+	// this page for a mailbox-scoped level change. Same passes the domain editor
+	// runs; only the row set is narrower.
+	if (LibraryFunctions::isFormSubmission()
+			&& in_array(($input['action'] ?? ''), array('ceremony_seal_batch', 'ceremony_unseal_batch'), true)) {
+		$scope_alias_id = intval($input['alias_scope_id'] ?? 0);
+		$scope_alias = new InboundEmailAlias($scope_alias_id, TRUE);
+		if ($scope_alias->key) {
+			$scope_domain = new InboundEmailDomain(
+				intval($scope_alias->get('iea_ied_inbound_email_domain_id')), TRUE);
+			$back = $editor_base . '?domain_id=' . intval($scope_domain->key)
+				. '&alias_id=' . $scope_alias_id;
+			if ($input['action'] === 'ceremony_seal_batch' && $scope_alias->seals_content()) {
+				mailbox_protection_seal_batch($scope_domain, 200, $scope_alias_id);
+				return LogicResult::redirect($back . '&sealed_now=1');
+			}
+			if ($input['action'] === 'ceremony_unseal_batch' && !$scope_alias->seals_content()) {
+				mailbox_protection_unseal_batch($scope_domain, intval($session->get_user_id()),
+					25, $scope_alias_id);
+				return LogicResult::redirect($back . '&unsealed_now=1');
+			}
+			return LogicResult::redirect($back);
+		}
+		return LogicResult::redirect($list_url);
+	}
 
 	// Combined mode: reached via "+ Mailbox" / "Edit" on an IMAP-source domain.
 	// domain_id rides through the POST as a hidden field; alias_id identifies an
@@ -48,6 +117,21 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 	$domain = $domain_id > 0 ? new InboundEmailDomain($domain_id, TRUE) : null;
 	$combined = (bool)($domain && $domain->key);
 	$alias_id = intval($input['alias_id'] ?? 0);
+
+	// Creation belongs to the connect wizard, and only to it
+	// (specs/mailbox_connect_flow.md § A): it asks in the order the answers
+	// exist, and one creation path is what keeps the mailbox, its domain, its
+	// grant and its feed from being assembled two slightly different ways. This
+	// editor EDITS. Arriving here with a domain and no mailbox is someone
+	// following an old link to add one, so hand them to the wizard.
+	if ($combined && $alias_id <= 0 && intval($input['edit_primary_key_value'] ?? 0) <= 0
+			&& intval($input['iia_inbound_imap_account_id'] ?? 0) <= 0
+			&& !LibraryFunctions::isFormSubmission()) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+		$suggested = InboundImapAccount::providerForEmailDomain($domain->get('ied_domain')) ?: 'imap_generic';
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_connect?provider='
+			. rawurlencode($suggested));
+	}
 
 	// Load or create the account. In combined mode an alias_id with an existing
 	// feed loads that feed (edit); without one, a new feed is created for it.
@@ -63,6 +147,16 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		$account = count($feeds) ? new InboundImapAccount($feeds->get(0)->key, TRUE) : new InboundImapAccount(NULL);
 	} else {
 		$account = new InboundImapAccount(NULL);
+	}
+
+	// No feed resolved means this is an arrival on one of the old CREATE paths —
+	// a bare URL, an old "+ IMAP feed" link, or a stale create-form POST. This
+	// editor edits; a pulled-in mailbox comes into being through the connect
+	// wizard and its provisioner, and nowhere else (specs/mailbox_connect_flow.md
+	// rule 1). The GET guard above already sent the well-known link shapes there
+	// with a provider suggestion; this catches every other way in.
+	if (!$account->key) {
+		return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_connect');
 	}
 
 	// Alias options for the plain (hosted) feed editor's dropdown.
@@ -215,6 +309,7 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		// domain (creating it / keeping it named to match); plain mode uses the
 		// dropdown selection.
 		$resolved_alias_id = 0;
+		$alias_pre_existing = false;
 		if ($combined) {
 			$username = trim((string)($input['iia_username'] ?? ''));
 			$local = strstr($username, '@', true);
@@ -222,6 +317,10 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 			$existing_alias = $account->key
 				? intval($account->get('iia_iea_inbound_email_alias_id'))
 				: $alias_id;
+			// Remembered before the resolve, because "was this mailbox already
+			// here?" decides whether a protection choice is an initial choice or a
+			// change — and nothing can ask afterwards.
+			$alias_pre_existing = ($existing_alias > 0);
 			$resolved_alias_id = _imap_edit_resolve_mailbox($domain_id, trim($local), $existing_alias);
 			$account->set('iia_iea_inbound_email_alias_id', $resolved_alias_id);
 		} else {
@@ -261,10 +360,11 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				InboundImapFolder::rewindCursors(intval($account->key));
 			}
 
-			// Combined mode: sync the mailbox's access grants to the submitted set.
+			// Combined mode: the mailbox's protection level and its access grants,
+			// which are one decision — sealing encrypts to exactly one holder's key.
 			if ($combined && $resolved_alias_id > 0) {
 				$submitted = array();
-				// A list from the checkboxes, a single id from the sealing-domain
+				// A list from the checkboxes, a single id from the sealing-mailbox
 				// picker. Both mean the same thing — who holds this mailbox — so both
 				// arrive under one name rather than the caller having to know which
 				// control rendered.
@@ -273,19 +373,78 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 						if (intval($uid) > 0) { $submitted[] = intval($uid); }
 					}
 				}
-				// A sealing domain holds ONE reader, and the rule has to be enforced
-				// where the grants are written. Mail on a Private or Fortress domain
-				// is sealed to a single holder's vault at the moment it arrives, so a
-				// second grantee would hold a mailbox they cannot decrypt — and the
-				// domain editor's own refusal to RAISE a multi-grant domain implies
-				// this rule while stopping none of it, because grants are written
-				// here.
-				if ($domain && $domain->seals_content() && count(array_unique($submitted)) > 1) {
-					return LogicResult::error('This mailbox is on a ' . htmlspecialchars($domain->security_level())
-						. ' domain, so its mail is encrypted to one person and only that person can read it. '
-						. 'Choose a single user, or move the mailbox to a Standard domain to share it.');
+				$submitted = array_values(array_unique($submitted));
+
+				$alias_row = new InboundEmailAlias($resolved_alias_id, TRUE);
+				$old_level = $alias_row->security_level();
+				$new_level = _imap_edit_submitted_level($input, $domain, $old_level);
+				$old_seals = in_array($old_level, array(InboundEmailDomain::LEVEL_PRIVATE,
+					InboundEmailDomain::LEVEL_FORTRESS), true);
+				$new_seals = in_array($new_level, array(InboundEmailDomain::LEVEL_PRIVATE,
+					InboundEmailDomain::LEVEL_FORTRESS), true);
+
+				// Changing a mailbox's protection is the same sensitive action the
+				// domain editor gates — re-confirm the account's second factor first.
+				// Not on creation: an initial choice is not a change, and there is no
+				// mail under it yet.
+				if ($alias_pre_existing && $new_level !== $old_level) {
+					// target_level rides the return URL so the picker comes back on
+					// the choice they made: the step-up drops the POST, and silently
+					// discarding their intent is how an operator ends up thinking
+					// the save did nothing.
+					$stepup = $session->require_recent_second_factor(
+						$editor_base . '?domain_id=' . intval($domain->key)
+						. '&alias_id=' . $resolved_alias_id
+						. '&target_level=' . rawurlencode($new_level));
+					if ($stepup !== null) {
+						return $stepup;
+					}
 				}
+
+				// Lowering first, raising last. A lowering relaxes the one-holder
+				// rule, so writing it before the grants sync means "share this
+				// mailbox and set it to Standard" is one submit rather than two; a
+				// raise has to see the final holder set before it is allowed at all.
+				if (!$new_seals && $old_seals) {
+					if (!_imap_edit_lowering_allowed($session)) {
+						throw new InboundEmailAliasException(
+							'Unlock your vault before lowering protection on this mailbox.');
+					}
+					_imap_edit_write_level($alias_row, $new_level);
+				}
+
 				InboundEmailMailboxGrant::sync_for_alias($resolved_alias_id, $submitted);
+
+				if ($new_seals && $new_level !== $old_level) {
+					// The same checklist the domain editor renders, gathered for this
+					// one mailbox. The rows are about holders, vaults and passkeys —
+					// never the level — so evaluating them here, after the grants are
+					// written, judges exactly the state the raise would seal into.
+					$acting_user_id = intval($session->get_user_id());
+					$rows = mailbox_protection_rows(
+						mailbox_protection_facts($domain, $acting_user_id, $resolved_alias_id),
+						$new_level, $acting_user_id);
+					if (!mailbox_protection_required_ok($rows)) {
+						throw new InboundEmailAliasException(mailbox_protection_first_failure($rows));
+					}
+					_imap_edit_write_level($alias_row, $new_level);
+				}
+
+				// A level change may alter the acting user's max posture — drop the
+				// session cache so the unlock-window caps re-evaluate.
+				if ($new_level !== $old_level) {
+					unset($_SESSION['max_security_level']);
+					// The raise seals history, the lowering unseals it: either way the
+					// receipt card on this page carries the convergence to done.
+					$receipt = $new_seals ? 'sealed_now=1' : ($old_seals ? 'unsealed_now=1' : '');
+					if ($receipt !== '') {
+						$session->save_message(new DisplayMessage(
+							'Mailbox saved.', 'Accounts', '~/plugins/mailbox/admin/~',
+							DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE));
+						return LogicResult::redirect($editor_base . '?domain_id=' . intval($domain->key)
+							. '&alias_id=' . $resolved_alias_id . '&' . $receipt);
+					}
+				}
 			}
 
 			// Folder tracking: a hidden marker tells us the selector was shown so an
@@ -331,6 +490,8 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 				'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
 				'folder_names' => $folder_names, 'sync_checked' => $sync_checked,
 				'tracked_folder_ids' => $tracked_folder_ids,
+				'ceremony' => _imap_edit_ceremony_state($domain,
+					$resolved_alias_id ?: $alias_id, $session, $input),
 				'error' => $e->getMessage(),
 			));
 		}
@@ -371,7 +532,109 @@ function admin_mailbox_imap_edit_logic(array $input): LogicResult {
 		'sync_visibility' => $sync_visibility, 'folder_options' => $folder_options,
 				'folder_names' => $folder_names, 'sync_checked' => $sync_checked,
 		'tracked_folder_ids' => $tracked_folder_ids,
+		// The mailbox's protection surface: the checklist before a raise, the
+		// receipt after one. Only for a pulled-in mailbox that already exists —
+		// a mailbox being created has no history to converge.
+		'ceremony' => _imap_edit_ceremony_state($domain,
+			$account->key ? intval($account->get('iia_iea_inbound_email_alias_id')) : $alias_id,
+			$session, $input),
 	));
+}
+
+/**
+ * The protection level the operator submitted for a pulled-in mailbox
+ * (specs/mailbox_connect_flow.md § D), falling back to what it already has.
+ *
+ * Only Standard and Private are offered, and only on an IMAP-source domain.
+ * Fortress is an identity guarantee — relay-side sealing, inverted DNS, in-app
+ * signing — and none of it exists for mail pulled from somebody else's server,
+ * so a stale POST cannot smuggle it in. A hosted mailbox has no level of its
+ * own at all: it inherits its domain's, which is where MX, SPF, DMARC and DKIM
+ * are decided.
+ */
+function _imap_edit_submitted_level(array $input, ?InboundEmailDomain $domain, string $current): string {
+	if (!$domain || !$domain->key || !$domain->get('ied_is_imap_source')
+			|| !array_key_exists('iea_security_level', $input)) {
+		return $current;
+	}
+	$want = strtolower(trim((string)$input['iea_security_level']));
+	return in_array($want, array(InboundEmailDomain::LEVEL_STANDARD,
+		InboundEmailDomain::LEVEL_PRIVATE), true) ? $want : $current;
+}
+
+/**
+ * Persist a mailbox's own level. Standard on an IMAP-source mailbox is stored
+ * explicitly rather than as "inherit": the operator chose it for this mailbox,
+ * and a later change to the domain must not silently reopen mail they decided
+ * to leave in the clear — or seal mail they decided to leave readable.
+ */
+function _imap_edit_write_level(InboundEmailAlias $alias, string $level): void {
+	$alias->set('iea_security_level', $level);
+	$alias->prepare();
+	$alias->save();
+	$alias->load();
+}
+
+/**
+ * Lowering protection needs the acting admin's own key open — an idle session
+ * must not quietly downgrade a mailbox. Someone with no vault at all is not
+ * being asked for one they cannot have.
+ */
+function _imap_edit_lowering_allowed($session): bool {
+	$acting_user_id = intval($session->get_user_id());
+	if ($acting_user_id <= 0) {
+		return false;
+	}
+	if (UserEncryptionVault::loadForUser($acting_user_id) === null) {
+		return true;
+	}
+	return VaultUnlock::isOpen($acting_user_id);
+}
+
+/**
+ * The ceremony state this editor renders for ONE mailbox: the checklist for a
+ * raise to Private, and the raise/lowering receipt that converges history
+ * afterwards. The same functions the domain editor calls, scoped to this alias
+ * — there is no second ceremony.
+ */
+function _imap_edit_ceremony_state($domain, int $alias_id, $session, array $input): ?array {
+	if (!$domain || !$domain->key || $alias_id <= 0 || !$domain->get('ied_is_imap_source')) {
+		return null;
+	}
+	$alias = new InboundEmailAlias($alias_id, TRUE);
+	if (!$alias->key) {
+		return null;
+	}
+	$acting_user_id = intval($session->get_user_id());
+	$facts = mailbox_protection_facts($domain, $acting_user_id, $alias_id);
+	$backlog = mailbox_protection_backlog_count(intval($domain->key), $alias_id);
+	$seals = $alias->seals_content();
+
+	$state = array(
+		'alias_id'    => $alias_id,
+		'address'     => (string)$alias->get_full_address(),
+		'level'       => $alias->security_level(),
+		'facts'       => $facts,
+		'rows_private' => mailbox_protection_rows($facts, InboundEmailDomain::LEVEL_PRIVATE, $acting_user_id),
+		'backlog'     => $backlog,
+		'sealed_total' => mailbox_protection_sealed_count(intval($domain->key), $alias_id),
+		'acting_user_id' => $acting_user_id,
+		'editor_url'  => '/plugins/mailbox/admin/admin_mailbox_imap_edit?domain_id='
+			. intval($domain->key) . '&alias_id=' . $alias_id,
+		// The receipt renders on arrival from a raise and on any later visit while
+		// a backlog remains, so a backlog that appears later still converges.
+		'sealing_active' => $seals && ($backlog > 0 || !empty($input['sealed_now'])),
+		'unseal_active'  => false,
+	);
+	if (!$seals) {
+		$counts = mailbox_protection_unseal_counts($domain, $acting_user_id, $alias_id);
+		$state['unseal_own_backlog']    = $counts['own'];
+		$state['unseal_others_backlog'] = $counts['others'];
+		$state['unseal_active'] = ($counts['own'] + $counts['others'] > 0)
+			|| !empty($input['unsealed_now']);
+		$state['window_open'] = ($acting_user_id > 0) && VaultUnlock::isOpen($acting_user_id);
+	}
+	return $state;
 }
 
 /**

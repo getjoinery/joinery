@@ -12,6 +12,10 @@
  * in place and resolves into the completed facts. A lowering lands on its
  * mirror (specs/mailbox_lowering_unseal.md), which unseals them back.
  *
+ * @version 3.8 - an ADD offers only Hosted mail: a new pulled-in domain is
+ *   born in the connect wizard, with its first mailbox
+ * @version 3.7 - a provider (IMAP-source) domain shows no protection level: it is
+ *   somebody else's domain, and each pulled-in mailbox chooses for itself
  * @version 3.6 - the domain's signing-key owner is stated here, and changed here
  */
 
@@ -107,29 +111,51 @@ if ($show_form) {
 
 	// IMAP-source presets hide the domain-name field (the domain is implied); the
 	// catch-all block only applies to a hosted (Custom) domain.
-	$imap_hide = ['ied_domain', 'ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched', 'ied_security_level_fortress_card'];
+	//
+	// The protection level goes with them (specs/mailbox_connect_flow.md § D): a
+	// provider domain is somebody else's, so it makes no claim about the mail —
+	// each pulled-in mailbox under it chooses for itself, in the mailbox editor.
+	// The AI consents follow the level, since they only mean something once mail
+	// is sealed at rest.
+	$imap_only_hide = ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched',
+		'ied_security_level', 'ied_security_level_fortress_card',
+		'ied_ai_processing_enabled', 'ied_ai_cloud_enabled'];
+	$imap_hide = array_merge(['ied_domain'], $imap_only_hide);
+	$hosted_show = ['ied_domain', 'ied_catch_all_mode', 'ied_security_level',
+		'ied_security_level_fortress_card'];
 	$type_visibility = [
-		'custom'         => ['show' => ['ied_domain', 'ied_catch_all_mode', 'ied_security_level_fortress_card'], 'hide' => []],
+		'custom'         => ['show' => $hosted_show, 'hide' => []],
 		'imap_gmail'     => ['show' => [], 'hide' => $imap_hide],
 		'imap_microsoft' => ['show' => [], 'hide' => $imap_hide],
 		'imap_yahoo'     => ['show' => [], 'hide' => $imap_hide],
 		'imap_icloud'    => ['show' => [], 'hide' => $imap_hide],
 		'imap_fastmail'  => ['show' => [], 'hide' => $imap_hide],
-		'imap_generic'   => ['show' => ['ied_domain'], 'hide' => ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched', 'ied_security_level_fortress_card']],
+		'imap_generic'   => ['show' => ['ied_domain'], 'hide' => $imap_only_hide],
 	];
 
+	// A NEW pulled-in (IMAP) domain is not created here: it comes into being
+	// through the connect wizard, together with its first mailbox (rule 1 of
+	// specs/mailbox_connect_flow.md — the logic refuses it server-side too).
+	// So an ADD offers only Hosted mail; an existing domain shows its real type.
+	$type_options = [
+		'custom'         => 'Hosted mail',
+		'imap_gmail'     => 'IMAP — Gmail',
+		'imap_microsoft' => 'IMAP — Microsoft 365 / Outlook',
+		'imap_yahoo'     => 'IMAP — Yahoo',
+		'imap_icloud'    => 'IMAP — iCloud',
+		'imap_fastmail'  => 'IMAP — Fastmail',
+		'imap_generic'   => 'IMAP — Other host',
+	];
+	if (!$form_domain->key) {
+		$type_options = ['custom' => 'Hosted mail'];
+	}
 	$formwriter->dropinput('domain_type', 'Type', [
-		'options' => [
-			'custom'         => 'Hosted mail',
-			'imap_gmail'     => 'IMAP — Gmail',
-			'imap_microsoft' => 'IMAP — Microsoft 365 / Outlook',
-			'imap_yahoo'     => 'IMAP — Yahoo',
-			'imap_icloud'    => 'IMAP — iCloud',
-			'imap_fastmail'  => 'IMAP — Fastmail',
-			'imap_generic'   => 'IMAP — Other host',
-		],
+		'options' => $type_options,
 		'value' => $domain_type,
 		'visibility_rules' => $type_visibility,
+		'helptext' => $form_domain->key ? ''
+			: 'A mailbox pulled in from Gmail, Microsoft or another IMAP host is set up with the '
+				. 'Connect a mailbox button on the Accounts page — its domain comes with it.',
 	]);
 
 	$formwriter->textinput('ied_domain', 'Domain Name', [

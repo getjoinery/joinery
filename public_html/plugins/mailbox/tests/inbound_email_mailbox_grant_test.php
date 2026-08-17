@@ -165,21 +165,28 @@ class InboundEmailMailboxGrantTest {
 	}
 
 	private function testCascadeUser() {
-		$this->out('-- user → grant cascade is registered --');
-		// The cascade is configured by $foreign_key_actions (our code) and
-		// executed by core's permanent_delete via del_deletion_rules. We assert
-		// the rule is registered — executing permanent_delete() here is not
-		// viable because this environment carries an unrelated stale deletion
-		// rule pointing at a table (sdp_profiles) that does not exist, which
-		// aborts the whole cascade transaction. The four-segment ieg_usr_user_id
-		// column is auto-detected, so this cascade registers cleanly.
+		$this->out('-- user → grant removal is registered, through the model --');
+		// The rule is configured by $foreign_key_actions (our code) and executed
+		// by core's permanent_delete via del_deletion_rules. We assert the rule is
+		// registered — executing permanent_delete() here is not viable because
+		// this environment carries an unrelated stale deletion rule pointing at a
+		// table (sdp_profiles) that does not exist, which aborts the whole
+		// transaction. The four-segment ieg_usr_user_id column is auto-detected,
+		// so the rule registers cleanly.
+		//
+		// permanent_delete, NOT cascade (specs/mailbox_connect_flow.md § E): a
+		// flat SQL cascade is the one grant write that does not pass through
+		// sync_for_alias, so it could take the last holder off a protected
+		// mailbox with nothing noticing. This action loads each grant as a model
+		// and calls its permanent_delete(), which refuses exactly that case.
 		$stmt = $this->db->prepare("SELECT del_action FROM del_deletion_rules
 			WHERE del_source_table = 'usr_users'
 			AND del_target_table = 'ieg_inbound_email_mailbox_grants'
 			AND del_target_column = 'ieg_usr_user_id'");
 		$stmt->execute();
 		$action = $stmt->fetchColumn();
-		$this->ok($action === 'cascade', 'usr_users → ieg cascade deletion rule registered');
+		$this->ok($action === 'permanent_delete',
+			'usr_users → ieg removal rule registered, routed through the model');
 	}
 
 	private function tearDown() {

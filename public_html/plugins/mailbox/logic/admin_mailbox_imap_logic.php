@@ -6,6 +6,8 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
+ * @version 1.3 - reconnect consent carries the provider's identity scopes, so
+ *   the consumer can check which address signed in
  * @version 1.2
  * @changelog 1.2 - Failures no longer arrive as green announcements, and a
  *   connect attempt for a provider with no app credentials leads to the page
@@ -56,23 +58,23 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 			$ingestor = new ImapIngestor($account);
 			// A green banner saying the connection failed is a contradiction the eye
 			// reads before the words, so every outcome carries its own level.
-			$level = SessionControl::MESSAGE_ANNOUNCEMENT;
+			$level = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 			if ($action === 'test') {
 				$res = $ingestor->testConnection();
 				$msg = $res['ok'] ? ('Connection OK. ' . $res['message']) : ('Connection failed: ' . $res['message']);
-				$level = $res['ok'] ? SessionControl::MESSAGE_ANNOUNCEMENT : SessionControl::MESSAGE_ERROR;
+				$level = $res['ok'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR;
 				$account->recordStatus($res['ok'] ? ('Test OK: ' . $res['message']) : ('Test failed: ' . $res['message']));
 			} else {
 				if (!$account->isConnectable()) {
 					$msg = 'This mailbox has not been connected yet — connect it first, then fetch.';
-					$level = SessionControl::MESSAGE_WARNING;
+					$level = DisplayMessage::MESSAGE_WARNING;
 				} else {
 					try {
 						$res = $ingestor->poll(50);
 						$msg = 'Fetch complete. ' . ($res['status'] ?? '');
 					} catch (Throwable $e) {
 						$msg = 'Fetch error: ' . $e->getMessage();
-						$level = SessionControl::MESSAGE_ERROR;
+						$level = DisplayMessage::MESSAGE_ERROR;
 						$account->recordStatus('Fetch error: ' . substr($e->getMessage(), 0, 400));
 					}
 				}
@@ -103,7 +105,7 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 	$providerKey = $account->getOAuthProviderKey();
 	if (!$account->isOAuth() || !$providerKey) {
 		return _imap_msg_redirect($session, 'This account does not use OAuth.', $list_url,
-			SessionControl::MESSAGE_WARNING);
+			DisplayMessage::MESSAGE_WARNING);
 	}
 
 	// Consent means sending the operator to the provider to approve this site's own
@@ -117,7 +119,7 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 				. 'Enter the ' . $label . ' app details here once, then come back and connect this mailbox.',
 			'/admin/admin_oauth_providers?return=' . urlencode($list_url)
 				. '#oauth-' . urlencode($providerKey),
-			SessionControl::MESSAGE_WARNING,
+			DisplayMessage::MESSAGE_WARNING,
 			'One-time setup');
 	}
 
@@ -133,6 +135,12 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 			'offline_access',
 		)
 		: array('https://mail.google.com/');
+	// The provider's identity scopes ride along so the consumer can check WHICH
+	// address signed in against the address this feed is configured for (§ C) —
+	// the mismatch otherwise surfaces later as an opaque IMAP login failure.
+	if ($providerClass !== null) {
+		$scopes = array_values(array_unique(array_merge($scopes, $providerClass::identityScopes())));
+	}
 
 	try {
 		$client = new OAuth2Client();
@@ -146,7 +154,7 @@ function _imap_begin_consent(InboundImapAccount $account, $session, string $list
 		return LogicResult::redirect($consentUrl);
 	} catch (Throwable $e) {
 		return _imap_msg_redirect($session, 'Could not start the connect flow: ' . $e->getMessage(), $list_url,
-			SessionControl::MESSAGE_ERROR);
+			DisplayMessage::MESSAGE_ERROR);
 	}
 }
 
@@ -167,7 +175,7 @@ function _imap_has_reference_backed(int $account_id): bool {
  * else (say, to enter OAuth app details) still arrives with the operator.
  */
 function _imap_msg_redirect($session, string $message, string $url,
-		int $level = SessionControl::MESSAGE_ANNOUNCEMENT, string $title = 'IMAP Accounts'): LogicResult {
+		int $level = DisplayMessage::MESSAGE_ANNOUNCEMENT, string $title = 'IMAP Accounts'): LogicResult {
 	$path = parse_url($url, PHP_URL_PATH) ?: $url;
 	$session->save_message(new DisplayMessage(
 		$message,

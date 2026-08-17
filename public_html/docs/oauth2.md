@@ -80,6 +80,39 @@ Use `DeclaresOAuthConfigFields` and write a `configGuide()` — that is what mak
 the provider appear on the admin page and collectable in place wherever it is
 needed. See [A provider declares its own fields](#a-provider-declares-its-own-fields).
 
+Use `DeclaresNoOAuthIdentity` too, unless the provider can say **who** signed in —
+see below.
+
+## Identity: who signed in
+
+A consumer that connects a *person's* account needs to know which account it got.
+Asking the operator to type it invites a mismatch that surfaces much later as an
+opaque authentication failure, because the address is used verbatim as the
+credential's username.
+
+A provider that can report it declares three things, and the client does the rest:
+
+| Method | Answers | Google | Microsoft |
+|---|---|---|---|
+| `identityScopes()` | extra scopes the lookup costs | `openid`, `email` | `User.Read` |
+| `getIdentityEndpoint()` | the profile URL to GET | `…/oauth2/v3/userinfo` | `…/v1.0/me` |
+| `identityFromProfile($p)` | the address in the payload | `email` | `mail`, else `userPrincipalName` |
+
+`OAuth2Client::fetchIdentity($providerClass, $token)` makes one bearer GET against
+the declared endpoint and hands the decoded payload back to the provider to read.
+It never throws: a provider that reports no identity, an endpoint that errors, and
+a payload with no address all return `null`, and the caller falls back to asking —
+with the token already in hand, so losing the convenience never loses the
+connection.
+
+**A provider with no endpoint is the ordinary case.** Most providers here are
+reached for a capability rather than for a person — a DNS provider's grant is about
+a zone — so `DeclaresNoOAuthIdentity` supplies the "cannot" answers in one `use`
+line, and only Google and Microsoft override.
+
+The mechanics stay in the client and the knowledge stays in the provider, exactly
+as with the token endpoints: the grant engine learns nothing provider-specific.
+
 ## Add a consumer
 
 ```php
@@ -122,8 +155,20 @@ outbound — so the scopes requested are:
 - **Microsoft:** `https://outlook.office365.com/IMAP.AccessAsUser.All`,
   `https://outlook.office365.com/SMTP.Send`, and `offline_access`.
 
-The consumer stores the granted tokens (encrypted) and the granted scopes on the
-IMAP account, and `ensureFresh()` keeps the XOAUTH2 bearer valid for both the poll
+The provider's own `identityScopes()` ride along, so the flow learns which address
+consented rather than trusting one typed in advance.
+
+The consumer handles two shapes of grant. A payload carrying `account_id` is a
+**reconnect**: the mailbox exists, so the token is stored on it. A payload carrying
+the operator's *intent* (`provider_key`, `reader_user_id`, `security_level`) and no
+ids is a **first connection**: the mailbox does not exist yet, and the consumer
+creates it from the address the provider reports, through
+`ImapFeedProvisioner::provision()`. That inversion is what lets the connect wizard
+ask its questions in the order the answers exist — see
+[Connecting a mailbox](/plugins/mailbox/docs/overview.md#connecting-a-mailbox).
+
+Either way the granted tokens (encrypted) and scopes are stored on the IMAP
+account, and `ensureFresh()` keeps the XOAUTH2 bearer valid for both the poll
 and the SMTP send. See
 [Receiving by IMAP poll](/plugins/mailbox/docs/overview.md#receiving-by-imap-poll)
 and [Email System → Two send modes](/docs/email_system.md#two-send-modes--smtpconfig).
@@ -287,8 +332,11 @@ when documenting a new consumer.
 
 ## Out of scope
 
-- **Token use** — formatting XOAUTH2, calling Gmail/Graph, establishing identity:
-  the consumer's responsibility. The core hands back a valid `OAuth2Token`.
+- **Token use** — formatting XOAUTH2, calling Gmail/Graph: the consumer's
+  responsibility. The core hands back a valid `OAuth2Token`. (Establishing
+  *identity* is the exception — it is a provider declaration plus one client call,
+  because otherwise every consumer that needs it builds the same lookup again. See
+  [Identity: who signed in](#identity-who-signed-in).)
 - **PKCE / public clients** — all current consumers are confidential server-side
   clients. PKCE can be added to `OAuth2Client` later without changing the
   provider/consumer seams.

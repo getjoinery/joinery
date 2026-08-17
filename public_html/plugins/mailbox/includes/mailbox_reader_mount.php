@@ -278,17 +278,19 @@ function mailbox_reader_emit_unseal_convergence(): void {
 		return;
 	}
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 	try {
+		// "No longer sealed" is the MAILBOX's answer (specs/mailbox_connect_flow.md
+		// § D) — the same predicate the unseal pass itself uses, so this probe can
+		// never start a loop with nothing to converge, or miss one that has work.
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			"SELECT 1 FROM iem_inbound_email_messages
-			 WHERE iem_sealed_owner_user_id = ?
-			   AND (iem_content_sealed = true OR iem_pending_parse = true)
-			   AND iem_delete_time IS NULL
-			   AND iem_ied_inbound_email_domain_id IN (
-					SELECT ied_inbound_email_domain_id FROM ied_inbound_email_domains
-					WHERE ied_security_level NOT IN ('" . InboundEmailDomain::LEVEL_PRIVATE . "','"
-						. InboundEmailDomain::LEVEL_FORTRESS . "') AND ied_delete_time IS NULL)
+			"SELECT 1 FROM iem_inbound_email_messages m
+			 " . mailbox_protection_posture_join() . "
+			 WHERE m.iem_sealed_owner_user_id = ?
+			   AND (m.iem_content_sealed = true OR m.iem_pending_parse = true)
+			   AND m.iem_delete_time IS NULL
+			   AND NOT (" . mailbox_protection_seals_sql() . ")
 			 LIMIT 1");
 		$stmt->execute(array($user_id));
 		if (!$stmt->fetchColumn()) {

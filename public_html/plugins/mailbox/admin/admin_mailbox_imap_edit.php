@@ -10,7 +10,9 @@
  * When no mailboxes (store-mode aliases) exist yet, the editor shows a callout
  * linking to the alias editor so the bound-mailbox requirement isn't a dead-end.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - a pulled-in mailbox picks its own protection level here, with
+ *   the scoped ceremony checklist before the raise and the receipt after it
  * @changelog 1.3 - the day-window field renders the stored value whatever the
  *   current scope, so a save while it is hidden cannot reset it.
  */
@@ -19,6 +21,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_imap_edit_logic.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
 $page_vars = process_logic(admin_mailbox_imap_edit_logic(array_merge($_GET, $_POST, $params ?? [])));
 extract($page_vars);
@@ -226,26 +229,61 @@ if (!empty($folder_options)) {
 	));
 }
 
-// Combined mode folds the mailbox's access grants into this one editor.
-// On a sealing domain this is a single choice, not a list: mail is encrypted to
-// one person as it arrives, so a second grantee would hold a mailbox they cannot
-// read. Offering checkboxes there invites a state the platform refuses.
-if ($combined && !empty($user_options)) {
-	if ($domain->seals_content()) {
-		$formwriter->dropinput('users_with_access', 'Who reads this mailbox', array(
-			'options' => $user_options,
-			'value' => $granted_user_ids[0] ?? '',
-			'empty_option' => '-- Select a person --',
-			'helptext' => 'Mail here is encrypted to one person as it arrives, so one person reads it. '
-				. 'To share a mailbox, put it on a Standard domain instead.',
-		));
-	} else {
-		$formwriter->checkboxList('users_with_access', 'Users with access', array(
-			'options' => $user_options,
-			'checked' => $granted_user_ids ?? array(),
-			'helptext' => 'Staff who can read this mailbox in the reader. Superadmins always see every mailbox.',
-		));
+// Mail protection for a PULLED-IN mailbox is this mailbox's own choice
+// (specs/mailbox_connect_flow.md § D): gmail.com is not an identity this
+// deployment holds, so two people pulling their own Gmail here can differ.
+// Standard and Private only — Fortress is a sending-identity guarantee that
+// mail on somebody else's server cannot make.
+$mailbox_level = InboundEmailDomain::LEVEL_STANDARD;
+if ($combined && $domain->get('ied_is_imap_source')) {
+	$mailbox_level = ($ceremony !== null)
+		? (string)$ceremony['level'] : $domain->security_level();
+	// After a step-up round trip the chosen level rides back as target_level —
+	// preselect it, so the operator's intent survives the lost POST.
+	if (!empty($_GET['target_level']) && in_array($_GET['target_level'],
+			array(InboundEmailDomain::LEVEL_STANDARD, InboundEmailDomain::LEVEL_PRIVATE), true)) {
+		$mailbox_level = (string)$_GET['target_level'];
 	}
+	$formwriter->radioinput('iea_security_level', 'Mail protection', array(
+		'options' => array(
+			InboundEmailDomain::LEVEL_STANDARD => 'Standard — stored ready to read',
+			InboundEmailDomain::LEVEL_PRIVATE  => 'Private — sealed to its reader as it arrives',
+		),
+		'value' => $mailbox_level,
+		'helptext' => 'Private encrypts this mailbox\'s mail to its reader as it arrives, so reading '
+			. 'it takes their unlock. Choose it BEFORE importing an archive and every message seals as '
+			. 'it lands; choose it afterwards and the whole history has to be sealed again from this page.',
+	));
+}
+
+// Combined mode folds the mailbox's reader into this one editor. A pulled-in
+// mailbox is ONE person's account on somebody else's server — the credentials
+// are theirs — so this is a single choice, never a list, whatever its level.
+// That is also what Private needs: mail is encrypted to one person as it
+// arrives, so a second grantee would hold a mailbox they cannot read.
+if ($combined && !empty($user_options)) {
+	$formwriter->dropinput('users_with_access', 'Who reads this mailbox', array(
+		'options' => $user_options,
+		'value' => $granted_user_ids[0] ?? '',
+		'empty_option' => '-- Select a person --',
+		'helptext' => 'The person this mailbox belongs to. On Private, their vault is the key its mail '
+			. 'seals to, so it has to be set before the level can be raised.',
+	));
+}
+
+// The prerequisites for raising THIS mailbox to Private — the same checklist the
+// domain editor renders, gathered for one address. Shown while it is still
+// Standard, since that is when the answer matters; the save re-verifies
+// server-side regardless, so this is the guided surface, not the enforcement.
+if ($ceremony !== null && $mailbox_level === InboundEmailDomain::LEVEL_STANDARD) {
+	echo mailbox_protection_render($ceremony['rows_private'], $domain, array(
+		'editor_url' => $ceremony['editor_url'],
+		'alias_url'  => '/plugins/mailbox/admin/admin_mailbox_alias',
+	), InboundEmailDomain::LEVEL_PRIVATE, $ceremony['address']);
+	// The checklist ships hidden (the domain editor reveals it when a higher card
+	// is picked); here there is one target, so it is simply shown.
+	echo '<script>(function(){var c=document.getElementById("protection-ceremony");'
+		. 'if(c){c.classList.remove("d-none");}})();</script>';
 }
 
 $formwriter->submitbutton('btn_submit', $combined ? 'Save Mailbox' : 'Save Account');
@@ -253,5 +291,71 @@ $formwriter->submitbutton('btn_submit', $combined ? 'Save Mailbox' : 'Save Accou
 echo $formwriter->end_form();
 
 $page->end_box();
+
+// Raise receipt (specs/mailbox_raise_receipt.md), scoped to this mailbox: the
+// card carries the shared batch driver's configuration, which runs bounded
+// mailbox/seal_batch passes against this alias and resolves the progress row in
+// place. Without JS the card's noscript form runs the same passes one page load
+// at a time.
+if ($ceremony !== null && !empty($ceremony['sealing_active'])) {
+	echo mailbox_protection_receipt_render($domain, $ceremony['facts'], array(
+		'backlog'        => $ceremony['backlog'],
+		'sealed_total'   => $ceremony['sealed_total'],
+		'acting_user_id' => $ceremony['acting_user_id'],
+		'editor_url'     => $ceremony['editor_url'],
+		'alias_scope_id' => $ceremony['alias_id'],
+		'scope_level'    => $ceremony['level'],
+	));
+	if ($ceremony['backlog'] > 0) {
+		?>
+		<script defer src="/assets/js/ceremony-batch.js?v=<?php echo @filemtime(PathHelper::getIncludePath('assets/js/ceremony-batch.js')) ?: '1'; ?>"></script>
+		<script>
+		document.addEventListener('ceremony:done', function () {
+			var card = document.getElementById('raise-receipt');
+			var title = document.getElementById('receipt-title');
+			if (card && title && card.dataset.titleDone) { title.textContent = card.dataset.titleDone; }
+		});
+		</script>
+		<?php
+	}
+}
+
+// Lowering receipt (specs/mailbox_lowering_unseal.md): the same card the other
+// way round. Only the acting user's own rows can converge — unsealing needs
+// their unlock window — so the card says who the rest are waiting on.
+if ($ceremony !== null && !empty($ceremony['unseal_active'])) {
+	echo mailbox_lowering_receipt_render($domain, array(
+		'own_backlog'    => $ceremony['unseal_own_backlog'] ?? 0,
+		'others_backlog' => $ceremony['unseal_others_backlog'] ?? 0,
+		'window_open'    => !empty($ceremony['window_open']),
+		'editor_url'     => $ceremony['editor_url'],
+		'alias_scope_id' => $ceremony['alias_id'],
+		'scope_label'    => $ceremony['address'],
+		'scope_level'    => $ceremony['level'],
+	));
+	if (($ceremony['unseal_own_backlog'] ?? 0) > 0 && !empty($ceremony['window_open'])) {
+		?>
+		<script>
+		(function () {
+			var card = document.getElementById('lowering-receipt');
+			if (!card || card.dataset.windowOpen !== '1') return;
+			var aliasId = parseInt(card.dataset.aliasId, 10) || 0;
+			function pass() {
+				joineryApi.post('mailbox/unseal_batch', { alias_id: aliasId }).then(function (d) {
+					d = d || {};
+					if (d.locked || !d.unsealed || !(d.own_remaining > 0)) {
+						window.location.reload();
+						return;
+					}
+					pass();
+				}).catch(function () { /* the next visit resumes */ });
+			}
+			pass();
+		})();
+		</script>
+		<?php
+	}
+}
+
 $page->admin_footer();
 ?>

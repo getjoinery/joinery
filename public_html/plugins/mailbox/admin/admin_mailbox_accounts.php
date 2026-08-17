@@ -13,6 +13,10 @@
  * every Edit jump to the existing per-object editors with context pre-filled.
  * DNS/host diagnostics live on the Setup tab.
  *
+ * @version 1.8 - + IMAP feed routes into the connect wizard (rule 1)
+ * @version 1.7
+ * @changelog 1.7 - each mailbox shows its OWN protection level; a provider domain
+ *   shows none, because it is not an identity this deployment holds
  * @version 1.6
  * @changelog 1.6 - An OAuth feed whose provider has no app credentials offers the
  *   setup step instead of a Connect button that cannot start.
@@ -22,6 +26,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/admin_tabs.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/logic/admin_mailbox_accounts_logic.php'));
 
 $page_vars = process_logic(admin_mailbox_accounts_logic(array_merge($_GET, $_POST, $params ?? [])));
@@ -53,6 +58,7 @@ $alias_base   = '/plugins/mailbox/admin/admin_mailbox_alias';
 $alias_action = '/plugins/mailbox/admin/admin_mailbox';
 $imap_edit    = '/plugins/mailbox/admin/admin_mailbox_imap_edit';
 $imap_action  = '/plugins/mailbox/admin/admin_mailbox_imap';
+$connect_wizard = '/plugins/mailbox/admin/admin_mailbox_connect';
 
 // Delivery-mode label for a mailbox row.
 $mode_label = function ($alias) {
@@ -125,22 +131,30 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 					<?php echo $enabled ? 'Enabled' : 'Disabled'; ?></span>
 			<?php endif; ?>
 			<?php
-			// Protection level (specs/mailbox_protection_ceremony.md): every domain
-			// shows its level, and the badge IS the path to raising it — click
-			// through to the domain editor's ceremony.
-			$level = $domain->security_level();
-			echo ' <a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($level)
-				. '" href="' . $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key . '"'
-				. ' title="Mail protection level — click to change">' . htmlspecialchars(ucfirst($level)) . '</a>';
+			// Protection level (specs/mailbox_protection_ceremony.md): a hosted
+			// domain shows its level, and the badge IS the path to raising it —
+			// click through to the domain editor's ceremony. A provider domain like
+			// gmail.com carries none: it is somebody else's domain, and protection
+			// there belongs to each mailbox under it (specs/mailbox_connect_flow.md
+			// § D), which is where those badges are.
+			if (!$is_imap_src) {
+				$level = $domain->security_level();
+				echo ' <a class="iea-badge iea-badge-level iea-badge-level-' . htmlspecialchars($level)
+					. '" href="' . $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key . '"'
+					. ' title="Mail protection level — click to change">' . htmlspecialchars(ucfirst($level)) . '</a>';
+			}
 			?>
 			<span class="iea-spacer"></span>
 			<a class="btn btn-sm btn-outline-secondary"
 			   href="<?php echo $domain_base . '?ied_inbound_email_domain_id=' . $domain->key; ?>">Edit domain</a>
 			<?php
-			// Under an IMAP-source domain, adding a mailbox sets up the mailbox AND
-			// its IMAP feed in one form; a hosted domain just needs the alias.
+			// A pulled-in mailbox is CREATED by the connect wizard and nowhere else
+			// (specs/mailbox_connect_flow.md § A) — it asks in the order the answers
+			// exist, and it is the only path that can create one. A hosted domain
+			// just needs the alias.
 			$add_mailbox_url = $is_imap_src
-				? ($imap_edit . '?domain_id=' . $domain->key)
+				? ($connect_wizard . '?provider='
+					. rawurlencode(InboundImapAccount::providerForEmailDomain($domain->get('ied_domain')) ?: 'imap_generic'))
 				: ($alias_base . '?domain_id=' . $domain->key);
 			?>
 			<a class="btn btn-sm btn-outline-primary"
@@ -176,11 +190,21 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 							   href="<?php echo htmlspecialchars($hint['url']); ?>"
 							   title="<?php echo htmlspecialchars($hint['title']); ?>"><?php echo htmlspecialchars($hint['text']); ?></a>
 						<?php endif; ?>
-						<?php $mb_level = $domain->security_level();
+						<?php
+						// A pulled-in mailbox owns its level and links to its own editor;
+						// a hosted mailbox inherits the domain's and links there
+						// (specs/mailbox_connect_flow.md § D).
+						$mb_level = $alias->security_level();
+						$mb_level_url = $is_imap_src
+							? ($imap_edit . '?domain_id=' . (int)$domain->key . '&alias_id=' . (int)$alias->key)
+							: ($domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key);
+						$mb_level_title = $is_imap_src
+							? 'Mail protection level — set on this mailbox'
+							: 'Mail protection level — set on the domain';
 						if ($mb_level !== InboundEmailDomain::LEVEL_STANDARD): ?>
 							<a class="iea-badge iea-badge-level iea-badge-level-<?php echo htmlspecialchars($mb_level); ?>"
-							   href="<?php echo $domain_base . '?ied_inbound_email_domain_id=' . (int)$domain->key; ?>"
-							   title="Mail protection level — set on the domain"><?php echo htmlspecialchars(ucfirst($mb_level)); ?></a>
+							   href="<?php echo $mb_level_url; ?>"
+							   title="<?php echo htmlspecialchars($mb_level_title); ?>"><?php echo htmlspecialchars(ucfirst($mb_level)); ?></a>
 						<?php endif; ?>
 					</div>
 					<div class="iea-mb-route"><?php echo $mode_label($alias); ?></div>
@@ -250,8 +274,13 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 								));
 								?>
 							<?php else: ?>
+								<?php // Creation goes through the wizard, here as everywhere
+								      // (specs/mailbox_connect_flow.md rule 1): it asks which
+								      // provider the mail is pulled FROM — the one fact this
+								      // hosted mailbox cannot tell us — and its provisioner
+								      // reuses this domain and mailbox, adding only the feed. ?>
 								<a class="btn btn-sm btn-outline-primary"
-								   href="<?php echo $imap_edit . '?alias_id=' . $alias->key; ?>">+ IMAP feed</a>
+								   href="<?php echo $connect_wizard; ?>">+ IMAP feed</a>
 							<?php endif; ?>
 						<?php endif; ?>
 					<?php endif; ?>
@@ -308,7 +337,8 @@ $connect_button = function ($imap) use ($imap_action, $oauth_providers) {
 <?php endif; ?>
 
 	<div class="iea-page-actions">
-		<a class="btn btn-primary" href="<?php echo $domain_base . '?action=add'; ?>">+ Add Domain</a>
+		<a class="btn btn-primary" href="<?php echo $connect_wizard; ?>">+ Connect a mailbox</a>
+		<a class="btn btn-outline-primary" href="<?php echo $domain_base . '?action=add'; ?>">+ Add Domain</a>
 	</div>
 
 <?php if (!empty($deleted_domains)): ?>

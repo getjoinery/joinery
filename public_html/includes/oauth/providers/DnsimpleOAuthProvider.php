@@ -18,6 +18,7 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class DnsimpleOAuthProvider implements OAuth2Provider {
 
     use DeclaresOAuthConfigFields;
+    use DeclaresNoOAuthIdentity;
 
     public static function getKey(): string { return 'dnsimple'; }
     public static function getLabel(): string { return 'DNSimple'; }
