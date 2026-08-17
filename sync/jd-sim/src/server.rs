@@ -161,10 +161,26 @@ struct ServerState {
 }
 
 /// The server. Cloning shares it — two simulated devices hold the same one.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MockServer {
     state: Arc<Mutex<ServerState>>,
     clock: SimClock,
+    /// Run when an upload is about to be finalized, so a scenario can change
+    /// the disk underneath an operation that is still in flight.
+    ///
+    /// Every other fault here is a network fault, and that left one very
+    /// ordinary event unreachable: the user saving the file again while it is
+    /// uploading. Applications do it to themselves — a safe-save renames a new
+    /// inode over the path the moment the write finishes — so it is not a rare
+    /// interleaving, and the client has a whole branch for it that nothing
+    /// could exercise. The soak rig found what lived in that branch.
+    during_upload: Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>,
+}
+
+impl std::fmt::Debug for MockServer {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MockServer").finish_non_exhaustive()
+    }
 }
 
 /// What the mock answers with when a request is refused. Mirrors the platform's
@@ -243,7 +259,20 @@ impl MockServer {
                 vault_public_keys: BTreeMap::new(),
             })),
             clock,
+            during_upload: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Do something to the world each time an upload reaches completion, just
+    /// before the server names the file.
+    ///
+    /// That instant is the one the client cannot control: the bytes are the
+    /// server's, the answer is not back yet, and whatever the user does to the
+    /// file now happens to a file the client believes it is still holding
+    /// still. Scenarios use it to rewrite, rename or delete the file being
+    /// uploaded.
+    pub fn while_completing_an_upload(&self, f: impl FnMut() + Send + 'static) {
+        *self.during_upload.lock().unwrap() = Some(Box::new(f));
     }
 
     /// Register a user's Drive vault public key.
@@ -1286,6 +1315,12 @@ impl MockServer {
             .and_then(Value::as_str)
             .unwrap_or("")
             .to_string();
+        // Before the server state is locked: the hook touches the disk, not the
+        // server, and holding this lock across somebody else's code is how a
+        // scenario deadlocks instead of failing.
+        if let Some(f) = self.during_upload.lock().unwrap().as_mut() {
+            f();
+        }
         let mut st = self.state.lock().unwrap();
         let Some(session) = st.uploads.get(&token).cloned() else {
             return Err(refuse(404, "NotFound", "Unknown or expired upload token."));

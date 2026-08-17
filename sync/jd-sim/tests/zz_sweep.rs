@@ -58,7 +58,16 @@ fn workload(seed: u64, steps: usize, devices: &[&str], chaos: bool) {
 /// slot and an HFS+ volume rewrites the spelling on the way to disk, which is
 /// where those names cost something.
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
-    let world = World::of(seed, devices);
+    let mut world = World::of(seed, devices);
+    // A chaotic world is one where the user is still working, not just one
+    // where the network is bad. Uploads finishing against a file that has moved
+    // on is the ordinary consequence of an autosave, and it reaches a branch of
+    // the client no network fault can. The budget lets the user stop, so the
+    // run still has a fixed point to settle to.
+    if chaos {
+        world.user_saves_during_uploads(8, (steps / 4).max(2) as u64);
+    }
+    let world = world;
     let committed = Committed::default();
     drive(&world, seed, steps, chaos);
 

@@ -2747,3 +2747,60 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
         live.keys().collect::<Vec<_>>()
     );
 }
+
+#[test]
+fn a_device_goes_quiet_even_when_the_user_keeps_saving_mid_upload() {
+    // The user is still working while the fleet syncs, which is the ordinary
+    // case and not an exotic one: applications autosave on a timer, and they
+    // save by renaming a new inode over the path, so a file being uploaded can
+    // acquire new bytes partway through.
+    //
+    // Nothing here is at risk of loss — the bytes that landed are a real
+    // version and the newer ones go up next pass. What was at risk is the
+    // device ever reporting itself finished. An upload that ends with the file
+    // changed used to record no agreement at all, and an entry with no agreed
+    // placement is one the scanner is never offered, so the file on the disk
+    // belonged to nothing: every pass read it as new, minted an identity,
+    // uploaded it, got back the id this entry already had, folded the new
+    // record away and left this one exactly as it was. Queue empty, tree
+    // correct, forever busy. A whole soak campaign ran that way.
+    let mut world = World::new(4242, &["laptop", "desktop"]);
+    world.user_saves_during_uploads(1, 8);
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    for i in 0..6 {
+        laptop
+            .fs
+            .user_write(&format!("Work/doc-{i}.txt"), format!("draft {i}").as_bytes());
+    }
+
+    assert!(
+        world.settle().is_some(),
+        "a device whose user keeps saving must still reach a fixed point"
+    );
+    assert_converged(&world);
+}
+
+#[test]
+#[ignore]
+fn zzz_seed_search() {
+    let mut bad = Vec::new();
+    for seed in 4000u64..4200 {
+        let r = std::panic::catch_unwind(move || {
+            let mut world = World::new(seed, &["laptop", "desktop"]);
+            world.user_saves_during_uploads(1, 8);
+            let laptop = world.device("laptop");
+            laptop.fs.user_mkdir("Work");
+            for i in 0..6 {
+                laptop.fs.user_write(&format!("Work/doc-{i}.txt"), format!("draft {i}").as_bytes());
+            }
+            world.settle().is_some()
+        });
+        match r {
+            Ok(true) => {}
+            _ => bad.push(seed),
+        }
+    }
+    println!("STALLING SEEDS: {bad:?}");
+}

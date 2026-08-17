@@ -129,6 +129,31 @@ pub struct Sample {
 // 1 — convergence
 // ---------------------------------------------------------------------------
 
+/// Fold one reading of one device into what the fleet is believed to have
+/// reached.
+///
+/// A quiet reading is remembered at the time of the FIRST one, because how long
+/// a device took to go quiet is the number worth reporting. A busy reading
+/// forgets the device entirely, and that is the whole point of this being a
+/// function rather than an insert: convergence has to mean every device quiet
+/// **at once**. Banking the first quiet reading and never looking again let a
+/// device settle, pick work back up — because another device had just uploaded,
+/// or because its own last pass left a conflict copy the next scan had yet to
+/// claim — and still count towards a fleet the audit then measured as though it
+/// were standing still.
+fn note_reading(
+    settled_at: &mut BTreeMap<String, u64>,
+    device: &str,
+    quiet: bool,
+    elapsed_ms: u64,
+) {
+    if quiet {
+        settled_at.entry(device.to_string()).or_insert(elapsed_ms);
+    } else {
+        settled_at.remove(device);
+    }
+}
+
 /// Wait for every device to stop working, or run out of patience.
 ///
 /// Returns `(verdict, per-device milliseconds, last status seen)`.
@@ -138,6 +163,15 @@ pub struct Sample {
 /// restarted it yet, which is an ordinary thing for this rig to have caused. It
 /// becomes a failure by never answering before the deadline, which is the same
 /// bar as never converging — either way the client has silently stopped.
+///
+/// **Settled means settled at the same moment.** A device that goes quiet is
+/// re-checked, not banked: one that reports itself finished and then picks up
+/// work — because another device just uploaded, or because its own last pass
+/// left a conflict copy the next scan has yet to claim — has not converged, and
+/// the fleet it belongs to has not either. Banking the first quiet reading let
+/// the audit run against a tree still in motion, and it showed up as a single
+/// file on one side and not the other, at the end of a settle that called
+/// itself clean.
 pub fn await_convergence(
     fleet: &Fleet,
     deadline: Duration,
@@ -157,15 +191,14 @@ pub fn await_convergence(
 
     loop {
         for device in &fleet.devices {
-            if settled_at.contains_key(&device.name) {
-                continue;
-            }
             let status = control::status(&device.control_file());
-            if let Some(s) = &status {
-                if s.is_settled() {
-                    settled_at.insert(device.name.clone(), started.elapsed().as_millis() as u64);
-                }
-            }
+            let quiet = status.as_ref().is_some_and(Status::is_settled);
+            note_reading(
+                &mut settled_at,
+                &device.name,
+                quiet,
+                started.elapsed().as_millis() as u64,
+            );
             last.insert(device.name.clone(), status);
         }
         if settled_at.len() == fleet.devices.len() {
@@ -1462,4 +1495,47 @@ mod tests {
         assert!(v.violated());
         assert_eq!(v.failures().len(), 2);
     }
+
+    #[test]
+    fn a_device_that_picks_work_back_up_stops_counting_as_settled() {
+        let mut settled = BTreeMap::new();
+        note_reading(&mut settled, "device-a", true, 1_000);
+        note_reading(&mut settled, "device-b", true, 2_000);
+        assert_eq!(settled.len(), 2, "both quiet at once is a converged fleet");
+
+        // device-b hears about something device-a uploaded and starts again.
+        note_reading(&mut settled, "device-b", false, 3_000);
+        assert_eq!(
+            settled.len(),
+            1,
+            "a fleet with one device working has not converged, whatever it \
+             managed a moment ago"
+        );
+    }
+
+    #[test]
+    fn how_long_a_device_took_is_measured_from_the_first_time_it_went_quiet() {
+        let mut settled = BTreeMap::new();
+        note_reading(&mut settled, "device-a", true, 1_000);
+        note_reading(&mut settled, "device-a", true, 9_000);
+        assert_eq!(
+            settled.get("device-a"),
+            Some(&1_000),
+            "later confirmations must not inflate the reported settle time"
+        );
+    }
+
+    #[test]
+    fn a_device_that_goes_quiet_again_is_timed_from_when_it_actually_did() {
+        let mut settled = BTreeMap::new();
+        note_reading(&mut settled, "device-a", true, 1_000);
+        note_reading(&mut settled, "device-a", false, 2_000);
+        note_reading(&mut settled, "device-a", true, 5_000);
+        assert_eq!(
+            settled.get("device-a"),
+            Some(&5_000),
+            "the earlier quiet spell was not the settle; the run went on past it"
+        );
+    }
+
 }

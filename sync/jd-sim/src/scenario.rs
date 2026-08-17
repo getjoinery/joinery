@@ -58,6 +58,25 @@ pub struct World {
     /// server" from "this version is gone" — and it would answer "safe" to
     /// both, which is the failure mode that matters.
     pub vaults: Vec<SimVault>,
+    /// Content the **user** destroyed while a pass was running.
+    ///
+    /// The custody check attributes everything that leaves a disk during a pass
+    /// to the engine, and that is right exactly as long as the user only acts
+    /// between passes. `user_saves_during_uploads` breaks that assumption on
+    /// purpose — it is the whole point of it — so what it overwrites is
+    /// recorded here and excluded from the check.
+    ///
+    /// This narrows the oracle by precisely one thing and it stays honest: an
+    /// entry only lands here because the harness itself performed the write, so
+    /// no removal the engine makes can ever reach it. A user who saves over
+    /// their own unsynced draft has lost it in a real client too, and the
+    /// engine did not do it.
+    ///
+    /// Cleared at the start of every pass, which is what keeps the exception
+    /// the size of the problem. Left to accumulate it would go on excusing that
+    /// hash for the rest of the run — including on another device, where the
+    /// same content may still be sitting and the engine may yet lose it.
+    destroyed_by_the_user: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
 }
 
 /// Which operating system's filesystem a device has.
@@ -110,6 +129,7 @@ impl World {
             devices,
             rng: SimRng::new(seed),
             vaults: Vec::new(),
+            destroyed_by_the_user: Default::default(),
         }
     }
 
@@ -139,6 +159,71 @@ impl World {
             .iter()
             .find(|d| d.name == name)
             .unwrap_or_else(|| panic!("no device called {name}"))
+    }
+
+    /// Let the user carry on working while the fleet syncs.
+    ///
+    /// Every scenario until now moved the disk only *between* passes, which
+    /// quietly assumed the one thing no client may assume: that a file holds
+    /// still while it is being uploaded. It does not. Applications save by
+    /// writing a temp file and renaming it over the original, so the path a
+    /// client is streaming from can acquire new bytes and a new inode partway
+    /// through — and an autosave on a timer makes that likely rather than rare.
+    ///
+    /// Arming this rewrites one file, on one device, each time an upload
+    /// reaches completion: the instant the bytes belong to the server and the
+    /// answer has not come back. Which file is chosen from everything on that
+    /// disk, so most of the time it is a bystander and some of the time it is
+    /// the file going up, which is the case worth reaching.
+    ///
+    /// `one_in` sets the rate — 1 fires on every completion, 4 on roughly a
+    /// quarter of them. Deterministic from the world's seed like everything
+    /// else, so a run that finds something replays.
+    ///
+    /// `budget` is how many saves the user has in them before they go to lunch,
+    /// and it is not a convenience. Settling is a fixed point, and a user who
+    /// never stops typing has not found a bug by preventing one — every upload
+    /// would create the next edit, forever, which is a livelock the harness
+    /// built rather than one the client has. The budget is what makes "and then
+    /// it went quiet" a question with an answer.
+    pub fn user_saves_during_uploads(&mut self, one_in: u64, budget: u64) {
+        let disks: Vec<MemFs> = self.devices.iter().map(|d| d.fs.clone()).collect();
+        let rng = std::sync::Arc::new(std::sync::Mutex::new(SimRng::new(
+            self.rng.next_u64() ^ 0x5a5e_d17e,
+        )));
+        let destroyed = self.destroyed_by_the_user.clone();
+        let mut round: u64 = 0;
+        self.server.while_completing_an_upload(move || {
+            if round >= budget {
+                return;
+            }
+            let mut rng = rng.lock().unwrap();
+            if one_in > 1 && rng.below(one_in) != 0 {
+                return;
+            }
+            let disk = &disks[rng.below(disks.len() as u64) as usize];
+            // Files only. `all_paths` lists directories too, and writing bytes
+            // over one turns a folder into a file — something no user can do
+            // and no filesystem will allow, so the engine below is entitled to
+            // assume it never happens. Left in, it is the harness inventing a
+            // world rather than simulating one.
+            let files: Vec<(String, Vec<u8>)> = disk
+                .all_paths()
+                .into_iter()
+                .filter_map(|p| disk.peek(&p).map(|bytes| (p, bytes)))
+                .collect();
+            if files.is_empty() {
+                return;
+            }
+            round += 1;
+            let (path, gone) = &files[rng.below(files.len() as u64) as usize];
+            // Declared before it happens, because the custody check reads
+            // everything that leaves a disk mid-pass as the engine's doing.
+            // This is the user's doing, and saying so is what keeps the check
+            // strict about the removals it is actually there to catch.
+            destroyed.lock().unwrap().insert(crate::sha256_hex(gone));
+            disk.user_write(path, format!("saved again while syncing, {round}").as_bytes());
+        });
     }
 
     /// One pass on one device, with custody checked around it.
@@ -174,10 +259,12 @@ impl World {
         device: &Device,
     ) -> Result<jd_core::pass::PassOutcome, jd_core::execute::ExecError> {
         let before = held_by(device);
+        self.destroyed_by_the_user.lock().unwrap().clear();
         let outcome = self.run_pass_on(device);
         let after = held_by(device);
+        let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
         for hash in &before {
-            if after.contains(hash) {
+            if after.contains(hash) || by_the_user.contains(hash) {
                 continue;
             }
             assert!(
