@@ -6,6 +6,8 @@
  * default 'common'): common | organizations | consumers | a specific tenant id.
  * Scopes must include offline_access to receive a refresh token.
  *
+ * @version 1.1 - a guest UPN (#EXT#) is a sign-in name, not a mailbox address;
+ *   identity reports none rather than minting an onmicrosoft.com mailbox
  * @version 1.0
  */
 
@@ -15,6 +17,7 @@ require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 class MicrosoftOAuthProvider implements OAuth2Provider {
 
     use DeclaresOAuthConfigFields;
+    use DeclaresNoOAuthIdentity;
 
     public static function getKey(): string { return 'microsoft'; }
     public static function getLabel(): string { return 'Microsoft'; }
@@ -89,5 +92,33 @@ class MicrosoftOAuthProvider implements OAuth2Provider {
 
     public static function extraAuthorizeParams(array $scopes): array {
         return [];
+    }
+
+    // --- Identity -----------------------------------------------------------
+    // Graph reports `mail` for a mailbox-enabled account and only the sign-in
+    // name (userPrincipalName) for one without, so both are read in that order:
+    // the mailbox address is what an IMAP feed needs, and the sign-in name is
+    // the honest fallback rather than nothing.
+
+    public static function identityScopes(): array {
+        return ['User.Read'];
+    }
+
+    public static function getIdentityEndpoint(): ?string {
+        return 'https://graph.microsoft.com/v1.0/me';
+    }
+
+    public static function identityFromProfile(array $profile): ?string {
+        foreach (['mail', 'userPrincipalName'] as $field) {
+            $value = trim((string)($profile[$field] ?? ''));
+            // A guest account's UPN ('jem_gmail.com#EXT#@x.onmicrosoft.com') is a
+            // sign-in name, not a mailbox address — reporting it would mint an
+            // onmicrosoft.com mailbox nothing can fetch. No identity is the
+            // honest answer; the flow then asks the operator.
+            if ($value !== '' && strpos($value, '#EXT#') === false) {
+                return $value;
+            }
+        }
+        return null;
     }
 }

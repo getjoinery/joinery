@@ -90,6 +90,14 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.35
+ * @changelog 1.35 - the spam-held store path defers (75) on a seal-target
+ *   refusal like every other path, instead of reporting delivery for a message
+ *   no row holds
+ * @version 1.34
+ * @changelog 1.34 - one resolveSealTarget() decides sealing for every ingest path:
+ *   the posture is the mailbox's, IMAP-polled mail seals like pushed mail, and a
+ *   sealing mailbox with no key DECLINES the message instead of writing plaintext
  * @version 1.33
  * @changelog 1.33 - a database-raised unique violation in storeExtracted() now
  *   throws InboundStoreCollisionException instead of being reported as a dedup:
@@ -124,6 +132,26 @@ require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declare
  * means "roll this message back and let it be retried", never "carry on".
  */
 class InboundStoreCollisionException extends RuntimeException {}
+
+/**
+ * A mailbox that seals content could not produce a key to seal to
+ * (specs/mailbox_connect_flow.md § E).
+ *
+ * Storing the message in plaintext would be the worst option available: it
+ * breaks the mailbox's one promise and hides that it did, and the read path
+ * dispatches on the row's own iem_content_sealed column, so a row that lands in
+ * plaintext renders in plaintext forever. So the store is DECLINED instead, and
+ * declining always means "try again later", never a bounce — every ingress
+ * treats this as transient (Postfix tempfails, the webhook answers non-2xx, the
+ * IMAP feed leaves the message on the source, a Direct sender keeps it). Once
+ * the mailbox is repaired the held mail flows in on its own.
+ *
+ * With the grant invariant in InboundEmailMailboxGrant::sync_for_alias() this is
+ * unreachable through every grant-writing door that exists; it is the backstop
+ * that makes a future bypass — or a vault that fails to load at delivery time —
+ * loud and recoverable instead of a silent leak.
+ */
+class MailboxSealTargetMissing extends RuntimeException {}
 
 class InboundEmailRouter {
 
@@ -263,6 +291,15 @@ class InboundEmailRouter {
 			if ($stores) {
 				try {
 					$this->storeMessage($raw_email, $parsed, $alias, $domain, $envelope_recipient, $auth, $content_spam);
+				} catch (MailboxSealTargetMissing $e) {
+					// Declining always means "try again later", on every path —
+					// including this one. Returning 0 here would tell the sender's
+					// queue the message was delivered while no row exists anywhere:
+					// the one outcome the refusal exists to prevent. The retry's
+					// re-store dedups (23505), so deferring cannot double-store.
+					error_log('InboundEmailRouter: ' . $e->getMessage());
+					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, $e->getMessage(), $domain->key);
+					return 75;
 				} catch (\Throwable $e) {
 					error_log('InboundEmailRouter: store of spam-held message failed: ' . $e->getMessage());
 					$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR, $envelope_recipient, null, 'Store of spam-held message failed: ' . $e->getMessage(), $domain->key);
@@ -379,6 +416,16 @@ class InboundEmailRouter {
 				$domain->key
 			);
 			return 0;
+		} catch (MailboxSealTargetMissing $e) {
+			// A protected mailbox with nobody to seal to. Deferring is right (the
+			// sender retries and the mail lands once it is repaired), but unlike a
+			// transient DB blip this will not fix itself, and the sender's queue
+			// expires in hours to days — so it IS logged, loudly, with the reason.
+			// The same condition raises the sealing_mailbox_holders health check.
+			error_log('InboundEmailRouter: ' . $e->getMessage());
+			$this->logTransaction($parsed, $alias, InboundEmailLog::STATUS_ERROR,
+				$envelope_recipient, null, $e->getMessage(), $domain->key);
+			return 75;
 		} catch (\Throwable $e) {
 			error_log('InboundEmailRouter: store failed: ' . $e->getMessage());
 			// No alias.record_forward() etc — and DO NOT log here because
@@ -460,15 +507,15 @@ class InboundEmailRouter {
 		// (specs/mailbox_unmatched_sealing.md), while its attachment Files keep the
 		// system ownership they have always had.
 		$owner_id = $this->attachmentOwnerId($alias);
-		$seal_owner_id = InboundEmailMessage::sealOwnerUserId(
-			($alias && $alias->key) ? intval($alias->key) : null,
-			($domain && $domain->key) ? intval($domain->key) : null);
-		$vault = ($seal_owner_id !== null) ? $this->loadOwnerVault($seal_owner_id) : null;
-		// Sealing is capability-based (a single owner who holds a vault) AND
-		// posture-based: the domain's security level must opt into sealing
-		// (specs/mailbox_security_levels.md § Level → mechanism-branch switch).
-		// A Standard domain stores plaintext even when its owner holds a vault.
-		$sealing = ($vault !== null && $domain->seals_content());
+		// Posture decides (specs/mailbox_security_levels.md § Level → mechanism-
+		// branch switch): a Standard mailbox stores plaintext even when its owner
+		// holds a vault, and a sealing mailbox with no key DECLINES the message
+		// rather than quietly writing it in the clear — the throw unwinds before
+		// any row exists, and every caller treats it as "try again later"
+		// (specs/mailbox_connect_flow.md § E).
+		$seal = $this->resolveSealTarget($alias, $domain);
+		$sealing = $seal['sealing'];
+		$vault = $seal['vault'];
 
 		// A composed row (an archive's Sent mail arrives as one) treats iem_recipient
 		// as CONTENT, not as the routing address — that is what decryptSealedField
@@ -857,11 +904,11 @@ class InboundEmailRouter {
 			: $this->resolveContentSpam($this->synthesizeRawForScan($meta, $body_plain, $body_html));
 
 		$owner_id = $this->attachmentOwnerId($alias);
-		$seal_owner_id = InboundEmailMessage::sealOwnerUserId(
-			($alias && $alias->key) ? intval($alias->key) : null,
-			($domain && $domain->key) ? intval($domain->key) : null);
-		$vault = ($seal_owner_id !== null) ? $this->loadOwnerVault($seal_owner_id) : null;
-		$sealing = ($vault !== null && $domain->seals_content());
+		// Identical posture rule and identical refusal to the SMTP store above —
+		// a Direct sender gets a retryable error and keeps the message.
+		$seal = $this->resolveSealTarget($alias, $domain);
+		$sealing = $seal['sealing'];
+		$vault = $seal['vault'];
 
 		$size_bytes = strlen($body_plain) + strlen($body_html);
 		foreach ($attachments as $attachment) {
@@ -1170,6 +1217,48 @@ class InboundEmailRouter {
 	private function loadOwnerVault(int $owner_id) {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 		return UserEncryptionVault::loadForUser($owner_id);
+	}
+
+	/**
+	 * Whose key this message seals to, resolved BEFORE any row is written — the
+	 * one answer every ingress path uses so they can never disagree about
+	 * whether a message is sealed or who holds it.
+	 *
+	 * Returns ['sealing' => bool, 'vault' => ?UserEncryptionVault,
+	 *          'owner_id' => ?int].
+	 *
+	 * The posture comes from the MAILBOX (specs/mailbox_connect_flow.md § D) —
+	 * its own level when it has one, the domain's otherwise — and mail with no
+	 * mailbox asks the domain, which is whose mail it is.
+	 *
+	 * @throws MailboxSealTargetMissing when the mailbox seals but no key resolves.
+	 */
+	public function resolveSealTarget($alias, $domain): array {
+		$alias_id  = ($alias && $alias->key) ? intval($alias->key) : null;
+		$domain_id = ($domain && $domain->key) ? intval($domain->key) : null;
+
+		$seals = ($alias_id !== null) ? $alias->seals_content()
+			: ($domain && $domain->key && $domain->seals_content());
+		if (!$seals) {
+			return array('sealing' => false, 'vault' => null, 'owner_id' => null);
+		}
+
+		$owner_id = InboundEmailMessage::sealOwnerUserId($alias_id, $domain_id);
+		$vault = ($owner_id !== null) ? $this->loadOwnerVault($owner_id) : null;
+		if ($vault === null) {
+			// Decline rather than downgrade. Naming the mailbox matters: this
+			// message is being held, and the operator needs to know which mailbox
+			// to repair before the sender's own retry window runs out.
+			$where = ($alias_id !== null && $alias->key)
+				? $alias->get_full_address()
+				: (($domain && $domain->key) ? (string)$domain->get('ied_domain') : 'this mailbox');
+			throw new MailboxSealTargetMissing(
+				'Refusing to store mail for ' . $where . ' unprotected: it is a protected mailbox with '
+				. ($owner_id === null ? 'no single member to seal to' : 'a member who holds no vault')
+				. '. The message stays where it is and will be delivered once the mailbox has one member '
+				. 'with a vault.');
+		}
+		return array('sealing' => true, 'vault' => $vault, 'owner_id' => $owner_id);
 	}
 
 	/**
@@ -1569,14 +1658,28 @@ class InboundEmailRouter {
 			);
 		}
 
+		// Pulled-in mail seals exactly like pushed mail (specs/mailbox_connect_flow.md
+		// § D): the posture is the MAILBOX's, since gmail.com is somebody else's
+		// domain and two people pulling their own Gmail into one deployment must be
+		// able to differ. A sealing mailbox with no key declines the message — the
+		// throw leaves it on the source and the feed reports why it stopped, which
+		// costs nothing because the mail is still in the remote mailbox.
+		$seal = $this->resolveSealTarget($alias, $domain);
+		$sealing = $seal['sealing'];
+
+		$sender  = substr((string)($msg['sender'] ?? ''), 0, 500);
+		$subject = substr((string)($msg['subject'] ?? ''), 0, 1000);
+		$plain   = (string)($msg['body_plain'] ?? '');
+		$html    = (string)($msg['body_html'] ?? '');
+
 		$row = array(
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
-			'iem_sender'      => substr((string)($msg['sender'] ?? ''), 0, 500),
+			'iem_sender'      => $sealing ? '' : $sender,
 			'iem_recipient'   => substr((string)$envelope_recipient, 0, 500),
-			'iem_subject'     => substr((string)($msg['subject'] ?? ''), 0, 1000),
-			'iem_body_plain'  => $msg['body_plain'] ?? '',
-			'iem_body_html'   => $msg['body_html'] ?? '',
+			'iem_subject'     => $sealing ? '' : $subject,
+			'iem_body_plain'  => $sealing ? '' : $plain,
+			'iem_body_html'   => $sealing ? '' : $html,
 			'iem_raw_message' => '', // reference-backed: parts fetched on demand
 			// 'remote' is the single source of truth for "fetch parts from IMAP";
 			// the locator columns below say which source/message. iem_raw_storage_key
@@ -1598,7 +1701,6 @@ class InboundEmailRouter {
 
 		try {
 			$saved = InboundEmailMessage::CreateEntry($row);
-			return array('message' => $saved, 'dedup' => false);
 		} catch (\Throwable $e) {
 			// Dedup surfaces two ways, and the difference matters because the caller
 			// now stores the message and its manifest in one transaction (D1,
@@ -1626,6 +1728,18 @@ class InboundEmailRouter {
 			}
 			throw $e;
 		}
+
+		// Seal outside the insert's catch: the row now exists, so a seal failure
+		// caught there would find its own row and report a false dedup. Sealing
+		// happens once the row has its serial id (the AD binds to it), inside the
+		// ingestor's per-message transaction — a seal failure rolls the row back
+		// with it and the next poll retries, so a permanently empty row can never
+		// be reported as stored.
+		if ($sealing) {
+			$this->sealMessageContent(intval($saved->key), $seal['vault'],
+				$sender, $subject, $plain, $html);
+		}
+		return array('message' => $saved, 'dedup' => false);
 	}
 
 	/**

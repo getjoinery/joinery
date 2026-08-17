@@ -20,6 +20,9 @@
  *     question DKIM already asks, answered the same way, so a Fortress domain
  *     cannot sign in anyone's name from a locked box.
  *
+ * @version 1.2
+ * @changelog 1.2 - a resolved mailbox answers with its OWN protection posture;
+ *   the domain's answer stands only while no mailbox has resolved
  * @version 1.1
  * @changelog 1.1 - resolveAddress reports identity (`exists`) and routing
  *   (`stores_email`) as separate facts; the store-only rule became the mail
@@ -61,6 +64,9 @@ class MailboxDirectConsumer {
 		$answer = array(
 			'hosts_domain'  => true,
 			'domain_id'     => intval($domain->key),
+			// The domain's answer is the right one while no mailbox has resolved —
+			// mail for an address nobody created belongs to the domain. Once a
+			// mailbox resolves, its own posture replaces this (below).
 			'seals_content' => $domain->seals_content(),
 			'exists'        => false,
 			'stores_email'  => false,
@@ -92,6 +98,11 @@ class MailboxDirectConsumer {
 		$answer['alias_id']     = intval($alias->key);
 		$answer['stores_email'] =
 			(string)$alias->get('iea_delivery_mode') === InboundEmailAlias::MODE_STORE;
+		// Protection follows the identity that owns the mail, and once a mailbox
+		// has resolved that identity is the mailbox (specs/mailbox_connect_flow.md
+		// § D). A pulled-in Private mailbox on a Standard domain answers sealed;
+		// its neighbour on the same domain answers plaintext.
+		$answer['seals_content'] = $alias->seals_content();
 
 		// A single-owner mailbox names that owner as the consenting user and, on a
 		// sealing domain, seals to their vault. A shared mailbox — several grantees,

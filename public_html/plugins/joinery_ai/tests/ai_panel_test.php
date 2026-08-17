@@ -63,10 +63,20 @@ function aip_alias(int $domain_id, string $local, int $holder_id): InboundEmailA
 	$alias->save();
 	$alias->load();
 	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', intval($alias->key));
-	InboundEmailMailboxGrant::sync_for_alias($alias->key, array($holder_id));
-	harness_defer(function () use ($alias) {
-		InboundEmailMailboxGrant::sync_for_alias($alias->key, array());
-	});
+
+	// The grant is written DIRECTLY, not through sync_for_alias: this suite is
+	// about which mailboxes the AI may read, so its holders are stand-ins who
+	// never need a vault — and sync_for_alias refuses to give a sealing mailbox a
+	// member without one (specs/mailbox_connect_flow.md § E). Enforcement belongs
+	// on the paths an operator drives; a fixture stating a posture does not have
+	// to satisfy it to ask what the panel does with it.
+	$grant = new InboundEmailMailboxGrant(NULL);
+	$grant->set('ieg_iea_inbound_email_alias_id', intval($alias->key));
+	$grant->set('ieg_usr_user_id', $holder_id);
+	$grant->save();
+	$grant->load();
+	harness_register_row('ieg_inbound_email_mailbox_grants',
+		'ieg_inbound_email_mailbox_grant_id', intval($grant->key));
 	return $alias;
 }
 

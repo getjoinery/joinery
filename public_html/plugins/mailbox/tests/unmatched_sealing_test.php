@@ -77,10 +77,23 @@ function um_alias(int $domain_id, string $local, array $holder_ids): InboundEmai
 	$alias->save();
 	$alias->load();
 	harness_register_row('iea_inbound_email_aliases', 'iea_inbound_email_alias_id', intval($alias->key));
-	InboundEmailMailboxGrant::sync_for_alias($alias->key, $holder_ids);
-	harness_defer(function () use ($alias) {
-		InboundEmailMailboxGrant::sync_for_alias($alias->key, array());
-	});
+
+	// Grants are written DIRECTLY here, not through sync_for_alias: this suite
+	// exists to pin what the owner resolution does for a mailbox with none or
+	// several holders, and sync_for_alias refuses to CREATE those states on a
+	// sealing mailbox (specs/mailbox_connect_flow.md § E). The refusal is the
+	// point — it is what keeps a real deployment out of these states — so the
+	// fixture builds them the only way left, and the assertions below say what
+	// the resolver does if one is ever reached anyway.
+	foreach ($holder_ids as $uid) {
+		$grant = new InboundEmailMailboxGrant(NULL);
+		$grant->set('ieg_iea_inbound_email_alias_id', intval($alias->key));
+		$grant->set('ieg_usr_user_id', intval($uid));
+		$grant->save();
+		$grant->load();
+		harness_register_row('ieg_inbound_email_mailbox_grants',
+			'ieg_inbound_email_mailbox_grant_id', intval($grant->key));
+	}
 	return $alias;
 }
 

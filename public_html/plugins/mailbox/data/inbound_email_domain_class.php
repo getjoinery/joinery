@@ -22,10 +22,19 @@
  * ied_security_level is the per-domain protection posture
  * (specs/mailbox_security_levels.md): 'standard' (server-managed plaintext),
  * 'private' (sealed at rest), or 'fortress' (sealed at the edge + session-gated
- * sending identity). It is the single switch that selects each mechanism's
- * plaintext-vs-sealed branch; mailboxes and aliases inherit it by design.
+ * sending identity). It is the switch that selects each mechanism's
+ * plaintext-vs-sealed branch for every mailbox that inherits it — which is every
+ * mailbox on a domain this deployment hosts. A mailbox pulled in over IMAP can
+ * carry its own instead (iea_security_level), because gmail.com is not an
+ * identity this deployment holds; see InboundEmailAlias::security_level(), which
+ * is what a content-sealing decision asks. Domain identity — DKIM, the protected
+ * sending identity, the DNS shape, the relay map — stays this class's answer.
  *
- * @version 1.7
+ * @version 1.9 - maxSecurityLevelForUser() counts live mailboxes only, like
+ *   the owned-domain pass beside it
+ * @version 1.8
+ * @changelog 1.8 - maxSecurityLevelForUser() asks each granted MAILBOX for its own
+ *   level, so a pulled-in Private mailbox on a Standard domain is not under-reported
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -213,22 +222,24 @@ class InboundEmailDomain extends SystemBase {
 	}
 
 	/**
-	 * The highest security level across every domain the user has a stake in —
-	 * one they own (ied_owner_usr_user_id) or hold a mailbox grant on (a grant
-	 * on one of its aliases). Drives the per-level unlock-window caps
+	 * The highest security level across everything the user has a stake in — a
+	 * domain they own (ied_owner_usr_user_id) or a mailbox they hold a grant on.
+	 * Drives the per-level unlock-window caps
 	 * (specs/mailbox_security_levels.md § The Unlock Window) and the Fortress
 	 * mandatory-2FA enrollment gate. Returns 'standard' when the user touches
-	 * no protected domain.
+	 * nothing protected.
+	 *
+	 * A granted MAILBOX contributes its own level, not its domain's
+	 * (specs/mailbox_connect_flow.md § D). Asking the domain here would
+	 * under-report a user whose only protected mail is a pulled-in Private
+	 * mailbox on an otherwise Standard domain — and under-reporting is quiet:
+	 * they would silently get a Standard-length unlock window over sealed mail.
 	 */
 	static function maxSecurityLevelForUser(int $user_id): string {
 		$rank = array(self::LEVEL_STANDARD => 0, self::LEVEL_PRIVATE => 1, self::LEVEL_FORTRESS => 2);
 		$best = self::LEVEL_STANDARD;
 
-		$consider = function($domain) use (&$best, $rank) {
-			if (!$domain || !$domain->key) {
-				return;
-			}
-			$level = $domain->security_level();
+		$consider = function($level) use (&$best, $rank) {
 			if (($rank[$level] ?? 0) > $rank[$best]) {
 				$best = $level;
 			}
@@ -238,25 +249,23 @@ class InboundEmailDomain extends SystemBase {
 		$owned = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'deleted' => false));
 		$owned->load();
 		foreach ($owned as $d) {
-			$consider($d);
+			if ($d && $d->key) {
+				$consider($d->security_level());
+			}
 		}
 
-		// Domains reached through a mailbox grant on one of their aliases.
+		// Every mailbox reached through a grant, each answering for itself.
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
-		$seen_domains = array();
-		foreach ($alias_ids as $alias_id) {
+		foreach (InboundEmailMailboxGrant::alias_ids_for_user($user_id) as $alias_id) {
 			$alias = new InboundEmailAlias($alias_id, true);
-			if (!$alias->key) {
-				continue;
+			// Live mailboxes only, like the owned-domain pass above: grant rows
+			// survive a soft delete, and a deleted Private mailbox must not keep
+			// holding its ex-reader to Private unlock caps over mail they can no
+			// longer reach.
+			if ($alias->key && !$alias->get('iea_delete_time')) {
+				$consider($alias->security_level());
 			}
-			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
-			if ($domain_id <= 0 || isset($seen_domains[$domain_id])) {
-				continue;
-			}
-			$seen_domains[$domain_id] = true;
-			$consider(new InboundEmailDomain($domain_id, true));
 		}
 
 		return $best;

@@ -20,6 +20,8 @@
  * is a no-op; with smarthost on, checkRelayTunnel applies and the two provider
  * checks are no-ops. The check list always matches the chosen path.
  *
+ * @version 1.16 - checkSealingMailboxHolders(): a protected mailbox with nobody
+ *                 to seal to is held mail, so it is named loudly and early
  * @version 1.15 - checkRelayMapFresh() grades a differing map: pending
  *                 (ProvisioningCheckPending) while the reconcile task is
  *                 alive and succeeding, failed only when it will not converge
@@ -32,6 +34,7 @@ require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailRouter.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 
 class InboundEmailHealth {
 
@@ -80,6 +83,66 @@ class InboundEmailHealth {
             );
         }
         @fclose($sock);
+    }
+
+    /**
+     * Every protected mailbox has exactly one member, and that member holds a
+     * vault (specs/mailbox_connect_flow.md § E).
+     *
+     * This is the visible half of the store-time refusal. A protected mailbox
+     * with nobody to seal to does not store its mail in the clear — it declines
+     * it, and the sender keeps retrying — so the mail is safe but WAITING, and
+     * the senders' queues expire in hours to days. This check is what turns that
+     * deadline into a non-event: it fails loudly, naming the mailbox, well
+     * inside the shortest retry window.
+     *
+     * @throws ProvisioningCheckFailed when any protected mailbox cannot be sealed to.
+     */
+    public static function checkSealingMailboxHolders() {
+        require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+        require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
+
+        $db = DbConnector::get_instance()->get_db_link();
+        $sql = "SELECT a.iea_inbound_email_alias_id AS alias_id, a.iea_alias AS local_part,
+                       d.ied_domain AS domain_name,
+                       (SELECT COUNT(*) FROM ieg_inbound_email_mailbox_grants g
+                         WHERE g.ieg_iea_inbound_email_alias_id = a.iea_inbound_email_alias_id) AS holders
+                  FROM iea_inbound_email_aliases a
+                  JOIN ied_inbound_email_domains d
+                    ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
+                 WHERE a.iea_delete_time IS NULL AND d.ied_delete_time IS NULL
+                   AND " . InboundEmailAlias::effectiveLevelSql('a', 'd') . " IN ('"
+                       . InboundEmailDomain::LEVEL_PRIVATE . "','"
+                       . InboundEmailDomain::LEVEL_FORTRESS . "')";
+        $rows = $db->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+
+        $broken = array();
+        foreach ($rows as $row) {
+            $address = $row['local_part'] . '@' . $row['domain_name'];
+            $holders = intval($row['holders']);
+            if ($holders === 0) {
+                $broken[] = $address . ' has no member';
+                continue;
+            }
+            if ($holders > 1) {
+                $broken[] = $address . ' has ' . $holders . ' members';
+                continue;
+            }
+            $holder_id = InboundEmailMessage::singleOwnerUserId(intval($row['alias_id']));
+            if ($holder_id === null || UserEncryptionVault::loadForUser($holder_id) === null) {
+                $broken[] = $address . '\'s member has no vault';
+            }
+        }
+
+        if (count($broken)) {
+            throw new ProvisioningCheckFailed(
+                'Protected mail is being held rather than stored, because it has no key to seal to: '
+                . implode('; ', array_slice($broken, 0, 5))
+                . (count($broken) > 5 ? ' (and ' . (count($broken) - 5) . ' more)' : '')
+                . '. Give each one exactly one member who holds a vault, or set it to Standard. '
+                . 'Senders are retrying meanwhile; their queues expire in hours to days.'
+            );
+        }
     }
 
     /** The active hardened ingest relay, or null on a colocated deployment. */

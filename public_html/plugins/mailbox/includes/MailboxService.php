@@ -49,7 +49,8 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.23
+ * @version 1.24
+ * @changelog 1.24 - each mailbox in the switcher reports its OWN protection level
  * @changelog 1.23 - The Inbox view excludes outbound rows: a sent-only thread lives in All Mail until a reply arrives
  */
 
@@ -387,10 +388,8 @@ class MailboxService {
 			$domains = new MultiInboundEmailDomain(array());
 			$domains->load();
 			$domain_map = array();
-			$level_map = array();
 			foreach ($domains as $d) {
 				$domain_map[intval($d->key)] = $d->get('ied_domain');
-				$level_map[intval($d->key)] = $d->security_level();
 			}
 			// A mailbox is `locked` for the switcher when its domain seals content
 			// and the viewer holds no open unlock window — the native switcher then
@@ -408,8 +407,11 @@ class MailboxService {
 				}
 				$domain_id = intval($a->get('iea_ied_inbound_email_domain_id'));
 				$domain = $domain_map[$domain_id] ?? '?';
-				$level = $level_map[$domain_id] ?? InboundEmailDomain::LEVEL_STANDARD;
-				$seals = in_array($level, array(InboundEmailDomain::LEVEL_PRIVATE, InboundEmailDomain::LEVEL_FORTRESS), true);
+				// Each mailbox states its OWN level (specs/mailbox_connect_flow.md
+				// § D) — two pulled-in mailboxes on the same provider domain can
+				// legitimately differ, and the chip beside each name has to say so.
+				$level = $a->security_level();
+				$seals = $a->seals_content();
 				$row = $agg[$aid] ?? null;
 				$mailboxes[] = array(
 					'alias_id'       => $aid,

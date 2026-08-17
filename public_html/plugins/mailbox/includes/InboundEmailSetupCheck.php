@@ -25,6 +25,12 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.44 - the sealing-holders row: a protected mailbox nothing can seal
+ *                 to is failing loudly on the Setup tab, inside the senders'
+ *                 retry window
+ * @version 1.43 - the sealed-backlog and sealed-leftover rows ask each MAILBOX's
+ *   posture, so a pulled-in Private mailbox on a Standard domain is neither
+ *   missed nor nagged about
  * @version 1.42 - the Direct PASS row names Cloudflare's _dc-srv SRV-target rewrite when the zone shows it, so the odd-looking record reads as normal
  * @version 1.41 - colocated SRV targets the WEB host (the endpoint is a web route and the cert covers the web host, not the mail hostname); the card probes the published endpoint over verified HTTPS, so a wrong target reads as broken instead of PASS
  * @version 1.40 - a Joinery Direct check row per domain: OPTIONAL, absent is INFO (never needs-attention), fresh lookup so the tab shows the truth right after publishing
@@ -53,6 +59,7 @@ require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 
 class InboundEmailSetupCheck {
 
@@ -1728,7 +1735,13 @@ class InboundEmailSetupCheck {
 		//
 		// The old row asserted the blocked cause for every unsealed message
 		// without testing it, which made the common case both loud and wrong.
-		if ($model && $model->seals_content()) {
+		//
+		// The row covers a domain that seals AND a Standard domain carrying a
+		// mailbox that seals on its own (specs/mailbox_connect_flow.md § D) —
+		// otherwise a pulled-in Private mailbox's stuck backlog would go
+		// unreported on the tab operators actually look at.
+		if ($model && ($model->seals_content()
+				|| InboundEmailAlias::domainHasSealingMailbox(intval($model->key)))) {
 			$pending    = 0;
 			$converging = 0;
 			$blocked    = 0;
@@ -1745,15 +1758,20 @@ class InboundEmailSetupCheck {
 				// before this deployment saw it, and the per-field seal happens
 				// when DeferredIngest parses it at the next unlock. Counting it
 				// as unsealed reports the safest arrival path as a failure.
+				// Only rows whose MAILBOX seals: a Standard mailbox's plaintext is
+				// correct, not backlog, and counting it would report a stuck seal
+				// that nothing is trying to perform.
 				$stmt = $db->prepare(
-					"SELECT iem_iea_inbound_email_alias_id AS alias_id,
-					        COUNT(*) FILTER (WHERE iem_content_sealed = false AND iem_pending_parse = false) AS unsealed,
-					        COUNT(*) FILTER (WHERE iem_pending_parse = true) AS pending,
-					        MIN(iem_received_time) FILTER (WHERE iem_content_sealed = false
-					            AND iem_pending_parse = false) AS oldest_unsealed
-					   FROM iem_inbound_email_messages
-					  WHERE iem_ied_inbound_email_domain_id = ? AND iem_delete_time IS NULL
-					  GROUP BY iem_iea_inbound_email_alias_id");
+					"SELECT m.iem_iea_inbound_email_alias_id AS alias_id,
+					        COUNT(*) FILTER (WHERE m.iem_content_sealed = false AND m.iem_pending_parse = false) AS unsealed,
+					        COUNT(*) FILTER (WHERE m.iem_pending_parse = true) AS pending,
+					        MIN(m.iem_received_time) FILTER (WHERE m.iem_content_sealed = false
+					            AND m.iem_pending_parse = false) AS oldest_unsealed
+					   FROM iem_inbound_email_messages m
+					   " . mailbox_protection_posture_join() . "
+					  WHERE m.iem_ied_inbound_email_domain_id = ? AND m.iem_delete_time IS NULL
+					    AND " . mailbox_protection_seals_sql() . "
+					  GROUP BY m.iem_iea_inbound_email_alias_id");
 				$stmt->execute(array(intval($model->key)));
 
 				require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
@@ -1923,15 +1941,20 @@ class InboundEmailSetupCheck {
 		// (specs/mailbox_lowering_unseal.md § 7): safe but not yet converged —
 		// each row unseals from its own reader's next unlocked session, so this
 		// stays INFO, never a failure.
-		if ($model && !$model->seals_content()) {
+		// "No longer seals" is asked per MAILBOX (specs/mailbox_connect_flow.md
+		// § D): a mailbox that still seals is doing exactly what it should, and
+		// counting its rows here would nag about protection nobody lowered.
+		if ($model) {
 			$leftover = 0;
 			try {
 				$db = DbConnector::get_instance()->get_db_link();
 				$stmt = $db->prepare(
-					"SELECT COUNT(*) FROM iem_inbound_email_messages
-					 WHERE iem_ied_inbound_email_domain_id = ?
-					   AND (iem_content_sealed = true OR iem_pending_parse = true)
-					   AND iem_delete_time IS NULL");
+					"SELECT COUNT(*) FROM iem_inbound_email_messages m
+					 " . mailbox_protection_posture_join() . "
+					 WHERE m.iem_ied_inbound_email_domain_id = ?
+					   AND NOT (" . mailbox_protection_seals_sql() . ")
+					   AND (m.iem_content_sealed = true OR m.iem_pending_parse = true)
+					   AND m.iem_delete_time IS NULL");
 				$stmt->execute(array(intval($model->key)));
 				$leftover = intval($stmt->fetchColumn());
 			} catch (\Throwable $e) {
@@ -2322,6 +2345,27 @@ class InboundEmailSetupCheck {
 			$out[] = $this->r('plugin.relay', '', 'plugin', 'Sending route', self::REQUIRED, self::FAIL,
 				'The route outgoing mail takes could not be verified.', $e->getMessage(),
 				array('text' => 'Check the active email provider credential, or the outgoing SMTP settings, on the Settings page.'));
+		}
+
+		// A protected mailbox that cannot be sealed to is HELD mail: store time
+		// refuses rather than writing plaintext, the senders retry, and their
+		// queues expire in hours to days (specs/mailbox_connect_flow.md § E).
+		// This row is what turns that deadline into a non-event — it fails
+		// loudly, naming the mailbox, well inside the shortest retry window.
+		try {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailHealth.php'));
+			InboundEmailHealth::checkSealingMailboxHolders();
+			$out[] = $this->r('plugin.sealing_holders', '', 'plugin', 'Protected mail can be sealed',
+				self::REQUIRED, self::PASS,
+				'Every protected mailbox has one member with a vault to seal its mail to.');
+		} catch (\Throwable $e) {
+			$out[] = $this->r('plugin.sealing_holders', '', 'plugin', 'Protected mail can be sealed',
+				self::REQUIRED, self::FAIL,
+				'A protected mailbox cannot seal its mail. New mail for it is being declined, and the '
+					. 'senders\' retry queues give up after hours to days.',
+				$e->getMessage(),
+				array('text' => 'Give the mailbox exactly one member, with a vault — or set it to '
+					. 'Standard from its editor. The held mail then flows in on its own.'));
 		}
 
 		// Cutover progress: relays are born enabled, so this row reports how

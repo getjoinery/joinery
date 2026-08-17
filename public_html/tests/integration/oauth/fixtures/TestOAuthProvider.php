@@ -9,7 +9,7 @@
  * exercise beginConsent against a Guzzle MockHandler. Loaded only by the test
  * bootstrap — never placed in includes/oauth/providers/.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Provider.php'));
@@ -20,6 +20,9 @@ class TestOAuthProvider implements OAuth2Provider {
     // returns, so nothing reads these settings — but declaring them keeps the
     // fixture honest about the contract every real provider satisfies.
     use DeclaresOAuthConfigFields;
+    // The stub reports no identity: the mock server has no profile endpoint, and
+    // a provider that cannot say who signed in is the ordinary case.
+    use DeclaresNoOAuthIdentity;
 
     const DEFAULT_BASE = 'http://localhost:8080';
 

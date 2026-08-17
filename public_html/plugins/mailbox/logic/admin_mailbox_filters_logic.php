@@ -157,7 +157,7 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 				'form_values'   => $values,
 				'scope_options' => $scope['options'],
 				'label_options' => _filter_label_options($values['scope']),
-				'forward_ack_domain' => _filter_forward_ack_domain($values['scope'], $scope['alias_domain']),
+				'forward_ack_domain' => _filter_forward_ack_domain($values['scope']),
 				'error'         => $e->getMessage(),
 				'session'       => $session,
 				'settings'      => $settings,
@@ -188,7 +188,7 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 			'form_values'   => $values,
 			'scope_options' => $scope['options'],
 			'label_options' => _filter_label_options($values['scope']),
-			'forward_ack_domain' => _filter_forward_ack_domain($values['scope'], $scope['alias_domain']),
+			'forward_ack_domain' => _filter_forward_ack_domain($values['scope']),
 			'session'       => $session,
 			'settings'      => $settings,
 		));
@@ -418,28 +418,24 @@ function _filter_collect_input(array $input): array {
 }
 
 /**
- * The domain name a filter's scope belongs to, but only when that domain seals
- * its content — the form uses it to decide whether forwarding needs an
- * acknowledgment, and to name the domain in the sentence being agreed to.
- * Empty string when nothing needs acknowledging.
+ * What a filter's scope is called, but only when mail in that scope is sealed —
+ * the form uses it to decide whether forwarding needs an acknowledgment, and to
+ * name the thing in the sentence being agreed to. Empty string when nothing
+ * needs acknowledging.
+ *
+ * A mailbox scope names the MAILBOX and asks its own level; a domain scope names
+ * the domain (specs/mailbox_connect_flow.md § D).
  */
-function _filter_forward_ack_domain(string $scope, array $alias_domain): string {
-	$domain_id = null;
+function _filter_forward_ack_domain(string $scope): string {
 	if (strncmp($scope, 'alias:', 6) === 0) {
-		$alias_id = intval(substr($scope, 6));
-		$domain_id = $alias_domain[$alias_id] ?? null;
-		if ($domain_id === null) {
-			$alias = new InboundEmailAlias($alias_id, TRUE);
-			$domain_id = $alias->key ? intval($alias->get('iea_ied_inbound_email_domain_id')) : null;
-		}
-	} elseif (strncmp($scope, 'domain:', 7) === 0) {
-		$domain_id = intval(substr($scope, 7));
+		$alias = new InboundEmailAlias(intval(substr($scope, 6)), TRUE);
+		return ($alias->key && $alias->seals_content()) ? (string)$alias->get_full_address() : '';
 	}
-	if (!$domain_id) {
-		return '';
+	if (strncmp($scope, 'domain:', 7) === 0) {
+		$domain = new InboundEmailDomain(intval(substr($scope, 7)), TRUE);
+		return ($domain->key && $domain->seals_content()) ? (string)$domain->get('ied_domain') : '';
 	}
-	$domain = new InboundEmailDomain(intval($domain_id), TRUE);
-	return ($domain->key && $domain->seals_content()) ? (string)$domain->get('ied_domain') : '';
+	return '';
 }
 
 /** Reconstruct the editable value set from a stored filter (edit prefill). */

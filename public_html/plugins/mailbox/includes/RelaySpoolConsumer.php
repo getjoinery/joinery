@@ -28,6 +28,10 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.7 - the seal-target hold never ages out: the relay said 250, so
+ *   dropping the blob later would be silent loss of accepted mail
+ * @version 1.6 - a protected mailbox with no key to seal to holds the blob on
+ *   the relay instead of storing it in plaintext
  * @version 1.5 - pull() reports 'seals' and 'errors' so a caller can tell an empty
  *                spool from an unproductive pass (the drain-before-wipe gate)
  * @version 1.4
@@ -135,8 +139,9 @@ class RelaySpoolConsumer {
 				// One aggregate line per pass — never per-blob (the pull runs every
 				// cron pass and held blobs persist across passes).
 				error_log('RelaySpoolConsumer: ' . $held . ' blob(s) HELD on the relay '
-					. '(domain disabled/unconfigured or Fortress owner unresolved) — '
-					. 'recoverable, awaiting the domain/owner or the grace-window age-out.');
+					. '(domain disabled/unconfigured, Fortress owner unresolved, or a protected '
+					. 'mailbox with no key to seal to) — recoverable; the Setup tab names a '
+					. 'sealing mailbox that needs repair.');
 			}
 
 			$this->relay->set('mrl_last_pull_time', gmdate('Y-m-d H:i:s'));
@@ -297,7 +302,20 @@ class RelaySpoolConsumer {
 		$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
 		$parsed = $this->router->parseEmail($raw);
 		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());
-		$result = $this->router->storeMessage($raw, $parsed, $alias, $domain, $recipient, $auth);
+		try {
+			$result = $this->router->storeMessage($raw, $parsed, $alias, $domain, $recipient, $auth);
+		} catch (MailboxSealTargetMissing $e) {
+			// A protected mailbox with nobody to seal to. Storing it in plaintext
+			// would defeat the level silently, so hold the blob on the relay — it
+			// is still sealed there — and let a later pull store it once the
+			// mailbox has one member with a vault. NO age-out on this hold: the
+			// relay told the sender 250, so dropping the blob later would be
+			// silent loss of accepted mail. Declining means "try again later"
+			// for as long as it takes (specs/mailbox_connect_flow.md § E); the
+			// Setup tab's sealing row is what keeps the wait short, and holds are
+			// logged in aggregate by the caller, never per pass.
+			return 'hold';
+		}
 		if (!$result['dedup'] && isset($result['message']) && $result['message'] !== null) {
 			// Stamp the spool id so a re-pull dedups on it directly. TARGETED UPDATE
 			// — storeMessage seals the content columns behind the model's back, so a

@@ -16,6 +16,10 @@
  * file only creates aliases, it never edits an existing alias's
  * destinations or delivery mode.
  *
+ * @version 1.2 - a domain can be created as an IMAP source in its creating save,
+ *                so a partially failed provisioning never leaves it hosted-shaped
+ * @version 1.1 - the protected-mailbox grant rule is checked against the union
+ *                actually being written, and reported as an error rather than thrown
  * @version 1.0 - extracted from admin_mailbox_setup_logic (add_domain) and
  *                admin_mailbox_alias_logic (alias save + grant sync)
  */
@@ -29,9 +33,17 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mail
  * creation, files fleet domain claims exactly as the Setup tab's add_domain
  * action always has.
  *
+ * $imap_source shapes the CREATING save: a provider domain (gmail.com) is not
+ * an identity this deployment holds, so it is born flagged as an IMAP source,
+ * accepting unmatched mail, at Standard — in one save, so a later failure in
+ * the same provisioning call can never leave it half-shaped as a hosted
+ * domain. No fleet claim is filed for it either: an ownership challenge for
+ * somebody else's domain could never be fulfilled. An EXISTING domain is
+ * reused exactly as it is, whatever was asked.
+ *
  * @return array{error: ?string, domain: ?InboundEmailDomain, created: bool}
  */
-function mailbox_provision_domain(string $domain_name): array {
+function mailbox_provision_domain(string $domain_name, bool $imap_source = false): array {
 	$result = array('error' => null, 'domain' => null, 'created' => false);
 
 	$domain_name = strtolower(trim($domain_name));
@@ -46,14 +58,20 @@ function mailbox_provision_domain(string $domain_name): array {
 			$domain = new InboundEmailDomain(NULL);
 			$domain->set('ied_domain', $domain_name);
 			$domain->set('ied_is_enabled', true);
-			$domain->set('ied_reject_unmatched', true);
+			$domain->set('ied_reject_unmatched', !$imap_source);
+			if ($imap_source) {
+				$domain->set('ied_is_imap_source', true);
+				$domain->set('ied_security_level', InboundEmailDomain::LEVEL_STANDARD);
+			}
 			$domain->prepare();
 			$domain->save();
 			$domain->load();
 			$result['created'] = true;
 
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
-			(new FleetClient())->fileDomainClaims($domain_name);
+			if (!$imap_source) {
+				require_once(PathHelper::getIncludePath('plugins/mailbox/includes/FleetClient.php'));
+				(new FleetClient())->fileDomainClaims($domain_name);
+			}
 		}
 		$result['domain'] = $domain;
 	} catch (InboundEmailDomainException $e) {
@@ -76,7 +94,8 @@ function mailbox_provision_domain(string $domain_name): array {
  *               alias: ?InboundEmailAlias, domain_created: bool,
  *               alias_created: bool, grant_added: bool}
  */
-function mailbox_provision_mailbox(string $domain_name, string $local_part, int $user_id): array {
+function mailbox_provision_mailbox(string $domain_name, string $local_part, int $user_id,
+		bool $imap_source = false): array {
 	$result = array(
 		'error' => null,
 		'domain' => null,
@@ -86,7 +105,7 @@ function mailbox_provision_mailbox(string $domain_name, string $local_part, int 
 		'grant_added' => false,
 	);
 
-	$domain_step = mailbox_provision_domain($domain_name);
+	$domain_step = mailbox_provision_domain($domain_name, $imap_source);
 	if ($domain_step['error'] !== null) {
 		$result['error'] = $domain_step['error'];
 		return $result;
@@ -110,14 +129,7 @@ function mailbox_provision_mailbox(string $domain_name, string $local_part, int 
 		return $result;
 	}
 
-	// Protected-domain invariants enforce at the mutation point, same as the
-	// alias page (specs/mailbox_protection_ceremony.md § 2b).
 	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
-	$protected_error = mailbox_protected_grant_error($domain, array($user_id));
-	if ($protected_error !== null) {
-		$result['error'] = $protected_error;
-		return $result;
-	}
 
 	try {
 		$alias = null;
@@ -155,10 +167,23 @@ function mailbox_provision_mailbox(string $domain_name, string $local_part, int 
 		}
 		if (!in_array($user_id, $granted, true)) {
 			$granted[] = $user_id;
+			// A protected mailbox seals to ONE holder with a vault, so the union
+			// this call would otherwise write is checked against that rule first —
+			// against the set actually being written, not the one user passed in
+			// (specs/mailbox_protection_ceremony.md § 2b). sync_for_alias applies
+			// the same rule at the write; this reports it as a result rather than
+			// an exception, which is what a headless caller can act on.
+			$protected_error = mailbox_protected_grant_error($domain, $granted, $alias);
+			if ($protected_error !== null) {
+				$result['error'] = $protected_error;
+				return $result;
+			}
 			InboundEmailMailboxGrant::sync_for_alias(intval($alias->key), $granted);
 			$result['grant_added'] = true;
 		}
 	} catch (InboundEmailAliasException $e) {
+		$result['error'] = $e->getMessage();
+	} catch (InboundEmailMailboxGrantException $e) {
 		$result['error'] = $e->getMessage();
 	}
 

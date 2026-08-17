@@ -29,6 +29,10 @@
  *
  * See specs/mail_archive_import.md.
  *
+ * @version 1.6
+ * @changelog 1.6 - a seal-target refusal HOLDS the batch (entries stay pending,
+ *   the run stays importing) instead of failing every remaining entry of a
+ *   repairable mailbox
  * @version 1.5
  * @changelog 1.5 - estimatedStorageBytes()/storageTargets(): what an import will
  *   cost on disk and where it lands, so the run can be refused before it starts
@@ -363,6 +367,20 @@ class MailArchiveImporter {
 			try {
 				$outcome = $this->importEntry($entry, $alias, $domain);
 				$counts[$outcome]++;
+			} catch (MailboxSealTargetMissing $e) {
+				// The mailbox cannot seal right now, so the store REFUSED — and
+				// declining always means "try again later", never a recorded
+				// failure (specs/mailbox_connect_flow.md § E). The entry stays
+				// pending, and the batch stops here: every remaining entry would
+				// refuse identically, and burning them all to FAILED would turn a
+				// repairable pause into thirty-five thousand rows of noise. Once
+				// the mailbox is repaired the next batch imports them unchanged.
+				$counts['seen']--;
+				$counts['held_reason'] = $e->getMessage();
+				$detail[] = array('locator' => (string)$entry->get('mie_locator'),
+					'folder' => (string)$entry->get('mie_source_folder'),
+					'reason' => 'Held, not failed: ' . $e->getMessage());
+				break;
 			} catch (Throwable $e) {
 				$counts['failed']++;
 				$reason = $e->getMessage();
@@ -387,7 +405,10 @@ class MailArchiveImporter {
 			$this->record($counts, $detail);
 		}
 
-		$counts['exhausted'] = ($counts['seen'] < $limit);
+		// A held batch is never exhausted: the entries it stopped on are still
+		// pending, and finishing the run now would strand them behind a DONE
+		// state. The run stays importing; the next pass retries them.
+		$counts['exhausted'] = empty($counts['held_reason']) && ($counts['seen'] < $limit);
 		return $counts;
 	}
 

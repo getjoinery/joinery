@@ -81,7 +81,10 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 		// afterward — never merely alarmed about.
 		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/protection_ceremony.php'));
 		$alias_domain = new InboundEmailDomain(intval($alias->get('iea_ied_inbound_email_domain_id')), TRUE);
-		$protected_error = mailbox_protected_grant_error($alias_domain, $submitted_grant_users);
+		// The MAILBOX answers where it exists — its own level may differ from its
+		// domain's (specs/mailbox_connect_flow.md § D).
+		$protected_error = mailbox_protected_grant_error($alias_domain, $submitted_grant_users,
+			$alias->key ? $alias : null);
 		if ($protected_error !== null) {
 			return LogicResult::render(array(
 				'alias' => $alias,
@@ -132,6 +135,20 @@ function admin_mailbox_alias_logic(array $input): LogicResult {
 				DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 			));
 			return LogicResult::redirect('/plugins/mailbox/admin/admin_mailbox_accounts');
+		} catch (InboundEmailMailboxGrantException $e) {
+			// The grant layer refused the resulting holder set on a protected
+			// mailbox. The pre-check above catches this for anything the form can
+			// express; this is the same refusal arriving from the write itself, so
+			// it reads the same way rather than as a crash.
+			return LogicResult::render(array(
+				'alias' => $alias,
+				'error' => $e->getMessage(),
+				'session' => $session,
+				'settings' => $settings,
+				'domains' => new MultiInboundEmailDomain(array('deleted' => false), array('ied_domain' => 'ASC')),
+				'user_options' => $user_options,
+				'granted_user_ids' => $submitted_grant_users,
+			));
 		} catch (InboundEmailAliasException $e) {
 			return LogicResult::render(array(
 				'alias' => $alias,

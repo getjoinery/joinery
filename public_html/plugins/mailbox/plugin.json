@@ -1,7 +1,7 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.93.24",
+    "version": "1.94.0",
     "author": "Joinery",
     "license": "PolyForm-Shield-1.0.0",
     "status": "beta",
@@ -91,6 +91,15 @@
             "check": {
                 "type": "code",
                 "call": "InboundEmailHealth::checkDomainDns"
+            }
+        },
+        {
+            "key": "sealing_mailbox_holders",
+            "label": "Protected mailboxes have someone to seal to",
+            "details": "A Private or Fortress mailbox encrypts its mail to one member's vault as it arrives. With no member, several members, or a member who holds no vault, there is no key — so incoming mail is HELD rather than stored in the clear, and senders retry until their queues expire. Fails naming each affected mailbox.",
+            "check": {
+                "type": "code",
+                "call": "InboundEmailHealth::checkSealingMailboxHolders"
             }
         },
         {

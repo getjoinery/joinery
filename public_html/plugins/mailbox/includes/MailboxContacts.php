@@ -15,9 +15,9 @@
  * column — see addressHash() — so the existing (hash, user) unique constraint already means one
  * row per (user, mailbox, address).
  *
- * A row is sealed when the adding user holds a Sealed Vault AND the mailbox's domain seals
- * content — the SAME RULE AS THE MAIL BESIDE IT (`$domain->seals_content()`, the identical
- * condition InboundEmailRouter uses). Sealing an address book while the mail it describes sits
+ * A row is sealed when the adding user holds a Sealed Vault AND the mailbox seals content —
+ * the SAME RULE AS THE MAIL BESIDE IT (`$alias->seals_content()`, the identical condition
+ * InboundEmailRouter resolves at store time). Sealing an address book while the mail it describes sits
  * in plaintext would protect nothing: every correspondent is already visible in that plaintext
  * mail. So both hang off one posture switch — a Standard mailbox is server-readable end to end,
  * a Private/Fortress mailbox seals end to end — and there is no "plaintext mail, sealed
@@ -33,7 +33,9 @@
  * them. The address hash is a keyed blind index for sealed rows (never leaks the sealed
  * address) and a plain SHA-256 otherwise.
  *
- * @version 2.2
+ * @version 2.3
+ * @changelog 2.3 - the posture question follows the MAILBOX, and an unreadable
+ *   one fails toward sealed rather than toward plaintext
  * @changelog 2.2 - listForUser(): the user's whole contact store for surfaces not scoped to one mailbox (Messenger people picker)
  */
 
@@ -81,19 +83,18 @@ class MailboxContacts {
 		if (array_key_exists($alias_id, self::$seals_cache)) {
 			return self::$seals_cache[$alias_id];
 		}
-		$seals = false;
+		// The MAILBOX's posture, which is its own level where it has one and the
+		// domain's otherwise (specs/mailbox_connect_flow.md § D) — the same
+		// question the mail beside these contacts asks.
 		try {
 			$alias = new InboundEmailAlias($alias_id, TRUE);
-			$domain_id = intval($alias->get('iea_ied_inbound_email_domain_id'));
-			if ($domain_id > 0) {
-				$domain = new InboundEmailDomain($domain_id, TRUE);
-				$seals = $domain->seals_content();
-			}
+			$seals = $alias->key ? $alias->seals_content() : false;
 		} catch (\Throwable $e) {
-			// An unreadable mailbox is not a licence to store plaintext where
-			// ciphertext was expected — but it is also not a mailbox anything can
-			// be filed against, so the callers' own guards take it from here.
+			// Fail toward the sealed path. An unreadable posture is not a licence
+			// to store plaintext where ciphertext was expected; the callers' own
+			// guards decide what to do with a mailbox nothing can be filed against.
 			error_log('MailboxContacts: could not read the posture of mailbox ' . $alias_id . ': ' . $e->getMessage());
+			$seals = true;
 		}
 		return self::$seals_cache[$alias_id] = $seals;
 	}

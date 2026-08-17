@@ -1149,46 +1149,58 @@ private static function UcName($string) {
 		if(!$dblink->inTransaction()){
 			$dblink->beginTransaction();
 			$this_transaction = true;
-		}		
-		
-		//REMOVE FROM ANY MAILING LISTS
-		if(!$debug){
-			//GET LIST OF CONTACT TYPES
-			$mailing_lists = new MultiMailingList(
-				array(),
-				NULL,		//SORT BY => DIRECTION
-				NULL,  //NUM PER PAGE
-				NULL);  //OFFSET
-			$mailing_lists->load();
-			foreach($mailing_lists as $mailing_list){
-				if($mailing_list->is_user_in_list($this->key, false)){
-					$mailing_list->remove_registrant($this->key);
+		}
+
+		// A deletion that fails must ROLL BACK before it propagates. A dependent
+		// rule can legitimately refuse this delete (a protected mailbox refusing
+		// to lose its only member, say), and without this the refusal escaped
+		// with the transaction still open — so every later statement in the
+		// request ran inside a doomed transaction and quietly did nothing.
+		try {
+			//REMOVE FROM ANY MAILING LISTS
+			if(!$debug){
+				//GET LIST OF CONTACT TYPES
+				$mailing_lists = new MultiMailingList(
+					array(),
+					NULL,		//SORT BY => DIRECTION
+					NULL,  //NUM PER PAGE
+					NULL);  //OFFSET
+				$mailing_lists->load();
+				foreach($mailing_lists as $mailing_list){
+					if($mailing_list->is_user_in_list($this->key, false)){
+						$mailing_list->remove_registrant($this->key);
+					}
 				}
 			}
-		}
-		
-		//DELETE ANY GROUP MEMBERSHIPS
-		$groups = Group::get_groups_in_category('user', false, 'objects');
-		foreach($groups as $group){
-			$group->remove_member($this->key);
+
+			//DELETE ANY GROUP MEMBERSHIPS
+			$groups = Group::get_groups_in_category('user', false, 'objects');
+			foreach($groups as $group){
+				$group->remove_member($this->key);
+			}
+
+			//DELETE CALENDAR OWNERSHIP: schedules + native entries (polymorphic owner,
+			//so not reachable by the generic FK cascade — see CalendarSubject::purge).
+			if(!$debug){
+				require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
+				CalendarSubject::user($this->key)->purge();
+			}
+
+			//DO ANY PREP ABOVE THIS LINE
+			parent::permanent_delete($debug);
+		} catch (\Throwable $e) {
+			if($this_transaction && $dblink->inTransaction()){
+				$dblink->rollBack();
+			}
+			throw $e;
 		}
 
-		//DELETE CALENDAR OWNERSHIP: schedules + native entries (polymorphic owner,
-		//so not reachable by the generic FK cascade — see CalendarSubject::purge).
-		if(!$debug){
-			require_once(PathHelper::getIncludePath('includes/calendar/CalendarSubject.php'));
-			CalendarSubject::user($this->key)->purge();
-		}
-
-		//DO ANY PREP ABOVE THIS LINE
-		parent::permanent_delete($debug);
-		
 		if($this_transaction){
 			$dblink->commit();
-		}	
-		
+		}
+
 		return true;
-		
+
 	}
 	
 	//TESTS FOR THIS CLASS

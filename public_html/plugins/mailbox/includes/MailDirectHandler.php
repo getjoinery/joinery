@@ -20,7 +20,9 @@
  * is for). Anything a kind needs to say travels in its parts, never in new
  * envelope fields; that is what keeps the envelope kind-independent.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - a protected mailbox with no key to seal to defers the
+ *   delivery (held, parts intact) instead of storing it in plaintext
  */
 
 require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectHandler.php'));
@@ -75,7 +77,16 @@ class MailDirectHandler implements DirectKindHandler {
 		$assembled = self::assemble($envelope, $parts, $secret);
 
 		$router = new InboundEmailRouter();
-		$router->storeDirectMessage($assembled['meta'], $assembled['parts'], $alias, $domain, $recipient, $gate_accepted);
+		try {
+			$router->storeDirectMessage($assembled['meta'], $assembled['parts'], $alias, $domain, $recipient, $gate_accepted);
+		} catch (MailboxSealTargetMissing $e) {
+			// A protected mailbox with nobody to seal to. Storing it in plaintext
+			// would break the mailbox's one promise silently, so the delivery is
+			// HELD with its parts instead — the framework's existing "not now"
+			// disposition — and lands once the mailbox has a member with a vault.
+			// The sender was already answered, so nothing leaks either way.
+			throw new DirectDeferIngest($e->getMessage(), 0, $e);
+		}
 	}
 
 	/**

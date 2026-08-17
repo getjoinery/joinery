@@ -13,7 +13,9 @@
  * OAuth2ProviderRegistry returns) because OAuth2Provider is an all-static
  * interface; static methods are called on it directly.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - fetchIdentity(): a bearer GET against the provider-declared
+ *   profile endpoint, so a consumer learns who signed in instead of asking
  */
 require_once(PathHelper::getComposerAutoloadPath());
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -120,6 +122,44 @@ class OAuth2Client {
         }
         $refreshed = $this->refresh($providerClass, $refreshToken);
         return $t->withRefreshedAccess($refreshed);
+    }
+
+    /**
+     * Who just signed in, as an email address, or null when this provider does
+     * not report one / the call fails.
+     *
+     * One bearer GET against the endpoint the PROVIDER declares, whose response
+     * the provider interprets — the client contributes only the mechanics, the
+     * same division the token endpoints already use. Never throws: losing the
+     * convenience must not lose the connection, so a caller that gets null falls
+     * back to asking, with the token already in hand.
+     *
+     * @param string $providerClass A class implementing OAuth2Provider.
+     */
+    public function fetchIdentity(string $providerClass, OAuth2Token $token): ?string {
+        $endpoint = $providerClass::getIdentityEndpoint();
+        if ($endpoint === null || $endpoint === '') {
+            return null;
+        }
+        try {
+            $response = $this->http->request('GET', $endpoint, [
+                'headers' => [
+                    'Authorization' => 'Bearer ' . $token->getAccessToken(),
+                    'Accept'        => 'application/json',
+                ],
+                'http_errors' => true,
+            ]);
+            $profile = json_decode((string)$response->getBody(), true);
+        } catch (Throwable $e) {
+            error_log('OAuth2Client::fetchIdentity failed for ' . $providerClass . ': ' . $e->getMessage());
+            return null;
+        }
+        if (!is_array($profile)) {
+            return null;
+        }
+        $address = $providerClass::identityFromProfile($profile);
+        $address = ($address === null) ? null : strtolower(trim($address));
+        return ($address !== null && $address !== '') ? $address : null;
     }
 
     /**
