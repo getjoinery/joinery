@@ -8,11 +8,16 @@
  * interval is the real cadence (self-throttling), so the task can run every cron
  * pass without hammering any one mailbox.
  *
- * Overlap guard: each account is claimed with an atomic conditional UPDATE that
- * stamps iia_last_poll_time on pickup, so two concurrent runs can't race on the
- * same account's last_seen_uid. Failures are per-account and non-fatal — one
+ * Overlap guard, two layers: each account is claimed with an atomic conditional
+ * UPDATE that stamps iia_last_poll_time on pickup (task-vs-task), and the
+ * ingest itself holds a per-account advisory lock inside ImapIngestor::poll()
+ * (any fetch path vs any other — a manual Fetch now included; this run counts a
+ * busy account as skipped). Failures are per-account and non-fatal — one
  * unreachable mailbox or expired token never stops the rest.
  *
+ * @version 1.2
+ * @changelog 1.2 - an account whose fetch lock is held (a manual Fetch now
+ *   mid-run) is skipped, not counted an error
  * @version 1.1
  */
 
@@ -89,6 +94,11 @@ class PollImapAccounts implements ScheduledTaskInterface {
 				$stored += intval($result['stored'] ?? 0);
 				$failedMessages += intval($result['failed'] ?? 0);
 				$messages[] = $this->describe($account) . ': ' . ($result['status'] ?? 'ok');
+			} catch (ImapFetchBusyException $e) {
+				// A manual Fetch now holds the account's fetch lock. Not an
+				// error — the fetch this run wanted is already happening.
+				$skipped++;
+				$messages[] = $this->describe($account) . ': skipped, a fetch is already running';
 			} catch (Throwable $e) {
 				$errors++;
 				// recordStatus is credential-free by construction.

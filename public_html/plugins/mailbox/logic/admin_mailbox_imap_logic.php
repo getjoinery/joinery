@@ -6,6 +6,8 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
+ * @version 1.4 - a Fetch now that finds a fetch already running says so as a
+ *   warning, not a fetch error
  * @version 1.3 - reconnect consent carries the provider's identity scopes, so
  *   the consumer can check which address signed in
  * @version 1.2
@@ -72,6 +74,12 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 					try {
 						$res = $ingestor->poll(50);
 						$msg = 'Fetch complete. ' . ($res['status'] ?? '');
+					} catch (ImapFetchBusyException $e) {
+						// A double click, or the scheduled poller mid-run. The
+						// fetch the operator wants is the one already happening.
+						$msg = 'A fetch for this mailbox is already running — it finishes on its own, '
+							. 'nothing else to press.';
+						$level = DisplayMessage::MESSAGE_WARNING;
 					} catch (Throwable $e) {
 						$msg = 'Fetch error: ' . $e->getMessage();
 						$level = DisplayMessage::MESSAGE_ERROR;

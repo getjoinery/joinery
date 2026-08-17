@@ -15,7 +15,9 @@
  * The mailbox itself is built by ImapFeedProvisioner, the one path a pulled-in
  * mailbox comes into being by; this page collects answers and nothing more.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - the address survives a refused password sign-in, so a retry
+ *   retypes one field, not two
  * @changelog 1.2 - sign-in shows the easiest method first: an app password
  *   wherever the host honors one, with a guided modal linking to the host's own
  *   app-password pages, and OAuth behind Other options; the register step
@@ -220,6 +222,7 @@ if ($state === 'signin') {
 		// sign-in, so the address has to be typed. Nothing can confirm it for us.
 		$formwriter->textinput('address', 'Email address', array(
 			'validation' => array('required' => true),
+			'value' => (string)($prefill_address ?? ''),
 			'helptext' => 'The address whose mail is collected. It is also the username the '
 				. 'connection signs in with.',
 		));
