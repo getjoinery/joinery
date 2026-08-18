@@ -12,7 +12,9 @@
  *   'title'       page heading
  *   'scope'       'site' | 'user' — site steps render only for permission 10
  *   'order'       position in the flow
- *   'copy'        the two-sentence intro (shared with the dashboard card)
+ *   'copy'        the two-sentence intro (shared with the dashboard card) —
+ *                 a string, or callable(?User $viewer): string for a step
+ *                 whose framing depends on live state (read via copyFor())
  *   'status'      callable(?User $viewer): 'green'|'amber'|'none'
  *   'render_file' include-path of the step's form partial (non-routable dir)
  *   'active'      optional callable(?User $viewer): bool — hidden when false
@@ -30,7 +32,7 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 class SetupSteps {
@@ -133,6 +135,20 @@ class SetupSteps {
 		}
 		$user_id = ($step['decision'] === 'user' && $viewer) ? (int)$viewer->key : NULL;
 		return self::hasDecision((string)($step['key'] ?? ''), $user_id);
+	}
+
+	/** A step's intro copy, evaluated if it depends on live state. Throws read as ''. */
+	public static function copyFor(array $step, ?User $viewer): string {
+		$copy = $step['copy'] ?? '';
+		if (!is_callable($copy)) {
+			return (string)$copy;
+		}
+		try {
+			return (string)call_user_func($copy, $viewer);
+		} catch (Throwable $e) {
+			error_log('SetupSteps: copy callable for "' . ($step['key'] ?? '?') . '" threw: ' . $e->getMessage());
+			return '';
+		}
 	}
 
 	/** A step's live status. A predicate that throws reads as 'none', never a fatal. */
@@ -388,7 +404,19 @@ class SetupSteps {
 			'title' => 'Sending email',
 			'scope' => 'site',
 			'order' => 30,
-			'copy'  => "Your site needs a way to send mail — receipts, reminders, sign-in codes. Pick a provider and we'll check it actually works before moving on.",
+			// Two different situations wear this step: a site with no working
+			// provider needs to pick one, a site that already sends only owes
+			// the delivery proof — the intro must not ask for keys it has.
+			'copy'  => function (?User $viewer): string {
+				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+				if (EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none') {
+					return "Your site needs a way to send mail — receipts, reminders, sign-in codes. Pick a provider and we'll check it actually works before moving on.";
+				}
+				if ((string)Globalvars::get_instance()->get_setting('email_test_send_last_success') === '') {
+					return "Your site is already set up to send mail. One check remains: send yourself a test message and confirm it arrived — a provider accepting mail is not the same as delivering it.";
+				}
+				return "Your site sends mail — receipts, reminders and sign-in codes all have a way out, and a test delivery has been confirmed.";
+			},
 			'render_file' => 'includes/setup_steps/mail_send.php',
 			'home_url' => '/admin/admin_settings_email',
 			'dismiss_line' => 'This site cannot send email yet.',
