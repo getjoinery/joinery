@@ -78,7 +78,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 	}
 
 	if (DriveHelper::folder_name_taken($user_id, $parent_id, $name)) {
-		return LogicResult::error('A folder with that name already exists here.');
+		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
 
 	$folder = new Folder(NULL);
@@ -89,7 +89,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 	$folder->set('fol_name', $name);
 	$folder->set('fol_protection_level', $level);
 	if (!DriveHelper::save_folder_unless_name_taken($folder)) {
-		return LogicResult::error('A folder with that name already exists here.');
+		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
 	$folder->load(); // repopulate serial pkey + default columns for the export
 

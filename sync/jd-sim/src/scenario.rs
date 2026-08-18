@@ -77,6 +77,20 @@ pub struct World {
     /// hash for the rest of the run — including on another device, where the
     /// same content may still be sitting and the engine may yet lose it.
     destroyed_by_the_user: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+    /// Content the user wrote **inside** a pass, in the window a download was
+    /// landing in.
+    ///
+    /// The custody check cannot see these. It compares the disk before a pass
+    /// with the disk after, and a file that is both written and built over
+    /// within one pass was never in either snapshot -- so the one window where
+    /// the engine can destroy the only copy of something is the one window the
+    /// check is blind to. Recorded here so a scenario can demand them back.
+    landing_saves: std::sync::Arc<std::sync::Mutex<std::collections::BTreeSet<String>>>,
+    /// How many such saves have been made in total, across every pass.
+    ///
+    /// The set above is cleared each pass, so a scenario cannot use it to ask
+    /// the question that keeps it honest: did the window ever actually open?
+    landing_seen: std::sync::Arc<std::sync::Mutex<usize>>,
 }
 
 /// Which operating system's filesystem a device has.
@@ -130,6 +144,8 @@ impl World {
             rng: SimRng::new(seed),
             vaults: Vec::new(),
             destroyed_by_the_user: Default::default(),
+            landing_saves: Default::default(),
+            landing_seen: Default::default(),
         }
     }
 
@@ -226,6 +242,77 @@ impl World {
         });
     }
 
+    /// The user saves the very file a download is landing on, in the window
+    /// between the engine clearing the path and the file arriving there.
+    ///
+    /// `OsVfs` names this window in the comment on its own refusal -- "between
+    /// that check and this rename the user can save a file, and under a storm
+    /// they do" -- and until now nothing could reach it. The guard that closes
+    /// it is the reason a download does not land on a file nobody has seen, so
+    /// the guard needs a scenario that actually tests it.
+    ///
+    /// What the custody check then enforces is the half that matters: the bytes
+    /// the user just wrote are NOT ledgered, so if the engine puts the download
+    /// on top of them they vanish during the pass and the check says so. The
+    /// content they replaced IS ledgered, because destroying that was the
+    /// user's own doing.
+    pub fn user_saves_while_downloads_land(&mut self, one_in: u64, budget: u64) {
+        let destroyed = self.destroyed_by_the_user.clone();
+        let landing = self.landing_saves.clone();
+        let seen = self.landing_seen.clone();
+        let seed = self.rng.next_u64() ^ 0x100d_5a7e;
+        for (i, device) in self.devices.iter().enumerate() {
+            let disk = device.fs.clone();
+            let destroyed = destroyed.clone();
+            let landed = landing.clone();
+            let seen = seen.clone();
+            let rng = std::sync::Arc::new(std::sync::Mutex::new(SimRng::new(
+                seed ^ (i as u64).wrapping_mul(0x9e37_79b9),
+            )));
+            let mut round: u64 = 0;
+            device.fs.while_a_download_lands(move |target| {
+                if round >= budget {
+                    return;
+                }
+                let mut rng = rng.lock().unwrap();
+                if one_in > 1 && rng.below(one_in) != 0 {
+                    return;
+                }
+                // The path the engine is landing on, as this disk names it.
+                let Ok(rel) = target.strip_prefix(std::path::Path::new("/sync")) else {
+                    return;
+                };
+                let rel = rel.to_string_lossy().to_string();
+                // Deliberately NOT restricted to paths that still hold a file.
+                // The engine has usually just moved the old one out of the way,
+                // so by the time it commits the path is empty -- and that is
+                // precisely the case worth testing, because a commit with no
+                // agreement onto an occupied path is the one the guard refuses.
+                // Requiring a file here fired the knob only on the branch that
+                // was already safe, and the test passed with the guard removed.
+                round += 1;
+                if let Some(gone) = disk.peek(&rel) {
+                    destroyed.lock().unwrap().insert(crate::sha256_hex(&gone));
+                }
+                let saved =
+                    format!("saved while a download was landing, {round}").into_bytes();
+                landed.lock().unwrap().insert(crate::sha256_hex(&saved));
+                *seen.lock().unwrap() += 1;
+                disk.user_write(&rel, &saved);
+            });
+        }
+    }
+
+    /// How many times the user has saved into a download's landing window.
+    ///
+    /// Whether each one survived is settled per pass, in `attempt_pass`, where
+    /// the engine's removals can still be told apart from the user's. This
+    /// exists so a scenario can assert the window opened at all -- a test that
+    /// never enters it would otherwise pass for the wrong reason.
+    pub fn saves_made_while_downloads_landed(&self) -> usize {
+        *self.landing_seen.lock().unwrap()
+    }
+
     /// One pass on one device, with custody checked around it.
     ///
     /// This is where the no-loss invariant is actually enforced, and it is
@@ -260,6 +347,7 @@ impl World {
     ) -> Result<jd_core::pass::PassOutcome, jd_core::execute::ExecError> {
         let before = held_by(device);
         self.destroyed_by_the_user.lock().unwrap().clear();
+        self.landing_saves.lock().unwrap().clear();
         let outcome = self.run_pass_on(device);
         let after = held_by(device);
         let by_the_user = self.destroyed_by_the_user.lock().unwrap().clone();
@@ -270,6 +358,33 @@ impl World {
             assert!(
                 locate(self, hash).is_some(),
                 "{} removed content during a pass and it is now nowhere a person could look ({})",
+                device.name,
+                &hash[..12]
+            );
+        }
+
+        // What the user saved into a landing window during THIS pass. The two
+        // snapshots above cannot see these at all: written and built over
+        // inside one pass, they are in neither, which leaves the one window
+        // where the engine can destroy the only copy of something as the one
+        // window the custody check was blind to.
+        //
+        // Checked here for the same reason everything else is: inside a single
+        // pass, the user wrote it and only the engine can have taken it away.
+        let landed = self.landing_saves.lock().unwrap().clone();
+        for hash in &landed {
+            // Still here, or the user themselves wrote over it -- the other
+            // chaos knob picks paths at random and can land on this one, and
+            // what it overwrites is the user's to overwrite. Reading that as
+            // the engine's doing blamed the client for the harness's own
+            // second actor, on six seeds out of six thousand.
+            if after.contains(hash) || by_the_user.contains(hash) {
+                continue;
+            }
+            assert!(
+                locate(self, hash).is_some(),
+                "{} built over a file the user saved while a download was landing, \
+                 and it is now nowhere a person could look ({})",
                 device.name,
                 &hash[..12]
             );

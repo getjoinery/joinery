@@ -286,6 +286,39 @@ check($elsewhere_after->get('fil_fol_folder_id') === null
 	|| (int)$elsewhere_after->get('fil_fol_folder_id') === 0,
 	'and the file stayed where it was');
 
+// A FOLDER name collision has to carry the same marker as a file one. It did
+// not, on any of the three endpoints, and the omission was invisible: the
+// client reads `reason` and never the English, so every folder collision came
+// back unclassified and the whole move-aside recovery sat idle behind it. The
+// simulator supplied the marker for folders, so no amount of simulated chaos
+// could have shown it.
+$rFolderHome = mk_folder('Collide-Home');
+check(res_ok($rFolderHome), 'a parent to collide inside');
+$dup_folder_parent = $rFolderHome->data['folder']['id'];
+$rFolderDup = mk_folder('Shared', $dup_folder_parent);
+check(res_ok($rFolderDup), 'a folder is made to collide with');
+$rFolderTaken = mk_folder('Shared', $dup_folder_parent);
+check(res_err($rFolderTaken), 'creating a second folder of that name is refused');
+check(isset($rFolderTaken->data['reason']) && $rFolderTaken->data['reason'] === 'name_taken',
+	'and the folder refusal carries the same marker a file refusal does');
+
+$rSibling = mk_folder('Archive', $dup_folder_parent);
+check(res_ok($rSibling), 'a sibling folder to rename');
+$rFolderRename = drive_rename_logic(array(
+	'entity_type' => 'folder', 'entity_id' => $rSibling->data['folder']['id'], 'name' => 'Shared'));
+check(res_err($rFolderRename), 'renaming a folder onto a sibling name is refused');
+check(isset($rFolderRename->data['reason']) && $rFolderRename->data['reason'] === 'name_taken',
+	'and the folder rename refusal carries the marker');
+
+$rElsewhere = mk_folder('Shared');
+check(res_ok($rElsewhere), 'a root folder sharing the name of one below');
+$rFolderMove = drive_move_logic(array(
+	'entity_type' => 'folder', 'entity_id' => $rElsewhere->data['folder']['id'],
+	'parent_id' => $dup_folder_parent));
+check(res_err($rFolderMove), 'moving a folder where that name is taken is refused');
+check(isset($rFolderMove->data['reason']) && $rFolderMove->data['reason'] === 'name_taken',
+	'and the folder move refusal carries the marker');
+
 // Restoring onto a name taken while the file sat in the trash keeps the file
 // and changes the name — the user asked for their file back, and a name is a
 // smaller thing to change than the answer.

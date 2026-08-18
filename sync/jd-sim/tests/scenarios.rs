@@ -2804,3 +2804,112 @@ fn zzz_seed_search() {
     }
     println!("STALLING SEEDS: {bad:?}");
 }
+
+#[test]
+fn a_folder_whose_name_a_file_took_stops_being_trashed_forever() {
+    // One device makes a folder; on the other, the user has already saved a
+    // FILE by that name. A real disk holds one or the other, never both, so
+    // the fleet has to pick -- and it does: the folder is moved aside under a
+    // conflicted-copy name and everybody ends up with the same tree.
+    //
+    // What did not end was the tidying up afterwards. The folder that lost its
+    // name is trashed on the server, so every device must remove it locally --
+    // but by then the name belongs to the file, and a folder cannot be read to
+    // rescue what is inside it when it is a file. The op failed, backed off,
+    // and came due again forever. The plan was empty and the trees agreed, so
+    // nothing looked wrong except that no device ever reported itself finished.
+    let world = World::new(4242, &["laptop", "desktop"]);
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Report");
+    laptop.fs.user_write("Report/notes.txt", b"a child of the folder");
+
+    let desktop = world.device("desktop");
+    desktop.fs.user_write("Report", b"the user's own notes, never uploaded");
+
+    assert!(
+        world.settle().is_some(),
+        "the fleet has to reach a fixed point, not merely the right tree"
+    );
+    assert_converged(&world);
+
+    for name in ["laptop", "desktop"] {
+        let d = world.device(name);
+        assert!(
+            d.store.queued_ops().unwrap().is_empty(),
+            "{name} is still holding work it can never finish"
+        );
+    }
+
+    // Which of the two keeps the plain name is the conflict rule's business.
+    // What matters here is that neither was destroyed to settle the argument:
+    // the user's file and the folder's child both survive, on both devices.
+    for name in ["laptop", "desktop"] {
+        let paths = world.device(name).fs.all_paths();
+        assert!(
+            paths.iter().any(|p| world.device(name).fs.peek(p).as_deref()
+                == Some(b"the user's own notes, never uploaded".as_slice())),
+            "{name} lost the file the user saved: {paths:?}"
+        );
+        assert!(
+            paths.iter().any(|p| p.ends_with("/notes.txt")),
+            "{name} lost the folder's child: {paths:?}"
+        );
+    }
+}
+
+#[test]
+fn a_save_in_the_window_a_download_is_landing_in_is_not_built_over() {
+    // The narrowest window the engine has. It clears a path for an incoming
+    // file, and between clearing it and putting the file down, the user saves.
+    // `OsVfs` refuses a commit with no agreement onto an occupied path for
+    // exactly this reason -- "under a storm they do" -- and until the mock grew
+    // a hook for it, no test could stand in that window at all.
+    //
+    // What must hold is custody, not any particular winner: the bytes the user
+    // typed are the only copy in existence, so they have to be somewhere when
+    // the dust settles, whichever file ends up wearing the plain name.
+    let mut world = World::new(4242, &["laptop", "desktop"]);
+    {
+        let laptop = world.device("laptop");
+        laptop.fs.user_mkdir("Work");
+        for i in 0..6 {
+            laptop
+                .fs
+                .user_write(&format!("Work/doc-{i}.txt"), format!("draft {i}").as_bytes());
+        }
+    }
+    // Settle first, so the next round of downloads lands on occupied paths --
+    // an empty path has no window to save into.
+    assert!(
+        world.settle().is_some(),
+        "the fleet settles before the interesting part"
+    );
+
+    world.user_saves_while_downloads_land(1, 12);
+    {
+        let laptop = world.device("laptop");
+        for i in 0..6 {
+            laptop.fs.user_write(
+                &format!("Work/doc-{i}.txt"),
+                format!("second draft {i}").as_bytes(),
+            );
+        }
+    }
+
+    assert!(
+        world.settle().is_some(),
+        "a device whose user saves into that window must still reach a fixed point"
+    );
+    assert_converged(&world);
+
+    // Whether each save survived is settled per pass, inside the custody
+    // check, where the engine's removals can still be told from the user's.
+    // What is left to assert here is that the window opened at all -- without
+    // it this test would be green for the wrong reason.
+    assert!(
+        world.saves_made_while_downloads_landed() > 0,
+        "the window was never actually entered"
+    );
+
+}

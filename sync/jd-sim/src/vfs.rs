@@ -108,11 +108,28 @@ struct MemFsState {
 
 /// The virtual disk. Cloning shares it — that is what makes "restart the
 /// engine over the same disk" a two-line operation.
-#[derive(Debug, Clone)]
+#[derive(Clone)]
 pub struct MemFs {
     state: Arc<Mutex<MemFsState>>,
     personality: Personality,
     clock: SimClock,
+    /// Fires as a download is about to land, before it has looked at the path.
+    ///
+    /// The window this opens is a real one and a narrow one: the engine clears
+    /// the way for an incoming file, and between clearing it and putting the
+    /// file there, the user saves. `OsVfs`'s own refusal names that exact
+    /// moment -- "between that check and this rename the user can save a file,
+    /// and under a storm they do" -- and nothing could reach it from a test.
+    #[allow(clippy::type_complexity)]
+    landing: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
+}
+
+impl std::fmt::Debug for MemFs {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.debug_struct("MemFs")
+            .field("personality", &self.personality)
+            .finish_non_exhaustive()
+    }
 }
 
 impl MemFs {
@@ -134,7 +151,15 @@ impl MemFs {
             })),
             personality,
             clock,
+            landing: Arc::new(Mutex::new(None)),
         }
+    }
+
+    /// Run this the instant a download begins to land, before it has looked at
+    /// the path it is landing on. Use it to have the user save over the file in
+    /// the window the engine believes it has already cleared.
+    pub fn while_a_download_lands(&self, f: impl FnMut(&Path) + Send + 'static) {
+        *self.landing.lock().unwrap() = Some(Box::new(f));
     }
 
     pub fn linux(clock: SimClock) -> MemFs {
@@ -190,6 +215,15 @@ impl MemFs {
         let key = self.store_path(path);
         let mut st = self.state.lock().unwrap();
         let mtime = self.truncated_now();
+        Self::refuse_impossible(&st, &key, "write a file");
+        assert!(
+            !matches!(st.nodes.get(&key), Some(Node::Dir)),
+            "a scenario wrote the file {key} over a directory. A real disk \
+             answers EISDIR; this map would have swapped the node and left the \
+             children hanging off a file, which is a shape no disk can hold. \
+             The scenario is asking for something impossible -- fix the \
+             scenario, not this check.",
+        );
         Self::ensure_parents(&mut st, &key);
         if !st.file_ids.contains_key(&key) {
             let id = Self::alloc_id(&mut st);
@@ -208,6 +242,14 @@ impl MemFs {
     pub fn user_mkdir(&self, path: &str) {
         let key = self.store_path(path);
         let mut st = self.state.lock().unwrap();
+        Self::refuse_impossible(&st, &key, "create a folder");
+        assert!(
+            !matches!(st.nodes.get(&key), Some(Node::File { .. })),
+            "a scenario made the folder {key} where a file already is. A real \
+             disk answers EEXIST; this map would have kept the file and \
+             created nothing, leaving the scenario to believe in a folder that \
+             is not there.",
+        );
         Self::ensure_parents(&mut st, &key);
         st.nodes.entry(key).or_insert(Node::Dir);
     }
@@ -236,6 +278,7 @@ impl MemFs {
         let f = self.store_path(from);
         let t = self.store_path(to);
         let mut st = self.state.lock().unwrap();
+        Self::refuse_impossible(&st, &t, "move something");
         Self::ensure_parents(&mut st, &t);
         Self::move_subtree(&mut st, &f, &t);
     }
@@ -401,6 +444,43 @@ impl MemFs {
         st.next_file_id
     }
 
+    /// Refuse, loudly, a scenario asking this tree for a shape a disk cannot
+    /// hold.
+    ///
+    /// These are the harness playing the user, so they cannot return an error
+    /// -- and staying silent is how a harness bug turns into hours of looking
+    /// at the engine. One did exactly that: a chaos knob wrote file bytes over
+    /// directory paths, the map swapped the nodes without complaint, and the
+    /// run failed much later as `trash_local ... is not a directory` that read
+    /// for all the world like a client defect.
+    fn refuse_impossible(st: &MemFsState, key: &str, doing: &str) {
+        if let Some(blocker) = Self::file_in_the_way(st, key) {
+            panic!(
+                "a scenario tried to {doing} at {key}, but {blocker} is a \
+                 file. Nothing lives beneath a file on a real disk.",
+            );
+        }
+    }
+
+    /// The ancestor of this key that is a file, if one is.
+    ///
+    /// A path is a file or a directory and never both, so nothing can be
+    /// created beneath a file: a real disk answers `EEXIST` naming the file in
+    /// the way, not the thing being written. This tree is a flat map with no
+    /// such rule of its own, so the rule has to be stated — without it a file
+    /// can hold children, which is a shape no disk this runs on can produce.
+    fn file_in_the_way(st: &MemFsState, key: &str) -> Option<String> {
+        let parts: Vec<&str> = key.split('/').collect();
+        (1..parts.len())
+            .map(|i| parts[..i].join("/"))
+            .find(|prefix| matches!(st.nodes.get(prefix), Some(Node::File { .. })))
+    }
+
+    /// The path a stored key names, for an error a caller can read.
+    fn path_of(key: &str) -> PathBuf {
+        PathBuf::from("/sync").join(key)
+    }
+
     fn ensure_parents(st: &mut MemFsState, key: &str) {
         let parts: Vec<&str> = key.split('/').collect();
         for i in 1..parts.len() {
@@ -550,8 +630,18 @@ impl Vfs for MemFs {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::CreateDir, &key, path)?;
         let mut st = self.state.lock().unwrap();
-        if st.nodes.contains_key(&key) {
-            return Err(VfsError::AlreadyExists(path.to_path_buf()));
+        // `create_dir_all` is what the real one calls, and it is content with a
+        // directory that is already there. Only a FILE in the way is a refusal,
+        // and it is the refusal the engine reads as harmless.
+        match st.nodes.get(&key) {
+            Some(Node::Dir) => return Ok(()),
+            Some(Node::File { .. }) => {
+                return Err(VfsError::AlreadyExists(path.to_path_buf()))
+            }
+            None => {}
+        }
+        if let Some(blocker) = Self::file_in_the_way(&st, &key) {
+            return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
         }
         Self::ensure_parents(&mut st, &key);
         st.nodes.insert(key, Node::Dir);
@@ -590,6 +680,9 @@ impl Vfs for MemFs {
                 return Err(VfsError::AlreadyExists(to.to_path_buf()));
             }
         }
+        if let Some(blocker) = Self::file_in_the_way(&st, &t) {
+            return Err(VfsError::AlreadyExists(Self::path_of(&blocker)));
+        }
         Self::ensure_parents(&mut st, &t);
         Self::move_subtree(&mut st, &f, &t);
         Ok(())
@@ -605,8 +698,11 @@ impl Vfs for MemFs {
             .filter(|k| **k == key || k.starts_with(&format!("{key}/")))
             .cloned()
             .collect();
+        // Already gone is the state that was asked for, so this succeeded. The
+        // real one says so explicitly, on the grounds that a retry after a
+        // crash must not fail on its own prior success.
         if victims.is_empty() {
-            return Err(VfsError::NotFound(path.to_path_buf()));
+            return Ok(());
         }
         for v in victims {
             if let Some(node) = st.nodes.remove(&v) {
@@ -725,6 +821,14 @@ impl SpoolFile for MemSpool {
         target: &Path,
         expect: Option<Fingerprint>,
     ) -> VfsResult<Fingerprint> {
+        // Before anything is read or locked: the user gets their moment. This
+        // is the window between the engine clearing this path and the file
+        // arriving on it, and a scenario that wants to save into that window
+        // has nowhere else to stand.
+        if let Some(f) = self.fs.landing.lock().unwrap().as_mut() {
+            f(target);
+        }
+
         // Whatever happens below, the spool goes. The handle is consumed by
         // this call, so a spool left behind on a failure is one nothing can
         // ever reach again.
@@ -773,6 +877,14 @@ impl SpoolFile for MemSpool {
         // seeds passed over it; the rig found it in a day.
         if expect.is_none() && st.nodes.contains_key(&key) {
             return Err(VfsError::AlreadyExists(target.to_path_buf()));
+        }
+
+        // A file standing where one of this path's folders should be. The real
+        // one hits it inside the `create_dir_all` that precedes the rename, and
+        // reports the file in the way rather than the target — which does not
+        // exist and cannot until somebody moves that file.
+        if let Some(blocker) = MemFs::file_in_the_way(&st, &key) {
+            return Err(VfsError::AlreadyExists(MemFs::path_of(&blocker)));
         }
 
         MemFs::ensure_parents(&mut st, &key);

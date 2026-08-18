@@ -1091,7 +1091,8 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // longer exists, and overwriting would discard an edit nobody has seen.
     let fingerprint = match spool.commit(&path, entry.synced_fingerprint) {
         Ok(fp) => fp,
-        Err(jd_vfs::VfsError::AlreadyExists(_)) => {
+        Err(jd_vfs::VfsError::AlreadyExists(blocked)) => {
+            let blocked = Some(blocked);
             // The guard fired. It compares fingerprints, and a fingerprint
             // drifts for reasons that are not edits — an application that saves
             // by writing a temporary and renaming it over the original leaves
@@ -1109,6 +1110,20 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // stale fingerprint, which is recorded so the next attempt gets
             // past. If they do differ, the local edit is real and the scan will
             // meet it as a conflict on the next pass.
+            // The refusal may not be about the target at all. A file standing
+            // where one of this path's folders should be is reported by name,
+            // and the file being written does not exist and cannot until
+            // somebody moves that one. Reading it as an edit here sends it to
+            // Overtaken, which drops the operation without touching the record
+            // that asked for it -- so the next pass plans the same download,
+            // and every pass after that.
+            if let Some(blocker) = blocked.filter(|b| b != &path) {
+                return Ok(OpOutcome::Retry(format!(
+                    "{} cannot be written while {} is a file",
+                    path.display(),
+                    blocker.display(),
+                )));
+            }
             let Some(fp) = env.vfs.fingerprint(&path)? else {
                 return Ok(OpOutcome::Overtaken(
                     "the file changed here while it was downloading".into(),
@@ -1872,12 +1887,35 @@ fn create_local_folder(
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
+    // A file holding the name this folder needs is moved aside, exactly as one
+    // holding a file's name is -- `make_room` is the same answer to the same
+    // question, and it keeps the user's copy under a conflict name rather than
+    // destroying it. Only a FILE: a directory already here IS this folder, and
+    // moving that aside would rename the tree out from under itself every pass.
+    if env.vfs.fingerprint(&path)?.is_some() {
+        make_room(env, &path, None)?;
+    }
     match env.vfs.create_dir(&path) {
+        // A folder that was already there is `Ok`: the call underneath is
+        // `create_dir_all`, which is content to find its work done. Creating a
+        // folder is the one operation where "it was already done" and "I did
+        // it" are the same result, which is why it needs no key.
         Ok(()) => {}
-        // Already there is the outcome we wanted. Creating a folder is the one
-        // operation where "it was already done" and "I did it" are the same
-        // result, which is why it needs no key.
-        Err(jd_vfs::VfsError::AlreadyExists(_)) => {}
+        // Room was just made at this path, so a refusal now is about one of the
+        // folders ABOVE it -- a file stands where a parent should be. That
+        // parent has an operation of its own and folders are created
+        // shallowest-first, so this clears once that one runs: waiting is
+        // right, and waiting quietly is not. Reading it as "already there is
+        // what we wanted" recorded this folder as synced with a file in its
+        // place, and every child that tried to land inside it was then refused
+        // by a disk that puts nothing beneath a file.
+        Err(jd_vfs::VfsError::AlreadyExists(blocker)) => {
+            return Ok(OpOutcome::Retry(format!(
+                "{} cannot be created while {} is a file",
+                path.display(),
+                blocker.display(),
+            )));
+        }
         Err(e) => return Err(e.into()),
     }
     let Some(mut entry) = require_entry(env, op.entity)? else {
@@ -2147,12 +2185,33 @@ fn move_local(
                 // about a file that is not on this disk at all. It would go
                 // quiet — correctly, by its own lights — while silently short a
                 // file.
-                entry.synced_placement = None;
-                entry.synced_fingerprint = None;
-                entry.synced_content = None;
-                entry.synced_remote_content = None;
-                entry.status = LocalStatus::PendingDownload;
-                env.store.put_entry(&entry)?;
+                // Only for a file. Its bytes are on the server, so forgetting
+                // where it used to be costs a download and settles the matter.
+                //
+                // A folder has no bytes to come back. What it has is a
+                // directory on this disk with the whole subtree inside it, and
+                // "materialize it fresh" means CREATE A SECOND ONE -- an empty
+                // folder at the server's current name, recorded as agreed,
+                // while the original and everything under it sits at the old
+                // name belonging to nothing. Both devices then report
+                // themselves settled and the audit disagrees with them, which
+                // is what the rig had: one entity, two create_local_folder ops
+                // and a move, and `Sub 3/Sub 6` stranded under a parent name
+                // that had been superseded hours earlier.
+                //
+                // So the placement stays. If the ancestor never comes back the
+                // entry is stranded, which `sweep_stranded_entries` counts and
+                // answers with an index walk -- the escape hatch built for
+                // exactly this. If it does come back, the placement is still
+                // known and reconcile plans the rename it should have planned.
+                if op.entity.entity_type == EntityType::File {
+                    entry.synced_placement = None;
+                    entry.synced_fingerprint = None;
+                    entry.synced_content = None;
+                    entry.synced_remote_content = None;
+                    entry.status = LocalStatus::PendingDownload;
+                    env.store.put_entry(&entry)?;
+                }
             }
             return Ok(why.outcome());
         }
@@ -2317,6 +2376,21 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Placed::Not(why) => return Ok(why.outcome()),
     };
     if op.entity.entity_type == EntityType::Folder {
+        // A file standing at the folder's path is not the folder. The folder
+        // went, something else took the name, and this op is not about it: the
+        // state it wanted -- that folder gone from here -- already holds.
+        //
+        // Falling through instead is wrong twice over. Reading the folder to
+        // rescue what is inside it cannot be done to a file, so the op fails
+        // and retries on a premise that will never come back true; and if it
+        // got past that, the trash below would bin a file this op was never
+        // about. A folder trashed on the server while another device sent a
+        // file of the same name is all it takes, and the rig found the fleet
+        // still busy on an empty plan a whole campaign later.
+        if env.vfs.fingerprint(&path)?.is_some() {
+            env.store.delete_subtree(op.entity)?;
+            return Ok(OpOutcome::Done);
+        }
         if let Some(parent) = path.parent() {
             let rescued = rescue_unsynced(env, &path, parent)?;
             if !rescued.is_empty() {
