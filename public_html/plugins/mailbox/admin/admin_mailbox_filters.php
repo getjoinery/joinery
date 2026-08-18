@@ -179,8 +179,9 @@ if (($mode ?? 'list') === 'form') {
 
 	$formwriter = $page->getFormWriter('import_form', array('enctype' => 'multipart/form-data'));
 	echo $formwriter->begin_form();
-	// No hidden op: the import_upload submit drives the next step. A hidden
-	// op=import would re-enter this upload branch instead of the preview.
+	// No hidden op needed: the import_upload submit name drives the next step
+	// (the logic checks the import submits before the op=import render branch,
+	// since the form's action URL still carries ?op=import).
 	$formwriter->hiddeninput('scope', '', array('value' => $active_scope));
 
 	echo '<p><strong>Import into:</strong> ' . htmlspecialchars($active_scope_label) . '</p>';
