@@ -13,7 +13,7 @@
  *
  * @see specs/implemented/inbound_email_filters.md
  * @see specs/inbound_email_filter_import.md
- * @version 1.4
+ * @version 1.5
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -75,18 +75,11 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 
 	$scope = _filter_scope_options();
 
-	// --- import step 1: the upload form ---
-	if ($op === 'import') {
-		$active_scope = _filter_active_scope($input, $scope['options']);
-		return LogicResult::render(array(
-			'mode'               => 'import',
-			'scope_options'      => $scope['options'],
-			'active_scope'       => $active_scope,
-			'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
-			'session'            => $session,
-			'settings'           => $settings,
-		));
-	}
+	// The import submits are checked BEFORE the op=import render branch: the
+	// forms post back to the page's own URL, which still carries ?op=import in
+	// its query string (FormWriter's default action keeps the query string), so
+	// testing $op first would swallow both submits and just re-render the
+	// upload form.
 
 	// --- import step 2: parse the uploaded export, render the preview ---
 	if (isset($input['import_upload'])) {
@@ -139,6 +132,19 @@ function admin_mailbox_filters_logic(array $input): LogicResult {
 		}
 		_filter_flash($session, $summary, $scoped_list($active_scope));
 		return LogicResult::redirect($scoped_list($active_scope));
+	}
+
+	// --- import step 1: the upload form ---
+	if ($op === 'import') {
+		$active_scope = _filter_active_scope($input, $scope['options']);
+		return LogicResult::render(array(
+			'mode'               => 'import',
+			'scope_options'      => $scope['options'],
+			'active_scope'       => $active_scope,
+			'active_scope_label' => $scope['options'][$active_scope] ?? $active_scope,
+			'session'            => $session,
+			'settings'           => $settings,
+		));
 	}
 
 	// --- save (step 2 submitted) ---
