@@ -42,7 +42,10 @@
 
 use jd_sim::net::NetFaults;
 use jd_sim::rng::SimRng;
-use jd_sim::scenario::{assert_converged, assert_nothing_lost, Committed, Platform, World};
+use jd_sim::scenario::{
+    assert_converged, assert_no_entry_is_stranded, assert_no_live_orphan_on_the_server,
+    assert_nothing_lost, Committed, Platform, World,
+};
 
 fn workload(seed: u64, steps: usize, devices: &[&str], chaos: bool) {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
@@ -66,6 +69,13 @@ fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: boo
     // run still has a fixed point to settle to.
     if chaos {
         world.user_saves_during_uploads(8, (steps / 4).max(2) as u64);
+        // The other half of "the user is still working": saving the very file a
+        // download is putting down, in the window between the engine clearing
+        // the path and the file arriving on it. Those bytes are the only copy
+        // of themselves and the custody check cannot see them -- written and
+        // built over inside one pass, they are in neither of its snapshots --
+        // so they are demanded back by hash below.
+        world.user_saves_while_downloads_land(8, (steps / 4).max(2) as u64);
     }
     let world = world;
     let committed = Committed::default();
@@ -91,6 +101,14 @@ fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: boo
     }
     assert_nothing_lost(&world, &committed);
     assert_converged(&world);
+    // The other two invariants the scenario suite checks. The sweep ran without
+    // them for its whole life, so the two shapes they catch -- an entry whose
+    // parent chain no longer reaches the root, and a live item on the server
+    // under a trashed folder -- had thousands of seeds to hide in and never had
+    // to survive one.
+    assert_no_entry_is_stranded(&world);
+    assert_no_live_orphan_on_the_server(&world);
+
 }
 
 /// Print one entry's agreement on every device, plus the disk paths that mention

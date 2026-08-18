@@ -680,6 +680,46 @@ mod tests {
     }
 
     #[test]
+    fn nothing_can_be_created_beneath_a_file() {
+        // A path is a file or a directory, never both, so a file standing where
+        // a folder should be does not quietly step aside. Creating the folder
+        // is refused, and so is every child that would land inside it. The
+        // engine has to be told this, because a simulator whose tree is a flat
+        // map will happily hold a file with children and report both as done.
+        let d = TempDir::new("beneath-a-file");
+        let v = vfs(&d);
+        let root = v.root().unwrap();
+        let occupied = root.join("Report");
+        fs::write(&occupied, b"the user's own notes").unwrap();
+
+        let refused = v.create_dir(&occupied).unwrap_err();
+        assert!(
+            matches!(refused, VfsError::AlreadyExists(_)),
+            "a file in the folder's place, got {refused:?}"
+        );
+
+        // The refusal names the FILE IN THE WAY, not the child being written.
+        // That distinction is the whole trap: the caller sees AlreadyExists and
+        // reasonably reads it as the target having changed underneath it, when
+        // the target does not exist at all and never will while this stands.
+        let child = occupied.join("notes.txt");
+        let mut spool = v.spool(&child).unwrap();
+        spool.write_all(b"a child of the folder").unwrap();
+        let err = spool.commit(&child, None).unwrap_err();
+        assert!(
+            matches!(&err, VfsError::AlreadyExists(p) if p == &occupied),
+            "refused, naming the file in the way; got {err:?}"
+        );
+        assert!(!child.exists(), "and the child was not written anywhere");
+
+        assert_eq!(
+            fs::read(&occupied).unwrap(),
+            b"the user's own notes",
+            "the file that was in the way is still the user's"
+        );
+    }
+
+    #[test]
     fn listing_hides_the_engines_own_files_and_flags_symlinks() {
         let d = TempDir::new("list");
         let v = vfs(&d);

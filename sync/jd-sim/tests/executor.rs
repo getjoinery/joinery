@@ -1349,3 +1349,125 @@ fn a_file_already_on_disk_is_adopted_rather_than_downloaded_forever() {
     );
     assert_eq!(device.fs.peek("report.txt").unwrap(), body);
 }
+
+#[test]
+fn a_file_standing_where_a_folder_goes_is_moved_aside_not_built_over() {
+    // A path is a file or a directory and never both, so a file holding the
+    // name a folder needs has to go somewhere before the folder can exist.
+    //
+    // Nothing used to move it. Creating the folder read the refusal as
+    // "already there is the outcome we wanted" -- true of a folder, and this is
+    // not one -- and recorded the folder synced with a file standing in its
+    // place. Every child then failed to land, because a disk puts nothing
+    // beneath a file, and the refusal they got named the file in the way
+    // rather than the file being written: read as an edit here, it dropped the
+    // operation and left the record asking for the same download every pass.
+    let (_clock, server, device) = world();
+    let folder_id = server.seed_folder(None, "Report");
+    let body = b"a child of the folder";
+    let file_id = server.seed_file(Some(folder_id), "notes.txt", body);
+
+    let mine = b"the user's own notes, never uploaded";
+    device.fs.user_write("Report", mine);
+
+    let fid = EntityId::folder(folder_id);
+    device
+        .store
+        .put_entry(&fresh(fid, None, "Report", LocalStatus::PendingDownload))
+        .unwrap();
+
+    let placement = Placement {
+        parent: None,
+        name: "Report".into(),
+    };
+    let folder = do_one(&device, fid, Action::CreateLocalFolder { placement });
+    assert_eq!(folder.done, 1, "the folder is made, the file steps aside");
+
+    // The user's file is still here, under a name that says what happened.
+    let kept = device
+        .fs
+        .all_paths()
+        .into_iter()
+        .find(|p| device.fs.peek(p).as_deref() == Some(mine.as_slice()))
+        .expect("the file the user saved was not destroyed to make room");
+    assert_ne!(kept, "Report", "and it is no longer holding the folder's name");
+    assert!(
+        device
+            .store
+            .open_issues()
+            .unwrap()
+            .iter()
+            .any(|i| i.kind == "kept_aside"),
+        "the user is told their file was moved"
+    );
+
+    // And with the folder real, its children land in it.
+    let cid = EntityId::file(file_id);
+    let mut child = fresh(cid, Some(folder_id), "notes.txt", LocalStatus::PendingDownload);
+    child.remote_content = Some(ContentId {
+        sha256: sha256_hex(body),
+        size: body.len() as u64,
+    });
+    device.store.put_entry(&child).unwrap();
+
+    let arrived = do_one(&device, cid, Action::Download);
+    assert_eq!(arrived.done, 1, "nothing is in the way any more");
+    assert_eq!(device.fs.peek("Report/notes.txt").unwrap(), body);
+}
+
+#[test]
+fn a_download_landing_does_not_overwrite_what_the_user_just_saved() {
+    // The same window the fleet-level scenario covers, at the one operation
+    // that opens it: the engine has decided this path is clear, and between
+    // that decision and the bytes arriving the user saves over it.
+    //
+    // Nothing here is a conflict either side could have seen coming. The save
+    // is the only copy of itself, so it has to survive -- under some name.
+    let (_clock, server, device) = world();
+    let theirs = b"the version the other device sent";
+    let file_id = server.seed_file(None, "notes.txt", theirs);
+
+    let mine_old = b"what this device had a moment ago";
+    device.fs.user_write("notes.txt", mine_old);
+
+    // Agreed content but no fingerprint, which is what sends the engine through
+    // `make_room` rather than the fingerprint guard.
+    let id = EntityId::file(file_id);
+    let mut entry = fresh(id, None, "notes.txt", LocalStatus::PendingDownload);
+    entry.synced_placement = Some(Placement {
+        parent: None,
+        name: "notes.txt".into(),
+    });
+    entry.synced_content = Some(ContentId {
+        sha256: sha256_hex(mine_old),
+        size: mine_old.len() as u64,
+    });
+    entry.remote_content = Some(ContentId {
+        sha256: sha256_hex(theirs),
+        size: theirs.len() as u64,
+    });
+    device.store.put_entry(&entry).unwrap();
+
+    let mine_new = b"what the user typed while it was landing";
+    let fs = device.fs.clone();
+    let mut fired = false;
+    device.fs.while_a_download_lands(move |_target| {
+        if !fired {
+            fired = true;
+            fs.user_write("notes.txt", mine_new);
+        }
+    });
+
+    do_one(&device, id, Action::Download);
+
+    let held: Vec<Vec<u8>> = device
+        .fs
+        .all_paths()
+        .iter()
+        .filter_map(|p| device.fs.peek(p))
+        .collect();
+    assert!(
+        held.iter().any(|b| b.as_slice() == mine_new.as_slice()),
+        "the save made in the landing window was built over"
+    );
+}
