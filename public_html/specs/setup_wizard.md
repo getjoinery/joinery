@@ -248,14 +248,36 @@ between deferring the step and settling it.
 
 ### Step 3 — Sending email
 
+The step wears two faces, because "not configured" and "configured but
+unproven" are different debts and must not read the same. The intro copy is
+computed from live state (`'copy'` in the registry may be a callable, read
+through `SetupSteps::copyFor()`):
+
+**No working provider** (`transactionalSendBlocker()` non-null or
+`detectServiceType() === 'none'`):
+
 > Your site needs a way to send mail — receipts, reminders, sign-in codes.
 > Pick a provider and we'll check it actually works before moving on.
 
-Controls: provider select + that provider's credential fields, rendered from
-the same `settings.json` declarations `/admin/admin_settings_email` renders
-(`SettingsFieldRenderer`), saved through `SettingsWriter` with
-`EmailSender::validateService()` first — same fields, one renderer, no
-parallel form. Sender name/address (`defaultemail`, `defaultemailname`).
+The settings form leads. Controls: provider select + that provider's
+credential fields, rendered from the same `settings.json` declarations
+`/admin/admin_settings_email` renders (`SettingsFieldRenderer`), saved
+through `SettingsWriter` with `EmailSender::validateService()` first — same
+fields, one renderer, no parallel form. Sender name/address (`defaultemail`,
+`defaultemailname`).
+
+**Provider configured, delivery unproven:**
+
+> Your site is already set up to send mail. One check remains: send yourself
+> a test message and confirm it arrived — a provider accepting mail is not
+> the same as delivering it.
+
+The **Prove it works** block leads; the settings form folds into a collapsed
+`<details>` whose summary names the current provider and From address, so an
+already-configured site is never re-asked for keys it has. (A third copy
+variant covers the proven state, since the green step still shows its intro
+above the "Already done" row.)
+
 **Send me a test** button (records last success; per the dashboard spec,
 test-send success — not key presence — is the green condition). Direct port-25
 self-hosting is advanced setup and never appears here.
