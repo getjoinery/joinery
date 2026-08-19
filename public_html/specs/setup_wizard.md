@@ -109,7 +109,7 @@ Owner flow, in order. Scope `user` steps are the member flow.
 | 5 | `mail_import` | Bring your old mail | user | any completed import run, or explicitly skipped (skip = green here; importing is optional forever) |
 | 6 | `calendar` | Calendar | user | a `cpr_calendar_preferences` row exists or any calendar entry exists (opt-out is a valid green) |
 | 7 | `ai_provider` | AI assistant | site | a provider resolves in `LlmProviderFactory::allModels()` or "Not now" chosen |
-| 8 | `backups` | Backups | site | `backup_target_id > 0` + `BackupRecoveryKey::is_ready()` + `BackupRun` task active |
+| 8 | `backups` | Backups | site | `backup_target_id > 0` + `BackupRecoveryKey::is_ready()` + `BackupRun` task active, **or** `BackupHistory::manager_coverage()` (a control plane's recent proven run) |
 | 9 | `done` | You're set up | both | all steps in scope green |
 
 For optional steps (5, 6, 7) an explicit "not now" choice counts as green —
@@ -357,6 +357,16 @@ action (below). Renders only when the plugin is active.
 > Everything here should survive this server dying. Point backups at a
 > storage bucket, and create the recovery key that encrypts them — shown
 > once, held only by you.
+
+**Fleet-backed nodes are already green.** A node whose control plane backs it
+up has the proof in its own database: every manager-profile run the fleet
+commands writes a `bkh_backup_history` row locally. The step's status reads
+`BackupHistory::manager_coverage()` — the newest manager-profile success that
+reached its bucket within `MANAGER_COVERAGE_DAYS` — as a second green path,
+and the intro copy (a state callable, like the mail step's) says the control
+plane has it covered instead of asking for a bucket. No message from the
+fleet is involved; the evidence lands with every run, and goes stale if the
+runs stop.
 
 Controls, in order on one page: bucket form (provider/bucket/keys →
 `save_target`, then the existing `test_target` connection check — nothing

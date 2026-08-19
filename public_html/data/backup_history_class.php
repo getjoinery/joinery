@@ -14,6 +14,10 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.3 - manager_coverage() and the 'finished_since' collection filter: the run
+ *                proving a control plane currently backs this site up, so the setup step
+ *                and dashboards can read fleet custody from local history instead of
+ *                calling the site un-backed-up
  * @version 1.2 - bkh_profile and bkh_recovery_fpr: a site can be backed up by more than one
  *                party, and every query that decides what to extend or delete has to be
  *                asking about one party's runs
@@ -155,6 +159,39 @@ class BackupHistory extends SystemBase {
 	}
 
 	/**
+	 * Days after which a control plane's newest proven run stops counting as
+	 * live coverage — long enough to ride out a weekend outage on the control
+	 * plane, short enough that abandoned coverage does not read as protection.
+	 */
+	const MANAGER_COVERAGE_DAYS = 7;
+
+	/**
+	 * The run proving another party currently backs this site up: the newest
+	 * manager-profile row that reached its bucket within MANAGER_COVERAGE_DAYS.
+	 * Null means no live coverage — whatever a control plane once did, this
+	 * site cannot currently point to a recent archive it did not make itself.
+	 *
+	 * @return BackupHistory|null
+	 */
+	public static function manager_coverage() {
+		$since = LibraryFunctions::time_shift(
+			gmdate('Y-m-d H:i:s'), '-' . self::MANAGER_COVERAGE_DAYS . ' days', 'Y-m-d H:i:s');
+		$rows = new MultiBackupHistory(
+			array(
+				'deleted' => false,
+				'profile' => BackupProfile::MANAGER,
+				'outcome' => 'success',
+				'offsite' => true,
+				'finished_since' => $since,
+			),
+			array('bkh_finish_time' => 'DESC'), 1, 0);
+		foreach ($rows as $row) {
+			return $row;
+		}
+		return null;
+	}
+
+	/**
 	 * The object keys this run owns, for retention to delete. Envelopes are
 	 * included deliberately: deleting an archive and leaving its envelope behind
 	 * accumulates orphans that look like restore points in a bucket listing.
@@ -222,6 +259,16 @@ class MultiBackupHistory extends SystemMultiBase {
 		// "am I backed up?" means.
 		if (isset($this->options['offsite'])) {
 			$filters['bkh_upload_time'] = $this->options['offsite'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// Runs finished on or after a UTC moment — how "is coverage live?" is
+		// asked. Validated because it lands in the SQL as a literal condition.
+		if (isset($this->options['finished_since'])) {
+			$since = (string)$this->options['finished_since'];
+			if (!preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $since)) {
+				throw new BackupHistoryException('finished_since must be a UTC timestamp (Y-m-d H:i:s).');
+			}
+			$filters['bkh_finish_time'] = ">= '" . $since . "'";
 		}
 
 

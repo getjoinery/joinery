@@ -419,6 +419,14 @@ it was) and `bkh_recovery_fpr` (which private key opens it), so a restore never
 has to infer from today's settings what was true when the archive was made. A site whose backups have been failing for a
 month looks identical to a healthy one if only successes are written down.
 
+Because manager-profile rows land in the site's own database, the site can
+answer "does someone back me up?" locally: `BackupHistory::manager_coverage()`
+returns the newest manager-profile success that reached its bucket within
+`MANAGER_COVERAGE_DAYS` (7), or null. The setup wizard's Backups step reads it
+as a green condition, so a fleet-backed node is not asked to configure a bucket
+it is already archived to; coverage goes stale on its own if the control
+plane's runs stop.
+
 ## Artifact naming
 
 `includes/BackupNaming.php` owns which files are backups, what each one is, and
