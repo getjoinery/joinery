@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.30 - the Cloudflare routing probe documents its serving contract:
+ *                 the node's /sm-ssl-probe.txt route is what makes the token fetchable
  * @version 1.29 - the publish-upgrade step cds to the running site's web root
  *                 instead of the path of the machine it was written on
  * @version 1.28 - fetch_status_via_api returns the curl errno alongside reason 'transport',
@@ -2283,7 +2285,12 @@ class JobCommandBuilder {
 			// behind Cloudflare — not that the zone proxies to THIS node. So
 			// completion is gated on a routing probe: the node writes a one-time
 			// token into the site's webroot, and the control plane fetches it
-			// through the domain. A mismatch fails the job before any config is
+			// through the domain. The token is only fetchable because the node's
+			// front controller serves it via its /sm-ssl-probe.txt route
+			// (views/sm_ssl_probe.php) — a webroot file is not otherwise
+			// reachable on a Joinery site, so a node whose code predates that
+			// route can never pass this probe and needs an upgrade first.
+			// A mismatch fails the job before any config is
 			// touched — the domain stays pending (ProvisionPendingSsl keeps
 			// retrying and exempts this case from its give-up window) and the
 			// proxy conf keeps its correct pre-cutover X-Forwarded-Proto until

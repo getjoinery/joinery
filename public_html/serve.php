@@ -1,6 +1,8 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.6.0 — /sm-ssl-probe.txt serves the SSL routing probe token, so a
+// control plane's Cloudflare-branch provisioning can prove a domain routes here.
 // @version 1.5.0 — /profile/conversation(s) hand off to the messenger app when
 // its plugin is active, and serve the older thread views when it is not.
 
@@ -137,6 +139,13 @@ $routes = [
         // Callers are other instances authenticated by an Ed25519 instance
         // signature, never a session.
         '/.well-known/joinery-direct' => ['view' => 'ajax/joinery_direct'],
+
+        // SSL routing probe — serves the one-time token a control plane's SSL
+        // provisioning job drops in the webroot, proving the domain routes to
+        // this installation. Without this route the front controller would 404
+        // the file and a Cloudflare-proxied domain could never verify routing.
+        // See views/sm_ssl_probe.php.
+        '/sm-ssl-probe.txt' => ['view' => 'views/sm_ssl_probe'],
 
         // Simple view routes (explicit view files)
         '/robots.txt' => ['view' => 'views/robots'],
