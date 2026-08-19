@@ -33,7 +33,7 @@ $page->public_header(array(
 			<div class="markdown-content"><?php echo $license_html; ?></div>
 		<?php else: ?>
 			<p>The license file is not available on this install. The platform is licensed under the
-			<a href="https://polyformproject.org/licenses/shield/1.0.0">PolyForm Shield License 1.0.0</a>.</p>
+			<a href="https://polyformproject.org/licenses/noncommercial/1.0.0">PolyForm Noncommercial License 1.0.0</a>.</p>
 		<?php endif; ?>
 	</div>
 </section>

@@ -1,9 +1,9 @@
 {
     "name": "Persona Browser",
-    "version": "0.11.14",
+    "version": "0.11.15",
     "description": "Reads your own social feed through a real logged-in browser on a Mac and shows it on a clean profile page. Experimental; Facebook only.",
     "author": "Joinery",
-    "license": "PolyForm-Shield-1.0.0",
+    "license": "PolyForm-Noncommercial-1.0.0",
     "receives_upgrades": true,
     "included_in_publish": true,
     "adminMenu": [

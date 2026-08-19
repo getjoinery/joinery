@@ -9,7 +9,8 @@
  * Licensing surface of the plugin manifests and license files.
  *
  * The open-core model rests on facts that live in files, not code: the core
- * license is PolyForm Shield with the plugin/theme exception intact, every
+ * license is PolyForm Noncommercial with the plugin/theme exception intact,
+ * every
  * first-party plugin carries its own LICENSE.md that agrees with its
  * manifest's license field, the two commercial plugins (and only they)
  * declare requires_entitlement, no plugin declares is_system anymore, and
@@ -33,7 +34,7 @@ require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 
 $STATUS_ENUM = array('experimental', 'beta', 'stable', 'deprecated');
 $COMMERCIAL_LICENSE = 'Joinery-Commercial';
-$SHIELD_LICENSE = 'PolyForm-Shield-1.0.0';
+$NONCOMMERCIAL_LICENSE = 'PolyForm-Noncommercial-1.0.0';
 
 // ---------------------------------------------------------------------------
 section('Core license');
@@ -46,10 +47,10 @@ if (!file_exists($core_license_path)) {
 check(file_exists($core_license_path), 'core LICENSE.md exists', $core_license_path);
 $core_license = file_exists($core_license_path) ? file_get_contents($core_license_path) : '';
 
-check(strpos($core_license, 'PolyForm Shield License 1.0.0') !== false,
-	'core license is PolyForm Shield 1.0.0');
-check(strpos($core_license, 'Noncommercial') === false,
-	'no leftover Noncommercial text in the core license');
+check(strpos($core_license, 'PolyForm Noncommercial License 1.0.0') !== false,
+	'core license is PolyForm Noncommercial 1.0.0');
+check(strpos($core_license, 'Shield') === false,
+	'no leftover Shield text in the core license');
 check(strpos($core_license, '## Plugin and Theme Exception') !== false,
 	'plugin and theme exception carried over');
 check(strpos($core_license, 'Required Notice: Copyright Joinery') !== false,
@@ -80,9 +81,9 @@ foreach ($manifests as $name => $manifest) {
 	check(file_exists($license_file), "$name: LICENSE.md present");
 	$license_text = file_exists($license_file) ? file_get_contents($license_file) : '';
 
-	if ($license === $SHIELD_LICENSE) {
-		check(strpos($license_text, 'PolyForm Shield License 1.0.0') !== false,
-			"$name: LICENSE.md agrees with manifest (Shield)");
+	if ($license === $NONCOMMERCIAL_LICENSE) {
+		check(strpos($license_text, 'PolyForm Noncommercial License 1.0.0') !== false,
+			"$name: LICENSE.md agrees with manifest (Noncommercial)");
 	} elseif ($license === $COMMERCIAL_LICENSE) {
 		check(strpos($license_text, 'Joinery Commercial Plugin License') !== false,
 			"$name: LICENSE.md agrees with manifest (commercial)");
