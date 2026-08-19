@@ -82,8 +82,13 @@ Career Area
 			?></h3>
 							<?php
 						
+					//AN OWNER OF AN OWN-ONCE PRODUCT GETS A NOTICE, NOT A BUY BUTTON
+				if(!empty($page_vars['already_owned'])){
+					echo '<p><strong>You already own this.</strong> It is listed with your '
+						. '<a href="/profile#orders">purchases</a>.</p>';
+				}
 					//DO NOT DISPLAY THE PRODUCT IF IT IS SOLD OUT 
-				if(!$product->is_sold_out()){
+				else if(!$product->is_sold_out()){
 					$product_url = '/product/' . $product->get('pro_link');
 					$formwriter = $page->getFormWriter('product_form', ['action' => $product_url, 'method' => 'POST']);
 					echo $formwriter->begin_form();

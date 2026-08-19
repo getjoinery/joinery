@@ -330,6 +330,63 @@ class ShoppingCart {
 			}
 		}
 
+		//OWN-ONCE PRODUCTS: refuse what would double-sell an ownership. Every
+		//check is against the account the line is FOR — the recipient on a line
+		//that carries an email, the signed-in buyer otherwise — matching who
+		//the payment-time recorder credits, so an owner can still buy a gift.
+		//Unknown identity passes; the charge-time guard is the authority.
+		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
+		if ($ownership_tag !== '' && !$product_version->is_subscription()) {
+			$added_for = strtolower(trim((string)($form_data['email'] ?? '')));
+
+			foreach($this->items as $existing_item) {
+				$item_product = $existing_item[1];
+				$item_data = $existing_item[2];
+				$item_tag = trim((string)$item_product->get('pro_ownership_tag'));
+				if ($item_tag === '') {
+					continue;
+				}
+				//A line for a different recipient is a different ownership —
+				//two gifts of the same thing to two people is a fine order.
+				if (strtolower(trim((string)($item_data['email'] ?? ''))) !== $added_for) {
+					continue;
+				}
+				if ($item_tag === $ownership_tag) {
+					throw new ShoppingCartException(
+						'"' . htmlspecialchars($product->get('pro_name')) . '" can only be owned once, and it is already in your cart. '
+						. '<a href="/cart">View your shopping cart</a>.');
+				}
+				//A bundle covers every tag: buying one beside a product it
+				//covers would sell the same ownership twice in one order.
+				if ($item_tag === Ownership::TAG_ALL || $ownership_tag === Ownership::TAG_ALL) {
+					throw new ShoppingCartException(
+						'"' . htmlspecialchars($product->get('pro_name')) . '" and "' . htmlspecialchars($item_product->get('pro_name'))
+						. '" cannot be bought together — one is a bundle that already covers the other. '
+						. '<a href="/cart">View your shopping cart</a>.');
+				}
+			}
+
+			if ($added_for !== '') {
+				//A recipient email no account matches owns nothing yet.
+				$ownership_user = User::GetByEmail($added_for);
+				$ownership_user_id = $ownership_user ? $ownership_user->key : NULL;
+			}
+			else {
+				$ownership_user_id = $session->get_user_id() ?: NULL;
+			}
+
+			if ($ownership_user_id && Ownership::user_owns($ownership_user_id, $ownership_tag)) {
+				if ($ownership_user_id == $session->get_user_id()) {
+					throw new ShoppingCartException(
+						'You already own "' . htmlspecialchars($product->get('pro_name')) . '". '
+						. '<a href="/profile#orders">See it in your purchases</a>.');
+				}
+				throw new ShoppingCartException(
+					'"' . htmlspecialchars($product->get('pro_name')) . '" is already owned by '
+					. htmlspecialchars($added_for) . ', and it can only be owned once.');
+			}
+		}
+
 		if ($product->get('pro_prg_product_group_id')) {
 			$product_group = new ProductGroup($product->get('pro_prg_product_group_id'), TRUE);
 			$current_count = 0;

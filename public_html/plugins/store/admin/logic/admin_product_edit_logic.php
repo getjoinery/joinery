@@ -119,7 +119,50 @@ function admin_product_edit_logic(array $input): LogicResult {
 			$product->set('pro_product_scripts', implode(',', $input['product_scripts']));
 		}
 
-		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id', 'pro_licensed_plugin');
+		// OWNERSHIP. The operator picks a meaning, not a string; the tag is
+		// derived plumbing except in the shared case, where they name the group.
+		$ownership_mode = (int)($input['ownership_mode'] ?? Product::OWNERSHIP_NONE);
+		$ownership_tag_input = trim((string)($input['pro_ownership_tag'] ?? ''));
+		$derive_ownership_tag = false;
+
+		if($ownership_mode == Product::OWNERSHIP_ONCE){
+			if($product->key){
+				$product->set('pro_ownership_tag', Ownership::tag_for_product($product->key));
+			}
+			else{
+				// A brand-new product has no id to derive from until the row
+				// exists. Stamp it right after the insert.
+				$derive_ownership_tag = true;
+				$product->set('pro_ownership_tag', NULL);
+			}
+		}
+		else if($ownership_mode == Product::OWNERSHIP_SHARED){
+			if($ownership_tag_input === ''){
+				return LogicResult::error('Name the ownership tag this product shares with the others, '
+					. 'or choose a different Ownership option.');
+			}
+			$product->set('pro_ownership_tag', $ownership_tag_input);
+		}
+		else if($ownership_mode == Product::OWNERSHIP_BUNDLE){
+			$product->set('pro_ownership_tag', Ownership::TAG_ALL);
+		}
+		else{
+			$product->set('pro_ownership_tag', NULL);
+		}
+
+		// Boundary: ownership stays out of tiers, billing and renewals. Refuse
+		// the save rather than dropping the tag silently.
+		if($product->key && ($derive_ownership_tag || trim((string)$product->get('pro_ownership_tag')) !== '')){
+			foreach($product->get_product_versions(TRUE) as $existing_version){
+				if($existing_version->is_subscription()){
+					return LogicResult::error('Ownership applies to one-time purchases only. '
+						. 'This product has a subscription version, so it cannot be owned once. '
+						. 'Set Ownership to "No limit" to save.');
+				}
+			}
+		}
+
+		$editable_fields = array('pro_name', 'pro_description', 'pro_max_purchase_count', 'pro_max_cart_count', 'pro_after_purchase_message','pro_is_active', 'pro_grp_group_id', 'pro_sbt_subscription_tier_id', 'pro_digital_link', 'pro_short_description', 'pro_emt_receipt_template_id');
 
 		foreach($editable_fields as $field) {
 			$product->set($field, $input[$field]);
@@ -167,6 +210,11 @@ function admin_product_edit_logic(array $input): LogicResult {
 		$product->save();
 		$product->load();
 
+		if($derive_ownership_tag && $product->key){
+			$product->set('pro_ownership_tag', Ownership::tag_for_product($product->key));
+			$product->save();
+		}
+
 		$product->save_requirement_instances($requirement_specs);
 
 		return LogicResult::redirect('/plugins/store/admin/admin_product?pro_product_id='. $product->key);
@@ -175,6 +223,15 @@ function admin_product_edit_logic(array $input): LogicResult {
 	// Handle GET actions for version management.
 	// Intentional GET-action mutations — opt in to the GET-is-read-only tripwire.
 	if (($input['action'] ?? '') == 'new_version') {
+		// Boundary: ownership stays out of subscriptions, from both directions —
+		// a tag cannot be saved onto a subscription product, and a subscription
+		// version cannot be added to a tagged product.
+		if (in_array($input['prv_price_type'] ?? '', array('day', 'week', 'month', 'year'), true)
+			&& trim((string)$product->get('pro_ownership_tag')) !== '') {
+			return LogicResult::error('This product can only be owned once, and ownership applies to '
+				. 'one-time purchases only — a subscription version cannot be added. '
+				. 'Set Ownership to "No limit" first.');
+		}
 		$product_version = new ProductVersion(NULL);
 		$product_version->set('prv_pro_product_id', $product->key);
 		$product_version->set('prv_version_name', $input['version_name']);
@@ -263,6 +320,25 @@ function admin_product_edit_logic(array $input): LogicResult {
 		}
 	}
 
+	// A hook file may also hold plain helpers. Only the _product_script naming
+	// convention marks something the operator can attach to a purchase.
+	$product_scripts_optionvals = array_values(array_filter($product_scripts_optionvals, function($fn){
+		return substr($fn, -15) === '_product_script';
+	}));
+
+	// Ownership control state: which of the four meanings the stored tag
+	// carries, plus the shared tags already in use for the suggestion list.
+	$ownership_mode = $product->get_ownership_mode();
+	$ownership_tags_in_use = MultiOwnership::tags_in_use();
+	$ownership_owner_count = 0;
+	if($product->key && trim((string)$product->get('pro_ownership_tag')) !== ''){
+		$ownership_owners = new MultiOwnership(array(
+			'tag' => $product->get('pro_ownership_tag'),
+			'revoked' => FALSE,
+		));
+		$ownership_owner_count = $ownership_owners->count_all();
+	}
+
 	// Return page variables for rendering
 	return LogicResult::render(array(
 		'product' => $product,
@@ -277,6 +353,9 @@ function admin_product_edit_logic(array $input): LogicResult {
 		'instances' => $instances,
 		'grouped_requirements' => $grouped_requirements,
 		'product_scripts_optionvals' => $product_scripts_optionvals,
+		'ownership_mode' => $ownership_mode,
+		'ownership_tags_in_use' => $ownership_tags_in_use,
+		'ownership_owner_count' => $ownership_owner_count,
 		'receipt_templates' => $receipt_templates,
 		'session' => $session,
 		'settings' => $settings,

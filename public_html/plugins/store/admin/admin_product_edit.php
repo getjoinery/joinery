@@ -38,6 +38,13 @@ if (!$product->key) {
 	$override_values = [];
 }
 
+// ownership_mode is a control, not a column: seed it from the stored tag. The
+// tag box shows a value only in the shared case — the other modes derive it.
+$override_values['ownership_mode'] = $ownership_mode;
+if ($ownership_mode != Product::OWNERSHIP_SHARED) {
+	$override_values['pro_ownership_tag'] = '';
+}
+
 // FormWriter V2 with model and edit_primary_key_value
 $formwriter = $page->getFormWriter('form1', [
 	'model' => $product,
@@ -177,16 +184,43 @@ $formwriter->textinput('pro_digital_link', 'Digital item link', [
 	'validation' => ['maxlength' => 255]
 ]);
 
-// License products: which plugin a purchase of this product entitles. Pair
-// with the mint_license_key script below so purchase mints and emails a key.
-$licensed_plugin_options = ['' => '-- None --'];
-foreach (LibraryFunctions::list_plugins() as $plugin_dir_name) {
-	$licensed_plugin_options[$plugin_dir_name] = $plugin_dir_name;
-}
-$formwriter->dropinput('pro_licensed_plugin', 'Licenses plugin', [
-	'options' => $licensed_plugin_options,
-	'helptext' => 'Purchasing this product buys a license for this plugin. Also check "mint_license_key_product_script" below so the key is minted and emailed.',
+// OWNERSHIP. Some products can only sensibly be owned once — a course, a
+// lifetime unlock, an all-access bundle. The operator picks a meaning here;
+// the tag string underneath is derived except in the shared case.
+$formwriter->dropinput('ownership_mode', 'Ownership', [
+	'options' => [
+		Product::OWNERSHIP_NONE   => 'No limit — can be purchased repeatedly',
+		Product::OWNERSHIP_ONCE   => 'Own once — a buyer can purchase this product only once',
+		Product::OWNERSHIP_SHARED => 'Own once, shared with other products…',
+		Product::OWNERSHIP_BUNDLE => 'Bundle — owning this grants every own-once product',
+	],
+	'helptext' => 'An owner sees "You already own this" instead of a buy button, and checkout will not '
+		. 'charge them again. Products sharing a tag count as the same purchase. Applies to one-time '
+		. 'purchases only — never to subscriptions.',
+	'visibility_rules' => [
+		Product::OWNERSHIP_NONE   => ['show' => [], 'hide' => ['pro_ownership_tag']],
+		Product::OWNERSHIP_ONCE   => ['show' => [], 'hide' => ['pro_ownership_tag']],
+		Product::OWNERSHIP_SHARED => ['show' => ['pro_ownership_tag'], 'hide' => []],
+		Product::OWNERSHIP_BUNDLE => ['show' => [], 'hide' => ['pro_ownership_tag']],
+	],
 ]);
+
+$shared_tag_helptext = 'A name for the group of products that count as the same thing. '
+	. 'Invent one for the first product in a group; reuse it on the rest.';
+if (!empty($ownership_tags_in_use)) {
+	$shared_tag_helptext .= ' Already in use here: ' . htmlspecialchars(implode(', ', $ownership_tags_in_use)) . '.';
+}
+$formwriter->textinput('pro_ownership_tag', 'Shared with (ownership tag)', [
+	'validation' => ['maxlength' => 64],
+	'helptext' => $shared_tag_helptext,
+]);
+
+if ($ownership_owner_count) {
+	echo '<p class="muted text-sm"><a href="/plugins/store/admin/admin_ownerships?tag='
+		. urlencode($product->get('pro_ownership_tag')) . '">'
+		. (int)$ownership_owner_count . ' buyer' . ($ownership_owner_count == 1 ? '' : 's')
+		. ' own this tag</a></p>';
+}
 
 // Receipt template override (optional). Falls back to purchase_receipt_product_default.
 $receipt_template_options = ['' => '-- Use system default --'];

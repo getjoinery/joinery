@@ -2,7 +2,7 @@
 /**
  * Full order history sub-page, with the user's plugin license keys.
  *
- * @version 2.1
+ * @version 2.3
  */
 
 require_once(PathHelper::getThemeFilePath('PublicPage.php', 'includes'));
@@ -89,22 +89,34 @@ $session = $page_vars['session'];
             <?php endif; ?>
         </div>
 
-        <?php if (isset($page_vars['license_keys']) && $page_vars['license_keys']->count() > 0): ?>
+        <?php if (isset($page_vars['ownerships']) && $page_vars['ownerships']->count() > 0): ?>
         <div class="card">
             <div class="card-header">
-                <h6 class="jy-tight">License Keys</h6>
+                <h6 class="jy-tight">What you own</h6>
             </div>
             <div class="card-body">
-                <p class="muted text-sm">Each key licenses one production instance; staging and development copies are included.</p>
-                <?php $k = 0; foreach ($page_vars['license_keys'] as $license_key): ?>
+                <p class="muted text-sm">These are yours for good — you will not be charged for them again.</p>
+                <?php $k = 0; foreach ($page_vars['ownerships'] as $ownership): ?>
                 <div class="jy-orders-row<?php echo $k > 0 ? ' is-divided' : ''; ?>">
                     <div>
-                        <p class="jy-orders-num"><?php echo htmlspecialchars($license_key->get('lck_plugin_name')); ?></p>
-                        <p class="muted text-sm jy-tight"><code><?php echo htmlspecialchars($license_key->get('lck_key')); ?></code></p>
+                        <p class="jy-orders-num"><?php
+                            $owned_tag = $ownership->get('own_tag');
+                            if ($owned_tag === Ownership::TAG_ALL) {
+                                echo 'All products';
+                            } else if (!empty($page_vars['ownership_labels'][$owned_tag])) {
+                                echo htmlspecialchars($page_vars['ownership_labels'][$owned_tag]);
+                            } else {
+                                echo htmlspecialchars($owned_tag);
+                            }
+                        ?></p>
+                        <?php if ($ownership->get('own_license_key')): ?>
+                        <p class="muted text-sm jy-tight"><code><?php echo htmlspecialchars($ownership->get('own_license_key')); ?></code></p>
+                        <p class="muted text-sm jy-tight">Covers one production instance; staging and development copies are included.</p>
+                        <?php endif; ?>
                     </div>
                     <div class="text-end">
                         <p class="muted text-sm jy-tight">
-                            <?php echo $license_key->get_local('lck_create_time', 'M j, Y'); ?>
+                            <?php echo $ownership->get_local('own_create_time', 'M j, Y'); ?>
                         </p>
                     </div>
                 </div>

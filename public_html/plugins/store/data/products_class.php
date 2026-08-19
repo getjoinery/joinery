@@ -39,6 +39,14 @@ class Product extends SystemBase {
 	public static $ai_excluded_fields = ['pro_stripe_product_id', 'pro_stripe_product_id_test', 'pro_product_scripts'];
 	public static $url_namespace = 'product';  //SUBDIRECTORY WHERE ITEMS ARE LOCATED EXAMPLE: DOMAIN.COM/URL_NAMESPACE/THIS_ITEM
 
+	// The four meanings own-once can have on the admin product edit page. The
+	// stored value is always pro_ownership_tag; these name what a given tag
+	// means so the operator never faces a blank string field.
+	const OWNERSHIP_NONE   = 1;   // no tag — buy it as often as you like
+	const OWNERSHIP_ONCE   = 2;   // tag derived as product-{id}
+	const OWNERSHIP_SHARED = 3;   // operator-named tag shared with other products
+	const OWNERSHIP_BUNDLE = 4;   // the all-access tag
+
 	protected static $foreign_key_actions = [
 		'pro_prg_product_group_id' => ['action' => 'prevent', 'message' => 'Cannot delete product group - products exist'],
 		'pro_fil_file_id' => ['action' => 'null'],
@@ -90,7 +98,7 @@ class Product extends SystemBase {
 	    'pro_link' => array('type'=>'varchar(255)', 'required'=>true),
 	    'pro_delete_time' => array('type'=>'timestamp(6)'),
 	    'pro_product_scripts' => array('type'=>'text'),
-	    'pro_licensed_plugin' => array('type'=>'varchar(64)'),
+	    'pro_ownership_tag' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id' => array('type'=>'varchar(64)'),
 	    'pro_stripe_product_id_test' => array('type'=>'varchar(64)'),
 	    'pro_sbt_subscription_tier_id' => array('type'=>'int4'),
@@ -111,6 +119,24 @@ public function get_requirement_info($output='text') {
 	}	
 	
 	//GET ALL OF THE ADDITIONAL PRODUCT REQUIREMENTS FOR THIS PRODUCT
+	/**
+	 * Which of the four ownership meanings this product's stored tag carries.
+	 * The inverse of what the admin product edit page writes.
+	 */
+	public function get_ownership_mode() {
+		$tag = trim((string)$this->get('pro_ownership_tag'));
+		if ($tag === '') {
+			return self::OWNERSHIP_NONE;
+		}
+		if ($tag === Ownership::TAG_ALL) {
+			return self::OWNERSHIP_BUNDLE;
+		}
+		if ($this->key && $tag === Ownership::tag_for_product($this->key)) {
+			return self::OWNERSHIP_ONCE;
+		}
+		return self::OWNERSHIP_SHARED;
+	}
+
 	function get_requirement_instances($deleted=false){
 		if (!$this->key) {
 			return new MultiProductRequirementInstance([], NULL, NULL, NULL);
@@ -861,6 +887,18 @@ class MultiProduct extends SystemMultiBase {
 
 		if (isset($this->options['is_active'])) {
 			$filters['pro_is_active'] = "= TRUE";
+		}
+
+		// Own-once products: those that carry any ownership tag at all. Used by
+		// the Ownership admin page to show what an all-access row covers.
+		if (isset($this->options['has_ownership_tag'])) {
+			if ($this->options['has_ownership_tag']) {
+				$filters['pro_ownership_tag'] = "IS NOT NULL AND pro_ownership_tag <> ''";
+			}
+			else {
+				// NULL and '' both mean untagged — the two halves must agree.
+				$filters['(pro_ownership_tag'] = "IS NULL OR pro_ownership_tag = '')";
+			}
 		}
 
 		if (isset($this->options['link'])) {

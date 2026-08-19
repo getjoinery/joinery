@@ -270,6 +270,28 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 		}
 	}
 
+	//Ownership, pre-charge: the store will not charge an account for something
+	//it already owns. This is the authoritative guard — the product page and
+	//the cart refuse earlier for a better experience, but a replayed URL or a
+	//guest who resolves to an existing account mid-checkout is caught here,
+	//before any payment call. Checked against the user the payment-time
+	//recorder would credit, so a gift to an owner is refused too.
+	//
+	//A refusal is a refusal, never a discount: no branch below reprices.
+	foreach($cart->items as $key => $cart_item) {
+		list($quantity, $product, $data, $price, $discount, $product_version) = $cart_item;
+		$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
+		if($ownership_tag === '' || $product_version->is_subscription()){
+			continue;
+		}
+		$ownership_candidate = $resolved_users[$key];
+		if(Ownership::user_owns($ownership_candidate->key, $ownership_tag)){
+			return _checkout_error('"' . $product->get('pro_name') . '" is already owned by '
+				. $ownership_candidate->get('usr_email')
+				. '. Remove it from your cart to continue.');
+		}
+	}
+
 	$payment_service = '';
 	if($charge_total > 0){
 		if($settings->get_setting('use_paypal_checkout') && (!empty($_GET['id']) || !empty($_GET['subscription']))){
@@ -775,6 +797,17 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			$user = $resolved_users[$key];
 			$summary = $line_summaries[$key];
 			$order_item = $summary['order_item'];
+
+			//Ownership. A tagged product makes its buyer an owner the moment
+			//the item is paid for — this is core's job, not a script's. It runs
+			//before the product scripts so a fulfillment script (a key mailer,
+			//say) finds the row it decorates already there.
+			try {
+				Ownership::record_purchase($product, $product_version, $user, $order_item, $order);
+			}
+			catch (Exception $e) {
+				error_log("Ownership recording failed for product {$product->key} (order {$order->key}): " . $e->getMessage());
+			}
 
 			//Plugin product scripts.
 			try {

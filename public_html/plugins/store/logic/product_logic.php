@@ -70,6 +70,13 @@ function product_logic(array $input): LogicResult {
 	}
 	$page_vars['user'] = $user;
 
+	// Own-once products: a viewer who already owns this sees "you already own
+	// this" where the buy controls would be. Anonymous viewers see the normal
+	// buy button — we do not know who they are, and checkout is the authority.
+	$ownership_tag = trim((string)$product->get('pro_ownership_tag'));
+	$page_vars['already_owned'] = ($ownership_tag !== '' && $user
+		&& Ownership::user_owns($user->key, $ownership_tag));
+
 	// Handle edit_item mode: pre-fill form with existing cart item data
 	$edit_item_index = isset($input['edit_item']) ? intval($input['edit_item']) : null;
 	if ($edit_item_index !== null && empty($_POST)) {
