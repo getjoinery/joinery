@@ -177,7 +177,17 @@ class StaticPageCache {
             '/checkout',
             '/cart',
             '/cart_confirm',
-            '/cart_charge'
+            '/cart_charge',
+            // File bytes, not pages. A signed upload URL carries its own
+            // signature and expiry, so every request for the same file is a
+            // different URL: nothing can ever hit, and each miss stores another
+            // copy of the file plus another index entry. One soak rig reached
+            // 59,977 cached downloads, a 1.6 GB cache and a 27 MB index that
+            // exhausted PHP's memory limit on every write -- which is served to
+            // the client as a 500 on the file it was trying to fetch.
+            '/uploads',
+            '/files',
+            '/media'
         ];
         foreach ($excluded_patterns as $pattern) {
             if ($request_path === $pattern || strpos($request_path, $pattern . '/') === 0) {
@@ -344,6 +354,25 @@ class StaticPageCache {
      * Returns true for URLs that should not be cached OR tracked
      */
     public static function shouldIgnore($request_path = '', $params = []) {
+        // Permanently uncacheable by its nature: an excluded path, or a link
+        // signed for one recipient. Ignoring means not even writing down the
+        // decision, and that distinction is the whole point here.
+        //
+        // `markAsNostatic` records a verdict against the exact URL, so a URL
+        // that is never requested twice leaves an entry nothing will ever read.
+        // Signed download links are all unique, and the index is rewritten in
+        // full on every save -- so each download made the next one slower until
+        // `json_encode` needed 27 MB, blew PHP's memory limit, and every file
+        // request started answering 500. Sixty thousand entries, and not one of
+        // them could ever have been useful.
+        if (self::isExcludedPath($request_path)) {
+            return true;
+        }
+        if (isset($params['sig']) || isset($params['signature'])
+            || isset($params['expires']) || isset($params['token'])) {
+            return true;
+        }
+
         // Check User-Agent for obvious spam/bots
         $user_agent = $_SERVER['HTTP_USER_AGENT'] ?? '';
         if (empty($user_agent)) {
@@ -458,6 +487,26 @@ class StaticPageCache {
         }
         if ($detailed && !$keyword_found) {
             $reasons[] = '✅ Path does not contain sensitive keywords';
+        }
+
+        // 3b. Never cache a URL that is signed for one recipient.
+        //
+        // `sig` plus `expires` is a link minted for one person and one moment.
+        // Caching it is wasted work by construction -- the signature differs on
+        // every issue, so a second request never matches the first -- and it
+        // puts a private file's bytes in a shared cache, which is not a place
+        // they belong however hard the key is to guess.
+        $signed = isset($params['sig']) || isset($params['signature'])
+            || isset($params['expires']) || isset($params['token']);
+        if ($signed) {
+            if ($detailed) {
+                $reasons[] = '❌ URL is signed or expiring (one recipient, one moment)';
+                $passed = false;
+            } else {
+                return false;
+            }
+        } else if ($detailed) {
+            $reasons[] = '✅ URL carries no signature or expiry';
         }
 
         // 4. Check User-Agent for bots and development tools
@@ -669,6 +718,17 @@ class StaticPageCache {
                 $url_extension = strtolower($matches[1]);
                 if (in_array($url_extension, $cacheable_extensions)) {
                     $is_cacheable_file = true;
+                }
+            }
+            // The extension is the URL's claim, not the body's. A file a user
+            // uploaded and called `notes.txt` may hold anything at all, and a
+            // NUL byte says plainly that this is not a text page whatever it is
+            // named. The rig had 1.6 GB of other people's binary files sitting
+            // in a cache meant for public HTML.
+            if ($is_cacheable_file && $content !== '' && strpos($content, "\0") !== false) {
+                $is_cacheable_file = false;
+                if ($detailed) {
+                    $reasons[] = '❌ Body contains NUL bytes, so it is not the text page the extension claims';
                 }
             }
         }

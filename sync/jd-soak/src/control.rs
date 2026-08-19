@@ -22,6 +22,15 @@ pub struct Status {
     pub pending_ops: u64,
     pub waiting_for_keys: u64,
     pub cursor: i64,
+    /// When this daemon last COMPLETED a pass, in milliseconds since the epoch.
+    ///
+    /// Quiet is not the same as having looked. A device whose queue is empty
+    /// may simply not have scanned the disk since the user last touched it --
+    /// the watcher can miss a deep removal made by another account, and the
+    /// full walk then waits for the poll interval. So a settle has to know
+    /// whether each device has actually run a pass since the storm ended,
+    /// rather than inferring it from the queue being empty.
+    pub last_pass_ms: Option<u64>,
     pub blocker: Option<String>,
     /// `state → count`, e.g. `synced` → 1204.
     pub entries: std::collections::BTreeMap<String, u64>,
@@ -155,6 +164,7 @@ impl Status {
             pending_ops: n("pending_ops"),
             waiting_for_keys: n("waiting_for_keys"),
             cursor: v.get("cursor").and_then(Value::as_i64).unwrap_or(0),
+            last_pass_ms: v.get("last_pass_ms").and_then(Value::as_u64),
             blocker: v.get("blocker").and_then(Value::as_str).map(str::to_string),
             issues_total: v
                 .get("issues_total")

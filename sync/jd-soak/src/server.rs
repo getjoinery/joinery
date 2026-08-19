@@ -394,6 +394,67 @@ mod tests {
         }
     }
 
+    /// A server that records what it was asked and answers a fixed feed page.
+    struct Feed {
+        rows: Vec<Value>,
+        asked: RefCell<Vec<Value>>,
+    }
+
+    impl DriveApi for Feed {
+        fn action(&self, _name: &str, body: Value) -> Result<Value, ProtoError> {
+            self.asked.borrow_mut().push(body);
+            Ok(json!({ "ok": true, "changes": self.rows.clone(), "next_cursor": 9 }))
+        }
+        fn action_idempotent(
+            &self,
+            name: &str,
+            body: Value,
+            _key: &str,
+        ) -> Result<Value, ProtoError> {
+            self.action(name, body)
+        }
+        fn upload(
+            &self,
+            _p: &jd_proto::UploadParams,
+            _r: &mut dyn jd_proto::ReadSeek,
+        ) -> Result<jd_proto::UploadOutcome, ProtoError> {
+            unimplemented!()
+        }
+        fn download(&self, _u: &str, _f: u64, _o: &mut dyn Write) -> Result<u64, ProtoError> {
+            unimplemented!()
+        }
+    }
+
+    unsafe impl Sync for Feed {}
+    unsafe impl Send for Feed {}
+
+    #[test]
+    fn a_cursor_with_nothing_after_it_is_up_to_date() {
+        let feed = Feed {
+            rows: vec![],
+            asked: RefCell::new(Vec::new()),
+        };
+        assert!(!changes_pending(&feed, 41).unwrap());
+        // Asked from the device's own cursor, or the answer is about somebody
+        // else's position in the feed.
+        assert_eq!(feed.asked.borrow()[0]["cursor"], json!(41));
+    }
+
+    #[test]
+    fn one_unread_change_means_the_device_is_behind() {
+        // The whole point: this device reports an empty queue and no entries in
+        // flight, and is nonetheless about to learn that a folder it still has
+        // on disk was deleted. Believing its quiet here is what makes an audit
+        // compare a stale disk against a current server and call the lag a
+        // disagreement -- on every device at once, because it is one lag rather
+        // than two faults.
+        let feed = Feed {
+            rows: vec![json!({ "change_id": 42, "entity_type": "folder", "kind": "trashed" })],
+            asked: RefCell::new(Vec::new()),
+        };
+        assert!(changes_pending(&feed, 41).unwrap());
+    }
+
     #[test]
     fn a_paged_walk_collects_every_page() {
         let api = canned(vec![
@@ -546,4 +607,24 @@ mod tests {
         // whole point: without this the caller cannot tell them apart.
         assert_eq!(search.unidentified, 1);
     }
+}
+
+/// Is there anything in the change feed this cursor has not reached?
+///
+/// The one question a device's status cannot answer about itself. A daemon
+/// reports `pending_ops: 0` and no entries in flight the moment its queue
+/// drains -- and it reports exactly that while a folder deleted on the server
+/// forty seconds ago still sits unread in the feed, because a change it has not
+/// been told about cannot be work it knows it has. So "quiet" and "up to date"
+/// are different claims, and only this one distinguishes them.
+///
+/// Asked the way the client asks, with the client's own cursor: an empty answer
+/// is the server saying there is nothing after that point. One row is enough to
+/// know, so the page is one row.
+pub fn changes_pending(api: &dyn DriveApi, cursor: i64) -> Result<bool, ProtoError> {
+    let answer = api.action("drive_changes", json!({ "cursor": cursor, "limit": 1 }))?;
+    Ok(answer
+        .get("changes")
+        .and_then(Value::as_array)
+        .is_some_and(|rows| !rows.is_empty()))
 }
