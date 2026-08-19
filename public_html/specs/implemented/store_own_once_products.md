@@ -149,13 +149,17 @@ buy/cart controls with a "You already own this" notice (link to
 `/profile#orders`). Anonymous viewers see the normal buy button — identity is
 unknown.
 
-**Add to cart (early feedback):** `ShoppingCart` refuses to add a tagged
-product the logged-in user already owns, throwing `ShoppingCartException` with
-a friendly message, in the same validation region as the existing
-subscription-cap and `pro_max_cart_count` checks. Anonymous carts pass — the
-charge-time guard is the authority. A tagged product is also capped at
-quantity 1 per cart (own-once implies there is nothing a quantity 2 could
-mean).
+**Add to cart (early feedback):** `ShoppingCart` checks the account each line
+is *for* — the recipient on a line carrying an email, the logged-in user
+otherwise, matching who the payment-time recorder credits so an owner can
+still buy a gift. It throws `ShoppingCartException` with a friendly message
+(same validation region as the existing subscription-cap and
+`pro_max_cart_count` checks) for: a line whose recipient already owns the tag;
+a second copy of a tag for the same recipient (own-once implies there is
+nothing a quantity 2 could mean — but two recipients make two legitimate
+lines); and a `*` bundle sharing a cart with a product it covers for the same
+recipient (one order must not sell the same ownership twice). Unknown identity
+passes — the charge-time guard is the authority.
 
 **Charge time (authoritative):** in `cart_charge_logic.php`, beside the
 existing pre-charge fulfillment-availability pass ("refuse while the purchase
@@ -170,6 +174,11 @@ that account — no charge occurs.
 This layering means the URL/replay paths cannot bypass the guard, and a guest
 who logs in (or whose email resolves) mid-checkout is still caught before money
 moves.
+
+The buyer-facing vocabulary is products, not tags: the profile's "What you
+own" list labels each ownership with the product name(s) carrying its tag
+(`*` reads "All products"; the raw tag shows only when no live product carries
+it — a derived `product-{id}` string must never face a buyer).
 
 ### 4. Admin product edit (`plugins/store/admin/admin_product_edit.php`)
 
@@ -200,7 +209,9 @@ except in the shared case:
   tag" — linking to the Ownership admin page filtered to that tag.
 - Saving a tag on a product whose current version is a subscription fails
   validation with a message saying ownership applies to one-time purchases
-  only.
+  only. The boundary holds from the other direction too: adding a subscription
+  version to a tagged product is refused the same way, on both version-save
+  paths (the product edit page's version actions and the version edit page).
 - The purchase-scripts checkbox list is unchanged; `mint_license_key` is simply
   one optional script among them (see §6).
 - Bump version numbers of touched files per project convention.
@@ -222,6 +233,8 @@ except in the shared case:
 - **Manual grant:** a small form (user + tag) minting a row with no order
   attached — comps and support cases. No key string is written; if the
   operator's fulfillment needs one, that remains their script's business.
+  A grant to someone who already owns the tag is refused — a second live row
+  would make revoking the first one silently mean nothing.
 - **No reissue.** No action regenerates a key string.
 
 ### 6. License-key fulfillment script (getjoinery's layer)
@@ -292,7 +305,9 @@ indexed).
 ## Out-of-band items recorded here for visibility (not part of this build)
 
 - Site/store contradictions on getjoinery: install service advertised at $39.99
-  vs $299 product; ELv2 vs PolyForm license text. Business decisions pending.
+  vs $299 product. The `business-license` product still describes itself as
+  Elastic License 2.0; the business license is PolyForm Shield 1.0.0, so that
+  product's short description is wrong on a live checkout page.
 - `plugins/server_manager/tests/plugin_distribution_anonymous_test.php` still
   asserts the ungated paid-plugin download on purpose; it flips only when the
   future download gate lands, not with this spec.

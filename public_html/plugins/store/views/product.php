@@ -31,6 +31,7 @@
 
     $edit_item_index = isset($page_vars['edit_item_index']) ? $page_vars['edit_item_index'] : null;
     $prefill_data = isset($page_vars['prefill_data']) ? $page_vars['prefill_data'] : null;
+    $already_owned = !empty($page_vars['already_owned']);
 ?>
 <div class="jy-ui">
 
@@ -96,7 +97,12 @@
                 <?php endif; ?>
 
                 <?php
-                if (!$product_version): ?>
+                if ($already_owned): ?>
+                    <div class="alert alert-info jy-product-alert">
+                        <strong>You already own this.</strong>
+                        <span>It is listed with your <a href="/profile#orders">purchases</a>.</span>
+                    </div>
+                <?php elseif (!$product_version): ?>
                     <div class="alert alert-error">This product is not available for purchase. No product version found.</div>
                 <?php elseif (!$product->is_sold_out() && ($edit_item_index !== null || $cart->can_add_to_cart($product_version))):
                     $formwriter = $page->getFormWriter('product_form', ['action' => $product->get_url(), 'method' => 'POST']);

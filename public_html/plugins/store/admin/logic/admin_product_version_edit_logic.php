@@ -52,6 +52,14 @@ function admin_product_version_edit_logic(array $input): LogicResult {
 
 		// Set price fields for new versions, or existing versions with no orders
 		if((!$product_version->key || !$has_orders) && isset($input['version_price'])){
+			// Boundary: a tagged (own-once) product takes no subscription
+			// version — ownership applies to one-time purchases only.
+			if (in_array($input['prv_price_type'] ?? '', array('day', 'week', 'month', 'year'), true)
+				&& trim((string)$product->get('pro_ownership_tag')) !== '') {
+				return LogicResult::error('This product can only be owned once, and ownership applies to '
+					. 'one-time purchases only — it cannot take a subscription version. '
+					. 'Set Ownership to "No limit" on the product first.');
+			}
 			$product_version->set('prv_pro_product_id', $product->key);
 			$product_version->set('prv_version_price', $input['version_price']);
 			$product_version->set('prv_price_type', $input['prv_price_type']);

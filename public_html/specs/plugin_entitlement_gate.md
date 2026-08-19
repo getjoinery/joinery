@@ -12,9 +12,9 @@ that. With perpetual purchases and updates included there is no lapsed state
 to police, so the gate currently protects nothing but the first download.
 Paid plugins are honor-system until this builds.
 
-**What already exists to build on:** every key is minted and recorded from
-day one (`lck_license_keys` in the store plugin: buyer, order, order item,
-plugin name, `lck_revoked_time` for a future lapse model), and the paid
+**What already exists to build on:** every purchase is recorded from day one
+(`own_ownerships` in the store plugin: buyer, order, order item, ownership tag,
+optional key string, `own_revoked_time` for a future lapse model), and the paid
 manifests already declare `requires_entitlement` — declared now, read only by
 the catalog listing. Flipping enforcement on later affects downloads only,
 never installed function; existing buyers just paste the key they already
@@ -27,7 +27,8 @@ hold.
 `plugins/server_manager/includes/publish_theme.php`, `?download=` branch: if
 the requested plugin's manifest declares `requires_entitlement`, require a
 valid license key (header or parameter) that maps to a non-revoked
-`lck_license_keys` row for that plugin, and 402 otherwise. Free plugins and
+`own_ownerships` row whose tag covers that plugin, and 402 otherwise. Free
+plugins and
 all themes keep serving anonymously — the installer bootstraps through this
 endpoint.
 
