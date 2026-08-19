@@ -2913,3 +2913,240 @@ fn a_save_in_the_window_a_download_is_landing_in_is_not_built_over() {
     );
 
 }
+
+#[test]
+fn a_stale_path_rebuilding_a_folders_old_name_does_not_strand_the_renamed_one() {
+    // A folder renamed twice in a row, and then an application that still held
+    // the folder's ORIGINAL path writing through it. Saving to a stale path
+    // creates the missing directories on the way, so the old name is standing
+    // on the disk again -- as a brand new, unrelated folder -- moments after
+    // the engine agreed the folder had moved away from it.
+    //
+    // That is not a contrived shape. An editor with a document open, a build
+    // tool with a configured output directory, a sync client's own temp path:
+    // all of them keep a path rather than a handle, and none of them notice a
+    // rename. The soak rig produced it on its own and the result persisted for
+    // the rest of the campaign -- the device holding the subtree under the new
+    // name, the server still calling it by the old one, and both sides
+    // reporting themselves settled about it.
+    let world = World::new(71, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Projects");
+    fs.user_mkdir("Projects/Sub 10");
+    fs.user_mkdir("Projects/Sub 10/Sub 18");
+    fs.user_mkdir("Projects/Sub 10/Sub 18/Sub 21");
+    for (path, body) in [
+        ("Projects/Sub 10/doc-12.txt", &b"twelve"[..]),
+        ("Projects/Sub 10/Sub 18/doc-11.txt", &b"eleven"[..]),
+        ("Projects/Sub 10/Sub 18/Sub 21/doc-4.txt", &b"four"[..]),
+    ] {
+        fs.user_write(path, body);
+        committed.note(path, body);
+    }
+    assert!(world.settle().is_some(), "the tree settles before the rename");
+    let (folders_before, _) = world.server.live_counts();
+
+    fs.user_rename("Projects/Sub 10", "Projects/Sub 10 (27)");
+    fs.user_write("Projects/Sub 10 (27)/in-flight-31.txt", b"in flight");
+    committed.note("Projects/Sub 10 (27)/in-flight-31.txt", b"in flight");
+    fs.user_rename("Projects/Sub 10 (27)", "Projects/Sub 10 (27) (31)");
+
+    // The stale path. Nothing here has been told about either rename.
+    fs.user_write("Projects/Sub 10/Sub 18/Sub 21/in-flight-32.txt", b"stale path");
+    committed.note("Projects/Sub 10/Sub 18/Sub 21/in-flight-32.txt", b"stale path");
+
+    assert!(
+        world.settle().is_some(),
+        "the device must reach a fixed point, not sit renaming forever"
+    );
+    assert_invariants(&world, &committed);
+    assert_converged(&world);
+    assert!(
+        world
+            .server
+            .tree()
+            .contains_key("Projects/Sub 10 (27) (31)/doc-12.txt"),
+        "the renamed folder reached the server under the name it actually has"
+    );
+    // The trees can agree while the records underneath them do not, and this is
+    // where that shows. Three directories genuinely came into existence -- the
+    // ones the stale save built on its way down -- and nothing else did. A
+    // fourth means the engine read its own renamed folder as new content and
+    // gave it a second identity, leaving the first pointed at a directory that
+    // merely shares its old name. Nothing is missing yet; it goes wrong the next
+    // time either of them is renamed.
+    let (folders_after, _) = world.server.live_counts();
+    assert_eq!(
+        folders_after,
+        folders_before + 3,
+        "one folder stayed one folder: no second identity for the one that moved"
+    );
+}
+
+#[test]
+fn a_rename_whose_answer_was_lost_still_ends_where_the_user_left_it() {
+    // The same stale-path shape, with the one network fault that makes a rename
+    // genuinely ambiguous: the server does the work and the answer is lost on
+    // the way back. The client has to retry a rename it does not know already
+    // happened -- and by then the user has renamed the folder again and an
+    // application has rebuilt the original name underneath it.
+    //
+    // What must not happen is the device coming to rest holding the subtree
+    // under one name while the server calls it another and neither side plans
+    // anything about it. That state reads as settled from inside and is
+    // permanent from outside.
+    let world = World::new(72, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Projects");
+    fs.user_mkdir("Projects/Sub 10");
+    fs.user_mkdir("Projects/Sub 10/Sub 18");
+    fs.user_mkdir("Projects/Sub 10/Sub 18/Sub 21");
+    for (path, body) in [
+        ("Projects/Sub 10/doc-12.txt", &b"twelve"[..]),
+        ("Projects/Sub 10/Sub 18/doc-11.txt", &b"eleven"[..]),
+        ("Projects/Sub 10/Sub 18/Sub 21/doc-4.txt", &b"four"[..]),
+    ] {
+        fs.user_write(path, body);
+        committed.note(path, body);
+    }
+    assert!(world.settle().is_some(), "the tree settles before the rename");
+
+    world.device("laptop").net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_rename".into()),
+        ..NetFaults::none()
+    });
+
+    fs.user_rename("Projects/Sub 10", "Projects/Sub 10 (27)");
+    // One pass, so the rename is attempted -- and its answer lost -- before the
+    // user touches the folder again.
+    world.pass(world.device("laptop"));
+
+    fs.user_write("Projects/Sub 10 (27)/in-flight-31.txt", b"in flight");
+    committed.note("Projects/Sub 10 (27)/in-flight-31.txt", b"in flight");
+    fs.user_rename("Projects/Sub 10 (27)", "Projects/Sub 10 (27) (31)");
+    fs.user_write("Projects/Sub 10/Sub 18/Sub 21/in-flight-32.txt", b"stale path");
+    committed.note("Projects/Sub 10/Sub 18/Sub 21/in-flight-32.txt", b"stale path");
+
+    assert!(
+        world.settle().is_some(),
+        "the device must reach a fixed point, not sit renaming forever"
+    );
+    assert_invariants(&world, &committed);
+    assert_converged(&world);
+}
+
+#[test]
+fn a_folders_old_name_rebuilt_after_the_rename_settled_is_still_new_content() {
+    // The rename is completely finished first -- server and device agree, no
+    // work outstanding -- and only then does something write through the name
+    // the folder used to have. So this is not a race with a rename in flight:
+    // it is a brand new directory tree appearing at a path the engine has a
+    // memory of, on a device that had just declared itself up to date.
+    //
+    // The rig produced exactly this and then reported itself settled while
+    // holding three files the server had never been told about.
+    let world = World::new(73, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Projects");
+    fs.user_mkdir("Projects/Sub 25");
+    fs.user_write("Projects/Sub 25/doc-31.txt", b"thirty one");
+    committed.note("Projects/Sub 25/doc-31.txt", b"thirty one");
+    assert!(world.settle().is_some());
+
+    fs.user_rename("Projects", "Projects (30)");
+    assert!(world.settle().is_some(), "the rename finishes completely");
+    assert!(world.server.tree().contains_key("Projects (30)/Sub 25/doc-31.txt"));
+
+    // Now the stale writer, which knows nothing about any of that.
+    for (path, body) in [
+        ("Projects/Sub 25/doc-31.txt", &b"thirty one, again"[..]),
+        ("Projects/Sub 25/doc-32.txt", &b"thirty two"[..]),
+        ("Projects/Sub 25/doc-33.txt", &b"thirty three"[..]),
+    ] {
+        fs.user_write(path, body);
+        committed.note(path, body);
+    }
+
+    assert!(world.settle().is_some(), "and the device settles again");
+    assert_invariants(&world, &committed);
+    assert_converged(&world);
+}
+
+#[test]
+fn a_new_folder_wearing_a_renamed_folders_old_name_is_not_that_folder() {
+    // The engine decides a tracked folder is still where it left it by asking
+    // whether a directory stands at that path. A directory does -- but it is
+    // not the same directory. The user renamed the folder, and something that
+    // still held the old path built a fresh one there afterwards.
+    //
+    // Getting this wrong is quiet. The trees still agree afterwards, because
+    // the renamed directory is simply adopted as new and its files move into
+    // it, so every ordinary check passes. What has actually happened is that
+    // one folder became two identities -- the original pointing at a directory
+    // that merely shares its old name, a new one holding the contents -- and
+    // the damage surfaces later, when either of them is renamed again and the
+    // two records start describing different trees. That is how the soak rig
+    // ended a campaign with a whole subtree on one device that the server had
+    // never heard of, both sides reporting themselves settled.
+    let world = World::new(74, &["laptop"]);
+    let mut committed = Committed::default();
+    let fs = &world.device("laptop").fs;
+
+    fs.user_mkdir("Field Notes");
+    fs.user_write("Field Notes/observations.txt", b"what was seen");
+    committed.note("Field Notes/observations.txt", b"what was seen");
+    assert!(world.settle().is_some());
+    assert_eq!(world.server.live_counts(), (1, 1));
+    let original = folder_id_named(&world, "Field Notes").expect("the folder reached the server");
+
+    // The rename, and then the stale writer rebuilding the name it remembers.
+    // No pass between them: this is one storm, as a person would produce it.
+    fs.user_rename("Field Notes", "Field Notes 2026");
+    fs.user_write("Field Notes/scratch.txt", b"saved to a path that moved");
+    committed.note("Field Notes/scratch.txt", b"saved to a path that moved");
+
+    assert!(world.settle().is_some());
+    assert_invariants(&world, &committed);
+    assert_converged(&world);
+
+    let (folders, files) = world.server.live_counts();
+    assert_eq!((folders, files), (2, 2), "one folder became two, not three");
+    let tree = world.server.tree();
+    assert!(tree.contains_key("Field Notes 2026/observations.txt"));
+    assert!(tree.contains_key("Field Notes/scratch.txt"));
+
+    // The counts and the tree agree either way, which is what makes this quiet.
+    // Identity is the only thing that tells the two apart: the folder the user
+    // renamed has to be the SAME folder afterwards, carrying its id, its
+    // history and its sharing with it. If instead the original stayed on the
+    // rebuilt directory and the moved one was adopted as new, everything above
+    // still passes and the two records go on to describe different trees.
+    assert_eq!(
+        folder_id_named(&world, "Field Notes 2026"),
+        Some(original),
+        "the folder the user renamed kept its identity; it was not re-created \
+         while the original settled onto a new directory wearing its old name"
+    );
+}
+
+/// The server id the device holds for the folder currently called `name`.
+fn folder_id_named(world: &World, name: &str) -> Option<i64> {
+    world
+        .device("laptop")
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| {
+            e.id.entity_type == jd_core::EntityType::Folder
+                && !e.remote_deleted
+                && e.remote.name == name
+        })
+        .map(|e| e.id.server_id)
+}

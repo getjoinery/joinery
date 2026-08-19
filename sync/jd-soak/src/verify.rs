@@ -32,6 +32,7 @@ use std::time::{Duration, Instant};
 use jd_proto::DriveApi;
 use jd_vfs::Personality;
 
+use crate::actor::now_ms;
 use crate::control::{self, Status};
 use crate::fleet::{Device, Fleet};
 use crate::journal::{self, Record};
@@ -172,8 +173,21 @@ fn note_reading(
 /// the audit run against a tree still in motion, and it showed up as a single
 /// file on one side and not the other, at the end of a settle that called
 /// itself clean.
+///
+/// **And it has to stay settled for a whole poll.** A device is quiet whenever
+/// its queue is empty, which includes being quiet because it has not yet ASKED
+/// what changed: there is no push channel, so another device's work is invisible
+/// to it for up to `poll_seconds`. Returning on the first simultaneously-quiet
+/// reading therefore measured a fleet that had merely not heard the news, and
+/// the audit ran in the gap before it did.
+///
+/// The simulator has always required two consecutive quiet rounds for exactly
+/// this reason. The rig required one instant, and paid for it in transient
+/// audited-green failures: a folder trashed on the server forty seconds before
+/// the audit, by the very device that had already reported itself finished.
 pub fn await_convergence(
     fleet: &Fleet,
+    api: &dyn DriveApi,
     deadline: Duration,
     sleep: &dyn Fn(Duration),
 ) -> (
@@ -188,6 +202,14 @@ pub fn await_convergence(
     let started = Instant::now();
     let mut settled_at: BTreeMap<String, u64> = BTreeMap::new();
     let mut last: BTreeMap<String, Option<Status>> = BTreeMap::new();
+    // How long the whole fleet has to have been quiet before the quiet counts.
+    // One full poll plus a margin: that is exactly how long a device can look
+    // finished purely because it has not yet asked the server what changed.
+    let confirm = confirmation_window(fleet.poll_seconds, deadline);
+    let mut quiet_since: Option<Instant> = None;
+    // The wall-clock moment this settle began. A device has to have completed a
+    // pass AFTER it, or its quiet is about the world as it was during the storm.
+    let settle_began_ms = now_ms();
 
     loop {
         for device in &fleet.devices {
@@ -201,7 +223,65 @@ pub fn await_convergence(
             );
             last.insert(device.name.clone(), status);
         }
-        if settled_at.len() == fleet.devices.len() {
+        // Any device busy resets the clock: the window has to be unbroken.
+        if settled_at.len() < fleet.devices.len() {
+            quiet_since = None;
+        } else if quiet_since.is_none() {
+            quiet_since = Some(Instant::now());
+        }
+        let mut held = quiet_since.is_some_and(|t| t.elapsed() >= confirm);
+        // Quiet is not the same as up to date, and only the server can tell the
+        // two apart. A daemon says `pending_ops: 0` the instant its queue
+        // drains -- including while a deletion made forty seconds ago still
+        // sits unread in the change feed, because a change it has not been told
+        // about is not work it knows it has. Believed on the strength of the
+        // queue alone, the audit then walks a disk that is simply behind and
+        // reports every not-yet-applied change as a disagreement. Both devices
+        // produce the identical list, because it is one lag, not two faults.
+        //
+        // So the window is a floor, not the proof. The proof is each device's
+        // own cursor having reached the end of the feed. Asked only once the
+        // window has already held, so a settle pays for it once rather than
+        // every two seconds.
+        // Has every device actually LOOKED since the storm stopped? A daemon
+        // reports an empty queue whether or not it has scanned the disk since
+        // the user last touched it -- the watcher can miss a deep removal made
+        // by another account, and the full walk then waits out the poll
+        // interval. Run 107 settled on that: convergence was declared, and
+        // sixty-two seconds later the device noticed a folder had gone and
+        // trashed it on the server, by which time the audit had already
+        // compared a disk against a server that still had it.
+        if held
+            && !fleet.devices.iter().all(|d| {
+                has_looked_since(last.get(&d.name).and_then(|s| s.as_ref()), settle_began_ms)
+            })
+        {
+            held = false;
+        }
+        if held {
+            for device in &fleet.devices {
+                let Some(Some(status)) = last.get(&device.name) else {
+                    continue;
+                };
+                match server::changes_pending(api, status.cursor) {
+                    Ok(false) => {}
+                    Ok(true) => {
+                        // Behind. Ask it to look now rather than waiting out
+                        // its poll interval, and stop calling this quiet.
+                        control::sync_now(&device.control_file());
+                        quiet_since = None;
+                        held = false;
+                        break;
+                    }
+                    // The server could not be asked. That is not evidence
+                    // either way, and refusing to settle on it would turn a
+                    // transient into a convergence failure. The window stands
+                    // on its own, as it did before there was anything better.
+                    Err(_) => {}
+                }
+            }
+        }
+        if settled_at.len() == fleet.devices.len() && held {
             let slowest = settled_at.values().copied().max().unwrap_or(0);
             return (
                 Verdict::pass(
@@ -280,6 +360,32 @@ pub fn await_convergence(
 /// milliseconds. Cheap enough to run every two seconds on a long settle, and
 /// short enough on a two-second one that the answer is not dominated by the
 /// waiting.
+/// How long the fleet must stay quiet before the quiet is believed.
+///
+/// One change-feed poll is the floor, because a device that has not polled yet
+/// is indistinguishable from one with nothing to do; the margin covers the pass
+/// that follows the poll actually finding something. Capped at a third of the
+/// deadline so a short settle still gets to run rather than spending its whole
+/// budget confirming.
+fn confirmation_window(poll_seconds: u64, deadline: Duration) -> Duration {
+    let want = Duration::from_secs(poll_seconds).saturating_add(Duration::from_secs(5));
+    want.min(deadline / 3)
+}
+
+/// Has this device completed a pass since `since_ms`?
+///
+/// An empty queue says nothing about whether the disk has been looked at. The
+/// watcher can miss a removal made by another account -- on the rig the actors
+/// run as root inside a daemon's tree -- and the full walk then waits out the
+/// poll interval. A device in that state answers every question correctly and
+/// is describing the world as it was during the storm.
+///
+/// No pass at all is not looking. A device that has only ever passed before the
+/// settle began has not looked either.
+fn has_looked_since(status: Option<&Status>, since_ms: u64) -> bool {
+    status.is_some_and(|s| s.last_pass_ms.is_some_and(|ms| ms >= since_ms))
+}
+
 fn poll_interval(deadline: Duration) -> Duration {
     (deadline / 4).clamp(Duration::from_millis(50), Duration::from_secs(2))
 }
@@ -855,7 +961,7 @@ pub fn settle(
     deadline: Duration,
     sleep: &dyn Fn(Duration),
 ) -> Verification {
-    let (convergence, convergence_ms, statuses) = await_convergence(fleet, deadline, sleep);
+    let (convergence, convergence_ms, statuses) = await_convergence(fleet, api, deadline, sleep);
 
     let mut trees = BTreeMap::new();
     let mut on_devices = BTreeSet::new();
@@ -1510,6 +1616,72 @@ mod tests {
             1,
             "a fleet with one device working has not converged, whatever it \
              managed a moment ago"
+        );
+    }
+
+    #[test]
+    fn the_confirmation_window_covers_a_whole_change_feed_poll() {
+        // A device with an empty queue may simply not have ASKED what changed
+        // yet, and there is no push channel to tell it. Anything shorter than a
+        // full poll cannot tell that apart from being finished.
+        let w = confirmation_window(30, Duration::from_secs(900));
+        assert!(
+            w >= Duration::from_secs(30),
+            "a window shorter than one poll believes a device that has not looked"
+        );
+    }
+
+    fn quiet_status(last_pass_ms: Option<u64>) -> Status {
+        Status {
+            indicator: "green".into(),
+            summary: "up to date".into(),
+            tracked: 3,
+            settled: 3,
+            pending_ops: 0,
+            waiting_for_keys: 0,
+            cursor: 100,
+            last_pass_ms,
+            blocker: None,
+            entries: BTreeMap::from([("synced".to_string(), 3u64)]),
+            issues: Vec::new(),
+            issues_total: 0,
+        }
+    }
+
+    #[test]
+    fn a_device_that_has_not_looked_since_the_storm_is_not_settled() {
+        // The exact shape run 107 settled on: a device reporting green with an
+        // empty queue, whose last pass was during the storm. A minute after the
+        // fleet was called converged it noticed a folder had been removed and
+        // trashed it on the server -- and by then the audit had compared a disk
+        // against a server that still had it.
+        let began = 1_000_000u64;
+        assert!(
+            !has_looked_since(Some(&quiet_status(Some(began - 1))), began),
+            "a pass that finished before the settle began describes the storm"
+        );
+        assert!(
+            !has_looked_since(Some(&quiet_status(None)), began),
+            "a device that has never passed has certainly not looked"
+        );
+        assert!(
+            !has_looked_since(None, began),
+            "and one that did not answer at all has not either"
+        );
+        assert!(
+            has_looked_since(Some(&quiet_status(Some(began + 1))), began),
+            "a pass after the settle began is the device saying it looked and found nothing"
+        );
+    }
+
+    #[test]
+    fn a_short_settle_still_gets_to_run() {
+        // The window is a floor on quiet, not a licence to spend the whole
+        // budget confirming: a two-second deadline must not demand thirty-five.
+        let deadline = Duration::from_secs(2);
+        assert!(
+            confirmation_window(30, deadline) <= deadline / 3,
+            "confirming must leave most of the deadline for actually settling"
         );
     }
 

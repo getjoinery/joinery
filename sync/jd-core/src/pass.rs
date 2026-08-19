@@ -851,6 +851,8 @@ fn detect_folder_moves(
             tracked.insert(path, entry.id);
         }
     }
+    // Folders whose believed path holds no directory. These have plainly moved
+    // or gone, and the check is cheap enough to make first.
     let mut missing: Vec<(String, EntityId)> = Vec::new();
     for (path, id) in &tracked {
         if dirs_on_disk.contains(path) {
@@ -859,12 +861,18 @@ fn detect_folder_moves(
             missing.push((path.clone(), *id));
         }
     }
-    if missing.is_empty() {
+    // Nothing has gone from where it was, and there is no unaccounted directory
+    // for anything to have moved TO. Everything below this line is about
+    // pairing one with the other, so there is nothing to pair and no reason to
+    // pay for the evidence -- which costs a path resolution per tracked file.
+    let unaccounted = dirs_on_disk.iter().any(|d| !folder_ids.contains_key(d));
+    if missing.is_empty() && !unaccounted {
         return Ok(scan);
     }
 
-    // What the engine believes about the files in each of those folders.
+    // What the engine believes about the files in each tracked folder.
     let mut children: HashMap<String, Vec<(String, u64)>> = HashMap::new();
+    let mut known_file_ids: std::collections::HashSet<u64> = std::collections::HashSet::new();
     for entry in all_entries(env)? {
         if entry.id.entity_type != EntityType::File {
             continue;
@@ -874,6 +882,7 @@ fn detect_folder_moves(
         else {
             continue;
         };
+        known_file_ids.insert(fingerprint.file_id);
         if let Some((dir, name)) = path.rsplit_once('/') {
             children
                 .entry(dir.to_string())
@@ -885,6 +894,114 @@ fn detect_folder_moves(
     let by_path: HashMap<&str, &ObservedFile> =
         observed.iter().map(|o| (o.path.as_str(), o)).collect();
 
+    // Does the directory standing at this path hold any of the files this
+    // folder is known to contain? Identity on this volume, not names: the same
+    // file_id at the same place is the folder itself, and nothing else can
+    // counterfeit it.
+    let corroborated = |path: &String| -> bool {
+        let Some(kids) = children.get(path) else {
+            // Nothing to check it by -- an empty folder, or one whose files
+            // have never been agreed. The path standing is all the evidence
+            // there is, and it is enough: an empty folder cannot be matched
+            // anywhere else either.
+            return true;
+        };
+        kids.iter().any(|(name, file_id)| {
+            by_path
+                .get(format!("{path}/{name}").as_str())
+                .is_some_and(|o| o.fingerprint.file_id == *file_id)
+        })
+    };
+
+    // Folders whose believed path holds a directory that is NOT them: the user
+    // renamed the folder, and something still carrying the old path -- an
+    // editor with a document open, a build tool with a configured output
+    // directory -- rebuilt that name afterwards by saving through it.
+    //
+    // Reading the path alone, the engine calls such a folder present, adopts
+    // the directory it actually moved to as brand new content, and the folder
+    // ends up with two identities: the original sitting on a directory that
+    // merely shares its old name, a new one holding the contents. Nothing looks
+    // wrong at the time -- the trees still agree, because the files move into
+    // the new folder -- and it comes apart later, when either of them is
+    // renamed again and the two records begin describing different trees. A
+    // soak campaign ended holding a whole subtree one device had and the server
+    // had never heard of, both sides reporting themselves settled about it.
+    //
+    // They stay in `present` regardless: a directory IS standing at the path, so
+    // this is not a deletion, and reading it as one would remove a folder from
+    // the server that the user still has.
+    //
+    // Matched in a SECOND round, after the folders that are genuinely nowhere.
+    // A folder with no directory at all has to be found or it is reported
+    // deleted; a displaced one is merely mis-attributed, and letting the two
+    // compete for the same directory lets a speculative claim outbid a
+    // necessary one. Second round, and only over what the first left unclaimed.
+    // Is everything under this path content the engine has never seen? That is
+    // what a rebuilt directory looks like, and it is the whole of the case: the
+    // name was made again from nothing, moments after the folder left it.
+    //
+    // A folder that merely lent a file out, or had one safe-saved into a new
+    // inode, still has tracked content standing under it and is NOT this. The
+    // distinction matters more than it looks: without it, one file moved out of
+    // a folder reads as the folder having moved, and the engine drags the
+    // folder after the file.
+    let holds_nothing_known = |path: &String| -> bool {
+        let prefix = format!("{path}/");
+        !observed
+            .iter()
+            .any(|o| o.path.starts_with(&prefix) && known_file_ids.contains(&o.fingerprint.file_id))
+    };
+    let displaced: Vec<(String, EntityId)> = tracked
+        .iter()
+        .filter(|(path, _)| {
+            dirs_on_disk.contains(*path) && !corroborated(path) && holds_nothing_known(path)
+        })
+        .map(|(path, id)| (path.clone(), *id))
+        .collect();
+    if missing.is_empty() && displaced.is_empty() {
+        return Ok(scan);
+    }
+    // Every file this disk holds, by its identity on the volume. Used only to
+    // answer the question below, and only when there is a displaced folder to
+    // ask it about.
+    let by_file_id: HashMap<u64, &ObservedFile> = if displaced.is_empty() {
+        HashMap::new()
+    } else {
+        observed
+            .iter()
+            .map(|o| (o.fingerprint.file_id, o))
+            .collect()
+    };
+
+    // Did this folder move here WHOLESALE -- is every file of its the disk can
+    // still find now inside this one directory?
+    //
+    // For a folder that has vanished from its path, a single recognized file is
+    // enough: it is somewhere, and one corroborated child is the best evidence
+    // available of where. For a folder whose directory is still standing, it is
+    // not enough at all, because "one of its files is over there" is the
+    // ordinary result of the user moving ONE FILE out. Overriding a standing
+    // directory on that reading drags the whole folder after the file and
+    // strands whatever else was in it. A renaming folder takes everything with
+    // it; a folder that has merely lent out a file does not.
+    let moved_wholesale = |old_path: &String, candidate: &str| -> bool {
+        let Some(kids) = children.get(old_path) else {
+            return false;
+        };
+        let mut here = 0;
+        for (name, file_id) in kids {
+            match by_file_id.get(file_id) {
+                // Not on this disk at all any more. Deleted, or never written
+                // here. It says nothing either way, so it does not object.
+                None => continue,
+                Some(o) if o.path == format!("{candidate}/{name}") => here += 1,
+                Some(_) => return false,
+            }
+        }
+        here > 0
+    };
+
     let mut claimed: Vec<EntityId> = Vec::new();
     // Shallowest first, so a renamed parent is resolved before the folders
     // inside it are asked where they live.
@@ -893,53 +1010,73 @@ fn detect_folder_moves(
         .filter(|d| !folder_ids.contains_key(*d))
         .collect();
     candidates.sort_by_key(|d| (depth_of(d), d.to_string()));
+    let mut taken: std::collections::HashSet<&String> = std::collections::HashSet::new();
 
-    for candidate in candidates {
-        let mut best: Option<(EntityId, String, usize)> = None;
-        for (old_path, id) in &missing {
-            if claimed.contains(id) {
+    for (pool, whole_only) in [(&missing, false), (&displaced, true)] {
+        for candidate in candidates.iter() {
+            if taken.contains(candidate) {
                 continue;
             }
-            let Some(kids) = children.get(old_path) else {
+            let mut best: Option<(EntityId, String, usize)> = None;
+            for (old_path, id) in pool.iter() {
+                if claimed.contains(id) {
+                    continue;
+                }
+                let Some(kids) = children.get(old_path) else {
+                    continue;
+                };
+                let matched = kids
+                    .iter()
+                    .filter(|(name, file_id)| {
+                        by_path
+                            .get(format!("{candidate}/{name}").as_str())
+                            .is_some_and(|o| o.fingerprint.file_id == *file_id)
+                    })
+                    .count();
+                if matched == 0 {
+                    continue;
+                }
+                if whole_only && !moved_wholesale(old_path, candidate) {
+                    continue;
+                }
+                // The most corroborated match wins, and ties break on the folder id
+                // so two devices reach the same answer.
+                if best.as_ref().is_none_or(|(bid, _, count)| {
+                    matched > *count || (matched == *count && *id < *bid)
+                }) {
+                    best = Some((*id, old_path.clone(), matched));
+                }
+            }
+
+            let Some((id, old_path, _)) = best else {
                 continue;
             };
-            let matched = kids
-                .iter()
-                .filter(|(name, file_id)| {
-                    by_path
-                        .get(format!("{candidate}/{name}").as_str())
-                        .is_some_and(|o| o.fingerprint.file_id == *file_id)
-                })
-                .count();
-            if matched == 0 {
-                continue;
+            claimed.push(id);
+            taken.insert(candidate);
+            scan.present.insert(id);
+            folder_ids.insert((*candidate).clone(), id.server_id);
+            // The folder is here, so it is no longer at the path it was believed to
+            // be. Where that path still holds a directory -- the rebuilt one that
+            // provoked this -- leaving the old key in place would hand every file
+            // saved into it to the folder that moved away, and they would surface
+            // under the new name. Dropping the key lets the directory be adopted
+            // for what it is, with its own identity, on this same pass.
+            if old_path != **candidate {
+                folder_ids.remove(&old_path);
             }
-            // The most corroborated match wins, and ties break on the folder id
-            // so two devices reach the same answer.
-            if best
-                .as_ref()
-                .is_none_or(|(bid, _, count)| matched > *count || (matched == *count && *id < *bid))
-            {
-                best = Some((*id, old_path.clone(), matched));
-            }
-        }
-
-        let Some((id, _, _)) = best else { continue };
-        claimed.push(id);
-        scan.present.insert(id);
-        folder_ids.insert(candidate.clone(), id.server_id);
-        if let Some(placement) = placement_of(candidate, folder_ids) {
-            // Only a real change is reported. A folder inside a renamed parent
-            // reaches here too, and its own placement — this parent, this name —
-            // has not moved at all; saying it did would queue a rename to where
-            // it already is.
-            let entry = env.store.get_entry(id)?;
-            let unchanged = entry
-                .as_ref()
-                .and_then(|e| e.synced_placement.clone())
-                .is_some_and(|p| p == placement);
-            if !unchanged {
-                scan.moves.insert(id, placement);
+            if let Some(placement) = placement_of(candidate, folder_ids) {
+                // Only a real change is reported. A folder inside a renamed parent
+                // reaches here too, and its own placement — this parent, this name —
+                // has not moved at all; saying it did would queue a rename to where
+                // it already is.
+                let entry = env.store.get_entry(id)?;
+                let unchanged = entry
+                    .as_ref()
+                    .and_then(|e| e.synced_placement.clone())
+                    .is_some_and(|p| p == placement);
+                if !unchanged {
+                    scan.moves.insert(id, placement);
+                }
             }
         }
     }

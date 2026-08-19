@@ -189,7 +189,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             }
         };
 
-        match rng.below(18) {
+        match rng.below(19) {
             // Create a file, sometimes deep.
             0..=2 => {
                 let dir = rng.pick(&dirs).cloned().unwrap_or_default();
@@ -372,6 +372,45 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
                                 files.push(to);
                             }
                         }
+                    }
+                }
+            }
+            // Rename a folder twice running, then write through the name it
+            // started with. An application that kept a path rather than a
+            // handle -- an editor with a document open, a build tool with a
+            // configured output directory -- notices neither rename, and saving
+            // rebuilds every directory on the way. So the original name is
+            // standing again, as an unrelated new folder, moments after the
+            // engine agreed the folder had moved off it.
+            //
+            // Straight from the rig, which produced this on its own and then
+            // held the resulting disagreement for the rest of the campaign: the
+            // device with the subtree under the new name, the server still
+            // calling it by the old one, and both sides reporting themselves
+            // settled. The generator could reach the shape only by accident --
+            // it renames a random folder once -- so it was worth naming.
+            17 => {
+                let candidates: Vec<String> =
+                    dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+                if let Some(original) = rng.pick(&candidates).cloned() {
+                    if device.fs.exists(&original) {
+                        let parent = original.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
+                        let name = original.rsplit('/').next().unwrap_or("x").to_string();
+                        let once = join(parent, &format!("{name} ({step})"));
+                        let twice = join(parent, &format!("{name} ({step}) ({step}b)"));
+                        device.fs.user_rename(&original, &once);
+                        device.fs.user_rename(&once, &twice);
+                        dirs.push(once);
+                        dirs.push(twice);
+                        // The stale save. Deliberately not guarded on the path
+                        // being absent -- the whole point is that the writer
+                        // does not look.
+                        let stale = join(&original, &format!("stale-{step}.txt"));
+                        let body = format!("written through a path that moved {step}").into_bytes();
+                        device.fs.user_write(&stale, &body);
+                        bodies.insert(stale.clone(), body);
+                        files.push(stale);
+                        dirs.push(original);
                     }
                 }
             }
