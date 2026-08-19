@@ -1,9 +1,9 @@
 {
     "name": "Joinery AI",
-    "version": "0.19.8",
+    "version": "0.19.9",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
-    "license": "PolyForm-Shield-1.0.0",
+    "license": "PolyForm-Noncommercial-1.0.0",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": [

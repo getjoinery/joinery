@@ -303,7 +303,7 @@ Routes outside the namespace are dropped with a logged warning.
 
 **`license`** names the terms the plugin ships under and must agree with the
 `LICENSE.md` file in the plugin's directory. First-party free plugins declare
-`PolyForm-Shield-1.0.0`; the commercial ones (`store`, `server_manager`)
+`PolyForm-Noncommercial-1.0.0`; the commercial ones (`store`, `server_manager`)
 declare `Joinery-Commercial`. The core `LICENSE.md`'s plugin and theme
 exception means third-party authors license their own plugins however they
 choose — a plugin that interfaces with the platform through its extension
