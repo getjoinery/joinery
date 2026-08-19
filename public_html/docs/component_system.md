@@ -742,8 +742,8 @@ $all_fields = $component_type->get_default_config(true);
 | Type | Description | Extra Options |
 |------|-------------|---------------|
 | `textinput` | Single-line text | - |
-| `textarea` | Multi-line text | - |
-| `textbox` | Alias for textarea | - |
+| `textarea` | Multi-line text, stored exactly as typed | `rows` |
+| `textbox` | Alias for textarea | `rows` |
 | `richtext` | WYSIWYG editor (Trumbowyg) | - |
 | `checkboxinput` | Boolean checkbox | - |
 | `dropinput` | Dropdown select | `options` |
@@ -758,6 +758,13 @@ $all_fields = $component_type->get_default_config(true);
 | `colorpicker` | Color picker with theme swatches | `max_swatches`, `sort`, etc. |
 | `hiddeninput` | Hidden field | - |
 | `repeater` | Repeatable field group | `fields`, `item_label`, `min`, `max` |
+
+A field holding markup the author wrote by hand — a whole page section, an
+embed, anything with layout wrappers — is a `textarea` with a generous `rows`,
+not a `richtext`. The WYSIWYG parses what it is given and re-serialises it from
+its own document model, and its paste filter allows only prose tags, so
+`div`, `section` and the classes on them are dropped on save. `richtext` is for
+fields that hold prose: a paragraph of copy, a caption, a post body.
 
 ### Field Options
 

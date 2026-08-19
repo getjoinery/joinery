@@ -335,6 +335,11 @@ if ($current_type_id) {
 			if (isset($field['placeholder'])) {
 				$field_options['placeholder'] = $field['placeholder'];
 			}
+			// A raw-HTML field needs a box you can actually work in; five rows
+			// is right for a caption and useless for a page section.
+			if (isset($field['rows'])) {
+				$field_options['rows'] = intval($field['rows']);
+			}
 			if (!empty($field['required'])) {
 				$field_options['required'] = true;
 				$field_label .= ' *';
