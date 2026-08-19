@@ -247,6 +247,16 @@
 		}
 		publish_output("License present at {$license_source}");
 
+		// The business license travels the same way, from beside whichever
+		// LICENSE.md was found. Not a publish blocker — a site serves fine
+		// without it — but when the tree has it, every install carries the terms
+		// a business buyer is asked to agree to.
+		$business_source = '';
+		$business_candidate = dirname($license_source) . '/LICENSE-BUSINESS.md';
+		if (is_file($business_candidate) && trim((string)file_get_contents($business_candidate)) !== '') {
+			$business_source = $business_candidate;
+		}
+
 		// =====================================================
 		// Guard: a release must be able to deliver its default bundles
 		// =====================================================
@@ -473,6 +483,14 @@
 		if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
 			publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
 			exit;
+		}
+
+		if ($business_source !== '') {
+			if (!copy($business_source, $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
+				publish_output("ERROR: Failed to copy LICENSE-BUSINESS.md into the core archive.");
+				exit;
+			}
+			publish_output("Business license present at {$business_source}");
 		}
 
 		// Copy config template

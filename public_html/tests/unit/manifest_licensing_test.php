@@ -56,6 +56,24 @@ check(strpos($core_license, '## Plugin and Theme Exception') !== false,
 check(strpos($core_license, 'Required Notice: Copyright Joinery') !== false,
 	'Required Notice line carried over');
 
+// Business use is sold under the Joinery Business License, not a public
+// source-available license: a public license grants redistribution, which would
+// let one buyer hand commercial rights to everyone. The terms a buyer receives
+// ship beside the core license so they are readable before purchase.
+$business_license_path = dirname($core_license_path) . '/LICENSE-BUSINESS.md';
+check(file_exists($business_license_path), 'business LICENSE-BUSINESS.md exists', $business_license_path);
+$business_license = file_exists($business_license_path) ? file_get_contents($business_license_path) : '';
+check(strpos($business_license, 'Joinery Business License') !== false,
+	'business license is the Joinery Business License');
+check(strpos($business_license, '## Noncompete') !== false,
+	'business license keeps the noncompete clause');
+check(strpos($business_license, 'one production instance') !== false,
+	'business license states the one-instance grant');
+check(stripos($business_license, 'grants you an additional copyright license to') === false,
+	'business license grants no redistribution right');
+check(strpos($business_license, 'Shield') === false && strpos($business_license, 'Elastic') === false,
+	'business license names no third-party license');
+
 // ---------------------------------------------------------------------------
 section('Plugin manifests and license files');
 // ---------------------------------------------------------------------------
