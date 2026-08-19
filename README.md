@@ -113,6 +113,12 @@ Joinery core is source-available under the
 [PolyForm Noncommercial License 1.0.0](LICENSE.md) with a Joinery Required Notice
 and a Plugin and Theme Exception: free to run for personal and noncommercial
 purposes, and free to build and distribute your own plugins and themes under
-whatever license you choose. Bundled plugins and themes carry their own
-`LICENSE.md`; a few (the store and server manager) are commercially licensed. For
-commercial licensing, contact [Joinery](https://getjoinery.com).
+whatever license you choose.
+
+Commercial use is licensed separately, under the
+[Joinery Business License](LICENSE-BUSINESS.md) — one production instance,
+unlimited users, lifetime updates, and use it for anything your business does
+short of building a competing product. Bundled plugins and themes carry their
+own `LICENSE.md`; a few (the store and server manager) are sold under their own
+commercial terms. To buy a business license, see
+[Joinery](https://getjoinery.com).

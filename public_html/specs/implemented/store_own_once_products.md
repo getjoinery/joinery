@@ -306,8 +306,8 @@ indexed).
 
 - Site/store contradictions on getjoinery: install service advertised at $39.99
   vs $299 product. The `business-license` product still describes itself as
-  Elastic License 2.0; the business license is PolyForm Shield 1.0.0, so that
-  product's short description is wrong on a live checkout page.
+  Elastic License 2.0; the business license is the Joinery Business License, so
+  that product's short description is wrong on a live checkout page.
 - `plugins/server_manager/tests/plugin_distribution_anonymous_test.php` still
   asserts the ungated paid-plugin download on purpose; it flips only when the
   future download gate lands, not with this spec.

@@ -64,7 +64,7 @@ The privacyguides.org / r/privacy crowd, plus the privacy-conscious person setti
 - Fear-mongering surveillance copy — empowerment ("own it") outperforms dread.
 - Trash-talk Proton/Google by name; position against the architecture ("renting trust"), not the brand.
 - Hide pricing, funding, or the stack.
-- Call it "open source" (licensing is PolyForm Noncommercial + commercial; see §8) — and don't say "source available" as a headline either; lead with the verifiable behaviors (code you can read, export everything, no telemetry, runs air-gapped) rather than a license label.
+- Call it "open source" (licensing is PolyForm Noncommercial for noncommercial use, the Joinery Business License for business use; see §8) — and don't say "source available" as a headline either; lead with the verifiable behaviors (code you can read, export everything, no telemetry, runs air-gapped) rather than a license label.
 
 ---
 
@@ -210,7 +210,7 @@ Everything developer/framework/builder-oriented moves off the marketing domain (
 
 ## 8. Licensing copy (a real tension — handle deliberately)
 
-The self-hosted audience's #1 skepticism is license rug-pulls, and they read "source available" as hostile. Joinery's licensing (PolyForm Noncommercial + commercial licenses, per the open-core work) cannot be described as "open source" — and must not be. The spec's resolution: **compete on verifiable behaviors, not license labels.** Copy leads with: code you can read on GitHub, export everything in standard formats, no telemetry, runs air-gapped, free forever for personal use — and then states the license plainly in one sentence where licensing is genuinely relevant (`/pricing`, `/why`, developers site), without euphemism and without apology. A blunt, permanent statement of what stays free is the documented antidote to rug-pull fear.
+The self-hosted audience's #1 skepticism is license rug-pulls, and they read "source available" as hostile. Joinery's licensing (PolyForm Noncommercial for noncommercial use, the Joinery Business License for business use) cannot be described as "open source" — and must not be. The spec's resolution: **compete on verifiable behaviors, not license labels.** Copy leads with: code you can read on GitHub, export everything in standard formats, no telemetry, runs air-gapped, free forever for personal use — and then states the license plainly in one sentence where licensing is genuinely relevant (`/pricing`, `/why`, developers site), without euphemism and without apology. A blunt, permanent statement of what stays free is the documented antidote to rug-pull fear.
 
 ---
 
@@ -275,7 +275,7 @@ The first pass put the copy in the database but kept a view file per page in the
 
 ### Open items this build did not close
 
-1. **Store SKUs do not match the page.** `/pricing` advertises Store $99, Server Manager $149, Founder $499 and Standard $399. None of those products exist except an older `business-license` selling different terms at a different price (and naming Elastic License 2.0, where this spec says PolyForm Noncommercial plus commercial licences). Every purchase button is therefore an enquiry email today. **Creating the SKUs and pointing the buttons at them — in the admin page editor, no deploy needed — is what turns these into checkout.** The founder card's scarcity badge is a plain field on the block, so it must be updated by hand or left blank rather than showing an invented number.
+1. **Store SKUs do not match the page.** `/pricing` advertises Store $99, Server Manager $149, Founder $499 and Standard $399. None of those products exist except an older `business-license` selling different terms at a different price (and naming Elastic License 2.0, where the business license is the Joinery Business License). Every purchase button is therefore an enquiry email today. **Creating the SKUs and pointing the buttons at them — in the admin page editor, no deploy needed — is what turns these into checkout.** The founder card's scarcity badge is a plain field on the block, so it must be updated by hand or left blank rather than showing an invented number.
 2. **The live prices changed underneath this page.** getjoinery.com was previously selling White Glove Install at $99 (discount code `INSTALL`) and a business licence at $299 (code `LAUNCH`). The spec's pricing supersedes both, but those coupons and the products behind them still exist and should be retired or repriced deliberately.
 3. **Screenshot debt is unpaid.** The new pages avoid it by carrying no empty image slots at all, rather than shipping nine "coming soon" boxes — but the proof strategy still wants real screenshots.
 4. **The StackScript has no public link.** `/install` option 2 describes the StackScript honestly, discloses that it is not a Marketplace listing yet, and links to the installation documentation. It needs the real StackScript URL when there is one.
