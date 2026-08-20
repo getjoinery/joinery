@@ -2,10 +2,11 @@
 /**
  * Shared LLM-provider test doubles for the joinery_ai / recipe / pipeline suites.
  *
- * Every fake speaks LlmProviderInterface. The interface is wide (streaming,
- * cost, model catalog, reachability, capabilities), but a test only ever cares
- * about the response content — so FakeLlmProvider carries every boilerplate
- * method once, and a test supplies only the behavior that matters:
+ * Every fake speaks LlmProviderInterface, which is now transport only — what a
+ * model costs, what it can do and whether it is safe come from the shipped
+ * catalog, so a fake has nothing to say about any of that. A test cares only
+ * about the response content, so FakeLlmProvider carries the boilerplate once
+ * and a test supplies only the behavior that matters:
  *
  *   - ScriptedLlmProvider: hand it a list of responses; each turn returns the
  *     next one and streams its text blocks through the delta sink. Entries may
@@ -39,13 +40,21 @@ abstract class FakeLlmProvider implements LlmProviderInterface {
         return $this->createMessageStreamed($params, static function (string $d): void {});
     }
 
-    public function estimateCost(string $model, array $usage): float { return 0.0; }
-    public function models(): array { return []; }
-    public function defaultModel(): string { return 'fake/test-model'; }
     public function id(): string { return 'fake'; }
-    public function isPrivate(): bool { return true; }   // an in-memory fake is always private/reachable
-    public function reachabilityProbe(): ?string { return null; }
-    public function modelCapabilities(string $model): array { return ['vision' => false, 'document' => false]; }
+    public function reachabilityProbe(): ?string { return null; }   // an in-memory fake is always reachable
+
+    /**
+     * A resolution wrapped around this fake, for the loops — which take a
+     * resolution rather than a provider, because a run makes exactly one model
+     * decision and everything downstream reads it.
+     *
+     * $entry overrides the catalog facts (tier, trust, context, defaults) for a
+     * test that cares about one of them; the defaults describe an unknown,
+     * untrusted, free model.
+     */
+    public function resolution(string $model = 'fake/test-model', array $entry = []): AiModelResolution {
+        return AiModelResolution::forProvider($this, $model, $entry);
+    }
 
     /** Build a canonical end_turn response carrying one text block. */
     public static function textResponse(string $text, ?array $usage = null): array {
@@ -96,3 +105,17 @@ class ScriptedLlmProvider extends FakeLlmProvider {
 }
 
 } // class_exists guard
+
+if (!function_exists('fake_model_resolution')) {
+    /**
+     * A throwaway model resolution, for a test calling a job or a loop directly.
+     *
+     * A pipeline job's nextItem() is handed the run's resolution so it can size
+     * its digest against the room it actually got. A test exercising selection
+     * rather than sizing needs one to pass and does not care what is in it.
+     * $entry overrides the catalog facts for a test that does care.
+     */
+    function fake_model_resolution(string $model = 'fake/test-model', array $entry = []): AiModelResolution {
+        return (new ScriptedLlmProvider([]))->resolution($model, $entry);
+    }
+}

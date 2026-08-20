@@ -54,7 +54,7 @@ foreach ($reserved as $name) {
 // worse failure than the one being fixed — it is invisible.
 $real = array(
 	'webDir', 'baseDir', 'site_template', 'apache_error_log', 'emails_active',
-	'joinery_ai_llm_provider', 'mailbox_enabled', 'request_log_retention_days',
+	'joinery_ai_selection_policy', 'mailbox_enabled', 'request_log_retention_days',
 );
 foreach ($real as $name) {
 	check(!Setting::isReservedName($name), "$name is still a writable setting");

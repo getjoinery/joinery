@@ -27,10 +27,12 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  */
 class RecipeRunner {
 
-    /** Active provider for the current run — set in run(), read by
-     *  recordTokens() for cost estimation. The runner is static and
-     *  single-run-at-a-time, so a static member is sufficient. */
-    private static $active_provider = null;
+    /** The ONE model resolution for the current run — decided in run(), read
+     *  by recordTokens() for costing and by the finaliser for provenance. The
+     *  runner is static and single-run-at-a-time, so a static member is
+     *  sufficient. Nothing re-resolves inside a run: see
+     *  specs/joinery_ai_model_capability_resolution.md §5. */
+    private static $active_resolution = null;
 
     /**
      * One run is one unit of work: it reads one recipe's source and writes that
@@ -49,6 +51,10 @@ class RecipeRunner {
     }
 
     private static function runIsolated(RecipeRun $run, ?float $deadline = null): void {
+        // Several runs share a process — an in-window drain slice works through
+        // everything one user has pending — so the previous run's decision must
+        // not leak into this one's cost record.
+        self::$active_resolution = null;
         try {
             $recipe = self::loadRecipe($run);
 
@@ -103,44 +109,48 @@ class RecipeRunner {
             $run->set('rcr_workspace_before', (string)$recipe->get('rcp_workspace'));
             $run->saveContent();
 
-            // Sink zero. Re-checked here and not only at save: a domain can
-            // withdraw its cloud consent after the recipe was saved, and that
-            // must stop the next run rather than let it keep shipping decrypted
-            // mail to a vendor. Throws before any content is read.
-            RecipeVaultScope::assertModelAllowed($recipe);
-
-            // The recipe's pinned model selects the provider (claude-* →
-            // Anthropic, else local). A recipe that pins no model follows the
-            // global-default provider and that provider's default model.
-            $model_pref = (string)$recipe->get('rcp_model');
-            $provider = LlmProviderFactory::forModel($model_pref);
-            self::$active_provider = $provider;
-            $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
+            // Sink zero, and the run's ONE model decision, in a single call.
+            //
+            // Resolved here and not only at save: a domain can tighten how far
+            // its decrypted mail may travel after the recipe was saved, and that
+            // must stop the next run rather than let it keep shipping mail to a
+            // vendor. Everything downstream — the dispatch, the cost record, the
+            // run history — reads THIS object. If the gate resolved to test
+            // trust and the dispatch resolved again to run, a catalog edit or a
+            // cleared key landing between them would silently move the work to
+            // an endpoint nothing approved.
+            $resolution = RecipeVaultScope::resolveForRecipe($recipe);
+            self::$active_resolution = $resolution;
+            $model = $resolution->modelId();
+            $run->set('rcr_model', $model);
+            $run->set('rcr_endpoint', $resolution->endpointKey());
             $max_iterations = max(1, (int)$recipe->get('rcp_max_iterations'));
             $token_budget   = max(1000, (int)$recipe->get('rcp_max_tokens'));
 
-            // Model controls: recipe row → plugin-setting default → floor, the same
-            // resolution chat uses, so a scheduled run and a chat are steered alike.
+            // Model controls: recipe row → this MODEL's catalog default → plugin
+            // setting → floor, the same chain chat uses, so a scheduled run and a
+            // chat are steered alike. The catalog rung is what stops one global
+            // temperature — a Claude-shaped 0.3 — being handed to a qwen that
+            // wants a looser one.
             $settings    = Globalvars::get_instance();
-            $temperature = AgentLoop::resolveFloat($recipe->get('rcp_temperature'),
-                $settings->get_setting('joinery_ai_default_temperature'));
-            $top_p       = AgentLoop::resolveFloat($recipe->get('rcp_top_p'),
-                $settings->get_setting('joinery_ai_default_top_p'));
-            $thinking    = AgentLoop::resolveThinkingLevel($recipe->get('rcp_thinking_level'),
-                $settings->get_setting('joinery_ai_default_thinking_level'));
+            $temperature = AgentLoop::resolveFloat($resolution->control('temperature',
+                $recipe->get('rcp_temperature'), $settings->get_setting('joinery_ai_default_temperature')), null);
+            $top_p       = AgentLoop::resolveFloat($resolution->control('top_p',
+                $recipe->get('rcp_top_p'), $settings->get_setting('joinery_ai_default_top_p')), null);
+            $thinking    = $resolution->thinkingDirective();
 
             if ((string)$recipe->get('rcp_mode') === Recipe::MODE_PIPELINE) {
                 // PHP drives item selection; the model judges one item per
                 // exchange. No tools, no workspace, no conversation carry-over
                 // — see specs/joinery_ai_item_pipeline.md.
-                $result = PipelineRunner::run($provider, $model, $recipe, $ctx,
+                $result = PipelineRunner::run($resolution, $recipe, $ctx,
                     $max_iterations, $token_budget, $temperature, $top_p, $thinking, $deadline);
             } else {
                 $allowed_tools = self::resolveAllowedTools($recipe);
                 $system = self::buildSystemPrompt($recipe, $ctx);
                 $messages = [['role' => 'user', 'content' => 'Run the recipe now.']];
 
-                $result = AgentLoop::run($provider, $model, $system, $messages,
+                $result = AgentLoop::run($resolution, $system, $messages,
                     $allowed_tools, $ctx, $max_iterations, $token_budget,
                     $temperature, $top_p, $thinking);
             }
@@ -193,6 +203,7 @@ class RecipeRunner {
                 break;
             case 'refusal':
             case 'tool_errors':
+            case 'provider_error':
                 self::finishFailed($run, $recipe, $result['detail'], $in, $out, $cw, $cr);
                 break;
             default:
@@ -486,10 +497,28 @@ class RecipeRunner {
         return AiPromptBuilder::modelCatalogBlock($allowed);
     }
 
+    /**
+     * The resolution's substitution note, for the run record. A run that did
+     * not run on what the recipe asked for — an unavailable pin, a relaxed
+     * floor, a mid-run failover — must say so where the operator reads the
+     * run, not only in the error log.
+     */
+    private static function substitutionNote(): string {
+        return self::$active_resolution !== null
+            ? trim(self::$active_resolution->substitutionNote()) : '';
+    }
+
+    /** Append the substitution note to a run text (tally or error detail). */
+    private static function withSubstitutionNote(string $text): string {
+        $note = self::substitutionNote();
+        if ($note === '') return $text;
+        return ($text === '' ? '' : $text . "\n\n") . '> ' . $note;
+    }
+
     private static function finishSuccess(RecipeRun $run, Recipe $recipe, string $text,
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_status', RecipeRun::STATUS_SUCCESS);
-        $run->set('rcr_output', $text);
+        $run->set('rcr_output', self::withSubstitutionNote($text));
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $workspace_after = (string)$recipe->get('rcp_workspace');
         $run->set('rcr_workspace_after', $workspace_after);
@@ -552,7 +581,7 @@ class RecipeRunner {
     private static function finishTimeout(RecipeRun $run, Recipe $recipe, string $why,
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_status', RecipeRun::STATUS_TIMEOUT);
-        $run->set('rcr_error', $why);
+        $run->set('rcr_error', self::withSubstitutionNote($why));
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
         $run->saveContent();
@@ -562,7 +591,7 @@ class RecipeRunner {
     private static function finishFailed(RecipeRun $run, Recipe $recipe, string $why,
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_status', RecipeRun::STATUS_FAILED);
-        $run->set('rcr_error', $why);
+        $run->set('rcr_error', self::withSubstitutionNote($why));
         self::recordTokens($run, $recipe, $in, $out, $cw, $cr);
         $run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
         $run->saveContent();
@@ -683,18 +712,27 @@ class RecipeRunner {
             int $in, int $out, int $cw, int $cr): void {
         $run->set('rcr_input_tokens', $in);
         $run->set('rcr_output_tokens', $out);
-        // Cost is estimated by the active provider (local providers return 0.0).
-        // recordTokens is only reached after the provider is built; guard
-        // defensively so a null never fatals the run finalizer.
-        $cost = 0.0;
-        if (self::$active_provider !== null) {
-            $cost = self::$active_provider->estimateCost(
-                (string)$recipe->get('rcp_model'),
-                ['input_tokens' => $in, 'output_tokens' => $out,
-                 'cache_creation_input_tokens' => $cw, 'cache_read_input_tokens' => $cr]
-            );
+
+        // Cost the model that ACTUALLY served the run, from the catalog's own
+        // rates. Costing the recipe's pin instead is how every unpinned recipe
+        // used to record $0 no matter what it spent: the seeder ships recipes
+        // with no pin, so the lookup missed every time. Caps were never
+        // affected — CostGuard counts tokens, not dollars — but this is
+        // precisely the number the model-selection design leans on.
+        // servedBy(), not the first choice: a run that failed over to an
+        // approved sibling was served by the sibling, and history has to say so.
+        // The endpoint moves with it — a paid first choice can fail over to a
+        // free sibling on a different endpoint, and recording the original
+        // endpoint against the sibling's model id would be a row that lies.
+        $model = self::$active_resolution !== null
+            ? self::$active_resolution->servedBy() : (string)$run->get('rcr_model');
+        if ($model !== '') $run->set('rcr_model', $model);
+        if (self::$active_resolution !== null) {
+            $run->set('rcr_endpoint', self::$active_resolution->endpointKey());
         }
-        $run->set('rcr_cost_estimate', $cost);
+        $run->set('rcr_cost_estimate', AiModelResolution::costFor($model,
+            ['input_tokens' => $in, 'output_tokens' => $out,
+             'cache_creation_input_tokens' => $cw, 'cache_read_input_tokens' => $cr]));
     }
 
 }

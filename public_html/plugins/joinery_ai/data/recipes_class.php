@@ -32,7 +32,24 @@ class Recipe extends SystemBase {
         'rcp_allowed_models'      => array('type'=>'jsonb'),
         'rcp_allowed_actions'     => array('type'=>'jsonb'),
         'rcp_allow_tainted_writes'=> array('type'=>'bool', 'default'=>false),
-        'rcp_model'               => array('type'=>'varchar(100)', 'default'=>'claude-haiku-4-5'),
+        // What this recipe NEEDS from a model, as floors rather than a name.
+        // NULL at every level means "inherit" — the same pattern
+        // rcp_temperature and rcp_thinking_level already use — and the chain is
+        // walked at resolve time, never written into the row: RecipeSeeder is
+        // create-only, so a floor materialised at install would be frozen there
+        // and a floor raised in a later release would never reach an existing
+        // install. A non-NULL value here therefore always means exactly one
+        // thing: an operator overrode the job's own declaration.
+        // See specs/joinery_ai_model_capability_resolution.md §4, §4a.
+        'rcp_min_tier'            => array('type'=>'varchar(20)'),   // basic|standard|capable|frontier
+        'rcp_trust_floor'         => array('type'=>'varchar(20)'),   // local|trusted|any
+        'rcp_thinking_required'   => array('type'=>'bool'),          // TRUE excludes models that cannot reason
+        'rcp_min_context'         => array('type'=>'int4'),          // nominal context floor, in tokens
+        // A rare explicit pin, kept under its original name: update_database
+        // builds schema from these specs and does not rename, so renaming would
+        // add a new column and leave this one holding stale values that enforce
+        // nothing. Empty/NULL is the normal case — the requirement chooses.
+        'rcp_model'               => array('type'=>'varchar(100)'),
         // Model controls (NULL temperature/top_p = fall back to the plugin-setting
         // default). See the chat-model-control spec.
         'rcp_temperature'         => array('type'=>'numeric(3,2)'),

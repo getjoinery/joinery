@@ -73,18 +73,22 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         $active_model = ChatRunner::defaultModel();
     }
 
-    // Per-model privacy, sourced from each model's provider. The chat composer
-    // uses this to warn (only) before sending sensitive-looking text to a
-    // non-private model. Every model here belongs to a configured provider, so
-    // forModel() resolves without throwing; treat any surprise as non-private.
+    // Per-model privacy, from each model's endpoint trust class in the shipped
+    // catalog. The composer uses this to warn (only) before sending
+    // sensitive-looking text somewhere it would leave the box. One value, so
+    // the warning and the sealed-egress gate cannot disagree. Anything the
+    // catalog does not classify warns, which is the safe side.
     $models = LlmProviderFactory::allModels();
     $model_privacy = [];
+    $model_trust = [];
     foreach ($models as $mid => $_label) {
         try {
-            $model_privacy[(string)$mid] = LlmProviderFactory::forModel((string)$mid)->isPrivate();
+            $trust = (string)(AiEndpointRegistry::trustForModel((string)$mid) ?: 'cloud');
         } catch (Throwable $e) {
-            $model_privacy[(string)$mid] = false;
+            $trust = 'cloud';
         }
+        $model_trust[(string)$mid] = $trust;
+        $model_privacy[(string)$mid] = ($trust !== 'cloud');
     }
 
     // Per-chat model controls. For an existing chat, show its own stored value
@@ -119,6 +123,7 @@ function joinery_ai_chat_page_logic(array $input, int $min_permission, string $l
         'active_model'   => $active_model,
         'models'         => $models,
         'model_privacy'  => $model_privacy,
+        'model_trust'    => $model_trust,
         'data_access'    => $selected ? (bool)$selected->get('aic_data_access') : false,
         'web_search'     => $selected ? (bool)$selected->get('aic_web_search') : $default_web_search,
         'history_access' => $selected ? (bool)$selected->get('aic_history_access') : false,

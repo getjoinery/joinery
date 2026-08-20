@@ -19,12 +19,14 @@ use GuzzleHttp\Exception\ConnectException;    // network / connection refused
  * request and OpenAI response -> canonical, entirely inside the adapter. The
  * runner never sees the OpenAI wire format.
  *
- * The base class targets a local host: inference is free (estimateCost() returns
- * 0.0), the provider is private (isPrivate() is true), and the thinking knob is
- * expressed via qwen's /think token. Remote OpenAI-compatible services (e.g.
+ * The base class targets a local host, and is transport only — what a model
+ * costs, what it can do and whether it is safe are the shipped catalog's
+ * answers, not this class's. The thinking knob arrives as a resolved directive
+ * and is expressed on the request's reasoning control. Remote
+ * OpenAI-compatible services (e.g.
  * Fireworks) subclass this, reusing all the wire translation and overriding the
- * vendor-specific seams — id(), models(), estimateCost(), isPrivate(),
- * systemThinkingSuffix(), applyReasoning(), unreachableMessage().
+ * vendor-specific seams — id(), systemThinkingSuffix(), applyReasoning(),
+ * unreachableMessage().
  */
 class OpenAiCompatibleProvider implements LlmProviderInterface {
 
@@ -71,11 +73,6 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         return 'local';
     }
 
-    /** Local inference runs on-device — private. Remote subclasses override. */
-    public function isPrivate(): bool {
-        return true;
-    }
-
     /**
      * A short GET {base_url}/models. Any HTTP answer (even a 4xx/5xx) proves the
      * host is up — we only care that the TCP/HTTP layer is alive, not that the
@@ -101,45 +98,6 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     }
 
     /**
-     * The operative context window (in tokens) the host is enforcing for $model,
-     * read from Ollama's native /api/ps. This is the real window the runner honors
-     * — whether it comes from a Modelfile num_ctx or the server-global default — so
-     * it needs no per-model config from the operator. Only reported while the model
-     * is loaded, which it is right after a turn; null otherwise.
-     *
-     * A health *hint* used to color the per-reply context number — never load-
-     * bearing. Tight timeouts and a catch-all keep it non-blocking: any failure,
-     * timeout, or unexpected shape returns null and the number renders uncolored.
-     */
-    public function hostContextWindow(string $model): ?int {
-        try {
-            $root = preg_replace('#/v1$#', '', $this->base_url);
-            $res = $this->http->get($root . '/api/ps', [
-                'connect_timeout' => 1,
-                'timeout'         => 2,
-                'http_errors'     => false,
-            ]);
-            $data = json_decode((string)$res->getBody(), true);
-            if (!is_array($data) || empty($data['models'])) return null;
-            foreach ($data['models'] as $m) {
-                if (($m['name'] ?? $m['model'] ?? '') === $model) {
-                    $w = (int)($m['context_length'] ?? 0);
-                    return $w > 0 ? $w : null;
-                }
-            }
-            // One model loaded at a time (OLLAMA_MAX_LOADED_MODELS) — if the name
-            // didn't match exactly, the sole loaded model is still the right one.
-            if (count($data['models']) === 1) {
-                $w = (int)($data['models'][0]['context_length'] ?? 0);
-                return $w > 0 ? $w : null;
-            }
-            return null;
-        } catch (\Throwable $e) {
-            return null;
-        }
-    }
-
-    /**
      * Time-to-first-token bound for the streamed read: how long to wait for the
      * model to *start* responding before giving up, separate from the between-token
      * inactivity bound (the per-call timeout). A cold or overloaded local model can
@@ -157,50 +115,6 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
     protected function firstTokenTimeoutMessage(): string {
         return $this->providerLabel() . ' did not start responding in time — the model may be '
             . 'loading or the host is overloaded (first-token timeout).';
-    }
-
-    /**
-     * The local host's vision support is host-dependent (a multimodal model like
-     * llava/qwen-vl accepts images; a text-only one does not), so it is declared
-     * by the joinery_ai_local_vision setting rather than assumed. Native PDF
-     * `document` blocks are not part of the OpenAI-compatible wire shape, so
-     * 'document' is always false here — an original-mode PDF is refused for a
-     * local model, exactly like a scanned-PDF vision fallback.
-     */
-    public function modelCapabilities(string $model): array {
-        $vision = (string)Globalvars::get_instance()->get_setting('joinery_ai_local_vision') === '1';
-        return ['vision' => $vision, 'document' => false];
-    }
-
-    public function defaultModel(): string {
-        $ids = $this->modelIds();
-        return $ids[0] ?? '';
-    }
-
-    /**
-     * Every configured local model, labeled as free. joinery_ai_local_model
-     * may hold a comma-separated list (e.g. a small fast model alongside the
-     * main one); the first entry is the default. The recipe-edit dropdown
-     * also defensively appends a recipe's own stored model (see edit.php) so
-     * switching providers never silently rewrites it.
-     */
-    public function models(): array {
-        $out = [];
-        foreach ($this->modelIds() as $id) {
-            $out[$id] = "{$id} (local · free)";
-        }
-        return $out;
-    }
-
-    /** joinery_ai_local_model split on commas, trimmed, empties dropped. */
-    private function modelIds(): array {
-        $ids = array_map('trim', explode(',', $this->model));
-        return array_values(array_filter($ids, fn($id) => $id !== ''));
-    }
-
-    /** Local inference is free. */
-    public function estimateCost(string $model, array $usage): float {
-        return 0.0;
     }
 
     /**
@@ -444,13 +358,15 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
         $messages = [];
 
         // System: array of text blocks (cache_control ignored) -> one system
-        // message prepended. A provider may append a control suffix to the system
-        // text; the local host expresses the thinking level via qwen's /think or
-        // /no_think token (see systemThinkingSuffix()). Remote subclasses that use
-        // a native reasoning parameter return no suffix.
-        $level = $params['thinking']['level'] ?? 'off';
+        // message prepended. A provider may append a control suffix to the
+        // system text via systemThinkingSuffix() — empty here, because the
+        // thinking level rides the request-level reasoning control instead
+        // (see applyReasoning()); only a subclass whose runtime still honors an
+        // in-prompt token returns one.
+        $directive = is_array($params['thinking'] ?? null)
+            ? $params['thinking'] : ['enabled' => false, 'effort' => null];
         $system_text = $this->flattenSystem($params['system'] ?? []);
-        $suffix = $this->systemThinkingSuffix($level);
+        $suffix = $this->systemThinkingSuffix($directive);
         if ($suffix !== '') {
             $system_text = trim($system_text . "\n" . $suffix);
         }
@@ -492,7 +408,7 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
             }, $params['tools']);
         }
 
-        $this->applyReasoning($request, $level);
+        $this->applyReasoning($request, $directive);
 
         return $request;
     }
@@ -506,23 +422,24 @@ class OpenAiCompatibleProvider implements LlmProviderInterface {
      * a stray literal the model reads as instruction text. Subclasses may
      * override if their runtime still honors an in-prompt token.
      */
-    protected function systemThinkingSuffix(string $level): string {
+    protected function systemThinkingSuffix(array $directive): string {
         return '';
     }
 
     /**
      * Apply the request-level reasoning control. Ollama's OpenAI-compatible
      * endpoint maps `reasoning_effort` onto the model's thinking channel, so
-     * this is the local equivalent of the native `think` field: 'off' -> 'none'
-     * (the strongest suppression the runtime offers), otherwise the level flows
-     * through as the effort. A reasoning-first model like qwen3:4b may still
+     * this is the local equivalent of the native `think` field: a directive
+     * with thinking off sends 'none' (the strongest suppression the runtime
+     * offers), otherwise the resolved effort flows through. A reasoning-first model like qwen3:4b may still
      * emit reasoning even at 'none' (relocated inline rather than in a <think>
      * block); the <think> filter and the JSON extractor downstream handle both
      * shapes. A non-reasoning model or a runtime that ignores the field is
      * unaffected — an unknown field is dropped by the endpoint.
      */
-    protected function applyReasoning(array &$request, string $level): void {
-        $request['reasoning_effort'] = ($level === '' || $level === 'off') ? 'none' : $level;
+    protected function applyReasoning(array &$request, array $directive): void {
+        $request['reasoning_effort'] = empty($directive['enabled'])
+            ? 'none' : (string)($directive['effort'] ?: 'low');
     }
 
     /**

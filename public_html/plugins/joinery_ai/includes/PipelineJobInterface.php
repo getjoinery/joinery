@@ -87,19 +87,59 @@ interface PipelineJobInterface {
     public function hasUnsealedBinding(array $config): bool;
 
     /**
-     * May this binding's content be sent to a model running off the box?
+     * How far may this binding's content travel to be read by a model? The
+     * most permissive endpoint trust class it may reach: 'local' | 'trusted' |
+     * 'cloud'.
      *
      * Asked only when requiresVaultScope() is non-null — a binding with nothing
      * sealed has nothing to protect, so a job with no sealed source returns
-     * true. For the email jobs this is the domain's explicit cloud consent,
+     * 'cloud'. For the email jobs this is the domain's explicit second consent,
      * separate from and narrower than its consent to AI reading at all
-     * (specs/implemented/sealed_content_egress.md, resolved decision 5).
+     * (specs/implemented/sealed_content_egress.md, resolved decision 5), folded
+     * to the STRICTEST answer across every sealed address in the binding.
+     *
+     * Three values rather than a boolean because "a vendor I have accepted
+     * terms with, but not a general cloud" is a distinction an operator can
+     * reasonably want and a yes/no cannot express. Same vocabulary an endpoint
+     * uses for its own trust class, so the gate is a comparison.
      *
      * Checked when the recipe is saved AND again at run start, so withdrawing
-     * consent stops a cloud-pinned recipe at its next run instead of letting it
-     * continue silently — the same one-way-tightening rule as the taint gate.
+     * consent stops a recipe at its next run instead of letting it continue
+     * silently — the same one-way-tightening rule as the taint gate.
      */
-    public function cloudProcessingAllowed(array $config): bool;
+    public function processingConsent(array $config): string;
+
+    /**
+     * The capability floor this job's judgement needs — one of
+     * AiModelRequirement::TIER_*.
+     *
+     * The job declares this, not the recipe, because the job is the only party
+     * that knows: a security scan reads attacker-controlled mail and needs a
+     * model that resists manipulation; marking advertisements is a yes/no on a
+     * short feed item and almost anything can do it. The operator who binds a
+     * mailbox to a recipe knows neither and should never be asked.
+     *
+     * This is the same kind of fact as untrustedDigest() and
+     * requiresVaultScope() — declared by the job, consulted by the runner,
+     * invisible on the recipe form — so it gets the same treatment. Read live
+     * at resolve time and never copied into a row, which is what lets a floor
+     * raised in a later release reach every existing install with no reseed.
+     *
+     * Grade the floor as LOW as the work honestly tolerates. A floor exists to
+     * stop work reaching a model that cannot do it; it does not reserve work
+     * for the biggest model available.
+     */
+    public function minTier(): string;
+
+    /**
+     * How far this job's content may travel by default, as a trust floor:
+     * 'local' | 'trusted' | 'any'.
+     *
+     * A floor, not a permission. processingConsent() still gates what the
+     * bound sources actually allow, and the STRICTER of the two wins — so a job
+     * declaring 'any' never widens what a domain refused.
+     */
+    public function defaultTrustFloor(): string;
 
     /**
      * The next unhandled item for this recipe, or null when the recipe is
@@ -112,12 +152,18 @@ interface PipelineJobInterface {
      * Return shape: ['item_key' => string, 'digest' => string, 'label' => string]
      *   - item_key: the job-scoped item identity (e.g. a message id)
      *   - digest: deterministic, bounded-size plain text rendering of the
-     *     item for the model to judge. The job owns the size cap so the
-     *     digest plus prompt fit the smallest intended model's context. The
-     *     runner wraps it in the untrusted block when untrustedDigest() is true.
+     *     item for the model to judge. The runner wraps it in the untrusted
+     *     block when untrustedDigest() is true.
      *   - label: a short human string for the run tally (e.g. the subject)
+     *
+     * $model is the resolution this run is dispatching on, so a job can size
+     * its digest against $model->usableContext() — the smaller of the catalog's
+     * nominal window and what the host is actually serving — instead of a
+     * constant chosen blind. This is the mirror of the min_context requirement:
+     * that is the job DEMANDING room before a model is chosen, this is the job
+     * being TOLD how much it got. A job that does not care ignores the argument.
      */
-    public function nextItem(array $config, Recipe $recipe): ?array;
+    public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array;
 
     /**
      * Is there at least one unhandled item? Same rules as nextItem(), asked

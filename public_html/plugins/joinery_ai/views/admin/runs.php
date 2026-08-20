@@ -73,7 +73,7 @@ foreach ($all_recipes as $r) {
     $filter_options[$r->get('rcp_name')] = (int)$r->key;
 }
 
-$headers = ['Run', 'Recipe', 'Status', 'Trigger', 'Started', 'Duration', 'Tokens', 'Cost'];
+$headers = ['Run', 'Recipe', 'Status', 'Trigger', 'Started', 'Duration', 'Model', 'Tokens', 'Cost'];
 $page->tableheader($headers, [
     'title'         => 'Runs',
     'filteroptions' => $filter_options,
@@ -108,6 +108,17 @@ foreach ($runs as $run) {
     }
     $row[] = htmlspecialchars($duration);
 
+    // Which model actually ran this. Recipes state what they need rather than
+    // naming a model, so without this "which model ran this?" would be
+    // unanswerable from history — and a mis-graded catalog entry is exactly the
+    // failure this column is here to catch. Blank on runs that predate the
+    // column: they genuinely do not know, and a guess would be worse.
+    $ran_on = trim((string)$run->get('rcr_model'));
+    $row[] = $ran_on !== ''
+        ? '<span title="' . htmlspecialchars((string)$run->get('rcr_endpoint')) . '">'
+          . htmlspecialchars(AgentLoop::modelShortLabel($ran_on)) . '</span>'
+        : '<span class="text-muted">—</span>';
+
     $row[] = (int)$run->get('rcr_input_tokens') . ' / ' . (int)$run->get('rcr_output_tokens');
 
     $row[] = '$' . number_format((float)$run->get('rcr_cost_estimate'), 4);
@@ -116,7 +127,7 @@ foreach ($runs as $run) {
 }
 
 if (!count($runs)) {
-    echo '<tr><td colspan="8" class="text-center text-muted py-4">No runs yet.</td></tr>';
+    echo '<tr><td colspan="9" class="text-center text-muted py-4">No runs yet.</td></tr>';
 }
 
 $page->endtable($pager);

@@ -17,6 +17,12 @@
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+
+require_once(__DIR__ . '/../lib/llm_fixtures.php');
+// Jobs are handed the run's model resolution so they can size a digest against the
+// room they actually got. These tests exercise selection, not sizing.
+$fake_resolution = fake_model_resolution();
+
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
@@ -95,12 +101,12 @@ section('schedule job excludes drafts');
 
 // A draft on the mailbox, and NO other candidate → nextItem returns nothing.
 $draft_id = $mk('draft', 'Half-written draft');
-$item = $job->nextItem($config, $recipe);
+$item = $job->nextItem($config, $recipe, $fake_resolution);
 check($item === null, 'a draft on the mailbox is never returned by nextItem', json_encode($item));
 
 // The same content, sent (morphed in place, same id) → now a candidate.
 InboundEmailMessage::updateColumns($draft_id, array('iem_direction' => 'outbound'));
-$item2 = $job->nextItem($config, $recipe);
+$item2 = $job->nextItem($config, $recipe, $fake_resolution);
 check($item2 !== null && (int)$item2['item_key'] === $draft_id, 'the morphed (outbound) row IS selectable', json_encode($item2));
 
 harness_finish();

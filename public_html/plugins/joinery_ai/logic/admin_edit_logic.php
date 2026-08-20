@@ -37,7 +37,6 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $recipe->set('rcp_schedule_frequency', 'weekly');
         $recipe->set('rcp_schedule_day_of_week', 1);
         $recipe->set('rcp_schedule_time', $default_utc_time);
-        $recipe->set('rcp_model', joinery_ai_default_recipe_model($settings));
         $recipe->set('rcp_delivery_dashboard', true);
         $recipe->set('rcp_enabled', true);
         $recipe->set('rcp_max_iterations', 5);
@@ -118,6 +117,9 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             'rcp_schedule_frequency',
             'rcp_schedule_day_of_week',
             'rcp_model',
+            'rcp_min_tier',
+            'rcp_trust_floor',
+            'rcp_min_context',
             'rcp_temperature',
             'rcp_top_p',
             'rcp_thinking_level',
@@ -127,8 +129,12 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             'rcp_monthly_token_cap',
             'rcp_workspace',
         ]);
-        // Numeric controls store NULL when blank (→ fall back to the setting default).
-        $null_when_blank = ['rcp_schedule_day_of_week', 'rcp_temperature', 'rcp_top_p'];
+        // Blank means INHERIT, not zero. The requirement columns are overrides:
+        // NULL is how a recipe says "whatever my job asks for", and writing a
+        // materialised value would freeze the floor at save time and stop a
+        // later release from ever raising it.
+        $null_when_blank = ['rcp_schedule_day_of_week', 'rcp_temperature', 'rcp_top_p',
+            'rcp_min_tier', 'rcp_trust_floor', 'rcp_min_context'];
         foreach ($simple_fields as $f) {
             if (array_key_exists($f, $input)) {
                 $value = $input[$f];
@@ -240,13 +246,21 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             );
         }
 
-        // Sink zero: a sealed-source recipe pinned to a cloud model would POST
-        // the decrypted mail to that vendor. Refused here so the admin sees why
-        // while they are choosing the model, and again at run start so
-        // withdrawing the domain's consent stops an already-saved recipe.
+        // A checkbox posts nothing when unticked, so the thinking requirement
+        // has to be read from the form's presence rather than from $input.
+        if (array_key_exists('requirement_fields_present', $input)) {
+            $recipe->set('rcp_thinking_required', isset($input['rcp_thinking_required']) ? true : null);
+        }
+
+        // Sink zero, plus the pin check, in one call: resolve what this recipe
+        // WOULD run on. Refused here so the admin sees why while they are
+        // choosing, and again at run start so tightening the domain's consent
+        // stops an already-saved recipe. A pin below the recipe's own floor is
+        // a configuration mistake and is refused at save — that is the point of
+        // checking here rather than only at run time.
         require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
         try {
-            RecipeVaultScope::assertModelAllowed($recipe);
+            RecipeVaultScope::resolveForRecipe($recipe);
         } catch (LlmProviderException $e) {
             return LogicResult::error($e->getMessage(), ['recipe' => $recipe, 'session' => $session]);
         }
@@ -277,40 +291,48 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         return LogicResult::redirect('/admin/joinery_ai/edit?rcp_recipe_id=' . $recipe->key . '&saved=1');
     }
 
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
     $page_vars = [
         'recipe' => $recipe,
         'session' => $session,
         'saved' => !empty($input['saved']),
         'shipped_key' => (string)($input['shipped'] ?? ''),
         'is_upgrade_server' => DeploymentHelper::isUpgradeServer(),
+        // What this recipe would run on right now, recomputed on load — so
+        // "Automatic" never means "unknowable".
+        'resolution' => joinery_ai_resolution_preview($recipe),
     ];
 
     return LogicResult::render($page_vars);
 }
 
 /**
- * The model a new recipe should default to. The provider is a global setting
- * and a recipe's rcp_model is only meaningful to whichever provider is active,
- * so the default is resolved against the active provider: honor the configured
- * joinery_ai_default_model when that provider can serve it, otherwise fall back
- * to the provider's own default. When the local provider is active and a local
- * model is configured, that means new recipes default to the local model.
+ * What a recipe would run on right now, as a line for the edit page.
+ *
+ * This design moves a judgement from per-recipe visible to per-catalog
+ * invisible: an operator used to open a recipe and read a model name, and now
+ * reads a floor while a file they did not open decides the rest. Fleet-wide
+ * cascade is worth that trade only if the resolution is stated back — so it is,
+ * on load, before they save.
+ *
+ * @return array{summary:string, error:string, advisories:string[], requirement:string}
  */
-function joinery_ai_default_recipe_model(Globalvars $settings): string {
-    $configured = $settings->get_setting('joinery_ai_default_model') ?: 'claude-haiku-4-5';
-
+function joinery_ai_resolution_preview(Recipe $recipe): array {
     try {
-        $provider = LlmProviderFactory::build();
-        // If the active provider can serve the configured default, keep it.
-        // Otherwise prefer the provider's own default (e.g. the local model).
-        if (isset($provider->models()[$configured])) {
-            return $configured;
-        }
-        $provider_default = $provider->defaultModel();
-        return $provider_default !== '' ? $provider_default : $configured;
-    } catch (LlmProviderException $e) {
-        // Provider is misconfigured (e.g. local selected with no model set).
-        // Keep the configured default; the edit form flags it as unavailable.
-        return $configured;
+        $req = RecipeVaultScope::requirementFor($recipe);
+    } catch (Throwable $e) {
+        return ['summary' => '', 'error' => $e->getMessage(), 'advisories' => [], 'requirement' => ''];
     }
+    $error = null;
+    $resolution = AiModelResolver::tryResolve($req, $error);
+    if ($resolution === null) {
+        return ['summary' => '', 'error' => (string)$error, 'advisories' => [],
+                'requirement' => $req->describe()];
+    }
+    return [
+        'summary'     => $resolution->summary(),
+        'error'       => '',
+        'advisories'  => $resolution->advisories(),
+        'requirement' => $req->describe(),
+    ];
 }

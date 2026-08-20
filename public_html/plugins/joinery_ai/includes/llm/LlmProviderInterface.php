@@ -3,6 +3,12 @@
 /**
  * The boundary between the recipe runner and whatever model actually drives it.
  *
+ * A provider is TRANSPORT ONLY. It knows how to speak one wire format; it does
+ * not know what models exist, what they cost, what they can do, or whether they
+ * are safe. All of that lives in the shipped catalog (AiEndpointRegistry) and is
+ * decided once by AiModelResolver, so there is exactly one answer to each of
+ * those questions and no second source to drift from it.
+ *
  * The canonical request/response shape is the Anthropic Messages block shape —
  * the runner's loop already speaks it (text / tool_use{id,name,input} /
  * tool_result{tool_use_id,content,is_error}; a top-level system array;
@@ -17,7 +23,10 @@ interface LlmProviderInterface {
     /**
      * Stream one message. $params is the canonical request: model, max_tokens,
      * system (array of text blocks), messages (canonical content blocks), tools
-     * (optional, Anthropic tool-schema shape). $onTextDelta is invoked with each
+     * (optional, Anthropic tool-schema shape), and `thinking` — a concrete
+     * DIRECTIVE from the resolver, ['enabled' => bool, 'effort' => 'low'|
+     * 'medium'|'high'|null], not a level to interpret. The provider translates
+     * it into its own wire field and never consults a table of model names. $onTextDelta is invoked with each
      * fragment of assistant answer text as it arrives (reasoning/think output is
      * never emitted). Returns the same canonical response array a blocking call
      * would, assembled from the stream:
@@ -44,25 +53,10 @@ interface LlmProviderInterface {
      */
     public function createMessage(array $params): array;
 
-    /** USD estimate from a canonical usage block. Local providers return 0.0. */
-    public function estimateCost(string $model, array $usage): float;
-
-    /** Models offered to the recipe-edit dropdown: [model_id => label]. */
-    public function models(): array;
-
-    /** Model used when a recipe has no explicit rcp_model. */
-    public function defaultModel(): string;
-
-    /** Stable identifier ('anthropic', 'local', 'fireworks') for logging/diagnostics. */
+    /** The endpoint key this transport was built for ('anthropic', 'local',
+     *  'fireworks'), for logging and diagnostics. Never a routing decision and
+     *  never a trust classification — the catalog owns both. */
     public function id(): string;
-
-    /**
-     * Whether traffic to this provider stays private. True for on-device hosts
-     * (local Ollama) and vetted no-train remotes (Fireworks); false for general
-     * cloud providers (Anthropic). The chat UI uses this to warn — only — before
-     * sending sensitive-looking text to a non-private model. It is never a gate.
-     */
-    public function isPrivate(): bool;
 
     /**
      * Fast pre-turn reachability check. Returns null when the provider is
@@ -75,15 +69,4 @@ interface LlmProviderInterface {
      * to the standard network-error message.
      */
     public function reachabilityProbe(): ?string;
-
-    /**
-     * What attachment block kinds this model can consume, as
-     *   ['vision' => bool, 'document' => bool]
-     * where 'vision' means it accepts image blocks and 'document' means it accepts
-     * native PDF `document` blocks (Anthropic only today). A model missing the
-     * needed flag rejects the upload at ingress with a clear message rather than
-     * sending a block the model will ignore or error on — the file-upload spec's
-     * fail-loud rule. Unknown models return both false (the safe side).
-     */
-    public function modelCapabilities(string $model): array;
 }

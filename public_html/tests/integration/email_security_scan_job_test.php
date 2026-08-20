@@ -35,6 +35,9 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 require_once(PathHelper::getIncludePath('data/users_class.php'));
 require_once(__DIR__ . '/../lib/llm_fixtures.php'); // ScriptedLlmProvider (+ LlmProviderInterface)
+// Jobs are handed the run's model resolution so they can size a digest against
+// the room they actually got. These tests exercise selection, not sizing.
+$fake_resolution = fake_model_resolution();
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineRunner.php'));
@@ -172,7 +175,7 @@ $msg_spam   = make_message((int)$domain->key, (int)$alias->key, 'Spam — exclud
 $msg_newer  = make_message((int)$domain->key, (int)$alias->key, 'Newer — phishy', 'Click http://evil.example/login now.', null, '-10');
 
 $config = DescriptorValidator::coerce($job->configDescriptor(), Recipe::decodeSourceConfig($recipe));
-$item1 = $job->nextItem($config, $recipe);
+$item1 = $job->nextItem($config, $recipe, $fake_resolution);
 // Newest first (specs/in_window_deferred_work.md § New mail goes first): fresh
 // mail is judged ahead of a backlog, not behind it.
 ok('nextItem returns the newest non-spam message first', $item1 !== null && $item1['item_key'] === (string)$msg_newer->key);
@@ -188,7 +191,7 @@ $log->set('aip_status', AipRecipeItemLog::STATUS_DONE);
 $log->prepare();
 $log->save();
 
-$item2 = $job->nextItem($config, $recipe);
+$item2 = $job->nextItem($config, $recipe, $fake_resolution);
 ok('spam-verdict message is skipped; the older message is next', $item2 !== null && $item2['item_key'] === (string)$msg_oldest->key);
 
 // Read mail is never judged: a summary helps you decide whether to open
@@ -196,7 +199,7 @@ ok('spam-verdict message is skipped; the older message is next', $item2 !== null
 // Targeted update: a full save() on a message row runs the alias-side
 // bookkeeping this fixture has no need of.
 InboundEmailMessage::updateColumns((int)$msg_oldest->key, ['iem_is_read' => true]);
-ok('a message marked read drops out of selection', $job->nextItem($config, $recipe) === null);
+ok('a message marked read drops out of selection', $job->nextItem($config, $recipe, $fake_resolution) === null);
 ok('hasWork agrees with nextItem when nothing is left',
     $job->hasWork($config, $recipe) === false);
 InboundEmailMessage::updateColumns((int)$msg_oldest->key, ['iem_is_read' => false]);
@@ -291,7 +294,7 @@ $provider = new ScriptedLlmProvider([
     // item is msg_spam, which nextItem() must never surface, so end_turn
     // (caught up) with zero provider calls is the only correct outcome.
 ]);
-$result = PipelineRunner::run($provider, 'fake/test-model', $recipe, $ctx, 5, 5000, null, null, 'off');
+$result = PipelineRunner::run($provider->resolution('fake/test-model'), $recipe, $ctx, 5, 5000, null, null);
 ok('run ends caught-up with zero calls (only remaining row is spam-verdict)',
     $result['stop_reason'] === 'end_turn' && $provider->calls === 0);
 
@@ -312,7 +315,7 @@ $provider2 = new ScriptedLlmProvider([
     ['text' => '{"score": 8, "verdict": "dangerous", "red_flags": [{"check":"D","finding":"Demands immediate sign-in."}], "summary": "Likely phishing."}'],
     ['text' => '{"score": 1, "verdict": "safe", "red_flags": [], "summary": "Ordinary newsletter."}'],
 ]);
-$result2 = PipelineRunner::run($provider2, 'fake/test-model', $recipe, $ctx2, 5, 5000, null, null, 'off');
+$result2 = PipelineRunner::run($provider2->resolution('fake/test-model'), $recipe, $ctx2, 5, 5000, null, null);
 ok('second run also ends caught-up', $result2['stop_reason'] === 'end_turn');
 ok('both items judged (2 provider calls)', $provider2->calls === 2);
 

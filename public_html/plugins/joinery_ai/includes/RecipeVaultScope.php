@@ -12,7 +12,7 @@
  * dispatcher and refused by the spawner outright; a mixed binding still runs
  * from cron for its standard remainder.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
@@ -72,9 +72,17 @@ class RecipeVaultScope {
 		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
 			return null;
 		}
-		$job = self::job($recipe);
-		if ($job === null) {
+		// The job resolves WITHOUT the swallow here, unlike job(): a registry
+		// failure must throw so the consent path treats it as protected, not as
+		// "needs nothing". A recipe with an EMPTY job id genuinely declares no
+		// job, needs no scope, and can produce no items — that is a clean null.
+		$job_id = trim((string)$recipe->get('rcp_pipeline_job'));
+		if ($job_id === '') {
 			return null;
+		}
+		$job = PipelineJobRegistry::get($job_id);
+		if (!($job instanceof PipelineJobInterface)) {
+			throw new RuntimeException("Pipeline job '$job_id' did not resolve to a job.");
 		}
 		return $job->requiresVaultScope(self::config($recipe));
 	}
@@ -151,75 +159,128 @@ class RecipeVaultScope {
 	}
 
 	/**
-	 * Refuse a recipe that would send sealed content to a model off the box.
+	 * How far this recipe's content may travel, as a trust floor — or null when
+	 * it reads nothing sealed and so imposes none.
 	 *
-	 * The recipe analogue of LlmProviderFactory::forConversation()'s Fortress
-	 * pin. Chat pins Fortress conversations to local hardware outright; a recipe
-	 * is allowed to use a cloud model, but only where the domain it reads has
-	 * given the second, explicit consent (specs/implemented/sealed_content_egress.md,
-	 * resolved decision 5).
-	 *
-	 * This is sink zero: it precedes every storage sink, and no storage-side
-	 * guard can see it, because the plaintext leaves over HTTPS rather than into
-	 * a column.
-	 *
-	 * Called at recipe save AND at run start. Both, deliberately: the save-time
-	 * check is where the admin gets a comprehensible error, and the run-start
-	 * re-check is what makes withdrawing a domain's consent actually stop the
-	 * next run rather than leaving an already-saved recipe shipping mail to a
-	 * vendor. Same one-way-tightening rule as the taint gate.
-	 *
-	 * @throws LlmProviderException when the pairing is refused
+	 * Fails CLOSED: an unanswerable scope check, or a job that throws while
+	 * answering, is treated as "reads protected content that must stay on the
+	 * box". A job that cannot be resolved cannot say yes on a domain's behalf.
+	 * The scheduling path makes the opposite choice for its own good reasons —
+	 * see scopeOrThrow().
 	 */
-	public static function assertModelAllowed(Recipe $recipe): void {
-		require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
-
-		// Fail CLOSED: an unanswerable scope check is treated as "reads
-		// protected content", so a job that throws cannot be the way a cloud
-		// model gets handed sealed mail. The scheduling path makes the opposite
-		// choice for its own good reasons — see scopeOrThrow().
+	public static function consentTrustFloor(Recipe $recipe): ?string {
 		try {
 			if (self::scopeOrThrow($recipe) === null) {
-				return; // nothing sealed in play — any model may read it
+				return null;   // nothing sealed in play — any model may read it
 			}
 		} catch (\Throwable $e) {
 			error_log('RecipeVaultScope: assuming protected content for recipe '
 				. (int)$recipe->key . ' — scope check failed: ' . $e->getMessage());
 		}
-		$model = trim((string)$recipe->get('rcp_model'));
-		if (!LlmProviderFactory::isCloudModel($model)) {
-			return; // stays on the operator's hardware
-		}
 
-		// Past this point the recipe reads protected content on a cloud model, so
-		// the ONLY thing that permits it is a domain that has said yes. A job
-		// that cannot be resolved, or that throws while answering, cannot say
-		// yes on that domain's behalf — so it does not.
-		$consented = false;
+		$consent = InboundEmailDomain::CONSENT_LOCAL;
 		try {
 			$job = self::job($recipe);
-			$consented = ($job !== null) && $job->cloudProcessingAllowed(self::config($recipe));
+			if ($job !== null) {
+				$consent = (string)$job->processingConsent(self::config($recipe));
+			}
 		} catch (\Throwable $e) {
-			error_log('RecipeVaultScope: cloud-consent check failed for recipe '
+			error_log('RecipeVaultScope: consent check failed for recipe '
 				. (int)$recipe->key . ': ' . $e->getMessage());
+			$consent = InboundEmailDomain::CONSENT_LOCAL;
 		}
-		if ($consented) {
-			return;
+		if (!in_array($consent, InboundEmailDomain::CONSENTS, true)) {
+			$consent = InboundEmailDomain::CONSENT_LOCAL;
 		}
 
-		// An unpinned recipe follows the site's default provider, so name that
-		// rather than an empty quotation mark pair the admin cannot act on.
-		$what = $model !== ''
-			? '“' . $model . '” runs on someone else\'s hardware'
-			: 'this recipe has no model pinned, so it follows the site default provider, '
-			  . 'which runs on someone else\'s hardware';
+		// Consent names the most permissive endpoint class the mail may reach;
+		// a requirement names a floor. 'cloud' consent imposes no floor at all.
+		return $consent === InboundEmailDomain::CONSENT_CLOUD
+			? AiModelRequirement::TRUST_ANY : $consent;
+	}
+
+	/**
+	 * The recipe's requirement with the sealed-content consent folded in.
+	 *
+	 * The consent is one more trust floor, and the STRICTEST of the recipe's own
+	 * floor and the domains' consent wins. Folding it into the requirement
+	 * rather than checking it afterwards is what makes sink zero structural: the
+	 * resolver cannot select an endpoint the domain refused, because such an
+	 * endpoint is filtered out before there is anything to choose from.
+	 */
+	public static function requirementFor(Recipe $recipe): AiModelRequirement {
+		$req = AiModelRequirementBuilder::forRecipe($recipe);
+		$floor = self::consentTrustFloor($recipe);
+		return $floor === null ? $req : $req->tightenTrustFloor($floor);
+	}
+
+	/**
+	 * Resolve the model this recipe runs on — the ONE resolution a run uses.
+	 *
+	 * This is sink zero: it precedes every storage sink, and no storage-side
+	 * guard can see it, because the plaintext leaves over HTTPS rather than into
+	 * a column. The recipe analogue of the Fortress chat pin — chat pins a
+	 * Fortress conversation to local hardware outright; a recipe may use an
+	 * off-box model, but only as far as the domain it reads has consented
+	 * (specs/implemented/sealed_content_egress.md, resolved decision 5).
+	 *
+	 * Called at recipe save AND at run start. Both, deliberately: the save-time
+	 * call is where the admin gets a comprehensible error, and the run-start
+	 * call is what makes withdrawing a domain's consent actually stop the next
+	 * run rather than leaving an already-saved recipe shipping mail to a vendor.
+	 * Same one-way-tightening rule as the taint gate. WITHIN a run there is only
+	 * ever one resolution — the object this returns.
+	 *
+	 * @throws LlmProviderException when nothing the domain permits can do the work
+	 */
+	public static function resolveForRecipe(Recipe $recipe): AiModelResolution {
+		$floor = self::consentTrustFloor($recipe);
+		$req = self::requirementFor($recipe);
+		try {
+			$resolution = AiModelResolver::resolve($req);
+		} catch (LlmProviderException $e) {
+			// When the consent is what narrowed the field, say THAT rather than
+			// handing the admin a capability message they cannot act on: the
+			// fix is a domain setting, not a bigger model.
+			if ($floor !== null && $floor !== AiModelRequirement::TRUST_ANY) {
+				throw new LlmProviderException(
+					'This recipe reads mail that is encrypted at rest, and that mail\'s domain only '
+					. 'permits it to be read by a model on '
+					. ($floor === AiModelRequirement::TRUST_LOCAL
+						? 'this server'
+						: 'this server or a vendor you have accepted')
+					. '. Nothing configured here fits. Either serve a suitable model locally, or '
+					. 'change how far the domain\'s decrypted mail may travel on the mailbox '
+					. 'domain page. (' . $e->getMessage() . ')');
+			}
+			throw $e;
+		}
+		self::assertResolutionAllowed($recipe, $resolution);
+		return $resolution;
+	}
+
+	/**
+	 * Belt and braces on sink zero: the model actually chosen must be one the
+	 * domain permits.
+	 *
+	 * requirementFor() already filters an off-limits endpoint out of the
+	 * candidate set, so this can only fire on a defect. It exists because the
+	 * cost of the filter silently not applying is decrypted mail on a vendor's
+	 * hardware, and a cheap assertion is worth having in front of that.
+	 *
+	 * @throws LlmProviderException
+	 */
+	public static function assertResolutionAllowed(Recipe $recipe, AiModelResolution $resolution): void {
+		$floor = self::consentTrustFloor($recipe);
+		if ($floor === null) return;
+		if (AiModelRequirement::trustSatisfies($floor, $resolution->trust())) return;
 
 		throw new LlmProviderException(
-			'This recipe reads mail that is encrypted at rest, and ' . $what . ' — so running '
-			. 'it would send the decrypted mail off this server. Either pin a local model, or '
-			. 'turn on “Send this domain\'s decrypted mail to cloud AI models” for the domain '
-			. 'this mailbox belongs to.'
-		);
+			'This recipe reads mail that is encrypted at rest, and “' . $resolution->label()
+			. '” runs on a ' . $resolution->trust() . ' endpoint — so running it would send the '
+			. 'decrypted mail further than that mail\'s domain has agreed to. Either pin a model '
+			. 'this domain permits, or change how far its decrypted mail may travel on the '
+			. 'mailbox domain page.');
 	}
 
 	/**

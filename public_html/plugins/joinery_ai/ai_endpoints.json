@@ -1,0 +1,117 @@
+{
+    "_comment": "Inference endpoints and the models each serves. Read at runtime by AiEndpointRegistry; never seeded into the database, so a model change reaches every node with a publish. Editing this file and publishing is how the fleet re-grades or re-prices a model. See specs/joinery_ai_model_capability_resolution.md.",
+    "endpoints": [
+        {
+            "key": "local",
+            "label": "Local / self-hosted",
+            "dialect": "openai",
+            "base_url_setting": "joinery_ai_local_base_url",
+            "api_key_setting": null,
+            "trust": "local",
+            "trust_note": "Inference runs on hardware you control; the text never leaves it.",
+            "probe": "ollama",
+            "models_setting": "joinery_ai_local_model",
+            "_models_note": "Whatever ids the host serves, comma-separated, exactly as today. Each is graded from ai_model_reference.json by its tag, and its mechanical facts come from the probe - no per-install binding."
+        },
+        {
+            "key": "fireworks",
+            "label": "Fireworks",
+            "dialect": "openai",
+            "base_url_setting": "joinery_ai_fireworks_base_url",
+            "api_key_setting": "joinery_ai_fireworks_api_key",
+            "trust": "trusted",
+            "trust_note": "A named vendor under a contractual no-train commitment on open-model traffic. The text leaves your hardware, but not to a general cloud.",
+            "models": [
+                {
+                    "id": "accounts/fireworks/models/gpt-oss-120b",
+                    "label": "gpt-oss 120B (Fireworks)",
+                    "tier": "capable",
+                    "thinking": "always",
+                    "tools": true,
+                    "context": 128000,
+                    "attachments": {"vision": false, "document": false},
+                    "cost": {"input": 0.15, "output": 0.60},
+                    "defaults": {"temperature": 0.6, "top_p": 0.95, "max_output_tokens": 16000}
+                },
+                {
+                    "id": "accounts/fireworks/models/qwen3p7-plus",
+                    "label": "Qwen 3.7 Plus (Fireworks)",
+                    "tier": "standard",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 256000,
+                    "attachments": {"vision": false, "document": false},
+                    "cost": {"input": 0.40, "output": 1.60},
+                    "defaults": {"temperature": 0.7, "top_p": 0.95, "max_output_tokens": 16000}
+                },
+                {
+                    "id": "accounts/fireworks/models/glm-5p2",
+                    "label": "GLM 5.2 (Fireworks)",
+                    "tier": "frontier",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 200000,
+                    "attachments": {"vision": false, "document": false},
+                    "cost": {"input": 1.40, "output": 4.40},
+                    "defaults": {"temperature": 0.6, "top_p": 0.95, "max_output_tokens": 16000}
+                }
+            ]
+        },
+        {
+            "key": "anthropic",
+            "label": "Anthropic",
+            "dialect": "anthropic",
+            "base_url": "https://api.anthropic.com/v1/messages",
+            "api_key_setting": "joinery_ai_anthropic_api_key",
+            "trust": "cloud",
+            "trust_note": "A general cloud vendor on ordinary commercial terms.",
+            "models": [
+                {
+                    "id": "claude-opus-4-7",
+                    "label": "Claude Opus 4.7",
+                    "tier": "frontier",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 200000,
+                    "attachments": {"vision": true, "document": true},
+                    "cost": {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
+                    "defaults": {"temperature": 0.3, "max_output_tokens": 16000}
+                },
+                {
+                    "id": "claude-opus-4-6",
+                    "label": "Claude Opus 4.6",
+                    "tier": "frontier",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 200000,
+                    "attachments": {"vision": true, "document": true},
+                    "cost": {"input": 5.00, "output": 25.00, "cache_write": 6.25, "cache_read": 0.50},
+                    "defaults": {"temperature": 0.3, "max_output_tokens": 16000},
+                    "retired": true
+                },
+                {
+                    "id": "claude-sonnet-4-6",
+                    "label": "Claude Sonnet 4.6",
+                    "tier": "frontier",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 200000,
+                    "attachments": {"vision": true, "document": true},
+                    "cost": {"input": 3.00, "output": 15.00, "cache_write": 3.75, "cache_read": 0.30},
+                    "defaults": {"temperature": 0.3, "max_output_tokens": 16000}
+                },
+                {
+                    "id": "claude-haiku-4-5",
+                    "label": "Claude Haiku 4.5",
+                    "tier": "capable",
+                    "thinking": "optional",
+                    "tools": true,
+                    "context": 200000,
+                    "attachments": {"vision": true, "document": true},
+                    "cost": {"input": 1.00, "output": 5.00, "cache_write": 1.25, "cache_read": 0.10},
+                    "defaults": {"temperature": 0.3, "max_output_tokens": 16000}
+                }
+            ]
+        }
+    ]
+}

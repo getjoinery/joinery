@@ -18,15 +18,27 @@ function chat_controls_logic(array $input): LogicResult {
 
     $settings = Globalvars::get_instance();
 
+    // The composer warns before sending sensitive-looking text somewhere it
+    // would leave the box. That is the same trust class the sealed-egress gate
+    // reads, so a warning and a gate can no longer disagree about a model —
+    // which they could when one asked the provider about its training policy
+    // and the other asked whether the bytes left the hardware.
     $models = [];
     foreach (LlmProviderFactory::allModels() as $id => $label) {
-        $private = false;
+        $trust = 'cloud';
         try {
-            $private = (bool)LlmProviderFactory::forModel((string)$id)->isPrivate();
+            $trust = (string)(AiEndpointRegistry::trustForModel((string)$id) ?: 'cloud');
         } catch (Throwable $e) {
-            // Unknown provider — treat as non-private (the safe, warn-by-default side).
+            // No usable catalog — warn, which is the safe side.
         }
-        $models[] = ['id' => (string)$id, 'label' => (string)$label, 'private' => $private];
+        $models[] = [
+            'id'      => (string)$id,
+            'label'   => (string)$label,
+            'trust'   => $trust,
+            // Kept for the existing composer: "no warning needed" is true for
+            // anything that does not reach a general cloud vendor.
+            'private' => $trust !== 'cloud',
+        ];
     }
 
     $brave_key_set = (string)$settings->get_setting('joinery_ai_brave_search_api_key') !== '';

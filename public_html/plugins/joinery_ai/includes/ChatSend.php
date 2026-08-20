@@ -35,14 +35,17 @@ class ChatSend {
     public static function buildNewConversation(int $uid, array $input, string $message): array {
         $c = new AiConversation(NULL);
         $c->set('aic_owner_user_id', $uid);
-        $c->set('aic_model', ChatRunner::defaultModel());
         ChatControls::seedNewConversation($c, $input);
         // Security level: the composer's choice or the plugin default, downgraded
         // when its prerequisites (vault / local model) are missing (Phase 1).
         $level = ChatLevel::resolveForNew($input['security_level'] ?? null, $uid);
         $c->set('aic_security_level', $level);
-        // Fortress pins inference to a local model — start it on one.
-        if ($level === AiConversation::LEVEL_FORTRESS
+        // The starting model follows the level: a Fortress chat's content never
+        // leaves the box, so it starts on something local. Asked once, of the
+        // level, rather than setting a default and then correcting it.
+        if ((string)$c->get('aic_model') === '') {
+            $c->set('aic_model', ChatRunner::defaultModelForLevel($level));
+        } elseif ($level === AiConversation::LEVEL_FORTRESS
                 && !ChatLevel::isLocalModel((string)$c->get('aic_model'))) {
             $c->set('aic_model', ChatLevel::localDefaultModel());
         }

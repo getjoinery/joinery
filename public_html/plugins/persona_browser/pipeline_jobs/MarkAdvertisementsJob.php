@@ -23,7 +23,20 @@ require_once(PathHelper::getIncludePath('plugins/persona_browser/data/persona_ad
  */
 class MarkAdvertisementsJob implements PipelineJobInterface {
 
-    const DIGEST_MAX = 1500;
+    /** Floor on the digest size, in characters. Used when the resolved model
+     *  will not say how much room it has — never as a fixed cap, because a
+     *  number chosen blind is either wasteful on a 200k window or truncating on
+     *  a 4k one. See sizeCap(). */
+    const DIGEST_MIN = 1500;
+
+    /** Share of the model's usable context this job will spend on one item's
+     *  digest. The rest holds the system prompt, the verdict schema and the
+     *  model's own reasoning. */
+    const CONTEXT_SHARE = 0.25;
+
+    /** Roughly four characters per token — close enough to size a cap by, and
+     *  deliberately conservative. */
+    const CHARS_PER_TOKEN = 4;
 
     public function id(): string { return 'mark_advertisements'; }
 
@@ -39,7 +52,17 @@ class MarkAdvertisementsJob implements PipelineJobInterface {
 
     public function hasUnsealedBinding(array $config): bool { return true; }
 
-    public function cloudProcessingAllowed(array $config): bool { return true; }
+    /** A public social feed - nothing sealed, nothing to withhold. The literal
+     *  rather than the mailbox plugin's constant: this job must answer with
+     *  mailbox inactive. */
+    public function processingConsent(array $config): string { return 'cloud'; }
+
+    /** One yes/no on a short feed item against clear instructions. Almost any
+     *  model can do it, and asking for more would push free local work onto a
+     *  paid endpoint for no gain. */
+    public function minTier(): string { return AiModelRequirement::TIER_BASIC; }
+
+    public function defaultTrustFloor(): string { return AiModelRequirement::TRUST_ANY; }
 
     /**
      * A blocked sender's posts can never be shown, so judging them would spend
@@ -55,7 +78,7 @@ class MarkAdvertisementsJob implements PipelineJobInterface {
     }
 
     /** Oldest unjudged post first, excluding anything already in this recipe's log. */
-    public function nextItem(array $config, Recipe $recipe): ?array {
+    public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array {
         $db = DbConnector::get_instance()->get_db_link();
         $sql = "SELECT pfi_persona_feed_item_id, pfi_author, pfi_message, pfi_image_alt
                 FROM pfi_persona_feed_items
@@ -72,7 +95,7 @@ class MarkAdvertisementsJob implements PipelineJobInterface {
 
         return [
             'item_key' => (string)$row['pfi_persona_feed_item_id'],
-            'digest'   => $this->digest($row),
+            'digest'   => $this->digest($row, $this->sizeCap($model)),
             'label'    => $row['pfi_author'] !== '' ? (string)$row['pfi_author'] : 'Unknown',
         ];
     }
@@ -137,7 +160,23 @@ PROMPT;
     }
 
     /** Bounded, deterministic plain-text rendering of one post for the model. */
-    private function digest(array $row): string {
+    /**
+     * How much of one post to show the model, in characters.
+     *
+     * The resolver picks the model before the run starts, so the job can simply
+     * be told how much room it got rather than guessing. usableContext() is the
+     * smaller of the catalog's nominal window and what the host is actually
+     * serving, so a 256k model being served with a 24k window sizes against the
+     * 24k. A model that reports nothing falls to the floor, which is the size
+     * this job used before it could ask.
+     */
+    private function sizeCap(AiModelResolution $model): int {
+        $ctx = $model->usableContext();
+        if ($ctx === null) return self::DIGEST_MIN;
+        return max(self::DIGEST_MIN, (int)($ctx * self::CONTEXT_SHARE * self::CHARS_PER_TOKEN));
+    }
+
+    private function digest(array $row, int $cap): string {
         $parts = [];
         $author = trim((string)$row['pfi_author']);
         $parts[] = 'Author: ' . ($author !== '' ? $author : 'Unknown');
@@ -146,8 +185,8 @@ PROMPT;
         $alt = trim((string)$row['pfi_image_alt']);
         if ($alt !== '') $parts[] = 'Image: ' . $alt;
         $digest = implode("\n\n", $parts);
-        if (mb_strlen($digest) > self::DIGEST_MAX) {
-            $digest = mb_substr($digest, 0, self::DIGEST_MAX) . '…';
+        if (mb_strlen($digest) > $cap) {
+            $digest = mb_substr($digest, 0, $cap) . '…';
         }
         return $digest;
     }

@@ -126,7 +126,13 @@ class ChatTurn {
      */
     private static function reachabilityError(AiConversation $conversation): ?string {
         try {
-            return LlmProviderFactory::forConversation($conversation)->reachabilityProbe();
+            // Probe the endpoint this turn will actually run on. Resolving here
+            // is deliberate and outside the run's one-resolution rule: this is a
+            // separate decision made before the turn starts, and its only output
+            // is a diagnostic string. The turn itself resolves once, in drive().
+            $resolution = AiModelResolver::tryResolve(
+                AiModelRequirementBuilder::forConversation($conversation));
+            return $resolution === null ? null : $resolution->provider()->reachabilityProbe();
         } catch (Throwable $e) {
             return null;
         }

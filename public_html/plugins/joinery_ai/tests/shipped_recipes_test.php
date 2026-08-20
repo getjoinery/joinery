@@ -96,6 +96,7 @@ check(count($keys) === count(array_unique($keys)), 'declared keys are unique');
 
 $non_travelling = array_keys(RecipeSeeder::NON_TRAVELLING_FIELDS);
 $leaked = array();
+$pipeline_floors = array();
 $with_prompt = array();
 foreach ($shipped as $d) {
 	foreach ($non_travelling as $field) {
@@ -104,10 +105,21 @@ foreach ($shipped as $d) {
 		$bare = preg_replace('/^rcp_/', '', $field);
 		if (array_key_exists($field, $d) || array_key_exists($bare, $d)) $leaked[] = $d['key'];
 	}
+	// Requirement keys are legal only on an AGENT-mode declaration (no job to
+	// declare a floor). On a pipeline declaration they would be a second
+	// answer beside the job's own, kept in step by hope.
+	if (!empty($d['pipeline_job'])) {
+		foreach (RecipeSeeder::REQUIREMENT_DECLARATION_KEYS as $rk) {
+			if (array_key_exists($rk, $d)) $pipeline_floors[] = $d['key'] . '.' . $rk;
+		}
+	}
 	if (trim((string)($d['prompt'] ?? '')) !== '') $with_prompt[] = $d['key'];
 }
 check(empty($leaked), 'no declaration carries a field that cannot travel',
 	'offending: ' . implode(', ', $leaked));
+check(empty($pipeline_floors),
+	'no pipeline declaration carries a requirement floor — the job is the single source',
+	'offending: ' . implode(', ', $pipeline_floors));
 check(empty($with_prompt),
 	'no declaration pastes prompt text — the job class owns the wording so upgrades can improve it',
 	'offending: ' . implode(', ', $with_prompt));
@@ -128,6 +140,12 @@ check($row && ($row['rcp_model'] === null || $row['rcp_model'] === ''),
 	'it carries no model — the destination resolves its own', var_export($row['rcp_model'] ?? null, true));
 check($row && ($row['rcp_temperature'] === null && $row['rcp_top_p'] === null),
 	'temperature and top_p are unset, so the site default applies');
+check($row && $row['rcp_min_tier'] === null && $row['rcp_trust_floor'] === null
+	&& $row['rcp_thinking_required'] === null && $row['rcp_min_context'] === null,
+	'every requirement column is NULL — a seeded floor would freeze at install '
+	. 'and never see a raise a later release ships',
+	$row ? json_encode(array_intersect_key($row, array_flip(
+		['rcp_min_tier', 'rcp_trust_floor', 'rcp_thinking_required', 'rcp_min_context']))) : 'no row');
 $config = $row ? json_decode((string)$row['rcp_source_config'], true) : null;
 check(empty($config), 'no mailbox is bound', var_export($row['rcp_source_config'] ?? null, true));
 check($row && (string)$row['rcp_prompt'] === '',

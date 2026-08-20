@@ -65,11 +65,16 @@ class FixtureJudgeJob implements PipelineJobInterface {
     /** Nothing sealed, so cron can always progress. */
     public function hasUnsealedBinding(array $config): bool { return true; }
 
-    /** No sealed source, so nothing to protect from a cloud model. */
-    public function cloudProcessingAllowed(array $config): bool { return true; }
+    /** No sealed source, so nothing to hold back from anywhere. */
+    public function processingConsent(array $config): string { return 'cloud'; }
+
+    /** A fixture judging in-memory strings: the weakest rung is honest. */
+    public function minTier(): string { return AiModelRequirement::TIER_BASIC; }
+
+    public function defaultTrustFloor(): string { return AiModelRequirement::TRUST_ANY; }
 
     public function hasWork(array $config, Recipe $recipe, ?string $posture = null): bool {
-        return $this->nextItem($config, $recipe) !== null;
+        return $this->pick($recipe) !== null;
     }
 
     public function countWork(array $config, Recipe $recipe, ?string $posture = null): int {
@@ -78,7 +83,11 @@ class FixtureJudgeJob implements PipelineJobInterface {
 
     public function coverageNotes(array $config, Recipe $recipe): array { return []; }
 
-    public function nextItem(array $config, Recipe $recipe): ?array {
+    public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array {
+        return $this->pick($recipe);
+    }
+
+    private function pick(Recipe $recipe): ?array {
         $db = DbConnector::get_instance()->get_db_link();
         foreach (self::$items as $item) {
             $sql = "SELECT 1 WHERE " . MultiAipRecipeItemLog::notExistsClause(':item_key');
@@ -168,7 +177,7 @@ $provider1 = new ScriptedLlmProvider([
     ['text' => '{"verdict": "keep"}'],
     ['text' => '{"verdict": "flag"}'],
 ]);
-$result1 = PipelineRunner::run($provider1, 'fake/test-model', $recipe1, $ctx1, 5, 5000, null, null, 'off');
+$result1 = PipelineRunner::run($provider1->resolution('fake/test-model'), $recipe1, $ctx1, 5, 5000, null, null);
 ok('stop_reason is end_turn (caught up)', $result1['stop_reason'] === 'end_turn');
 ok('both items recorded', FixtureJudgeJob::$recorded === ['a1' => ['verdict' => 'keep'], 'a2' => ['verdict' => 'flag']]);
 ok('provider called exactly twice', $provider1->calls === 2);
@@ -184,7 +193,7 @@ $provider2 = new ScriptedLlmProvider([
     ['text' => 'not json at all'],
     ['text' => '{"verdict": "keep"}'],
 ]);
-$result2 = PipelineRunner::run($provider2, 'fake/test-model', $recipe2, $ctx2, 5, 5000, null, null, 'off');
+$result2 = PipelineRunner::run($provider2->resolution('fake/test-model'), $recipe2, $ctx2, 5, 5000, null, null);
 ok('retry succeeded: item recorded', FixtureJudgeJob::$recorded === ['b1' => ['verdict' => 'keep']]);
 ok('exactly one retry (2 calls) for the single item', $provider2->calls === 2);
 $logged2 = new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe2->key]);
@@ -206,7 +215,7 @@ $provider3 = new ScriptedLlmProvider([
     ['text' => 'still not json'],   // c1 attempt 2 (retry) — gives up
     ['text' => '{"verdict": "keep"}'], // c2 attempt 1 — succeeds
 ]);
-$result3 = PipelineRunner::run($provider3, 'fake/test-model', $recipe3, $ctx3, 5, 5000, null, null, 'off');
+$result3 = PipelineRunner::run($provider3->resolution('fake/test-model'), $recipe3, $ctx3, 5, 5000, null, null);
 ok('c1 never recorded (invalid verdict)', !isset(FixtureJudgeJob::$recorded['c1']));
 ok('c2 recorded after c1 was skipped', FixtureJudgeJob::$recorded === ['c2' => ['verdict' => 'keep']]);
 ok('run reached caught-up end (end_turn), not aborted', $result3['stop_reason'] === 'end_turn');
@@ -227,7 +236,7 @@ FixtureJudgeJob::$items = [
 FixtureJudgeJob::$recorded = [];
 [$recipe4, $run4, $ctx4] = make_recipe_and_run($owner_uid, 5, 5000);
 $provider4 = new ScriptedLlmProvider(array_fill(0, 8, ['text' => 'never valid json']));
-$result4 = PipelineRunner::run($provider4, 'fake/test-model', $recipe4, $ctx4, 5, 5000, null, null, 'off');
+$result4 = PipelineRunner::run($provider4->resolution('fake/test-model'), $recipe4, $ctx4, 5, 5000, null, null);
 ok('stop_reason is tool_errors', $result4['stop_reason'] === 'tool_errors');
 ok('exactly 3 items attempted before abort (6 calls: 2 per item)', $provider4->calls === 6);
 $logged4 = (new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe4->key]))->count_all();
@@ -240,7 +249,7 @@ FixtureJudgeJob::$items = [['item_key' => 'e1', 'digest' => 'e1', 'label' => 'E1
 $q = $db->prepare("UPDATE rcr_recipe_runs SET rcr_kill_requested = TRUE WHERE rcr_run_id = ?");
 $q->execute([(int)$run5->key]);
 $provider5 = new ScriptedLlmProvider([['text' => '{"verdict": "keep"}']]);
-$result5 = PipelineRunner::run($provider5, 'fake/test-model', $recipe5, $ctx5, 5, 5000, null, null, 'off');
+$result5 = PipelineRunner::run($provider5->resolution('fake/test-model'), $recipe5, $ctx5, 5, 5000, null, null);
 ok('stop_reason is cancelled', $result5['stop_reason'] === 'cancelled');
 ok('provider never called', $provider5->calls === 0);
 ok('nothing logged', (new MultiAipRecipeItemLog(['recipe_id' => (int)$recipe5->key]))->count_all() === 0);
@@ -258,7 +267,7 @@ $provider6 = new ScriptedLlmProvider([
         'cache_creation_input_tokens' => 0, 'cache_read_input_tokens' => 0]],
     ['text' => '{"verdict": "keep"}'],
 ]);
-$result6 = PipelineRunner::run($provider6, 'fake/test-model', $recipe6, $ctx6, 5, 50, null, null, 'off');
+$result6 = PipelineRunner::run($provider6->resolution('fake/test-model'), $recipe6, $ctx6, 5, 50, null, null);
 ok('stop_reason is token_budget', $result6['stop_reason'] === 'token_budget');
 ok('exactly one item processed before the budget halted the run', $provider6->calls === 1);
 ok('f1 recorded, f2 never reached', FixtureJudgeJob::$recorded === ['f1' => ['verdict' => 'keep']]);

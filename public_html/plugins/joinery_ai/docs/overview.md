@@ -560,41 +560,413 @@ panel's confirm dialog) inherits it. Internal identifiers (`TaintGate`,
 `rcp_allow_tainted_writes`) keep their names — they are precise for
 developers.
 
-## LLM providers
+## Endpoints, models and capability resolution
 
-The runner is decoupled from any specific model vendor through a provider boundary in `includes/llm/`.
+Nothing in this plugin holds a model name in a database row. A recipe states what
+the work **needs**; the platform decides what runs it. That split is what lets a
+model change reach every server in a fleet as a file edit and a publish, instead
+of an SSH session per node.
 
-**Canonical IR.** The runner's loop manipulates messages and content blocks in the Anthropic Messages shape (`text`, `tool_use{id,name,input}`, `tool_result{tool_use_id,content,is_error}`; a top-level `system` array; `tools[]` with `input_schema`). That shape is the runner's canonical internal representation. `LlmProviderInterface::createMessageStreamed(array $params, callable $onTextDelta): array` accepts and returns that canonical shape, handing each fragment of answer text to `$onTextDelta` as it arrives; each provider sends `stream: true`, parses the upstream SSE, and translates canonical ↔ its own wire format entirely inside the provider class. This is the one provider call path — `createMessage(array $params): array` is a blocking convenience over it with a no-op sink. The runner never branches on provider.
+### The shipped catalog
+
+`plugins/joinery_ai/ai_endpoints.json` declares every place a request may be sent
+and what each one serves. It is read at runtime by `AiEndpointRegistry` and never
+seeded into the database — that is the whole point, since database values do not
+travel with a release and files in the release tree do.
+
+An **endpoint** carries a key, a wire dialect (`anthropic` | `openai`), a base URL
+(literal or the setting an operator binds), the setting holding its API key, and a
+**trust class**. It then either lists the models it serves, or names a setting
+holding whatever the operator's own host serves.
+
+A **catalog model** carries its wire `id`, a label, a capability `tier`, whether it
+can reason (`thinking`: `none` | `optional` | `always`), whether it can drive
+tools, its nominal `context` window, its attachment support, its per-Mtok `cost`
+(absent means free), per-model sampling `defaults`, and an optional `retired` flag.
+
+A model id appears in exactly one endpoint, so routing and classification are the
+same lookup and cannot disagree — the property the sealed-mail gate rests on.
+
+### Trust classes
+
+| Class | Meaning | Example |
+|---|---|---|
+| `local` | the bytes never leave hardware the operator controls | Ollama on this box or their own LAN host |
+| `trusted` | leaves the box to a named vendor under terms the operator accepted | Fireworks (contractual no-train on open-model traffic) |
+| `cloud` | a general vendor on ordinary terms | Anthropic |
+
+One value answers three questions that used to be asked separately: whether the
+chat composer warns before sending sensitive-looking text, whether a Fortress
+conversation may use the model, and whether a domain's sealed mail may reach it.
+
+A requirement states a **trust floor** — `local` accepts only `local`, `trusted`
+accepts `local` and `trusted`, `any` accepts all three.
+
+### Capability tiers
+
+Four rungs, deliberately coarse. **A request for tier N is satisfied by any model
+of tier ≥ N** — it is a minimum, not a selector.
+
+| Tier | The job it can be trusted with | Examples |
+|---|---|---|
+| `basic` | one short classification against clear instructions, on short text | is-this-an-advertisement, language detection |
+| `standard` | reads a document-length input, fills a multi-field schema | extracting a calendar entry |
+| `capable` | adversarial or consequential judgement on **one item**; resists manipulation planted in the input | phishing scanning, email triage |
+| `frontier` | sustained **multi-step tool use**, long-horizon reasoning, subtle drafting | agent-mode recipes, drafting mail sent under the owner's name |
+
+The line between `capable` and `frontier` is the line `rcp_mode` already draws:
+`capable` is pipeline mode, where PHP picks the item and the model judges it in one
+bounded exchange; `frontier` is agent mode, where the model drives and each tool
+call compounds on the last.
+
+**Grade generously.** A model on a boundary gets the higher rung; a recipe's
+arguable floor gets the lower one. A floor exists to stop work reaching a model
+that cannot do it, not to reserve work for the biggest model available.
+
+### Grading a model the operator serves themselves
+
+The cloud endpoints ship graded and an operator never touches them. The only open
+question is the model on their own box, and nobody should have to grade one.
+
+`plugins/joinery_ai/ai_model_reference.json` answers it. It is separate from
+`ai_endpoints.json` on purpose: the catalog is authoritative for routing (an entry
+there means "you may send here"), the reference is advisory for grading, and
+merging them would let a reference entry become routable by accident.
+
+Named entries match by glob and win; otherwise a size ladder grades the model from
+the parameter count parsed out of its tag. Where a tag carries more than one count
+the **largest** wins — `35b-a3b` is a 35B model with 3B active per token. Only a tag
+with nothing readable in it falls to `basic`, which is the one genuinely unknown
+case rather than a punishment for being unlisted. Each named entry records whether
+its grading is `measured` (naming the run behind it) or `research`, so you can tell
+what to trust when a recipe misbehaves.
+
+**Tier is the only fact this file owns.** A local model's mechanical facts —
+thinking, tools, context, attachments — come from the host itself when the endpoint
+declares `probe: "ollama"`: `/api/show` reports a `capabilities` array and the
+model's context length. The host knows these better than any shipped file, so
+swapping in a vision model is simply right with no publish. Precedence per fact is
+a named reference entry (for a host that mis-reports) → the probe → stated defaults.
+For a host with no probe the defaults are `thinking: optional`, `tools: true`, no
+attachments, and context **unknown** — and an unknown context fails a `min_context`
+requirement **closed**, naming the host's silence rather than guessing a number.
+
+`tests/tools/score_email_corpus.php` is the instrument that turns a `research`
+entry into a `measured` one.
+
+### What a recipe states
+
+| Column | Meaning |
+|---|---|
+| `rcp_min_tier` | the capability floor |
+| `rcp_trust_floor` | `local` \| `trusted` \| `any` |
+| `rcp_thinking_required` | TRUE excludes models that cannot reason at all |
+| `rcp_min_context` | optional floor for large digests, checked against the nominal window |
+| `rcp_model` | a rare explicit pin |
+
+Every one is NULL by default, and NULL means **inherit** — the same pattern
+`rcp_temperature` and `rcp_thinking_level` already use. A non-NULL value means
+exactly one thing: an operator overrode something.
+
+`rcp_thinking_required` and `rcp_thinking_level` are different questions and both
+stay: the requirement says *must be able to reason*, the level says *how hard*.
+
+### Nobody has to fill these in
+
+**The job declares the floor, not the recipe.** `EmailSecurityScanJob` knows it
+reads attacker-controlled mail and needs `capable`; `MarkAdvertisementsJob` knows it
+is a yes/no on a short feed item and needs `basic`. The operator who binds a mailbox
+to a recipe knows neither and is never asked. `PipelineJobInterface::minTier()` and
+`defaultTrustFloor()` are the same kind of fact as `untrustedDigest()` and
+`requiresVaultScope()` — declared by the job, consulted by the runner, invisible on
+the form.
+
+The chain, most specific first:
+
+| Source | Set by | How often |
+|---|---|---|
+| `rcp_model` (pin) | an operator who insists | rare |
+| `rcp_min_tier` / `rcp_trust_floor` / … | a power user overriding the job | rare |
+| the job's `minTier()` / `defaultTrustFloor()` | the developer who wrote the job | **the normal case** |
+| the `recipes.json` declaration (agent-mode recipes, which have no job) | whoever ships the recipe | the normal case for those |
+| the plugin fallback | the platform | last resort |
+
+`AiModelRequirementBuilder` walks it **at resolve time**, and an inherited value is
+never written into a row. That is load-bearing: `RecipeSeeder` is create-only, so a
+floor materialised at install would be frozen there and a floor raised in a later
+release would never reach an existing install. Keeping the columns NULL is what
+makes a job's floor cascade with the code that declares it.
+
+The fallback rung is `standard` for a pipeline recipe, `frontier` for agent mode
+(the model is driving a tool loop, which is what that rung means), trust floor
+`any`, thinking not required, no context floor.
+
+### The resolver
+
+`AiModelResolver::resolve(AiModelRequirement $req): AiModelResolution`
+
+1. **Filter** to catalog models that are *available* (their endpoint's key setting is
+   set, and it serves at least one model), *not retired*, and clear every floor.
+2. **Order** by the site's `joinery_ai_selection_policy`:
+   - `prefer_local` *(the default everywhere)* — the lowest trust class that clears
+     the floor first, then cheapest. Cloud is reached only when the operator's own
+     hardware cannot meet the floor, so using someone else's hardware is always a
+     decision someone can be pointed at.
+   - `cheapest` — lowest cost per Mtok, ignoring trust beyond the floor.
+   - `best` — highest tier that clears the floor, then cheapest.
+3. **Tie-break** deterministically: cheaper first, then the least capable model that
+   still clears the floor, then catalog order. A recipe must not drift between runs.
+   The middle step matters on a local box, where every model is free and dollars
+   separate nothing: running a 35B to answer "is this an advertisement" spends GPU
+   that a qualifying 9B would not. For a local endpoint, catalog order is the
+   operator's own `joinery_ai_local_model` list order.
+
+A refusal names the gap and the fix, because the cost of this design is that the
+model is no longer a name someone typed: *"This recipe needs a capable model that
+stays on your hardware. Your local endpoint serves only a basic model. Either serve
+a larger model on your local host, or lower the recipe's minimum."*
+
+**A refusal is only for a floor somebody stated.** Where the floor came from the
+platform's own fallback and nothing clears it, resolution relaxes to the most
+capable model available and says so on the edit page and the run — because an
+assumption nobody made should not make the feature unusable. Agent mode assumes
+`frontier`; on a box whose largest model grades `capable` that would otherwise
+make agent-mode recipes impossible to create at all.
+
+### Resolve once — the load-bearing rule
+
+`resolve()` returns an `AiModelResolution` carrying the chosen endpoint and model,
+the transport, the normalized thinking directive, and the **ordered remainder of
+approved candidates**. Every consumer of a run — the consent gates, the dispatch,
+the cost record, the run history — reads that same object. Nothing re-resolves.
+
+This is not a style preference. The guard in front of decrypted mail leaving the box
+works because there is one decision that both the gate and the dispatch read, so what
+receives the request and what the gate believes receives it provably cannot disagree.
+Check-then-resolve-again would let a catalog edit, a changed local model list or a
+cleared API key landing between them silently move the work to a different endpoint
+than the one that was approved.
+
+Two corollaries:
+
+- **Fail closed.** An unparseable catalog, an unknown pin, or an id present in no
+  endpoint is a refusal — never a fall-through to "whatever is available".
+- **Save time and run start each resolve once**, for their own decision. That is what
+  makes a withdrawn consent or a removed local model stop the *next* run. Within a
+  single run, one resolution.
+
+### Failover never spends money
+
+On a transport failure **before the first token** — connection refused, a model that
+would not load — `AiModelResolution::send()` advances to the next approved candidate.
+The candidate list is fixed at resolve time and truncated so nothing in it costs more
+than the first choice, so a free first choice can only fall back to another free one.
+A sleeping local host can never become a cloud bill: the recipe fails and, being
+hourly, tries again next hour. What this does buy is real — a big model that will not
+fit degrades to a measured sibling on the same box, free and inside the approved set.
+
+A stream that dies *after* the first token is a **failed run**, not a retry: a second
+dispatch would double-spend and re-fire side effects.
+
+### Pins
+
+A pin resolves to that exact catalog model **and is still checked against the
+requirement** — against a floor somebody *stated*, that is: an operator's override
+column, a job's `minTier()`, a shipped declaration. The platform's last-resort
+fallback still filters an unstated recipe onto something sensible, but it never
+vetoes an explicit pin, because the pin is the most specific source in the chain
+and an assumption nobody made is not grounds to refuse it.
+
+Three outcomes that must not be treated alike:
+
+| Situation | Meaning | Behaviour |
+|---|---|---|
+| below a stated floor at save time | someone configured it wrong | **refused at save**, naming the gap |
+| below a stated floor with no save — a release raised the floor, or the catalog re-graded the model down | the world changed under a saved row | **refused at run start**, fail closed |
+| unavailable — no key, retired, or the host stopped serving it | this install cannot reach it *today* | **falls back to requirement resolution**, and the run records that it did |
+
+An unavailable pin is an availability fact, not a configuration error: the recipe
+still has a requirement, and the requirement is enough to run on.
+
+### Say what ran
+
+This design moves a judgement from per-recipe visible to per-catalog invisible. An
+operator used to open a recipe and read `claude-haiku-4-5`; now they read a floor
+while a file they did not open decides the rest. Mis-grade a model and a security
+scan quietly runs on something too weak. Fleet-wide cascade is worth that trade only
+because the resolution is stated back:
+
+- **On the recipe edit page**, the Model line reads *"Automatic — right now this runs
+  on …"*, recomputed on load, so an operator sees what their floor bought before they
+  save. The requirement columns live behind an *Advanced* fold that opens
+  automatically when anything is overridden.
+- **On every run**, `rcr_model` and `rcr_endpoint` record what actually served it, and
+  `rcr_cost_estimate` is derived from `rcr_model` rather than from the recipe's
+  (usually empty) pin. The run history lists the model per run.
+
+### Where the gates ask
+
+| Gate | How it asks |
+|---|---|
+| Fortress chat | the requirement carries `trust_floor: local`, taken from the chat **level**, not from a column |
+| `RecipeVaultScope` sealed egress | the domain's consent is folded into the requirement as one more trust floor, and the strictest of it and the recipe's own floor wins |
+| chat privacy warning | the same `trust` value, so the warning and the gate cannot disagree |
+| attachment ingress | `needs_vision` / `needs_document` on the requirement; refused before the upload is accepted |
+
+### Domain consent is three-valued
+
+`ied_ai_processing_consent` on a mailbox domain holds the most permissive trust class
+that domain's decrypted mail may reach: `local` | `trusted` | `cloud`, the same
+vocabulary an endpoint uses, so the gate is a direct comparison. It starts at `local`
+— sealed mail never travels until someone says so — and loosening it needs the same
+fresh identity check as turning AI reading on at all. `EmailPipelineJobBase` folds a
+recipe's whole bound set to the **strictest** answer any sealed address gives.
+
+### The provider layer
+
+Providers are **transport only**. They know how to speak one wire format; they do not
+know what models exist, what they cost, what they can do, or whether they are safe.
+All of that is the catalog's, decided once by the resolver, so there is exactly one
+answer to each question and no second source to drift from it.
+
+**Canonical IR.** The runner's loop manipulates messages and content blocks in the
+Anthropic Messages shape (`text`, `tool_use{id,name,input}`,
+`tool_result{tool_use_id,content,is_error}`; a top-level `system` array; `tools[]`
+with `input_schema`). `LlmProviderInterface::createMessageStreamed(array $params,
+callable $onTextDelta, ?callable $shouldAbort): array` accepts and returns that
+canonical shape, handing each fragment of answer text to `$onTextDelta` as it
+arrives; each provider sends `stream: true`, parses the upstream SSE, and translates
+canonical ↔ its own wire format entirely inside the provider class. This is the one
+provider call path — `createMessage()` is a blocking convenience over it with a no-op
+sink. The runner never branches on provider.
+
+`$params['thinking']` is a concrete **directive** from the resolver —
+`['enabled' => bool, 'effort' => 'low'|'medium'|'high'|null]` — not a level to
+interpret. A provider translates it into its own wire field (`budget_tokens`,
+`reasoning_effort`) and never consults a table of model names.
 
 **Providers:**
 
-- **`AnthropicProvider`** — the canonical IR is the Anthropic block shape, so this provider is a near-passthrough: it posts the request body and assembles the canonical response from the Anthropic SSE stream (`message_start`/`content_block_delta`/`message_delta`), emitting `text_delta` fragments to the sink and accumulating `input_json_delta` into tool-use input. Carries the cost table (`COST_PER_MTOKEN`) and the Claude model list. `AnthropicException` is kept as a subclass of `LlmProviderException` for backward compatibility, and `AnthropicClient` remains a class alias.
-- **`OpenAiCompatibleProvider`** — one provider for every OpenAI-compatible runtime (Ollama, llama.cpp server, vLLM, LM Studio), all of which expose `/v1/chat/completions` with tool-calling. It does the real translation: canonical → OpenAI request, and the streamed `choices[].delta` chunks → canonical (with `stream_options.include_usage` for the final usage chunk, and `prompt_tokens_details.cached_tokens` mapped to `cache_read_input_tokens` when the host reports it). Malformed tool arguments from small models decode to `{}` (the tool's own validation then yields a normal `is_error` result) rather than crashing the run; inline `<think>…</think>` reasoning is filtered from both the streamed text and the final text by a split-tag-safe state machine. The base class targets a local host: inference is free (`estimateCost()` returns `0.0`), the provider is private (`isPrivate()` is `true`), the thinking knob is expressed through the request's `reasoning_effort` field (`off → none`, otherwise the level) — the control the current Ollama qwen3 templates read, and there is no prompt caching (`cache_control` ignored, full system prompt re-sent each call). Remote OpenAI-compatible services subclass it, reusing all the wire translation and overriding the vendor seams — `id()`, `models()`, `estimateCost()`, `isPrivate()`, `systemThinkingSuffix()`, `applyReasoning()`, `unreachableMessage()`.
-- **`FireworksProvider`** — Fireworks AI, an OpenAI-compatible remote, as a subclass of `OpenAiCompatibleProvider`. Supplies a curated model catalog with pricing (`MODELS` / `COST_PER_MTOKEN`), bills cached input at 50% of the input rate, drops the qwen `/think` token in favour of the native `reasoning_effort` parameter on models that accept it (`REASONING_MODELS`), and classifies itself private (`isPrivate()` is `true`) — Fireworks does not train on open-model traffic. `FireworksProvider::owns($model)` recognises the namespaced `accounts/fireworks/…` model ids. Verify pricing and model ids against the live Fireworks catalog; they move frequently.
+- **`AnthropicProvider`** — the canonical IR is the Anthropic block shape, so this is
+  a near-passthrough: it posts the request body and assembles the canonical response
+  from the Anthropic SSE stream (`message_start` / `content_block_delta` /
+  `message_delta`), emitting `text_delta` fragments to the sink and accumulating
+  `input_json_delta` into tool-use input. Extended thinking requires default sampling,
+  so `temperature`/`top_p` are dropped when the directive enables reasoning.
+  `AnthropicException` is kept as a subclass of `LlmProviderException` for backward
+  compatibility, and `AnthropicClient` remains a class alias.
+- **`OpenAiCompatibleProvider`** — one provider for every OpenAI-compatible runtime
+  (Ollama, llama.cpp server, vLLM, LM Studio), all of which expose
+  `/v1/chat/completions` with tool-calling. It does the real translation: canonical →
+  OpenAI request, and the streamed `choices[].delta` chunks → canonical (with
+  `stream_options.include_usage` for the final usage chunk, and
+  `prompt_tokens_details.cached_tokens` mapped to `cache_read_input_tokens` when the
+  host reports it). Malformed tool arguments from small models decode to `{}` (the
+  tool's own validation then yields a normal `is_error` result) rather than crashing
+  the run; inline `<think>…</think>` reasoning is filtered from both the streamed text
+  and the final text by a split-tag-safe state machine. The thinking directive goes on
+  the request's `reasoning_effort` field — the control current Ollama qwen3 templates
+  read. There is no prompt caching (`cache_control` ignored, full system prompt re-sent
+  each call). Remote OpenAI-compatible services subclass it, reusing all the wire
+  translation and overriding the vendor seams — `id()`, `systemThinkingSuffix()`,
+  `applyReasoning()`, `unreachableMessage()`.
+- **`FireworksProvider`** — Fireworks AI, an OpenAI-compatible remote, as a subclass of
+  `OpenAiCompatibleProvider`. Supplies Fireworks-flavoured diagnostics and its own
+  timeouts. `FireworksProvider::owns($model)` recognises the namespaced
+  `accounts/fireworks/…` ids.
 
-All providers stream with no total request timeout. The local provider bounds the streamed read in two phases: a shorter **first-token** timeout (`joinery_ai_local_first_token_timeout_seconds`, default 60) caps how long it waits for the model to *start* — a cold model load or an overloaded host fails fast, classified `api_no_response` — then, once bytes arrive, it relaxes to the per-read inactivity timeout (`joinery_ai_local_timeout_seconds`, default 300) for the rest of the generation, so a long answer never aborts as long as tokens keep flowing. To bound the first phase independently of the between-token phase, the local provider drives the detached socket resource directly (`stream_set_timeout` tightened for the first-token wait, relaxed on first byte); reads are byte-identical to the PSR-7 stream. Remote providers use the single per-read timeout (a cloud API's first token is prompt).
+All providers stream with no total request timeout. The local provider bounds the
+streamed read in two phases: a shorter **first-token** timeout
+(`joinery_ai_local_first_token_timeout_seconds`, default 60) caps how long it waits
+for the model to *start* — a cold model load or an overloaded host fails fast,
+classified `api_no_response` — then, once bytes arrive, it relaxes to the per-read
+inactivity timeout (`joinery_ai_local_timeout_seconds`, default 300) for the rest of
+the generation, so a long answer never aborts as long as tokens keep flowing. To bound
+the first phase independently, the local provider drives the detached socket resource
+directly (`stream_set_timeout` tightened for the first-token wait, relaxed on first
+byte); reads are byte-identical to the PSR-7 stream. Remote providers use the single
+per-read timeout (a cloud API's first token is prompt).
 
-**Pre-flight reachability (chat).** Before a chat turn commits to a full streaming call, `ChatTurn` calls `LlmProviderInterface::reachabilityProbe()`: a couple-second `GET {base_url}/models` on the local provider that returns a diagnostic message when the host is unreachable (a sleeping or offline Tailscale peer) so the turn fails in ~2–3s instead of stalling on the connect. Any HTTP answer — even a 4xx/5xx — counts as reachable; only a connection failure trips it. Cloud providers return `null` (no probe — their own call path handles transport errors). An unreachable result marks the turn failed with the standard `api_network_error` message.
+**Building a transport.** `LlmProviderFactory::forEndpoint($key)` turns an endpoint key
+into a wire client — which dialect, which URL, which key — and throws
+`LlmProviderException` naming the empty setting when one is missing. Nothing sniffs a
+model name to pick a provider; the resolver has already settled which endpoint the work
+runs on. `LlmProviderFactory::allModels()` lists every model this install can reach, for
+the chat picker and the recipe pin.
 
-**Test connection.** `POST /api/v1/action/joinery_ai/test_connection` (owner only, no parameters) proves the configured provider actually answers: it builds the provider from the saved settings — so the API key only ever travels the normal settings-save path — runs `reachabilityProbe()` (a real check only for the local provider; cloud providers return null and rely on the live call), then a one-token `createMessage()` on the default model. Success returns `{ok, model, ms}`; failure returns the transport/auth error. The setup wizard's AI step drives it; the flow is always save-then-test.
+**Pre-flight reachability (chat).** Before a chat turn commits to a full streaming call,
+`ChatTurn` resolves the turn's endpoint and calls `reachabilityProbe()`: a couple-second
+`GET {base_url}/models` on a local host that returns a diagnostic message when it is
+unreachable (a sleeping or offline Tailscale peer) so the turn fails in ~2–3s instead of
+stalling on the connect. Any HTTP answer — even a 4xx/5xx — counts as reachable; only a
+connection failure trips it. Cloud endpoints return `null` and rely on the live call. An
+unreachable result marks the turn failed with the standard `api_network_error` message.
 
-**Errors.** Each provider throws `LlmProviderException` with a message carrying its own label (`Local model …`, `Fireworks …`, `Anthropic …`, via the overridable `providerLabel()`) and the `4xx`/`5xx` token that `classify()` keys on. `classify()` reduces a failure to a stable code (`api_not_configured`, `api_auth_failed`, `api_quota_exceeded`, `api_request_invalid`, `api_server_error`, `api_network_error`, `api_no_response` — the local host connected but never began streaming within the first-token bound) recognising both Anthropic and OpenAI-style wording (e.g. an `unauthorized` / "the API key … is invalid" body classifies as auth). Recipes record `[code] <raw message>` in Run History.
+**Test connection.** `POST /api/v1/action/joinery_ai/test_connection` (owner only, no
+parameters) proves the platform can actually reach a model: it resolves the weakest
+requirement under the site's own selection policy — so it tests whatever real work would
+reach for — runs `reachabilityProbe()`, then a one-token `createMessage()`. Success
+returns `{ok, model, label, endpoint, ms}`; failure returns the transport/auth error. The
+setup wizard's AI step drives it; the flow is always save-then-test.
 
-Chat puts `LlmProviderException::operatorMessage()` on the failed row, which splits on how actionable the detail is. `api_not_configured` — nothing was sent because a required setting is empty, so the factory refused to build the provider — passes the exception's own message through verbatim: those strings are written in this plugin, name the empty setting rather than any value, and tell the operator exactly what to fill in. Every other code shows `friendlyMessage()`, since its detail is third-party wording the operator cannot act on. Any failure class matched by a substring must keep `api_not_configured`'s `is empty` check ahead of the `4xx` branch — a configuration failure has no HTTP status to key on.
+**Errors.** Each provider throws `LlmProviderException` with a message carrying its own
+label (`Local model …`, `Fireworks …`, `Anthropic …`, via the overridable
+`providerLabel()`) and the `4xx`/`5xx` token that `classify()` keys on. `classify()`
+reduces a failure to a stable code (`api_not_configured`, `api_auth_failed`,
+`api_quota_exceeded`, `api_request_invalid`, `api_server_error`, `api_network_error`,
+`api_no_response` — the host connected but never began streaming within the first-token
+bound) recognising both Anthropic and OpenAI-style wording (e.g. an `unauthorized` / "the
+API key … is invalid" body classifies as auth). Recipes record `[code] <raw message>` in
+Run History. Only `api_network_error`, `api_server_error` and `api_no_response` earn a
+failover — an auth or quota error would fail identically on the sibling.
 
-**Turn diagnostics.** `ChatTurn` logs through `ChatAsync::log()`, which appends to `{site root}/logs/joinery_ai_worker.log` — the same file the spawned CLI worker redirects its stdio to, so both paths share one AI audit trail. The web chat endpoints detach with `fastcgi_finish_request()` before running the turn, which closes the FastCGI stderr stream that would carry `error_log()` output to the web server; anything a turn logs with `error_log()` after that point is discarded with no trace. Every diagnostic emitted during a turn therefore goes through `ChatAsync::log()`, never `error_log()`.
+Chat puts `LlmProviderException::operatorMessage()` on the failed row, which splits on
+how actionable the detail is. `api_not_configured` — nothing was sent because a required
+setting is empty — passes the exception's own message through verbatim: those strings are
+written in this plugin, name the empty setting rather than any value, and tell the
+operator exactly what to fill in. Every other code shows `friendlyMessage()`, since its
+detail is third-party wording the operator cannot act on. Any failure class matched by a
+substring must keep `api_not_configured`'s `is empty` check ahead of the `4xx` branch — a
+configuration failure has no HTTP status to key on.
 
-**Factory + routing.** The model selects the provider. `LlmProviderFactory::forModel($model)` returns the provider that serves that model id — a `claude-*` id → `AnthropicProvider`, an `accounts/fireworks/…` id → `FireworksProvider`, any other non-empty id → the local `OpenAiCompatibleProvider` — so a recipe pinned to a model always runs on that model's own provider. A recipe that pins no model follows `LlmProviderFactory::build()`, which reads the `joinery_ai_llm_provider` setting (`anthropic` | `fireworks` | `local`) for the global-default provider. Either entry point throws `LlmProviderException` with a configuration-specific message if the resolved provider's required setting is empty. The model dropdown is built from `LlmProviderFactory::allModels()` — every model offered by every configured provider (Anthropic if a key is set, Fireworks if a key is set, the local host if a model is set) — and a recipe whose stored `rcp_model` belongs to a provider that isn't configured keeps the value, flagged as unavailable.
+**Turn diagnostics.** `ChatTurn` logs through `ChatAsync::log()`, which appends to
+`{site root}/logs/joinery_ai_worker.log` — the same file the spawned CLI worker redirects
+its stdio to, so both paths share one AI audit trail. The web chat endpoints detach with
+`fastcgi_finish_request()` before running the turn, which closes the FastCGI stderr stream
+that would carry `error_log()` output to the web server; anything a turn logs with
+`error_log()` after that point is discarded with no trace. Every diagnostic emitted during
+a turn therefore goes through `ChatAsync::log()`, never `error_log()`.
 
-Local settings: `joinery_ai_local_base_url` (default `http://localhost:11434/v1`), `joinery_ai_local_model` (must be set before the local provider runs), `joinery_ai_local_api_key` (optional; Ollama ignores it), `joinery_ai_local_timeout_seconds` (default `300` — the between-token inactivity cap; local CPU generation is slow), `joinery_ai_local_first_token_timeout_seconds` (default `60` — how long to wait for the model to *start* before failing the turn).
+### Settings
 
-Fireworks settings: `joinery_ai_fireworks_api_key` (Bearer key; the model dropdown surfaces Fireworks models once it is set), `joinery_ai_fireworks_base_url` (default `https://api.fireworks.ai/inference/v1`).
+| Setting | What it is |
+|---|---|
+| `joinery_ai_selection_policy` | `prefer_local` (default) \| `cheapest` \| `best` |
+| `joinery_ai_local_base_url` | the OpenAI-compatible host (default `http://localhost:11434/v1`) |
+| `joinery_ai_local_model` | the ids that host serves, comma-separated, exactly as it names them |
+| `joinery_ai_local_api_key` | optional; Ollama ignores it |
+| `joinery_ai_local_timeout_seconds` | between-token inactivity cap (default `300`) |
+| `joinery_ai_local_first_token_timeout_seconds` | how long to wait for the model to start (default `60`) |
+| `joinery_ai_anthropic_api_key` | setting it makes the Anthropic endpoint available |
+| `joinery_ai_fireworks_api_key` / `joinery_ai_fireworks_base_url` | likewise for Fireworks |
+| `joinery_ai_default_model` | which model a new **chat** starts on. Recipes never read it |
 
-**Local setup (Ollama).** Stand up an OpenAI-compatible server on a host with enough RAM for the chosen model, pull/serve the model and set `joinery_ai_local_model` to its id, point `joinery_ai_local_base_url` at it (`localhost` if same-box), and switch `joinery_ai_llm_provider` to `local`. Manage RAM with the server's keep-alive (e.g. `OLLAMA_KEEP_ALIVE=5m`) so the model unloads between occasional runs.
+**Clearing an API key is how you take an endpoint out of play** — an endpoint with no key
+contributes nothing to resolution. That is why there is no separate disable switch.
 
-**Capability caveat.** Reliable tool-calling has a parameter cliff around 7–9B; models small enough to run on a constrained box (~1B) load and generate but emit malformed tool calls and don't function as agents. A ~1B model (`llama3.2:1b`, `qwen3:1.7b`) validates the adapter end-to-end but isn't a real recipe driver; a dense 14B+ on a 16 GB+ host (e.g. `qwen3:14b`) is the practical floor for dependable loops. Recipes needing reliable tool use keep `joinery_ai_llm_provider = anthropic` until a suitable host exists.
+**Local setup (Ollama).** Stand up an OpenAI-compatible server on a host with enough RAM
+for the chosen model, pull/serve the model, set `joinery_ai_local_model` to its id and
+point `joinery_ai_local_base_url` at it (`localhost` if same-box). Every recipe follows
+automatically, because none of them names a model. Manage RAM with the server's keep-alive
+(e.g. `OLLAMA_KEEP_ALIVE=5m`) so the model unloads between occasional runs.
 
-**Privacy classification.** `LlmProviderInterface::isPrivate()` declares whether traffic to a provider stays private — `true` for on-device hosts (local Ollama) and vetted no-train remotes (Fireworks), `false` for general cloud providers (Anthropic). Privacy is a property of the provider, not of where it runs: Fireworks is remote yet private. The chat UI is the only consumer (see [Chat](#chat) — the sensitivity warning); it is never a routing gate.
+**Capability caveat.** Reliable tool-calling has a parameter cliff around 7–9B; models
+small enough to run on a constrained box (~1B) load and generate but emit malformed tool
+calls and do not function as agents. A ~1B model (`llama3.2:1b`, `qwen3:1.7b`) validates the
+adapter end-to-end but is not a real recipe driver. This is what the tier ladder encodes:
+the size ladder grades ≤4B as `basic`, which no agent-mode recipe's `frontier` floor
+accepts — so an under-powered host refuses the work with a message naming the gap rather
+than producing garbage.
 
 ## Tool architecture
 

@@ -1,0 +1,49 @@
+{
+    "_comment": "Advisory capability gradings for models an operator serves on their own hardware. NEVER routable - ai_endpoints.json is the only file that says where a request may be sent. This file answers one question about a local model: which capability rung is it on. Named entries win; the ladder is the fallback, matched against the parameter count parsed out of the model tag. See specs/joinery_ai_model_capability_resolution.md.",
+    "ladder": [
+        {"max_params_b": 4, "tier": "basic"},
+        {"max_params_b": 32, "tier": "capable"},
+        {"max_params_b": null, "tier": "frontier"}
+    ],
+    "models": [
+        {
+            "match": "qwen3.5:9b*",
+            "tier": "capable",
+            "basis": "measured",
+            "evidence": "email_security_corpus 2026-08-20, 100 msgs: 96% recall / 4% FP at score >=7; mean phish 8.9 vs ham 0.3, hard negatives 1.1",
+            "defaults": {"temperature": 0.7, "top_p": 0.95}
+        },
+        {
+            "match": "qwen3.6:35b-a3b*",
+            "tier": "capable",
+            "basis": "measured",
+            "evidence": "email_security_corpus 2026-08-20, 100 msgs: 92% recall / 2% FP at score >=7; mean phish 8.8 vs ham 0.1, hard negatives 0.5; 783s wall clock against 1024s for the 9B",
+            "defaults": {"temperature": 0.7, "top_p": 0.95}
+        },
+        {
+            "match": "qwen3.8:27b*",
+            "tier": "capable",
+            "basis": "research",
+            "evidence": "Dense 27B in the same family as the measured 9B and 35B MoE; graded by size class pending a corpus run.",
+            "defaults": {"temperature": 0.7, "top_p": 0.95}
+        },
+        {
+            "match": "gemma2:9b*",
+            "tier": "capable",
+            "basis": "measured",
+            "evidence": "email_security_corpus 2026-07: 90% recall / 8% FP at score >=7"
+        },
+        {
+            "match": "qwen3:4b*",
+            "tier": "basic",
+            "basis": "measured",
+            "evidence": "email_security_corpus: scored phish, ham and hard negatives all inside the 5.9-8.7 band - it cannot separate them"
+        },
+        {
+            "match": "llama3.3:70b*",
+            "tier": "frontier",
+            "basis": "research",
+            "evidence": "70B dense; sustained tool use is within reach on a 128GB-class box."
+        }
+    ]
+}

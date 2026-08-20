@@ -119,7 +119,7 @@ if ($show_form) {
 	// is sealed at rest.
 	$imap_only_hide = ['ied_catch_all_mode', 'ied_catch_all_address', 'ied_reject_unmatched',
 		'ied_security_level', 'ied_security_level_fortress_card',
-		'ied_ai_processing_enabled', 'ied_ai_cloud_enabled'];
+		'ied_ai_processing_enabled', 'ied_ai_processing_consent'];
 	$imap_hide = array_merge(['ied_domain'], $imap_only_hide);
 	$hosted_show = ['ied_domain', 'ied_catch_all_mode', 'ied_security_level',
 		'ied_security_level_fortress_card'];
@@ -206,9 +206,9 @@ if ($show_form) {
 		// rest. On Standard the server already reads it, so there is nothing to
 		// consent to (specs/in_window_deferred_work.md).
 		'visibility_rules' => [
-			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled']],
-			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled'], 'hide' => []],
-			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_cloud_enabled'], 'hide' => []],
+			InboundEmailDomain::LEVEL_STANDARD => ['show' => [], 'hide' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent']],
+			InboundEmailDomain::LEVEL_PRIVATE  => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
+			InboundEmailDomain::LEVEL_FORTRESS => ['show' => ['ied_ai_processing_enabled', 'ied_ai_processing_consent'], 'hide' => []],
 		],
 	]);
 
@@ -220,9 +220,29 @@ if ($show_form) {
 	if (!empty($_GET['target_ai'])) {
 		$ai_value = true;
 	}
-	$cloud_value = (bool)$form_domain->get('ied_ai_cloud_enabled');
+	$consent_value = $form_domain->ai_processing_consent();
 	if (!empty($_GET['target_cloud'])) {
-		$cloud_value = true;
+		$consent_value = (string)$_GET['target_cloud'];
+		if (!in_array($consent_value, InboundEmailDomain::CONSENTS, true)) {
+			$consent_value = InboundEmailDomain::CONSENT_LOCAL;
+		}
+	}
+
+	// One plain sentence per endpoint explaining what the operator is agreeing
+	// to on THIS install, taken from the endpoint's own trust_note so the
+	// wording follows the catalog rather than being restated here.
+	$trust_notes = [];
+	try {
+		foreach (AiEndpointRegistry::endpoints() as $ep_key => $ep) {
+			if (!AiEndpointRegistry::isAvailable((string)$ep_key)) continue;
+			$note = trim((string)($ep['trust_note'] ?? ''));
+			if ($note !== '' && (string)$ep['trust'] !== InboundEmailDomain::CONSENT_LOCAL) {
+				$trust_notes[] = (string)$ep['label'] . ': ' . $note;
+			}
+		}
+	} catch (Throwable $e) {
+		// No usable catalog — the control still works, it just cannot name
+		// which vendors "trusted" covers here.
 	}
 
 	$formwriter->checkboxinput('ied_ai_processing_enabled',
@@ -234,17 +254,27 @@ if ($show_form) {
 				. 'is off, because encrypted mail is unreadable without you.',
 		]);
 
-	// The narrower second consent. Reading sealed mail on your own hardware and
-	// sending that plaintext to a vendor are different promises, so they are
-	// different switches — this one stays off when the first is turned on.
-	$formwriter->checkboxinput('ied_ai_cloud_enabled',
-		"Send this domain's decrypted mail to cloud AI models", [
-			'value' => $cloud_value,
-			'helptext' => 'Off by default, and separate from the setting above on purpose. With it '
-				. 'off, this domain\'s mail is only ever read by a model running on hardware you '
-				. 'control, and a recipe pinned to a cloud model is refused. Turning it on lets '
-				. 'the decrypted mail be sent to that provider, who then holds it in the clear. '
-				. 'Turning it back off stops those recipes at their next run.',
+	// The narrower second consent: not whether the AI may read this mail, but
+	// how far the decrypted text may travel to be read. Reading sealed mail on
+	// your own hardware, handing it to a vendor you have accepted terms with,
+	// and handing it to a general cloud are three different promises, so the
+	// operator gets three answers rather than one switch that conflates the
+	// last two.
+	$formwriter->dropinput('ied_ai_processing_consent',
+		"How far this domain's decrypted mail may travel", [
+			'value'   => $consent_value,
+			'options' => [
+				InboundEmailDomain::CONSENT_LOCAL   => 'Stay on my hardware (default)',
+				InboundEmailDomain::CONSENT_TRUSTED => 'My hardware, or a vendor I have accepted',
+				InboundEmailDomain::CONSENT_CLOUD   => 'Any configured AI endpoint, including cloud',
+			],
+			'helptext' => 'Starts at the strictest setting, and separate from the option above on '
+				. 'purpose. On the first, this domain\'s mail is only ever read by a model running '
+				. 'on hardware you control, and a recipe that would need anything else is refused. '
+				. 'Loosening it lets the decrypted mail be sent to that provider, who then holds it '
+				. 'in the clear. Tightening it back stops those recipes at their next run.'
+				. ($trust_notes ? ' On this install, "a vendor I have accepted" means — '
+					. implode(' ', $trust_notes) : ''),
 		]);
 
 	$formwriter->dropinput('ied_catch_all_mode', 'Catch-All Mode', [

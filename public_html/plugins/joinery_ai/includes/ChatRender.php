@@ -75,14 +75,13 @@ class ChatRender {
         return (string)Globalvars::get_instance()->get_setting('joinery_ai_default_model');
     }
 
-    /** Estimated USD for an input/output token pair under a model's provider
-     *  pricing. Local/unknown models price at 0. Best-effort: never throws. */
+    /** Estimated USD for an input/output token pair, at the catalog's rates for
+     *  that model. A model with no declared cost — every local one — prices at
+     *  0. Best-effort: never throws. */
     public static function estimateCost(string $model, int $in, int $out): float {
         if ($model === '' || ($in === 0 && $out === 0)) return 0.0;
         try {
-            require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
-            $provider = LlmProviderFactory::forModel($model);
-            return (float)$provider->estimateCost($model, ['input_tokens' => $in, 'output_tokens' => $out]);
+            return AiModelResolution::costFor($model, ['input_tokens' => $in, 'output_tokens' => $out]);
         } catch (Throwable $e) {
             return 0.0;
         }

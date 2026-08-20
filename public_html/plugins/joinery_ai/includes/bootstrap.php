@@ -180,7 +180,6 @@ SetupSteps::register('ai_provider', array(
     // declaring them here keeps the allow-list with the plugin that owns them.
     'settings_source' => 'joinery_ai',
     'settings_names' => array(
-        'joinery_ai_llm_provider',
         'joinery_ai_local_base_url',
         'joinery_ai_local_model',
         'joinery_ai_anthropic_api_key',

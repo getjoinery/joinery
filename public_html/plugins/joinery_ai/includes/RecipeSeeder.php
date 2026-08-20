@@ -52,11 +52,37 @@ class RecipeSeeder {
         'rcp_allow_tainted_writes' => 'a security acknowledgment, not ours to give',
     ];
 
-    /** Keys a declaration may carry. Anything else is a typo worth reporting. */
+    /**
+     * The requirement keys sit BETWEEN the two lists: an AGENT-mode declaration
+     * may carry them (it has no job to declare a floor), so they are not
+     * non-travelling — but fromDeclaration() never writes them into a row
+     * either, because the seeder is create-only and a floor frozen at install
+     * would miss every raise a later release ships. They are read live at
+     * resolve time (AiModelRequirementBuilder::declarationFor()). A PIPELINE
+     * declaration must not carry them at all: its job is the single source,
+     * and a second answer here would be a place for the two to disagree.
+     */
+    const REQUIREMENT_DECLARATION_KEYS = [
+        'min_tier', 'trust_floor', 'thinking_required', 'min_context',
+    ];
+
+    /**
+     * Keys a declaration may carry. Anything else is a typo worth reporting.
+     *
+     * The four requirement keys are declarable but deliberately NOT seeded into
+     * a row — fromDeclaration() never writes them. They are read live at
+     * resolve time (AiModelRequirementBuilder), because this seeder is
+     * create-only: a value written at install would be frozen there, and a
+     * floor raised in a later release would silently miss every install that
+     * already has the recipe. Pipeline recipes should omit them entirely and
+     * let their job declare the floor; they exist for agent-mode declarations,
+     * which have no job to ask.
+     */
     const DECLARED_KEYS = [
         'key', 'name', 'pipeline_job', 'prompt', 'requires_plugin',
         'schedule_frequency', 'schedule_day_of_week', 'schedule_time',
         'max_iterations', 'max_tokens', 'monthly_token_cap', 'thinking_level',
+        'min_tier', 'trust_floor', 'thinking_required', 'min_context',
     ];
 
     public static function manifestPath(): string {
@@ -316,10 +342,11 @@ class RecipeSeeder {
         // they fall back to whatever this install tuned globally.
         $recipe->set('rcp_owner_user_id', $owner_id);
         $recipe->set('rcp_source_config', []);
-        // Empty, not null: save() fills a null field from its declared column
-        // default, which for rcp_model is a specific model name. Empty string is
-        // how a recipe says it has no model of its own, and the edit form
-        // resolves the site's own default when it sees one.
+        // No pin, and no requirement columns either. A model name cannot travel
+        // (it names something the destination may not serve) and a requirement
+        // must not be frozen into a row — both are answered live, from the job
+        // or from this declaration, so raising a floor in a release changes
+        // every existing install with no reseed and no migration.
         $recipe->set('rcp_model', '');
         return $recipe;
     }
@@ -435,6 +462,26 @@ class RecipeSeeder {
         $declaration['max_tokens']        = (int)$recipe->get('rcp_max_tokens');
         $declaration['monthly_token_cap'] = (int)$recipe->get('rcp_monthly_token_cap');
         $declaration['thinking_level']    = (string)$recipe->get('rcp_thinking_level') ?: 'off';
+
+        // An AGENT-mode recipe carries its own requirement, because it has no
+        // job to declare one. A pipeline recipe carries none: its job is the
+        // single source, and repeating the floor here would be a second answer
+        // to keep in step. Only an operator's explicit override travels — a
+        // NULL column means "inherit", and shipping an inherited value would
+        // freeze whatever this publishing instance happened to resolve.
+        if ($job === '') {
+            foreach ([
+                'min_tier'          => 'rcp_min_tier',
+                'trust_floor'       => 'rcp_trust_floor',
+                'min_context'       => 'rcp_min_context',
+                'thinking_required' => 'rcp_thinking_required',
+            ] as $declared => $column) {
+                $v = $recipe->get($column);
+                if ($v === null || $v === '') continue;
+                $declaration[$declared] = ($declared === 'min_context') ? (int)$v
+                    : (($declared === 'thinking_required') ? (bool)$v : (string)$v);
+            }
+        }
 
         // Carry forward a requires_plugin already declared for this key rather
         // than dropping it — the marking action re-writes the whole entry.

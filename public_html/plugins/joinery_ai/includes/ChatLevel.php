@@ -1,7 +1,6 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ChatSeal.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
-require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/FireworksProvider.php'));
 
 /**
  * The per-conversation security level's prerequisites and resolution
@@ -13,34 +12,51 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/Firewor
  */
 class ChatLevel {
 
-    /** A local model is served (joinery_ai_local_model set). */
+    /**
+     * Is there a model this install can reach that stays on the operator's own
+     * hardware? Fortress's whole point, so it is asked of the catalog rather
+     * than of one setting — an endpoint declared `local` qualifies whether it
+     * is Ollama on this box or the operator's own LAN host.
+     */
     public static function localModelConfigured(): bool {
-        return (string)Globalvars::get_instance()->get_setting('joinery_ai_local_model') !== '';
+        try {
+            foreach (AiEndpointRegistry::catalog() as $entry) {
+                if ((string)$entry['trust'] === AiModelRequirement::TRUST_LOCAL) return true;
+            }
+        } catch (Throwable $e) {
+            // No usable catalog — nothing is reachable, local included.
+        }
+        return false;
     }
 
-    /** Whether a model id routes to the local host (not Anthropic, not Fireworks). */
+    /**
+     * Does this model id run on hardware the operator controls?
+     *
+     * One lookup in the shipped catalog, where a model id belongs to exactly
+     * one endpoint and that endpoint declares its trust class. This used to
+     * re-implement the provider factory's string sniffing independently — two
+     * copies of one decision, already drifting in shape — and an id neither
+     * copy recognised was classified as local, which is to say safe.
+     *
+     * An unknown id is now NOT local, which is the correct direction to be
+     * wrong in: it is what makes a Fortress chat refuse a model nothing
+     * classifies rather than assume the best of it.
+     */
     public static function isLocalModel(string $model): bool {
         $m = trim($model);
         if ($m === '') return false;
-        if (preg_match('/^claude/i', $m)) return false;
-        if (FireworksProvider::owns($m)) return false;
-        return true;
-    }
-
-    /** The default local model id (first of the configured list), or '' if none. */
-    public static function localDefaultModel(): string {
         try {
-            return (string)LlmProviderFactory::forModel(self::anyLocalId())->defaultModel();
+            return AiEndpointRegistry::trustForModel($m) === AiModelRequirement::TRUST_LOCAL;
         } catch (Throwable $e) {
-            return self::anyLocalId();
+            return false;
         }
     }
 
-    /** The first configured local model id, from the (possibly comma-separated) setting. */
-    private static function anyLocalId(): string {
-        $raw = (string)Globalvars::get_instance()->get_setting('joinery_ai_local_model');
-        $first = trim(explode(',', $raw)[0] ?? '');
-        return $first;
+    /** A local model a Fortress chat can start on, or '' when the operator
+     *  serves none. Resolved rather than guessed, so it honours the same
+     *  selection policy every other choice does. */
+    public static function localDefaultModel(): string {
+        return ChatRunner::defaultModelForLevel(AiConversation::LEVEL_FORTRESS);
     }
 
     public static function privateAvailable(int $owner_id): bool {

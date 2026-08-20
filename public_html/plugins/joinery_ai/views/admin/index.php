@@ -149,10 +149,13 @@ foreach ($recipes as $recipe) {
     }
     $row[] = htmlspecialchars($sched_label);
 
+    // A pin is now the rare case: normally a recipe states what it needs and
+    // the model is chosen when it runs. "Automatic" is the healthy answer here,
+    // not a gap — the recipe's own page says what that resolves to today.
     $model_label = (string)$recipe->get('rcp_model');
     $row[] = $model_label !== ''
-        ? htmlspecialchars($model_label)
-        : '<em class="text-muted">not set</em>';
+        ? 'Pinned: ' . htmlspecialchars($model_label)
+        : '<em class="text-muted">Automatic</em>';
 
     $latest = $latest_runs[$recipe->key] ?? null;
     if ($latest) {
