@@ -28,6 +28,10 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.8 - one pull at a time: pull() takes a per-relay advisory
+ *   try-lock at the chokepoint both the scheduled reconcile and the reader's
+ *   check-mail action pass through; a second pull reports 'skipped' instead of
+ *   racing the first on the same staged blobs
  * @version 1.7 - the seal-target hold never ages out: the relay said 250, so
  *   dropping the blob later would be silent loss of accepted mail
  * @version 1.6 - a protected mailbox with no key to seal to holds the blob on
@@ -50,6 +54,9 @@ class RelaySpoolConsumer {
 	/** Safety cap on entries processed per pull pass. */
 	const DEFAULT_MAX = 500;
 
+	/** Advisory-lock class for the per-relay pull lock (74211/74212 are taken). */
+	const PULL_LOCK_CLASS = 74213;
+
 	/** @var MailboxRelay */
 	private $relay;
 	/** @var InboundEmailRouter */
@@ -70,6 +77,28 @@ class RelaySpoolConsumer {
 		if (RelaySsh::host($this->relay) === '') {
 			return array('status' => 'skipped', 'message' => 'relay has no tunnel host yet');
 		}
+
+		// One pull per relay at a time, enforced here at the chokepoint every pull
+		// path passes through (the scheduled reconcile AND the reader's check-mail
+		// action). A second caller reports 'skipped' — the running pull is already
+		// bringing in the same blobs, so there is nothing for it to add.
+		$db = DbConnector::get_instance()->get_db_link();
+		$lock = $db->prepare('SELECT pg_try_advisory_lock(?, ?)');
+		$lock->execute(array(self::PULL_LOCK_CLASS, intval($this->relay->key)));
+		if (!$lock->fetchColumn()) {
+			return array('status' => 'skipped', 'message' => 'another pull is already running');
+		}
+		try {
+			return $this->pullLocked($max);
+		} finally {
+			// Session advisory locks are reentrant per connection, so this unlock
+			// pairs exactly with the acquire above whatever the body did.
+			$unlock = $db->prepare('SELECT pg_advisory_unlock(?, ?)');
+			$unlock->execute(array(self::PULL_LOCK_CLASS, intval($this->relay->key)));
+		}
+	}
+
+	private function pullLocked(int $max): array {
 		$spool_path = $this->relay->spoolPath();
 
 		$stage = $this->stageDir();

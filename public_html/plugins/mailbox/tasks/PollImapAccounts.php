@@ -15,6 +15,9 @@
  * busy account as skipped). Failures are per-account and non-fatal — one
  * unreachable mailbox or expired token never stops the rest.
  *
+ * @version 1.3
+ * @changelog 1.3 - the fetch cycle itself lives in ImapFetch::run(), shared
+ *   with every manual fetch path so none of them can do less than this task
  * @version 1.2
  * @changelog 1.2 - an account whose fetch lock is held (a manual Fetch now
  *   mid-run) is skipped, not counted an error
@@ -76,21 +79,8 @@ class PollImapAccounts implements ScheduledTaskInterface {
 			}
 
 			$polled++;
-			$ingestor = new ImapIngestor($account);
 			try {
-				if ($account->syncEnabled()) {
-					// Two-way / read-only sync: run the whole cycle on one connection
-					// (specs/two_way_imap_sync.md §7) — Pull → Ingest → Push.
-					$syncer = new ImapSyncer($account, $ingestor);
-					$syncer->prepare();                 // capabilities + folder discovery
-					$syncer->pull();                    // flags + VANISHED (pull|both)
-					$result = $ingestor->poll($maxPerAccount); // ingest, seeding ilm_ labels + Trash soft-deletes
-					if ($account->isTwoWay()) {
-						$syncer->push($maxPerAccount);  // STORE / COPY / MOVE / EXPUNGE / trash
-					}
-				} else {
-					$result = $ingestor->poll($maxPerAccount);
-				}
+				$result = ImapFetch::run($account, $maxPerAccount);
 				$stored += intval($result['stored'] ?? 0);
 				$failedMessages += intval($result['failed'] ?? 0);
 				$messages[] = $this->describe($account) . ': ' . ($result['status'] ?? 'ok');
@@ -105,8 +95,6 @@ class PollImapAccounts implements ScheduledTaskInterface {
 				$account->recordStatus('Fetch error: ' . substr($e->getMessage(), 0, 400));
 				$messages[] = $this->describe($account) . ': ERROR ' . $e->getMessage();
 				error_log('PollImapAccounts: account ' . $account->key . ' failed: ' . $e->getMessage());
-			} finally {
-				$ingestor->close();
 			}
 		}
 

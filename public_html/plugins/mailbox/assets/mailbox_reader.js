@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.48
+ * No framework. @version 2.49
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -3576,10 +3576,30 @@
 
 		var refreshBtn = $('#mbx-refresh');
 		refreshBtn.innerHTML = iconSvg('refresh');
+		var refreshing = false;
 		refreshBtn.addEventListener('click', function () {
-			refreshMailboxes();
-			loadThreads(true);
-			updateSetupBanner(true);   // Refresh means "check again", setup included
+			if (refreshing) return;
+			refreshing = true;
+			refreshBtn.classList.add('mbx-refreshing');
+			// Refresh means "go get my mail": first activate the delivery chain's
+			// pull lanes (relay spool pull + IMAP feed fetch), THEN re-read. On a
+			// relay-fronted deployment the re-read also parses any pulled
+			// Fortress rows (drainRelayBacklog), so new mail lands in this paint.
+			// A failed or cooled-down check still re-reads — refresh never breaks.
+			var checkMail = CFG.checkMailUrl
+				? joineryApi.post(CFG.checkMailUrl, {}).catch(function () {})
+				: Promise.resolve();
+			checkMail.then(function () {
+				return Promise.all([
+					refreshMailboxes(),
+					loadThreads(true)
+				]);
+			}).then(function () {
+				updateSetupBanner(true);   // Refresh means "check again", setup included
+			}).finally(function () {
+				refreshing = false;
+				refreshBtn.classList.remove('mbx-refreshing');
+			});
 		});
 
 		// Select-all: ticks every rendered row, or clears when anything is ticked
