@@ -294,8 +294,9 @@ Declare `show_when` on the field that should appear, naming the setting and valu
 that reveals it:
 
 ```json
-{ "name": "joinery_ai_local_model", "group": "provider", "label": "Local Model",
-  "type": "text", "show_when": { "joinery_ai_llm_provider": "local" } }
+{ "name": "comments_active", "group": "blog", "label": "Allow comments",
+  "type": "select", "options": { "1": "Yes", "0": "No" },
+  "show_when": { "blog_active": "1" } }
 ```
 
 The renderer inverts this into FormWriter `visibility_rules` on the trigger

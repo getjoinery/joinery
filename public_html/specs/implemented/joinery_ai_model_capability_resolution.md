@@ -1,8 +1,13 @@
 # Joinery AI — Endpoint catalog and capability-based model resolution
 
-**Status:** Proposed — design-reviewed with the owner 2026-08-20; every open
-fork is settled and recorded in §Settled and §Decisions. Do not reopen those
-without new evidence.
+**Status:** IMPLEMENTED 2026-08-20. Code-reviewed with fixes applied; safe and
+db tiers green; verified end-to-end with a live pipeline run against the local
+host (run 4266: resolve, consent fold, dispatch, verdicts, cost record). Every
+open fork is settled and recorded in §Settled and §Decisions; do not reopen
+those without new evidence. Two refinements were made during the build and are
+recorded in §Settled: a stated floor refuses where the fallback floor only
+prefers, and equally-priced survivors break ties toward the least capable model
+that still clears the floor.
 **Plugin:** `joinery_ai`
 **Touches:** `LlmProviderFactory`, `LlmProviderInterface`, `AnthropicProvider`,
 `FireworksProvider`, `OpenAiCompatibleProvider`, `ChatLevel`, `AgentLoop`,
@@ -584,6 +589,9 @@ endpoint and catalog model, the built provider, the normalized thinking
 directive — and the **ordered remainder of approved candidates**: every other
 model that passed the same filters, in selection order, truncated by the
 cost-nonincreasing rule (no candidate costing more than the first choice).
+For a pinned first choice whose capability floor nobody stated, the pin's own
+tier is the accepted level: no candidate sits below it, so a pinned capable
+model degrades sideways or up, never to a weaker sibling.
 Every consumer of a run — the consent gates, the dispatch, the cost record, the
 run history — reads **that same object**. Nothing re-resolves.
 
@@ -649,9 +657,20 @@ where a pinned name and the recipe's real needs disagree silently.
 
 **Two different ways a pin can fail, and they must not be treated alike:**
 
+**A pin is checked against a floor somebody STATED, never against the
+fallback.** An operator's override column, a job's `minTier()`, a shipped
+declaration — those are statements, and a pin below one of them is a mistake
+worth refusing. The final rung of §4a's chain is not a statement; it is what the
+platform assumes when nobody had an opinion. Letting an assumption veto the one
+thing the operator did say would invert the chain, in which the pin is the most
+specific source of all — and it would refuse every hand-made agent-mode recipe
+on any fleet without a `frontier` model, including this dev install's local
+smoke-test recipe, for a floor nobody chose. The safety case is untouched:
+`EmailSecurityScanJob` states `capable`, so a `basic` pin under it still fails.
+
 | Situation | Meaning | Behaviour |
 |---|---|---|
-| Pin is **below the floor** at save time — a `basic` model on a `capable` recipe | someone configured it wrong | **refuse at save**, naming the gap. It is a mistake and it should be fixed, not worked around. |
+| Pin is **below a stated floor** at save time — a `basic` model on a `capable` recipe | someone configured it wrong | **refuse at save**, naming the gap. It is a mistake and it should be fixed, not worked around. |
 | Pin **becomes** below the floor with no save — a release raised the job's floor or re-graded the catalog model down | the world changed under a saved row | **refuse at run start**, fail closed, recorded on the run and shown on the edit page. Save-time checking alone would read as "runs are never checked". |
 | Pin is **unavailable** — its endpoint has no key, its model is `retired`, or the local host stopped serving it | this install cannot reach it *today* | **fall back to normal resolution** and record that it did, on the run and on the edit page |
 
@@ -1026,6 +1045,25 @@ the section is split into its own page.
   currently throw at run start because no Anthropic key is set) moves to the
   local host the day this ships, provided the local host clears its floor.
 - **The catalog is plugin-local** — `plugins/joinery_ai/ai_endpoints.json`.
+- **A stated floor and the fallback floor are different things.** A floor
+  somebody stated — an operator's override, a job's `minTier()`, a shipped
+  declaration — both filters and refuses. The platform's last-resort assumption
+  filters, but never refuses:
+  - it does not veto an explicit **pin** (the agent-mode fallback of `frontier`
+    would otherwise refuse an operator's deliberate pin to a 9B on a box that
+    serves nothing larger — punishing them for a default they never chose), and
+  - when **nothing at all** clears it, resolution relaxes to the most capable
+    model available and says so on the run and the edit page, rather than
+    refusing. Caught by `taint_gate` during the build: without this, an
+    agent-mode recipe could not be *saved* on a fleet whose largest local model
+    grades `capable`, which is not what a default is for. A **stated** floor
+    nothing meets still refuses, because someone asked for something this
+    install cannot do and needs to know. §5, §6.
+- **Among equally-priced survivors, take the LEAST capable that clears the
+  floor.** On a local box every model is free, so dollars separate nothing, and
+  running a 35B to answer "is this an advertisement" spends GPU a qualifying 9B
+  would not. Catalog order — which for a local endpoint is the operator's own
+  list order — breaks the remaining ties. §5.
 - **The visibility trade is made knowingly.** Which model runs a recipe stops
   being a name an operator typed and becomes a consequence of a grading in a
   shipped file. Fleet-wide cascade is bought with that, and it is only safe

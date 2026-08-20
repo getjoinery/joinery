@@ -1,8 +1,8 @@
 # Spec: AI participant in messaging (an assistant that lives in a human conversation)
 
 **Status:** Draft (awaiting implementation)
-**Version:** 1.1
-**Area:** core messaging (`data/conversations_class.php`, `logic/conversation_send_logic.php`) + `plugins/joinery_ai` engine (`AgentLoop`, `LlmProviderFactory`, `AiPromptBuilder`)
+**Version:** 1.2
+**Area:** core messaging (`data/conversations_class.php`, `logic/conversation_send_logic.php`) + `plugins/joinery_ai` engine (`AgentLoop`, `AiModelResolver`, `AiPromptBuilder`)
 **Depends on:** the shipped human messaging system (`cnv`/`cnp`/`msg`); the shipped joinery_ai chat engine; **group-conversation enablement** (§3.2 — a real prerequisite, not assumed)
 **Related:** `joinery_ai_chat_member_access.md` (owner-scoped reads — the opposite direction; here the AI reads *nothing* private), `docs/social_features.md`
 
@@ -82,8 +82,8 @@ The turn is produced by a **new runner** (`ConversationAiRunner`, in `plugins/jo
 
 1. **Assemble speaker-attributed history** from `msg_messages` (§3.5 — the one genuinely new mechanism).
 2. **Build a group-chat system prompt** via the reusable `AiPromptBuilder` seam (§3.6) — *not* `ChatRunner::buildSystemPrompt()`, which is `private static` and coupled to an `AiConversation` row (`ChatRunner.php:396`) this room doesn't have.
-3. **Resolve the platform-default provider with no `aic` row.** `LlmProviderFactory::build()` (`llm/LlmProviderFactory.php:67`) returns the global-default provider from the `joinery_ai_llm_provider` setting, requiring no conversation; the model is `$provider->defaultModel()`. Because the room is non-sealed and sandboxed (§2), the default (possibly remote) provider is acceptable — there is no fortress content to keep local.
-4. **Run and persist.** Call `AgentLoop::run($provider, $model, $system, $messages, $room_safe_tools, $context, ...)` — signature at `AgentLoop.php:88-99`, returns an assoc array whose `assistant_text` is the reply. `$room_safe_tools` is the room-safe whitelist (§2 — web search and any other tool that reads no participant's private data), **never** the private-data tools. Write that reply back with `Conversation::add_message(User::USER_AI, $assistant_text)` — the *same* funnel human messages use, so the AI's reply reuses the existing notification fan-out for free (participants are told a new message arrived) and appears as an ordinary message authored by the AI.
+3. **Resolve a model with no `aic` row.** `AiModelResolver::resolve(AiModelRequirementBuilder::forPurpose('the messaging room'))` returns an `AiModelResolution` requiring no conversation: the requirement states floors and the site's `joinery_ai_selection_policy` picks among the catalog models that clear them. Because the room is non-sealed and sandboxed (§2), no trust floor beyond the site posture is needed — there is no fortress content to keep local. If group replies prove to need more than the basic tier, state a fallback capable floor on the requirement rather than naming a model.
+4. **Run and persist.** Call `AgentLoop::run($resolution, $system, $messages, $room_safe_tools, $context, ...)` — signature at `AgentLoop.php:83`, returns an assoc array whose `assistant_text` is the reply. `$room_safe_tools` is the room-safe whitelist (§2 — web search and any other tool that reads no participant's private data), **never** the private-data tools. Write that reply back with `Conversation::add_message(User::USER_AI, $assistant_text)` — the *same* funnel human messages use, so the AI's reply reuses the existing notification fan-out for free (participants are told a new message arrived) and appears as an ordinary message authored by the AI.
 
 **`ToolContext`.** `AgentLoop::run()` requires a `ToolContext`. Room-safe tools like web search *are* dispatched, but they read no participant data, so the context carries **no participant identity and no private-data capability** — a minimal sandbox context that can service the room-safe tools while exposing no owner whose private data could be read. It does not impersonate a participant. (Reuse an existing lightweight context if one fits, or add a small `SandboxToolContext`.)
 
@@ -127,7 +127,7 @@ Persona is **fixed** in v1 (one name, one avatar, one voice). Per-room custom pe
 | 1 | `data/users_class.php` | Add reserved `User::USER_AI` constant; protect its row from edit/delete like `USER_SYSTEM` (`:1128`); extend `not_system_users` (`:1365-1367`) to exclude it. Seed the AI user row (name + avatar) at install. |
 | 2 | `data/conversations_class.php` | In `add_message()` after the row saves (`:163`): if the conversation includes `USER_AI`, the message mentions the AI (or the room is 1-human-+-AI, §3.3), and the sender ≠ `USER_AI` (§3.7), enqueue an AI turn. Add the mention-detection helper. |
 | 3 | `data/conversations_class.php` + messaging views/logic | Group-conversation minimum (§3.2): a create/convert-with-AI path calling `create_conversation([...humans, USER_AI], $subject)`; render participant count ≠ 2 (don't assume `get_other_participant()`); an add-participant action. |
-| 4 | `plugins/joinery_ai/includes/ConversationAiRunner.php` | **New.** Assemble speaker-attributed history from `msg_messages` (§3.5); build the group persona via `AiPromptBuilder::systemBlocks()` (§3.6); resolve provider via `LlmProviderFactory::build()` + `defaultModel()` (§3.4); `AgentLoop::run(..., allowed_tools: <room-safe whitelist — web search, never private-data tools>, ...)`; write reply via `add_message(USER_AI, $text)`. |
+| 4 | `plugins/joinery_ai/includes/ConversationAiRunner.php` | **New.** Assemble speaker-attributed history from `msg_messages` (§3.5); build the group persona via `AiPromptBuilder::systemBlocks()` (§3.6); resolve a model via `AiModelResolver::resolve(AiModelRequirementBuilder::forPurpose(...))` (§3.4); `AgentLoop::run(..., allowed_tools: <room-safe whitelist — web search, never private-data tools>, ...)`; write reply via `add_message(USER_AI, $text)`. |
 | 5 | `plugins/joinery_ai/includes/` (context) | A minimal sandbox `ToolContext` (§3.4) that services room-safe tools but carries no participant identity or private-data capability, or reuse an existing lightweight context. Never impersonates a participant. |
 | 6 | async worker (`cli/` + spawner) | A messaging-turn worker mirroring `cli/run_chat_turn.php` / `ChatWorkerSpawner`, invoking `ConversationAiRunner` off the §3.3 enqueue. |
 | 7 | notification fan-out (`add_message`, `:174-204`) | Exclude `USER_AI` from the human-notification recipients (the AI needs no email/unread), and don't accrue unread state for it. |
@@ -164,7 +164,7 @@ No `serve.php` route, no schema migration (the reserved user is seeded data, not
 Fold into existing docs as current-state (no migration narration):
 
 - `docs/social_features.md` (messaging section) — a conversation may include the Joinery Assistant as a participant; it is invoked by @-mention (or directly in a 1-human room); it is sandboxed to the conversation with no access to any participant's private data, files, or other chats; it runs on the platform-default provider. Document that group (N-participant) conversations are supported.
-- `plugins/joinery_ai/docs/overview.md` — add the in-messaging assistant as a third engine surface alongside the private chat and recipes, noting it runs with **no private-data tools** (room-safe tools like web search are allowed) and no `aic` row (provider via `LlmProviderFactory::build()`, persona via `AiPromptBuilder`).
+- `plugins/joinery_ai/docs/overview.md` — add the in-messaging assistant as a third engine surface alongside the private chat and recipes, noting it runs with **no private-data tools** (room-safe tools like web search are allowed) and no `aic` row (model via `AiModelResolver` with a `forPurpose()` requirement, persona via `AiPromptBuilder`).
 
 ---
 
