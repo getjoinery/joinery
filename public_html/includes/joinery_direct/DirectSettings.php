@@ -10,14 +10,14 @@
  * mechanism — the values live here, the enforcement reuses the platform's
  * existing limiters and byte counters.
  *
- * @version 1.0
+ * @version 1.1
  */
 
 class DirectSettings {
 
 	/** Is Direct on at all? Off means: publish nothing, send nothing, refuse everything. */
 	public static function enabled(): bool {
-		return (string)self::raw('joinery_direct_enabled', '0') === '1';
+		return (string)self::raw('joinery_direct_enabled', '1') === '1';
 	}
 
 	// ── Manifest bounds, checked at preflight, identically for every recipient,
