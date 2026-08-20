@@ -35,7 +35,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.16.1
+ * @version 1.17.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -95,6 +95,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 		'senderContextUrl'  => '/api/v1/action/mailbox/sender_context',
 		'directStatusUrl'   => '/api/v1/action/mailbox/direct_status',
 		'setupStatusUrl'    => '/api/v1/action/mailbox/setup_status',
+		// Refresh's "go get my mail" leg: runs the delivery chain's pull lanes
+		// (relay spool pull + IMAP feed fetch) now, ahead of the scheduled passes.
+		'checkMailUrl'      => '/api/v1/action/mailbox/check_mail',
 		// Every mailbox user gets the Contact panel (their own contact store); the
 		// endpoint decides what goes in it — the site-account half is admin-only,
 		// because member records are operator data.

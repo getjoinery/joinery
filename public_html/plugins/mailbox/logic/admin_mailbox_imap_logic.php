@@ -6,6 +6,9 @@
  * (begin an OAuth2 consent flow through the OAuth2 Core for Gmail/Microsoft
  * accounts). Loads the accounts plus their bound-alias labels for display.
  *
+ * @version 1.5 - Fetch now runs the full ImapFetch cycle, so a sync-enabled
+ *   account's manual fetch pulls flags and pushes changes exactly as the
+ *   scheduled poller does, not just an ingest poll
  * @version 1.4 - a Fetch now that finds a fetch already running says so as a
  *   warning, not a fetch error
  * @version 1.3 - reconnect consent carries the provider's identity scopes, so
@@ -56,13 +59,13 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 		}
 
 		if ($action === 'test' || $action === 'poll_now') {
-			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
-			$ingestor = new ImapIngestor($account);
 			// A green banner saying the connection failed is a contradiction the eye
 			// reads before the words, so every outcome carries its own level.
 			$level = DisplayMessage::MESSAGE_ANNOUNCEMENT;
 			if ($action === 'test') {
+				$ingestor = new ImapIngestor($account);
 				$res = $ingestor->testConnection();
+				$ingestor->close();
 				$msg = $res['ok'] ? ('Connection OK. ' . $res['message']) : ('Connection failed: ' . $res['message']);
 				$level = $res['ok'] ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR;
 				$account->recordStatus($res['ok'] ? ('Test OK: ' . $res['message']) : ('Test failed: ' . $res['message']));
@@ -72,7 +75,7 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 					$level = DisplayMessage::MESSAGE_WARNING;
 				} else {
 					try {
-						$res = $ingestor->poll(50);
+						$res = ImapFetch::run($account, 50);
 						$msg = 'Fetch complete. ' . ($res['status'] ?? '');
 					} catch (ImapFetchBusyException $e) {
 						// A double click, or the scheduled poller mid-run. The
@@ -87,7 +90,6 @@ function admin_mailbox_imap_logic(array $input): LogicResult {
 					}
 				}
 			}
-			$ingestor->close();
 			return _imap_msg_redirect($session, $msg, $list_url, $level);
 		}
 

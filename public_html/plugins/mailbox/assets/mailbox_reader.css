@@ -1,7 +1,7 @@
 /*
  * Mailbox Reader styles — two-pane Gmail layout: a left rail plus a single main
  * pane that swaps between the conversation list and an opened conversation.
- * Vanilla CSS, no framework. @version 2.24
+ * Vanilla CSS, no framework. @version 2.25
  */
 
 /* Every size the reader renders text at, in one ladder. Nothing in this file
@@ -209,6 +209,9 @@
 .mbx-toolbtn:hover { background: #eef1f4; color: #111827; }
 .mbx-toolbtn.danger:hover { background: #fee4e2; color: #b42318; }
 .mbx-toolbtn:disabled { opacity: .4; cursor: default; background: none; }
+/* Refresh in flight: the icon spins while the check-mail pull + re-read run. */
+.mbx-toolbtn.mbx-refreshing svg { animation: mbx-spin .8s linear infinite; }
+@keyframes mbx-spin { to { transform: rotate(360deg); } }
 /* The bulk group appears only with a selection; it shares the toolbar's line. */
 .mbx-bulk { display: flex; align-items: center; gap: 2px; }
 .mbx-bulk[hidden] { display: none; }

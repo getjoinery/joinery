@@ -1921,21 +1921,37 @@ surface that cannot render the middle grade still treats it as unmet.
 
 ### Spool pull + deferred ingest
 
-`PullRelaySpool` (scheduled task) dials out over WireGuard as the deployment's
-restricted tenant account, `rsync`s new entries from **its own spool
-subdirectory** copy-only, stores each durably keyed on the spool id (an
-idempotent re-pull is a no-op), and acks the entries it stored with the tenant
-shell's `joinery-ack` verb (ids only — the shell resolves them inside the
-tenant's spool and rejects anything with a path separator) — the
-delete-after-store is the ack. Standard/Private blobs are opened at pull with the
-ambient transport key and run through today's ingest. Fortress blobs cannot be
-opened while the owner is logged out, so they land as **pending-parse** rows:
-operational metadata + the sealed blob, so threading and unread counts work while
-subject/sender/body/attachments do not exist yet. At the next unlock,
-`DeferredIngest` unseals each blob, runs the full pipeline (parse, filters,
-attachment split, seal fields under a fresh per-message DEK), and clears the
-pending state. For a single reader this is invisible — the rules have always run
-by the time any mailbox view renders.
+The pull (`RelaySpoolConsumer`, phase 2 of the `MailboxRelayReconcile`
+scheduled task) dials out over WireGuard as the deployment's restricted tenant
+account, `rsync`s new entries from **its own spool subdirectory** copy-only,
+stores each durably keyed on the spool id (an idempotent re-pull is a no-op),
+and acks the entries it stored with the tenant shell's `joinery-ack` verb (ids
+only — the shell resolves them inside the tenant's spool and rejects anything
+with a path separator) — the delete-after-store is the ack. Standard/Private
+blobs are opened at pull with the ambient transport key and run through today's
+ingest. Fortress blobs cannot be opened while the owner is logged out, so they
+land as **pending-parse** rows: operational metadata + the sealed blob, so
+threading and unread counts work while subject/sender/body/attachments do not
+exist yet. At the next unlock, `DeferredIngest` unseals each blob, runs the
+full pipeline (parse, filters, attachment split, seal fields under a fresh
+per-message DEK), and clears the pending state. For a single reader this is
+invisible — the rules have always run by the time any mailbox view renders.
+
+The reader's Refresh button runs the same pull on demand (`mailbox/check_mail`
+API action) before re-reading the list, so a user waiting on a message waits on
+one click, not on the cron interval. A per-relay advisory try-lock inside
+`RelaySpoolConsumer::pull()` keeps a click and the scheduled pass from racing
+(the loser reports `skipped`), and a short cooldown on the relay's last-pull
+time absorbs rapid clicking. On a direct-MX deployment the relay lane is a fast
+no-op — mail is pushed at SMTP time and there is nothing to pull.
+
+`check_mail` covers the other pull lane too: it fetches the enabled IMAP feeds
+bound to the viewer's accessible mailboxes (`ImapFetch::run` — the same full
+cycle the scheduled poller runs), bypassing each account's poll interval.
+Most-starved accounts go first, a few per click, and an atomic 15-second claim
+on each account's last-poll time collapses rapid clicks to one fetch; the
+per-account advisory fetch lock inside `ImapIngestor::poll()` keeps a click
+and the scheduled poller off the same account at once.
 
 Degradation is safe: relay down → senders' MTAs retry for days; tunnel down → the
 relay keeps spooling sealed blobs until the next pull. Neither loses mail.
@@ -3579,6 +3595,11 @@ The **PollImapAccounts** scheduled task is the heartbeat. It runs every cron pas
 (`every_run`) as a **floor**; each account's own `iia_poll_interval_seconds`
 (default 300) is the **actual cadence** — the task self-throttles per account, and
 claims each account with an atomic stamp so two runs can't race the same cursor.
+Two on-demand paths sit beside it, both running the same `ImapFetch::run` cycle:
+the reader's Refresh button (`mailbox/check_mail`, the viewer's own feeds) and
+the admin **Fetch now** row action. Every path funnels through the per-account
+advisory fetch lock inside `ImapIngestor::poll()`, so concurrent fetches on one
+account fail fast rather than racing the cursors.
 **Existing mail** is a per-mailbox choice (`iia_import_scope`) on the feed
 editor — how far back into the source the feed reaches:
 - **Future only** (default) — the cursor seeds to the folder's current high UID,
