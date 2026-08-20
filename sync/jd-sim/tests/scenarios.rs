@@ -1577,6 +1577,143 @@ fn a_file_dropped_into_a_vault_folder_never_leaves_as_plaintext() {
     assert_nothing_lost(&world, &committed);
 }
 
+/// A chunk corrupted on the way up never becomes a file nobody can open.
+///
+/// Encryption removes the check that catches this everywhere else. A plaintext
+/// upload declares its content hash and the server refuses the assembled bytes
+/// if they do not match; an encrypted one used to declare nothing, on the
+/// reasoning that a plaintext hash would tell the server what it is holding and
+/// would collide with somebody else's file in the dedup table. Both are true of
+/// the PLAINTEXT hash. The ciphertext's gives away nothing the server does not
+/// already have and can collide with nothing, because every encryption uses
+/// fresh IVs.
+///
+/// Without it the failure is total and silent: the file lands, it lists, every
+/// device agrees it is there, and not one of them can ever open it. The vault
+/// sweep found this on 389 of 400 hostile seeds, each device retrying a
+/// download some three hundred times and reporting only that decryption failed.
+#[test]
+fn a_corrupted_chunk_never_becomes_an_encrypted_file_nobody_can_open() {
+    let vault = SimVault::new(9_301);
+    let mut world = World::new(9_301, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    // Every chunk arrives wrong. The upload cannot succeed, and the whole
+    // question is what it leaves behind when it does not.
+    world.device("laptop").net.set_faults(NetFaults {
+        corrupt_chunk: 1000,
+        ..NetFaults::none()
+    });
+    let body = b"a memo whose bytes are mangled on every attempt";
+    world.device("laptop").fs.user_write("Private/memo.txt", body);
+    world.settle();
+
+    jd_sim::scenario::assert_the_vault_opens(&world);
+
+    // And the local file is untouched -- a refused upload is not a lost file.
+    assert_eq!(
+        disk_tree(world.device("laptop"))
+            .get("Private/memo.txt")
+            .cloned()
+            .flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the user's file should still be exactly where they put it"
+    );
+}
+
+/// A lost answer at the end of an encrypted upload does not make a second file.
+///
+/// What stops a lost completion answer from duplicating a file is dedup at
+/// init: the retry declares the same content hash, the server recognizes bytes
+/// it already has, and answers with the file rather than taking a second copy.
+/// An encrypted upload never takes that path -- dedup is skipped for a vault
+/// destination, and could not work anyway, because a retry re-encrypts with
+/// fresh IVs and so declares a hash the server has never seen.
+///
+/// So the retry runs the whole upload again against a server that already did
+/// it. Inside a vault nothing downstream catches the result: the stored title
+/// is a per-file opaque id, unique by construction, so the two copies do not
+/// even collide by name. The user gets two files called `notes.txt` in one
+/// folder, on every device, and no device can put both of them at that path.
+#[test]
+fn a_lost_completion_answer_does_not_duplicate_an_encrypted_file() {
+    let vault = SimVault::new(9_302);
+    let mut world = World::new(9_302, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should arrive");
+
+    world.device("laptop").net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_upload_complete".into()),
+        ..NetFaults::none()
+    });
+    let body = b"a note whose upload lands and whose answer does not come back";
+    world.device("laptop").fs.user_write("Private/notes.txt", body);
+    assert!(world.settle().is_some(), "it should settle");
+
+    // The fault has to have fired, or this proves nothing: a test that passes
+    // because nothing happened is worse than no test.
+    assert_eq!(
+        world.device("laptop").net.stats().dropped_after,
+        1,
+        "the completion answer should have been lost exactly once"
+    );
+
+    let names: Vec<String> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| jd_sim::scenario::what_the_vault_really_holds(&world, f).map(|(n, _)| n))
+        .collect();
+    assert_eq!(
+        names,
+        vec!["notes.txt".to_string()],
+        "one upload should leave one file -- the answer was lost, not the bytes"
+    );
+}
+
+/// The same fault on a plaintext upload, which is the control.
+///
+/// This is what dedup at init buys, and having it beside the encrypted case is
+/// what makes the difference between them a finding rather than an assumption.
+#[test]
+fn a_lost_completion_answer_does_not_duplicate_a_plaintext_file() {
+    let mut world = World::new(9_303, &["laptop"]);
+    world.server.seed_folder(None, "Work");
+    assert!(world.settle().is_some(), "the folder should arrive");
+
+    world.device("laptop").net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_upload_complete".into()),
+        ..NetFaults::none()
+    });
+    let body = b"an ordinary note whose answer goes missing";
+    world.device("laptop").fs.user_write("Work/notes.txt", body);
+    assert!(world.settle().is_some(), "it should settle");
+
+    assert_eq!(
+        world.device("laptop").net.stats().dropped_after,
+        1,
+        "the completion answer should have been lost exactly once"
+    );
+
+    let names: Vec<String> = world
+        .server
+        .tree()
+        .into_iter()
+        .filter(|(_, hash)| hash.is_some())
+        .map(|(path, _)| path)
+        .collect();
+    assert_eq!(
+        names,
+        vec!["Work/notes.txt".to_string()],
+        "one upload should leave one file"
+    );
+}
+
 /// Two computers, one vault: what one encrypts the other can read.
 ///
 /// The round trip is the real test of the format. A client that encrypts and

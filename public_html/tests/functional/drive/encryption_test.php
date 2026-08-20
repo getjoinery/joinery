@@ -175,6 +175,53 @@ $mv2 = api_request('POST', '/api/v1/action/drive_move', $H, array(
 ));
 check(!empty($mv2['json']['error']), 'plaintext file rejected moving into a vault');
 
+// Both refusals say WHY in a field, not only in English. A sync client cannot
+// convert the file for itself either -- it has to re-upload at the destination
+// and trash the source -- and it can only decide to do that if it can tell this
+// refusal apart from a name clash or a trashed parent.
+check(($mv1['json']['data']['reason'] ?? '') === 'protection_boundary',
+	'the refusal names the boundary in a field a client can read');
+check(($mv2['json']['data']['reason'] ?? '') === 'protection_boundary',
+	'and so does the refusal in the other direction');
+
+// A vault folder is a top-level tree, so the root always takes it back. It can
+// be put inside another vault, and it has to be able to come out again: the
+// root converts nothing, because a folder carries its own level wherever it
+// goes. Reading the root as Standard made this look like a conversion and
+// refused it, which left a nested vault stuck there permanently.
+$outer = api_request('POST', '/api/v1/action/drive_folder_create', $H, array(
+	'name' => 'OuterVault_' . bin2hex(random_bytes(3)), 'encrypted' => true,
+));
+$outer_id = (int)($outer['json']['data']['folder']['id'] ?? 0);
+if ($outer_id) { $made_folders[] = $outer_id; }
+$inner = api_request('POST', '/api/v1/action/drive_folder_create', $H, array(
+	'name' => 'InnerVault_' . bin2hex(random_bytes(3)), 'encrypted' => true,
+));
+$inner_id = (int)($inner['json']['data']['folder']['id'] ?? 0);
+if ($inner_id) { $made_folders[] = $inner_id; }
+check($outer_id > 0 && $inner_id > 0, 'two vault folders at the root');
+
+$mv_in = api_request('POST', '/api/v1/action/drive_move', $H, array(
+	'entity_type' => 'folder', 'entity_id' => $inner_id, 'parent_id' => $outer_id,
+));
+check(empty($mv_in['json']['error']), 'a vault folder moves inside another vault');
+check((int)(new Folder($inner_id, true))->get('fol_parent_folder_id') === $outer_id, 'and it landed there');
+
+$mv_out = api_request('POST', '/api/v1/action/drive_move', $H, array(
+	'entity_type' => 'folder', 'entity_id' => $inner_id, 'parent_id' => 0,
+));
+check(empty($mv_out['json']['error']), 'and it can come back out to the root');
+$back = new Folder($inner_id, true);
+check($back->get('fol_parent_folder_id') === null, 'the nested vault is at the root again');
+check(DriveHelper::folder_is_encrypted($back), 'and the root did not change what it is');
+
+// The other direction is still refused: the root is not a vault, so a vault
+// folder cannot take a plaintext one in, and a vault folder cannot sit in one.
+$mv_bad = api_request('POST', '/api/v1/action/drive_move', $H, array(
+	'entity_type' => 'folder', 'entity_id' => $inner_id, 'parent_id' => (int)$plain_folder->key,
+));
+check(!empty($mv_bad['json']['error']), 'a vault folder still cannot sit inside a plaintext one');
+
 // ---------------------------------------------------------------------------
 section('API: rename — encrypted files rename via their metadata');
 
@@ -287,6 +334,38 @@ if (!$grp_id) {
 
 	$put = harness_put_chunk('/api/v1/drive_upload/' . $token, $H, 'bytes 0-' . (strlen($cipher) - 1) . '/' . strlen($cipher), $cipher);
 	check($put['status'] === 200, 'ciphertext chunk accepted');
+
+	// An encrypted upload may declare a hash, and it is the CIPHERTEXT's. The
+	// plaintext's could never be sent -- it would tell the server what it is
+	// holding, and dedup matches on it -- but without any hash at all an
+	// encrypted upload has no integrity check, and a chunk corrupted on the way
+	// up becomes a file no device can ever open. So the sync client sends this
+	// one, and the server has to be checking it.
+	$bad_cipher = random_bytes(2048);
+	$bad_init = api_request('POST', '/api/v1/action/drive_upload_init', $H, array(
+		'name' => 'enc-' . bin2hex(random_bytes(8)), 'size_bytes' => strlen($bad_cipher),
+		'sha256' => hash('sha256', $bad_cipher),
+		'mime_type' => 'application/octet-stream', 'folder_id' => $efolder_id,
+	));
+	$bad_token = $bad_init['json']['data']['upload_token'] ?? '';
+	check($bad_token !== '', 'an encrypted upload may declare its ciphertext hash');
+	check(empty($bad_init['json']['data']['deduped']), 'and declaring one still never dedups an encrypted upload');
+	if ($bad_token !== '') {
+		// The bytes that arrive are not the bytes that were promised.
+		$mangled = $bad_cipher;
+		$mangled[0] = chr(ord($mangled[0]) ^ 0xFF);
+		harness_put_chunk('/api/v1/drive_upload/' . $bad_token, $H,
+			'bytes 0-' . (strlen($mangled) - 1) . '/' . strlen($mangled), $mangled);
+		$bad_done = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
+			'upload_token' => $bad_token,
+			'encrypted_metadata' => base64_encode(random_bytes(48)),
+			'wrapped_file_keys' => array((string)$owner->key => base64_encode(random_bytes(80))),
+		));
+		check(!empty($bad_done['json']['error']), 'corrupted ciphertext is refused against the declared hash');
+		$landed = (int)($bad_done['json']['data']['file']['id'] ?? 0);
+		check($landed === 0, 'and no file was created from it');
+		$dblink->prepare("DELETE FROM fup_file_uploads WHERE fup_token_sha256 = ?")->execute(array(hash('sha256', $bad_token)));
+	}
 
 	$complete = api_request('POST', '/api/v1/action/drive_upload_complete', $H, array(
 		'upload_token' => $token,

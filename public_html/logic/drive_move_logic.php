@@ -75,14 +75,32 @@ function drive_move_logic(array $input): LogicResult {
 	// A protected folder may still move to the root (a protected tree is a
 	// top-level tree).
 	require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));
-	$dest_level = ($parent_id > 0) ? DriveHelper::folder_level($target) : ProtectionLevel::STANDARD;
+	$item_level = ($entity_type === DriveHelper::ENTITY_FILE)
+		? $entity->protection_level()
+		: DriveHelper::folder_level($entity);
+	// A FOLDER carries its own level wherever it goes, and the root imposes no
+	// floor on it -- a protected tree is a top-level tree, which is the shape a
+	// vault is created in to begin with. Reading the root as Standard made
+	// moving one back to the top look like a conversion and refused it, so a
+	// vault folder that had been put inside another vault could never come out
+	// again.
+	//
+	// A FILE is the opposite, and the asymmetry is deliberate: a file's
+	// protection comes from the folder holding it, so at the root there is
+	// nothing to hold it. An encrypted file cannot be created at the root, and
+	// must not arrive there by being moved -- every sync client reads a file's
+	// encryption from its parent, so one loose at the root reads as plaintext
+	// on every device that sees it.
+	$dest_level = ($parent_id > 0)
+		? DriveHelper::folder_level($target)
+		: (($entity_type === DriveHelper::ENTITY_FOLDER) ? $item_level : ProtectionLevel::STANDARD);
 	$convert_file_to = null;
 
 	if ($entity_type === DriveHelper::ENTITY_FILE) {
-		$item_level = $entity->protection_level();
 		if ($item_level !== $dest_level) {
 			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
-				return LogicResult::error('Move a Fortress file by re-uploading it; only your browser can convert it.');
+				return LogicResult::error('Move a Fortress file by re-uploading it; only your browser can convert it.',
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
 			}
 			$plain_bytes = $entity->plain_size_bytes();
 			if ($plain_bytes > DriveSealed::TRANSITION_BYTE_BUDGET) {
@@ -109,12 +127,10 @@ function drive_move_logic(array $input): LogicResult {
 			$convert_file_to = $dest_level;
 		}
 	} else {
-		$item_level = DriveHelper::folder_level($entity);
 		if ($item_level !== $dest_level) {
 			if ($item_level === ProtectionLevel::FORTRESS || $dest_level === ProtectionLevel::FORTRESS) {
-				return LogicResult::error($parent_id > 0
-					? 'A Fortress folder can only sit at the Drive root or inside another Fortress folder.'
-					: 'That folder can\'t move here.');
+				return LogicResult::error('A Fortress folder can only sit at the Drive root or inside another Fortress folder.',
+					array('reason' => 'protection_boundary', 'folder_id' => (int)$parent_id));
 			}
 			// Standard <-> Private for a whole subtree is the level change, not a
 			// move: it is byte work with a receipt, and silently starting it from

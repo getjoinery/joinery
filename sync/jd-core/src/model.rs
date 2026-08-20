@@ -190,6 +190,27 @@ impl Entry {
             .unwrap_or(&self.local_placement().name)
     }
 
+    /// Is this entry holding a file on this computer, or is it only recording
+    /// where one would go?
+    ///
+    /// The three statuses that answer no are the ones where the device has
+    /// already told the user, by name, that it will not be materializing this
+    /// here: a name the filesystem cannot hold, an encrypted file whose key has
+    /// not arrived, and a subtree the user took out of scope. Such an entry
+    /// still records a placement -- that is how it says what it is waiting for
+    /// -- but no bytes of its are at that path and none ever were.
+    ///
+    /// The distinction matters wherever one entry asks whether a path belongs
+    /// to another. `PendingDownload` deliberately answers yes: those bytes are
+    /// on their way to that path, and letting something else take it in the
+    /// meantime is how two files end up fighting over one slot.
+    pub fn holds_a_local_file(&self) -> bool {
+        !matches!(
+            self.status,
+            LocalStatus::Unsyncable(_) | LocalStatus::PendingKey | LocalStatus::OutOfScope
+        )
+    }
+
     /// Has this entry ever completed a sync? A `None` last-agreed state means
     /// it has not, which is why a brand-new entry can never be read as "the
     /// other side deleted it".

@@ -86,6 +86,28 @@ struct ChangeRow {
     actor: Option<String>,
 }
 
+/// One encrypted file as the server holds it, with everything a holder of the
+/// key needs to see it the way its owner does.
+///
+/// The server's own view of a vault is not comparable with a disk: the title is
+/// a placeholder, the hash is of ciphertext, and the real name is inside a blob
+/// it cannot open. Anything asserting that the two sides agree has to translate
+/// one into the other first, and this is what it translates from.
+#[derive(Debug, Clone)]
+pub struct VaultFile {
+    pub id: i64,
+    /// The folder it sits in, as a path. Empty for the drive root. Folder names
+    /// inside a vault are plaintext on the server by design, so this needs no
+    /// translating.
+    pub folder_path: String,
+    /// The opaque title the server stores, never the user's name.
+    pub placeholder: String,
+    pub wrapped_file_key: Option<String>,
+    pub encrypted_metadata: Option<String>,
+    /// The bytes of its current version, as stored.
+    pub ciphertext: Option<Vec<u8>>,
+}
+
 /// One encrypted file's every stored version, with what it takes to read them.
 #[derive(Debug, Clone)]
 pub struct EncryptedContent {
@@ -242,6 +264,37 @@ fn file_trashed(file_id: i64) -> ApiRefusal {
         errortype: "ActionError",
         message: "That file is in the trash.".into(),
         data: serde_json::json!({ "reason": "file_trashed", "file_id": file_id }),
+    }
+}
+
+/// The move would carry something across the edge of a vault.
+///
+/// The server holds no key, so it cannot turn plaintext into ciphertext or back
+/// again -- which means a file cannot change protection level by being moved.
+/// The real server says so outright (`drive_move_logic`: "Move a Fortress file
+/// by re-uploading it; only your browser can convert it", and for a folder "A
+/// Fortress folder can only sit at the Drive root or inside another Fortress
+/// folder"), and the crossing is done by re-uploading at the destination and
+/// trashing the source.
+///
+/// The mock had no such rule and took the move. Both directions were silent
+/// and both are the failure the encrypted design exists to prevent: a plaintext
+/// file with its real name sitting inside a vault, or ciphertext nobody can
+/// open sitting outside one. Nothing in a tree, a listing or a convergence
+/// check would have shown either.
+fn protection_boundary(entity_type: &str, folder_id: Option<i64>) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: if entity_type == "folder" {
+            "A vault folder can only sit at the drive root or inside another vault folder.".into()
+        } else {
+            "Move a vault file by re-uploading it; only a key holder can convert it.".to_string()
+        },
+        data: serde_json::json!({
+            "reason": "protection_boundary",
+            "folder_id": folder_id,
+        }),
     }
 }
 
@@ -600,6 +653,83 @@ impl MockServer {
         }
     }
 
+    /// Every live encrypted file, in a shape something holding the key can read.
+    pub fn vault_files(&self) -> Vec<VaultFile> {
+        let st = self.state.lock().unwrap();
+        let mut out = Vec::new();
+        for f in st.files.values() {
+            if f.trashed || !f.encrypted {
+                continue;
+            }
+            let folder_path = match f.folder {
+                None => Some(String::new()),
+                Some(p) => Self::folder_path(&st, p),
+            };
+            let Some(folder_path) = folder_path else {
+                continue;
+            };
+            out.push(VaultFile {
+                id: f.id,
+                folder_path,
+                placeholder: f.name.clone(),
+                wrapped_file_key: f.wrapped_file_key.clone(),
+                encrypted_metadata: f.encrypted_metadata.clone(),
+                ciphertext: st.blobs.get(&f.sha256).cloned(),
+            });
+        }
+        out.sort_by_key(|f| f.id);
+        out
+    }
+
+    /// Every live thing sitting inside a vault that the server can nonetheless
+    /// read.
+    ///
+    /// The leak the whole encrypted design is arranged around, put as a question
+    /// a harness can ask: is there anything under an encrypted folder whose
+    /// bytes and whose name the server holds in the clear? A file is flagged
+    /// encrypted at upload time from its destination folder, so the only ways
+    /// into this list are a client that put plaintext where a vault was, or a
+    /// server path that carried something across the boundary without
+    /// converting it. Both are silent -- the tree looks right, every device
+    /// agrees it is synced, and the user's private folder is private to nobody.
+    pub fn plaintext_inside_a_vault(&self) -> Vec<String> {
+        let st = self.state.lock().unwrap();
+        let mut out = Vec::new();
+        for f in st.files.values() {
+            if f.trashed || f.encrypted {
+                continue;
+            }
+            if Self::inside_a_vault(&st, f.folder) {
+                out.push(format!("file {} in the clear, named {}", f.id, f.name));
+            }
+        }
+        for f in st.folders.values() {
+            if f.trashed || f.encrypted {
+                continue;
+            }
+            if Self::inside_a_vault(&st, f.parent) {
+                out.push(format!("folder {} not marked encrypted, named {}", f.id, f.name));
+            }
+        }
+        out.sort();
+        out
+    }
+
+    /// Does this parent chain reach an encrypted folder?
+    fn inside_a_vault(st: &ServerState, mut parent: Option<i64>) -> bool {
+        for _ in 0..256 {
+            let Some(id) = parent else { return false };
+            let Some(f) = st.folders.get(&id) else {
+                return false;
+            };
+            if f.encrypted {
+                return true;
+            }
+            parent = f.parent;
+        }
+        false
+    }
+
     /// Seed an encrypted vault folder.
     pub fn seed_encrypted_folder(&self, parent: Option<i64>, name: &str) -> i64 {
         let id = self.seed_folder(parent, name);
@@ -615,6 +745,16 @@ impl MockServer {
         st.next_folder_id += 1;
         let id = st.next_folder_id;
         Self::record(&mut st, "folder", id, "created");
+        // Inherited from the parent, exactly as `drive_folder_create` does it.
+        // Seeding was the one way to make a folder, and it always made a
+        // plaintext one -- so a scenario that put a subfolder inside a vault got
+        // a folder the server thought was ordinary, holding files it would then
+        // store in the clear. A state the real server cannot be talked into, and
+        // one every check would have called correct.
+        let encrypted = parent
+            .and_then(|p| st.folders.get(&p))
+            .map(|f| f.encrypted)
+            .unwrap_or(false);
         st.folders.insert(
             id,
             FolderRow {
@@ -622,7 +762,7 @@ impl MockServer {
                 parent,
                 name: name.to_string(),
                 trashed: false,
-                encrypted: false,
+                encrypted,
             },
         );
         id
@@ -1029,6 +1169,29 @@ impl MockServer {
                 Some(_) => {}
             }
         }
+        // Encryption is a property of where a thing lives, and the server
+        // cannot change it: no key, no conversion. So the level of the
+        // destination has to match the level of what is arriving, or the move
+        // is refused and the client makes the crossing itself.
+        let dest_encrypted = dest
+            .and_then(|d| st.folders.get(&d))
+            .map(|f| f.encrypted)
+            .unwrap_or(false);
+        let item_encrypted = if t == "folder" {
+            match st.folders.get(&id) {
+                Some(f) => f.encrypted,
+                None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+            }
+        } else {
+            match st.files.get(&id) {
+                Some(f) => f.encrypted,
+                None => return Err(refuse(404, "NotFound", "That file does not exist.")),
+            }
+        };
+        if item_encrypted != dest_encrypted {
+            return Err(protection_boundary(t, dest));
+        }
+
         // Something of that name is already living there. The real server
         // refuses this — `drive_move_logic` checks `folder_name_taken` and
         // `file_name_taken` against the destination and answers `name_taken`,
@@ -1230,18 +1393,20 @@ impl MockServer {
                 "name and size_bytes are required.",
             ));
         }
-        // A plaintext upload declares its hash so the dedup short-circuit can
-        // fire. An encrypted one must not: its ciphertext is unique per file, so
-        // a hash could only ever match somebody else's bytes by accident, and
-        // the short-circuit path carries neither metadata nor keys.
+        // A hash is what the assembled upload is checked against at completion,
+        // and an ENCRYPTED upload declares one too -- of its ciphertext. The
+        // mock refused one outright, reasoning from dedup: a ciphertext hash is
+        // unique per encryption and could only match somebody else's bytes by
+        // accident. That is true of DEDUP and was applied to the whole hash, so
+        // encrypted uploads arrived with nothing to check them against and
+        // corrupt bytes were stored permanently -- unreadable to every device
+        // for ever, reported only as "decryption failed". The real server never
+        // had that rule: `drive_upload_init_logic` skips the dedup lookup for a
+        // vault destination and records `fup_expected_sha256` regardless.
+        //
+        // So the guard belongs on the dedup short-circuit alone, which is where
+        // it is below.
         if encrypted {
-            if !sha.is_empty() {
-                return Err(refuse(
-                    400,
-                    "ValidationError",
-                    "An encrypted upload does not declare a content hash.",
-                ));
-            }
             if body.get("modified_time").is_some() {
                 return Err(refuse(
                     400,
@@ -1366,10 +1531,10 @@ impl MockServer {
         // wrong file is exactly what this catches, and it is the last place it
         // can be caught before it becomes the user's data.
         let actual = sha256_hex(&session.received);
-        if session.encrypted {
-            // Nothing was declared, so nothing can be checked against a claim.
-            // The hash still has to exist — it is how the blob is addressed —
-            // so it is taken from the bytes that actually arrived.
+        if session.sha256.is_empty() {
+            // Nothing was declared, so there is nothing to check against. The
+            // hash still has to exist — it is how the blob is addressed — so it
+            // is taken from the bytes that actually arrived.
             if let Some(s) = st.uploads.get_mut(&token) {
                 s.sha256 = actual.clone();
             }
@@ -1383,7 +1548,11 @@ impl MockServer {
                 return Err(file_trashed(id));
             }
         }
-        if !session.encrypted && actual != session.sha256 {
+        // Checked whenever one was declared, encrypted or not, exactly as
+        // `drive_upload_complete_logic` checks `fup_expected_sha256`. Skipping
+        // it for encrypted uploads left them with no integrity check at all,
+        // and a corrupted chunk then became a file no device could ever open.
+        if !session.sha256.is_empty() && actual != session.sha256 {
             st.uploads.remove(&token);
             return Err(refuse(
                 400,

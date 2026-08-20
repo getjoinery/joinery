@@ -1666,6 +1666,203 @@ fn a_create_retried_after_its_answer_was_lost_does_not_revive_a_deleted_folder()
     );
 }
 
+/// A parked entry does not own the path it is parked over.
+///
+/// Two files in one folder can end up wanting one name. The device materializes
+/// one and parks the other, saying so by name -- and the parked one keeps
+/// recording the placement it is waiting for, because that is how it says what
+/// it is waiting for. It holds no bytes there and never did.
+///
+/// Reading that record as ownership deadlocks the file that DID win the name.
+/// Its upload skips every candidate path as somebody else's, finds the file
+/// nowhere, is called overtaken and dropped without touching the entry -- and
+/// the next pass plans exactly the same upload, because the disk still differs
+/// from what was last agreed. Nothing fails, nothing queues, no issue is
+/// raised, and the device never goes quiet again. The vault sweep found it as
+/// seed 70119: one device replanning the same UploadVersion for four hundred
+/// rounds while every tree in the world already matched.
+///
+/// A vault is what makes it ordinary rather than exotic. The server enforces
+/// name uniqueness on the stored title, and an encrypted file's title is an
+/// opaque per-file identifier -- so two files in one vault folder whose real
+/// names are both `slot-2.dat` are a state the server cannot see, let alone
+/// refuse.
+#[test]
+fn a_parked_entry_does_not_own_the_path_it_is_parked_over() {
+    let (_clock, server, device) = world();
+    let body = b"the bytes that won the name";
+    device.fs.user_write("slot-2.dat", body);
+
+    // The winner: a real server file, materialized here, whose bytes have since
+    // changed on this disk.
+    let winner = EntityId::file(server.seed_file(None, "slot-2.dat", b"what the server still has"));
+    let mut w = fresh(winner, None, "slot-2.dat", LocalStatus::Synced);
+    w.synced_placement = Some(Placement {
+        parent: None,
+        name: "slot-2.dat".into(),
+    });
+    device.store.put_entry(&w).unwrap();
+
+    // The rival: a different server file that wants the same name here, parked
+    // because this device can only put one file at one path.
+    let rival = EntityId::file(server.seed_file(None, "slot-2.dat", b"the other file entirely"));
+    let mut r = fresh(
+        rival,
+        None,
+        "slot-2.dat",
+        LocalStatus::Unsyncable(jd_vfs::UnsyncableReason::DuplicateName {
+            with: "slot-2.dat".into(),
+        }),
+    );
+    r.synced_placement = Some(Placement {
+        parent: None,
+        name: "slot-2.dat".into(),
+    });
+    device.store.put_entry(&r).unwrap();
+
+    let report = do_one(&device, winner, Action::UploadVersion);
+    assert_eq!(
+        (report.done, report.overtaken),
+        (1, 0),
+        "the upload had to go through; the parked rival holds nothing at that path"
+    );
+    assert_eq!(
+        server.blob(&sha256_hex(body)).map(|b| b.len()),
+        Some(body.len()),
+        "the new bytes should be on the server"
+    );
+
+    // And the rival is untouched -- it is still parked, still waiting, and its
+    // own server file was not overwritten by somebody else's bytes.
+    let still = device.store.get_entry(rival).unwrap().expect("rival kept");
+    assert!(
+        matches!(still.status, LocalStatus::Unsyncable(_)),
+        "the rival is still parked, got {:?}",
+        still.status
+    );
+}
+
+/// A file another entry is genuinely holding is still off limits.
+///
+/// The counterpart of the test above, and the reason it has to say `parked`
+/// rather than `any other entry`: an entry that is materialized, or has a
+/// download on its way to that path, really does own it. Sending those bytes up
+/// under this entry's identity would put one file on the server twice, which is
+/// invisible once done.
+#[test]
+fn a_path_another_entry_is_really_holding_is_still_not_ours() {
+    let (_clock, server, device) = world();
+    device.fs.user_write("slot-2.dat", b"bytes that belong to the holder");
+
+    let holder = EntityId::file(server.seed_file(None, "slot-2.dat", b"the holder's server copy"));
+    let mut h = fresh(holder, None, "slot-2.dat", LocalStatus::Synced);
+    h.synced_placement = Some(Placement {
+        parent: None,
+        name: "slot-2.dat".into(),
+    });
+    device.store.put_entry(&h).unwrap();
+
+    // A second entry with no file of its own, whose agreement points at the
+    // same path. It must not send the holder's bytes up as its own.
+    let interloper = EntityId::file(server.seed_file(None, "elsewhere.dat", b"a different file"));
+    let mut i = fresh(interloper, None, "slot-2.dat", LocalStatus::Synced);
+    i.synced_placement = Some(Placement {
+        parent: None,
+        name: "slot-2.dat".into(),
+    });
+    device.store.put_entry(&i).unwrap();
+
+    let before = server.all_versions().len();
+    let report = do_one(&device, interloper, Action::UploadVersion);
+    assert_eq!(
+        (report.done, report.overtaken),
+        (0, 1),
+        "it must not claim a path another entry is holding"
+    );
+    assert_eq!(
+        server.all_versions().len(),
+        before,
+        "and nothing new should have been committed"
+    );
+}
+
+/// Nothing crosses the edge of a vault by being moved.
+///
+/// The server holds no key, so it cannot encrypt or decrypt anything -- which
+/// makes a move across that edge a request it can only refuse. The real server
+/// does (`drive_move_logic` answers before the write, in both directions and
+/// for both files and folders); the mock did not, and took the write.
+///
+/// What that hid is the whole point of the encrypted design. A plaintext file
+/// carried INTO a vault sits there with its real name and its readable bytes,
+/// inside the folder the user believes is the private one. An encrypted file
+/// carried OUT sits in an ordinary folder as ciphertext under a placeholder
+/// name, which no device without the key can ever open. Neither shows up in a
+/// tree, a listing, or a convergence check: everything agrees, and the file is
+/// wrong.
+#[test]
+fn nothing_crosses_the_edge_of_a_vault_by_being_moved() {
+    let (_clock, server, _device) = world();
+    let vault = server.seed_encrypted_folder(None, "Private");
+    let ordinary = server.seed_folder(None, "Work");
+    let plaintext = server.seed_file(Some(ordinary), "memo.txt", b"an ordinary memo");
+    let encrypted = server.seed_encrypted_file(Some(vault), "enc-abc", b"\x00ciphertext\x7f");
+
+    let refused = |entity_type: &str, entity_id: i64, into: Option<i64>| {
+        let answer = server.action(
+            "drive_move",
+            &serde_json::json!({
+                "entity_type": entity_type,
+                "entity_id": entity_id,
+                "parent_id": into,
+            }),
+        );
+        let err = answer.expect_err("the server must refuse a move across a vault edge");
+        assert_eq!(
+            err.data.get("reason").and_then(|r| r.as_str()),
+            Some("protection_boundary"),
+            "the refusal has to be one a client can act on, got: {err:?}"
+        );
+    };
+
+    refused("file", plaintext, Some(vault));
+    refused("file", encrypted, Some(ordinary));
+    refused("file", encrypted, None);
+    refused("folder", vault, Some(ordinary));
+
+    // A vault folder may still sit at the drive root, and moving WITHIN one
+    // side of the edge is an ordinary move that has to keep working.
+    let inner = server.seed_folder(Some(vault), "Notes");
+    server
+        .action(
+            "drive_move",
+            &serde_json::json!({ "entity_type": "file", "entity_id": encrypted, "parent_id": inner }),
+        )
+        .expect("a move inside the vault is ordinary");
+    server
+        .action(
+            "drive_move",
+            &serde_json::json!({ "entity_type": "file", "entity_id": plaintext, "parent_id": null }),
+        )
+        .expect("a move between plaintext folders is ordinary");
+    assert!(
+        server.plaintext_inside_a_vault().is_empty(),
+        "nothing readable should have reached the vault: {:?}",
+        server.plaintext_inside_a_vault()
+    );
+
+    // And the detector that says so is not vacuous. Every route the API offers
+    // now refuses to produce this state, so the only way to check the check is
+    // to reach past the API and build it -- a readable file, under its real
+    // name, inside the vault.
+    server.seed_file(Some(vault), "tax-return.pdf", b"in the clear where it must not be");
+    let readable = server.plaintext_inside_a_vault();
+    assert!(
+        readable.iter().any(|r| r.contains("tax-return.pdf")),
+        "a readable file inside the vault has to be named, got: {readable:?}"
+    );
+}
+
 /// The server id of the live folder with this name, if there is one.
 fn folder_id_named(server: &MockServer, name: &str) -> Option<i64> {
     for id in 1..2000i64 {

@@ -44,8 +44,29 @@ use crate::vfs::MemFs;
 /// many of them because most attempts fail.
 pub const MAX_PASSES: usize = 400;
 
+/// What an ENCRYPTED world gets instead.
+///
+/// Every attempt at an encrypted upload re-encrypts the whole file and runs
+/// init, chunks and completion again, so under identical faults it needs
+/// materially more passes than the plaintext workload the budget above was
+/// tuned for. Four hostile vault seeds out of four hundred were reported as
+/// "never settled" on the smaller budget; all four settled on this one, with
+/// every tree already in agreement and a single upload still retrying against
+/// a transient network error.
+///
+/// That is the trap this constant exists to close: **running out of passes and
+/// being wedged arrive as the same failure**, and telling them apart is the
+/// first question worth asking about any of them. A seed that settles at a
+/// larger budget was never stuck.
+pub const MAX_PASSES_ENCRYPTED: usize = 2_000;
+
 /// A situation: a server, a clock, and the computers attached to it.
 pub struct World {
+    /// How many passes [`World::settle`] gives the fleet before calling it
+    /// stuck. `MAX_PASSES` by default; a vault world raises it to
+    /// [`MAX_PASSES_ENCRYPTED`]. `SETTLE_PASSES` overrides either, which is how
+    /// a "never settled" failure is told apart from a wedge in one command.
+    pub settle_passes: usize,
     pub clock: SimClock,
     pub server: MockServer,
     pub devices: Vec<Device>,
@@ -138,6 +159,10 @@ impl World {
             })
             .collect();
         World {
+            settle_passes: std::env::var("SETTLE_PASSES")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(MAX_PASSES),
             clock,
             server,
             devices,
@@ -419,7 +444,7 @@ impl World {
     /// is a failure worth reporting rather than a timeout to shrug at.
     pub fn settle(&self) -> Option<usize> {
         let mut quiet_rounds = 0;
-        for round in 1..=MAX_PASSES {
+        for round in 1..=self.settle_passes {
             let mut any_work = false;
             for device in &self.devices {
                 // Time moves between passes so backoffs elapse. Without this a
@@ -495,8 +520,162 @@ pub fn disk_tree(device: &Device) -> BTreeMap<String, Option<String>> {
 }
 
 /// The server's live tree in the same shape.
+///
+/// The SERVER's own view: an encrypted file appears here under the opaque title
+/// it stores, with the hash of its ciphertext. That is the right answer for
+/// anything asking what the server knows -- and the wrong one for anything
+/// comparing it with a disk, which is what [`owner_view_of_the_server`] is for.
 pub fn server_tree(server: &MockServer) -> BTreeMap<String, Option<String>> {
     server.tree()
+}
+
+/// The server's live tree as the holder of the vault key sees it.
+///
+/// Inside a vault the two sides of every comparison are in different languages.
+/// The server stores `enc-<content id>` where the user sees `budget.xlsx`, and
+/// the hash it answers with is of ciphertext that changes on every encryption
+/// while the plaintext underneath does not. Comparing those directly reports
+/// every encrypted file as missing from the disk AND present on the server, so
+/// a convergence check run over a vault fails identically whether the engine is
+/// perfect or broken -- which is to say it checks nothing.
+///
+/// So this translates: for each encrypted file, open its grant with a key this
+/// world holds, read the real name out of the metadata blob, and decrypt the
+/// current version to get a hash in the same domain as the disk's.
+///
+/// A file no key here opens is deliberately left under its stored name, so it
+/// shows up as an unexplained `enc-...` entry the disks do not have rather than
+/// quietly disappearing from the comparison. A vault whose key is gone is a
+/// loss, and the check should say so rather than excuse it.
+pub fn owner_view_of_the_server(world: &World) -> BTreeMap<String, Option<String>> {
+    let mut out = server_tree(&world.server);
+    for f in world.server.vault_files() {
+        let Some((name, hash)) = open_as_the_owner(world, &f) else {
+            continue;
+        };
+        let stored = join_path(&f.folder_path, &f.placeholder);
+        out.remove(&stored);
+        out.insert(join_path(&f.folder_path, &name), hash);
+    }
+    out
+}
+
+fn join_path(folder: &str, leaf: &str) -> String {
+    if folder.is_empty() {
+        leaf.to_string()
+    } else {
+        format!("{folder}/{leaf}")
+    }
+}
+
+/// One encrypted file's real name and plaintext hash, if any key in this world
+/// opens it.
+///
+/// The hash is `None` when the grant and the metadata open but the bytes do not
+/// -- a file whose key is right and whose content is not, which is a different
+/// failure from an unreadable file and deserves to read as one.
+/// What one encrypted file really is, for a diagnostic: the name and the
+/// content id its metadata blob carries.
+///
+/// The content id is the one that matters and the one nothing else shows. It is
+/// bound into every chunk as authenticated data, so a device holding a
+/// different one from the blob's decrypts nothing and says only "decryption
+/// failed" -- which reads as corruption and is not.
+pub fn what_the_vault_really_holds(
+    world: &World,
+    f: &crate::server::VaultFile,
+) -> Option<(String, String)> {
+    let wrapped = f.wrapped_file_key.as_deref()?;
+    let blob = f.encrypted_metadata.as_deref()?;
+    for vault in &world.vaults {
+        let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
+            wrapped,
+            &vault.secret_key_pkcs8,
+            &vault.public_key_b64,
+        ) else {
+            continue;
+        };
+        if let Ok(meta) = jd_crypto::drive::decrypt_metadata(blob, &file_key) {
+            return Some((meta.name, meta.cid));
+        }
+    }
+    None
+}
+
+/// Every encrypted file the server is holding that its owner cannot read.
+///
+/// The encrypted counterpart of the no-loss oracle, and it asks the only
+/// question that matters about a vault: is what came back the file? A grant
+/// that opens and metadata that decrypts prove nothing about the CONTENT --
+/// those travel in the completion body while the bytes go up in chunks, so a
+/// chunk corrupted on the way leaves a file with a perfect name, a perfect key,
+/// and ciphertext that authenticates against nothing.
+///
+/// Such a file is lost in the only sense that counts. It occupies a name, it
+/// lists, every device agrees it is there, and no device will ever open it --
+/// each one reporting, for ever, that decryption failed.
+pub fn vault_content_that_will_not_open(world: &World) -> Vec<String> {
+    let mut bad = Vec::new();
+    for f in world.server.vault_files() {
+        let Some((name, cid)) = what_the_vault_really_holds(world, &f) else {
+            // No key in this world opens the grant at all. A different problem
+            // -- and an ordinary state for a device that was never granted one
+            // -- so it is not this check's business.
+            continue;
+        };
+        let opened = f.wrapped_file_key.as_deref().and_then(|wrapped| {
+            world.vaults.iter().find_map(|vault| {
+                let key = jd_crypto::drive::open_wrapped_file_key(
+                    wrapped,
+                    &vault.secret_key_pkcs8,
+                    &vault.public_key_b64,
+                )
+                .ok()?;
+                let bytes = f.ciphertext.as_ref()?;
+                jd_crypto::drive::decrypt_content(bytes, &key, &cid).ok()
+            })
+        });
+        if opened.is_none() {
+            bad.push(format!("file {} ({name:?}) does not decrypt", f.id));
+        }
+    }
+    bad
+}
+
+/// The vault holds nothing its owner cannot read.
+pub fn assert_the_vault_opens(world: &World) {
+    let bad = vault_content_that_will_not_open(world);
+    assert!(
+        bad.is_empty(),
+        "the server is holding encrypted content no key in this world can open: {bad:?}"
+    );
+}
+
+fn open_as_the_owner(
+    world: &World,
+    f: &crate::server::VaultFile,
+) -> Option<(String, Option<String>)> {
+    let wrapped = f.wrapped_file_key.as_deref()?;
+    let blob = f.encrypted_metadata.as_deref()?;
+    for vault in &world.vaults {
+        let Ok(file_key) = jd_crypto::drive::open_wrapped_file_key(
+            wrapped,
+            &vault.secret_key_pkcs8,
+            &vault.public_key_b64,
+        ) else {
+            continue;
+        };
+        let Ok(meta) = jd_crypto::drive::decrypt_metadata(blob, &file_key) else {
+            continue;
+        };
+        let hash = f
+            .ciphertext
+            .as_ref()
+            .and_then(|c| jd_crypto::drive::decrypt_content(c, &file_key, &meta.cid).ok())
+            .map(|plain| crate::sha256_hex(&plain));
+        return Some((meta.name, hash));
+    }
+    None
 }
 
 /// Every device agrees with the server, and with each other.
@@ -509,7 +688,7 @@ pub fn assert_converged(world: &World) {
     // other way round, every one of these reads as an unexplained missing file
     // and sends you looking at transfers.
     assert_records_agree_with_the_server(world);
-    let server = server_tree(&world.server);
+    let server = owner_view_of_the_server(world);
     for device in &world.devices {
         let disk = disk_tree(device);
         // A volume that rewrites the spelling of a name holds one file where
