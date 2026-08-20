@@ -89,6 +89,25 @@ impl ProtoError {
             _ => false,
         }
     }
+
+    /// The folder a `parent_trashed` refusal names, when it names one.
+    ///
+    /// A client cannot infer this. The destination it sent may not be the one
+    /// its operation was planned with — a folder create re-resolves its parent
+    /// at the moment it runs — so the only trustworthy answer is the server's.
+    /// A refusal without a folder id is not evidence about any folder.
+    pub fn parent_trashed_folder_id(&self) -> Option<i64> {
+        if !self.parent_trashed() {
+            return None;
+        }
+        match self {
+            ProtoError::Api { data, .. } => data
+                .get("folder_id")
+                .and_then(Value::as_i64)
+                .filter(|id| *id > 0),
+            _ => None,
+        }
+    }
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]

@@ -240,17 +240,50 @@ rather than in the loader.
 The refusal exists because a live item under a trashed parent is invisible and
 permanent: no listing walks into a trashed folder, so no client can be told
 where the item lives, no user can see it to move or delete it, and it holds
-quota nobody can account for. The state arises from an ordinary two-device race
-— one device writes into a folder while another deletes it — and once the write
-is taken there is nothing to repair it. Sync clients treat the marker as
-`Overtaken` rather than a failure: the index walk carrying the delete also
-trashes their copy of the folder, and anything inside it the server never took
-is rescued out on the way.
+quota nobody can account for. A sync client told about one through the change
+feed is worse off still — it waits for a parent that will never arrive and
+never reports itself finished again. The state arises from an ordinary
+two-device race — one device writes into a folder while another deletes it —
+and once the write is taken there is nothing to repair it. Sync clients treat
+the marker as `Overtaken` rather than a failure: the index walk carrying the
+delete also trashes their copy of the folder, and anything inside it the server
+never took is rescued out on the way.
 
-`drive_upload_complete` discards the staged upload as it refuses, rather than
-leaving it to expire — the destination is gone and the transfer has nowhere
-left to land. `drive_restore` is not subject to the rule; restoring into a
-still-trashed parent re-roots the item instead.
+That first check is a fast fail, not the guarantee. It is made before the
+expensive part of the verb — quota, bytes, sealing, thumbnails, a
+protection-level conversion — and a folder trashed during that work would be
+marked deleted, sweep the children it could see, and finish before the new row
+landed underneath it. `DriveHelper::place_into($folder_id, $write)` closes that
+window: it takes a Postgres advisory lock keyed on the destination, re-reads the
+folder, refuses with `DriveDestinationTrashedException` if it went to the trash,
+and only then runs the write. `soft_delete_folder_cascade()` takes the same lock
+around marking a folder deleted and sweeping what is directly inside it. Two
+orderings remain and both are safe: the placement finishes first and the cascade
+sweeps what it made, or the cascade finishes first and the placement is refused.
+The cascade always takes a parent's lock before a child's, which is what keeps
+two overlapping cascades from deadlocking; `drive_upload_complete` takes the
+quota lock outside the placement lock, and nothing takes them the other way
+round.
+
+A file in the trash is not a place either. `drive_upload_init` and
+`drive_upload_complete` both refuse a new version of one, with
+`reason: file_trashed` and the file id. The row is hidden from every listing, so
+a version admitted into it is a save that reports success and shows nothing —
+bytes charged to quota that the owner cannot see, find, or delete. Coming back
+out of the trash is `drive_restore`'s job; a sync client whose edit beat
+somebody else's delete sends the rescued bytes up as a NEW file where the old
+one lived, which it can only do if this is refused. `drive_upload_complete`
+re-asks after `drive_upload_init` has already asked, because the file can go to
+the trash while the bytes are in flight.
+
+Each verb turns the exception into its own refusal, because each has cleanup
+only it knows about. `drive_upload_complete` discards the staged upload as it
+refuses, rather than leaving it to expire — the destination is gone and the
+transfer has nowhere left to land. `drive_restore` re-roots rather than refusing
+when the parent it is coming back to is already trashed; it holds the same lock
+over the write, so a parent trashed between the re-rooting decision and the
+write leaves the item safely in the trash instead of bringing it back
+invisible.
 
 One case the rule cannot reach, stated honestly: a Fortress file's `fil_title`
 is an opaque `enc-…` identifier and its real name lives inside encrypted

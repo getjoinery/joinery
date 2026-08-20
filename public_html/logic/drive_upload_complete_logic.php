@@ -97,6 +97,13 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			$up->discard();
 			return LogicResult::error('You can no longer update that file.');
 		}
+		// Trashed while the bytes were in flight — asked again here for the same
+		// reason the destination folder is: a version admitted into a hidden row
+		// is a save that reports success and shows nothing.
+		if ($target_file->get('fil_delete_time') !== null && $target_file->get('fil_delete_time') !== '') {
+			$up->discard();
+			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id));
+		}
 		$owner_id = (int)$target_file->get('fil_usr_user_id');
 		$level = $target_file->protection_level();
 	} elseif ($folder_id) {
@@ -110,7 +117,7 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			// rather than leave it to expire: the destination is gone and this
 			// transfer has nowhere left to land.
 			$up->discard();
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
 		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
 		$level = DriveHelper::folder_level($folder);
@@ -307,18 +314,29 @@ function drive_upload_complete_logic(array $input): LogicResult {
 			$restrictions['fil_content_modified_time'] = $modified_time;
 		}
 		try {
-			if ($sealed) {
-				// Server custody: the bytes are sealed on the way into the blob, so
-				// the plaintext never lands in the file store at all. The type is
-				// sniffed from the plaintext first (sniffing a container would read
-				// application/octet-stream forever), and the thumbnail is rendered
-				// while the plaintext is still on disk.
-				require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
-				VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
-				$file = DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
-			} else {
-				$file = File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
-			}
+			// The trashed-destination check near the top of this function is a
+			// fast fail, made before the bytes were touched. It is not the
+			// guarantee: quota, sealing and thumbnailing all run between there
+			// and here, and a folder trashed inside that window would leave this
+			// file live and unreachable underneath it. place_into re-asks the
+			// question with the destination held, so the cascade either sweeps
+			// this row or never starts.
+			$file = DriveHelper::place_into($folder_id, function () use ($sealed, $part, $name, $mime, $owner_id, $restrictions) {
+				if ($sealed) {
+					// Server custody: the bytes are sealed on the way into the blob, so
+					// the plaintext never lands in the file store at all. The type is
+					// sniffed from the plaintext first (sniffing a container would read
+					// application/octet-stream forever), and the thumbnail is rendered
+					// while the plaintext is still on disk.
+					require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
+					VaultUnlock::loadConsumerBootstraps(); // DriveSealed loads only through the loader
+					return DriveSealed::createSealedFile($part, $name, $mime, $owner_id, $restrictions);
+				}
+				return File::createFromUpload($part, $name, $mime, $owner_id, $restrictions);
+			});
+		} catch (DriveDestinationTrashedException $e) {
+			$up->discard();
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
 		} catch (DriveSealedException $e) {
 			$up->discard();
 			return LogicResult::error($e->getMessage());

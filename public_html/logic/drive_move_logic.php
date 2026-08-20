@@ -48,7 +48,7 @@ function drive_move_logic(array $input): LogicResult {
 			// Moving something into the trash is what drive_trash is for, and it
 			// records the move so a restore can undo it. Landing an item here
 			// instead would hide it with no record of where it came from.
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 		}
 		// Single-owner-tree rule: an item may only live under a folder owned by
 		// the item's owner. Without this, the destination owner's trash /
@@ -137,8 +137,19 @@ function drive_move_logic(array $input): LogicResult {
 		if (DriveHelper::folder_name_taken($owner_id, $parent_id, $entity->get('fol_name'), $entity_id)) {
 			return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
 		}
-		$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
-		if (!DriveHelper::save_folder_unless_name_taken($entity)) {
+		// Held against the destination going to the trash between the check at the
+		// top and the write here — the depth, cycle and name checks all run in
+		// between, and landing a subtree under a trashed folder would hide all of
+		// it at once.
+		try {
+			$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
+				$entity->set('fol_parent_folder_id', $parent_id > 0 ? $parent_id : null);
+				return DriveHelper::save_folder_unless_name_taken($entity);
+			});
+		} catch (DriveDestinationTrashedException $e) {
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+		}
+		if (!$saved) {
 			return LogicResult::error('A folder with that name already exists in the destination.', array('reason' => 'name_taken'));
 		}
 		$owner = $owner_id;
@@ -167,8 +178,17 @@ function drive_move_logic(array $input): LogicResult {
 			}
 			$entity = DriveHelper::load_file($entity_id);
 		}
-		$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
-		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+		// As above, and wider still for a file: the protection-level conversion
+		// between the check and here is byte work.
+		try {
+			$saved = DriveHelper::place_into($parent_id, function () use ($entity, $parent_id) {
+				$entity->set('fil_fol_folder_id', $parent_id > 0 ? $parent_id : null);
+				return DriveHelper::save_file_unless_name_taken($entity);
+			});
+		} catch (DriveDestinationTrashedException $e) {
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
+		}
+		if (!$saved) {
 			return LogicResult::error('A file with that name already exists in the destination.', array('reason' => 'name_taken'));
 		}
 		$owner = $owner_id;

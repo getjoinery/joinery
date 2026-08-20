@@ -86,6 +86,14 @@ function drive_upload_init_logic(array $input): LogicResult {
 		if (!DriveHelper::can_write(DriveHelper::ENTITY_FILE, $target_file, $user_id, $session->get_permission())) {
 			return LogicResult::error('You do not have permission to update that file.');
 		}
+		// A new version of a file in the trash has nowhere to be seen. The row is
+		// hidden from every listing, so the bytes would be admitted, charged to
+		// quota, and invisible — and to the uploader the save looks like it
+		// worked. Restoring is drive_restore's job; a sync client whose edit beat
+		// somebody's delete sends the rescued bytes up as a NEW file instead.
+		if ($target_file->get('fil_delete_time') !== null && $target_file->get('fil_delete_time') !== '') {
+			return LogicResult::error('That file is in the trash.', array('reason' => 'file_trashed', 'file_id' => $file_id));
+		}
 		$folder_id = (int)$target_file->get('fil_fol_folder_id');
 		$owner_id  = (int)$target_file->get('fil_usr_user_id');
 		$encrypted = $target_file->is_encrypted();
@@ -99,7 +107,7 @@ function drive_upload_init_logic(array $input): LogicResult {
 			return LogicResult::error('You do not have access to that folder.');
 		}
 		if (DriveHelper::folder_is_trashed($folder)) {
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
 		}
 		$owner_id = (int)$folder->get('fol_usr_user_id');
 		require_once(PathHelper::getIncludePath('includes/ProtectionLevel.php'));

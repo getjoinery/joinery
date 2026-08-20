@@ -504,6 +504,24 @@ the folder, and work inside it the server never took is rescued out first and
 raised as `rescued_from_trash`. Reading the refusal as a failure instead would
 retry it forever against a folder that is not coming back.
 
+A `file_trashed` refusal answers the same question one level down: the file
+this is a new version OF has gone to the trash. An operation planned before
+that delete is dropped as overtaken rather than sent, so reconcile can apply
+the rule that actually fits — an edit beats a delete, and the rescued bytes go
+up as a new file where the old one lived. Sending it anyway is what makes two
+devices disagree forever: the bytes land in a hidden row, the file appears to
+come back on the uploading device, and the device that deleted it has already
+dropped the tombstone, so nothing ever tells it otherwise.
+
+The refusal carries `folder_id`, and that is the only folder the client records
+as gone. It cannot work the answer out for itself: an operation may send a
+destination it re-resolved at the moment it ran — `create_remote_folder` reads
+the parent from the entry rather than from the plan, because a parent that was
+provisional when the work was planned may be real by the time it runs — so the
+plan and the request can name different folders. A refusal that names no folder
+is not evidence about any folder, and the client records nothing; the deletion
+arrives through the change feed like any other.
+
 The server side of the same promise is `sde_last_seen_time`: the security page
 shows when each device last synced, so a stalled device is visible from every
 other device.

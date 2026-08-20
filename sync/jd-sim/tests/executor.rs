@@ -1471,3 +1471,292 @@ fn a_download_landing_does_not_overwrite_what_the_user_just_saved() {
         "the save made in the landing window was built over"
     );
 }
+
+// ---------------------------------------------------------------------------
+// A refusal names a folder, and only that folder is condemned
+// ---------------------------------------------------------------------------
+
+#[test]
+fn a_parent_trashed_refusal_condemns_the_folder_the_server_named() {
+    let (_clock, server, device) = world();
+
+    // Two folders of the same name in different places. One is in the trash;
+    // the other is live and holds work of its own.
+    let trashed = server.seed_folder(None, "Archive");
+    let live_parent = server.seed_folder(None, "Projects");
+    let live = server.seed_folder(Some(live_parent), "Archive");
+    server
+        .action(
+            "drive_trash",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": trashed }),
+        )
+        .expect("the folder goes to the trash");
+
+    for (id, parent, name) in [
+        (trashed, None, "Archive"),
+        (live_parent, None, "Projects"),
+        (live, Some(live_parent), "Archive"),
+    ] {
+        device
+            .store
+            .put_entry(&fresh(
+                EntityId::folder(id),
+                parent,
+                name,
+                LocalStatus::Synced,
+            ))
+            .unwrap();
+    }
+
+    // A folder waiting to be created. Its entry says it belongs in the trashed
+    // folder — that is what the create will actually send, because a create
+    // re-resolves its destination at the moment it runs. Its PLAN still names
+    // the live folder of the same name, which is the stale half.
+    let new_id = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(
+            new_id,
+            Some(trashed),
+            "Notes",
+            LocalStatus::PendingUpload,
+        ))
+        .unwrap();
+
+    do_one(
+        &device,
+        new_id,
+        Action::CreateRemoteFolder {
+            placement: Placement {
+                parent: Some(live),
+                name: "Notes".into(),
+            },
+        },
+    );
+
+    let condemned = |id: i64| -> bool {
+        device
+            .store
+            .get_entry(EntityId::folder(id))
+            .unwrap()
+            .expect("the folder is still tracked")
+            .remote_deleted
+    };
+
+    assert!(
+        !condemned(live),
+        "the live folder that merely shares its name is untouched — reading the \
+         stale plan instead of the server's answer condemned it, and the device \
+         then trashed its own copy and forgot a folder the server still held"
+    );
+    assert!(!condemned(live_parent), "and neither is anything above it");
+    assert!(
+        condemned(trashed),
+        "the folder the server refused is recorded as gone"
+    );
+}
+
+#[test]
+fn a_refusal_that_names_no_folder_condemns_nothing() {
+    // A server that does not say which folder is in the trash leaves the client
+    // with no evidence about any folder. Guessing from the plan is what this
+    // replaces, so the answer is to record nothing and let the change feed
+    // deliver the deletion the ordinary way.
+    use jd_proto::ProtoError;
+
+    let named = ProtoError::Api {
+        status: 422,
+        errortype: "ActionError".into(),
+        message: "That folder is in the trash.".into(),
+        data: serde_json::json!({ "reason": "parent_trashed", "folder_id": 512 }),
+    };
+    assert_eq!(named.parent_trashed_folder_id(), Some(512));
+
+    let unnamed = ProtoError::Api {
+        status: 422,
+        errortype: "ActionError".into(),
+        message: "That folder is in the trash.".into(),
+        data: serde_json::json!({ "reason": "parent_trashed" }),
+    };
+    assert!(unnamed.parent_trashed(), "still recognised as the refusal");
+    assert_eq!(unnamed.parent_trashed_folder_id(), None);
+
+    let other = ProtoError::Api {
+        status: 400,
+        errortype: "ActionError".into(),
+        message: "A folder with that name already exists here.".into(),
+        data: serde_json::json!({ "reason": "name_taken", "folder_id": 512 }),
+    };
+    assert_eq!(
+        other.parent_trashed_folder_id(),
+        None,
+        "a folder id on some other refusal is not a trashed parent"
+    );
+}
+
+#[test]
+fn a_create_retried_after_its_answer_was_lost_does_not_revive_a_deleted_folder() {
+    let (clock, server, device) = world();
+
+    let provisional = EntityId::folder(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(provisional, None, "Sub 15", LocalStatus::PendingUpload))
+        .unwrap();
+    device.fs.user_mkdir("Sub 15");
+
+    // The create reaches the server and does its work; the answer is lost.
+    device.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_folder_create".into()),
+        ..NetFaults::none()
+    });
+    let first = do_one(
+        &device,
+        provisional,
+        Action::CreateRemoteFolder {
+            placement: Placement {
+                parent: None,
+                name: "Sub 15".into(),
+            },
+        },
+    );
+    assert_eq!(first.retrying, 1, "the answer was lost, so it retries");
+    device.net.set_faults(NetFaults::none());
+
+    // Somebody else deletes the folder while this device is still retrying.
+    assert!(
+        server.tree().contains_key("Sub 15"),
+        "the folder reached the server despite the lost answer"
+    );
+    let id = folder_id_named(&server, "Sub 15").expect("the folder has an id");
+    server
+        .action(
+            "drive_trash",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": id }),
+        )
+        .expect("the trash should be accepted");
+
+    // The retry replays the answer the first attempt produced — a snapshot from
+    // before the delete. Taking it at face value leaves this device the only
+    // one that thinks the folder is there, AGREEING with a server that does
+    // not have it, so nothing it ever does will disagree.
+    clock.advance_secs(60 * 60); // past the retry backoff
+    let now = device.now();
+    let e: ExecEnv = env(&device, &now);
+    run_queued(&e).expect("run");
+
+    let entries: Vec<_> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|entry| entry.id.entity_type == jd_core::model::EntityType::Folder)
+        .collect();
+    assert!(
+        entries.iter().all(|e| e.remote_deleted),
+        "the retry looked, and the folder it created is in the trash: {:?}",
+        entries
+            .iter()
+            .map(|e| (e.id.server_id, e.remote.name.clone(), e.remote_deleted))
+            .collect::<Vec<_>>()
+    );
+    assert!(
+        !server.tree().contains_key("Sub 15"),
+        "and the server still does not have it"
+    );
+}
+
+/// The server id of the live folder with this name, if there is one.
+fn folder_id_named(server: &MockServer, name: &str) -> Option<i64> {
+    for id in 1..2000i64 {
+        let answer = server.action(
+            "drive_stat",
+            &serde_json::json!({
+                "entities": [{ "entity_type": "folder", "entity_id": id }]
+            }),
+        );
+        if let Ok(v) = answer {
+            if let Some(items) = v.get("items").and_then(|i| i.as_array()) {
+                if let Some(item) = items.first() {
+                    if item.get("name").and_then(|n| n.as_str()) == Some(name) {
+                        return Some(id);
+                    }
+                }
+            }
+        }
+    }
+    None
+}
+
+#[test]
+fn a_rename_retried_after_its_answer_was_lost_records_where_the_file_actually_is() {
+    let (clock, server, device) = world();
+
+    // A file both this device and another will rename.
+    let id = EntityId::file(server.seed_file(None, "slot-3.dat", b"the contested bytes"));
+    let mut entry = fresh(id, None, "slot-3.dat", LocalStatus::Synced);
+    entry.synced_placement = Some(Placement {
+        parent: None,
+        name: "slot-3.dat".into(),
+    });
+    entry.remote_content = Some(ContentId {
+        sha256: sha256_hex(b"the contested bytes"),
+        size: 19,
+    });
+    entry.synced_content = entry.remote_content.clone();
+    device.store.put_entry(&entry).unwrap();
+    device.fs.user_write("slot-3.dat", b"the contested bytes");
+
+    // The rename reaches the server and does its work; the answer is lost.
+    device.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_rename".into()),
+        ..NetFaults::none()
+    });
+    let first = do_one(
+        &device,
+        id,
+        Action::ApplyLocalMove {
+            to: Placement {
+                parent: None,
+                name: "slot-2.dat".into(),
+            },
+        },
+    );
+    assert_eq!(first.retrying, 1, "the answer was lost, so it retries");
+    device.net.set_faults(NetFaults::none());
+
+    // Another device renames it again before the retry gets its turn.
+    server
+        .action(
+            "drive_rename",
+            &serde_json::json!({
+                "entity_type": "file",
+                "entity_id": id.server_id,
+                "name": "slot-1.dat",
+            }),
+        )
+        .expect("the second rename should be accepted");
+
+    clock.advance_secs(60 * 60); // past the retry backoff
+    let now = device.now();
+    let e: ExecEnv = env(&device, &now);
+    run_queued(&e).expect("run");
+
+    let after = device
+        .store
+        .get_entry(id)
+        .unwrap()
+        .expect("the entry is still tracked");
+    assert_eq!(
+        after.remote.name, "slot-1.dat",
+        "the retry replayed an answer describing a rename the server has moved \
+         past; recording it would leave this device agreeing with a server that \
+         calls the file something else, which no later pass can ever notice"
+    );
+    assert_eq!(
+        after.synced_placement.as_ref().map(|p| p.name.as_str()),
+        Some("slot-1.dat"),
+        "and the agreement says the same"
+    );
+}
+
