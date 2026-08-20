@@ -60,7 +60,14 @@ fn workload(seed: u64, steps: usize, devices: &[&str], chaos: bool) {
 /// generated and never actually collided. A Mac folds the case pair into one
 /// slot and an HFS+ volume rewrites the spelling on the way to disk, which is
 /// where those names cost something.
-fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
+/// The world a sweep seed runs in.
+///
+/// Every diagnostic here builds its world through this, and that is the whole
+/// point of it existing: a dump that skipped the chaos hooks reproduced a
+/// DIFFERENT run under the same seed, showed a converged tree, and sent an
+/// afternoon looking for a defect in the wrong place. A tool that disagrees
+/// with the sweep is worse than no tool.
+fn sweep_world(seed: u64, devices: &[(&str, Platform)], steps: usize, chaos: bool) -> World {
     let mut world = World::of(seed, devices);
     // A chaotic world is one where the user is still working, not just one
     // where the network is bad. Uploads finishing against a file that has moved
@@ -77,7 +84,11 @@ fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: boo
         // so they are demanded back by hash below.
         world.user_saves_while_downloads_land(8, (steps / 4).max(2) as u64);
     }
-    let world = world;
+    world
+}
+
+fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
+    let world = sweep_world(seed, devices, steps, chaos);
     let committed = Committed::default();
     drive(&world, seed, steps, chaos);
 
@@ -189,7 +200,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             }
         };
 
-        match rng.below(19) {
+        match rng.below(20) {
             // Create a file, sometimes deep.
             0..=2 => {
                 let dir = rng.pick(&dirs).cloned().unwrap_or_default();
@@ -414,6 +425,34 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
                     }
                 }
             }
+            // One folder BOTH devices put things in, which either of them may
+            // delete out from under the other.
+            //
+            // Arm 15 deletes a folder too, but it picks from this device's own
+            // list, so the other device is usually nowhere near it. A shared
+            // name is what makes the delete land while somebody else's write is
+            // in flight — and that is the shape the rig produced twice, three
+            // days apart: a file created inside a folder the server had trashed
+            // a hundred milliseconds earlier, live and reachable by nothing.
+            // It is also the only workload that makes a device meet a
+            // `parent_trashed` refusal at all, which is the answer a device
+            // once blamed on the wrong folder entirely.
+            18 => {
+                let shared = "Contested Folder";
+                if !device.fs.exists(shared) {
+                    device.fs.user_mkdir(shared);
+                    dirs.push(shared.to_string());
+                }
+                if rng.below(4) == 0 {
+                    device.fs.user_remove(shared);
+                } else {
+                    let path = join(shared, &format!("in-{step}-{}.txt", device.name));
+                    let body = format!("into a folder that may be going {step}").into_bytes();
+                    device.fs.user_write(&path, &body);
+                    bodies.insert(path.clone(), body);
+                    files.push(path);
+                }
+            }
             // Let it sync.
             _ => {
                 world.clock.advance_secs(20 * 60);
@@ -424,18 +463,32 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
     }
 }
 
-fn sweep(label: &str, seeds: std::ops::Range<u64>, steps: usize, devices: &[&str], chaos: bool) {
+fn sweep(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+) -> Vec<(String, u64)> {
     let mixed: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
     sweep_on(label, seeds, steps, &mixed, chaos)
 }
 
+/// Run every seed in the range and report which ones failed.
+///
+/// Returns them rather than only printing them. Printing alone made the test
+/// itself always pass — a whole estate could be failing and `cargo test` would
+/// say `ok`, with the real answer discarded unless somebody remembered
+/// `--nocapture`. Each sweep test collects these and asserts the list is empty,
+/// so the verdict is the verdict.
+#[must_use]
 fn sweep_on(
     label: &str,
     seeds: std::ops::Range<u64>,
     steps: usize,
     devices: &[(&str, Platform)],
     chaos: bool,
-) {
+) -> Vec<(String, u64)> {
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
     for seed in seeds {
@@ -455,22 +508,56 @@ fn sweep_on(
         failures.len(),
         failures
     );
+    failures.into_iter().map(|s| (label.to_string(), s)).collect()
+}
+
+/// The reporting guard itself, because getting this wrong is silent.
+///
+/// A sweep collects failures instead of panicking on the first one, so that a
+/// run reports every bad seed rather than the earliest. For its whole life that
+/// meant the sweep only PRINTED its verdict: `cargo test` said `ok` with seeds
+/// failing, and the real answer was thrown away unless somebody remembered
+/// `--nocapture`. A fifty-minute run was spent learning that.
+#[test]
+fn a_sweep_with_a_failing_seed_fails_the_test() {
+    assert!(std::panic::catch_unwind(|| no_seed_failed(vec![vec![], vec![]])).is_ok());
+    let boom = std::panic::catch_unwind(|| {
+        no_seed_failed(vec![vec![("longhostile-3dev".to_string(), 61140)]])
+    });
+    assert!(boom.is_err(), "a failing seed has to fail the test");
+}
+
+/// Fail the test if any seed in any arm failed, naming them all.
+fn no_seed_failed(arms: Vec<Vec<(String, u64)>>) {
+    let failed: Vec<(String, u64)> = arms.into_iter().flatten().collect();
+    assert!(
+        failed.is_empty(),
+        "{} seed(s) failed: {}",
+        failed.len(),
+        failed
+            .iter()
+            .map(|(l, s)| format!("{l}/{s}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    );
 }
 
 #[test]
 #[ignore] // 3000+ seeds; run it by name, not as part of the workspace suite
 fn scratch_rich_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));
-    sweep("orig-clean-2dev", 1000..1200, 40, &["laptop", "desktop"], false);
-    sweep("orig-hostile-2dev", 1200..1400, 30, &["laptop", "desktop"], true);
-    sweep("orig-clean-3dev", 1400..1520, 40, &["a", "b", "c"], false);
-    sweep("wide-clean-2dev", 20000..20600, 40, &["laptop", "desktop"], false);
-    sweep("wide-hostile-2dev", 21000..21600, 30, &["laptop", "desktop"], true);
-    sweep("wide-clean-3dev", 22000..22400, 40, &["a", "b", "c"], false);
-    sweep("wide-hostile-3dev", 23000..23400, 30, &["a", "b", "c"], true);
-    sweep("wide-long-3dev", 24000..24200, 90, &["a", "b", "c"], false);
-    sweep("fresh-long-2dev", 9000..9150, 80, &["laptop", "desktop"], false);
+    arms.push(sweep("orig-clean-2dev", 1000..1200, 40, &["laptop", "desktop"], false));
+    arms.push(sweep("orig-hostile-2dev", 1200..1400, 30, &["laptop", "desktop"], true));
+    arms.push(sweep("orig-clean-3dev", 1400..1520, 40, &["a", "b", "c"], false));
+    arms.push(sweep("wide-clean-2dev", 20000..20600, 40, &["laptop", "desktop"], false));
+    arms.push(sweep("wide-hostile-2dev", 21000..21600, 30, &["laptop", "desktop"], true));
+    arms.push(sweep("wide-clean-3dev", 22000..22400, 40, &["a", "b", "c"], false));
+    arms.push(sweep("wide-hostile-3dev", 23000..23400, 30, &["a", "b", "c"], true));
+    arms.push(sweep("wide-long-3dev", 24000..24200, 90, &["a", "b", "c"], false));
+    arms.push(sweep("fresh-long-2dev", 9000..9150, 80, &["laptop", "desktop"], false));
     let _ = std::panic::take_hook();
+    no_seed_failed(arms);
 }
 
 /// A world for the diagnostic tools, honouring PLATFORMS when it is set so a
@@ -503,39 +590,34 @@ fn platform_spec(names: &[&str]) -> Vec<(String, Platform)> {
         .collect()
 }
 
-fn platform_world(seed: u64, names: &[&str]) -> World {
-    let spec = platform_spec(names);
-    let devices: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    World::of(seed, &devices)
-}
-
 /// The same workload where the computers disagree about what a name is.
 #[test]
 #[ignore]
 fn scratch_platform_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));
-    sweep_on(
+    arms.push(sweep_on(
         "plat-mac-pc",
         40000..40800,
         40,
         &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
         false,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "plat-linux-mac",
         40800..41600,
         40,
         &[("linux", Platform::Linux), ("mac", Platform::MacOs)],
         false,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "plat-mac-hfs",
         41600..42400,
         40,
         &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
         false,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "plat-three-hostile",
         42400..43200,
         30,
@@ -545,8 +627,8 @@ fn scratch_platform_sweep() {
             ("pc", Platform::Windows),
         ],
         true,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "plat-four-long",
         43200..43600,
         80,
@@ -557,8 +639,9 @@ fn scratch_platform_sweep() {
             ("disk", Platform::Decomposing),
         ],
         false,
-    );
+    ));
     let _ = std::panic::take_hook();
+    no_seed_failed(arms);
 }
 
 /// Another block nothing has run, Linux and mixed-platform together. New seeds
@@ -566,27 +649,28 @@ fn scratch_platform_sweep() {
 #[test]
 #[ignore]
 fn scratch_dawn_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));
-    sweep("dawn-clean-2dev", 50000..51200, 40, &["laptop", "desktop"], false);
-    sweep("dawn-hostile-2dev", 51200..52400, 30, &["laptop", "desktop"], true);
-    sweep("dawn-clean-3dev", 52400..53200, 40, &["a", "b", "c"], false);
-    sweep("dawn-hostile-3dev", 53200..54000, 30, &["a", "b", "c"], true);
-    sweep("dawn-long-3dev", 54000..54400, 90, &["a", "b", "c"], false);
-    sweep_on(
+    arms.push(sweep("dawn-clean-2dev", 50000..51200, 40, &["laptop", "desktop"], false));
+    arms.push(sweep("dawn-hostile-2dev", 51200..52400, 30, &["laptop", "desktop"], true));
+    arms.push(sweep("dawn-clean-3dev", 52400..53200, 40, &["a", "b", "c"], false));
+    arms.push(sweep("dawn-hostile-3dev", 53200..54000, 30, &["a", "b", "c"], true));
+    arms.push(sweep("dawn-long-3dev", 54000..54400, 90, &["a", "b", "c"], false));
+    arms.push(sweep_on(
         "dawn-mac-pc",
         55000..55800,
         40,
         &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
         false,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "dawn-mac-hfs",
         55800..56600,
         40,
         &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
         false,
-    );
-    sweep_on(
+    ));
+    arms.push(sweep_on(
         "dawn-four-hostile",
         56600..57000,
         40,
@@ -597,8 +681,9 @@ fn scratch_dawn_sweep() {
             ("disk", Platform::Decomposing),
         ],
         true,
-    );
+    ));
     let _ = std::panic::take_hook();
+    no_seed_failed(arms);
 }
 
 /// Seeds nothing has ever run. The sweep above is a regression suite now — it
@@ -607,14 +692,49 @@ fn scratch_dawn_sweep() {
 #[test]
 #[ignore]
 fn scratch_night_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
     std::panic::set_hook(Box::new(|_| {}));
-    sweep("night-clean-2dev", 30000..31200, 40, &["laptop", "desktop"], false);
-    sweep("night-hostile-2dev", 31200..32400, 30, &["laptop", "desktop"], true);
-    sweep("night-clean-3dev", 32400..33200, 40, &["a", "b", "c"], false);
-    sweep("night-hostile-3dev", 33200..34000, 30, &["a", "b", "c"], true);
-    sweep("night-long-3dev", 34000..34400, 90, &["a", "b", "c"], false);
-    sweep("night-long-2dev", 35000..35400, 80, &["laptop", "desktop"], false);
+    arms.push(sweep("night-clean-2dev", 30000..31200, 40, &["laptop", "desktop"], false));
+    arms.push(sweep("night-hostile-2dev", 31200..32400, 30, &["laptop", "desktop"], true));
+    arms.push(sweep("night-clean-3dev", 32400..33200, 40, &["a", "b", "c"], false));
+    arms.push(sweep("night-hostile-3dev", 33200..34000, 30, &["a", "b", "c"], true));
+    arms.push(sweep("night-long-3dev", 34000..34400, 90, &["a", "b", "c"], false));
+    arms.push(sweep("night-long-2dev", 35000..35400, 80, &["laptop", "desktop"], false));
     let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
+/// Long AND hostile, which nothing else here is.
+///
+/// Every `*-long-*` sweep above runs clean, and every `*-hostile-*` one stops at
+/// thirty steps. So a campaign has never had to survive network chaos for its
+/// whole length — which is exactly what the rig does, for an hour and three
+/// quarters, with faults throughout, and where most of what it finds comes
+/// from. A short hostile run reaches a handful of retries; a long one reaches
+/// the state a device gets into after retrying through a hundred of them while
+/// the tree underneath it keeps moving.
+///
+/// Slower per seed than anything else here — budget for it accordingly.
+#[test]
+#[ignore]
+fn scratch_long_hostile_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep("longhostile-2dev", 60000..60400, 80, &["laptop", "desktop"], true));
+    arms.push(sweep("longhostile-3dev", 61000..61300, 90, &["a", "b", "c"], true));
+    arms.push(sweep_on(
+        "longhostile-mixed",
+        62000..62200,
+        80,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
 }
 
 #[test]
@@ -626,7 +746,9 @@ fn scratch_dump() {
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
-    let world = platform_world(seed, &names);
+    let spec = platform_spec(&names);
+    let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
+    let world = sweep_world(seed, &refs, steps, chaos);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         drive(&world, seed, steps, chaos);
         world.settle();
@@ -731,7 +853,9 @@ fn scratch_trace() {
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
-    let world = platform_world(seed, &names);
+    let spec = platform_spec(&names);
+    let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
+    let world = sweep_world(seed, &refs, steps, chaos);
     drive(&world, seed, steps, chaos);
     for round in 0..12 {
         for d in &world.devices {

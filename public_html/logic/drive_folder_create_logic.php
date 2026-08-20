@@ -52,7 +52,7 @@ function drive_folder_create_logic(array $input): LogicResult {
 			return LogicResult::error('You do not have access to that folder.');
 		}
 		if (DriveHelper::folder_is_trashed($parent)) {
-			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed'));
+			return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 		}
 		if (DriveHelper::depth($parent_id) + 1 > DriveHelper::max_depth()) {
 			return LogicResult::error('Maximum folder depth reached.');
@@ -81,17 +81,31 @@ function drive_folder_create_logic(array $input): LogicResult {
 		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
 
-	$folder = new Folder(NULL);
-	$folder->set('fol_usr_user_id', $user_id);
-	if ($parent_id > 0) {
-		$folder->set('fol_parent_folder_id', $parent_id);
+	// The parent-trashed check above is a fast fail; the vault lookup and name
+	// search run after it. place_into re-asks with the parent held, so this
+	// folder cannot land under a parent that went to the trash meanwhile — which
+	// would hide it from every listing with nothing to bring it back.
+	try {
+		$folder = DriveHelper::place_into($parent_id, function () use ($user_id, $parent_id, $name, $level) {
+			$folder = new Folder(NULL);
+			$folder->set('fol_usr_user_id', $user_id);
+			if ($parent_id > 0) {
+				$folder->set('fol_parent_folder_id', $parent_id);
+			}
+			$folder->set('fol_name', $name);
+			$folder->set('fol_protection_level', $level);
+			if (!DriveHelper::save_folder_unless_name_taken($folder)) {
+				return null;
+			}
+			$folder->load(); // repopulate serial pkey + default columns for the export
+			return $folder;
+		});
+	} catch (DriveDestinationTrashedException $e) {
+		return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$parent_id));
 	}
-	$folder->set('fol_name', $name);
-	$folder->set('fol_protection_level', $level);
-	if (!DriveHelper::save_folder_unless_name_taken($folder)) {
+	if ($folder === null) {
 		return LogicResult::error('A folder with that name already exists here.', array('reason' => 'name_taken'));
 	}
-	$folder->load(); // repopulate serial pkey + default columns for the export
 
 	FileChange::record(FileChange::KIND_CREATED, DriveHelper::ENTITY_FOLDER, $folder->key, $user_id, $user_id);
 

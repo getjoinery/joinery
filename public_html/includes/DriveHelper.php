@@ -4,6 +4,12 @@ require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
 require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
 
 /**
+ * The destination folder went into the trash. Raised by DriveHelper::place_into
+ * so a placement verb can do its own cleanup before refusing.
+ */
+class DriveDestinationTrashedException extends RuntimeException {}
+
+/**
  * DriveHelper — shared tree + access logic for the member Drive.
  *
  * The drive_* action logic files stay thin by delegating here: entity loading,
@@ -640,6 +646,75 @@ class DriveHelper {
 	}
 
 	// ------------------------------------------------------------------
+	// Placement serialization — a folder cannot be trashed mid-placement
+	// ------------------------------------------------------------------
+
+	const PLACEMENT_LOCK_CLASS = 42003; // pg advisory lock namespace for placement
+
+	/**
+	 * Serialize putting something INTO a folder against putting that folder in
+	 * the trash (session-scoped Postgres advisory lock, keyed on the folder).
+	 *
+	 * Every placement verb reads the destination, decides it is not trashed, and
+	 * then does work — quota, bytes, sealing, thumbnails — before the row lands.
+	 * The trash cascade meanwhile marks the folder deleted and then sweeps the
+	 * children it can see. Those two overlap: a cascade that runs entirely
+	 * inside a placement's window trashes the folder, finds no children, and
+	 * leaves the new row live underneath it. Nothing lists it and no sync client
+	 * can place it, so it is unreachable — and a client that has been told
+	 * about it waits for a parent that will never arrive.
+	 *
+	 * Holding this lock across the re-read and the write leaves only two
+	 * orderings, both safe: the placement finishes first and the cascade sweeps
+	 * what it made, or the cascade finishes first and the placement sees a
+	 * trashed destination and refuses.
+	 *
+	 * Always pair with placement_unlock() in a finally; prefer place_into().
+	 */
+	public static function placement_lock($folder_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_lock(?, ?)");
+		$q->execute(array(self::PLACEMENT_LOCK_CLASS, (int)$folder_id));
+	}
+
+	public static function placement_unlock($folder_id) {
+		$q = DbConnector::get_instance()->get_db_link()->prepare("SELECT pg_advisory_unlock(?, ?)");
+		$q->execute(array(self::PLACEMENT_LOCK_CLASS, (int)$folder_id));
+	}
+
+	/**
+	 * Run $write with the destination folder held against the trash, and refuse
+	 * if it is already there.
+	 *
+	 * $write receives the freshly re-read destination Folder (null at the root)
+	 * and its return value is passed straight back. A destination that went to
+	 * the trash raises DriveDestinationTrashedException, which callers turn into
+	 * their own parent_trashed refusal — they each have cleanup of their own to
+	 * do (a staged upload to discard, bytes to drop) that only they know about.
+	 *
+	 * The Drive root is not a folder and can never be trashed, so folder_id 0
+	 * runs $write with no lock at all.
+	 */
+	public static function place_into($folder_id, callable $write) {
+		$folder_id = (int)$folder_id;
+		if ($folder_id <= 0) {
+			return $write(null);
+		}
+		self::placement_lock($folder_id);
+		try {
+			$fresh = self::load_folder($folder_id);
+			if (!$fresh) {
+				throw new DriveDestinationTrashedException('Destination folder not found.');
+			}
+			if (self::folder_is_trashed($fresh)) {
+				throw new DriveDestinationTrashedException('That folder is in the trash.');
+			}
+			return $write($fresh);
+		} finally {
+			self::placement_unlock($folder_id);
+		}
+	}
+
+	// ------------------------------------------------------------------
 	// Tree — depth, ancestry, cycles
 	// ------------------------------------------------------------------
 
@@ -902,22 +977,36 @@ class DriveHelper {
 		self::require_classes();
 		$folder_id = (int)$folder->key;
 
-		// Delete this folder FIRST so its delete_time is the earliest in the
-		// cascade — selective restore keeps only descendants with a delete_time
-		// at/after the folder's, so an independently-trashed child (deleted before
-		// this cascade) is left in the trash.
-		$folder->soft_delete();
+		// Held across marking this folder deleted AND sweeping what is directly
+		// inside it — the same lock every placement verb takes on its destination
+		// (see place_into). Without it a placement running concurrently lands its
+		// row after this sweep has already looked, leaving it live under a folder
+		// nothing lists.
+		self::placement_lock($folder_id);
+		try {
+			// Delete this folder FIRST so its delete_time is the earliest in the
+			// cascade — selective restore keeps only descendants with a delete_time
+			// at/after the folder's, so an independently-trashed child (deleted before
+			// this cascade) is left in the trash.
+			$folder->soft_delete();
 
-		// Files directly in this folder.
-		$files = new MultiFile(array('folder_id' => $folder_id, 'deleted' => false));
-		$files->load();
-		foreach ($files as $file) {
-			$file->soft_delete();
+			// Files directly in this folder.
+			$files = new MultiFile(array('folder_id' => $folder_id, 'deleted' => false));
+			$files->load();
+			foreach ($files as $file) {
+				$file->soft_delete();
+			}
+
+			// Descendant folders, read while still holding this folder's lock so a
+			// subfolder cannot be created here and missed. Each takes its own lock
+			// when it recurses; the order is always parent before child, which is
+			// what keeps two overlapping cascades from deadlocking.
+			$subfolders = new MultiFolder(array('parent_id' => $folder_id, 'deleted' => false));
+			$subfolders->load();
+		} finally {
+			self::placement_unlock($folder_id);
 		}
 
-		// Descendant folders (depth-first).
-		$subfolders = new MultiFolder(array('parent_id' => $folder_id, 'deleted' => false));
-		$subfolders->load();
 		foreach ($subfolders as $sub) {
 			self::soft_delete_folder_cascade($sub);
 		}

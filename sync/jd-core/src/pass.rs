@@ -455,6 +455,18 @@ pub fn walk_index(env: &ExecEnv) -> Result<Vec<(EntityId, RemoteState)>, ExecErr
 /// Stat a batch of entities, reporting anything the server no longer has as
 /// deleted rather than as a failure. Those are opposite instructions and the
 /// server distinguishes them, so the client must too.
+/// Ask the server what one entity is right now.
+///
+/// For the places that hold an answer they cannot trust. An idempotent retry
+/// replays the response the FIRST attempt produced — a snapshot of a moment
+/// that has passed — so a create whose answer was lost comes back describing a
+/// folder that may since have been deleted. Nothing in the payload says it is a
+/// replay, and nothing can: the guarantee is that the action happened once, not
+/// that the world stood still.
+pub(crate) fn stat_one(env: &ExecEnv, id: EntityId) -> Result<Option<RemoteState>, ExecError> {
+    Ok(stat_all(env, &[id])?.into_iter().next().map(|(_, s)| s))
+}
+
 fn stat_all(env: &ExecEnv, ids: &[EntityId]) -> Result<Vec<(EntityId, RemoteState)>, ExecError> {
     let mut out = Vec::new();
     for chunk in ids.chunks(STAT_BATCH) {

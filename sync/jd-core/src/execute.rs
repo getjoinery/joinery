@@ -44,7 +44,9 @@ use jd_vfs::Vfs;
 
 use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placement};
 use crate::order::Plan;
+use crate::pass::stat_one;
 use crate::reconcile::Action;
+use crate::remote::RemoteState;
 use crate::round::retry_delay_ms;
 use crate::store::{Op, OpState, Store, StoreError};
 
@@ -273,7 +275,7 @@ pub fn run_one(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let outcome = match perform(env, op) {
         Ok(o) => o,
         Err(e) => {
-            note_the_parent_is_in_the_trash(env, op, &e)?;
+            note_the_parent_is_in_the_trash(env, &e)?;
             classify(&e)
         }
     };
@@ -396,26 +398,59 @@ fn classify(e: &ExecError) -> OpOutcome {
 /// folder goes to the trash, and anything inside it the server never took is
 /// rescued on the way out — instead of waiting for the feed to say the same
 /// thing later.
-fn note_the_parent_is_in_the_trash(
+/// What the server holds for this entity now, when the op has been tried before.
+///
+/// An idempotent retry replays the response the FIRST attempt produced. That is
+/// the correct guarantee — the action happened once — but the payload is a
+/// snapshot of a moment that has passed, and nothing in it says so. A mutation
+/// whose answer was lost comes back describing an entity another device has
+/// since renamed, moved or deleted.
+///
+/// Writing that snapshot down as a fresh agreement is what makes it permanent:
+/// the device then believes it AGREES with the server, so nothing it plans will
+/// ever disagree, and the difference survives every pass. A long hostile sweep
+/// found it as an empty folder living on one device for good, and as a file one
+/// device called `slot-3.dat` while the server and both its peers called it
+/// `slot-1.dat` — every device quiet, every other invariant satisfied.
+///
+/// Only retries pay for the extra call. A first attempt's answer describes what
+/// the server did a moment ago and is as fresh as anything can be.
+fn server_view_after_retry(
     env: &ExecEnv,
     op: &Op,
-    e: &ExecError,
-) -> Result<(), ExecError> {
+    id: EntityId,
+) -> Result<Option<RemoteState>, ExecError> {
+    if op.attempts == 0 {
+        return Ok(None);
+    }
+    stat_one(env, id)
+}
+
+fn note_the_parent_is_in_the_trash(env: &ExecEnv, e: &ExecError) -> Result<(), ExecError> {
     let ExecError::Proto(p) = e else {
         return Ok(());
     };
     if !p.parent_trashed() {
         return Ok(());
     }
-    let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
-    let Some(parent) = params.get("parent").and_then(Value::as_i64) else {
+    // Only the folder the SERVER names. The op's own plan is not evidence: an
+    // operation may send a destination it re-resolved at the moment it ran —
+    // `create_remote_folder` does exactly that, since a parent that was
+    // provisional when the work was planned may be real by the time it runs —
+    // so the plan and the request can name different folders. Reading the plan
+    // condemned a live folder that merely shared its name with the trashed one
+    // the server had refused about. The ordinary deletion path then trashed the
+    // local copy and forgot the record, and the change feed had long since
+    // moved past that folder's creation, so nothing ever re-learned it: one
+    // seed in seventeen thousand, ending with a folder and a file missing from
+    // a device while the server still held both.
+    //
+    // Without a named folder there is nothing to record, and guessing is what
+    // this is here to stop. Nothing is lost by staying quiet: a trashed folder
+    // arrives as deleted through the change feed like any other.
+    let Some(parent) = p.parent_trashed_folder_id() else {
         return Ok(());
     };
-    // A provisional parent is not on the server at all, so the refusal cannot
-    // have been about it.
-    if parent < 0 {
-        return Ok(());
-    }
     if let Some(mut folder) = env.store.get_entry(EntityId::folder(parent))? {
         if !folder.remote_deleted {
             folder.remote_deleted = true;
@@ -1225,6 +1260,27 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             "the entry is no longer tracked".into(),
         ));
     };
+    // A new version of a file the server has since deleted. The op was planned
+    // when the file was there; somebody trashed it while this upload was still
+    // retrying, and the answer is no longer a version of anything.
+    //
+    // Sending it anyway is worse than useless. The bytes land against a row in
+    // the trash, which nothing lists — so on this device the file appears to
+    // come back, and on the device that deleted it nothing arrives at all,
+    // because it dropped the tombstone once both sides agreed. The two never
+    // speak about that file again and both report themselves settled. Chaos is
+    // what makes it reachable: the upload has to still be retrying when the
+    // delete lands, which a healthy network never leaves time for.
+    //
+    // Dropped rather than refused, because there IS a right answer and this op
+    // cannot carry it: an edit beats a delete, so the next plan rescues these
+    // bytes as a new file where the old one lived. Only reconcile can decide
+    // that, and it never gets the chance while this op keeps succeeding.
+    if as_new.is_none() && entry.remote_deleted {
+        return Ok(OpOutcome::Overtaken(
+            "the server deleted it while this upload was in flight".into(),
+        ));
+    }
     // Where the bytes are on this computer.
     //
     // Three places are worth looking, and every one of them can be the stale
@@ -1459,6 +1515,12 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         env.store.rekey_entry(entry.id, target)?;
         entry.id = target;
     }
+    // No replayed-snapshot guard here, unlike a create or a move, and the
+    // reason is in the upload protocol itself: the completion's idempotency key
+    // carries the token a FRESH init produced, so a retry never replays an
+    // older answer. What stops a lost completion from making a second copy is
+    // dedup at init, which short-circuits to the file the server already has
+    // and describes it as of now.
     let was_encrypted = entry.is_encrypted;
     let content_id = entry.content_id.clone();
     apply_export(&mut entry, &file);
@@ -1872,6 +1934,28 @@ fn create_remote_folder(
         entry.id = target;
     }
     entry.remote = placement;
+    // On a RETRY the answer cannot be taken at face value. An idempotent replay
+    // returns what the first attempt produced — a snapshot of a moment that has
+    // passed — so a create whose answer was lost comes back describing a folder
+    // another device has since deleted. Recording that as a fresh agreement
+    // makes this device the only one that believes the folder exists, and
+    // because it believes it AGREES with the server, nothing it ever does will
+    // disagree: the empty directory sits there for good, on one device, with
+    // every invariant but the tree itself satisfied. A long hostile sweep found
+    // it twice, and it is invisible to a healthy network, which never leaves an
+    // answer in flight long enough for a delete to overtake it.
+    //
+    // Only retries pay for this. A first attempt's answer describes the folder
+    // the server made a moment ago and is as fresh as anything can be.
+    match server_view_after_retry(env, op, entry.id)? {
+        Some(state) if state.deleted => {
+            entry.remote_deleted = true;
+            env.store.put_entry(&entry)?;
+            return Ok(OpOutcome::Done);
+        }
+        Some(state) => entry.remote = state.placement,
+        None => {}
+    }
     agree(&mut entry, None, None);
     entry.synced_placement = Some(entry.remote.clone());
     env.store.put_entry(&entry)?;
@@ -2112,7 +2196,18 @@ fn move_remote(
         (false, false) => {}
     }
 
-    entry.remote = to;
+    // Where it ACTUALLY is, when this op has been tried before — the calls above
+    // may have been idempotent replays describing a journey the server has
+    // since taken further. See server_view_after_retry.
+    entry.remote = match server_view_after_retry(env, op, entry.id)? {
+        Some(state) if state.deleted => {
+            entry.remote_deleted = true;
+            env.store.put_entry(&entry)?;
+            return Ok(OpOutcome::Done);
+        }
+        Some(state) => state.placement,
+        None => to,
+    };
     entry.synced_placement = Some(entry.remote.clone());
     if entry.status == LocalStatus::Synced || entry.synced_content.is_some() {
         entry.status = LocalStatus::Synced;

@@ -221,12 +221,36 @@ fn name_taken(message: &'static str) -> ApiRefusal {
 /// that places an item; without it here the mock would take the write and hold
 /// a live item under a folder no listing shows, which is exactly the state that
 /// went unnoticed on a real box until the rig grew this refusal.
-fn parent_trashed() -> ApiRefusal {
+///
+/// The refusal names the folder, exactly as the real one does. A client cannot
+/// work it out for itself: the parent it sent may not be the parent its
+/// operation was planned with, since a create re-resolves the destination from
+/// what it knows at the moment it runs. Guessing from the plan condemned a live
+/// folder that merely shared a name with the trashed one.
+/// A new version of a file that is in the trash, refused exactly as the real
+/// server refuses it (`drive_upload_init_logic` / `drive_upload_complete_logic`).
+///
+/// The mock used to take the bytes AND quietly un-trash the row, which the real
+/// server never does — it would leave the version inside a hidden file. That
+/// kindness hid a client defect for the life of the sweep: an upload planned
+/// before somebody's delete kept succeeding after it, the file came back on the
+/// uploading device only, and the device that deleted it had already dropped
+/// the tombstone. Both then reported themselves settled, permanently disagreeing.
+fn file_trashed(file_id: i64) -> ApiRefusal {
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: "That file is in the trash.".into(),
+        data: serde_json::json!({ "reason": "file_trashed", "file_id": file_id }),
+    }
+}
+
+fn parent_trashed(folder_id: i64) -> ApiRefusal {
     ApiRefusal {
         status: 422,
         errortype: "ActionError",
         message: "That folder is in the trash.".into(),
-        data: serde_json::json!({ "reason": "parent_trashed" }),
+        data: serde_json::json!({ "reason": "parent_trashed", "folder_id": folder_id }),
     }
 }
 
@@ -851,7 +875,7 @@ impl MockServer {
         if let Some(p) = parent {
             match st.folders.get(&p) {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
-                Some(f) if f.trashed => return Err(parent_trashed()),
+                Some(f) if f.trashed => return Err(parent_trashed(p)),
                 Some(_) => {}
             }
         }
@@ -1001,7 +1025,7 @@ impl MockServer {
         if let Some(d) = dest {
             match st.folders.get(&d) {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
-                Some(f) if f.trashed => return Err(parent_trashed()),
+                Some(f) if f.trashed => return Err(parent_trashed(d)),
                 Some(_) => {}
             }
         }
@@ -1179,8 +1203,13 @@ impl MockServer {
         if let Some(f) = folder {
             match st.folders.get(&f) {
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
-                Some(fo) if fo.trashed => return Err(parent_trashed()),
+                Some(fo) if fo.trashed => return Err(parent_trashed(f)),
                 Some(_) => {}
+            }
+        }
+        if let Some(id) = file_id {
+            if st.files.get(&id).is_some_and(|f| f.trashed) {
+                return Err(file_trashed(id));
             }
         }
         // Whether this upload is encrypted is the DESTINATION's property, never
@@ -1346,6 +1375,14 @@ impl MockServer {
             }
         }
         let session = st.uploads.get(&token).cloned().expect("still present");
+        // Trashed while the bytes were in flight — re-asked here, where they
+        // actually land, for the same reason the destination folder is.
+        if let Some(id) = session.file_id {
+            if st.files.get(&id).is_some_and(|f| f.trashed) {
+                st.uploads.remove(&token);
+                return Err(file_trashed(id));
+            }
+        }
         if !session.encrypted && actual != session.sha256 {
             st.uploads.remove(&token);
             return Err(refuse(
@@ -1590,7 +1627,6 @@ impl MockServer {
                 f.sha256 = sha.to_string();
                 f.size = size;
                 f.head_change_id = change_id;
-                f.trashed = false;
                 // A new version's metadata follows its content — the size
                 // inside the blob changed with the bytes. The file key, the
                 // content id and every existing grant do not.

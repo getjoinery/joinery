@@ -58,7 +58,16 @@ function drive_restore_logic(array $input): LogicResult {
 				}
 			}
 		}
-		DriveHelper::restore_folder_cascade($entity);
+		// The re-rooting above read the parent; the cascade below writes. Held
+		// against that parent going to the trash in between, which would bring
+		// the whole subtree back somewhere nothing lists it.
+		try {
+			DriveHelper::place_into((int)$entity->get('fol_parent_folder_id'), function () use ($entity) {
+				DriveHelper::restore_folder_cascade($entity);
+			});
+		} catch (DriveDestinationTrashedException $e) {
+			return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+		}
 	} else {
 		// If the file's folder is itself trashed, restore it to the root so it
 		// doesn't reappear inside a folder that is still in the trash.
@@ -86,7 +95,16 @@ function drive_restore_logic(array $input): LogicResult {
 			$entity->set('fil_title', $name);
 		}
 		$entity->set('fil_delete_time', null);
-		if (!DriveHelper::save_file_unless_name_taken($entity)) {
+		try {
+			$saved = DriveHelper::place_into($folder_id, function () use ($entity) {
+				return DriveHelper::save_file_unless_name_taken($entity);
+			});
+		} catch (DriveDestinationTrashedException $e) {
+			// The folder was live when it was chosen above and is not now. The
+			// file stays in the trash rather than coming back invisible.
+			return LogicResult::error('The folder this was in went to the trash while restoring. Try again.');
+		}
+		if (!$saved) {
 			// Something else claimed the free name between the search above and
 			// here. The file is still safely in the trash.
 			return LogicResult::error('That name was taken while restoring. Try again.');

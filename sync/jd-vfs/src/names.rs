@@ -323,6 +323,7 @@ pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolve
 /// disambiguates repeats within the same day.
 pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> String {
     let (stem, ext) = split_extension(name);
+    let stem = strip_conflict_markers(stem);
     let n = if suffix <= 1 {
         String::new()
     } else {
@@ -334,6 +335,33 @@ pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> 
             stem, date, device, n, e
         ),
         None => format!("{} (conflicted copy {} from {}){}", stem, date, device, n),
+    }
+}
+
+/// The stem with any conflict-copy marker chain removed.
+///
+/// A conflict copy can itself lose a conflict, and naming the result by
+/// appending again has no fixed point: three devices each preserving the
+/// other's copy produce a name nobody has seen before on every single pass, so
+/// the plan is different every time and the fleet never settles. A long
+/// hostile sweep found one at six markers deep and still growing —
+/// `slot-3 (conflicted copy … from c) (conflicted copy … from b) … .dat` —
+/// with every device replanning an upload for a name it had just invented.
+///
+/// Cutting at the FIRST marker is what makes it stable: however deep the chain
+/// goes, every device reduces it to the same base, so the name a conflict
+/// produces depends only on the file, the day and the device — and repeats
+/// within a day are what the numeric suffix is for. The lost history is no
+/// loss: the marker that matters is the one for the conflict happening now,
+/// and the copies it replaced are still sitting beside it under their own
+/// names.
+fn strip_conflict_markers(stem: &str) -> &str {
+    const MARK: &str = " (conflicted copy ";
+    match stem.find(MARK) {
+        // Only when the marker actually closes. A file a person named
+        // `notes (conflicted copy of the minutes.txt` is their name, not ours.
+        Some(at) if stem[at..].contains(')') => &stem[..at],
+        _ => stem,
     }
 }
 
@@ -602,6 +630,37 @@ mod tests {
         assert_eq!(
             conflict_copy_name("Makefile", "2026-07-16", "PC", 1),
             "Makefile (conflicted copy 2026-07-16 from PC)"
+        );
+    }
+
+    #[test]
+    fn a_conflict_copy_of_a_conflict_copy_does_not_stack_markers() {
+        // The name a third device produces from a chain two deep is the name
+        // any device produces from the original. Without that there is no fixed
+        // point: each pass invents a name nobody has seen, replans an upload
+        // for it, and the fleet never goes quiet.
+        let once = conflict_copy_name("slot-3.dat", "2026-07-31", "a", 1);
+        let twice = conflict_copy_name(&once, "2026-07-31", "b", 1);
+        let thrice = conflict_copy_name(&twice, "2026-07-31", "c", 1);
+        assert_eq!(twice, "slot-3 (conflicted copy 2026-07-31 from b).dat");
+        assert_eq!(thrice, "slot-3 (conflicted copy 2026-07-31 from c).dat");
+        assert_eq!(
+            thrice,
+            conflict_copy_name("slot-3.dat", "2026-07-31", "c", 1),
+            "however deep the chain, every device reduces it to the same base"
+        );
+
+        // The numeric suffix still disambiguates repeats within a day, and is
+        // not mistaken for part of the chain.
+        assert_eq!(
+            conflict_copy_name(&thrice, "2026-07-31", "c", 2),
+            "slot-3 (conflicted copy 2026-07-31 from c) 2.dat"
+        );
+
+        // A name of the user's own that merely starts like a marker is theirs.
+        assert_eq!(
+            conflict_copy_name("notes (conflicted copy of the minutes.txt", "2026-07-31", "a", 1),
+            "notes (conflicted copy of the minutes (conflicted copy 2026-07-31 from a).txt"
         );
     }
 
