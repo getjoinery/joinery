@@ -184,7 +184,13 @@ function _register_email_is_platform_hosted(string $email): bool {
 	if (!class_exists('InboundEmailDomain')) {
 		return false;
 	}
-	return InboundEmailDomain::isHostedEmailAddress($email);
+	try {
+		return InboundEmailDomain::isHostedEmailAddress($email);
+	} catch (\Throwable $e) {
+		// Plugin files ship everywhere but its tables exist only where it has
+		// been activated; a missing table means no hosted domains here.
+		return false;
+	}
 }
 
 /**

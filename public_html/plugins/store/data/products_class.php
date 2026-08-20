@@ -594,7 +594,13 @@ public function get_requirement_info($output='text') {
 				foreach($info as $field_name => $field_constraints) {
 					foreach($field_constraints as $constraint => $value_message) {
 						if (is_array($value_message)) {
-							if (count($value_message) == 2) {
+							if (array_key_exists('value', $value_message)) {
+								// Associative ['value' => x] shape (Question::output_js_validation)
+								$rules[$field_name][$constraint] = $value_message['value'];
+								if (isset($value_message['message'])) {
+									$messages[$field_name][$constraint] = $value_message['message'];
+								}
+							} else if (count($value_message) == 2) {
 								list($value, $message) = $value_message;
 								$field_container = $field_name . '_container';
 							} else {
