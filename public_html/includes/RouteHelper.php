@@ -1428,34 +1428,41 @@ class RouteHelper {
         ];
         $is_valid_page = true; // Set before include
 
-        try {
-            if ($view_full_path) {
+        if ($view_full_path) {
+            try {
                 require_once($view_full_path);
-                // Save cache before exiting
-                if ($cache_buffer_started && $cache_result === false) {
-                    $content = ob_get_contents();
-                    if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
-                        StaticPageCache::createCache($request_path, $cache_params, $content);
-                    } else if (!StaticPageCache::shouldIgnore($request_path, $cache_params)) {
-                        // Only mark as nostatic if it's not spam/malicious
-                        StaticPageCache::markAsNostatic($request_path, $cache_params);
-                    }
-                    // If shouldIgnore() returns true, do nothing (ignore completely)
+            } catch (\Throwable $e) {
+                // A throw mid-render leaves partial page output in the
+                // static-cache buffer. Discard it — an error response must
+                // never be cached, and the URL must not be marked nostatic
+                // for having errored once.
+                if ($cache_buffer_started) {
+                    ob_end_clean();
                 }
-                exit();
+                // One behavior for every route type: the registered error
+                // handler (ErrorManager). A missing view never reaches this
+                // block — $view_full_path is only set for a file that exists
+                // — so a throw here is the page erroring, not a 404.
+                throw $e;
             }
-        } catch (Exception $e) {
-            error_log("Asset/view not found: " . $request_path . " - " . $e->getMessage());
-            LibraryFunctions::display_404_page();
+            // Save cache before exiting — success path only
+            if ($cache_buffer_started && $cache_result === false) {
+                $content = ob_get_contents();
+                if (StaticPageCache::shouldCache($request_path, $cache_params, $content)) {
+                    StaticPageCache::createCache($request_path, $cache_params, $content);
+                } else if (!StaticPageCache::shouldIgnore($request_path, $cache_params)) {
+                    // Only mark as nostatic if it's not spam/malicious
+                    StaticPageCache::markAsNostatic($request_path, $cache_params);
+                }
+                // If shouldIgnore() returns true, do nothing (ignore completely)
+            }
+            exit();
         }
         
         // 7. Allow plugins to add custom routes (backward compatibility)
         if (function_exists('handlePluginRoutes')) {
             handlePluginRoutes($params);
         }
-
-        // Note: Cache saving is now handled by register_shutdown_function above
-        // This ensures caching works even when exit() is called during route handling
 
         // 8. Final fallback - 404
         if (self::$match_only_mode) {
