@@ -32,24 +32,17 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  */
 class AgentLoop {
 
-    /** Max output tokens per individual API call — the hard ceiling on one model
-     *  response. Sized to hold a reasoning pass plus a full answer (reasoning
-     *  models spend output tokens thinking before they answer). Within every
-     *  offered model's output limit (Claude Haiku/Sonnet 64K, Opus 128K;
-     *  Fireworks models well above). The turn-wide budget is enforced separately
-     *  via the $token_budget argument. */
+    /** Floor on the output tokens allowed for one model response, used when the
+     *  catalog names no per-model ceiling.
+     *
+     *  This used to be a pair of constants selected by provider identity, both
+     *  set to the same number, chosen as a lowest common denominator BECAUSE the
+     *  code could not see which model it was talking to. The catalog can, so the
+     *  real ceiling comes from the resolved model's own default and this is only
+     *  the fallback. Sized to hold a reasoning pass plus a full answer, since
+     *  reasoning models spend output tokens thinking before they answer. The
+     *  turn-wide budget is enforced separately via $token_budget. */
     const PER_CALL_MAX_TOKENS = 16000;
-
-    /** Same ceiling, but for the local/self-hosted provider. Kept at parity
-     *  with the cloud ceiling: local reasoning models (qwen3) think before
-     *  answering and cannot be made to stop (the "off" thinking level only
-     *  relocates the reasoning, it does not remove it — see
-     *  OpenAiCompatibleProvider::applyReasoning), so a real analysis task needs
-     *  the reasoning tokens PLUS the answer to fit under this cap. A tighter
-     *  cap truncates mid-reasoning and yields empty/unparseable output. The
-     *  per-run rcp_max_tokens budget and the kill switch bound total cost;
-     *  this only caps a single exchange. */
-    const LOCAL_PER_CALL_MAX_TOKENS = 16000;
 
     /** Abort the turn if this many consecutive iterations return a tool error. */
     const CONSECUTIVE_TOOL_ERROR_LIMIT = 3;
@@ -88,8 +81,7 @@ class AgentLoop {
     }
 
     public static function run(
-        LlmProviderInterface $provider,
-        string $model,
+        AiModelResolution $resolution,
         array $system,
         array $messages,
         array $allowed_tools,
@@ -98,8 +90,10 @@ class AgentLoop {
         int $token_budget,
         ?float $temperature = null,
         ?float $top_p = null,
-        string $thinking_level = 'off'
+        ?array $thinking = null
     ): array {
+        $model = $resolution->modelId();
+        $thinking = $thinking ?? $resolution->thinkingDirective();
         $tool_schemas = RecipeToolRegistry::schemasFor($allowed_tools);
         foreach (RecipeToolRegistry::unknown($allowed_tools) as $unknown_name) {
             $context->appendToolCall([
@@ -144,7 +138,7 @@ class AgentLoop {
 
             $params = [
                 'model'      => $model,
-                'max_tokens' => $provider->id() === 'local' ? self::LOCAL_PER_CALL_MAX_TOKENS : self::PER_CALL_MAX_TOKENS,
+                'max_tokens' => $resolution->maxOutputTokens(self::PER_CALL_MAX_TOKENS),
                 'system'     => $system,
                 'messages'   => $messages,
             ];
@@ -156,18 +150,22 @@ class AgentLoop {
             // is unchanged. See the chat-model-control spec.
             if ($temperature !== null) $params['temperature'] = $temperature;
             if ($top_p !== null)       $params['top_p'] = $top_p;
-            // Always pass the thinking level (including 'off') so each provider can
-            // act on it — notably the local provider maps 'off' to qwen3's
-            // /no_think, the snappy default that skips the reasoning pass.
-            $params['thinking'] = ['level' => $thinking_level];
+            // The thinking DIRECTIVE, decided once by the resolver against the
+            // chosen model's declared capability. Providers translate it into
+            // their own wire field and never consult a table of model names, so
+            // there is no second catalog to disagree with the first.
+            $params['thinking'] = $thinking;
 
             // One provider call path: always stream. The context's emitText is
             // the sink — chat forwards it to the live partial-row writer; recipes
             // no-op it, so this is transparent to the autonomous surface.
+            // send() may fail over to an approved sibling before the first token
+            // arrives; $model is re-read each iteration so the status line and
+            // the request agree about what is running.
             $context->noteActivity('Waiting for ' . self::modelShortLabel($model) . '…'
                 . ($iter > 0 ? ' (step ' . ($iter + 1) . ')' : ''));
-            $response = $provider->createMessageStreamed($params, [$context, 'emitText'],
-                [$context, 'shouldAbort']);
+            $response = $resolution->send($params, [$context, 'emitText'], [$context, 'shouldAbort']);
+            $model = $resolution->modelId();
 
             $usage = $response['usage'] ?? [];
             // A cached prompt reports its tokens split across input/cache_read, so
@@ -295,23 +293,14 @@ class AgentLoop {
             'messages'           => $messages,
             'stop_reason'        => $stop_reason,
             'detail'             => $detail,
-            // The model's real context window, read from the host just after the
-            // turn (model still loaded). Colors the per-reply context number by how
-            // close it is to the limit. Best-effort, non-blocking — null for remote
-            // models or an unreachable host.
-            'context_window'     => self::sampleContextWindow($provider, $model),
+            // The operative context window: the smaller of the catalog's
+            // nominal figure and what the host is actually serving right now.
+            // Colors the per-reply context number by how close it is to the
+            // limit. Best-effort — null when neither number is available.
+            'context_window'     => $resolution->usableContext(),
+            'model'              => $resolution->servedBy(),
+            'endpoint'           => $resolution->endpointKey(),
         ];
-    }
-
-    /**
-     * The operative context window for a local turn, used to color the per-reply
-     * context number by proximity. Null for remote providers (no /api/ps) or when
-     * the host didn't answer — the number then renders uncolored. Never throws or
-     * blocks: hostContextWindow() bounds its own timeouts.
-     */
-    private static function sampleContextWindow($provider, string $model): ?int {
-        if ($provider->id() !== 'local' || !method_exists($provider, 'hostContextWindow')) return null;
-        return $provider->hostContextWindow($model);
     }
 
     /**

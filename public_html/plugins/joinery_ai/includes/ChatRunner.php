@@ -59,13 +59,48 @@ class ChatRunner {
         "You are Joinery AI, a helpful assistant for the administrator of this site.\n"
       . "Answer naturally and conversationally. Use Markdown when it helps. Do not use emoji.";
 
-    /** Default model for a new conversation: the active provider's default. */
+    /**
+     * The model a new conversation starts on.
+     *
+     * Chat is a deliberate pick-your-own surface: it carries no capability
+     * floor, because a conversation has no job to declare one. So this is the
+     * site's chat default — one operator's taste about the most visible AI
+     * surface — behaving as a site-wide pin: it resolves to that model when the
+     * install can reach it, and falls back to normal resolution when it cannot,
+     * rather than starting every new chat on a name nothing serves.
+     *
+     * Returns '' when nothing at all is configured; the composer shows the
+     * setup prompt in that case rather than a broken picker.
+     */
     public static function defaultModel(): string {
+        $configured = trim((string)Globalvars::get_instance()->get_setting('joinery_ai_default_model'));
         try {
-            return LlmProviderFactory::build()->defaultModel();
+            if ($configured !== '' && AiEndpointRegistry::model($configured) !== null) {
+                return $configured;
+            }
+            $req = AiModelRequirementBuilder::forPurpose('a new chat')->withTools(true);
+            $resolution = AiModelResolver::tryResolve($req);
+            return $resolution === null ? '' : $resolution->modelId();
         } catch (Throwable $e) {
-            return (string)Globalvars::get_instance()->get_setting('joinery_ai_default_model');
+            return '';
         }
+    }
+
+    /**
+     * The default model for a new conversation at $level.
+     *
+     * Fortress content never leaves the box, so a Fortress chat starts on a
+     * local model whatever the site default says — enforced by the resolver
+     * from the level rather than by a second definition of "local" kept in step
+     * by hand.
+     */
+    public static function defaultModelForLevel(string $level): string {
+        if ($level !== AiConversation::LEVEL_FORTRESS) return self::defaultModel();
+        $req = AiModelRequirementBuilder::forPurpose('a Fortress chat')
+            ->withTools(true)
+            ->withTrustFloor(AiModelRequirement::TRUST_LOCAL);
+        $resolution = AiModelResolver::tryResolve($req);
+        return $resolution === null ? '' : $resolution->modelId();
     }
 
     /**
@@ -104,11 +139,14 @@ class ChatRunner {
     private static function drive(AiConversation $conversation, ChatTurnContext $ctx, array $messages): array {
         $settings = Globalvars::get_instance();
 
-        $model_pref = (string)$conversation->get('aic_model');
-        // forConversation enforces the Fortress local-only pin (Phase 5); Standard
-        // and Private route by the model id exactly as before.
-        $provider = LlmProviderFactory::forConversation($conversation);
-        $model = $model_pref !== '' ? $model_pref : $provider->defaultModel();
+        // The turn's ONE model decision. The Fortress local-only pin is part of
+        // the requirement (from the chat LEVEL, not from a column), so a
+        // Fortress conversation cannot resolve onto anything off the box —
+        // which is the same guarantee the old special case in the provider
+        // factory made, expressed once instead of twice.
+        $resolution = AiModelResolver::resolve(
+            AiModelRequirementBuilder::forConversation($conversation));
+        $model = $resolution->modelId();
 
         $system = self::buildSystemPrompt($conversation, $ctx, $messages);
         $allowed_tools = self::resolveAllowedTools($conversation, $ctx);
@@ -117,12 +155,16 @@ class ChatRunner {
         // Per-chat model controls: row value → plugin-setting default → floor.
         $token_budget = AgentLoop::resolveInt($conversation->get('aic_max_tokens'),
             $settings->get_setting('joinery_ai_chat_max_tokens'), 1000);
-        $temperature  = AgentLoop::resolveFloat($conversation->get('aic_temperature'),
-            $settings->get_setting('joinery_ai_default_temperature'));
-        $top_p        = AgentLoop::resolveFloat($conversation->get('aic_top_p'),
-            $settings->get_setting('joinery_ai_default_top_p'));
-        $thinking     = AgentLoop::resolveThinkingLevel($conversation->get('aic_thinking_level'),
-            $settings->get_setting('joinery_ai_default_thinking_level'));
+        // Sampling: the chat's own value, else this MODEL's catalog default,
+        // else the plugin setting. One global temperature handed to every model
+        // is a Claude-shaped number given to qwen, which wants a looser one.
+        $temperature  = AgentLoop::resolveFloat($resolution->control('temperature',
+            $conversation->get('aic_temperature'),
+            $settings->get_setting('joinery_ai_default_temperature')), null);
+        $top_p        = AgentLoop::resolveFloat($resolution->control('top_p',
+            $conversation->get('aic_top_p'),
+            $settings->get_setting('joinery_ai_default_top_p')), null);
+        $thinking     = $resolution->thinkingDirective();
 
         // Egress restriction is durable per conversation. If an earlier turn
         // opened sealed content, restrict web egress for THIS turn too — even
@@ -136,7 +178,7 @@ class ChatRunner {
             SealedEgressGuard::restrictEgress('conv:' . (int)$conversation->key);
         }
 
-        $result = AgentLoop::run($provider, $model, $system, $messages,
+        $result = AgentLoop::run($resolution, $system, $messages,
             $allowed_tools, $ctx, $max_iterations, $token_budget,
             $temperature, $top_p, $thinking);
 
@@ -149,7 +191,9 @@ class ChatRunner {
             AiConversation::updateColumns((int)$conversation->key, ['aic_egress_restricted' => true]);
         }
 
-        return ['result' => $result, 'context' => $ctx, 'model' => $model];
+        // servedBy(), so a turn that failed over to an approved sibling reports
+        // what actually answered it.
+        return ['result' => $result, 'context' => $ctx, 'model' => $resolution->servedBy()];
     }
 
     /**

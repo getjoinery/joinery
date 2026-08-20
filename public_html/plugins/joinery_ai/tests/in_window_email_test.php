@@ -31,6 +31,12 @@
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
+
+require_once(__DIR__ . '/../../../tests/lib/llm_fixtures.php');
+// Jobs are handed the run's model resolution so they can size a digest against the
+// room they actually got. These tests exercise selection, not sizing.
+$fake_resolution = fake_model_resolution();
+
 require_once(__DIR__ . '/../../../tests/lib/vault_fixtures.php');
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -185,7 +191,7 @@ try {
 	section('sealed mail is invisible while locked');
 
 	check(VaultUnlock::secretKey($owner_id) === null, 'precondition: the vault is locked');
-	check($job->nextItem($config, $recipe) === null,
+	check($job->nextItem($config, $recipe, $fake_resolution) === null,
 		'nextItem finds nothing while locked, rather than reading ciphertext');
 	check($job->hasWork($config, $recipe) === false, 'and hasWork agrees');
 	check(RecipeVaultScope::hasWork($owner_id) === false,
@@ -198,7 +204,7 @@ try {
 		array('idle' => null, 'absolute' => null));
 	check(VaultUnlock::isOpen($owner_id), 'precondition: the window is open');
 
-	$item = $job->nextItem($config, $recipe);
+	$item = $job->nextItem($config, $recipe, $fake_resolution);
 	check($item !== null && $item['item_key'] === (string)$newer,
 		'the newest unread sealed message is the next item');
 	check($item !== null && strpos((string)$item['digest'], 'Newer note') !== false,
@@ -211,15 +217,15 @@ try {
 	section('read and unparsed mail are both out of scope');
 
 	InboundEmailMessage::updateColumns($newer, array('iem_is_read' => true));
-	$item = $job->nextItem($config, $recipe);
+	$item = $job->nextItem($config, $recipe, $fake_resolution);
 	check($item !== null && $item['item_key'] === (string)$older,
 		'a read message drops out and the older one is next');
 
 	InboundEmailMessage::updateColumns($older, array('iem_pending_parse' => true));
-	check($job->nextItem($config, $recipe) === null,
+	check($job->nextItem($config, $recipe, $fake_resolution) === null,
 		'an unparsed message is never judged on its empty content');
 	InboundEmailMessage::updateColumns($older, array('iem_pending_parse' => false));
-	check($job->nextItem($config, $recipe) !== null, 'and returns once it is parsed');
+	check($job->nextItem($config, $recipe, $fake_resolution) !== null, 'and returns once it is parsed');
 
 	// -----------------------------------------------------------------------
 	section('cron refuses an in-window recipe');
@@ -711,95 +717,102 @@ try {
 	// This precedes every storage sink — the plaintext leaves over HTTPS, not
 	// into a column, so no storage-side guard can see it.
 	require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
-	check(LlmProviderFactory::isCloudModel('claude-haiku-4-5') === true,
-		'a Claude model counts as cloud');
-	check(LlmProviderFactory::isCloudModel('qwen3.6:35b-a3b-nvfp4') === false,
-		'a local model does not');
 
-	// An UNPINNED recipe is the important case, and the easy one to get wrong:
-	// its model id says nothing, so the classification has to come from the
-	// global default provider the run will actually follow. Shipped templates
-	// seed unpinned, so they are the rows on this path.
-	$saved_provider = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider');
-	harness_set_setting_mem('joinery_ai_llm_provider', 'anthropic');
-	check(LlmProviderFactory::isCloudModel('') === true,
-		'no pinned model + a cloud site default counts as cloud, not as harmless');
-	harness_set_setting_mem('joinery_ai_llm_provider', 'local');
-	check(LlmProviderFactory::isCloudModel('') === false,
-		'and as local when the site default is local');
-	harness_set_setting_mem('joinery_ai_llm_provider', $saved_provider);
+	// Make the cloud endpoint REACHABLE for this section. A pin to an endpoint
+	// with no key is an availability fact, not a consent violation — it falls
+	// back to the requirement and runs local, which is safe but tests nothing.
+	// The case worth proving is a cloud model this install genuinely could use.
+	$saved_anthropic = Globalvars::get_instance()->get_setting('joinery_ai_anthropic_api_key');
+	harness_set_setting_mem('joinery_ai_anthropic_api_key', 'sink-zero-fixture-key');
+	AiEndpointRegistry::clearCache();
+	harness_defer(function () use ($saved_anthropic) {
+		harness_set_setting_mem('joinery_ai_anthropic_api_key', $saved_anthropic);
+		AiEndpointRegistry::clearCache();
+	});
 
-	// The gate has to refuse that recipe too, and say something an admin can act
-	// on rather than quoting an empty model name back at them.
-	$unpinned = iw_recipe($owner_id, 'email_triage', $address);
-	$unpinned->set('rcp_model', '');
-	harness_set_setting_mem('joinery_ai_llm_provider', 'anthropic');
-	$refused_unpinned = false;
-	$unpinned_message = '';
-	try {
-		RecipeVaultScope::assertModelAllowed($unpinned);
-	} catch (LlmProviderException $e) {
-		$refused_unpinned = true;
-		$unpinned_message = $e->getMessage();
-	}
-	check($refused_unpinned,
-		'a sealed-source recipe with NO model pinned is refused against a cloud default');
-	check(stripos($unpinned_message, 'no model pinned') !== false,
-		'and the refusal explains that rather than quoting an empty name', $unpinned_message);
-	harness_set_setting_mem('joinery_ai_llm_provider', $saved_provider);
+	check(AiEndpointRegistry::trustForModel('claude-haiku-4-5') === 'cloud',
+		'a Claude model is classified cloud by the shipped catalog');
+	check(AiEndpointRegistry::trustForModel('qwen3.6:35b-a3b-nvfp4') === 'local',
+		'a model the operator serves themselves is classified local');
+	check(AiEndpointRegistry::trustForModel('nothing-serves-this') === null,
+		'and an id no endpoint serves is classified as nothing at all');
 
+	// An UNPINNED recipe is the important case, and the easy one to get wrong.
+	// Its model id says nothing, so the answer has to come from what the
+	// requirement would actually resolve to. Shipped templates seed unpinned,
+	// so they are the rows on this path.
 	MailboxAliasConfig::clearPostureCache();
-	check(MailboxAliasConfig::aiCloudAllowed($address) === false,
-		'the sealed domain has not consented to cloud processing');
-	check(MailboxAliasConfig::aiCloudAllowed($std_address) === true,
+	check(MailboxAliasConfig::aiProcessingConsent($address) === InboundEmailDomain::CONSENT_LOCAL,
+		'the sealed domain has not consented to its mail travelling');
+	check(MailboxAliasConfig::aiProcessingConsent($std_address) === InboundEmailDomain::CONSENT_CLOUD,
 		'while a standard domain has nothing to withhold');
 
+	$unpinned = iw_recipe($owner_id, 'email_triage', $address);
+	$unpinned->set('rcp_model', '');
+	check(RecipeVaultScope::consentTrustFloor($unpinned) === AiModelRequirement::TRUST_LOCAL,
+		'an unpinned sealed-source recipe is floored to local by its domain, not left open');
+	check(RecipeVaultScope::requirementFor($unpinned)->trustFloor() === AiModelRequirement::TRUST_LOCAL,
+		'and that floor is folded into the requirement, so nothing off-box is even a candidate');
+
+	// A pin the domain does not permit is refused, naming the model and the
+	// setting that would allow it.
 	$recipe->set('rcp_model', 'claude-haiku-4-5');
 	$refused_cloud = false;
 	$cloud_message = '';
 	try {
-		RecipeVaultScope::assertModelAllowed($recipe);
+		RecipeVaultScope::resolveForRecipe($recipe);
 	} catch (LlmProviderException $e) {
 		$refused_cloud = true;
 		$cloud_message = $e->getMessage();
 	}
 	check($refused_cloud, 'a sealed-source recipe pinned to a cloud model is refused');
-	check(strpos($cloud_message, 'claude-haiku-4-5') !== false
-		&& stripos($cloud_message, 'cloud AI models') !== false,
-		'and the refusal names the model and the setting that would allow it', $cloud_message);
+	check(stripos($cloud_message, 'encrypted at rest') !== false,
+		'and the refusal explains that the mail is sealed', $cloud_message);
 
 	// A local model on the same sealed recipe is fine.
 	$recipe->set('rcp_model', 'qwen3.6:35b-a3b-nvfp4');
 	$local_ok = true;
+	$local_why = '';
 	try {
-		RecipeVaultScope::assertModelAllowed($recipe);
+		$local_res = RecipeVaultScope::resolveForRecipe($recipe);
+		check($local_res->isLocal(), 'and it resolves onto the local endpoint');
 	} catch (LlmProviderException $e) {
 		$local_ok = false;
+		$local_why = $e->getMessage();
 	}
-	check($local_ok, 'the same recipe on a local model is allowed');
+	check($local_ok, 'the same recipe on a local model is allowed', $local_why);
 
-	// Granting consent lets the cloud model through...
-	$fortress->set('ied_ai_cloud_enabled', true);
+	// Three-valued consent: the distinction a boolean could not express.
+	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_TRUSTED);
 	$fortress->save();
 	MailboxAliasConfig::clearPostureCache();
+	check(RecipeVaultScope::consentTrustFloor($recipe) === AiModelRequirement::TRUST_TRUSTED,
+		'a domain consenting to trusted processing floors the recipe at trusted');
 	$recipe->set('rcp_model', 'claude-haiku-4-5');
-	$allowed_now = true;
+	$trusted_refuses_cloud = false;
 	try {
-		RecipeVaultScope::assertModelAllowed($recipe);
+		RecipeVaultScope::resolveForRecipe($recipe);
 	} catch (LlmProviderException $e) {
-		$allowed_now = false;
+		$trusted_refuses_cloud = true;
 	}
-	check($allowed_now, 'granting the domain cloud consent allows it');
+	check($trusted_refuses_cloud, 'and still refuses a cloud model');
+
+	// Granting full consent lets the cloud model through...
+	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_CLOUD);
+	$fortress->save();
+	MailboxAliasConfig::clearPostureCache();
+	check(RecipeVaultScope::consentTrustFloor($recipe) === AiModelRequirement::TRUST_ANY,
+		'full consent imposes no floor at all');
 
 	// ...and withdrawing it stops the recipe again, without the recipe changing.
 	// This is the whole point of re-checking at run start rather than only at
 	// save: the recipe row is identical either side of this.
-	$fortress->set('ied_ai_cloud_enabled', false);
+	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
 	$fortress->save();
 	MailboxAliasConfig::clearPostureCache();
 	$stopped_again = false;
 	try {
-		RecipeVaultScope::assertModelAllowed($recipe);
+		RecipeVaultScope::resolveForRecipe($recipe);
 	} catch (LlmProviderException $e) {
 		$stopped_again = true;
 	}
@@ -808,13 +821,29 @@ try {
 
 	// A standard-mailbox recipe is never gated by this.
 	$std_recipe->set('rcp_model', 'claude-haiku-4-5');
-	$std_ok = true;
+	check(RecipeVaultScope::consentTrustFloor($std_recipe) === null,
+		'and an ordinary mailbox recipe imposes no consent floor at all');
+
+	// A pin to an endpoint this install cannot reach is an AVAILABILITY fact,
+	// not a consent violation: the requirement is still enough to run on, so it
+	// falls back and lands somewhere the domain permits.
+	harness_set_setting_mem('joinery_ai_anthropic_api_key', '');
+	AiEndpointRegistry::clearCache();
+	$fortress->set('ied_ai_processing_consent', InboundEmailDomain::CONSENT_LOCAL);
+	$fortress->save();
+	MailboxAliasConfig::clearPostureCache();
+	$recipe->set('rcp_model', 'claude-haiku-4-5');
+	$fell_back = null;
 	try {
-		RecipeVaultScope::assertModelAllowed($std_recipe);
-	} catch (LlmProviderException $e) {
-		$std_ok = false;
-	}
-	check($std_ok, 'and an ordinary mailbox recipe is untouched by the gate');
+		$fell_back = RecipeVaultScope::resolveForRecipe($recipe);
+	} catch (LlmProviderException $e) {}
+	check($fell_back !== null && $fell_back->isLocal(),
+		'an unreachable cloud pin falls back to the requirement and stays local',
+		$fell_back === null ? 'refused' : $fell_back->modelId());
+	check($fell_back !== null && $fell_back->substitutionNote() !== '',
+		'and the substitution is recorded rather than silent');
+	harness_set_setting_mem('joinery_ai_anthropic_api_key', 'sink-zero-fixture-key');
+	AiEndpointRegistry::clearCache();
 
 	$recipe->set('rcp_model', '');
 

@@ -149,12 +149,12 @@ class CostGuard {
         $db = DbConnector::get_instance()->get_db_link();
         // Only usage that COST something counts. These caps exist to stop
         // runaway spending, and a model running on the operator's own hardware
-        // spends nothing — a local provider's estimateCost() is 0.0, so its runs
-        // record rcr_cost_estimate = 0 and are excluded here
+        // spends nothing — a local model declares no cost in the catalog, so
+        // its runs record rcr_cost_estimate = 0 and are excluded here
         // (specs/in_window_deferred_work.md § Token caps have to stop counting
-        // free work). Cost is the right signal rather than isPrivate(), which is
-        // about training policy: Fireworks is private AND paid, and must keep
-        // counting.
+        // free work). Cost is the right signal rather than the trust class,
+        // which is about where content may travel: Fireworks is trusted AND
+        // paid, and must keep counting.
         $sql = "SELECT COALESCE(SUM(rcr_input_tokens) + SUM(rcr_output_tokens), 0)
                 FROM rcr_recipe_runs
                 WHERE rcr_started_time >= ?

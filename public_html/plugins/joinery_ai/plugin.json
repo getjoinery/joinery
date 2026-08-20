@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.19.9",
+    "version": "0.20.0",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -92,13 +92,17 @@
     },
     "settings": [
         {
-            "name": "joinery_ai_llm_provider",
-            "default": "anthropic",
+            "name": "joinery_ai_selection_policy",
+            "default": "prefer_local",
             "group": "provider",
-            "label": "LLM Provider",
+            "label": "How a model is chosen",
             "type": "select",
-            "options": {"anthropic": "Anthropic (cloud)", "fireworks": "Fireworks (cloud · no-train, private)", "local": "Local / self-hosted (OpenAI-compatible)"},
-            "helptext": "Which backend drives recipes. The recipe model is reinterpreted by whichever provider is active."
+            "options": {
+                "prefer_local": "Prefer my own hardware, then the cheapest that qualifies (recommended)",
+                "cheapest": "Cheapest that qualifies, wherever it runs",
+                "best": "Most capable that qualifies, then cheapest"
+            },
+            "helptext": "Recipes say what they need, not which model to use, and this decides among the models that qualify. Preferring your own hardware is the platform's standing posture: reaching a vendor is then always a consequence of a floor your hardware could not meet."
         },
         {
             "name": "joinery_ai_anthropic_api_key",
@@ -114,7 +118,6 @@
             "group": "provider",
             "label": "Local Base URL",
             "type": "text",
-            "show_when": {"joinery_ai_llm_provider": "local"},
             "helptext": "OpenAI-compatible endpoint (Ollama, llama.cpp, vLLM, LM Studio). Use the host URL if the server is not on this box."
         },
         {
@@ -123,8 +126,7 @@
             "group": "provider",
             "label": "Local Model",
             "type": "text",
-            "show_when": {"joinery_ai_llm_provider": "local"},
-            "helptext": "Model id(s) served by the host. Must be set before the local provider runs. Comma-separate multiple ids to offer them all in the chat model dropdown — the first is the default."
+            "helptext": "Model id(s) your host serves, comma-separated, exactly as it names them. Each is graded automatically from its tag against the shipped model reference, so there is nothing to bind and no slots to keep straight - swap a model here and every recipe follows, because none of them names one."
         },
         {
             "name": "joinery_ai_local_api_key",
@@ -132,7 +134,6 @@
             "secret": true,
             "group": "provider",
             "label": "Local API Key",
-            "show_when": {"joinery_ai_llm_provider": "local"},
             "helptext": "Only for servers that require a key; Ollama ignores it."
         },
         {
@@ -141,7 +142,6 @@
             "group": "provider",
             "label": "Local Timeout (s)",
             "type": "number",
-            "show_when": {"joinery_ai_llm_provider": "local"},
             "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
             "helptext": "Per-call HTTP timeout — the max quiet gap between tokens once the model is generating. CPU-only local generation is slow, so keep this high."
         },
@@ -151,7 +151,6 @@
             "group": "provider",
             "label": "Local First-Token Timeout (s)",
             "type": "number",
-            "show_when": {"joinery_ai_llm_provider": "local"},
             "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
             "helptext": "How long to wait for the model to start responding before failing the turn. Bounds a cold model load or an overloaded host so a stalled request fails fast."
         },
@@ -169,7 +168,6 @@
             "group": "provider",
             "label": "Fireworks Base URL",
             "type": "text",
-            "show_when": {"joinery_ai_llm_provider": "fireworks"},
             "helptext": "OpenAI-compatible Fireworks endpoint. The default is correct for the public API."
         },
         {
@@ -198,11 +196,11 @@
         },
         {
             "name": "joinery_ai_default_model",
-            "default": "claude-haiku-4-5",
-            "group": "caps",
-            "label": "Default Model for new recipes",
+            "default": "",
+            "group": "chat",
+            "label": "Default model for new chats",
             "type": "text",
-            "helptext": "Used when creating a new recipe. Each recipe can override."
+            "helptext": "Which model a new conversation starts on, as your host or vendor names it. Chat is a pick-your-own surface, so this is taste rather than a requirement. Blank, or a model this install cannot reach, starts the chat on whatever is available. Recipes never read this - they state what they need instead."
         },
         {
             "name": "joinery_ai_failure_email_throttle_seconds",
@@ -351,15 +349,6 @@
             "type": "number",
             "validation": {"number": true, "min": 1, "messages": {"min": "Must be 1 or more."}},
             "helptext": "Most personal memories listed (titles only) in each turn's memory index. Shared memories are always listed and do not count against this."
-        },
-        {
-            "name": "joinery_ai_local_vision",
-            "default": "0",
-                "group": "provider",
-                "label": "Local model can read images",
-                "type": "select",
-                "options": {"1": "Yes", "0": "No"},
-                "helptext": "Turn on only when the local model actually accepts images."
         },
         {
             "name": "joinery_ai_attach_image_max_bytes",

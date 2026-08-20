@@ -29,43 +29,9 @@ class AnthropicException extends LlmProviderException {}
  */
 class AnthropicProvider implements LlmProviderInterface {
 
+    /** Fallback when the endpoint definition names no base_url. */
     const API_URL = 'https://api.anthropic.com/v1/messages';
     const API_VERSION = '2023-06-01';
-
-    const DEFAULT_MODEL = 'claude-haiku-4-5';
-
-    /**
-     * USD per 1,000,000 tokens. For run-cost estimation in the dashboard;
-     * a few percent off is acceptable. Source: platform.claude.com pricing
-     * cached 2026-04-15. Add new models here when they're enabled in the
-     * model dropdown.
-     *
-     * Cache write (5-min TTL): 1.25× input. Cache read: 0.1× input.
-     */
-    const COST_PER_MTOKEN = [
-        'claude-opus-4-7'   => ['input' => 5.00, 'output' => 25.00, 'cache_write' => 6.25, 'cache_read' => 0.50],
-        'claude-opus-4-6'   => ['input' => 5.00, 'output' => 25.00, 'cache_write' => 6.25, 'cache_read' => 0.50],
-        'claude-sonnet-4-6' => ['input' => 3.00, 'output' => 15.00, 'cache_write' => 3.75, 'cache_read' => 0.30],
-        'claude-haiku-4-5'  => ['input' => 1.00, 'output' =>  5.00, 'cache_write' => 1.25, 'cache_read' => 0.10],
-    ];
-
-    /** Models offered to the recipe-edit dropdown. */
-    const MODELS = [
-        'claude-opus-4-7'   => 'Claude Opus 4.7 ($5/$25 per Mtok)',
-        'claude-sonnet-4-6' => 'Claude Sonnet 4.6 ($3/$15 per Mtok)',
-        'claude-haiku-4-5'  => 'Claude Haiku 4.5 ($1/$5 per Mtok)',
-    ];
-
-    /**
-     * Attachment capability per model: 'vision' accepts image blocks, 'document'
-     * accepts native PDF `document` blocks. Every current Claude model does both.
-     * See modelCapabilities() and the file-upload spec §3.
-     */
-    const MODEL_CAPABILITIES = [
-        'claude-opus-4-7'   => ['vision' => true, 'document' => true],
-        'claude-sonnet-4-6' => ['vision' => true, 'document' => true],
-        'claude-haiku-4-5'  => ['vision' => true, 'document' => true],
-    ];
 
     /** @var string */
     private $api_key;
@@ -73,13 +39,17 @@ class AnthropicProvider implements LlmProviderInterface {
     /** @var Client */
     private $http;
 
-    public function __construct(string $api_key, ?Client $http = null) {
+    /** @var string The messages URL, from the endpoint definition. */
+    private $api_url;
+
+    public function __construct(string $api_key, string $api_url = self::API_URL, ?Client $http = null) {
         if (!$api_key) {
             throw new LlmProviderException(
                 'Anthropic API key is empty. Configure joinery_ai_anthropic_api_key.'
             );
         }
         $this->api_key = $api_key;
+        $this->api_url = $api_url !== '' ? $api_url : self::API_URL;
         $this->http = $http ?: new Client([
             'timeout' => 120,
             'connect_timeout' => 10,
@@ -90,27 +60,9 @@ class AnthropicProvider implements LlmProviderInterface {
         return 'anthropic';
     }
 
-    /** General cloud provider — not classified private; triggers the chat warning. */
-    public function isPrivate(): bool {
-        return false;
-    }
-
     /** No cheap pre-flight probe for a cloud provider — the real call handles transport errors. */
     public function reachabilityProbe(): ?string {
         return null;
-    }
-
-    /** Image + native-PDF capable across the catalog; unknown ids fall to false. */
-    public function modelCapabilities(string $model): array {
-        return self::MODEL_CAPABILITIES[$model] ?? ['vision' => false, 'document' => false];
-    }
-
-    public function models(): array {
-        return self::MODELS;
-    }
-
-    public function defaultModel(): string {
-        return self::DEFAULT_MODEL;
     }
 
     /** Inactivity (between-token) timeout for the streamed read, in seconds. */
@@ -127,14 +79,18 @@ class AnthropicProvider implements LlmProviderInterface {
             ?callable $shouldAbort = null): array {
         $params['stream'] = true;
 
-        // Translate the canonical thinking knob (['level'=>off|low|medium|high])
-        // to Anthropic's extended-thinking field. temperature/top_p are canonical
-        // Anthropic params and pass through as-is — except extended thinking
-        // requires default sampling, so they're dropped when thinking is enabled.
+        // Translate the resolver's thinking DIRECTIVE into Anthropic's
+        // extended-thinking field. Whether this model can reason at all was
+        // decided against the catalog before the request was built, so there is
+        // nothing to look up here. temperature/top_p are canonical Anthropic
+        // params and pass through as-is — except extended thinking requires
+        // default sampling, so they're dropped when thinking is enabled.
         if (isset($params['thinking'])) {
-            $level = $params['thinking']['level'] ?? 'off';
+            $directive = $params['thinking'];
             unset($params['thinking']);
-            $budget = ['low' => 1024, 'medium' => 4096, 'high' => 12000][$level] ?? 0;
+            $effort = (string)($directive['effort'] ?? '');
+            $budget = empty($directive['enabled'])
+                ? 0 : (['low' => 1024, 'medium' => 4096, 'high' => 12000][$effort] ?? 1024);
             if ($budget > 0) {
                 $params['thinking'] = ['type' => 'enabled', 'budget_tokens' => $budget];
                 // Anthropic requires max_tokens > budget_tokens; leave room for the
@@ -158,7 +114,7 @@ class AnthropicProvider implements LlmProviderInterface {
         foreach ($delays as $delay) {
             if ($delay > 0) sleep($delay);
             try {
-                $response = $this->http->post(self::API_URL, [
+                $response = $this->http->post($this->api_url, [
                     'headers'      => $headers,
                     'json'         => $params,
                     'stream'       => true,
@@ -327,27 +283,6 @@ class AnthropicProvider implements LlmProviderInterface {
                 $msg = is_array($err) ? trim(($err['type'] ?? '') . ': ' . ($err['message'] ?? '')) : 'stream error';
                 throw new LlmProviderException('Anthropic stream error: ' . $msg);
         }
-    }
-
-    /**
-     * Estimate USD cost from a canonical usage block:
-     *   { input_tokens, output_tokens, cache_creation_input_tokens?, cache_read_input_tokens? }
-     */
-    public function estimateCost(string $model, array $usage): float {
-        $rates = self::COST_PER_MTOKEN[$model] ?? null;
-        if (!$rates) return 0.0;
-
-        $input_uncached  = (int)($usage['input_tokens']                 ?? 0);
-        $output          = (int)($usage['output_tokens']                ?? 0);
-        $cache_write     = (int)($usage['cache_creation_input_tokens']  ?? 0);
-        $cache_read      = (int)($usage['cache_read_input_tokens']      ?? 0);
-
-        return (
-            $input_uncached * $rates['input']
-          + $output         * $rates['output']
-          + $cache_write    * $rates['cache_write']
-          + $cache_read     * $rates['cache_read']
-        ) / 1000000.0;
     }
 
     private static function extractError(string $body): ?string {

@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.25.0
+ * @version 1.26.0
  */
 return [
 	[
@@ -646,6 +646,103 @@ return [
 			}
 
 			$dblink->exec("ALTER TABLE iia_inbound_imap_accounts ALTER COLUMN iia_import_scope SET NOT NULL");
+		},
+	],
+
+	[
+		// Carry the old yes/no cloud consent onto the three-valued one.
+		//
+		// A boolean could not say "a vendor I have accepted, but not a general
+		// cloud", which is a distinction an operator can reasonably want. The
+		// new column holds the most permissive endpoint trust class this
+		// domain's decrypted mail may reach, using the same three names an
+		// endpoint uses for its own trust — so the sealed-egress gate is a
+		// comparison rather than a translation.
+		//
+		// Mapping: false -> 'local' (it never left the box), true -> 'cloud'
+		// (it could reach anywhere). Nothing lands on 'trusted', because nobody
+		// has been asked that question yet and inventing an answer would be
+		// widening a consent on their behalf.
+		//
+		// Plugin tables sync AFTER the core migration list runs, so on the first
+		// pass the new column may not exist yet; a missing column here would
+		// throw and halt the loop. The guard DEFERS (stays pending, nothing
+		// recorded) rather than returning — a plain return would be recorded as
+		// applied and the carry-over would never happen. The next
+		// update_database pass runs it for real.
+		'id' => 'ied_001_ai_processing_consent',
+		'version' => '1.26.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			$has_new = (int)$dblink->query(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'ied_inbound_email_domains'
+				   AND column_name = 'ied_ai_processing_consent'")->fetchColumn();
+			if (!$has_new) {
+				echo "ied_ai_processing_consent not present yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+
+			// Plugin-table sync adds a new column without its
+			// field_specifications DEFAULT, so set it before anything writes.
+			$dblink->exec("ALTER TABLE ied_inbound_email_domains
+			               ALTER COLUMN ied_ai_processing_consent SET DEFAULT 'local'");
+			$dblink->exec("UPDATE ied_inbound_email_domains SET ied_ai_processing_consent = 'local'
+			               WHERE ied_ai_processing_consent IS NULL OR ied_ai_processing_consent = ''");
+
+			$has_old = (int)$dblink->query(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'ied_inbound_email_domains'
+				   AND column_name = 'ied_ai_cloud_enabled'")->fetchColumn();
+			if ($has_old) {
+				$q = $dblink->query(
+					"UPDATE ied_inbound_email_domains SET ied_ai_processing_consent = 'cloud'
+					 WHERE ied_ai_cloud_enabled = true
+					   AND ied_ai_processing_consent IS DISTINCT FROM 'cloud'");
+				echo "ied_inbound_email_domains: " . $q->rowCount() . " domain(s) carried over as 'cloud'.\n";
+			} else {
+				echo "ied_ai_cloud_enabled already dropped, nothing to carry over.\n";
+			}
+
+			$dblink->exec("ALTER TABLE ied_inbound_email_domains
+			               ALTER COLUMN ied_ai_processing_consent SET NOT NULL");
+		},
+	],
+
+	[
+		// Drop the retired yes/no cloud consent column once ied_001 has carried
+		// its value onto the three-valued one. It is already out of the data
+		// class, so nothing reads or writes it — but while the physical column
+		// lingers, a future re-run of the carry-over could re-widen a consent an
+		// operator has since tightened. Deferred until the new column is
+		// finalized NOT NULL, which is ied_001's last statement — so this can
+		// never destroy the old value before it has been carried over.
+		'id' => 'ied_002_drop_retired_cloud_consent',
+		'version' => '1.26.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+
+			$has_old = (int)$dblink->query(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'ied_inbound_email_domains'
+				   AND column_name = 'ied_ai_cloud_enabled'")->fetchColumn();
+			if (!$has_old) {
+				echo "ied_ai_cloud_enabled already gone, nothing to drop.\n";
+				return;
+			}
+
+			$carried = (int)$dblink->query(
+				"SELECT COUNT(*) FROM information_schema.columns
+				 WHERE table_schema = 'public' AND table_name = 'ied_inbound_email_domains'
+				   AND column_name = 'ied_ai_processing_consent' AND is_nullable = 'NO'")->fetchColumn();
+			if (!$carried) {
+				echo "ied_001 has not completed yet - deferred to the next update_database pass.\n";
+				return 'defer';
+			}
+
+			$dblink->exec("ALTER TABLE ied_inbound_email_domains DROP COLUMN ied_ai_cloud_enabled");
+			echo "ied_ai_cloud_enabled dropped.\n";
 		},
 	],
 ];

@@ -16,6 +16,17 @@ extract($page_vars);
 
 $is_new = !$recipe->key;
 
+/** Has anyone overridden this recipe's model requirement? Drives whether the
+ *  Advanced block starts open — a set override must never be hidden behind a
+ *  fold the operator has to remember to check. */
+function joinery_ai_has_model_override(Recipe $recipe): bool {
+    foreach (['rcp_model', 'rcp_min_tier', 'rcp_trust_floor', 'rcp_min_context'] as $col) {
+        $v = $recipe->get($col);
+        if ($v !== null && $v !== '') return true;
+    }
+    return $recipe->get('rcp_thinking_required') !== null;
+}
+
 // Present on the render path; absent when the logic returned an error, so fall
 // back rather than letting the ship control disappear mid-correction.
 $is_upgrade_server = $is_upgrade_server ?? DeploymentHelper::isUpgradeServer();
@@ -48,7 +59,8 @@ if (!empty($shipped_key)) {
 if ($declared_key !== '' && !$recipe->get('rcp_enabled')
         && empty(Recipe::decodeSourceConfig($recipe))) {
     echo '<div class="alert alert-info">This recipe shipped with your install and is not set up yet. '
-       . 'Choose the mailbox it should work on, pick a model, then enable it.</div>';
+       . 'Choose the mailbox it should work on, then enable it. The model is chosen for you '
+       . 'from what this recipe needs.</div>';
 }
 
 // Models with configuration issues — surfaces the registry's scan-time
@@ -221,35 +233,107 @@ echo '</div>';
 // --- Model & tools ---
 $settings = Globalvars::get_instance();
 
-// Model options come from the active provider, so switching provider re-skins
-// the dropdown without touching this view. If the recipe's stored model isn't
-// served by a configured provider (its provider isn't set up), append it
-// flagged so the value is preserved and the mismatch is visible rather than
-// silently overwritten on save.
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
+
+// What this recipe would run on right now. A recipe states what it NEEDS, not
+// which model to use, so this line is how an operator sees what their floor
+// actually bought — before they save, and without opening a file.
+$resolution = $resolution ?? ['summary' => '', 'error' => '', 'advisories' => [], 'requirement' => ''];
+
+echo '<div class="form-group mb-3">';
+echo '<label class="form-label">Model</label>';
+if ($resolution['summary'] !== '') {
+    echo '<p class="mb-1"><strong>Automatic</strong> — right now this runs on '
+       . htmlspecialchars($resolution['summary']) . '</p>';
+} else {
+    echo '<p class="mb-1"><strong>Automatic</strong> — nothing available can run this recipe yet.</p>';
+}
+if ($resolution['requirement'] !== '') {
+    echo '<p class="text-muted small mb-1">It needs ' . htmlspecialchars($resolution['requirement'])
+       . '. Which model that is, is decided when the recipe runs, so upgrading the model on your '
+       . 'host or in a release moves every recipe at once.</p>';
+}
+if ($resolution['error'] !== '') {
+    echo '<p class="text-danger small mb-1">' . htmlspecialchars($resolution['error']) . '</p>';
+}
+foreach ($resolution['advisories'] as $advisory) {
+    echo '<p class="text-muted small mb-1">' . htmlspecialchars($advisory) . '</p>';
+}
+echo '</div>';
+
+// Everything below is a power-user override. The normal case is an operator who
+// never opens it: the job that does the work declares the floor, because it is
+// the only party that knows what the work needs.
+echo '<details class="mb-3" id="rcp_model_advanced"'
+   . (joinery_ai_has_model_override($recipe) ? ' open' : '') . '>';
+echo '<summary class="form-label" style="cursor:pointer">Advanced — choose the model yourself</summary>';
+echo '<div class="mt-2">';
+
+// The presence marker: a checkbox posts nothing when unticked, so the save path
+// needs to know the Advanced fields were on the form at all before it reads one.
+echo '<input type="hidden" name="requirement_fields_present" value="1">';
+
+$formwriter->dropinput('rcp_min_tier', 'Minimum capability', [
+    'value'   => (string)$recipe->get('rcp_min_tier'),
+    'options' => [
+        ''         => 'Inherit (what this recipe\'s job asks for)',
+        'basic'    => 'Basic — one short yes/no on short text',
+        'standard' => 'Standard — reads a document, fills a multi-field answer',
+        'capable'  => 'Capable — judges one item that may be trying to fool it',
+        'frontier' => 'Frontier — drives a multi-step tool loop, or drafts in your voice',
+    ],
+    'helptext' => 'A floor, not a preference: any model at or above it can run this. Leave it '
+        . 'inherited unless you know this recipe needs more than its job asks for.',
+]);
+
+$formwriter->dropinput('rcp_trust_floor', 'How far the work may travel', [
+    'value'   => (string)$recipe->get('rcp_trust_floor'),
+    'options' => [
+        ''        => 'Inherit',
+        'local'   => 'Stay on my hardware',
+        'trusted' => 'My hardware, or a vendor I have accepted',
+        'any'     => 'Anywhere configured, including cloud',
+    ],
+    'helptext' => 'Tightening only. Where this recipe reads mail that is encrypted at rest, the '
+        . 'domain\'s own setting still applies and the stricter of the two wins.',
+]);
+
+$thinking_required = $recipe->get('rcp_thinking_required');
+$formwriter->checkboxinput('rcp_thinking_required', 'Requires a model that can reason', [
+    'value' => (bool)$thinking_required,
+    'helptext' => 'Excludes models with no reasoning ability at all. Different from the Thinking '
+        . 'Level below, which says how hard to reason once one is chosen.',
+]);
+
+$rcp_min_context = $recipe->get('rcp_min_context');
+$formwriter->numberinput('rcp_min_context', 'Minimum context (tokens)', [
+    'value' => ($rcp_min_context === null ? '' : $rcp_min_context),
+    'min' => 0, 'step' => 1000,
+    'helptext' => 'Only for recipes that hand the model a large digest. Blank = no floor. A host '
+        . 'that does not report its context window fails this rather than guessing.',
+]);
+
+// The pin. Rare, still checked against the floors above, and unavailable-not-
+// wrong is treated differently from below-the-floor — see the spec's §6.
 try {
-    // The model selects the provider, so offer every model from every
-    // configured provider — not just the global-default one.
     $model_options = LlmProviderFactory::allModels();
-} catch (LlmProviderException $e) {
-    // No provider configured yet. Don't crash the edit page — fall back to no
-    // preset options; the stored model is still preserved below.
+} catch (Throwable $e) {
     $model_options = [];
 }
 $stored_model = (string)$recipe->get('rcp_model');
-// A shipped recipe carries no model — the publishing instance's choice means
-// nothing here — so resolve the site's own default at the moment it's edited.
-if ($stored_model === '') {
-    $stored_model = joinery_ai_default_recipe_model($settings);
-}
 if ($stored_model !== '' && !isset($model_options[$stored_model])) {
-    $model_options[$stored_model] = "$stored_model — unavailable (its provider isn't configured)";
+    $model_options[$stored_model] = "$stored_model — not available on this install";
 }
-
-$formwriter->dropinput('rcp_model', 'Model', [
+$formwriter->dropinput('rcp_model', 'Pin to one model', [
     'value'   => $stored_model,
-    'options' => $model_options,
+    'options' => ['' => 'No pin — let the requirement choose'] + $model_options,
+    'helptext' => 'Overrides everything above. A pin that cannot meet the floors is refused when '
+        . 'you save; a pin this install cannot reach today falls back to the requirement, and the '
+        . 'run says so.',
 ]);
+
+echo '</div>';
+echo '</details>';
 
 $rcp_temp = $recipe->get('rcp_temperature');
 $formwriter->numberinput('rcp_temperature', 'Temperature', [

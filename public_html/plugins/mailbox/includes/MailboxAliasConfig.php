@@ -198,28 +198,35 @@ class MailboxAliasConfig {
 	}
 
 	/**
-	 * May this address's decrypted mail be sent to a model running off the box?
+	 * How far this address's decrypted mail may travel to be read by a model:
+	 * the most permissive endpoint trust class it may reach.
 	 *
-	 * Only meaningful where there is something to protect: on a standard domain
-	 * the mail is not sealed at rest, so no promise is broken by a cloud model
-	 * reading it, and this returns true. On a sealed domain it is the domain's
-	 * explicit second consent, default off.
+	 * Only meaningful where there is something to protect. On a standard domain
+	 * the mail is not sealed at rest, so no promise is broken by any model
+	 * reading it and the answer is 'cloud'. On a sealed domain it is the
+	 * domain's explicit second consent, which starts at 'local'.
 	 *
 	 * Deliberately separate from aiProcessingAllowed(): letting the AI read
 	 * sealed mail on hardware you control and letting that plaintext leave the
 	 * box are different decisions, and an operator may reasonably want the first
-	 * without the second.
+	 * without the second — or want it to reach a vendor they have accepted terms
+	 * with without reaching a general cloud, which is the distinction a boolean
+	 * could not express.
+	 *
+	 * An address that resolves to nothing gets the strictest answer: an
+	 * unanswerable question is not a permission.
 	 */
-	public static function aiCloudAllowed(string $address): bool {
+	public static function aiProcessingConsent(string $address): string {
 		$row = self::domainPostureForAddress($address);
 		if ($row === null) {
-			return false;
+			return InboundEmailDomain::CONSENT_LOCAL;
 		}
 		$level = (string)$row['ied_security_level'];
 		if ($level !== 'private' && $level !== 'fortress') {
-			return true;
+			return InboundEmailDomain::CONSENT_CLOUD;
 		}
-		return (bool)$row['ied_ai_cloud_enabled'];
+		$v = strtolower(trim((string)$row['ied_ai_processing_consent']));
+		return in_array($v, InboundEmailDomain::CONSENTS, true) ? $v : InboundEmailDomain::CONSENT_LOCAL;
 	}
 
 	/**
@@ -240,7 +247,7 @@ class MailboxAliasConfig {
 
 		$db = DbConnector::get_instance()->get_db_link();
 		$q = $db->prepare(
-			"SELECT d.ied_security_level, d.ied_ai_processing_enabled, d.ied_ai_cloud_enabled
+			"SELECT d.ied_security_level, d.ied_ai_processing_enabled, d.ied_ai_processing_consent
 			   FROM iea_inbound_email_aliases a
 			   JOIN ied_inbound_email_domains d ON d.ied_inbound_email_domain_id = a.iea_ied_inbound_email_domain_id
 			  WHERE a.iea_delete_time IS NULL

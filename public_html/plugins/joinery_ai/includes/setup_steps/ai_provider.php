@@ -1,25 +1,28 @@
 <?php
 /**
  * Setup wizard step: AI assistant (specs/setup_wizard.md § Step 7).
- * Three-way choice, own-machine first. Writes the plugin's declared settings
- * through the wizard's generic step_settings_save handler; the Test button
- * calls joinery_ai/test_connection against what was saved.
+ * Own-machine first. Writes the plugin's declared settings through the wizard's
+ * generic step_settings_save handler; the Test button calls
+ * joinery_ai/test_connection, which probes whatever endpoint this install would
+ * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
- * @version 1.0
+ * @version 1.1
  */
 
-$setup_ai_provider = (string)$settings->get_setting('joinery_ai_llm_provider') ?: 'anthropic';
 $setup_ai_local_url = (string)$settings->get_setting('joinery_ai_local_base_url');
 $setup_ai_local_model = (string)$settings->get_setting('joinery_ai_local_model');
 $setup_ai_has_anthropic = (string)$settings->get_setting('joinery_ai_anthropic_api_key') !== '';
 $setup_ai_has_fireworks = (string)$settings->get_setting('joinery_ai_fireworks_api_key') !== '';
 $setup_ai_configured = $setup_ai_has_anthropic || $setup_ai_has_fireworks || $setup_ai_local_model !== '';
 
-$setup_ai_choice = 'local';
-if ($setup_ai_provider === 'anthropic' || $setup_ai_provider === 'fireworks') {
-	$setup_ai_choice = 'cloud';
-}
+// There is no "active provider" to remember: every configured endpoint is
+// available at once, and what a piece of work runs on is decided from what it
+// needs. So the radio is only about which fields to show, and it opens on
+// whatever this install has actually set up - own-machine first.
+$setup_ai_provider = $setup_ai_has_anthropic ? 'anthropic' : 'fireworks';
+$setup_ai_choice = ($setup_ai_local_model === '' && ($setup_ai_has_anthropic || $setup_ai_has_fireworks))
+	? 'cloud' : 'local';
 ?>
 
 <?php if (!empty($_GET['saved'])) { ?>
@@ -32,7 +35,6 @@ $setup_ai_form->begin_form();
 $setup_ai_form->hiddeninput('action', '', array('value' => 'step_settings_save'));
 $setup_ai_form->hiddeninput('step', '', array('value' => 'ai_provider'));
 $setup_ai_form->hiddeninput('step_key', '', array('value' => 'ai_provider'));
-$setup_ai_form->hiddeninput('joinery_ai_llm_provider', '', array('value' => $setup_ai_provider, 'id' => 'setup-ai-provider-setting'));
 ?>
 	<fieldset class="jy-fieldset">
 		<label class="jy-check"><input type="radio" name="ai_choice" value="local" <?php echo $setup_ai_choice === 'local' ? 'checked' : ''; ?>> <strong>My own machine</strong> — an OpenAI-compatible server you run (Ollama, LM Studio, …)</label>
@@ -91,14 +93,12 @@ $setup_ai_form->end_form();
 
 	<script>
 	(function () {
-		var providerSetting = document.getElementById('setup-ai-provider-setting');
 		var cloudWhich = document.getElementById('setup-ai-cloud-which');
 		function sync() {
 			var choice = document.querySelector('input[name="ai_choice"]:checked');
 			var isLocal = choice && choice.value === 'local';
 			document.getElementById('setup-ai-local').classList.toggle('d-none', !isLocal);
 			document.getElementById('setup-ai-cloud').classList.toggle('d-none', isLocal);
-			providerSetting.value = isLocal ? 'local' : cloudWhich.value;
 			document.querySelectorAll('[data-ai-cloud]').forEach(function (div) {
 				div.classList.toggle('d-none', isLocal || div.getAttribute('data-ai-cloud') !== cloudWhich.value);
 			});

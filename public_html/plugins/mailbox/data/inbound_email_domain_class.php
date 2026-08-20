@@ -61,6 +61,17 @@ class InboundEmailDomain extends SystemBase {
 	const LEVEL_PRIVATE  = 'private';
 	const LEVEL_FORTRESS = 'fortress';
 
+	// How far this domain's decrypted mail may travel to be read by an AI
+	// model, as the most permissive endpoint trust class it may reach. Same
+	// three names an endpoint uses, so the sealed-egress gate is a comparison
+	// rather than a translation. See specs/joinery_ai_model_capability_resolution.md §9a.
+	const CONSENT_LOCAL   = 'local';
+	const CONSENT_TRUSTED = 'trusted';
+	const CONSENT_CLOUD   = 'cloud';
+
+	/** The three consent values, least to most permissive. */
+	const CONSENTS = array(self::CONSENT_LOCAL, self::CONSENT_TRUSTED, self::CONSENT_CLOUD);
+
 	public static $field_specifications = array(
 		'ied_inbound_email_domain_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
 		'ied_domain'            => array('type'=>'varchar(255)', 'required'=>true, 'is_nullable'=>false),
@@ -88,13 +99,23 @@ class InboundEmailDomain extends SystemBase {
 		// here" and "the server reads my mail while I am here, and sends it to
 		// the configured model host" — which must never become true silently.
 		'ied_ai_processing_enabled' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
-		// Second, narrower consent. ied_ai_processing_enabled says the AI may
-		// read this domain's sealed mail at all; this says the decrypted text
-		// may be sent to a model running on someone else's hardware. Separate
-		// because they are different promises: the first keeps plaintext inside
-		// the box, the second lets it out. Default off, and off is the answer
-		// for every domain that has not deliberately said otherwise.
-		'ied_ai_cloud_enabled'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
+		// Second, narrower consent: how far this domain's decrypted mail may
+		// travel. ied_ai_processing_enabled says the AI may read it at all;
+		// this says where it may be read. Separate because they are different
+		// promises — the first keeps plaintext inside the box, the second lets
+		// it out.
+		//
+		// Holds the MOST PERMISSIVE endpoint trust class the mail may reach:
+		//   'local'   — never leaves hardware the operator controls (the default,
+		//               and the answer for every domain that has not said otherwise)
+		//   'trusted' — may reach a named vendor the operator has accepted terms
+		//               with, but not a general cloud
+		//   'cloud'   — may reach any configured endpoint
+		// Same vocabulary as an endpoint's trust class, so the gate is a direct
+		// comparison rather than a translation. A boolean could not express
+		// "trusted yes, cloud no", which is a distinction an operator can
+		// reasonably want. See specs/joinery_ai_model_capability_resolution.md §9a.
+		'ied_ai_processing_consent' => array('type'=>'varchar(20)', 'is_nullable'=>false, 'default'=>'local'),
 		// Outbound send protection (specs/mailbox_outbound_send_protection.md).
 		'ied_is_protected_identity' => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'ied_owner_usr_user_id'     => array('type'=>'int8', 'is_nullable'=>true),   // whose vault seals the DKIM key
@@ -214,6 +235,23 @@ class InboundEmailDomain extends SystemBase {
 			return self::LEVEL_STANDARD;
 		}
 		return $v;
+	}
+
+	/**
+	 * How far this domain's decrypted mail may travel, validated. Anything
+	 * unrecognised reads as the strictest value: an unreadable consent is not a
+	 * permission, and sealed mail never travels until someone says so.
+	 */
+	function ai_processing_consent() {
+		$v = strtolower(trim((string)$this->get('ied_ai_processing_consent')));
+		return in_array($v, self::CONSENTS, true) ? $v : self::CONSENT_LOCAL;
+	}
+
+	/** The stricter of two consent values. Used to fold a recipe's whole bound
+	 *  set down to one answer — the strictest sealed address wins. */
+	static function strictestConsent($a, $b) {
+		$rank = array(self::CONSENT_LOCAL => 0, self::CONSENT_TRUSTED => 1, self::CONSENT_CLOUD => 2);
+		return (($rank[$a] ?? 0) <= ($rank[$b] ?? 0)) ? $a : $b;
 	}
 
 	/** True when this domain seals stored content at rest (Private or Fortress). */

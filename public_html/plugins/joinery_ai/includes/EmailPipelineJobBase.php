@@ -87,19 +87,39 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
     }
 
     /**
-     * The domain's second consent: may its decrypted mail leave the box?
-     * A run reads the whole bound set, so EVERY sealed address's domain must
-     * have said yes before a cloud model is allowed; the standard addresses
-     * have nothing sealed and never withhold it.
+     * The domain's second consent: how far may its decrypted mail travel?
+     *
+     * A run reads the whole bound set in one pass, so the answer is the
+     * STRICTEST any sealed address gives — one address that must stay on the
+     * box holds the whole recipe there. An address with nothing sealed has
+     * nothing to protect and contributes no constraint.
      */
-    public function cloudProcessingAllowed(array $config): bool {
+    public function processingConsent(array $config): string {
+        $consent = InboundEmailDomain::CONSENT_CLOUD;
         foreach (MailboxAliasConfig::listedAddresses($config) as $address) {
-            if (MailboxAliasConfig::isSealedAtRest($address)
-                    && !MailboxAliasConfig::aiCloudAllowed($address)) {
-                return false;
-            }
+            if (!MailboxAliasConfig::isSealedAtRest($address)) continue;
+            $consent = InboundEmailDomain::strictestConsent(
+                $consent, MailboxAliasConfig::aiProcessingConsent($address));
         }
-        return true;
+        return $consent;
+    }
+
+    /**
+     * Mail is document-length and the verdict has several fields to hold at
+     * once, so `standard` is the honest floor for the family. A job whose
+     * judgement is adversarial — the security scan — raises it for itself.
+     */
+    public function minTier(): string {
+        return AiModelRequirement::TIER_STANDARD;
+    }
+
+    /**
+     * No floor of the job's own: what mail may reach is the domain's decision,
+     * enforced by processingConsent() above, and stating a second answer here
+     * would be a place for the two to disagree.
+     */
+    public function defaultTrustFloor(): string {
+        return AiModelRequirement::TRUST_ANY;
     }
 
     /** Cheap existence check for the same pool nextItem() draws from,
@@ -143,7 +163,7 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
         return $notes;
     }
 
-    public function nextItem(array $config, Recipe $recipe): ?array {
+    public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array {
         $owner_id = (int)$recipe->get('rcp_owner_user_id');
         // Selection is shared across all three email jobs so they cannot
         // drift apart — see EmailJobCandidates for the rules. Config drift

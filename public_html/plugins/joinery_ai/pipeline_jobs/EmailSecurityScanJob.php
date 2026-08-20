@@ -43,6 +43,22 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
     }
 
     /** The scan judges the message envelope and body alone. */
+    /**
+     * The one email job that raises the family floor. Its input is written by
+     * an attacker who wants a particular verdict, and its verdict is
+     * consequential, so it needs a model that resists manipulation planted in
+     * the text — `capable`, the rung for single-item adversarial judgement.
+     *
+     * Not `frontier`: a measured 9B does this at 96% recall / 4% false
+     * positives, and would not survive a long tool loop. Those are different
+     * capabilities on different rungs, and asking for the wrong one here would
+     * put a security scan out of reach of every local box.
+     * See specs/joinery_ai_model_capability_resolution.md §3a.
+     */
+    public function minTier(): string {
+        return AiModelRequirement::TIER_CAPABLE;
+    }
+
     protected function includeAttachmentDigest(): bool {
         return false;
     }

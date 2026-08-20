@@ -62,8 +62,6 @@ class ChatCancelStubProvider extends FakeLlmProvider {
                 'content' => [['type' => 'text', 'text' => 'partial answer so far']],
                 'usage' => ['input_tokens' => 3, 'output_tokens' => 4]];
     }
-    public function models(): array { return ['stub' => 'stub']; }
-    public function defaultModel(): string { return 'stub'; }
     public function id(): string { return 'stub'; }
 }
 
@@ -134,7 +132,7 @@ section('AgentLoop maps mid-generation abort → cancelled, keeping the partial'
 $msg2 = $make_running_msg((int)$convA->key);
 $ctx2 = new ChatTurnContext($convA, $uidA, (int)$msg2->key);   // starts UNflagged
 $prov_abort = new ChatCancelStubProvider('abort', (int)$msg2->key);
-$res2 = AgentLoop::run($prov_abort, 'stub', $SYSTEM, $HISTORY, [], $ctx2, 3, 1000);
+$res2 = AgentLoop::run($prov_abort->resolution('stub'), $SYSTEM, $HISTORY, [], $ctx2, 3, 1000);
 check($prov_abort->calls === 1, 'the generation started (shouldContinue passed at the loop top)', 'calls=' . $prov_abort->calls);
 check(($res2['stop_reason'] ?? '') === 'cancelled', 'aborted stream maps to stop_reason cancelled', $res2['stop_reason'] ?? '(none)');
 check(($res2['assistant_text'] ?? '') === 'partial answer so far', 'the partial answer is kept', $res2['assistant_text'] ?? '');
@@ -145,7 +143,7 @@ $msg3 = $make_running_msg((int)$convA->key);
 AiConversationMessage::updateColumns((int)$msg3->key, ['aim_cancel_requested' => true]);
 $ctx3 = new ChatTurnContext($convA, $uidA, (int)$msg3->key);
 $prov_never = new ChatCancelStubProvider('tool_use');
-$res3 = AgentLoop::run($prov_never, 'stub', $SYSTEM, $HISTORY, [], $ctx3, 3, 1000);
+$res3 = AgentLoop::run($prov_never->resolution('stub'), $SYSTEM, $HISTORY, [], $ctx3, 3, 1000);
 check($prov_never->calls === 0, 'a pre-set flag stops the turn before any provider call', 'calls=' . $prov_never->calls);
 check(($res3['stop_reason'] ?? '') === 'cancelled', 'between-steps guard yields cancelled', $res3['stop_reason'] ?? '');
 
@@ -154,7 +152,7 @@ section('Control: an unflagged turn is never spuriously cancelled');
 $msg4 = $make_running_msg((int)$convA->key);
 $ctx4 = new ChatTurnContext($convA, $uidA, (int)$msg4->key);
 $prov_ok = new ChatCancelStubProvider('end_turn', (int)$msg4->key); // 'end_turn' never aborts
-$res4 = AgentLoop::run($prov_ok, 'stub', $SYSTEM, $HISTORY, [], $ctx4, 3, 1000);
+$res4 = AgentLoop::run($prov_ok->resolution('stub'), $SYSTEM, $HISTORY, [], $ctx4, 3, 1000);
 check(($res4['stop_reason'] ?? '') === 'end_turn', 'a normal generation ends end_turn, not cancelled', $res4['stop_reason'] ?? '');
 check($ctx4->isCancelRequested() === false, 'the control row was never flagged');
 

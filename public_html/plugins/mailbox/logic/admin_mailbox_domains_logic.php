@@ -247,31 +247,39 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// be a deliberate choice) ---
 		// On a sealed level this decides whether the AI email features may read
 		// this domain's mail during an unlock window. It changes what the
-		// security level means in practice, so switching it ON needs the same
-		// fresh identity check other vault-consequential changes require.
-		// Turning it OFF is always allowed: withdrawing consent must never be
-		// harder than giving it.
+		// security level means in practice, so switching it ON — or letting the
+		// mail travel further than it could before — needs the same fresh
+		// identity check other vault-consequential changes require. Tightening
+		// either is always allowed: withdrawing consent must never be harder
+		// than giving it.
 		$old_ai = $domain->key ? (bool)$domain->get('ied_ai_processing_enabled') : false;
 		$new_ai = isset($input['ied_ai_processing_enabled']);
 		if ($new_ai && !$new_seals) {
 			$new_ai = false;   // meaningless at Standard; never store a stale yes
 		}
 
-		// The narrower consent: may that reading leave the box? It can only be
-		// on where the first is on — consenting to cloud processing for mail the
-		// AI may not read at all is a stale yes waiting to surprise someone.
-		$old_cloud = $domain->key ? (bool)$domain->get('ied_ai_cloud_enabled') : false;
-		$new_cloud = isset($input['ied_ai_cloud_enabled']);
-		if ($new_cloud && !$new_ai) {
-			$new_cloud = false;
+		// The narrower consent: how far may that reading travel? It can only be
+		// loosened where the first is on — consenting to off-box processing for
+		// mail the AI may not read at all is a stale yes waiting to surprise
+		// someone.
+		$consent_rank = array(InboundEmailDomain::CONSENT_LOCAL => 0,
+			InboundEmailDomain::CONSENT_TRUSTED => 1, InboundEmailDomain::CONSENT_CLOUD => 2);
+		$old_consent = $domain->key ? $domain->ai_processing_consent() : InboundEmailDomain::CONSENT_LOCAL;
+		$new_consent = strtolower(trim((string)($input['ied_ai_processing_consent'] ?? '')));
+		if (!in_array($new_consent, InboundEmailDomain::CONSENTS, true)) {
+			$new_consent = InboundEmailDomain::CONSENT_LOCAL;
 		}
+		if (!$new_ai) {
+			$new_consent = InboundEmailDomain::CONSENT_LOCAL;
+		}
+		$loosening_consent = ($consent_rank[$new_consent] > $consent_rank[$old_consent]);
 
-		// ONE gate over BOTH grants. Either one newly on needs a fresh identity
-		// check: granting cloud consent on a domain that already allowed AI
-		// reading is the graver of the two — it is what lets decrypted mail
-		// leave the server — so it cannot be the one that slips through
-		// unchecked. Turning either OFF is always allowed: withdrawing consent
-		// must never be harder than giving it.
+		// ONE gate over BOTH grants. Either one newly loosened needs a fresh
+		// identity check: widening how far this domain's mail may travel, on a
+		// domain that already allowed AI reading, is the graver of the two — it
+		// is what lets decrypted mail leave the server — so it cannot be the one
+		// that slips through unchecked. Tightening either is always allowed:
+		// withdrawing consent must never be harder than giving it.
 		// Only on an actual grant to an EXISTING domain, for the same reason the
 		// level gate above says: choosing this while creating a domain is an
 		// initial choice, not a change, and there is no mail under it yet for the
@@ -279,13 +287,13 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 		// entirely — the POST is dropped by the redirect, and a new domain has no
 		// key to come back to, so the return URL carried id=0 and landed on a row
 		// that never existed.
-		if ($domain->key && (($new_ai && !$old_ai) || ($new_cloud && !$old_cloud))) {
+		if ($domain->key && (($new_ai && !$old_ai) || $loosening_consent)) {
 			// Same ceremony the level change above uses: redirect to the step-up,
 			// return to this editor, and let the operator re-submit now confirmed.
-			// BOTH flags ride the return URL, so whichever boxes they ticked are
-			// still ticked when they land back here — the lost POST must not
-			// discard their intent, and a silently-dropped cloud tick would be
-			// the worst version of that.
+			// BOTH answers ride the return URL, so whatever they chose is still
+			// chosen when they land back here — the lost POST must not discard
+			// their intent, and a silently-tightened consent would be the worst
+			// version of that, because it reads as the system agreeing with them.
 			//
 			// SessionControl rather than PasskeyService: both read the same
 			// session-bound `stepup` marker in pks_passkey_ceremonies, but this
@@ -296,14 +304,14 @@ function admin_mailbox_domains_logic(array $input): LogicResult {
 			$ai_return = '/plugins/mailbox/admin/admin_mailbox_domains?ied_inbound_email_domain_id='
 				. (int)$domain->key . '&target_level=' . rawurlencode($new_level)
 				. ($new_ai ? '&target_ai=1' : '')
-				. ($new_cloud ? '&target_cloud=1' : '');
+				. ($loosening_consent ? '&target_cloud=' . rawurlencode($new_consent) : '');
 			$ai_stepup = $session->require_recent_second_factor($ai_return);
 			if ($ai_stepup !== null) {
 				return $ai_stepup;
 			}
 		}
 		$domain->set('ied_ai_processing_enabled', $new_ai);
-		$domain->set('ied_ai_cloud_enabled', $new_cloud);
+		$domain->set('ied_ai_processing_consent', $new_consent);
 
 		try {
 			$domain->prepare();

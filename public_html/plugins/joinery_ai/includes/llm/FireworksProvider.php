@@ -8,57 +8,21 @@ use GuzzleHttp\Client;
  *
  * Fireworks exposes an OpenAI-compatible /chat/completions endpoint, so this
  * rides OpenAiCompatibleProvider's wire translation and only supplies the
- * vendor-specific surface: a curated model catalog with pricing, reasoning_effort
- * in place of qwen's /think token, a private classification (Fireworks does not
- * train on open-model traffic), and Fireworks-flavoured diagnostics.
+ * vendor-specific surface: reasoning_effort in place of qwen's /think token,
+ * and Fireworks-flavoured diagnostics.
  *
- * Privacy: a vetted no-train remote, not on-device. isPrivate() is true so the
- * chat UI does not warn for it — but genuinely identifying data still belongs on
- * the local provider. See specs/joinery_ai_fireworks_provider.md.
- *
- * Pricing and model IDs move frequently — verify against the live Fireworks
- * catalog (fireworks.ai) before relying on cost figures.
+ * Which models Fireworks serves, what they cost and how far they are trusted
+ * are declared in plugins/joinery_ai/ai_endpoints.json, which ships with a
+ * release — so re-pricing or re-grading the fleet is a file edit and a publish
+ * rather than a tour of production databases. Fireworks is graded `trusted`
+ * there: the text leaves your hardware, but to a named vendor under a
+ * contractual no-train commitment on open-model traffic.
+ * See specs/joinery_ai_fireworks_provider.md.
  */
 class FireworksProvider extends OpenAiCompatibleProvider {
 
     const DEFAULT_BASE_URL = 'https://api.fireworks.ai/inference/v1';
     const DEFAULT_MODEL    = 'accounts/fireworks/models/gpt-oss-120b';
-
-    /**
-     * USD per 1,000,000 tokens. Cached input is billed at 50% of the input rate
-     * (handled in estimateCost). Verified against fireworks.ai 2026-06-28; the
-     * catalog moves, so re-check when adding models.
-     *
-     * Three tiers, no coding bias: cheap-but-good, cheapish reasoning+tools, and
-     * a Sonnet-class top end for well under Sonnet's price.
-     */
-    const COST_PER_MTOKEN = [
-        'accounts/fireworks/models/gpt-oss-120b' => ['input' => 0.15, 'output' => 0.60],
-        'accounts/fireworks/models/qwen3p7-plus' => ['input' => 0.40, 'output' => 1.60],
-        'accounts/fireworks/models/glm-5p2'      => ['input' => 1.40, 'output' => 4.40],
-    ];
-
-    /** Models offered to the model dropdown. */
-    const MODELS = [
-        'accounts/fireworks/models/gpt-oss-120b' => 'gpt-oss-120B (Fireworks · cheap · $0.15/$0.60 per Mtok)',
-        'accounts/fireworks/models/qwen3p7-plus' => 'Qwen 3.7 Plus (Fireworks · reasoning + tools · $0.40/$1.60 per Mtok)',
-        'accounts/fireworks/models/glm-5p2'      => 'GLM 5.2 (Fireworks · Sonnet-class · $1.40/$4.40 per Mtok)',
-    ];
-
-    /** Models that accept the reasoning_effort knob (all three are reasoning-capable). */
-    const REASONING_MODELS = [
-        'accounts/fireworks/models/gpt-oss-120b' => true,
-        'accounts/fireworks/models/qwen3p7-plus' => true,
-        'accounts/fireworks/models/glm-5p2'      => true,
-    ];
-
-    /**
-     * Always-on reasoning models that reject reasoning_effort="none" — thinking
-     * cannot be disabled, so `off` maps to the lowest effort ("low") instead.
-     */
-    const REASONING_NO_OFF = [
-        'accounts/fireworks/models/gpt-oss-120b' => true,
-    ];
 
     /** True when a model id belongs to Fireworks (namespaced account path). */
     public static function owns(string $model): bool {
@@ -88,11 +52,6 @@ class FireworksProvider extends OpenAiCompatibleProvider {
         return 'fireworks';
     }
 
-    /** Vetted no-train remote — classified private; suppresses the chat warning. */
-    public function isPrivate(): bool {
-        return true;
-    }
-
     /** Remote cloud host — skip the local-style pre-flight probe; the real call handles transport errors. */
     public function reachabilityProbe(): ?string {
         return null;
@@ -103,44 +62,24 @@ class FireworksProvider extends OpenAiCompatibleProvider {
         return 0;
     }
 
-    /**
-     * The curated Fireworks catalog is text-only here: no image or native-PDF
-     * ingest. Uploads to a Fireworks chat are refused at ingress with the
-     * "switch to a Claude model" message. If a vision-capable Fireworks model is
-     * added later, flip its entry here.
-     */
-    public function modelCapabilities(string $model): array {
-        return ['vision' => false, 'document' => false];
-    }
-
-    public function models(): array {
-        return self::MODELS;
-    }
-
-    public function defaultModel(): string {
-        return self::DEFAULT_MODEL;
-    }
-
     /** Fireworks models are real OpenAI chat models — no qwen /think token. */
-    protected function systemThinkingSuffix(string $level): string {
+    protected function systemThinkingSuffix(array $directive): string {
         return '';
     }
 
     /**
-     * Map the canonical thinking level to Fireworks' reasoning_effort knob. The
-     * Thinking control thus drives all our reasoning models: low/medium/high scale
-     * it, and `off` disables thinking ("none") — except on always-on models that
-     * reject "none", where `off` falls back to the lowest effort ("low"). Skipped
-     * for any non-reasoning model so we never send an unsupported parameter.
+     * Put the resolver's directive on Fireworks' reasoning_effort knob.
+     *
+     * Which models can reason, and which cannot be made to stop, used to be two
+     * tables of model names here. The catalog declares that now
+     * (`thinking: none|optional|always`) and the resolver has already turned it
+     * into a decision, so this only translates: thinking off sends "none",
+     * anything else sends the resolved effort. An always-on model never
+     * receives "none" because the resolver never produces it for one.
      */
-    protected function applyReasoning(array &$request, string $level): void {
-        $model = (string)($request['model'] ?? '');
-        if (empty(self::REASONING_MODELS[$model])) return;
-        if ($level === '' || $level === 'off') {
-            $request['reasoning_effort'] = !empty(self::REASONING_NO_OFF[$model]) ? 'low' : 'none';
-        } else {
-            $request['reasoning_effort'] = $level;
-        }
+    protected function applyReasoning(array &$request, array $directive): void {
+        $request['reasoning_effort'] = empty($directive['enabled'])
+            ? 'none' : (string)($directive['effort'] ?: 'low');
     }
 
     protected function providerLabel(): string {
@@ -149,26 +88,5 @@ class FireworksProvider extends OpenAiCompatibleProvider {
 
     protected function unreachableMessage(): string {
         return "Fireworks API not reachable at {$this->base_url} (connection error)";
-    }
-
-    /**
-     * USD from a canonical usage block. OpenAI-style usage counts cached tokens
-     * inside input_tokens, so the uncached remainder bills at the full input rate
-     * and the cached portion at half.
-     */
-    public function estimateCost(string $model, array $usage): float {
-        $rates = self::COST_PER_MTOKEN[$model] ?? null;
-        if (!$rates) return 0.0;
-
-        $input    = (int)($usage['input_tokens'] ?? 0);
-        $output   = (int)($usage['output_tokens'] ?? 0);
-        $cached   = (int)($usage['cache_read_input_tokens'] ?? 0);
-        $uncached = max(0, $input - $cached);
-
-        return (
-            $uncached * $rates['input']
-          + $cached   * $rates['input'] * 0.5
-          + $output   * $rates['output']
-        ) / 1000000.0;
     }
 }

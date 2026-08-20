@@ -31,6 +31,12 @@ require_once(__DIR__ . '/../../../tests/lib/harness.php');
 require_once(__DIR__ . '/../../../tests/lib/logic.php');
 harness_boot();
 
+require_once(__DIR__ . '/../../../tests/lib/llm_fixtures.php');
+// Jobs are handed the run's model resolution so they can size a digest against the
+// room they actually got. These tests exercise selection, not sizing.
+$fake_resolution = fake_model_resolution();
+
+
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
@@ -139,7 +145,7 @@ $config = array('mailbox_aliases' => array($addr1, $addr2));
 $resolved = MailboxAliasConfig::resolveBoundAliases($config, $member_id);
 check(count($resolved) === 2, 'both addresses resolve with live grants', json_encode($resolved));
 
-$item = $job->nextItem($config, $recipe);
+$item = $job->nextItem($config, $recipe, $fake_resolution);
 check($item !== null && $item['item_key'] === (string)$newer,
 	'the newest unread message across the UNION is selected first',
 	json_encode($item));
@@ -160,7 +166,7 @@ check(count($resolved) === 1 && in_array($addr1, $resolved, true),
 $notes = $job->coverageNotes($config, $recipe);
 check(count($notes) === 1 && strpos($notes[0], $addr2) !== false,
 	'and the run tally note names the dropped address', json_encode($notes));
-$item = $job->nextItem($config, $recipe);
+$item = $job->nextItem($config, $recipe, $fake_resolution);
 check($item !== null && $item['item_key'] === (string)$older,
 	'selection now sees only the still-granted mailbox');
 

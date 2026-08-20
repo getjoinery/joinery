@@ -329,6 +329,20 @@ class PluginManager extends AbstractExtensionManager {
                 $up = $migration['up'] ?? null;
                 if (is_callable($up)) {
                     $up_result = $up($dbconnector);
+                    // A migration may return 'defer' when it cannot run yet —
+                    // typically because it needs a plugin column that this same
+                    // update_database pass only creates AFTER migrations run.
+                    // Deferring records nothing, so the migration stays pending
+                    // and the next pass runs it for real. Returning normally
+                    // from a guard branch instead would mark it applied and it
+                    // would never complete.
+                    if ($up_result === 'defer') {
+                        if ($use_savepoint) {
+                            $dblink->exec("RELEASE SAVEPOINT plugin_migration");
+                        }
+                        $results[] = array('success' => true, 'id' => $migration_id, 'deferred' => true);
+                        continue;
+                    }
                     $result['success'] = ($up_result !== false);
                 } else {
                     $result['success'] = true; // No up function — nothing to do

@@ -6,197 +6,104 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/OpenAiC
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/FireworksProvider.php'));
 
 /**
- * Builds an LLM provider. The model id is authoritative: a model implies its
- * vendor (claude-* → Anthropic, accounts/fireworks/* → Fireworks, anything else
- * → the local OpenAI-compatible host), so a recipe pinned to a model always runs
- * on that model's provider regardless of the global setting. The global setting
- * (joinery_ai_llm_provider) is only the default for callers that have no model
- * to route by — e.g. a recipe that pins no model and follows the default.
+ * Builds the transport for one endpoint.
+ *
+ * This class used to answer "which provider does this model name belong to?"
+ * by sniffing the string — /^claude/ meant Anthropic, an accounts/fireworks/
+ * prefix meant Fireworks, anything else was assumed local. That guess was also
+ * the platform's definition of "cloud", so an id nobody recognised was
+ * classified as safe by default.
+ *
+ * The shipped catalog answers it instead: a model id belongs to exactly one
+ * endpoint, and AiModelResolver settles which endpoint a piece of work runs on
+ * BEFORE anything is dispatched. All that is left here is turning an endpoint
+ * key into a wire client — which dialect, which URL, which key.
+ *
+ * See specs/joinery_ai_model_capability_resolution.md §1, §5.
  */
 class LlmProviderFactory {
 
     /**
-     * Provider for a specific model id. Empty model → the global-default
-     * provider (build()). A claude-* id → Anthropic; an accounts/fireworks/* id →
-     * Fireworks; any other non-empty id is assumed served by the local host.
+     * The transport for one catalog endpoint.
      *
-     * @throws LlmProviderException if the resolved provider's required setting is empty.
+     * @throws LlmProviderException when the endpoint is unknown, or its
+     *         required setting is empty
      */
-    public static function forModel(string $model): LlmProviderInterface {
-        switch (self::routeFor($model)) {
-            case 'local':     return self::local();
-            case 'fireworks': return self::fireworks();
-            default:          return self::anthropic();
+    public static function forEndpoint(string $endpoint_key): LlmProviderInterface {
+        $endpoint = AiEndpointRegistry::endpoint($endpoint_key);
+        if ($endpoint === null) {
+            throw new LlmProviderException(
+                'No AI endpoint named "' . $endpoint_key . '" is declared in the model catalog.');
         }
-    }
 
-    /**
-     * Which provider a model id resolves to: 'anthropic' | 'fireworks' | 'local'.
-     *
-     * The single routing decision. forModel() builds from it and isCloudModel()
-     * classifies from it, so what actually receives the request and what the
-     * consent gates believe receives it cannot disagree — including for the
-     * empty model id, where the answer is not a property of the id at all but of
-     * the global default provider setting.
-     */
-    private static function routeFor(string $model): string {
-        $model = trim($model);
-        if ($model === '') {
-            // No pinned model: the run follows the global default, so THAT is
-            // what has to be classified. Anything other than 'local' leaves the
-            // box, and the setting's own fallback is Anthropic.
-            $default = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider') ?: 'anthropic';
-            if ($default === 'local')     return 'local';
-            if ($default === 'fireworks') return 'fireworks';
-            return 'anthropic';
+        $settings = Globalvars::get_instance();
+        $base_url = AiEndpointRegistry::baseUrl($endpoint_key);
+        $api_key  = AiEndpointRegistry::apiKey($endpoint_key);
+
+        $key_setting = $endpoint['api_key_setting'] ?? null;
+        if ($key_setting !== null && $api_key === '') {
+            throw new LlmProviderException(
+                'The ' . (string)$endpoint['label'] . ' endpoint is in use but ' . $key_setting
+                . ' is empty. Set it on the Joinery AI settings page.');
         }
-        if (preg_match('/^claude/i', $model)) return 'anthropic';
-        if (FireworksProvider::owns($model))  return 'fireworks';
-        // Any other id is served by the operator's own OpenAI-compatible host,
-        // which is where forModel() sends it — classification and routing agree.
-        return 'local';
-    }
 
-    /**
-     * Provider for a conversation, enforcing the Fortress contract
-     * (specs/joinery_ai_chat_encryption.md § Phase 5): a Fortress chat's content
-     * never leaves the box, so its turn MUST run on the local model — any cloud
-     * model (claude-* / Fireworks) is rejected here, the single choke point every
-     * turn passes through. Standard/Private route by the model id as usual.
-     *
-     * @throws LlmProviderException on a Fortress chat pinned to a cloud model, or
-     *         when the resolved provider's required setting is empty.
-     */
-    public static function forConversation(AiConversation $conversation): LlmProviderInterface {
-        $model = trim((string)$conversation->get('aic_model'));
-        if ((string)$conversation->get('aic_security_level') === AiConversation::LEVEL_FORTRESS) {
-            // A Fortress turn is pinned local below whatever the id says, so the
-            // only thing to report is an explicit cloud CHOICE. An unpinned chat
-            // has made no choice to refuse — it simply runs local.
-            if ($model !== '' && self::isCloudModel($model)) {
-                throw new LlmProviderException(
-                    'This is a Fortress chat — its content never leaves your hardware, so it can only run '
-                    . 'on a local model. The selected model “' . $model . '” is a cloud model. Switch to a '
-                    . 'local model in the chat settings, or a configured local model must be available.'
-                );
-            }
-            return self::local();   // pins to the local host (uses joinery_ai_local_model)
+        if ((string)($endpoint['dialect'] ?? 'openai') === 'anthropic') {
+            return new AnthropicProvider($api_key, $base_url);
         }
-        return self::forModel($model);
+
+        // Every OpenAI-dialect endpoint rides the same wire translation.
+        // Fireworks subclasses it only for its own diagnostics and timeouts.
+        $timeout = (int)$settings->get_setting('joinery_ai_local_timeout_seconds') ?: 300;
+        if ($endpoint_key === 'fireworks') {
+            return new FireworksProvider($api_key, $base_url, FireworksProvider::DEFAULT_MODEL, 120);
+        }
+        if ($base_url === '') {
+            throw new LlmProviderException(
+                'The ' . (string)$endpoint['label'] . ' endpoint has no base URL configured.');
+        }
+        // The per-request model always names itself, so the constructor's model
+        // argument is only a fallback; pass the endpoint's first served id.
+        $first = (string)(array_key_first(AiEndpointRegistry::modelsFor($endpoint_key)) ?? '');
+        return new OpenAiCompatibleProvider($base_url, $first, $api_key, $timeout);
     }
 
     /**
-     * Does this model run somewhere other than the operator's own hardware?
+     * Every model this install can send to right now, as [model_id => label] —
+     * for the chat model picker and the recipe pin.
      *
-     * The one definition of "cloud" — the Fortress chat pin and the sealed-mail
-     * recipe gate both ask here, so they cannot disagree about a model. Note
-     * this is NOT LlmProviderInterface::isPrivate(), which is about a provider's
-     * training policy and is true for Fireworks: a vendor promising not to train
-     * on your data is still a vendor holding your plaintext. For sealing, the
-     * only question is whether the bytes leave the box.
-     *
-     * Answered from routeFor(), the same decision forModel() builds from — so an
-     * UNPINNED recipe is classified by the global default provider it will
-     * actually follow, not treated as harmless because its model id is empty.
-     * Shipped templates ship unpinned, so that case is the common one.
-     */
-    public static function isCloudModel(string $model): bool {
-        return self::routeFor($model) !== 'local';
-    }
-
-    /**
-     * The global-default provider, from joinery_ai_llm_provider. Used when
-     * there is no model to route by.
-     *
-     * @throws LlmProviderException if the active provider's required setting is empty.
-     */
-    public static function build(): LlmProviderInterface {
-        $provider = Globalvars::get_instance()->get_setting('joinery_ai_llm_provider') ?: 'anthropic';
-        if ($provider === 'local')     return self::local();
-        if ($provider === 'fireworks') return self::fireworks();
-        return self::anthropic();
-    }
-
-    /**
-     * Every selectable model across all configured providers, as
-     * [model_id => label] — for the recipe-edit dropdown. Since the model now
-     * picks the provider, the dropdown offers models from every provider that
-     * is configured (Anthropic if a key is set, the local host if a local
-     * model is set), not just the global-default one. A provider with no
-     * configuration contributes nothing.
+     * An endpoint with no key contributes nothing, which is what makes clearing
+     * a key the supported way to take one out of play.
      */
     public static function allModels(): array {
-        $settings = Globalvars::get_instance();
-        $out = [];
-        if ((string)$settings->get_setting('joinery_ai_anthropic_api_key') !== '') {
-            foreach (self::anthropic()->models() as $id => $label) {
-                $out[$id] = $label;
+        try {
+            $out = [];
+            foreach (AiEndpointRegistry::catalog() as $id => $entry) {
+                if (!empty($entry['retired'])) continue;
+                $out[$id] = (string)$entry['label'];
             }
+            return $out;
+        } catch (AiCatalogException $e) {
+            return [];
         }
-        if ((string)$settings->get_setting('joinery_ai_fireworks_api_key') !== '') {
-            foreach (self::fireworks()->models() as $id => $label) {
-                $out[$id] = $label;
-            }
-        }
-        if ((string)$settings->get_setting('joinery_ai_local_model') !== '') {
-            foreach (self::local()->models() as $id => $label) {
-                $out[$id] = $label;
-            }
-        }
-        return $out;
     }
 
     /**
-     * Attachment capabilities (['vision'=>bool,'document'=>bool]) for a model id,
-     * resolved through its provider. An empty or unroutable id — or a provider
-     * whose required setting is unset — returns both false, so ingress refuses
-     * the upload rather than guessing capable.
+     * Attachment capabilities for a model id, from the catalog.
+     *
+     * An id no endpoint serves returns both false, so ingress refuses the
+     * upload rather than guessing capable — the file-upload spec's fail-loud
+     * rule, now answered from one place instead of per provider.
      */
     public static function capabilitiesForModel(string $model): array {
         try {
-            return self::forModel($model)->modelCapabilities(trim($model));
-        } catch (Throwable $e) {
-            return ['vision' => false, 'document' => false];
+            $entry = AiEndpointRegistry::model(trim($model));
+        } catch (AiCatalogException $e) {
+            $entry = null;
         }
+        if ($entry === null) return ['vision' => false, 'document' => false];
+        return [
+            'vision'   => (bool)($entry['attachments']['vision'] ?? false),
+            'document' => (bool)($entry['attachments']['document'] ?? false),
+        ];
     }
-
-    private static function anthropic(): LlmProviderInterface {
-        $key = (string)Globalvars::get_instance()->get_setting('joinery_ai_anthropic_api_key');
-        if ($key === '') {
-            throw new LlmProviderException(
-                'An Anthropic model is in use but joinery_ai_anthropic_api_key is empty. '
-                . 'Set it on the Joinery AI settings page.'
-            );
-        }
-        return new AnthropicProvider($key);
-    }
-
-    private static function fireworks(): LlmProviderInterface {
-        $settings = Globalvars::get_instance();
-        $key  = (string)$settings->get_setting('joinery_ai_fireworks_api_key');
-        $base = $settings->get_setting('joinery_ai_fireworks_base_url') ?: FireworksProvider::DEFAULT_BASE_URL;
-        if ($key === '') {
-            throw new LlmProviderException(
-                'A Fireworks model is in use but joinery_ai_fireworks_api_key is empty. '
-                . 'Set it on the Joinery AI settings page.'
-            );
-        }
-        return new FireworksProvider($key, $base);
-    }
-
-    private static function local(): LlmProviderInterface {
-        $settings = Globalvars::get_instance();
-        $base  = $settings->get_setting('joinery_ai_local_base_url') ?: 'http://localhost:11434/v1';
-        $model = (string)$settings->get_setting('joinery_ai_local_model');
-        $key   = (string)$settings->get_setting('joinery_ai_local_api_key');
-        $timeout = (int)$settings->get_setting('joinery_ai_local_timeout_seconds') ?: 300;
-        if ($model === '') {
-            throw new LlmProviderException(
-                'A non-Anthropic model is in use but joinery_ai_local_model is empty. '
-                . 'Set it to the model id served by your OpenAI-compatible host.'
-            );
-        }
-        return new OpenAiCompatibleProvider($base, $model, $key, $timeout);
-    }
-
 }

@@ -80,7 +80,7 @@ try {
     ]);
     $ctx->setStreamSink(ChatAsync::streamSink($msg));
 
-    $result = AgentLoop::run($provider, 'accounts/fireworks/models/glm-5p2', [],
+    $result = AgentLoop::run($provider->resolution('accounts/fireworks/models/glm-5p2'), [],
         [['role' => 'user', 'content' => 'hi']], [], $ctx, 3, 1000);
 
     ok('turn ends normally', ($result['stop_reason'] ?? '') === 'end_turn');
@@ -109,7 +109,7 @@ try {
         ['stop_reason' => 'end_turn',
          'content' => [['type' => 'text', 'text' => 'done']], 'usage' => []],
     ]);
-    AgentLoop::run($provider2, 'fake/test-model', [],
+    AgentLoop::run($provider2->resolution('fake/test-model'), [],
         [['role' => 'user', 'content' => 'hi']], [], $ctx2, 3, 1000);
     ok('second provider call carries the step suffix',
         in_array('Waiting for test-model… (step 2)', $labels2, true));

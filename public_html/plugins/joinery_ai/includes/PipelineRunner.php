@@ -22,6 +22,8 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProv
  *   cancelled     -> admin hit Stop mid-batch
  *   token_budget  -> output token budget exhausted
  *   tool_errors   -> 3 consecutive invalid/unparseable verdicts
+ *   provider_error -> the provider stopped answering mid-drain; the items
+ *     already judged and the tokens already spent travel with the result
  */
 class PipelineRunner {
 
@@ -35,17 +37,17 @@ class PipelineRunner {
     const CONSECUTIVE_ITEM_ERROR_LIMIT = 3;
 
     public static function run(
-        LlmProviderInterface $provider,
-        string $model,
+        AiModelResolution $resolution,
         Recipe $recipe,
         RecipeRunContext $ctx,
         int $max_iterations,
         int $token_budget,
         ?float $temperature,
         ?float $top_p,
-        string $thinking_level,
+        ?array $thinking = null,
         ?float $deadline = null
     ): array {
+        $thinking = $thinking ?? $resolution->thinkingDirective();
         $job = PipelineJobRegistry::get((string)$recipe->get('rcp_pipeline_job'));
         $config = DescriptorValidator::coerce($job->configDescriptor(), Recipe::decodeSourceConfig($recipe));
         $verdict_descriptor = $job->verdictDescriptor();
@@ -82,7 +84,11 @@ class PipelineRunner {
                     'deadline', 'slice ended at ' . $items_done . ' items; more remain');
             }
 
-            $item = $job->nextItem($config, $recipe);
+            // The job is TOLD how much room it got, so it can size its digest
+            // against the model actually running rather than a constant chosen
+            // blind. The mirror of a min_context requirement, which is the job
+            // demanding room before a model is chosen.
+            $item = $job->nextItem($config, $recipe, $resolution);
             if ($item === null) {
                 return self::result(self::renderTally($tally, true, $coverage_notes), $in, $out, $cw, $cr, 'end_turn', '');
             }
@@ -95,10 +101,22 @@ class PipelineRunner {
                 ? "<<UNTRUSTED_{$ctx->untrustedNonce()}>>\n$digest\n<</UNTRUSTED_{$ctx->untrustedNonce()}>>"
                 : $digest;
 
-            [$verdict, $call_in, $call_out, $call_cw, $call_cr, $error] = self::judgeItem(
-                $provider, $model, $system, $digest_content, $verdict_descriptor,
-                $temperature, $top_p, $thinking_level, $job
-            );
+            // A provider that will not answer (candidates exhausted, or an
+            // error no sibling would fix) ends the run as failed — but the
+            // items already judged and the tokens already spent are REAL, so
+            // they return with the result instead of vanishing into an
+            // exception. Letting this propagate would record a run that judged
+            // fifty items as having spent nothing.
+            try {
+                [$verdict, $call_in, $call_out, $call_cw, $call_cr, $error] = self::judgeItem(
+                    $resolution, $system, $digest_content, $verdict_descriptor,
+                    $temperature, $top_p, $thinking, $job
+                );
+            } catch (LlmProviderException $e) {
+                $tally[] = "- **$label** — not judged: the provider did not answer.";
+                return self::result(self::renderTally($tally, false, $coverage_notes), $in, $out, $cw, $cr,
+                    'provider_error', '[' . LlmProviderException::classify($e) . '] ' . $e->getMessage());
+            }
             $in += $call_in; $out += $call_out; $cw += $call_cw; $cr += $call_cr;
 
             $record = ['item_key' => $item_key, 'label' => $label];
@@ -118,7 +136,9 @@ class PipelineRunner {
                 continue;
             }
 
-            $job->recordVerdict($item_key, $verdict, $recipe, $model);
+            // What ACTUALLY judged this item — not the first choice, in case
+            // the drain failed over partway through.
+            $job->recordVerdict($item_key, $verdict, $recipe, $resolution->servedBy());
             $record['status']  = 'done';
             $record['verdict'] = $verdict;
             $ctx->appendAndFlush($record);
@@ -167,12 +187,11 @@ class PipelineRunner {
      *   cache_write_tokens, cache_read_tokens, error|null]
      */
     private static function judgeItem(
-        LlmProviderInterface $provider, string $model, array $system, string $digest_content,
-        array $verdict_descriptor, ?float $temperature, ?float $top_p, string $thinking_level,
+        AiModelResolution $resolution, array $system, string $digest_content,
+        array $verdict_descriptor, ?float $temperature, ?float $top_p, array $thinking,
         PipelineJobInterface $job
     ): array {
-        $max_tokens = $provider->id() === 'local'
-            ? AgentLoop::LOCAL_PER_CALL_MAX_TOKENS : AgentLoop::PER_CALL_MAX_TOKENS;
+        $max_tokens = $resolution->maxOutputTokens(AgentLoop::PER_CALL_MAX_TOKENS);
 
         $messages = [['role' => 'user', 'content' => $digest_content]];
         $in = 0; $out = 0; $cw = 0; $cr = 0;
@@ -180,16 +199,19 @@ class PipelineRunner {
 
         for ($attempt = 1; $attempt <= self::MAX_VERDICT_ATTEMPTS; $attempt++) {
             $params = [
-                'model'      => $model,
+                'model'      => $resolution->modelId(),
                 'max_tokens' => $max_tokens,
                 'system'     => $system,
                 'messages'   => $messages,
             ];
             if ($temperature !== null) $params['temperature'] = $temperature;
             if ($top_p !== null)       $params['top_p'] = $top_p;
-            $params['thinking'] = ['level' => $thinking_level];
+            $params['thinking'] = $thinking;
 
-            $response = $provider->createMessage($params);
+            // Through the resolution, so a first choice that will not load fails
+            // over to an approved, no-more-expensive sibling rather than failing
+            // the whole drain.
+            $response = $resolution->send($params, static function (string $d): void {});
 
             $usage = $response['usage'] ?? [];
             $in += (int)($usage['input_tokens'] ?? 0);

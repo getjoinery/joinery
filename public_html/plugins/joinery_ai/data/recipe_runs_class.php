@@ -41,6 +41,15 @@ class RecipeRun extends SystemBase {
         'rcr_input_tokens'      => array('type'=>'int4', 'default'=>0),
         'rcr_output_tokens'     => array('type'=>'int4', 'default'=>0),
         'rcr_cost_estimate'     => array('type'=>'numeric(10,4)', 'default'=>0),
+        // What actually ran this. Before a resolver picked the model, the model
+        // was typed on the recipe and sat there in front of you; now the choice
+        // is a consequence of a grading in a shipped file, so "which model ran
+        // this?" has to be answerable from history. Cost is derived from
+        // rcr_model rather than from the recipe's (usually empty) pin — which is
+        // also what stops an unpinned recipe on a paid endpoint recording $0.
+        // See specs/joinery_ai_model_capability_resolution.md §8.
+        'rcr_model'             => array('type'=>'varchar(100)'),
+        'rcr_endpoint'          => array('type'=>'varchar(50)'),
         'rcr_output'            => array('type'=>'text'),
         'rcr_error'             => array('type'=>'text'),
         // 'text', not jsonb: on a sealed run this holds an AEAD blob, which is

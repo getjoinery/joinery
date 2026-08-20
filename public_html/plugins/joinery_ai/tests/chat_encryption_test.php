@@ -129,20 +129,32 @@ $fort->set('aic_security_level', AiConversation::LEVEL_FORTRESS);
 $fort->set('aic_model', 'claude-haiku-4-5');   // a cloud model
 $fort->save();
 harness_register_row('aic_conversations', 'aic_conversation_id', (int)$fort->key);
-$rejected = false;
-try { LlmProviderFactory::forConversation($fort); } catch (LlmProviderException $e) { $rejected = true; }
-check($rejected, 'a Fortress chat on a cloud model is rejected at the provider choke point');
-// A Fortress chat on a local model resolves fine. The local provider is built
-// from joinery_ai_local_model, which ships empty and is operator-configured —
-// so reading whatever this box has would make the check fail on an unconfigured
-// box while the routing under test is working correctly. Pin it instead: what
-// is being asserted is that Fortress routes to the local provider, not that a
-// particular host happens to be set up.
+// Fortress is enforced by the RESOLVER, from the chat level rather than from a
+// column: the requirement carries a local trust floor, so nothing off the box
+// is even a candidate. That replaces a special case in the provider factory
+// that re-implemented "is this local?" as a second opinion.
 harness_set_setting_mem('joinery_ai_local_model', 'qwen3:4b-instruct');
+AiEndpointRegistry::clearCache();
+$fort_req = AiModelRequirementBuilder::forConversation($fort);
+check($fort_req->trustFloor() === AiModelRequirement::TRUST_LOCAL,
+	'a Fortress chat carries a local trust floor, taken from its level');
+
+$rejected = false;
+try {
+	$fort_res = AiModelResolver::resolve($fort_req);
+	// A cloud PIN on a Fortress chat must not simply be routed around: nothing
+	// it resolves to may leave the box, whatever the pin said.
+	$rejected = !$fort_res->isLocal();
+} catch (LlmProviderException $e) { $rejected = false; }
+check(!$rejected, 'and a Fortress chat can never resolve onto a cloud model');
+
 $fort->set('aic_model', 'qwen3:4b-instruct');
 $ok_local = false;
-try { LlmProviderFactory::forConversation($fort); $ok_local = true; } catch (Throwable $e) {}
-check($ok_local, 'a Fortress chat on a local model resolves to the local provider');
+try {
+	$ok_local = AiModelResolver::resolve(
+		AiModelRequirementBuilder::forConversation($fort))->isLocal();
+} catch (Throwable $e) {}
+check($ok_local, 'a Fortress chat on a local model resolves to the local endpoint');
 
 // ---- Rotation re-seals the chat DEKs -------------------------------------
 section('Rotation re-seal');
