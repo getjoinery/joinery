@@ -24,6 +24,13 @@
 #   * docker inspect on the IMAGE and docker history carry no database
 #     password (it used to sit in 7 history layers)
 #
+# Plus one that failed on a real box on 2026-08-20 (a user's setup wizard
+# offered to send a test to admin@example.com):
+#
+#   * the --admin-email address and the upgrade source land inside the
+#     container — _site_init.sh runs in there on first boot, and a host-side
+#     export never crossed, so both were silently dropped
+#
 # Run this on a host you can throw away or at least freely install Docker
 # sites on. It builds joinery-base if missing (5-10 minutes, once per host),
 # installs a site with --no-ssl on a port of its own, asserts, rebuilds,
@@ -39,6 +46,7 @@ TOOLS="$ROOT/maintenance_scripts/install_tools"
 SITENAME="joinerygate"
 DOMAIN="joinerygate.example.test"
 PORT=8099
+ADMIN_EMAIL="gate-admin@joinerygate.example.test"
 
 passed=0; failed=0
 chk() {
@@ -117,10 +125,25 @@ assert_installed_state() {
     local cron_count
     cron_count="$(docker exec "$SITENAME" sh -c "grep -rl process_scheduled_tasks.php /etc/cron.d/ 2>/dev/null | wc -l" 2>/dev/null || echo probe-failed)"
     chk "[$phase] exactly one cron.d file runs the task runner" "$cron_count" "1"
+
+    # The env-file handoff. _site_init.sh runs inside the container on first
+    # boot, so the admin email and upgrade source chosen on the host reach it
+    # only through the run-time env file — an export alone never crossed, and
+    # both were silently dropped.
+    local admin_email
+    admin_email="$(docker exec "$SITENAME" su -c "psql -d $SITENAME -tAc \"SELECT usr_email FROM usr_users WHERE usr_user_id = 1\"" postgres 2>/dev/null || echo probe-failed)"
+    chk "[$phase] admin account carries the --admin-email address" "$admin_email" "$ADMIN_EMAIL"
+    local upgrade_source
+    upgrade_source="$(docker exec "$SITENAME" su -c "psql -d $SITENAME -tAc \"SELECT stg_value FROM stg_settings WHERE stg_name = 'upgrade_source'\"" postgres 2>/dev/null || echo probe-failed)"
+    if [ -n "$upgrade_source" ] && [ "$upgrade_source" != "probe-failed" ]; then
+        chk "[$phase] upgrade_source setting is seeded" "seeded" "seeded"
+    else
+        chk "[$phase] upgrade_source setting is seeded" "${upgrade_source:-empty}" "non-empty"
+    fi
 }
 
 echo "== Installing $SITENAME on port $PORT (this builds joinery-base if missing) =="
-if ! (cd "$TOOLS" && ./install.sh -y -q site "$SITENAME" --password-file="$PWFILE" "$DOMAIN" "$PORT" --no-ssl); then
+if ! (cd "$TOOLS" && ./install.sh -y -q site "$SITENAME" --password-file="$PWFILE" --admin-email="$ADMIN_EMAIL" "$DOMAIN" "$PORT" --no-ssl); then
     echo "  FAIL: install.sh exited non-zero"
     echo "RESULT: FAIL $passed $((failed+1))"
     exit 1
@@ -141,7 +164,7 @@ chk "docker history carries no database password" "$HIST_HITS" "0"
 # and _site_init.sh does not run again — the state where the cron file and
 # cache ownership have no writer unless the start command owns them.
 echo "== Rebuilding the container (volumes kept, _site_init.sh skipped) =="
-if ! (cd "$TOOLS" && ./install.sh -y -q site "$SITENAME" --password-file="$PWFILE" "$DOMAIN" "$PORT" --no-ssl); then
+if ! (cd "$TOOLS" && ./install.sh -y -q site "$SITENAME" --password-file="$PWFILE" --admin-email="$ADMIN_EMAIL" "$DOMAIN" "$PORT" --no-ssl); then
     echo "  FAIL: rebuild install.sh exited non-zero"
     echo "RESULT: FAIL $passed $((failed+1))"
     exit 1

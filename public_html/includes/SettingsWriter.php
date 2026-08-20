@@ -37,7 +37,7 @@
  * settings writes is a circularity nobody wants to debug at 2am. Rollback is
  * reverting the constant.
  *
- * @version 1.0
+ * @version 1.1
  */
 class SettingsWriter {
 
@@ -140,6 +140,14 @@ class SettingsWriter {
 			if ($names !== null && !isset($names[$name])) {
 				$result['refused'][] = $name;
 				continue;
+			}
+
+			// Whitespace at either end of a single-line value is a paste
+			// artifact, never intent: a username saved with a leading space
+			// reads fine on the page and then fails authentication at send
+			// time. Multi-line types keep their shape.
+			if (is_string($value) && !in_array($declaration['type'] ?? '', array('textarea', 'code'), true)) {
+				$value = trim($value);
 			}
 
 			$candidates[$name] = $value;

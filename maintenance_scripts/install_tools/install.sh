@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 2.53 - Docker sites receive the admin email, admin password and
+#              upgrade server. _site_init.sh runs inside the container on first
+#              boot, so the host-side exports never reached it: --admin-email,
+#              JOINERY_ADMIN_PASSWORD and UPGRADE_SERVER were silently dropped,
+#              leaving the account at admin@example.com with no recorded
+#              upgrade source. They now cross in the run-time env file beside
+#              POSTGRES_PASSWORD.
 #VERSION 2.52 - The deferred-certificate retry timer compares addresses per
 #              family. Every Linode is dual-stack and prefers IPv6, so a bare
 #              curl ifconfig.me reported an IPv6 address, the domain had only an
@@ -3669,6 +3676,19 @@ EOF
     ENV_FILE="$(mktemp /tmp/joinery-env-XXXXXX)"
     chmod 600 "$ENV_FILE"
     printf 'POSTGRES_PASSWORD=%s\n' "$POSTGRES_PASSWORD" > "$ENV_FILE"
+    # Everything _site_init.sh reads from the environment has to cross here
+    # too: on Docker it runs inside the container on first boot, so a host-side
+    # export never reaches it. Same visibility trade as POSTGRES_PASSWORD
+    # above, and the admin password is replaced at first sign-in anyway.
+    if [ -n "${JOINERY_ADMIN_EMAIL:-}" ]; then
+        printf 'JOINERY_ADMIN_EMAIL=%s\n' "$JOINERY_ADMIN_EMAIL" >> "$ENV_FILE"
+    fi
+    if [ -n "${JOINERY_ADMIN_PASSWORD:-}" ]; then
+        printf 'JOINERY_ADMIN_PASSWORD=%s\n' "$JOINERY_ADMIN_PASSWORD" >> "$ENV_FILE"
+    fi
+    if [ -n "${UPGRADE_SERVER:-}" ]; then
+        printf 'UPGRADE_SERVER=%s\n' "$UPGRADE_SERVER" >> "$ENV_FILE"
+    fi
     trap 'rm -f "$ENV_FILE"' RETURN
 
     if [ "$QUIET_MODE" -eq 1 ]; then
