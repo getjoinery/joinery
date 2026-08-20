@@ -118,9 +118,14 @@ that wants "everything encrypted" makes its top-level folders vaults.
 
 The server never transforms bytes, so a file cannot cross the encryption boundary
 in place: moving a plaintext file into a vault, or an encrypted file out of one,
-is refused — the client converts by re-uploading (download → decrypt/encrypt →
-upload). An encrypted vault folder may move to the Drive root (a top-level
-vault) or inside another vault; `drive_move` blocks every other placement.
+is refused with `reason: protection_boundary` — the client converts by
+re-uploading (download → decrypt/encrypt → upload), and the machine-readable
+reason is what lets it tell this apart from a name clash or a trashed parent. An
+encrypted vault folder may move to the Drive root (a top-level vault) or inside
+another vault; `drive_move` blocks every other placement. The root imposes no
+level of its own on a folder — a folder carries its own wherever it goes, so a
+nested vault can always come back out to the top. A *file* takes its level from
+the folder holding it, so an encrypted file may not sit loose at the root.
 
 **Filenames and metadata are encrypted too.** For an encrypted file `fil_name` /
 `fil_title` hold an opaque identifier; the real name, MIME type, chunk layout,

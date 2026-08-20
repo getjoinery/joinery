@@ -209,10 +209,26 @@ Three reasons, and they are told apart because the fixes differ:
 | `unicode_clash` | Two names are different bytes that normalize to one form — `café` typed two ways | Pick one spelling |
 | `duplicate_name` | The server is holding two live items in one folder under the *same* name | Nothing they can do from here — the second item has no path to be seen at, so the message points them at the web |
 
-`duplicate_name` should be rare: the server refuses a name a live sibling
-already holds. It is reported rather than folded into `unicode_clash` because a
-name like `app.db-wal` has no spelling to argue about, and reading it as a
-Unicode problem sends whoever investigates to the wrong place entirely.
+`duplicate_name` should be rare outside a vault: the server refuses a name a
+live sibling already holds. It is reported rather than folded into
+`unicode_clash` because a name like `app.db-wal` has no spelling to argue about,
+and reading it as a Unicode problem sends whoever investigates to the wrong place
+entirely.
+
+**Inside a vault it is ordinary, and the server cannot help.** Uniqueness is
+enforced on the stored title, and an encrypted file's title is an opaque
+per-file identifier that is unique by construction — so two files in one vault
+folder whose real names are both `notes.txt` are a state the server cannot see,
+let alone refuse. The client is the only thing that can tell, and it parks one
+of them.
+
+A parked entry keeps recording the placement it is waiting for, and that record
+is **not** ownership of the path: it holds no bytes there and never did. Whatever
+asks "does this path belong to another entry" has to skip parked entries
+(`Entry::holds_a_local_file`), or the file that won the name can never upload
+again — its transfer is skipped over every candidate path as somebody else's,
+found nowhere, dropped as overtaken, and planned again on the next pass. Nothing
+fails, nothing queues, no issue is raised, and the device never goes quiet.
 
 One shape of it is the client's own bookkeeping rather than anything the user
 can act on, and is repaired without being shown. A device that creates a file or
@@ -258,9 +274,15 @@ so the client works it out the same way, when a new local file first gets an
 identity. The plaintext is encrypted into a scratch file and sent from there —
 a resumed chunk upload has to re-send bytes identical to the ones it already
 sent, and re-encrypting cannot produce them, because every IV is fresh. What
-goes to the server is the placeholder name, the ciphertext size, no content
-hash, the metadata blob, and the file key sealed to every reader of the
-destination folder (resolved through `drive_public_keys`). The owner's key is
+goes to the server is the placeholder name, the ciphertext size, the hash of the
+**ciphertext**, the metadata blob, and the file key sealed to every reader of the
+destination folder (resolved through `drive_public_keys`). The plaintext hash is
+never sent: it would tell the server what it is holding, and it is what dedup
+matches on, so sending it would hand somebody else's file back as this one. The
+ciphertext's gives away nothing the server does not already have, collides with
+nothing (every encryption uses fresh IVs), and is what the assembled upload is
+checked against — without it an encrypted upload has no integrity check at all,
+and a chunk corrupted on the way up becomes a file no device can ever open. The owner's key is
 mandatory: a vault file its owner can never open would be a file they can see,
 are billed for, and have permanently lost.
 

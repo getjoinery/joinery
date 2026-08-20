@@ -1309,11 +1309,29 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     // holds. Those are that entry's bytes, and sending them up under this one's
     // identity would put a single file on the server twice — the expensive way
     // to be wrong, and invisible once done.
+    //
+    // Unless that entry is PARKED, which is the difference between recording a
+    // placement and holding a file. An entry the device has told the user it
+    // will not be materializing has no bytes at that path and never had; what
+    // is sitting there belongs to whoever won the name. Counting its claim
+    // anyway is a deadlock: this upload is skipped over every candidate, found
+    // nowhere, called overtaken, and planned again on the very next pass, while
+    // the parked entry waits for a change that a settled tree will never
+    // produce. Neither one is failing, nothing is queued, no issue is raised,
+    // and the device simply never goes quiet again.
+    //
+    // A vault is where this stops being hypothetical. The server enforces name
+    // uniqueness on the stored title, and an encrypted file's title is an
+    // opaque per-file identifier -- so two files in one vault folder whose REAL
+    // names are both `slot-2.dat` are a state the server cannot even see, let
+    // alone refuse. The client is the only thing that can tell, it parks one of
+    // them, and before this the other could never upload again.
     let mine = |p: &Placement| -> Result<bool, ExecError> {
         Ok(!env.store.every_entry()?.into_iter().any(|e| {
             e.id != op.entity
                 && !e.remote_deleted
                 && e.id.entity_type == EntityType::File
+                && e.holds_a_local_file()
                 && e.local_placement() == p
         }))
     };
@@ -1458,7 +1476,8 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             Ok(packed) => {
                 params.name = format!("enc-{}", packed.content_id);
                 params.size_bytes = packed.cipher_size;
-                params.sha256 = String::new();
+                // The CIPHERTEXT's hash, not the plaintext's. See `Packed`.
+                params.sha256 = packed.cipher_sha256.clone();
                 params.mime_type = Some("application/octet-stream".into());
                 params.encrypted_metadata = Some(packed.metadata);
                 params.wrapped_file_keys = packed.wrapped_file_keys;
@@ -1616,9 +1635,38 @@ fn reseal_metadata(
 struct Packed {
     bytes: Box<dyn jd_vfs::ReadSeek>,
     cipher_size: u64,
+    /// The hash of the ciphertext, which is what the upload declares and what
+    /// the server checks the assembled bytes against.
+    ///
+    /// The PLAINTEXT hash is never sent and never could be: it would tell the
+    /// server what it is holding, and it is what the dedup short-circuit
+    /// matches on, so sending it would hand somebody else's file back as this
+    /// one. The ciphertext hash gives away nothing — the server has those exact
+    /// bytes — and cannot collide with anything, because every encryption uses
+    /// fresh IVs. Without it an encrypted upload has no integrity check at all,
+    /// and a chunk corrupted on the way up becomes a file that no device can
+    /// ever open, reported for ever as "decryption failed".
+    cipher_sha256: String,
     content_id: String,
     metadata: String,
     wrapped_file_keys: Vec<(i64, String)>,
+}
+
+/// A writer that hashes what passes through it on the way to another writer.
+struct Tallied<W: Write> {
+    inner: W,
+    hasher: Sha256,
+}
+
+impl<W: Write> Write for Tallied<W> {
+    fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
+        self.hasher.update(buf);
+        self.inner.write_all(buf)?;
+        Ok(buf.len())
+    }
+    fn flush(&mut self) -> std::io::Result<()> {
+        self.inner.flush()
+    }
 }
 
 /// Turn a local file into what an encrypted upload actually sends.
@@ -1740,14 +1788,24 @@ fn encrypt_for_upload(
 
     let mut scratch = env.vfs.scratch()?;
     let mut reader = env.vfs.open_read(path)?;
-    let mut encryptor =
-        jd_crypto::drive::ContentEncryptor::new(&mut *scratch, &file_key, &content_id);
-    std::io::copy(&mut *reader, &mut encryptor)?;
-    encryptor.finish()?;
+    // Hashed on the way past rather than by reading the scratch back: these are
+    // the exact bytes the upload will send, and re-reading them to hash would
+    // be a second chance for the two to disagree.
+    let cipher_sha256 = {
+        let tallied = Tallied {
+            inner: &mut *scratch,
+            hasher: Sha256::new(),
+        };
+        let mut encryptor =
+            jd_crypto::drive::ContentEncryptor::new(tallied, &file_key, &content_id);
+        std::io::copy(&mut *reader, &mut encryptor)?;
+        hex(&encryptor.finish()?.hasher.finalize())
+    };
     drop(reader);
 
     Ok(Ok(Packed {
         bytes: scratch.finish()?,
+        cipher_sha256,
         // Computed rather than measured: the container's size is an exact
         // function of the plaintext's, and the server's own size ceiling uses
         // the same function. A measured size that disagreed with it would be a

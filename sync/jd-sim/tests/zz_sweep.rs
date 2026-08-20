@@ -26,8 +26,14 @@
 //!   generator has always produced them and they have always been distinct
 //!   files.
 //!
+//! - `scratch_vault_sweep` — the same workload run entirely inside an encrypted
+//!   folder every device can open, so every name is a secret, every byte that
+//!   leaves is ciphertext, and the hash the server answers with is in a
+//!   different domain from the one on disk.
+//!
 //! And the tools for the seed a sweep hands back. All take `SEED`, `STEPS`,
-//! `DEVS`, `CHAOS`, and — for a platform failure — `PLATFORMS` and `NAMES`:
+//! `DEVS`, `CHAOS`, `VAULT`, and — for a platform failure — `PLATFORMS` and
+//! `NAMES`:
 //!
 //! - `scratch_one` — run that seed alone and let it panic.
 //! - `scratch_dump` — the end state: server tree, every disk, every entry,
@@ -67,8 +73,67 @@ fn workload(seed: u64, steps: usize, devices: &[&str], chaos: bool) {
 /// DIFFERENT run under the same seed, showed a converged tree, and sent an
 /// afternoon looking for a defect in the wrong place. A tool that disagrees
 /// with the sweep is worse than no tool.
-fn sweep_world(seed: u64, devices: &[(&str, Platform)], steps: usize, chaos: bool) -> World {
+/// The vault folder a vault sweep runs its whole workload inside.
+const VAULT_ROOT: &str = "Private";
+
+/// Where a sweep's workload hangs off: the drive root, or inside a vault.
+fn sweep_root(vault: bool) -> &'static str {
+    if vault {
+        VAULT_ROOT
+    } else {
+        ""
+    }
+}
+
+fn sweep_world(
+    seed: u64,
+    devices: &[(&str, Platform)],
+    steps: usize,
+    chaos: bool,
+    vault: bool,
+) -> World {
     let mut world = World::of(seed, devices);
+    // One vault, every device holding its key, and the whole workload run
+    // inside it. Encryption had only ever been tested by hand-written stories
+    // that seed, settle, write, settle -- so every encrypted file the engine
+    // had ever handled arrived in a calm world and stayed where it was put.
+    // None of them was ever renamed while an upload was retrying, moved into a
+    // folder another device was deleting, or reached for by two computers at
+    // once. That is the whole of what the rig does, and `no-ciphertext` came
+    // back `vacuous` on every segment of it because no encrypted entity existed
+    // to check.
+    //
+    // Every device gets the key rather than some, because the asymmetry
+    // (one laptop can read the vault, another cannot) already has scenarios of
+    // its own; what has never been swept is the ordinary case where they all
+    // can and the world is hostile.
+    if vault {
+        // An encrypted attempt re-encrypts the whole file and runs the upload
+        // again, so the fleet needs more passes to get through the same faults.
+        // An explicit SETTLE_PASSES still wins, so a failure here can be told
+        // apart from a wedge without editing anything.
+        if std::env::var("SETTLE_PASSES").is_err() {
+            world.settle_passes = jd_sim::scenario::MAX_PASSES_ENCRYPTED;
+        }
+        let key = jd_sim::SimVault::new(seed);
+        let names: Vec<String> = world.devices.iter().map(|d| d.name.clone()).collect();
+        for name in &names {
+            world.give_vault(name, &key);
+        }
+        world
+            .server
+            .set_vault_public_key(jd_sim::server::OWNER_USER_ID, &key.public_key_b64);
+        world.server.seed_encrypted_folder(None, VAULT_ROOT);
+        // Materialized before the workload starts, on a network that still
+        // works. The generator writes straight to paths inside it, and a device
+        // that had not yet learned the folder was a vault would make an
+        // ordinary directory of that name and send its contents up in the
+        // clear -- testing the harness's mistake instead of the engine.
+        assert!(
+            world.settle().is_some(),
+            "seed {seed}: the vault folder should arrive before the workload starts"
+        );
+    }
     // A chaotic world is one where the user is still working, not just one
     // where the network is bad. Uploads finishing against a file that has moved
     // on is the ordinary consequence of an autosave, and it reaches a branch of
@@ -88,9 +153,20 @@ fn sweep_world(seed: u64, devices: &[(&str, Platform)], steps: usize, chaos: boo
 }
 
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
-    let world = sweep_world(seed, devices, steps, chaos);
+    workload_core(seed, steps, devices, chaos, false)
+}
+
+fn workload_core(
+    seed: u64,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    chaos: bool,
+    vault: bool,
+) {
+    let root = sweep_root(vault);
+    let world = sweep_world(seed, devices, steps, chaos, vault);
     let committed = Committed::default();
-    drive(&world, seed, steps, chaos);
+    drive(&world, seed, steps, chaos, root);
 
     if world.settle().is_none() {
         let mut lines = Vec::new();
@@ -119,7 +195,54 @@ fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: boo
     // to survive one.
     assert_no_entry_is_stranded(&world);
     assert_no_live_orphan_on_the_server(&world);
+    if vault {
+        assert_nothing_in_the_vault_is_readable(&world, seed);
+        assert_the_server_was_never_told_a_real_name(&world, root, seed);
+        jd_sim::scenario::assert_the_vault_opens(&world);
+    }
+}
 
+/// Nothing under the vault is stored where the server can read it.
+///
+/// A file is flagged encrypted from the folder it is uploaded into, so this
+/// failing means something reached a vault by a route that did not ask: a
+/// client that decided a folder was ordinary, or a server path that carried an
+/// item across the boundary without converting it. Neither shows up in a tree.
+fn assert_nothing_in_the_vault_is_readable(world: &World, seed: u64) {
+    let readable = world.server.plaintext_inside_a_vault();
+    assert!(
+        readable.is_empty(),
+        "seed {seed}: the server holds these in the clear inside a vault: {readable:?}"
+    );
+}
+
+/// The server never learned what anything in the vault is called.
+///
+/// An encrypted file's real name lives inside its metadata blob and its stored
+/// title is an opaque placeholder forever. Folder names inside a vault are
+/// plaintext by design -- only files are checked here. The names come off the
+/// disks rather than a list the generator kept, so conflict copies and every
+/// name a device invented for itself are covered too.
+fn assert_the_server_was_never_told_a_real_name(world: &World, root: &str, seed: u64) {
+    let mut secret: std::collections::BTreeSet<String> = Default::default();
+    for d in &world.devices {
+        for (path, hash) in jd_sim::scenario::disk_tree(d) {
+            if hash.is_none() || !path.starts_with(root) {
+                continue;
+            }
+            secret.insert(path.rsplit('/').next().unwrap_or_default().to_string());
+        }
+    }
+    let told: Vec<String> = jd_sim::scenario::server_tree(&world.server)
+        .into_iter()
+        .filter(|(_, hash)| hash.is_some())
+        .map(|(path, _)| path)
+        .filter(|path| secret.contains(path.rsplit('/').next().unwrap_or_default()))
+        .collect();
+    assert!(
+        told.is_empty(),
+        "seed {seed}: the server was told the real name of {told:?}"
+    );
 }
 
 /// Print one entry's agreement on every device, plus the disk paths that mention
@@ -162,7 +285,10 @@ fn trace(world: &World, tag: &str) {
     println!("  server: {server:?}");
 }
 
-fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
+/// `root` is the folder the whole workload hangs off -- empty for the drive
+/// root, or a vault folder, in which case every path the generator invents is
+/// inside it and every byte that leaves a device has to be encrypted first.
+fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
     let mut rng = SimRng::new(seed ^ 0x5EED_1234);
     if chaos {
         for d in &world.devices {
@@ -182,7 +308,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
     };
 
     let mut files: Vec<String> = Vec::new();
-    let mut dirs: Vec<String> = vec![String::new()];
+    let mut dirs: Vec<String> = vec![root.to_string()];
     // What was last written where, so a "copy" arm can produce a second file
     // with byte-identical content. Duplicate content is its own shape: pairing
     // hunts by hash, and two files that hash the same are exactly where that
@@ -274,7 +400,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // Rename a folder — with whatever is inside it.
             11 => {
                 let candidates: Vec<String> =
-                    dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+                    dirs.iter().filter(|d| is_movable(d, root)).cloned().collect();
                 if let Some(d) = rng.pick(&candidates).cloned() {
                     if device.fs.exists(&d) {
                         let parent = d.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
@@ -297,31 +423,36 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // never has the other device touching the same pair, and fifteen
             // hundred seeds of it found nothing.
             13 => {
-                let slots = ["Shared/slot-1.dat", "Shared/slot-2.dat", "Shared/slot-3.dat"];
-                if !device.fs.exists(slots[0]) {
-                    device.fs.user_mkdir("Shared");
+                let base = join(root, "Shared");
+                let slots = [
+                    join(&base, "slot-1.dat"),
+                    join(&base, "slot-2.dat"),
+                    join(&base, "slot-3.dat"),
+                ];
+                if !device.fs.exists(&slots[0]) {
+                    device.fs.user_mkdir(&base);
                     for (n, s) in slots.iter().enumerate() {
                         device
                             .fs
                             .user_write(s, format!("slot {n} from {}", device.name).as_bytes());
-                        files.push(s.to_string());
+                        files.push(s.clone());
                     }
                 } else if rng.below(3) == 0 {
                     // Three-way rotation: a→tmp, b→a, c→b, tmp→c. The same trap
                     // with a longer cycle, which is where an implementation that
                     // special-cased pairs falls over.
-                    let via = format!("Shared/.rotate-{step}.tmp");
-                    device.fs.user_rename(slots[0], &via);
-                    device.fs.user_rename(slots[1], slots[0]);
-                    device.fs.user_rename(slots[2], slots[1]);
-                    device.fs.user_rename(&via, slots[2]);
+                    let via = join(&base, &format!(".rotate-{step}.tmp"));
+                    device.fs.user_rename(&slots[0], &via);
+                    device.fs.user_rename(&slots[1], &slots[0]);
+                    device.fs.user_rename(&slots[2], &slots[1]);
+                    device.fs.user_rename(&via, &slots[2]);
                 } else {
                     let i = rng.below(3) as usize;
                     let j = (i + 1 + rng.below(2) as usize) % 3;
-                    let via = format!("Shared/.swap-{step}.tmp");
-                    device.fs.user_rename(slots[i], &via);
-                    device.fs.user_rename(slots[j], slots[i]);
-                    device.fs.user_rename(&via, slots[j]);
+                    let via = join(&base, &format!(".swap-{step}.tmp"));
+                    device.fs.user_rename(&slots[i], &via);
+                    device.fs.user_rename(&slots[j], &slots[i]);
+                    device.fs.user_rename(&via, &slots[j]);
                 }
             }
             // Both devices reach for the same name at once.
@@ -343,7 +474,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // other held the same names where the folder used to be.
             14 => {
                 let movable: Vec<String> =
-                    dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+                    dirs.iter().filter(|d| is_movable(d, root)).cloned().collect();
                 if let (Some(d), Some(into)) =
                     (rng.pick(&movable).cloned(), rng.pick(&dirs).cloned())
                 {
@@ -361,7 +492,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // Delete a folder with whatever is inside it.
             15 => {
                 let removable: Vec<String> =
-                    dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+                    dirs.iter().filter(|d| is_movable(d, root)).cloned().collect();
                 if let Some(d) = rng.pick(&removable).cloned() {
                     if device.fs.exists(&d) {
                         device.fs.user_remove(&d);
@@ -402,7 +533,7 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // it renames a random folder once -- so it was worth naming.
             17 => {
                 let candidates: Vec<String> =
-                    dirs.iter().filter(|d| !d.is_empty()).cloned().collect();
+                    dirs.iter().filter(|d| is_movable(d, root)).cloned().collect();
                 if let Some(original) = rng.pick(&candidates).cloned() {
                     if device.fs.exists(&original) {
                         let parent = original.rsplit_once('/').map(|(p, _)| p).unwrap_or("");
@@ -438,15 +569,15 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             // `parent_trashed` refusal at all, which is the answer a device
             // once blamed on the wrong folder entirely.
             18 => {
-                let shared = "Contested Folder";
-                if !device.fs.exists(shared) {
-                    device.fs.user_mkdir(shared);
-                    dirs.push(shared.to_string());
+                let shared = join(root, "Contested Folder");
+                if !device.fs.exists(&shared) {
+                    device.fs.user_mkdir(&shared);
+                    dirs.push(shared.clone());
                 }
                 if rng.below(4) == 0 {
-                    device.fs.user_remove(shared);
+                    device.fs.user_remove(&shared);
                 } else {
-                    let path = join(shared, &format!("in-{step}-{}.txt", device.name));
+                    let path = join(&shared, &format!("in-{step}-{}.txt", device.name));
                     let body = format!("into a folder that may be going {step}").into_bytes();
                     device.fs.user_write(&path, &body);
                     bodies.insert(path.clone(), body);
@@ -461,6 +592,13 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool) {
             }
         }
     }
+}
+
+/// A folder the workload may move or delete. The root it all hangs off is not
+/// one: deleting it takes the whole world with it, and for a vault sweep it
+/// would leave the rest of the run with no vault to test.
+fn is_movable(dir: &str, root: &str) -> bool {
+    !dir.is_empty() && dir != root
 }
 
 fn sweep(
@@ -489,6 +627,31 @@ fn sweep_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
+    sweep_core(label, seeds, steps, devices, chaos, false)
+}
+
+/// The same sweep with the whole workload inside a vault every device can open.
+#[must_use]
+fn sweep_vault(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+) -> Vec<(String, u64)> {
+    let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    sweep_core(label, seeds, steps, &named, chaos, true)
+}
+
+#[must_use]
+fn sweep_core(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    chaos: bool,
+    vault: bool,
+) -> Vec<(String, u64)> {
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
     for seed in seeds {
@@ -497,7 +660,7 @@ fn sweep_on(
         let r = std::panic::catch_unwind(|| {
             let refs: Vec<(&str, Platform)> =
                 owned.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-            workload_on(seed, steps, &refs, chaos);
+            workload_core(seed, steps, &refs, chaos, vault);
         });
         if r.is_err() {
             failures.push(seed);
@@ -737,6 +900,36 @@ fn scratch_long_hostile_sweep() {
     no_seed_failed(arms);
 }
 
+/// Everything the other sweeps do, inside a vault.
+///
+/// Encryption has only ever been tested by stories somebody wrote down, and
+/// every one of them is calm: seed, settle, write, settle. So no encrypted file
+/// had ever been renamed while its upload was retrying, moved into a folder
+/// another device was deleting, reached for by two computers at once, or
+/// carried through a conflict copy -- and the soak rig, which does all of that
+/// for an hour and three quarters, reported `no-ciphertext: vacuous` on every
+/// segment it ever ran, because no encrypted entity existed for it to check.
+///
+/// What makes this arm different from the ones above, rather than the same
+/// workload in a subfolder: an encrypted file's name is not on the server, its
+/// hash there is of ciphertext while the disk's is of plaintext, and its
+/// content key has to survive every retry -- three places where the two sides
+/// speak different languages and an engine can quietly compare across them.
+#[test]
+#[ignore]
+fn scratch_vault_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_vault("vault-clean-2dev", 70000..70400, 40, &["laptop", "desktop"], false));
+    arms.push(sweep_vault("vault-hostile-2dev", 70400..70800, 30, &["laptop", "desktop"], true));
+    arms.push(sweep_vault("vault-clean-3dev", 70800..71100, 40, &["a", "b", "c"], false));
+    arms.push(sweep_vault("vault-hostile-3dev", 71100..71400, 30, &["a", "b", "c"], true));
+    arms.push(sweep_vault("vault-longhostile-2dev", 71400..71600, 80, &["laptop", "desktop"], true));
+    arms.push(sweep_vault("vault-longhostile-3dev", 71600..71750, 90, &["a", "b", "c"], true));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 #[test]
 #[ignore]
 fn scratch_dump() {
@@ -744,13 +937,14 @@ fn scratch_dump() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    let world = sweep_world(seed, &refs, steps, chaos);
+    let world = sweep_world(seed, &refs, steps, chaos, vault);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, chaos);
+        drive(&world, seed, steps, chaos, sweep_root(vault));
         world.settle();
     }));
 
@@ -767,6 +961,30 @@ fn scratch_dump() {
     println!("=== server");
     for (p, h) in jd_sim::scenario::server_tree(&world.server) {
         println!("  {p} {h:?}");
+    }
+    // Encrypted rows BY ID, which the tree cannot show. An entry pointing at a
+    // file the tree does not seem to contain is the ordinary case inside a
+    // vault -- the stored title is the content id of the FIRST version and does
+    // not follow later ones -- so "it is not in the tree" proves nothing, and
+    // an investigation that starts there starts wrong.
+    let vault_files = world.server.vault_files();
+    if !vault_files.is_empty() {
+        println!("=== server encrypted rows");
+        for f in &vault_files {
+            println!(
+                "  id={} in {:?} stored={} key={} meta={} cipher={}",
+                f.id,
+                f.folder_path,
+                f.placeholder,
+                if f.wrapped_file_key.is_some() { "yes" } else { "NONE" },
+                if f.encrypted_metadata.is_some() { "yes" } else { "NONE" },
+                f.ciphertext.as_ref().map(|c| c.len()).unwrap_or(0),
+            );
+            match jd_sim::scenario::what_the_vault_really_holds(&world, f) {
+                Some((name, cid)) => println!("        really {name:?} cid={cid}"),
+                None => println!("        no key here opens it"),
+            }
+        }
     }
     for d in &world.devices {
         println!("=== {} disk", d.name);
@@ -787,6 +1005,23 @@ fn scratch_dump() {
                 e.synced_placement.as_ref().map(|p| p.name.clone()),
                 e.synced_placement.as_ref().map(|p| p.parent),
             );
+            // The crypto identity, without which an encrypted failure is
+            // unreadable: a file key that opens but decrypts to nothing and a
+            // content id that no longer matches the AAD look identical from the
+            // outside, and both read as "decryption failed".
+            if e.is_encrypted {
+                println!(
+                    "      encrypted cid={:?} key={} remote_sha={:?} synced_remote_sha={:?} synced_sha={:?}",
+                    e.content_id,
+                    match &e.wrapped_file_key {
+                        Some(k) => format!("{}…", &k[..k.len().min(12)]),
+                        None => "none".to_string(),
+                    },
+                    e.remote_content.as_ref().map(|c| c.sha256[..12].to_string()),
+                    e.synced_remote_content.as_ref().map(|c| c.sha256[..12].to_string()),
+                    e.synced_content.as_ref().map(|c| c.sha256[..12].to_string()),
+                );
+            }
         }
         println!("=== {} queued ops", d.name);
         for op in d.store.queued_ops().unwrap() {
@@ -851,12 +1086,13 @@ fn scratch_trace() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    let world = sweep_world(seed, &refs, steps, chaos);
-    drive(&world, seed, steps, chaos);
+    let world = sweep_world(seed, &refs, steps, chaos, vault);
+    drive(&world, seed, steps, chaos, sweep_root(vault));
     for round in 0..12 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -879,10 +1115,11 @@ fn scratch_one() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    workload_on(seed, steps, &refs, chaos);
+    workload_core(seed, steps, &refs, chaos, vault);
 }
 
 /// Scratch: watch what happens to an entry the server has told us about, whose
