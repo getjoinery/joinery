@@ -766,7 +766,7 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 			}
 
 			$receipts[$key+1]['pname'] = $product_name . $trial;
-			$receipts[$key+1]['name'] = $data['full_name_first'].' '.$data['full_name_last'];
+			$receipts[$key+1]['name'] = trim(($data['full_name_first'] ?? '') . ' ' . ($data['full_name_last'] ?? ''));
 			$receipts[$key+1]['price'] = $price - $discount;
 			$receipts[$key+1]['after_purchase_message'] = $product->get('pro_after_purchase_message');
 			if($product->get('pro_digital_link')){

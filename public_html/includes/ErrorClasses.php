@@ -337,11 +337,21 @@ class WebErrorHandler implements ErrorHandlerInterface {
         if ($exception instanceof BaseException && $exception->shouldDisplay()) {
             return $exception->getUserMessage();
         }
-        
+
+        // The SystemBase exception family marks user-safe messages with these
+        // interfaces — that marking is the whole point of throwing them, so
+        // honor it here too (message only; title/status stay generic).
+        if ($exception instanceof \DisplayableErrorMessage
+                || $exception instanceof \DisplayableErrorMessageNoLog
+                || $exception instanceof \DisplayablePermanentErrorMessage
+                || $exception instanceof \DisplayablePermanentErrorMessageNoLog) {
+            return $exception->getMessage();
+        }
+
         if ($this->isProduction()) {
             return 'We apologize for the inconvenience. Our team has been notified.';
         }
-        
+
         return $exception->getMessage();
     }
     
@@ -695,6 +705,18 @@ class AjaxErrorHandler implements ErrorHandlerInterface {
             ];
         }
         
+        // The SystemBase exception family marks user-safe messages with these
+        // interfaces — honor them here as the web handler does.
+        if ($exception instanceof \DisplayableErrorMessage
+                || $exception instanceof \DisplayableErrorMessageNoLog
+                || $exception instanceof \DisplayablePermanentErrorMessage
+                || $exception instanceof \DisplayablePermanentErrorMessageNoLog) {
+            return [
+                'message' => $exception->getMessage(),
+                'type' => 'error'
+            ];
+        }
+
         return [
             'message' => $this->isProduction() ? 'An error occurred processing your request.' : $exception->getMessage(),
             'type' => 'error'

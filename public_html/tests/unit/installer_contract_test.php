@@ -54,6 +54,8 @@ $handoff_src   = is_file($handoff) ? file_get_contents($handoff) : '';
 $wrapper_src   = is_file($wrapper) ? file_get_contents($wrapper) : '';
 $publish_src   = is_file($publish) ? file_get_contents($publish) : '';
 $quickstart_md = is_file($quickstart) ? file_get_contents($quickstart) : '';
+$installation  = PathHelper::getIncludePath('docs/installation.md');
+$installation_md = is_file($installation) ? file_get_contents($installation) : '';
 $upgrade_src   = is_file($upgrade) ? file_get_contents($upgrade) : '';
 
 
@@ -232,7 +234,9 @@ section('A published install fetches from the release site, and knows it');
 // docs were written for was handed the working tree of a development box.
 check(preg_match('/UPGRADE_SERVER="\$\{UPGRADE_SERVER:-https:\/\/getjoinery\.com\}"/', $install_src) === 1,
     'install.sh defaults UPGRADE_SERVER to the release site');
-check(strpos($quickstart_md, 'https://getjoinery.com/utils/latest_release') !== false,
+// The one-liner is published in the installation reference; quickstart is the
+// StackScript path and points command-line installs there.
+check(strpos($installation_md, 'https://getjoinery.com/utils/latest_release') !== false,
     'the published one-liner fetches from the same place');
 
 // Two unconnected knobs until this landed: --upgrade-server chose where the

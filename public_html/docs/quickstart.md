@@ -95,7 +95,7 @@ The reason this comes *after* creating the server: the server's address doesn't 
 
 **Using Cloudflare?** For your first setup, set the record to **DNS only** (the grey cloud icon, not the orange one). You can turn the orange cloud on later once everything works.
 
-DNS changes take time to spread across the internet — usually minutes, occasionally a few hours. **You don't have to watch it.** Your server checks every few minutes on its own, and the moment your domain points at it, it fetches its HTTPS certificate automatically. There is nothing for you to do.
+DNS changes take time to spread across the internet — usually minutes, occasionally a few hours. **You don't have to watch it.** The install continues without waiting for DNS: your server checks every few minutes on its own, and the moment your domain points at it, it fetches its HTTPS certificate automatically. There is nothing for you to do.
 
 ---
 
@@ -136,7 +136,7 @@ More is available under **Admin → Plugins** — events, an online store, and o
 ## If Something Goes Wrong
 
 - **The site never appears** after 15 minutes: the most common cause is a typo in the domain field. The cheapest fix is also the cleanest one — on the Linode dashboard, **delete the server** (Settings → Delete) and repeat Step 2 with the field corrected. It costs a few cents and takes ten minutes.
-- **The padlock / HTTPS isn't working** but the site loads over `http://`: DNS just hasn't finished spreading. Check that your A record from Step 3 has the right IP address, then wait — the certificate is fetched automatically once the domain connects.
+- **The padlock / HTTPS isn't working** but the site loads over `http://`: DNS just hasn't finished spreading. Check that your A record from Step 3 has the right IP address, then wait — the certificate is fetched automatically once the domain connects. If you'd rather not wait for the next automatic attempt, SSH in and run the `setup_ssl.sh` command the install printed in its closing summary (it lives under `maintenance_scripts/sysadmin_tools/setup_ssl.sh` in your install directory) — it fetches the certificate immediately.
 - **You can't log in**: make sure you're using the *admin email and password* from the form (not the root password), and that you're at `/admin`.
 
 For anything deeper, the [full installation reference](installation.md#troubleshooting) has a troubleshooting section.

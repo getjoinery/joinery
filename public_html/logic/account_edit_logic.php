@@ -98,8 +98,14 @@ require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
 				if (class_exists('InboundEmailDomain')) {
 					// Owned OR grant-reached — a grant-reached mailbox is just as
 					// circular (the reset link still lands where the user is locked out).
-					$is_user_hosted = in_array($new_domain,
-						InboundEmailDomain::userHostedDomainNames((int)$user->key), true);
+					try {
+						$is_user_hosted = in_array($new_domain,
+							InboundEmailDomain::userHostedDomainNames((int)$user->key), true);
+					} catch (\Throwable $e) {
+						// Plugin files ship everywhere but its tables exist only where
+						// it has been activated; a missing table means no hosted domains.
+						$is_user_hosted = false;
+					}
 				}
 			}
 			$has_reset_path = $session->user_has_second_factor($user)

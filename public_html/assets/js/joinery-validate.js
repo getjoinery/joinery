@@ -1,7 +1,7 @@
 /**
  * Joinery Validation System - Pure JavaScript validation library
  * No jQuery dependencies, works alongside jQuery validation if present
- * @version 1.2.1
+ * @version 1.2.2
  * @changelog 1.2.1 - A submit event another listener already cancelled is
  *   left alone. The re-dispatch exists so other listeners can veto a
  *   validated submission; without this check a page handler that
@@ -468,9 +468,10 @@ console.log('%c=== JOINERY VALIDATION v1.2.0 ===', 'color: blue; font-weight: bo
                     continue;
                 }
 
-                // Extract rule parameter
+                // Extract rule parameter. A null/undefined param must not
+                // throw — a crash here silently blocks the form's submit.
                 const param = ruleParam === true ? true
-                            : ruleParam.value !== undefined ? ruleParam.value
+                            : (ruleParam !== null && typeof ruleParam === 'object' && ruleParam.value !== undefined) ? ruleParam.value
                             : ruleParam;
 
                 // Call validator with validator instance as context

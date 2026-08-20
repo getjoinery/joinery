@@ -137,7 +137,15 @@ function security_logic(array $input): LogicResult{
 		$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
 		if (is_file($domain_class)) {
 			require_once($domain_class);
-			if (class_exists('InboundEmailDomain') && InboundEmailDomain::isHostedEmailAddress($candidate)) {
+			try {
+				$candidate_is_hosted = class_exists('InboundEmailDomain')
+					&& InboundEmailDomain::isHostedEmailAddress($candidate);
+			} catch (\Throwable $e) {
+				// Plugin files ship everywhere but its tables exist only where it
+				// has been activated; a missing table means no hosted domains here.
+				$candidate_is_hosted = false;
+			}
+			if ($candidate_is_hosted) {
 				$msgtxt = 'Choose a recovery address on an outside provider (Gmail, Outlook, etc.). A mailbox hosted here would be unreachable when you are locked out — the very situation recovery exists to solve.';
 				$message = new DisplayMessage($msgtxt, 'Use an outside address', '/\/profile\/security.*/',
 					DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE, 'securitybox', TRUE);

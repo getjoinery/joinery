@@ -216,10 +216,13 @@ operator involvement.*
    products. Resolved on getjoinery with the platform's own
    `plugins/store/utils/refresh_stripe_test_keys.php` (all 5 test
    products + prices created).
-3. **No purchase email of any kind is queued** for any order — no receipt
-   template on any product (`pro_emt_receipt_template_id` NULL), and the
-   confirmation page still tells every buyer "An email has been sent."
-   Store config gap plus false copy.
+3. ~~No purchase email queued~~ **REVISED after delivery checking: receipts
+   and licence-key emails ARE sent** — direct-send via Mailgun, bypassing
+   `equ_queued_emails` (which is why the queue looked empty). Every buyer
+   received "Your purchase receipt"; every mint sent a "Your … license key"
+   email, including both mints of the two-product combo. What remains of
+   this finding: see finding 8 (delivery losses) and finding 9 (sending
+   identity).
 4. **Any product with a required question is unpurchasable through the UI**
    (launch-blocking — this is Automatic Install). Two stacked defects:
    `products_class.php::output_javascript` runs `list()` over the
@@ -231,19 +234,49 @@ operator involvement.*
    unpatched — Phase 1/2 orders for product 9 were placed by bypassing the
    broken client validator (`form.submit()`), which exercised the server
    path normally.
-5. **Product 9 has no after-purchase message** — combined with finding 3,
-   a real buyer is never shown or sent the Connect link, so their
-   provision would sit at `pending_connect` forever. Store config
-   (admin product edit), not code.
-6. **Own-once double-add guard fires but the buyer sees a raw error
-   page.** Second Add to Cart of an owned-once product raises
-   `SystemDisplayableError` with a good message ("already in your cart"
-   + link) that the error page swallows — buyer gets "An Error Occurred"
-   and a 500.
+5. **Product 9 had no after-purchase message** — a real buyer was never
+   shown the Connect link, so their provision would sit at
+   `pending_connect` forever. **FIXED live 2026-08-20**: Connect-link
+   message set on product 9 (renders on the confirmation page and in the
+   receipt's after-purchase block).
+6. **Own-once double-add guard fires but the buyer saw a raw error
+   page.** The guard's `SystemDisplayableError` message ("already in
+   your cart" + link) was swallowed — the `Displayable*` marker
+   interfaces on the SystemBase exception family were honored by NO
+   error handler (only the parallel `BaseException::shouldDisplay()`
+   system was checked). **FIXED in dev** (`ErrorClasses.php`: web and
+   AJAX handlers now show the message for marked exceptions; title and
+   status stay generic). Ships with the next release.
 7. Registration bypass note: buyers were minted server-side (finding 1
    blocks the real flow) and marked activated/verified — the
    registration → activation-email leg is UNTESTED and must re-run after
    finding 1 ships.
+8. **Transactional email is lost nondeterministically to spam
+   blocklists.** Buyer7's four same-second emails: Mailgun accepted all
+   four, but two were rejected by the receiving MX — the shared Mailgun
+   IP that happened to carry them (69.72.43.15) is on SpamCop's
+   blocklist; the two that arrived rode a different shared IP. A real
+   customer behind any RBL-enforcing provider can silently lose their
+   licence key or receipt. Options live in
+   [[project-email-consolidation]] territory (dedicated IP, different
+   sender, or Direct); the keys remain visible on the profile page, which
+   softens but does not close this.
+9. **getjoinery sends as jeremytunnell.** `mailgun_domain` on
+   getjoinery.com is `mail.jeremytunnell.com` and the From is
+   `jeremy@jeremytunnell.com`. Both `getjoinery.com` and
+   `mail.getjoinery.com` are already verified-active in the Mailgun
+   account, so the fix is three settings (`mailgun_domain` →
+   mail.getjoinery.com, `defaultemail` → support@getjoinery.com,
+   `defaultemailname` → Get Joinery) — the session's permission layer
+   refused the production write, so this one is applied by the owner
+   (settings page or one-line CLI).
+10. Minor: `cart_charge_logic.php:769` emitted PHP warnings (undefined
+    `full_name_first`/`full_name_last`) on every checkout. **FIXED in
+    dev** (null-coalesced).
+11. Non-finding worth recording: the welcome email appears "stuck" at
+    READY_TO_SEND for up to 15 minutes because a provision completing at
+    second :02 of a tick misses the same tick's Send Queued Emails run at
+    second :01 — it drains on the next tick. Cosmetic latency only.
 
 **Verified working (evidence in DB unless noted):** login, terms-accept
 gate, setup wizard (dismiss requires the "I understand" checkbox — fine),
@@ -256,9 +289,20 @@ already own this" instead of a buy button; order→provision seam for
 product 9 (domain question answer lands in `cvp_domain`, buyer stamped);
 mixed four-product cart produced three ownerships + one provision from a
 single order; PAT-backed account link accepted by the pipeline;
-**"Advance customer provisioning" picked the ready provision up on its
-first unattended tick and created Linode instance 103255756
-(45.79.195.250)** — Phase 2d in progress past that point.
+**"Advance customer provisioning" carried the provision end-to-end
+unattended**: ready → Linode instance 103255756 (45.79.195.250) created
+on the first tick → agent-executed install (job 13, node record 3,
+`gj-verify-2-getjoinery-com`) → **site serving HTTP 200 "Welcome to
+Joinery" by IP with Host header** → provision `done` → welcome email
+("Your site is ready: gj-verify-2.getjoinery.com", correct IP + DNS
+instructions in the body) queued, sent on the next drain tick, and
+**delivered** to the buyer's inbox at 18:45:04. Provision 2 (buyer5)
+correctly stayed parked at `pending_connect` throughout; fleet seeding
+produced no errors (buyer holds no fleet entitlement — clean skip).
+**Phases 1 and 2 are COMPLETE.** Test-mode exit gate done (`debug` back
+to 0, verified). Owner deletes instance 103255756 manually; the test
+buyer's PAT-backed account link (cca row 2) remains on getjoinery —
+revoke the PAT in Linode Cloud Manager when the instance is gone.
 
 ## Decisions log
 
