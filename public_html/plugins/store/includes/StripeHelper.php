@@ -1283,11 +1283,15 @@ class StripeHelper {
 		}
 		
 		//IF WE GOT HERE WE NEED TO CREATE ONE
+		// The nickname is what labels this price in the Stripe dashboard, where
+		// every price of a product otherwise looks alike. Build it from the
+		// amount actually being charged. The currency CODE, not the symbol —
+		// CurrencyHelper::symbol() is for HTML (it returns '&euro;') and falls
+		// back to '$' for any currency it does not know, which would label a
+		// GBP price with a dollar sign.
+		$nickname = number_format((float)$price, 2) . ' ' . strtoupper((string)$currency_code);
 		if($product_version->get('prv_trial_period_days')){
-			$nickname = $amount. '-trial'.$product_version->get('prv_trial_period_days');
-		}
-		else{
-			$nickname = $amount;
+			$nickname .= '-trial'.$product_version->get('prv_trial_period_days');
 		}
 		
 
