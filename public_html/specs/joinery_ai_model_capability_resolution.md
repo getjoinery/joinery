@@ -1,12 +1,26 @@
 # Joinery AI — Endpoint catalog and capability-based model resolution
 
-**Status:** Proposed
+**Status:** Proposed — design-reviewed with the owner 2026-08-20; every open
+fork is settled and recorded in §Settled and §Decisions. Do not reopen those
+without new evidence.
 **Plugin:** `joinery_ai`
-**Touches:** `LlmProviderFactory`, `AnthropicProvider`, `FireworksProvider`,
-`OpenAiCompatibleProvider`, `ChatLevel`, `RecipeRunner`, `PipelineRunner`,
-`RecipeVaultScope`, `RecipeSeeder`, `recipes.json`, `plugin.json` (settings),
-`data/recipes_class.php`, `data/ai_conversations_class.php`,
-`views/admin/edit.php`, `logic/admin_edit_logic.php`, `logic/chat_controls_logic.php`
+**Touches:** `LlmProviderFactory`, `LlmProviderInterface`, `AnthropicProvider`,
+`FireworksProvider`, `OpenAiCompatibleProvider`, `ChatLevel`, `AgentLoop`,
+`RecipeRunner`, `PipelineRunner`, `RecipeVaultScope`, `RecipeSeeder`,
+`PipelineJobInterface` (+ its four implementations: `EmailTriageJob`,
+`EmailSecurityScanJob`, `EmailScheduleJob`, `MarkAdvertisementsJob`),
+`recipes.json`, `plugin.json` (settings), `data/recipes_class.php`,
+`data/recipe_runs_class.php`, `data/ai_conversations_class.php`,
+`views/admin/edit.php`, `logic/admin_edit_logic.php`, `logic/chat_controls_logic.php`,
+`tests/lib/llm_fixtures.php`; consent widening (§9a):
+`plugins/mailbox/data/inbound_email_domain_class.php`,
+`plugins/mailbox/includes/MailboxAliasConfig.php`,
+`plugins/mailbox/admin/admin_mailbox_domains.php` (+ its logic file),
+`plugins/persona_browser/pipeline_jobs/MarkAdvertisementsJob.php`,
+`plugins/joinery_ai/tests/in_window_email_test.php`
+**New files:** `plugins/joinery_ai/ai_endpoints.json`,
+`plugins/joinery_ai/ai_model_reference.json`, `AiEndpointRegistry`,
+`AiModelResolver`, `AiModelRequirement`, `AiModelResolution`
 
 ---
 
@@ -96,7 +110,10 @@ the flexibility this spec is being asked for.
 `rcp_thinking_level` / `aic_thinking_level` (`off|low|medium|high`) say **how
 hard** to reason. Each provider maps it: Anthropic to `budget_tokens`, Fireworks
 to `reasoning_effort` (with a per-model table of models that cannot turn it
-off), the local host to qwen's `/think` token. Nothing says **whether a job needs
+off), the local host to a request-level `reasoning_effort` with no model names
+involved. (Two stale comments in `OpenAiCompatibleProvider` and `AgentLoop`
+still describe a qwen `/think` prompt token the code no longer emits — correct
+them in this pass.) Nothing says **whether a job needs
 a model capable of reasoning at all**, so a recipe set to `high` that resolves
 onto a non-reasoning model silently gets no reasoning.
 
@@ -192,11 +209,9 @@ An **endpoint** is one place a request can be sent.
       "base_url_setting": "joinery_ai_local_base_url",
       "api_key_setting": null,
       "trust": "local",
-      "slots": [
-        { "slot": "small", "setting": "joinery_ai_local_model_small", "tier": "basic",    "thinking": "optional", "tools": true },
-        { "slot": "mid",   "setting": "joinery_ai_local_model_mid",   "tier": "standard", "thinking": "optional", "tools": true },
-        { "slot": "large", "setting": "joinery_ai_local_model_large", "tier": "capable",   "thinking": "optional", "tools": true }
-      ]
+      "probe": "ollama",
+      "models_setting": "joinery_ai_local_model",
+      "_models_note": "Whatever ids the host serves, comma-separated, exactly as today. Each is graded from ai_model_reference.json by its tag - no per-install binding."
     }
   ]
 }
@@ -212,8 +227,9 @@ An **endpoint** is one place a request can be sent.
 | `api_key_setting` | the endpoint is **available** only when this setting is non-empty; `null` means no key needed |
 | `trust` | `local` \| `trusted` \| `cloud` — see below |
 | `trust_note` | one plain sentence shown in the UI explaining why `trusted` was granted |
-| `enabled_setting` | optional; lets an operator switch an endpoint off without clearing the key |
-| `models` / `slots` | the catalog it serves (fixed ids, or operator-bound slots) |
+| `enabled_setting` | optional; lets an operator switch an endpoint off without clearing the key. Like every `*_setting` here, it must name a setting declared in `plugin.json` — `Setting::put` refuses undeclared names |
+| `models` / `models_setting` | the catalog it serves — a fixed list, or a setting naming whatever the operator's host serves (graded from the reference file) |
+| `probe` | optional; `ollama` \| absent — this endpoint can report its models' mechanical facts (capabilities, context) live; see §3b. Replaces the `method_exists()` duck-typing in `AgentLoop` |
 
 **Catalog-model fields**
 
@@ -227,7 +243,7 @@ An **endpoint** is one place a request can be sent.
 | `context` | window in tokens |
 | `attachments` | `{vision, document}` |
 | `cost` | USD per Mtok; absent means free (local) |
-| `retired` | optional; still resolvable for cost history, never selected for new work |
+| `retired` | optional; still resolvable for cost history, never selected for new work. A pin naming a retired model is treated as **unavailable** (falls back to requirement resolution, recorded), not as a configuration error |
 
 This replaces `MODELS`, `COST_PER_MTOKEN`, `MODEL_CAPABILITIES`,
 `REASONING_MODELS` and `REASONING_NO_OFF` — five constant tables in three
@@ -263,28 +279,163 @@ the ladder stays short.
 | Tier | The job it can be trusted with | Examples of work |
 |---|---|---|
 | `basic` | one short classification against clear instructions, on short text | *is this an advertisement*, is-this-a-receipt, language detection |
-| `standard` | reads a document-length input, fills a multi-field schema, holds a few constraints at once | email triage, extracting a calendar entry |
-| `capable` | adversarial or consequential judgement; resists manipulation planted in the input; multi-step tool use | phishing and security scanning, anything that writes based on untrusted text |
-| `frontier` | long-horizon reasoning, subtle drafting, large context | composing mail the owner sends under their own name |
+| `standard` | reads a document-length input, fills a multi-field schema, holds a few constraints at once | extracting a calendar entry |
+| `capable` | adversarial or consequential judgement on **one item**; resists manipulation planted in the input | phishing and security scanning, email triage |
+| `frontier` | sustained **multi-step tool use**, long-horizon reasoning, subtle drafting | agent-mode recipes, composing mail the owner sends under their own name |
+
+**The line between `capable` and `frontier` is the line the system already
+draws.** `capable` is pipeline mode — PHP picks the item, the model judges it in
+one bounded exchange, nothing carries over. `frontier` is agent mode — the model
+drives, holds a conversation, and each tool call compounds on the last. That is
+`rcp_mode`, which already exists, which is a good sign the distinction is real
+rather than invented.
+
+An earlier draft bundled "resists manipulation" and "multi-step tool use" into
+one rung. Measurement killed it: `gemma2:9b` and `qwen3.5:9b-nvfp4` both do
+adversarial email judgement well (see the reference file) and neither would
+survive a long tool loop. They are different capabilities and they belong on
+different rungs.
 
 **Rule: a request for tier N is satisfied by any model of tier ≥ N.** That is
 what makes it a minimum rather than a selector.
 
+A consequence worth stating so it does not read as a mistake: under the current
+ladder **no local model grades `standard`** — the band runs ≤4B `basic` then
+straight to `capable` at 7B. That is fine. A rung with no models is still a
+valid floor, because anything above it satisfies it; `standard` exists for
+recipes whose honest requirement sits there, and it will populate as cloud and
+future models are graded.
+
+**Grade generously.** Where a model sits on a boundary it gets the HIGHER rung,
+and where a recipe's floor is arguable it gets the LOWER one. A floor exists to
+stop work reaching a model that cannot do it, not to reserve work for the
+biggest model available — and the measurements below show that within a wide
+band, size buys very little on the judgement tasks recipes actually run.
+
 The tier is a property of the model in the catalog, so re-grading the fleet
 after a vendor release is a catalog edit and a publish.
 
+### 3a. `ai_model_reference.json` — how a local model gets its tier
+
+The cloud endpoints ship graded; an operator never touches them. The open
+question is only ever **the model on their own box**, and no operator should be
+asked to grade one.
+
+So a second shipped file answers it. It is deliberately separate from
+`ai_endpoints.json`: the catalog is authoritative for routing (an entry there
+means "you may send here"), the reference is advisory for grading. Merging them
+would let a reference entry become routable by accident.
+
+```jsonc
+{
+  "_comment": "Advisory gradings for local models. Never routable — see ai_endpoints.json for that.",
+  "ladder": [
+    { "max_params_b": 4,  "tier": "basic" },
+    { "max_params_b": 32, "tier": "capable" },
+    { "max_params_b": null, "tier": "frontier" }
+  ],
+  "models": [
+    { "match": "qwen3.5:9b*", "tier": "capable", "basis": "measured",
+      "evidence": "email_security_corpus 2026-08-20, 100 msgs: 96% recall / 4% FP @>=7; mean phish 8.9 vs ham 0.3" },
+    { "match": "qwen3.6:35b-a3b*", "tier": "capable", "basis": "measured",
+      "evidence": "email_security_corpus 2026-08-20, 100 msgs: 92% recall / 2% FP @>=7; mean phish 8.8 vs ham 0.1; 783s vs 1024s for the 9B" },
+    { "match": "gemma2:9b", "tier": "capable", "basis": "measured",
+      "evidence": "email_security_corpus 2026-07: 90% recall / 8% FP @>=7" },
+    { "match": "qwen3:4b*", "tier": "basic", "basis": "measured",
+      "evidence": "email_security_corpus: scored phish, ham and hard negatives all in the 5.9-8.7 band - cannot separate" }
+  ]
+}
+```
+
+**Named entries win; the ladder is the fallback.** Most Ollama tags announce
+their own size (`:9b`, `:4b`, `:27b`, `:35b-a3b`), so an unrecognized model is
+graded by parsing the parameter count out of the tag. Where a tag carries more
+than one count, the parser takes the **largest** — `35b-a3b` grades as 35B
+total, not the 3B active-parameter suffix. Only a tag with nothing readable in
+it falls to `basic` — which is the one genuinely unknown case, not a punishment
+for being unlisted.
+
+**`basis` is `measured` or `research`.** A `measured` entry names the run behind
+it. Cloud gradings are `research` and say so. This is how you know whether to
+trust a grading when a recipe misbehaves, and it keeps the file from silently
+becoming a pile of guesses.
+
+**Grade by family and size class, not by exact tag.** Quantizations and instruct
+variants multiply endlessly; a per-tag list would go stale weekly. Hence the
+glob `match`.
+
+### 3b. Tier is the only fact the reference file owns
+
+A requirement has five axes, and tier is the only one no probe can measure —
+it is a judgement about judgement. The other, *mechanical* facts of a local
+model (`thinking`, `tools`, `context`, `attachments`) come from the host
+itself: an endpoint declaring `probe: "ollama"` is asked via `/api/show`, which
+reports a `capabilities` array (`tools`, `thinking`, `vision`, …) and the
+model's `context_length`. The host knows these better than any shipped file —
+swap in a vision model or a new quantization and the facts are simply right,
+no publish needed. Probe results are cached per model tag.
+
+**Precedence, per fact:** a named reference entry that carries the field
+(rare — for a host that mis-reports) → the probe → the stated defaults.
+Defaults, for a host with no probe (a vLLM or LM Studio behind the same OpenAI
+dialect): `thinking: optional`, `tools: true`, no attachments, context
+**unknown** — and an unknown context fails a `min_context` requirement
+**closed**, with the refusal naming the host's silence rather than guessing a
+number. The defaults are load-bearing: `tools: true` on a host that cannot
+drive them surfaces as a runtime failure, not a resolution refusal, which is
+the price of not making every operator fill in a fact table.
+
+This is the same design move as the live-context probe (Decision 3, Branch B),
+applied uniformly: the probe capability is declared on the endpoint once, and
+serves both the mechanical fact set at resolve time and the live window check
+at run time.
+
+#### What the measurements actually showed
+
+Two models a size class apart were scored on the same 100-message corpus
+(50 phish, 30 ham, 20 hard negatives) on the same host:
+
+| | `qwen3.5:9b-nvfp4` | `qwen3.6:35b-a3b-q4_K_M` |
+|---|---|---|
+| recall @>=7 | **96%** (48/50) | 92% (46/50) |
+| false positives @>=7 | 4% (2/50) | **2%** (1/50) |
+| mean phish / ham / hard | 8.9 / 0.3 / 1.1 | 8.8 / 0.1 / 0.5 |
+| total wall clock | 1024s | **783s** |
+
+Three conclusions the design rests on:
+
+1. **They are not distinguishable.** Two messages of recall against one false
+   positive, on 50 per class, is noise. A model a size class larger did not
+   judge better — it judged *more conservatively*, scoring everything lower.
+2. **So the buckets must be coarse.** If 9B and 35B perform identically, a
+   fine-grained ladder would be inventing precision that the underlying reality
+   does not have. This is the strongest argument for four loose rungs.
+3. **Mixture-of-experts breaks size intuition, in the useful direction.** The
+   35B decodes ~24% faster end to end than the dense 9B, because only ~3B
+   parameters are active per token. Its one real cost is cold load — minutes to
+   page in 24GB — which dominates a recipe that wakes hourly to judge two items
+   and is irrelevant to a drain of fifty.
+
+`tests/tools/score_email_corpus.php` (v1.3) is the instrument. Re-running it is
+how a `research` entry becomes a `measured` one.
+
 ### 4. A recipe states a requirement, not a model
 
-New columns on `rcp_recipes` (and the mirror fields on `aic_conversations`):
+New columns on `rcp_recipes` — and on `rcp_recipes` only. Chat gains **none**
+of these (Decision 6): a conversation has no requirement, only its pick
+(`aic_model`), and Fortress's `local` constraint is a property of the chat
+level, enforced by the resolver from the level rather than stored per row.
 
 | Column | Type | Default | Meaning |
 |---|---|---|---|
-| `rcp_min_tier` | `varchar(20)` | `standard` | the capability floor |
-| `rcp_trust_floor` | `varchar(20)` | `any` | `local` \| `trusted` \| `any` |
-| `rcp_thinking_required` | `varchar(10)` | `off` | `off` \| `allowed` \| `required` |
-| `rcp_min_context` | `int4` | `NULL` | optional floor for large digests |
-| `rcp_selection_policy` | `varchar(20)` | `NULL` | `NULL` inherits the site policy (which is `prefer_local`); set only to opt one recipe out |
+| `rcp_min_tier` | `varchar(20)` | `NULL` | the capability floor; NULL = inherit (§4a) |
+| `rcp_trust_floor` | `varchar(20)` | `NULL` | `local` \| `trusted` \| `any`; NULL = inherit |
+| `rcp_thinking_required` | `bool` | `NULL` | TRUE excludes `thinking: none` models; NULL = inherit |
+| `rcp_min_context` | `int4` | `NULL` | optional floor for large digests; checked against the catalog's **nominal** window at resolve time — the live-probed window surfaces as the usable-context warning, never a refusal |
 | `rcp_model` | `varchar(100)` | `NULL` | **kept, not renamed** — reinterpreted as a rare explicit pin; column default drops from `claude-haiku-4-5` to null |
+
+(An earlier draft also had a per-recipe `rcp_selection_policy`. Cut — Decision
+8: the site policy sets posture, the pin is the per-recipe lever.)
 
 `rcp_model` deliberately keeps its name. `update_database` builds schema from
 `$field_specifications` and does not rename: a rename would add the new column
@@ -294,15 +445,104 @@ Reinterpreting the existing column costs one comment and no migration. Same for
 
 `rcp_thinking_required` and the existing `rcp_thinking_level` are different
 questions and both stay: the requirement says **must be able to reason**, the
-level says **how hard**. `required` excludes any model whose catalog `thinking`
-is `none`. `off` does not exclude an `always` model — it is satisfied by
-mapping to the model's lowest effort, exactly as `FireworksProvider` already
-does for `gpt-oss-120b`.
+level says **how hard**. The requirement is a plain boolean — an earlier draft
+had three values (`off`/`allowed`/`required`), but `off` merely duplicated
+`thinking_level: off` and the middle value bought nothing (Decision 7). TRUE
+excludes any model whose catalog `thinking` is `none`; a level of `off` does
+not exclude an `always` model — it is satisfied by mapping to the model's
+lowest effort, exactly as `FireworksProvider` already does for `gpt-oss-120b`.
+The one residual mismatch — a level above `off` resolving onto a model that
+cannot reason — is handled with visibility, not machinery: the edit page's
+resolution line says *"this model cannot reason — level ignored."*
 
 Attachment needs (`vision`, `document`) and tool-driving are derived, not
 stored: agent mode implies `tools`, and chat ingress asks the resolver whether
 the resolved model can take the file — which is what `capabilitiesForModel()`
 does today, through one door instead of two.
+
+### 4a. Nobody should have to fill these in
+
+The requirement columns are a power-user surface. The normal case is an operator
+who never opens them, and the design has to make that the *good* path rather
+than the neglected one.
+
+**The job declares the floor, not the recipe.** `EmailSecurityScanJob` knows it
+reads attacker-controlled mail and needs `capable`; `MarkAdvertisementsJob` knows
+it is a yes/no on a short feed item and needs `basic`. The operator who binds a
+mailbox to a recipe knows none of that and should not be asked.
+
+This is not a new idea in this codebase — it is what `PipelineJobInterface`
+already does. `untrustedDigest()`, `requiresVaultScope()` and
+`cloudProcessingAllowed()` are all safety properties declared by the **job**,
+consulted by the runner, and invisible on the recipe form. A capability floor is
+exactly the same kind of fact, so it gets exactly the same treatment:
+
+```php
+/** The capability floor this job's judgement needs. */
+public function minTier(): string;
+
+/** Whether this job's content may be sent off the operator's hardware
+ *  by default (a floor, not a permission — the domain consent still gates). */
+public function defaultTrustFloor(): string;
+```
+
+Agent-mode recipes have no job. A declared one takes its requirement from its
+`recipes.json` declaration (§10); an operator-authored one takes the plugin
+default, which is `frontier` — the model is driving a tool loop, which is what
+that rung means.
+
+**Resolution chain, most specific first:**
+
+| Source | Set by | How often |
+|---|---|---|
+| `rcp_model` (pin) | an operator who insists | rare |
+| `rcp_min_tier` / `rcp_trust_floor` / … | a power user overriding the job | rare |
+| the job's `minTier()` / `defaultTrustFloor()` (pipeline recipes) | the developer who wrote the job | **the normal case** |
+| the declaration in `recipes.json`, via `declarationByKey()` (agent-mode declared recipes, which have no job) | whoever ships the recipe | the normal case for declared agent recipes |
+| plugin settings default | the platform | fallback |
+
+NULL at every recipe-row level means "inherit" — the same pattern
+`rcp_temperature`, `rcp_top_p` and `rcp_thinking_level` already use, where a
+NULL column falls through to a plugin setting. Nothing new to learn.
+
+**The chain is walked at resolve time, and an inherited value is never written
+into a row.** This is load-bearing: `RecipeSeeder` is create-only — it has no
+update path and never touches an existing row — so any requirement materialized
+at seed time would be frozen at install and a floor raised in a later release
+would never reach an existing install. Keeping the columns NULL is what makes a
+job's floor cascade with the code that declares it. A non-NULL requirement
+column therefore always means exactly one thing: an operator overrode it.
+
+The final rung's fallback values: `min_tier` `standard` (`frontier` for
+agent-mode recipes, per above), `trust_floor` `any`, thinking not required,
+no `min_context`.
+
+#### So: JSON or database?
+
+Both, and the split is not arbitrary — it follows what has to cascade.
+
+| Thing | Lives in | Why |
+|---|---|---|
+| endpoints, model gradings, cost, capabilities | **JSON in the release tree** | fleet knowledge; must reach every node on publish without touching a database |
+| a job's declared floor | **PHP, in the job class** | it is a property of the code that does the work, and it ships with that code |
+| a recipe's override or pin | **database columns** | per-recipe, per-install, operator-owned; it is exactly the kind of thing a database is for |
+
+The rule of thumb: **if changing it should reach the whole fleet, it is a file;
+if it is one operator's decision about one recipe, it is a column.** Today's
+design has model identity in the second bucket when it belongs in the first,
+which is the entire problem this spec exists to fix.
+
+#### What the edit form shows
+
+One line, closed by default:
+
+> **Model** — Automatic · currently Qwen 3.6 35B (local)
+
+Opening *Advanced* reveals the floor, the trust floor, the thinking requirement
+and the pin, each showing what it inherits and from where. An operator who wants
+a specific model can still have one; an operator who does not never learns these
+fields exist. The resolution is rendered live either way (§8), so "Automatic"
+never means "unknowable".
 
 ### 5. The resolver — one function, one answer
 
@@ -316,11 +556,11 @@ a message naming the gap.
 Selection order:
 
 1. **Filter** to catalog models that are *available* (endpoint key setting set,
-   endpoint not disabled, a local slot actually bound), *not retired*, and
+   endpoint not disabled, the local host serving at least one model), *not retired*, and
    satisfy every field of the requirement.
 2. **Prefer local, always, unless something says otherwise.** The policy is
-   `rcp_selection_policy` when the recipe sets one, else the site setting
-   `joinery_ai_selection_policy`, which ships as `prefer_local`. Local is
+   the site setting `joinery_ai_selection_policy`, which ships as
+   `prefer_local` (per-recipe policy was cut — Decision 8). Local is
    therefore the standing behaviour of the platform, and using someone else's
    hardware is a decision someone had to make and can be pointed at.
    - `prefer_local` *(default everywhere)* — lowest trust class that clears the
@@ -334,15 +574,18 @@ Selection order:
 A refusal names the gap and the fix:
 
 > This recipe needs a **capable** model that stays on your hardware. Your local
-> endpoint serves only a **basic** model. Either bind a larger model to the
-> local `large` slot, or lower the recipe's minimum.
+> endpoint serves only a **basic** model. Either serve a larger model on your
+> local host, or lower the recipe's minimum.
 
 #### Resolve once. This is the load-bearing rule.
 
-`resolve()` returns an **immutable** `AiModelResolution` carrying the endpoint,
-the catalog model entry, the built provider and the normalized thinking
-directive. Every consumer of a run — the consent gates, the dispatch, the cost
-record, the run history — reads **that same object**. Nothing re-resolves.
+`resolve()` returns an **immutable** `AiModelResolution` carrying the chosen
+endpoint and catalog model, the built provider, the normalized thinking
+directive — and the **ordered remainder of approved candidates**: every other
+model that passed the same filters, in selection order, truncated by the
+cost-nonincreasing rule (no candidate costing more than the first choice).
+Every consumer of a run — the consent gates, the dispatch, the cost record, the
+run history — reads **that same object**. Nothing re-resolves.
 
 This is not a style preference. Today the guard in front of decrypted mail
 leaving the box works because `routeFor()` is one decision that both
@@ -350,8 +593,8 @@ leaving the box works because `routeFor()` is one decision that both
 the gate believes receives it provably cannot disagree — the class comment says
 exactly that, and it is the property sink zero rests on. A resolver introduces a
 shape that does not exist today: check, then resolve again. If the gate resolves
-to test trust and the dispatch resolves to run, a catalog change, a slot
-rebinding or a cleared API key landing between them silently moves the work to a
+to test trust and the dispatch resolves to run, a catalog change, a changed
+local model list or a cleared API key landing between them silently moves the work to a
 different endpoint than the one that was approved. Resolving once and passing
 the result closes that gap by construction rather than by discipline.
 
@@ -363,14 +606,24 @@ Two corollaries:
   cloud and the gate therefore refuses.
 - **The re-check at run start re-resolves deliberately.** Save time and run
   start each resolve once, for their own decision; that is what makes a
-  withdrawn consent or an unbound slot stop the *next* run. Within a single run,
+  withdrawn consent or a removed local model stop the *next* run. Within a single run,
   one resolution.
+- **Failover walks the list, never re-resolves.** On a transport failure
+  **before the first token** — connection refused, model failed to load —
+  dispatch advances to the next candidate in the resolution. Every candidate
+  passed the same requirement, trust and consent filters at resolve time, so
+  nothing outside the approved set is ever reachable, which is what keeps
+  "one resolution per run" true. A stream that dies *after* the first token is
+  a **failed run**, not a retry — a second dispatch would double-spend and
+  re-fire side effects. The run records both what was resolved and what
+  actually served it (§8).
 
 #### The resolver owns the thinking directive
 
 Thinking translation currently lives inside providers and is keyed on model
-names: `FireworksProvider::REASONING_MODELS` / `REASONING_NO_OFF`, and the local
-host's qwen `/think` token. Once the catalog declares `thinking:
+names in `FireworksProvider::REASONING_MODELS` / `REASONING_NO_OFF` (the local
+provider already translates without model names, via a request-level
+`reasoning_effort`). Once the catalog declares `thinking:
 none|optional|always`, providers cannot keep that knowledge without two
 catalogs disagreeing.
 
@@ -391,30 +644,55 @@ a place where two answers could disagree.
 ### 6. Pins still exist, and are still checked
 
 `rcp_model` as a pin (and `aic_model`) resolves to that exact catalog model — **and
-are still validated against the requirement**. A pin that cannot meet the floor
-is refused at save time with the reason. This closes today's failure mode where
-a pinned name and the recipe's real needs disagree silently, and where a pin
-names a model the install does not have.
+is still validated against the requirement**. This closes today's failure mode
+where a pinned name and the recipe's real needs disagree silently.
+
+**Two different ways a pin can fail, and they must not be treated alike:**
+
+| Situation | Meaning | Behaviour |
+|---|---|---|
+| Pin is **below the floor** at save time — a `basic` model on a `capable` recipe | someone configured it wrong | **refuse at save**, naming the gap. It is a mistake and it should be fixed, not worked around. |
+| Pin **becomes** below the floor with no save — a release raised the job's floor or re-graded the catalog model down | the world changed under a saved row | **refuse at run start**, fail closed, recorded on the run and shown on the edit page. Save-time checking alone would read as "runs are never checked". |
+| Pin is **unavailable** — its endpoint has no key, its model is `retired`, or the local host stopped serving it | this install cannot reach it *today* | **fall back to normal resolution** and record that it did, on the run and on the edit page |
+
+Collapsing these would be a real upgrade-day hazard: a genuine pin (this dev
+install has three, to a local qwen model) must survive its host being briefly
+unavailable without either hard-failing or being silently forgotten. An
+unavailable pin is an availability fact, not a configuration error — the recipe
+still has a requirement, and the requirement is enough to run on.
+
+Neither case is silent. The run records what actually served it (§8), so
+"my pin isn't being used" is always answerable.
 
 ### 7. What stays in the database, and why
 
 Only genuinely instance-local facts:
 
 - **Endpoint keys** — already settings, already secret.
-- **Local slot bindings** — `joinery_ai_local_model_small` / `_mid` / `_large`,
-  the ollama tags this host actually serves. Swapping a model on a host is one
-  settings edit on that host, and every recipe follows automatically because
-  none of them names it.
-- **`joinery_ai_selection_policy`** — one select, shipping `prefer_local`. A
-  recipe overrides it only by setting `rcp_selection_policy`.
+- **The local model list** — `joinery_ai_local_model`, the ollama tags this host
+  actually serves, comma-separated, exactly as today. Each is graded from the
+  shipped reference file by its tag, so there is nothing to bind and no slots to
+  keep straight. Swapping a model on a host is one settings edit on that host,
+  and every recipe follows automatically because none of them names it.
+- **`joinery_ai_selection_policy`** — one select, shipping `prefer_local`.
+  There is deliberately no per-recipe override (Decision 8); the pin is the
+  per-recipe lever.
+- **The chat default** — `joinery_ai_default_model` survives, redefined as
+  **chat-only**: the model a new conversation starts on when the user has not
+  picked one. Recipes never read it — they have requirements. It behaves as a
+  site-wide chat pin under §6's rules: resolves to that catalog model, and
+  when unavailable falls back to normal resolution and says so. The chat
+  default is one operator's taste about the most visible AI surface — exactly
+  the "one operator's decision" bucket the rule of thumb in §4a assigns to the
+  database.
 - **`joinery_ai_endpoint_overrides`** *(optional, JSON textarea)* — a narrow
   escape hatch for a site that must disable an endpoint or re-grade a tier
   locally. Merged over the shipped catalog; empty on every normal install.
 
-`joinery_ai_llm_provider`, `joinery_ai_default_model` and the single
-`joinery_ai_local_model` setting are retired by this design — the first two
-because the resolver answers the question they existed to answer, the third
-because it becomes the three slot settings.
+`joinery_ai_llm_provider` is the one setting this design retires — the
+resolver answers the question it existed to answer. (`joinery_ai_local_model`
+and `joinery_ai_default_model` both survive, as above: the first unchanged,
+the second narrowed to chat.)
 
 ### 8. Say what ran — the visibility this design would otherwise cost
 
@@ -464,27 +742,79 @@ design leans on, so costing from `rcr_model` rather than from the recipe's
 | Attachment ingress | `capabilitiesForModel()` | requirement flags `needs_vision` / `needs_document`; the resolver refuses before the upload is accepted |
 
 The one-way-tightening rule is unchanged: both save time and run start
-re-resolve, so withdrawing a consent or unbinding a local slot stops the next
+re-resolve, so withdrawing a consent or removing a local model stops the next
 run rather than leaving an armed recipe.
 
-### 10. Shipped recipes finally carry their requirement
+### 9a. Domain consent becomes three-valued
 
-`RecipeSeeder::DECLARED_KEYS` gains `min_tier`, `trust_floor`,
-`thinking_required`, `min_context`. `NON_TRAVELLING_FIELDS` keeps stripping the
-pin — a model name still cannot travel — but the *requirement* now does, so a
-seeded recipe arrives knowing what it needs and resolves correctly against
-whatever the destination has.
+The distinction §9 promises is not free: consent today is
+`ied_inbound_email_domains.ied_ai_cloud_enabled`, a `bool NOT NULL DEFAULT
+false`, folded through `cloudProcessingAllowed(array $config): bool`. A boolean
+cannot say "trusted yes, cloud no", so the store, the interface, and the admin
+control all widen — in this build, in one pass, matching the no-deprecation
+rule (§Migration item 8).
+
+**Storage.** New column `ied_ai_processing_consent varchar(20) NOT NULL DEFAULT
+'local'`, holding the **most permissive trust class the domain's decrypted mail
+may reach**: `local` | `trusted` | `cloud` — the same vocabulary as endpoint
+trust, so the gate is a direct comparison. A data migration seeds it from the
+bool (`false → 'local'`, `true → 'cloud'`), then `ied_ai_cloud_enabled` leaves
+`$field_specifications`; the physical column lingers harmlessly until a later
+cleanup, per the platform's no-schema-drops rule.
+
+**Interface.** `PipelineJobInterface::cloudProcessingAllowed(array $config):
+bool` is replaced by:
+
+```php
+/** The most permissive trust class this run's decrypted content may reach:
+ *  'local' | 'trusted' | 'cloud'. The strictest sealed address wins. */
+public function processingConsent(array $config): string;
+```
+
+`EmailPipelineJobBase` implements it as the **minimum across the listed sealed
+addresses** (an address with nothing sealed contributes no constraint — today's
+all-must-consent fold, generalized). `MarkAdvertisementsJob`'s unconditional
+`return true` becomes `return 'cloud'` — its feed items are not sealed mail.
+
+**The gate.** `RecipeVaultScope::assertModelAllowed()` asserts the resolved
+endpoint's trust class is at or below the consent — `local` always passes,
+`trusted` needs `trusted` or `cloud` consent, `cloud` needs `cloud` consent.
+Equivalently: the consent acts as one more trust floor on the requirement, and
+the strictest of the recipe's floor and the domains' consent wins.
+
+**The control.** The domain admin page's checkbox becomes a three-way select
+(FormWriter, with the endpoint's `trust_note` text explaining what `trusted`
+means on this install). Default for new domains stays the strictest value,
+`local` — sealed mail never travels until someone says so.
+
+### 10. Shipped recipes carry their requirement — without the seeder writing it
+
+`NON_TRAVELLING_FIELDS` keeps stripping the pin — a model name still cannot
+travel — and the requirement travels, but **never as a seeded row value**. The
+seeder is create-only: a value it wrote at install would be frozen there, and a
+floor raised in a later release would silently miss every existing install. So
+the requirement columns of a seeded recipe stay NULL and the floor is read live
+through §4a's chain:
+
+- **Pipeline recipes** carry no requirement fields in `recipes.json` at all.
+  The floor is the job's `minTier()` / `defaultTrustFloor()` — it ships with
+  the code that does the work, and there is exactly one source for it.
+- **Agent-mode declared recipes** (no job) carry `min_tier`, `trust_floor`,
+  `thinking_required`, `min_context` in their `recipes.json` declaration, read
+  at resolve time via the existing `declarationByKey()`. `DECLARED_KEYS` does
+  **not** gain these fields — they are resolved, not seeded.
+
+Either way, changing a floor in a release changes the effective floor of every
+existing seeded recipe on every install, with no reseed and no migration —
+because no row holds a copy.
 
 ```jsonc
 {
   "key": "email_security_scan_default",
   "name": "Email security scan",
-  "pipeline_job": "email_security_scan",
+  "pipeline_job": "email_security_scan",   // the job declares capable/any - not repeated here
   "requires_plugin": "mailbox",
-  "min_tier": "capable",
-  "trust_floor": "any",
-  "thinking_required": "required",
-  "thinking_level": "medium",
+  "thinking_level": "off",
   "max_iterations": 25,
   "max_tokens": 5000,
   "monthly_token_cap": 200000
@@ -495,40 +825,45 @@ whatever the destination has.
 
 ## The permutation space
 
-The requirement space is 4 tiers × 3 trust floors × 3 thinking requirements =
-**36 shapes**, times the attachment/tool/context flags. Enumerating all of it is
+The requirement space is 4 tiers × 3 trust floors × 2 thinking requirements =
+**24 shapes**, times the attachment/tool/context flags. Enumerating all of it is
 not useful. Two tables are.
 
 ### Resolution matrix — what today's fleet can serve
 
-Assuming Anthropic and Fireworks keys set, and a local host serving a
-mid-sized model bound to the `mid` slot.
+Against the dev fleet's actual bindings: Anthropic and Fireworks keys set, and
+the Studio serving `qwen3.6:35b-a3b-q4_K_M`, `qwen3.6:35b-a3b-nvfp4`,
+`qwen3.8:27b-q4_K_M` and `qwen3.5:9b-nvfp4`.
 
 | Requirement | `local` | `trusted` (or better) | `any` |
 |---|---|---|---|
-| `basic` | local `small`/`mid` | local, else gpt-oss 120B | local (policy `prefer_local`) |
-| `standard` | local `mid` | local `mid`, else Qwen 3.7 Plus | local `mid` |
-| `capable` | **unsatisfiable** unless `large` is bound | gpt-oss 120B ($0.15/$0.60) | gpt-oss 120B, else Haiku 4.5 |
-| `frontier` | **unsatisfiable on every current host** | GLM 5.2 ($1.40/$4.40) | GLM 5.2, else Sonnet 4.6 |
+| `basic` | 9B | 9B | 9B (policy `prefer_local`) |
+| `standard` | 9B | 9B | 9B |
+| `capable` | 9B or 35B MoE — both measured | 35B MoE, else gpt-oss 120B | 35B MoE, else Haiku 4.5 |
+| `frontier` | **unsatisfiable on today's bindings** | GLM 5.2 ($1.40/$4.40) | GLM 5.2, else Sonnet 4.6 |
 
-The two unsatisfiable cells are the useful output of this exercise: they are
-real gaps that are invisible today, and the refusal message tells the operator
-exactly which slot to bind or which floor to lower.
+Only one cell is unsatisfiable, and it is a hardware fact rather than a
+categorical one: `frontier` means sustained multi-step tool use, and the largest
+model bound on the Studio is a 35B MoE. A 128GB-class box running a 70B dense or
+a 120B MoE would fill it. The refusal message says exactly that, so the gap is
+visible instead of silent.
 
 ### Assignment table — every surface's requirement
 
+Floors set as low as the job honestly tolerates, per the permissive rule.
+
 | Surface | `min_tier` | `trust_floor` | `thinking_required` | Why |
 |---|---|---|---|---|
-| `mark_advertisements` | `basic` | `any` | `off` | one yes/no on a short feed item |
-| `email_triage` | `standard` | `any` | `off` | document-length input, multi-field verdict |
-| `email_schedule` | `standard` | `any` | `off` | structured extraction from a mail body |
-| `email_security_scan` | `capable` | `any` | `required` | adversarial input, consequential verdict |
-| Chat — Standard | `standard` | `any` | `allowed` | general assistant work |
-| Chat — Private | `standard` | `any` | `allowed` | storage is sealed; inference is not restricted |
-| Chat — Fortress | `standard` | `local` | `allowed` | its whole point |
+| `mark_advertisements` | `basic` | `any` | no | one yes/no on a short feed item |
+| `email_triage` | `standard` | `any` | no | document-length input, multi-field verdict |
+| `email_schedule` | `standard` | `any` | no | structured extraction from a mail body |
+| `email_security_scan` | `capable` | `any` | no | adversarial input, consequential verdict — but a measured 9B clears it, so the floor is `capable`, not `frontier`, and thinking is not required (both measured runs scored with thinking off) |
+| Chat — Standard | — | `any` | — | chat carries no floor; the user picks, or the chat default applies (Decision 6) |
+| Chat — Private | — | `any` | — | storage is sealed; inference is not restricted |
+| Chat — Fortress | — | `local` | — | its whole point; the floor comes from the chat level, not a column |
 | Sealed-mail recipe, domain consent withheld | as declared | `local` | as declared | sink zero |
 | Sealed-mail recipe, domain consented to trusted | as declared | `trusted` | as declared | the distinction the binary cannot express today |
-| Composer (drafting under the owner's name) | `frontier` | `any` | `allowed` | subtle drafting |
+| Composer (drafting under the owner's name) | `frontier` | `any` | no | subtle drafting |
 
 ---
 
@@ -537,25 +872,44 @@ exactly which slot to bind or which floor to lower.
 No production users, so no data migration is required — but existing dev and
 fleet rows should keep working:
 
-1. **No column rename.** `rcp_model` and `aic_model` keep their names and their
-   values, reinterpreted as pins and now validated against the requirement. The
-   only schema change on them is dropping `rcp_model`'s `claude-haiku-4-5`
-   default to null, so a new recipe expresses a requirement rather than
-   inheriting a name.
-2. New requirement columns take the defaults above, which reproduce today's
-   behaviour for anything that had no opinion.
-3. `joinery_ai_local_model` seeds the `mid` slot on first sync; the operator
-   distributes across `small`/`large` at leisure.
+1. **No column rename.** `rcp_model` and `aic_model` keep their names,
+   reinterpreted as pins and now validated against the requirement. The schema
+   change is dropping `rcp_model`'s `claude-haiku-4-5` default to null, so a
+   new recipe expresses a requirement rather than inheriting a name — **and a
+   one-time migration nulls every `rcp_model` that still equals that old
+   default.** Those values are column-default residue, not decisions (the dev
+   install has 24 such rows against 3 deliberate pins; the seeder writes `''`,
+   so only the default ever minted them). Left in place they would read as
+   deliberate pins to a paid vendor the moment an Anthropic key is set,
+   permanently defeating `prefer_local`. `aic_model` needs no such sweep — it
+   has no column default, so every value there is a real pick.
+2. New requirement columns are added NULL everywhere and stay NULL — every
+   existing recipe inherits from its job, its declaration, or the plugin
+   fallback (§4a), which reproduces today's behaviour for anything that had no
+   opinion.
+3. `joinery_ai_local_model` is unchanged — same setting, same comma-separated
+   format. It stops being an ungraded list only because the reference file now
+   grades each entry. Nothing for an operator to migrate.
 4. `joinery_ai_selection_policy` seeds as `prefer_local` on every install,
    including existing ones — it is the platform's standing posture, not a
-   carried-forward preference. `joinery_ai_llm_provider` and
-   `joinery_ai_default_model` are retired outright.
+   carried-forward preference. `joinery_ai_llm_provider` is retired outright.
+   `joinery_ai_default_model` keeps its row and its value (the dev install's
+   `qwen3.6:35b-a3b-q4_K_M` carries straight over); only its `plugin.json`
+   description changes, to say it is the chat default and nothing else.
 5. `LlmProviderFactory::forModel()` / `isCloudModel()` / `ChatLevel::isLocalModel()`
    become thin wrappers over the registry during the transition, then go.
 6. `rcr_model` / `rcr_endpoint` are added empty. History predating this design
    genuinely does not know which model ran, and a guess written into the column
    would be worse than a blank — leave it blank.
-7. The five provider methods the catalog absorbs (`models()`, `defaultModel()`,
+7. **Consent widening (§9a):** a data migration seeds
+   `ied_ai_processing_consent` from `ied_ai_cloud_enabled` (`false → 'local'`,
+   `true → 'cloud'`), the bool leaves `$field_specifications`, and
+   `cloudProcessingAllowed()` is replaced by `processingConsent()` across its
+   implementations in the same pass. Note the plugin-column ordering gotcha:
+   plugin tables sync *after* migrations, so the seeding migration must handle
+   the column not existing yet on first run (a second `update_database` pass
+   completes it).
+8. The five provider methods the catalog absorbs (`models()`, `defaultModel()`,
    `isPrivate()`, `modelCapabilities()`, `estimateCost()`) are removed from
    `LlmProviderInterface` in one pass, not deprecated in place: leaving a second
    answerable source is exactly the drift this design exists to end.
@@ -565,37 +919,74 @@ fleet rows should keep working:
 
 - **Catalog schema gate** — `ai_endpoints.json` parses, every model has a valid
   tier / thinking / trust, no duplicate model ids across endpoints, every
-  `api_key_setting` and `base_url_setting` names a declared setting.
-- **Resolver matrix** — a table-driven suite over the 36 requirement shapes
+  `api_key_setting`, `base_url_setting` and `enabled_setting` names a declared
+  setting.
+- **Resolver matrix** — a table-driven suite over the 24 requirement shapes
   against a fixture catalog, asserting the chosen model and asserting that
   unsatisfiable cells refuse with a message naming the gap.
 - **Determinism** — the same requirement resolves identically across repeated
   calls and process restarts.
 - **Local by default** — with every endpoint configured and a local model that
   clears the floor, resolution picks the local one; it reaches a vendor only
-  when the floor cannot be met locally, or when a recipe set its own policy.
+  when the floor cannot be met locally.
 - **Gate agreement** — for every catalog model, the chat warning and the sealed
   egress gate read the same trust class (the regression the current
   `isPrivate()` / `isCloudModel()` split allows).
 - **One resolution per run** — the gate and the dispatch receive the same
   resolution object. Asserted by mutating the catalog (or clearing an endpoint
-  key) *after* the gate passes and confirming the run still dispatches to the
-  approved endpoint or fails, never to a different one. This is the sink-zero
-  regression test.
+  key) *after* the gate passes and confirming the run still dispatches within
+  the resolution's approved candidate list or fails — never outside it. This is
+  the sink-zero regression test.
 - **Fail closed** — an unparseable catalog, an unknown pin, and an id in no
   endpoint each refuse rather than falling through to any available model.
 - **Run provenance** — a completed run records the `rcr_model` and
   `rcr_endpoint` it actually used, and its `rcr_cost_estimate` is derived from
   `rcr_model`. Includes the case the current code gets wrong: an unpinned
   recipe running on a paid endpoint must record a non-zero cost.
-- **Thinking directive** — a `thinking: none` model is excluded from a
-  `required` requirement; an `always` model under an `off` requirement resolves
-  and dispatches at the lowest effort rather than being refused.
-- **Pin validation** — a pin below the requirement is refused at save.
-- **Seeder round trip** — a declaration's requirement survives publish and
-  seeding while the pin is stripped.
+- **Thinking directive** — a `thinking: none` model is excluded when the
+  requirement is TRUE; an `always` model under `thinking_level: off` resolves
+  and dispatches at the lowest effort rather than being refused; a level above
+  `off` on a `none` model resolves, and the edit page states the level is
+  ignored.
+- **Failover never spends money** — with the local host made unreachable and
+  every cloud endpoint configured, a `prefer_local` recipe FAILS; it does not
+  resolve onto a paid endpoint. The inverse also holds: failover between two
+  free local models is allowed — and only on before-first-token failure; a
+  stream that dies mid-response is a failed run, never a second dispatch.
+- **Control resolution order** — a control set on the recipe wins; unset, the
+  catalog model's default wins; unset there, the plugin setting. Asserted with a
+  model whose catalog default differs from the plugin setting, so a silent
+  reordering is caught.
+- **Pin failure modes** — a pin below the floor is refused at save; a saved pin
+  that a release later puts below the floor refuses at run start, fail closed;
+  a pin whose endpoint has no key falls back to requirement resolution and the
+  run records the substitution. These must not collapse into one behaviour.
+- **Usable context** — when the host reports a smaller live window than the
+  catalog's nominal one, the smaller is what a job is told, and the gap raises
+  a warning.
+- **Seeder round trip** — a seeded recipe's requirement columns are NULL, its
+  effective floor equals the job's (pipeline) or the declaration's (agent
+  mode), and the pin is stripped. Then the cascade itself: raising the job's or
+  declaration's floor changes the effective floor of the already-seeded row
+  with no reseed — the regression that would recreate frozen per-install
+  requirements.
 - **Availability** — clearing an endpoint's key removes its models from
   resolution without an error anywhere else.
+- **Chat default as pin** — a conversation with no pick starts on
+  `joinery_ai_default_model`; when that model is unavailable the chat resolves
+  normally and the substitution is visible; a Fortress conversation refuses a
+  non-local default rather than silently using it.
+- **Local model facts** — precedence per fact: a named reference-file override
+  beats the probe beats the defaults; a probing host's vision model resolves a
+  vision requirement with no reference entry; a non-probing host takes the
+  stated defaults; and a `min_context` requirement against a host that did not
+  report context refuses, naming the silence — never a guessed number.
+- **Three-valued consent** — a domain at `trusted` consent permits a `trusted`
+  endpoint and refuses a `cloud` one; at `local` it refuses both; the fold
+  across a recipe's bound domains takes the strictest; and the seeding
+  migration maps `false → 'local'`, `true → 'cloud'`. Sealed content on a
+  `local`-consent domain reaching any off-box endpoint is the sink-zero
+  regression.
 
 ## Docs
 
@@ -609,12 +1000,31 @@ the section is split into its own page.
 
 - **Trust classes are `local` / `trusted` / `cloud`.** Three, because two cannot
   express an off-box endpoint the operator has decided is safe.
-- **Tiers are `basic` / `standard` / `capable` / `frontier`.** Four rungs.
-- **Local is the standing policy.** `prefer_local` everywhere unless a recipe
-  explicitly says otherwise via `rcp_selection_policy`. Note this is a visible
-  behaviour change on any site with a local box: triage that runs on Anthropic
-  today moves to the local host the day this ships, provided the local host
-  clears the recipe's floor.
+- **Tiers are `basic` / `standard` / `capable` / `frontier`.** Four rungs, with
+  `capable` = single-item adversarial judgement (pipeline mode) and `frontier` =
+  sustained multi-step tool use (agent mode).
+- **Err toward allowing less capable models.** A model on a boundary gets the
+  higher rung; a recipe's arguable floor gets the lower one. A floor stops work
+  reaching a model that cannot do it — it does not reserve work for the biggest
+  model available. The 9B-vs-35B measurement is the evidence: a size class of
+  difference bought nothing on the judgement task.
+- **Local models can be `frontier`.** It is a hardware question, not a
+  categorical one — a 128GB-class box running a 70B dense or a 120B MoE fills
+  the rung. Today's Studio bindings top out at a 35B MoE, so the cell is empty
+  on this fleet and the refusal says so.
+- **Local gradings come from a shipped reference file**, not from the operator.
+  `ai_model_reference.json`, named entries over a size-parsed ladder, each
+  carrying `measured` or `research` provenance. The file owns **tier only**;
+  a local model's mechanical facts (thinking, tools, context, attachments)
+  come from the endpoint's declared probe, with reference-entry overrides and
+  stated defaults for non-probing hosts (§3b).
+- **Local is the standing policy.** `prefer_local` everywhere; the site
+  setting is the only policy knob, and a single recipe's lever is the pin
+  (Decision 8). Note this is a visible
+  behaviour change on any site with a local box: a recipe that reaches a cloud
+  vendor today (or fails trying — the dev install's 24 default-residue pins
+  currently throw at run start because no Anthropic key is set) moves to the
+  local host the day this ships, provided the local host clears its floor.
 - **The catalog is plugin-local** — `plugins/joinery_ai/ai_endpoints.json`.
 - **The visibility trade is made knowingly.** Which model runs a recipe stops
   being a name an operator typed and becomes a consequence of a grading in a
@@ -622,11 +1032,191 @@ the section is split into its own page.
   because the resolution is stated back on the edit page and recorded on every
   run (§8). A mis-graded catalog is the failure mode to watch for, and the run
   record is how it gets caught.
-- **A declaration cannot ship a selection policy.** `recipes.json` carries
-  `min_tier`, `trust_floor`, `thinking_required` and `min_context` only. A
+- **Domain consent is three-valued, built in this pass.** `local` / `trusted` /
+  `cloud`, same vocabulary as endpoint trust, stored per domain, strictest
+  sealed address wins, seeded from the old boolean. §9a.
+- **Failover never spends money.** A resolver may only fall back to a candidate
+  costing no more than its first choice, so a sleeping local host never becomes
+  a cloud bill. It fails instead, and an hourly recipe simply runs next hour.
+  The fallback set is the resolution's own candidate list (§5), walked only on
+  before-first-token failures.
+- **Sampling defaults are per model, in the catalog.** One global temperature of
+  0.3 for every model is a Claude-shaped number handed to qwen. Controls resolve
+  recipe row → catalog model default → plugin setting → floor.
+- **No local slots.** The operator's existing comma-separated
+  `joinery_ai_local_model` list is graded from the reference file by tag; there
+  is nothing to bind.
+- **Chat picks its own model.** No job, no floor, no requirement columns on
+  `aic_conversations` — the user chooses, or `joinery_ai_default_model` (kept,
+  chat-only, site-wide-pin semantics) applies. Fortress's `local` trust floor
+  is the only constraint chat carries, and it lives on the chat level, not in
+  a column.
+- **The operative context window is the minimum** of the catalog's nominal value
+  and the host's live one, with a large gap surfaced as a warning. Pipeline jobs
+  are told that number and size their digests against it.
+- **A declaration cannot ship a selection policy.** An agent-mode declaration
+  carries `min_tier`, `trust_floor`, `thinking_required` and `min_context`
+  only (a pipeline declaration carries none — its job declares them, §10). A
   shipped recipe that must not reach a vendor says so with
   `trust_floor: local`, which is a statement about the work; a policy is a
   statement about the operator's preference and is not the publisher's to make.
+
+## Decisions taken during design
+
+Every item below was raised as an open question and resolved. Kept rather than
+deleted because each records why the design is shaped the way it is.
+
+**1. Local slots: CUT.** An earlier draft had the local endpoint binding
+`small`/`mid`/`large` setting slots. That mechanism existed only because grading
+was assumed to be manual per install. It is not: `ai_model_reference.json` grades
+a local model from its tag, so the existing comma-separated
+`joinery_ai_local_model` list is already a graded catalog with nothing to bind.
+Slots and their three settings are gone; the Studio's four models grade
+themselves. Applied throughout this spec.
+
+**2. Failover never spends money. SETTLED.**
+
+A timeout must never be the reason a bill appears. The rule is **failover may
+never increase cost**: never free to paid, and never cheap to expensive. Local
+inference is free, so a recipe resolved onto the local box that finds it asleep
+does **not** quietly move to Fireworks or Anthropic — it fails, and being an
+hourly recipe, it tries again next hour.
+
+Concretely, the resolver may only walk to a candidate whose cost is less than or
+equal to the first choice's. A free first choice can therefore only fail over to
+another free candidate.
+
+The mechanism is the candidate list inside the resolution (§5): the approved,
+cost-truncated set is fixed at resolve time, dispatch walks it only on
+before-first-token failures, and a mid-stream death is a failed run rather than
+a retry. On this fleet that buys something real: the Studio's recurring memory
+pressure can fail the 35B's load while the 9B still serves, and the hour's
+`capable` work degrades to a measured sibling instead of failing — free, local,
+and inside the approved set.
+
+Note the trust floor needs no separate failover rule: it is a hard filter on the
+candidate set, so a `local`-floored recipe never has an off-box candidate to
+fall to in the first place. Cost is the axis that was actually unguarded.
+
+**3. `AgentLoop` branches on provider identity in two places — and they are not
+the same problem.**
+
+*Branch A, line 147 — the per-call output cap:*
+
+```php
+'max_tokens' => $provider->id() === 'local' ? self::LOCAL_PER_CALL_MAX_TOKENS : self::PER_CALL_MAX_TOKENS,
+```
+
+Both constants are **16000**. The branch computes the same number either way —
+it is dead today, kept only so the two could diverge. And the comment explains
+why the value is what it is: *"Within every offered model's output limit (Claude
+Haiku/Sonnet 64K, Opus 128K)"*. That is a lowest-common-denominator guess made
+**because the code cannot see which model it is talking to**. The catalog can.
+Recommend a per-model `max_output_tokens`, and delete both constants and the
+branch.
+
+*Branch B, line 313 — the live context probe:*
+
+```php
+if ($provider->id() !== 'local' || !method_exists($provider, 'hostContextWindow')) return null;
+```
+
+This one must NOT simply move into the catalog, because it asks a different
+question. The catalog knows a model's **nominal** window; this probes Ollama for
+what the host is **actually serving right now**, which is a different number —
+the local memory guard spec records a real incident where Ollama defaulted to a
+4,096-token window and broke turns on a model rated far higher.
+
+So both values are wanted, and the operative one is the **minimum** of them —
+SETTLED. A large gap between them is surfaced as a warning: *"this 256k model is
+being served with a 24k window."* What goes is the `method_exists()` duck-typing
+— "can this endpoint report its live context?" becomes the endpoint's declared
+`probe` capability, the same declaration that serves the mechanical fact set at
+resolve time (§3b), rather than a guess about a method name.
+
+**3a. Per-model default controls in the catalog. SETTLED — add.**
+
+There is one global `joinery_ai_default_temperature` (0.3) applied to every
+model on the platform. That is a Claude-shaped number being handed to qwen,
+which wants roughly 0.6–0.7; the platform is quietly mis-tuning its own local
+models. Sampling defaults are a property of the model, so they belong beside it:
+
+```jsonc
+{ "id": "qwen3.6:35b-a3b-q4_K_M", "tier": "capable",
+  "defaults": { "temperature": 0.7, "top_p": 0.95, "max_output_tokens": 16000, "thinking": "low" } }
+```
+
+Resolution for any control becomes: **recipe/chat row → catalog model default →
+plugin setting → hard floor.** One more rung on a fallback chain that already
+exists, and it makes "the right settings for this model" ship with the model
+instead of being one number for all of them.
+
+**4. Jobs are told how much room they got. SETTLED.**
+
+`PipelineJobInterface` says the job owns the size cap so the digest "plus prompt
+fit the smallest intended model's context", and `MarkAdvertisementsJob` hardcodes
+`DIGEST_MAX = 1500` — a number chosen blind, then handed to a model that may
+have a 200k window.
+
+Since the resolver picks the model *before* the run, the job can simply be told.
+`nextItem()` gains the resolution:
+
+```php
+public function nextItem(array $config, Recipe $recipe, AiModelResolution $model): ?array;
+```
+
+and a job sizes its digest against `$model->usableContext()` — the minimum of the
+catalog's nominal window and the host's live one (item 3, Branch B) — instead of
+a constant. A job that does not care ignores the argument and keeps its cap.
+
+This is the mirror of `min_context` on the requirement: that is the job
+*demanding* room before a model is chosen, this is the job *being told* how much
+it got after. Both directions are wanted, and neither substitutes for the other.
+
+**5. Drop `joinery_ai_endpoint_overrides`. SETTLED — cut.**
+
+It was proposed as an escape hatch for three things, and every one is already
+covered without it:
+
+| Wanted | Already possible |
+|---|---|
+| disable an endpoint | clear its API key — the endpoint drops out of resolution by definition |
+| re-grade a model locally | pin it on the recipe, or add a named entry to the reference file and publish |
+| point at a different host | `joinery_ai_local_base_url` / `joinery_ai_fireworks_base_url` are already settings |
+
+So it buys nothing, and it costs an unvalidatable free-form JSON blob in a
+settings textarea — a shape this platform has been bitten by before. Cut until a
+real install demonstrates a need.
+
+**6. Chat inherits nothing, by design. SETTLED.**
+
+A chat has no job and takes no capability floor — `aic_conversations` gains
+none of the requirement columns. The user picks a model from the dropdown, or
+the chat starts on `joinery_ai_default_model`, which survives as a chat-only
+setting behaving like a site-wide pin (§7): unavailable → normal resolution,
+recorded. The only constraint chat carries is the Fortress trust floor
+(`local`), which is a property of the chat level — enforced by the resolver
+from the level, stored nowhere per conversation. §4a's "nobody fills these in"
+story is about recipes; chat is a deliberate pick-your-own surface and stays
+that way.
+
+**7. Thinking requirement collapsed to a boolean. SETTLED.**
+
+An earlier draft had `off`/`allowed`/`required` — 3 values against 4 levels,
+12 combinations with no interaction rules. `off` merely duplicated
+`thinking_level: off`, and `allowed` still permitted the headline defect (a
+high level silently ignored by a non-reasoning model). Now: the boolean
+filters candidates, the level tunes the survivor, and the one residual
+mismatch is stated on the edit page instead of being legislated.
+
+**8. Per-recipe selection policy: CUT.**
+
+`rcp_selection_policy` was a third override axis beside the pin and the
+requirement. The site policy sets posture; a recipe that must have a specific
+model pins it. No named use case survived: "this one recipe should be
+`cheapest` but I refuse to pin it" describes nobody. Same call as Decision 5 —
+cut until a real install demonstrates a need; it can return as a pure column
+addition.
 
 ## Deferred
 
