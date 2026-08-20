@@ -1,173 +1,142 @@
-# Quick Start: Deploy Your First Joinery Site
+# Quick Start: Your First Joinery Site
 
-This guide walks you through renting a server, pointing your domain at it, and installing Joinery — from scratch, with no prior experience required. The whole process takes about 15–20 minutes of active work. The one thing that can't be hurried is DNS propagation (more on that in Step 2), which may add anywhere from a few minutes to a few hours of waiting.
+This guide gets you from nothing to a running Joinery site — no technical experience needed, and nothing to type into a command line. You'll do everything by filling in forms in a web browser. Expect about 15 minutes of active work, plus a short wait while your site installs itself.
 
-If you already have a server and know your way around the command line, see the [full installation reference](installation.md) instead.
+If you're comfortable at a command line, or you already have a server you want to install on, use the [full installation reference](installation.md) instead — it covers manual installs, multi-site setups, and every option in detail.
+
+---
+
+## How This Works
+
+Joinery is **self-hosted**: your site runs on a computer *you* control, not on ours. Your files, your email, your data — all of it lives on your own machine. That's the whole point.
+
+You almost certainly don't want to run a physical computer at home for this, so instead you'll rent a small computer in a data center — called a **VPS** (virtual private server) — for about the price of a coffee each month. You never see the hardware; you just click a few buttons and it exists.
+
+Joinery has a one-click installer on **Linode** (part of Akamai Cloud), a well-established server rental company. You fill in a short form, click Create, and a few minutes later your site is running with a login you chose. That's the path this guide follows.
 
 ---
 
 ## Before You Start
 
-You'll need three things:
+You'll need two things:
 
-- **A domain name** — your web address, like `yourdomain.com`. If you don't have one yet, you can buy one from [Namecheap](https://www.namecheap.com), [Cloudflare Registrar](https://www.cloudflare.com/products/registrar/), or Google Domains. You can skip the domain for a quick test, but you'll need one for SSL and real use.
-- **A credit card** for the server rental. Expect roughly $5–$12/month depending on the plan you choose.
-- **A computer** with internet access. You'll open a terminal window in Step 3 — instructions are provided for Mac, Windows, and Linux.
+### 1. A domain name
 
----
+A domain is your address on the internet — `yourname.com`. Your site needs one for three reasons:
 
-## Step 1 — Rent a Server
+- It's how people (and you) find your site. Without one, your site only answers at a raw number like `123.45.67.89`.
+- The padlock in the browser — **HTTPS**, the thing that keeps logins and passwords encrypted — can only be issued to a domain, never to a bare number.
+- Every link your site creates, and every email address it will eventually handle, is built from your domain.
 
-Joinery runs on a **VPS** (Virtual Private Server) — a Linux computer you rent by the hour that lives in a data center. You don't need to manage hardware; you just connect to it over the internet.
+**Why can't Joinery register one for you?** Domains are rented year-by-year from companies called **registrars**, and the registration is in the owner's name. Your domain should be registered to *you* — it's the deed to your address. If you own it, your site can never be taken from you, and you can move it anywhere, anytime. So this is the one piece you have to buy yourself.
 
-We recommend **Linode** (now part of Akamai Cloud). It's reliable, straightforward to use, and competitively priced.
+It takes about five minutes and costs roughly $10–15 a year. [Namecheap](https://www.namecheap.com) and [Cloudflare Registrar](https://www.cloudflare.com/products/registrar/) are both good choices. Pick any name you like that's available.
 
-[Sign up for Linode using our referral link](https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488) and you'll receive $100 of credit to use over your first 60 days.
+### 2. A credit card
 
-Once you have a Linode account, follow these steps to create your server:
-
-1. Log in and click **Create → Linode**.
-2. **Choose an image:** Select **Ubuntu 24.04 LTS** or **Ubuntu 26.04 LTS**. This is the operating system your server will run — the installer stops on any other version.
-3. **Choose a region:** Pick a data center geographically close to your expected users. Any region works.
-4. **Choose a plan:** The **Nanode 1 GB** ($5/month) is sufficient for a small site. If you expect real users from day one, the **Linode 2 GB** ($12/month) gives more breathing room. You can resize later if needed.
-5. **Set a root password:** This is the master password for your server. Use a strong, random password and save it in a password manager. Avoid these characters, which can cause problems during installation: `'  "  \  $  `  !`
-6. Click **Create Linode** and wait 60–90 seconds for the server to boot.
-7. **Note the IP address** displayed on the Linode dashboard — a number like `123.45.67.89`. You'll need it in the next two steps.
+For the server rental. Expect **$5–12/month** depending on the size you pick. Billing is hourly, so experimenting costs pennies — if you make a mistake, you can throw the server away and start over for less than a dime.
 
 ---
 
-## Step 2 — Point Your Domain at the Server
+## Step 1 — Create a Linode Account
 
-Do this step now, before installing, because DNS changes can take anywhere from a few minutes to a few hours to propagate. Starting early means the installer will likely be able to set up SSL automatically when you get there.
+[Sign up for Linode using our referral link](https://www.linode.com/lp/refer/?r=f89d0c9308eeef26368cc67356eb8fa81365d488) and you'll receive **$100 of credit** to use over your first 60 days — more than enough to run your site free for the first two months.
 
-**DNS** (Domain Name System) is what translates `yourdomain.com` into an IP address so browsers know which server to connect to. You configure it by adding an **A record** — a simple entry that says "requests for this domain should go to this IP."
-
-**How to add an A record:**
-
-1. Log in to wherever you bought your domain (Namecheap, Cloudflare, etc.).
-2. Find the DNS settings — usually labelled DNS Management, DNS Zone, or Nameservers.
-3. Add a new **A record** with these values:
-   - **Name / Host:** `@` — this means the root domain (`yourdomain.com`). Optionally add a second A record with name `www` pointing to the same IP, so both `yourdomain.com` and `www.yourdomain.com` work.
-   - **Value / Points to:** your Linode IP address (from Step 1)
-   - **TTL:** 300 seconds (or the minimum your registrar allows)
-4. Save the record.
-
-**If you're using Cloudflare:** the installer detects Cloudflare automatically. For your first deployment, set the proxy to **DNS only** (grey cloud icon) to keep things straightforward. See the [Cloudflare section of the installation docs](installation.md#cloudflare-proxy-support) if you want to enable it later.
+You'll need to verify your email and add a payment card. Once you can see the Linode dashboard, you're ready.
 
 ---
 
-## Step 3 — Connect to Your Server
+## Step 2 — Create Your Server
 
-**SSH** (Secure Shell) is an encrypted connection to your server's command line — like a remote keyboard for your Linux machine. You'll use it to run the installer.
+Open the Joinery one-click installer:
 
-### Mac or Linux
+**[https://cloud.linode.com/stackscripts/2185451](https://cloud.linode.com/stackscripts/2185451)**
 
-1. Open **Terminal**. On Mac: press `Cmd+Space`, type `Terminal`, press Enter. On Linux: press `Ctrl+Alt+T`.
-2. Type the following command, replacing `123.45.67.89` with your actual IP address:
-   ```
-   ssh root@123.45.67.89
-   ```
-3. The first time you connect, you'll see a message asking you to confirm the server's identity. Type `yes` and press Enter.
-4. Enter your root password when prompted (the one you set in Step 1). Characters won't appear as you type — that's normal for password fields in terminals.
+Click **Deploy New Linode**. A form opens. Here's every field and what it means:
 
-### Windows
+### The Joinery fields (top of the form)
 
-1. Open **Windows Terminal** (search for it in the Start menu; it's pre-installed on Windows 11 and available free from the Microsoft Store on Windows 10).
-2. Follow the same steps as Mac/Linux above.
+- **Admin email address** — the email you'll use to log in to your site. Use a real address you check: it's also how you recover your account if you ever forget your password.
+- **Admin password** — the password you'll use to log in to your site. Choose a strong one and save it in a password manager. (You'll be asked to set a fresh one the first time you log in — a routine precaution.)
+- **Site domain** — the domain you bought, like `yourname.com`. Type it exactly, with no `www` and no `https://`. Don't make one up — it must be a domain you actually own, because in the next step you'll connect it to this server.
+- **SSH public key** *(optional)* — a way for technical users to open a command line on the server. If you don't know what this is, **leave it blank**. Everything in this guide works without it.
+- **Linode API token** *(optional)* — only useful if your domain's DNS is managed *at Linode*. If it is, provide a token and the installer connects your domain for you, letting you skip Step 3. If you bought your domain at Namecheap, Cloudflare, or anywhere else, **leave it blank**.
 
-When connected, you'll see a prompt that looks something like `root@localhost:~#`. You're in.
+### The server fields (rest of the form)
 
----
+- **Image** — the server's operating system. Only the version Joinery supports is offered, so just leave it as is.
+- **Region** — where in the world your server physically lives. Pick a city near you or your visitors. Any choice works.
+- **Linode Plan** — the size of the server. Under **Shared CPU**, the **Nanode 1 GB** ($5/month) is plenty for a personal site. If you expect real traffic from day one, the **Linode 2 GB** ($12/month) gives breathing room. You can move up later without reinstalling.
+- **Linode Label** — a nickname for the server in your Linode dashboard. Anything works; `joinery` is fine.
+- **Root Password** — this one is **not** your website login. It's the master password for the rented machine itself, and Linode requires you to set one. You'll probably never type it again, but save it in your password manager anyway. Stick to letters, numbers, and simple punctuation — avoid quotes, backslashes, dollar signs, backticks, and exclamation marks, which can confuse the setup process.
 
-## Step 4 — Install Joinery
+Click **Create Linode**.
 
-Copy the command below, replace `yourdomain.com` with your actual domain, then paste it into your SSH session and press Enter. The installer will take care of everything — PHP, Apache, PostgreSQL, SSL, and the Joinery application itself.
-
-```bash
-mkdir -p /tmp/joinery && \
-  curl -sL https://getjoinery.com/utils/latest_release | tar xz -C /tmp/joinery && \
-  cd /tmp/joinery/maintenance_scripts/install_tools && \
-  sudo ./install.sh server && \
-  sudo ./install.sh site mysite yourdomain.com --admin-email=you@example.com
-```
-
-Put your own address in `--admin-email`. That becomes the login for the admin account, and it's how you get back in if you ever lose the password — leave it off and the account is created as `admin@example.com`, which you'd have to change by hand.
-
-If you don't have a domain yet, substitute your server's IP address for `yourdomain.com`. The site will work, but you won't get SSL until you add a domain later.
-
-**Running it from a script** (cloud-init, CI, a provisioning tool — anywhere nobody is at a keyboard): put `-y` before the subcommand and supply the database password in the environment, since there is no terminal to prompt on:
-
-```bash
-sudo POSTGRES_PASSWORD='choose-one' ./install.sh -y server && \
-  sudo ./install.sh -y site mysite yourdomain.com --admin-email=you@example.com
-```
-
-With `-y`, every prompt takes its default; the destructive ones (overwriting an existing site, deleting data volumes) always refuse unless their own flags — `--wipe-data`, `--allow-downgrade` — say otherwise.
-
-**`--no-ssl`** on the `site` command skips certificate setup entirely. What you get is a site that answers on plain HTTP for its domain — nothing redirects to HTTPS until a certificate exists. Add one later with `setup_ssl.sh` (below).
-
-The install takes a few minutes. You'll see output scrolling past — that's normal. When it finishes, your site is live, with Drive, Calendar, mail and the AI assistant already installed.
-
-**If DNS hasn't propagated yet:** the SSL step is skipped automatically and the install continues. Your site is reachable over HTTP in the meantime, and a background timer watches for your domain — once it points at this server, a certificate is issued within a few minutes with nothing for you to do.
-
-To watch that happen:
-
-```bash
-sudo journalctl -fu joinery-ssl-retry@yourdomain.com
-```
-
-To issue one immediately instead of waiting for the next check:
-
-```bash
-sudo /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/setup_ssl.sh yourdomain.com
-```
-
-**If you see an error:** the most common cause is a typo in the command. Check that `yourdomain.com` was replaced correctly. For other issues, see the [Troubleshooting section](installation.md#troubleshooting) in the full installation docs.
+Your server now boots up and installs Joinery entirely on its own — the web server, the database, the application, everything. This takes about **5–10 minutes**. While it works, do Step 3.
 
 ---
 
-## Step 5 — Log In
+## Step 3 — Connect Your Domain to Your Server
 
-Open a browser and go to:
+*(Skip this step if you gave a Linode API token in Step 2 and your DNS is hosted at Linode — it's already done.)*
 
-```
-https://yourdomain.com/admin
-```
+Right now your domain and your server don't know about each other. Connecting them is one small edit called an **A record** — an entry in your domain's settings that says "send visitors for this name to this server."
 
-(Use `http://` if SSL was skipped temporarily.)
+The reason this comes *after* creating the server: the server's address doesn't exist until the server does.
 
-Log in as:
+1. **Find your server's IP address.** On the Linode dashboard, click your new server. Its **IP address** — four numbers separated by dots, like `123.45.67.89` — is shown near the top. Copy it.
+2. **Log in where you bought your domain** (Namecheap, Cloudflare, etc.) and find the DNS settings — usually labelled **DNS**, **DNS Management**, or **DNS Zone**.
+3. **Add an A record:**
+   - **Name / Host:** `@` (this symbol means "the domain itself")
+   - **Value / Points to:** your server's IP address
+   - **TTL:** the smallest value offered (often 300 or "5 min")
+4. Optionally add a second A record with name `www` pointing to the same IP, so `www.yourname.com` works too.
+5. Save.
 
-- **Email:** the address you passed to `--admin-email` (or `admin@example.com` if you left it off)
-- **Password:** the one the installer printed when it finished
+**Using Cloudflare?** For your first setup, set the record to **DNS only** (the grey cloud icon, not the orange one). You can turn the orange cloud on later once everything works.
 
-Every site gets its own admin password — there is no shared default. If you've lost the line the installer printed, it's also saved on the server at `/var/www/html/yoursite/config/admin_credentials.txt` (readable by root only):
-
-```bash
-sudo cat /var/www/html/yoursite/config/admin_credentials.txt
-```
-
-You'll be asked to set a new password immediately. Do that first — use something strong and save it somewhere safe, then delete the credentials file.
-
-**If you've lost the password entirely,** reset it from the server:
-
-```bash
-sudo php /var/www/html/yoursite/maintenance_scripts/sysadmin_tools/reset_admin_password.php
-```
-
-Once you're in, two housekeeping items before anything else:
-
-1. **Set up email.** Go to `/admin/admin_settings_email` and name a provider. Do this first: password reset is the only way back into your account once the installer's password is gone, and it needs somewhere to send from. A new site has no provider configured, and most hosts — Linode included — block outbound port 25, so running a mail server on this machine will not deliver.
-2. **Set your site name.** Go to `/admin/admin_settings` and update the Site Name field.
-
-If you installed without `--admin-email`, also change the admin address at `/admin/admin_user?usr_user_id=1`.
+DNS changes take time to spread across the internet — usually minutes, occasionally a few hours. **You don't have to watch it.** Your server checks every few minutes on its own, and the moment your domain points at it, it fetches its HTTPS certificate automatically. There is nothing for you to do.
 
 ---
 
-## What's Next
+## Step 4 — Log In
 
-- **Install a theme** — `/admin/admin_themes`
-- **Install more plugins** — `/admin/admin_plugins`. A fresh install comes with mail and the AI assistant; events, commerce and the password vault are there to add.
-- **Set up your mailbox** — the mail plugin needs MX and DKIM records you control before it can receive
-- **Give the AI assistant a provider** — `/admin/admin_settings` under AI
-- **Full installation reference** — for multi-site setups, site cloning, manual SSL, and advanced configuration, see [Installation](installation.md)
+Give the install 5–10 minutes from when you clicked Create, then open a browser and go to:
+
+```
+https://yourname.com/admin
+```
+
+If the padlock isn't ready yet (DNS still spreading), `http://yourname.com/admin` works in the meantime — the secure version switches on by itself shortly after your domain connects.
+
+Log in with the **admin email and admin password you chose on the form** in Step 2.
+
+You'll be asked to set a new password right away. Do it, and save the new one in your password manager.
+
+**Then, before anything else, do these two things:**
+
+1. **Set up email sending** — go to **Settings → Email** (`/admin/admin_settings_email`) and connect an email provider. This matters more than it sounds: if you ever forget your password, a reset email is the way back in — and a brand-new site has no way to send one until you connect a provider. (Server rental companies, Linode included, block servers from sending mail directly — an anti-spam measure across the whole industry — so a sending service is required, not optional.)
+2. **Name your site** — go to **Settings** (`/admin/admin_settings`) and set the Site Name.
+
+---
+
+## What You Have Now
+
+Your site comes ready with:
+
+- **Drive** — file storage, like your own private Dropbox
+- **Calendar** — events, reminders, and imports from other calendars
+- **Mail** — a full mailbox on your own domain. It's installed but needs a few settings from you before it can send and receive; its **Setup tab** walks you through them.
+- **AI assistant** — installed, and needs one thing from you: an API key from an AI provider (such as Anthropic or OpenAI). Add it under **Settings → AI**. You create that key in an account *you* own, so your AI usage is billed to you directly and never passes through anyone else.
+
+More is available under **Admin → Plugins** — events, an online store, and others — each a click to add.
+
+---
+
+## If Something Goes Wrong
+
+- **The site never appears** after 15 minutes: the most common cause is a typo in the domain field. The cheapest fix is also the cleanest one — on the Linode dashboard, **delete the server** (Settings → Delete) and repeat Step 2 with the field corrected. It costs a few cents and takes ten minutes.
+- **The padlock / HTTPS isn't working** but the site loads over `http://`: DNS just hasn't finished spreading. Check that your A record from Step 3 has the right IP address, then wait — the certificate is fetched automatically once the domain connects.
+- **You can't log in**: make sure you're using the *admin email and password* from the form (not the root password), and that you're at `/admin`.
+
+For anything deeper, the [full installation reference](installation.md#troubleshooting) has a troubleshooting section.
