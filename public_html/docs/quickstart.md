@@ -30,11 +30,11 @@ A domain is your address on the internet — `yourname.com`. Your site needs one
 
 **Why can't Joinery register one for you?** Domains are rented year-by-year from companies called **registrars**, and the registration is in the owner's name. Your domain should be registered to *you* — it's the deed to your address. If you own it, your site can never be taken from you, and you can move it anywhere, anytime. So this is the one piece you have to buy yourself.
 
-It takes about five minutes and costs roughly $10–15 a year. [Namecheap](https://www.namecheap.com) and [Cloudflare Registrar](https://www.cloudflare.com/products/registrar/) are both good choices. Pick any name you like that's available.
+It takes about five minutes and costs roughly $10–15 a year. [Namecheap](https://www.namecheap.com) is the simplest place to do it. Pick any name you like that's available.
 
 ### 2. A credit card
 
-For the server rental. Expect **$5–12/month** depending on the size you pick. Billing is hourly, so experimenting costs pennies — if you make a mistake, you can throw the server away and start over for less than a dime.
+For the server rental. Expect **$5/month**. Billing is hourly, so experimenting costs pennies — if you make a mistake, you can throw the server away and start over for less than a dime.
 
 ---
 
@@ -66,7 +66,7 @@ Click **Deploy New Linode**. A form opens. Here's every field and what it means:
 
 - **Image** — the server's operating system. Only the version Joinery supports is offered, so just leave it as is.
 - **Region** — where in the world your server physically lives. Pick a city near you or your visitors. Any choice works.
-- **Linode Plan** — the size of the server. Under **Shared CPU**, the **Nanode 1 GB** ($5/month) is plenty for a personal site. If you expect real traffic from day one, the **Linode 2 GB** ($12/month) gives breathing room. You can move up later without reinstalling.
+- **Linode Plan** — the size of the server. Click the **Shared CPU** tab and choose the **Nanode 1 GB** ($5/month). It's plenty to start with, and you can upgrade to a bigger size later without reinstalling.
 - **Linode Label** — a nickname for the server in your Linode dashboard. Anything works; `joinery` is fine.
 - **Root Password** — this one is **not** your website login. It's the master password for the rented machine itself, and Linode requires you to set one. You'll probably never type it again, but save it in your password manager anyway. Stick to letters, numbers, and simple punctuation — avoid quotes, backslashes, dollar signs, backticks, and exclamation marks, which can confuse the setup process.
 
@@ -85,7 +85,7 @@ Right now your domain and your server don't know about each other. Connecting th
 The reason this comes *after* creating the server: the server's address doesn't exist until the server does.
 
 1. **Find your server's IP address.** On the Linode dashboard, click your new server. Its **IP address** — four numbers separated by dots, like `123.45.67.89` — is shown near the top. Copy it.
-2. **Log in where you bought your domain** (Namecheap, Cloudflare, etc.) and find the DNS settings — usually labelled **DNS**, **DNS Management**, or **DNS Zone**.
+2. **Log in where you bought your domain** (e.g. Namecheap) and find the DNS settings — usually labelled **DNS**, **DNS Management**, or **DNS Zone**.
 3. **Add an A record:**
    - **Name / Host:** `@` (this symbol means "the domain itself")
    - **Value / Points to:** your server's IP address
