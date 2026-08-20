@@ -21,7 +21,7 @@ class Validator {
 
 	// Validate text only
 	function validateTextOnly($theinput, $blankname, $description = ''){
-		$result = ereg ("^[A-Za-z0-9\ ]+$", $theinput );
+		$result = preg_match('/^[A-Za-z0-9 ]+$/', (string)$theinput);
 		if ($result){
 			return true;
 		}else{
@@ -36,7 +36,7 @@ class Validator {
 
 	// Validate text only, no spaces allowed
 	function validateTextOnlyNoSpaces($theinput, $blankname, $description = ''){
-		$result = ereg ("^[A-Za-z0-9]+$", $theinput );
+		$result = preg_match('/^[A-Za-z0-9]+$/', (string)$theinput);
 		if ($result){
 			return true;
 		}else{
@@ -78,7 +78,9 @@ class Validator {
 
 	// Validate email address
 	function validateEmail($themail, $blankname, $description = ''){
-		$result = ereg ("^[^@ ]+@[^@ ]+\.[^@ \.]+$", $themail );
+		// The same check EmailSender runs at send time, so a value that saves
+		// here cannot then be refused as a recipient or From address.
+		$result = filter_var((string)$themail, FILTER_VALIDATE_EMAIL) !== false;
 		if ($result){
 			return true;
 		}else{

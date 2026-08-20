@@ -1305,7 +1305,10 @@
       "default": "",
       "group": "email_identity",
       "label": "Default From address",
-      "type": "text"
+      "type": "text",
+      "validation": {
+        "email": true
+      }
     },
     {
       "name": "defaultemailname",
@@ -1320,7 +1323,10 @@
       "group": "email_identity",
       "label": "Default Reply-To",
       "type": "text",
-      "helptext": "Applied to system mail that sets no Reply-To of its own."
+      "helptext": "Applied to system mail that sets no Reply-To of its own.",
+      "validation": {
+        "email": true
+      }
     },
     {
       "name": "hcaptcha_private",
@@ -1888,7 +1894,10 @@
       "default": "",
       "group": "email_identity",
       "label": "Webmaster email",
-      "type": "text"
+      "type": "text",
+      "validation": {
+        "email": true
+      }
     },
     {
       "name": "active_theme_plugin",

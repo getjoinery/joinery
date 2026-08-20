@@ -114,6 +114,13 @@
 #                       container is gone.
 #   CLONE_FROM        - URL to clone database and uploads from (optional)
 #   CLONE_KEY         - Authentication key for clone source (optional)
+#   JOINERY_ADMIN_EMAIL    - Address for the site's admin account (optional;
+#                            the seeded admin@example.com stays without it)
+#   JOINERY_ADMIN_PASSWORD - Owner-chosen admin password (optional; one is
+#                            generated into config/admin_credentials.txt
+#                            when absent)
+#   UPGRADE_SERVER         - Where the site records its upgrades as coming
+#                            from (optional)
 
 # BASE_IMAGE_VERSION must be declared before FROM so it can be used in FROM.
 # Default matches the version install.sh always passes via --build-arg; the

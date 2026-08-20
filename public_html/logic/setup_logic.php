@@ -6,7 +6,7 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.2
+ * @version 1.3
  */
 
 function setup_logic(array $input): LogicResult {
@@ -280,12 +280,22 @@ function setup_logic(array $input): LogicResult {
 			$error = 'Email dry-run mode is on (Settings → Email), so nothing can really send.';
 		} else {
 			$to = (string)$viewer->get('usr_email');
-			$ok = EmailSender::quickSend($to, 'Test: your site can send email',
-				"This is the setup wizard's test message. If you are reading it, sending works — go back and press \"It arrived\".");
+			// A failed send is this step's expected weather, not an exceptional
+			// condition — a throw here must land as the step's error, never
+			// escape the view (an escaped exception renders as the 404 page).
+			try {
+				$ok = EmailSender::quickSend($to, 'Test: your site can send email',
+					"This is the setup wizard's test message. If you are reading it, sending works — go back and press \"It arrived\".");
+			} catch (Throwable $e) {
+				$ok = false;
+				$error = 'The test send failed: ' . $e->getMessage();
+			}
 			if ($ok) {
 				return LogicResult::redirect('/setup?step=mail_send&sent=1');
 			}
-			$error = 'The test send failed — check the provider credentials and try again.';
+			if ($error === '') {
+				$error = 'The test send failed — check the provider credentials and try again.';
+			}
 		}
 	}
 
