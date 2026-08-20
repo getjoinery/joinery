@@ -30,6 +30,14 @@
 //!   folder every device can open, so every name is a secret, every byte that
 //!   leaves is ciphertext, and the hash the server answers with is in a
 //!   different domain from the one on disk.
+//! - `scratch_vault_platform_sweep` — a vault where the computers disagree
+//!   about what a name is. Naming inside a vault is decided entirely on the
+//!   client, because the server is holding an opaque id and cannot be a second
+//!   opinion about a name it has never seen.
+//! - `scratch_vault_one_key_sweep` — a vault only ONE device can open, with the
+//!   others working around it. `VAULT=2` on the diagnostics reproduces it;
+//!   `VAULT=1` is the everyone-has-the-key shape.
+//! - `scratch_vault_fresh_sweep` — vault seeds nothing has run.
 //!
 //! And the tools for the seed a sweep hands back. All take `SEED`, `STEPS`,
 //! `DEVS`, `CHAOS`, `VAULT`, and — for a platform failure — `PLATFORMS` and
@@ -73,12 +81,42 @@ fn workload(seed: u64, steps: usize, devices: &[&str], chaos: bool) {
 /// DIFFERENT run under the same seed, showed a converged tree, and sent an
 /// afternoon looking for a defect in the wrong place. A tool that disagrees
 /// with the sweep is worse than no tool.
-/// The vault folder a vault sweep runs its whole workload inside.
+/// The vault folder a vault sweep runs its workload in.
 const VAULT_ROOT: &str = "Private";
 
-/// Where a sweep's workload hangs off: the drive root, or inside a vault.
-fn sweep_root(vault: bool) -> &'static str {
-    if vault {
+/// How a sweep's world relates to encryption.
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum Vault {
+    /// No vault at all: the plaintext workload the sweeps have always run.
+    None,
+    /// One vault, every device holding its key, and the WHOLE workload inside
+    /// it -- so every name is a secret and every byte that leaves is ciphertext.
+    Shared,
+    /// One vault, only the first device holding its key. The others work around
+    /// it, and must sync everything outside it perfectly while materializing
+    /// nothing inside it.
+    ///
+    /// This is the asymmetry the soak rig's `no-ciphertext` invariant was
+    /// written for and has never once been able to check, because the rig has
+    /// no encrypted lane. It is also the only shape that exercises what a
+    /// device does with an entry it can see, cannot open, and must not guess
+    /// about -- while the tree around it is being renamed, moved and deleted.
+    OneKeyHolder,
+}
+
+impl Vault {
+    fn any(self) -> bool {
+        self != Vault::None
+    }
+}
+
+/// Where a sweep's workload hangs off.
+///
+/// A shared vault puts everything inside it. A mixed world cannot: the devices
+/// with no key have to be able to work, so the workload runs at the root and
+/// the key holder reaches into the vault on its own.
+fn sweep_root(vault: Vault) -> &'static str {
+    if vault == Vault::Shared {
         VAULT_ROOT
     } else {
         ""
@@ -90,7 +128,7 @@ fn sweep_world(
     devices: &[(&str, Platform)],
     steps: usize,
     chaos: bool,
-    vault: bool,
+    vault: Vault,
 ) -> World {
     let mut world = World::of(seed, devices);
     // One vault, every device holding its key, and the whole workload run
@@ -107,7 +145,7 @@ fn sweep_world(
     // (one laptop can read the vault, another cannot) already has scenarios of
     // its own; what has never been swept is the ordinary case where they all
     // can and the world is hostile.
-    if vault {
+    if vault.any() {
         // An encrypted attempt re-encrypts the whole file and runs the upload
         // again, so the fleet needs more passes to get through the same faults.
         // An explicit SETTLE_PASSES still wins, so a failure here can be told
@@ -117,7 +155,13 @@ fn sweep_world(
         }
         let key = jd_sim::SimVault::new(seed);
         let names: Vec<String> = world.devices.iter().map(|d| d.name.clone()).collect();
-        for name in &names {
+        // Every device, or only the first. The others are linked accounts that
+        // never went through the ceremony -- an ordinary state, not a fault.
+        let holders = match vault {
+            Vault::OneKeyHolder => &names[..1],
+            _ => &names[..],
+        };
+        for name in holders {
             world.give_vault(name, &key);
         }
         world
@@ -153,7 +197,7 @@ fn sweep_world(
 }
 
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
-    workload_core(seed, steps, devices, chaos, false)
+    workload_core(seed, steps, devices, chaos, Vault::None)
 }
 
 fn workload_core(
@@ -161,12 +205,12 @@ fn workload_core(
     steps: usize,
     devices: &[(&str, Platform)],
     chaos: bool,
-    vault: bool,
+    vault: Vault,
 ) {
     let root = sweep_root(vault);
     let world = sweep_world(seed, devices, steps, chaos, vault);
     let committed = Committed::default();
-    drive(&world, seed, steps, chaos, root);
+    drive(&world, seed, steps, chaos, root, vault);
 
     if world.settle().is_none() {
         let mut lines = Vec::new();
@@ -195,10 +239,16 @@ fn workload_core(
     // to survive one.
     assert_no_entry_is_stranded(&world);
     assert_no_live_orphan_on_the_server(&world);
-    if vault {
+    if vault.any() {
         assert_nothing_in_the_vault_is_readable(&world, seed);
-        assert_the_server_was_never_told_a_real_name(&world, root, seed);
         jd_sim::scenario::assert_the_vault_opens(&world);
+        jd_sim::scenario::assert_no_ciphertext_on_a_keyless_disk(&world);
+    }
+    if vault == Vault::Shared {
+        // Only meaningful when everything is inside the vault. In a mixed world
+        // most names are plaintext by design, and checking them against the
+        // server would flag the workload's own ordinary files.
+        assert_the_server_was_never_told_a_real_name(&world, root, seed);
     }
 }
 
@@ -288,7 +338,7 @@ fn trace(world: &World, tag: &str) {
 /// `root` is the folder the whole workload hangs off -- empty for the drive
 /// root, or a vault folder, in which case every path the generator invents is
 /// inside it and every byte that leaves a device has to be encrypted first.
-fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
+fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str, vault: Vault) {
     let mut rng = SimRng::new(seed ^ 0x5EED_1234);
     if chaos {
         for d in &world.devices {
@@ -318,6 +368,17 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
 
     for step in 0..steps {
         let device = &world.devices[rng.below(world.devices.len() as u64) as usize];
+        // In a mixed world the key holder reaches into the vault now and then,
+        // and everyone else works around it. A device with no key never writes
+        // there -- it cannot even see the folder, so a workload that made it
+        // try would be testing the harness's mistake rather than the engine.
+        // Half the key holder's steps, which is what it takes for the vault to
+        // hold enough to be interesting: at a third it produced about one
+        // encrypted file per run, and a workload that barely reaches the thing
+        // it is testing is a green run that proves nothing.
+        let into_the_vault = vault == Vault::OneKeyHolder
+            && device.vault().is_some()
+            && rng.below(2) == 0;
         let join = |d: &str, n: &str| -> String {
             if d.is_empty() {
                 n.to_string()
@@ -329,7 +390,11 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
         match rng.below(20) {
             // Create a file, sometimes deep.
             0..=2 => {
-                let dir = rng.pick(&dirs).cloned().unwrap_or_default();
+                let dir = if into_the_vault {
+                    VAULT_ROOT.to_string()
+                } else {
+                    rng.pick(&dirs).cloned().unwrap_or_default()
+                };
                 let path = join(&dir, &leaf(step));
                 let body = format!("body {step} {}", device.name).into_bytes();
                 device.fs.user_write(&path, &body);
@@ -372,6 +437,13 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
             // Move a file into another folder.
             7 => {
                 if let (Some(p), Some(dir)) = (rng.pick(&files).cloned(), rng.pick(&dirs).cloned()) {
+                    // Never across the edge of the vault. The server refuses an
+                    // in-place crossing and the client cannot yet make one for
+                    // itself (docs/drive_sync.md), so generating one would test
+                    // a feature nobody has written rather than this one.
+                    if !same_side_of_the_vault(&p, &dir) {
+                        continue;
+                    }
                     if device.fs.exists(&p) {
                         let name = p.rsplit('/').next().unwrap_or("x").to_string();
                         let to = join(&dir, &name);
@@ -392,7 +464,11 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
             }
             // Make a folder, sometimes nested inside an existing one.
             9..=10 => {
-                let parent = rng.pick(&dirs).cloned().unwrap_or_default();
+                let parent = if into_the_vault {
+                    VAULT_ROOT.to_string()
+                } else {
+                    rng.pick(&dirs).cloned().unwrap_or_default()
+                };
                 let path = join(&parent, &format!("Sub {step}"));
                 device.fs.user_mkdir(&path);
                 dirs.push(path);
@@ -478,6 +554,9 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
                 if let (Some(d), Some(into)) =
                     (rng.pick(&movable).cloned(), rng.pick(&dirs).cloned())
                 {
+                    if !same_side_of_the_vault(&d, &into) {
+                        continue;
+                    }
                     let name = d.rsplit('/').next().unwrap_or("x").to_string();
                     let to = join(&into, &name);
                     // Not into itself and not into its own descendant, which no
@@ -594,6 +673,18 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str) {
     }
 }
 
+/// Are these two paths on the same side of the vault's edge?
+///
+/// Encryption is a property of where a thing lives, and the server cannot
+/// change it -- it holds no key, so it cannot convert bytes. A move across that
+/// edge is therefore refused, and the crossing is done by re-uploading at the
+/// destination and trashing the source, which the client does not do yet. Until
+/// it does, a workload that generates one is testing the absence of a feature.
+fn same_side_of_the_vault(a: &str, b: &str) -> bool {
+    let inside = |p: &str| p == VAULT_ROOT || p.starts_with(&format!("{VAULT_ROOT}/"));
+    inside(a) == inside(b)
+}
+
 /// A folder the workload may move or delete. The root it all hangs off is not
 /// one: deleting it takes the whole world with it, and for a vault sweep it
 /// would leave the rest of the run with no vault to test.
@@ -627,7 +718,7 @@ fn sweep_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, false)
+    sweep_core(label, seeds, steps, devices, chaos, Vault::None)
 }
 
 /// The same sweep with the whole workload inside a vault every device can open.
@@ -640,7 +731,32 @@ fn sweep_vault(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, true)
+    sweep_core(label, seeds, steps, &named, chaos, Vault::Shared)
+}
+
+/// A vault only the first device can open, with the rest working around it.
+#[must_use]
+fn sweep_vault_one_key(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+) -> Vec<(String, u64)> {
+    let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    sweep_core(label, seeds, steps, &named, chaos, Vault::OneKeyHolder)
+}
+
+/// A vault workload on computers that disagree about what a name is.
+#[must_use]
+fn sweep_vault_on(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    chaos: bool,
+) -> Vec<(String, u64)> {
+    sweep_core(label, seeds, steps, devices, chaos, Vault::Shared)
 }
 
 #[must_use]
@@ -650,7 +766,7 @@ fn sweep_core(
     steps: usize,
     devices: &[(&str, Platform)],
     chaos: bool,
-    vault: bool,
+    vault: Vault,
 ) -> Vec<(String, u64)> {
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
@@ -930,6 +1046,110 @@ fn scratch_vault_sweep() {
     no_seed_failed(arms);
 }
 
+/// A vault on computers that disagree about what a name is.
+///
+/// The corner nothing had touched. Naming is decided in the PLAINTEXT domain --
+/// a vault file's real name comes out of its metadata blob, and every question
+/// about it (is this a sibling of that, do these two want one slot, what shall
+/// the conflict copy be called) is asked about a name the server has never
+/// seen. Outside a vault the server is a second opinion: it refuses a name a
+/// live sibling already holds, and the client meets that refusal. Inside one it
+/// cannot be -- it is holding `enc-<content id>`, unique by construction, and
+/// two files it considers perfectly distinct are one slot on a Mac.
+///
+/// So case twins, composed and decomposed spellings, and conflict-copy naming
+/// are resolved here with no second opinion at all, on volumes that fold or
+/// rewrite the names as they land. `scratch_platform_sweep` covers the folding;
+/// `scratch_vault_sweep` covers the encryption; neither covers both.
+#[test]
+#[ignore]
+fn scratch_vault_platform_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_vault_on(
+        "vaultplat-mac-pc",
+        72000..72400,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+        false,
+    ));
+    arms.push(sweep_vault_on(
+        "vaultplat-mac-hfs",
+        72400..72800,
+        40,
+        &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
+        false,
+    ));
+    arms.push(sweep_vault_on(
+        "vaultplat-linux-mac",
+        72800..73200,
+        40,
+        &[("linux", Platform::Linux), ("mac", Platform::MacOs)],
+        false,
+    ));
+    arms.push(sweep_vault_on(
+        "vaultplat-hostile-mixed",
+        73200..73450,
+        40,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
+/// One device holds the key; the others do not.
+///
+/// The asymmetry the soak rig's `no-ciphertext` invariant was written for, and
+/// which the rig has never once been able to check because it has no encrypted
+/// lane at all. Three hand-written scenarios cover it in a calm world; nothing
+/// covers it while the tree is being renamed, moved and deleted underneath.
+///
+/// What a keyless device has to get right is unusually specific. It can SEE the
+/// encrypted entries -- they are in its change feed like anything else -- and it
+/// must not materialize them, must not create the vault folder as an ordinary
+/// directory (that would be a plaintext drop box inside the folder the user
+/// believes is private), must say per file that it is waiting for a key, and
+/// must go on syncing everything outside the vault perfectly. Every one of
+/// those is a chance to do something silently wrong.
+///
+/// It is also the only arm that exercises a parked entry belonging to a file
+/// this device will never hold, which is the case a name clash resolves
+/// differently from every other.
+#[test]
+#[ignore]
+fn scratch_vault_one_key_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_vault_one_key("onekey-clean-2dev", 77000..77400, 40, &["holder", "guest"], false));
+    arms.push(sweep_vault_one_key("onekey-hostile-2dev", 77400..77800, 30, &["holder", "guest"], true));
+    arms.push(sweep_vault_one_key("onekey-clean-3dev", 77800..78100, 40, &["holder", "b", "c"], false));
+    arms.push(sweep_vault_one_key("onekey-hostile-3dev", 78100..78400, 30, &["holder", "b", "c"], true));
+    arms.push(sweep_vault_one_key("onekey-longhostile", 78400..78600, 80, &["holder", "guest"], true));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
+/// Vault seeds nothing has run. The arms above are a regression suite now --
+/// every seed in them was fixed, so they are green by construction.
+#[test]
+#[ignore]
+fn scratch_vault_fresh_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_vault("vaultfresh-clean-2dev", 74000..74500, 40, &["laptop", "desktop"], false));
+    arms.push(sweep_vault("vaultfresh-hostile-2dev", 74500..75000, 30, &["laptop", "desktop"], true));
+    arms.push(sweep_vault("vaultfresh-clean-3dev", 75000..75400, 40, &["a", "b", "c"], false));
+    arms.push(sweep_vault("vaultfresh-hostile-3dev", 75400..75800, 30, &["a", "b", "c"], true));
+    arms.push(sweep_vault("vaultfresh-longhostile", 75800..76000, 80, &["laptop", "desktop"], true));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 #[test]
 #[ignore]
 fn scratch_dump() {
@@ -937,14 +1157,18 @@ fn scratch_dump() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
-    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
+    let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
+        "1" => Vault::Shared,
+        "2" => Vault::OneKeyHolder,
+        _ => Vault::None,
+    };
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, chaos, sweep_root(vault));
+        drive(&world, seed, steps, chaos, sweep_root(vault), vault);
         world.settle();
     }));
 
@@ -1086,13 +1310,17 @@ fn scratch_trace() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
-    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
+    let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
+        "1" => Vault::Shared,
+        "2" => Vault::OneKeyHolder,
+        _ => Vault::None,
+    };
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
 
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
-    drive(&world, seed, steps, chaos, sweep_root(vault));
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault);
     for round in 0..12 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -1115,7 +1343,11 @@ fn scratch_one() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
-    let vault: bool = std::env::var("VAULT").unwrap_or("0".into()) == "1";
+    let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
+        "1" => Vault::Shared,
+        "2" => Vault::OneKeyHolder,
+        _ => Vault::None,
+    };
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();

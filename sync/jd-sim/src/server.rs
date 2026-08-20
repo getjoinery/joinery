@@ -681,6 +681,29 @@ impl MockServer {
         out
     }
 
+    /// The path of every live vault folder, outermost first.
+    ///
+    /// A device with no key does not materialize a vault folder at all -- an
+    /// ordinary directory of that name would be a plaintext drop box inside
+    /// what the user believes is the private folder, and anything they put
+    /// there would go up in the clear. So the folder is deliberately absent,
+    /// and anything comparing that device's disk with the server has to know
+    /// which paths it is entitled to be missing.
+    pub fn vault_folder_paths(&self) -> Vec<String> {
+        let st = self.state.lock().unwrap();
+        let mut out = Vec::new();
+        for f in st.folders.values() {
+            if f.trashed || !f.encrypted {
+                continue;
+            }
+            if let Some(path) = Self::folder_path(&st, f.id) {
+                out.push(path);
+            }
+        }
+        out.sort_by_key(|p| p.len());
+        out
+    }
+
     /// Every live thing sitting inside a vault that the server can nonetheless
     /// read.
     ///

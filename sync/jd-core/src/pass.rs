@@ -247,6 +247,23 @@ pub fn run_pass(
         // a folder the user believes is private, and the server would store it
         // exactly as sent.
         entry.is_encrypted = parent_is_encrypted(env, placement.parent)?;
+        // ...and if it belongs in a vault this device cannot open, say so and
+        // stop, exactly as the download side does. A device linked without
+        // encrypted folders does not materialize the vault, but nothing stops
+        // the user making a folder of that name and saving into it -- and the
+        // engine then has a local file it can neither send in the clear (the
+        // server would store it exactly as sent, inside the folder the user
+        // believes is private) nor encrypt.
+        //
+        // Planned as an upload it becomes an operation that cannot succeed and
+        // is retried anyway: two thousand attempts against "this device has no
+        // key for encrypted folders", the device never quiet, and nothing ever
+        // told to the user. `PendingKey` is the same bargain the download side
+        // already makes -- the file waits, visibly, and `apply_naming` releases
+        // it by itself the moment a key arrives.
+        if entry.is_encrypted && env.vault.is_none() {
+            entry.status = LocalStatus::PendingKey;
+        }
         env.store.put_entry(&entry)?;
         out.local_creations += 1;
     }
