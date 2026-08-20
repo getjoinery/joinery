@@ -52,6 +52,41 @@ impl NamingOutcome {
     }
 }
 
+/// Where an entry is competing for a name, and under what name.
+///
+/// Normally the last-agreed placement: while a remote move is known but not yet
+/// applied the file is physically still in its old folder, and that is the
+/// folder whose siblings it is really up against.
+///
+/// **An entry holding no local file is the exception.** It was never
+/// materialized, so it is competing with nobody — and judging it in the folder
+/// it was last agreed to be in is how it stays stuck there. For a parked entry
+/// that is a closed loop: it lost the name there, so its move was never
+/// applied; its move was never applied, so it is still judged there. Nothing
+/// about a settled tree ever changes to release it.
+///
+/// The vault sweep found it as one file frozen in a folder it had already left
+/// on one device while the other had applied the move, both reporting
+/// themselves settled. Encryption is not required to reach it — it needs only a
+/// name taken at the old location — but a vault makes it likelier, because the
+/// server cannot refuse the duplicate name that starts it.
+///
+/// An entry waiting for a key is the same bargain and the harm runs the other
+/// way: it holds nothing in its old folder either, and leaving it there lets it
+/// park a REAL file that wants that name — freezing a file this device could
+/// otherwise sync perfectly well, over a rival that is not there.
+///
+/// `PendingDownload` deliberately still counts as holding its old spot: those
+/// bytes are on their way to that path.
+fn competing_placement(entry: &Entry) -> &crate::model::Placement {
+    if entry.holds_a_local_file() {
+        entry.local_placement()
+    } else {
+        &entry.remote
+    }
+}
+
+
 /// Resolve every tracked entry's local name against this filesystem.
 ///
 /// `root_prefix_bytes` is the length of the sync root's own path, which counts
@@ -75,7 +110,8 @@ pub fn apply_naming(
     // Group by the folder each entry sits in *locally*. The last-agreed parent,
     // not the remote one: while a remote move is known but not yet applied the
     // file is still in its old folder, and that is the folder whose siblings it
-    // is actually competing with.
+    // is actually competing with. See `competing_placement` for the one case
+    // where that is not true.
     let mut by_parent: HashMap<Option<i64>, Vec<Entry>> = HashMap::new();
     for entry in crate::pass::all_entries(env)? {
         // Out of scope is a deliberate absence, and something the server has
@@ -85,7 +121,7 @@ pub fn apply_naming(
             continue;
         }
         by_parent
-            .entry(entry.local_placement().parent)
+            .entry(competing_placement(&entry).parent)
             .or_default()
             .push(entry);
     }
@@ -99,7 +135,7 @@ pub fn apply_naming(
         siblings.sort_by_key(resolution_order);
         let names: Vec<String> = siblings
             .iter()
-            .map(|e| e.local_placement().name.clone())
+            .map(|e| competing_placement(e).name.clone())
             .collect();
         let resolved = jd_vfs::resolve_siblings(&names, personality);
 
@@ -115,7 +151,7 @@ pub fn apply_naming(
                     // equal when the server holds a decomposed name and this
                     // filesystem wants the composed one, which is a mapping like
                     // any other and has to be recorded as one.
-                    let mapped = (name != entry.local_placement().name).then_some(name);
+                    let mapped = (name != competing_placement(&entry).name).then_some(name);
                     (mapped, None)
                 }
                 LocalName::Escaped { local, .. } => {
@@ -145,7 +181,7 @@ pub fn apply_naming(
             let verdict = verdict.or_else(|| {
                 let name_len = local_name
                     .as_deref()
-                    .unwrap_or(&entry.local_placement().name)
+                    .unwrap_or(&competing_placement(&entry).name)
                     .len();
                 let total = parent_len + name_len;
                 (!jd_vfs::path_fits(total, root_prefix_bytes, personality)).then(|| {
@@ -462,6 +498,150 @@ mod tests {
         assert_eq!(
             e.local_name, None,
             "no mapping means no row to keep in step"
+        );
+    }
+
+    #[test]
+    fn a_parked_entry_is_judged_where_the_server_says_it_is() {
+        // It lost the name in folder 1 and was parked. The server has since put
+        // it in folder 2, where nothing else wants that name -- so the park is
+        // over, and saying so is the only way it ever gets there. Judging it in
+        // the folder it was last agreed to be in is a closed loop: it lost the
+        // name there, so its move was never applied; its move was never
+        // applied, so it is still judged there. One device applied the move and
+        // the other kept the file frozen in a folder it had already left, both
+        // reporting themselves settled.
+        let f = fixture("parkedmove");
+        // Both folders have to exist as entries: everything in a pass is found
+        // by walking down from the root, so a file under a folder nothing
+        // tracks is never reached at all.
+        f.store
+            .put_entry(&materialized(EntityId::folder(1), "Shared"))
+            .unwrap();
+        f.store
+            .put_entry(&materialized(EntityId::folder(2), "Elsewhere"))
+            .unwrap();
+
+        // The one holding the name, and holding the file.
+        let mut winner = materialized(EntityId::file(1), "slot-2.dat");
+        winner.remote.parent = Some(1);
+        winner.synced_placement = Some(Placement {
+            parent: Some(1),
+            name: "slot-2.dat".into(),
+        });
+        f.store.put_entry(&winner).unwrap();
+
+        // The parked one, whose agreement still points at folder 1 while the
+        // server has it in folder 2.
+        let mut parked = entry(EntityId::file(2), "slot-2.dat");
+        parked.remote.parent = Some(2);
+        parked.synced_placement = Some(Placement {
+            parent: Some(1),
+            name: "slot-2.dat".into(),
+        });
+        parked.status = LocalStatus::Unsyncable(UnsyncableReason::DuplicateName {
+            with: "slot-2.dat".into(),
+        });
+        f.store.put_entry(&parked).unwrap();
+
+        apply_naming(&env(&f.store), &Personality::linux(), 10).unwrap();
+
+        let after = f.store.get_entry(EntityId::file(2)).unwrap().unwrap();
+        assert_eq!(
+            after.status,
+            LocalStatus::Synced,
+            "the clash is over -- it is not in that folder any more"
+        );
+        assert_eq!(
+            f.store.get_entry(EntityId::file(1)).unwrap().unwrap().status,
+            LocalStatus::Synced,
+            "and the one that won the name is untouched"
+        );
+    }
+
+    #[test]
+    fn a_parked_entry_that_has_not_moved_stays_parked() {
+        // The counterpart, and the reason the rule says "where the server says
+        // it is" rather than "somewhere else": an entry still sitting in the
+        // folder it lost the name in has nothing new to say.
+        let f = fixture("parkedstill");
+        f.store
+            .put_entry(&materialized(EntityId::folder(1), "Shared"))
+            .unwrap();
+
+        let mut winner = entry(EntityId::file(1), "slot-2.dat");
+        winner.remote.parent = Some(1);
+        winner.synced_placement = Some(Placement {
+            parent: Some(1),
+            name: "slot-2.dat".into(),
+        });
+        f.store.put_entry(&winner).unwrap();
+
+        let mut parked = entry(EntityId::file(2), "slot-2.dat");
+        parked.remote.parent = Some(1);
+        parked.synced_placement = Some(Placement {
+            parent: Some(1),
+            name: "slot-2.dat".into(),
+        });
+        parked.status = LocalStatus::Unsyncable(UnsyncableReason::DuplicateName {
+            with: "slot-2.dat".into(),
+        });
+        f.store.put_entry(&parked).unwrap();
+
+        apply_naming(&env(&f.store), &Personality::linux(), 10).unwrap();
+
+        assert!(
+            matches!(
+                f.store.get_entry(EntityId::file(2)).unwrap().unwrap().status,
+                LocalStatus::Unsyncable(UnsyncableReason::DuplicateName { .. })
+            ),
+            "two live entries still want one name in one folder"
+        );
+    }
+
+    #[test]
+    fn an_entry_waiting_for_a_key_does_not_park_a_real_file_in_a_folder_it_has_left() {
+        // The harm runs the other way here. A device with no key for an
+        // encrypted file holds nothing on disk for it; if the server moves that
+        // file elsewhere, the stale agreement keeps it claiming a name in the
+        // old folder -- and a real file that wants that name is parked against
+        // a rival which is not there, and which nothing will ever move.
+        let f = fixture("pendingkeymove");
+        f.store
+            .put_entry(&materialized(EntityId::folder(1), "Shared"))
+            .unwrap();
+        f.store
+            .put_entry(&materialized(EntityId::folder(2), "Elsewhere"))
+            .unwrap();
+
+        // No key for this one, and the server has since moved it to folder 2.
+        let mut keyless = entry(EntityId::file(1), "notes.txt");
+        keyless.is_encrypted = true;
+        keyless.remote.parent = Some(2);
+        keyless.synced_placement = Some(Placement {
+            parent: Some(1),
+            name: "notes.txt".into(),
+        });
+        keyless.status = LocalStatus::PendingKey;
+        f.store.put_entry(&keyless).unwrap();
+
+        // An ordinary file that wants that name in folder 1, and can have it.
+        let mut real = entry(EntityId::file(2), "notes.txt");
+        real.remote.parent = Some(1);
+        f.store.put_entry(&real).unwrap();
+
+        apply_naming(&env(&f.store), &Personality::linux(), 10).unwrap();
+
+        let after = f.store.get_entry(EntityId::file(2)).unwrap().unwrap();
+        assert!(
+            !matches!(after.status, LocalStatus::Unsyncable(_)),
+            "nothing is in that folder to clash with, got {:?}",
+            after.status
+        );
+        assert_eq!(
+            f.store.get_entry(EntityId::file(1)).unwrap().unwrap().status,
+            LocalStatus::PendingKey,
+            "and the one waiting for a key is still waiting for it"
         );
     }
 

@@ -555,9 +555,45 @@ pub fn owner_view_of_the_server(world: &World) -> BTreeMap<String, Option<String
         };
         let stored = join_path(&f.folder_path, &f.placeholder);
         out.remove(&stored);
+        // Two vault files CAN decrypt to one path -- see
+        // `vault_names_the_server_cannot_tell_apart` -- and this map cannot
+        // hold both. Whichever lands last wins, so the view alone must never be
+        // used to decide anything; the collision is reported separately, first,
+        // and by name.
         out.insert(join_path(&f.folder_path, &name), hash);
     }
     out
+}
+
+/// Real names the server is holding twice in one folder.
+///
+/// Outside a vault this cannot happen: the server refuses a name a live sibling
+/// already holds. Inside one it cannot even be asked -- uniqueness is enforced
+/// on the stored title, and an encrypted file's title is an opaque per-file id,
+/// unique by construction. So two files whose real names are both `notes.txt`
+/// sit in one folder and the server sees nothing wrong.
+///
+/// Reported before the trees, because it is the CAUSE and the trees are only
+/// where it surfaces. A device can put one file at one path, so it materializes
+/// one and parks the other; the comparison then finds the disk holding one
+/// file's bytes where the view happens to show the other's, which reads as an
+/// unexplained content mismatch and sends you looking at transfers.
+pub fn vault_names_the_server_cannot_tell_apart(world: &World) -> Vec<String> {
+    let mut seen: BTreeMap<String, i64> = BTreeMap::new();
+    let mut clashes = Vec::new();
+    for f in world.server.vault_files() {
+        let Some((name, _)) = open_as_the_owner(world, &f) else {
+            continue;
+        };
+        let path = join_path(&f.folder_path, &name);
+        match seen.get(&path) {
+            Some(first) => clashes.push(format!("{path} is held by both file {first} and file {}", f.id)),
+            None => {
+                seen.insert(path, f.id);
+            }
+        }
+    }
+    clashes
 }
 
 fn join_path(folder: &str, leaf: &str) -> String {
@@ -642,6 +678,40 @@ pub fn vault_content_that_will_not_open(world: &World) -> Vec<String> {
     bad
 }
 
+/// No device without a key is holding ciphertext on its disk.
+///
+/// The one thing a keyless device must never do. Ciphertext written to disk is
+/// worse than nothing arriving: it lands under the server's placeholder name,
+/// nothing on that machine can open it, backup software copies it, and the user
+/// has a file they cannot read and cannot explain. Absence is the correct
+/// behaviour and the engine says so by name, per file.
+pub fn assert_no_ciphertext_on_a_keyless_disk(world: &World) {
+    let stored: std::collections::BTreeSet<String> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| f.ciphertext.as_ref().map(|c| crate::sha256_hex(c)))
+        .collect();
+    let mut problems = Vec::new();
+    for device in &world.devices {
+        if device.vault().is_some() {
+            continue;
+        }
+        for path in device.fs.all_paths() {
+            let Some(bytes) = device.fs.peek(&path) else {
+                continue;
+            };
+            if stored.contains(&crate::sha256_hex(&bytes)) {
+                problems.push(format!("{} holds ciphertext at {path}", device.name));
+            }
+        }
+    }
+    assert!(
+        problems.is_empty(),
+        "bytes only the server was ever meant to see reached a disk that cannot open them: {problems:?}"
+    );
+}
+
 /// The vault holds nothing its owner cannot read.
 pub fn assert_the_vault_opens(world: &World) {
     let bad = vault_content_that_will_not_open(world);
@@ -688,7 +758,30 @@ pub fn assert_converged(world: &World) {
     // other way round, every one of these reads as an unexplained missing file
     // and sends you looking at transfers.
     assert_records_agree_with_the_server(world);
+    let clashes = vault_names_the_server_cannot_tell_apart(world);
+    assert!(
+        clashes.is_empty(),
+        "the server is holding one real name twice inside a vault, which no device can \
+         put at one path: {clashes:?}"
+    );
     let server = owner_view_of_the_server(world);
+    // What each encrypted file really contains, by server id. The exemption
+    // below matches a parked entry by CONTENT, and an encrypted entry's own
+    // recorded hash is of the ciphertext while the view it is held against is
+    // in the plaintext domain. Comparing across the two never matches, so every
+    // legitimately parked encrypted file read as one the device simply did not
+    // have -- a convergence failure whose stated cause (a missing file) had
+    // nothing to do with its real one (a name this disk cannot hold twice).
+    let plain_by_id: BTreeMap<i64, String> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| {
+            open_as_the_owner(world, f)
+                .and_then(|(_, hash)| hash)
+                .map(|hash| (f.id, hash))
+        })
+        .collect();
     for device in &world.devices {
         let disk = disk_tree(device);
         // A volume that rewrites the spelling of a name holds one file where
@@ -725,11 +818,55 @@ pub fn assert_converged(world: &World) {
                         | jd_core::model::LocalStatus::PendingKey
                 )
             })
-            .filter_map(|e| e.remote_content.as_ref().map(|c| c.sha256.clone()))
+            .filter_map(|e| {
+                if e.is_encrypted {
+                    plain_by_id.get(&e.id.server_id).cloned()
+                } else {
+                    e.remote_content.as_ref().map(|c| c.sha256.clone())
+                }
+            })
             .collect();
         let held_back = |h: &Option<String>| h.as_ref().is_some_and(|h| declined.contains(h));
         let disk: BTreeMap<String, Option<String>> =
             disk.into_iter().filter(|(_, h)| !held_back(h)).collect();
+
+        // A device with no key materializes no vault folder and nothing under
+        // one, on purpose -- see `MockServer::vault_folder_paths`. Holding it to
+        // a tree that contains them asks it to produce files it cannot read and
+        // a folder it must not create. The content-based exemption above cannot
+        // cover this on its own: a FOLDER has no content to match on.
+        //
+        // Dropped from BOTH sides, because the traffic runs both ways. The vault
+        // is invisible on that machine, so nothing stops the user making a
+        // folder of the same name and saving into it — and those files are
+        // local-only for ever, since the device can neither encrypt them nor
+        // send them in the clear into a folder the user believes is private. It
+        // says so per file (`PendingKey`); expecting the server to have them is
+        // asking it to commit the leak instead.
+        //
+        // What this must NOT excuse is ciphertext reaching that disk, which is
+        // the one thing that would be seriously wrong — and
+        // `assert_no_ciphertext_on_a_keyless_disk` checks it separately, by
+        // content, so nothing here can hide it.
+        let (disk, server): (BTreeMap<String, Option<String>>, BTreeMap<String, Option<String>>) =
+            if device.vault().is_none() {
+                let vaults = world.server.vault_folder_paths();
+                let outside = |path: &String| {
+                    !vaults
+                        .iter()
+                        .any(|v| path == v || path.starts_with(&format!("{v}/")))
+                };
+                (
+                    disk.into_iter().filter(|(p, _)| outside(p)).collect(),
+                    server
+                        .iter()
+                        .filter(|(p, _)| outside(p))
+                        .map(|(p, h)| (p.clone(), h.clone()))
+                        .collect(),
+                )
+            } else {
+                (disk, server.clone())
+            };
 
         let server = if jd_vfs::Vfs::personality(&device.fs).decomposes_unicode {
             server
