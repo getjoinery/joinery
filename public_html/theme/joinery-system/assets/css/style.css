@@ -314,6 +314,10 @@ input, select, textarea, button { font-family: inherit; font-size: inherit; }
 /* ===== Main Content Area ===== */
 .main-content {
     flex: 1;
+    /* A flex item's default minimum is its content's intrinsic width, so one
+       long nowrap line anywhere on a page would inflate the whole layout past
+       the viewport instead of letting the page's own clipping/ellipsis work. */
+    min-width: 0;
     margin-left: var(--sidebar-width);
     min-height: 100vh;
     display: flex;

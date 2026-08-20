@@ -44,9 +44,9 @@ plugins/joinery_ai/
     QueueableToolInterface.php  # Card-renderer opt-in a tool needs before it can be queued
     ProposedActionFacts.php     # Shared literal-argument fact-line rendering
     llm/
-      LlmProviderInterface.php   # Provider contract (createMessage / cost / models / isPrivate)
+      LlmProviderInterface.php   # Provider contract — transport only (createMessage / streaming / probe)
       LlmProviderException.php   # Base provider error; AnthropicException extends it
-      LlmProviderFactory.php     # Builds the active provider from settings
+      LlmProviderFactory.php     # Builds the transport for a catalog endpoint (forEndpoint)
       AnthropicProvider.php      # Anthropic Messages API (canonical IR passthrough)
       OpenAiCompatibleProvider.php # Ollama / llama.cpp / vLLM / LM Studio; base for remote OpenAI-compatible
       FireworksProvider.php      # Fireworks AI (extends OpenAiCompatibleProvider)
@@ -1023,7 +1023,7 @@ Four AJAX endpoints back the page: `chat_send.php` (append the user message + an
 
 **Model controls.** Each chat carries per-conversation controls beside the capability toggles, all resolving row → plugin-setting default → floor (`AgentLoop::resolveFloat` / `resolveInt` / `resolveThinkingLevel`), and all editable from the chat status strip / its "⚙ Settings" disclosure (persisted via `chat_set_capabilities`; new chats seed them on the first `chat_send`, validated through `ChatControls`):
 
-- **Model** (`aic_model`) — a picker populated from `LlmProviderFactory::allModels()`; the model id implies the provider. Each `<option>` carries `data-private` (from the model's `isPrivate()`, supplied by the logic as a `model_privacy` map) to drive the sensitivity warning below.
+- **Model** (`aic_model`) — a picker populated from `LlmProviderFactory::allModels()` (the catalog's non-retired models); the model id implies the endpoint. Each `<option>` carries `data-private` (true when the catalog's trust class for the model is not `cloud`, supplied by the logic as a `model_privacy` map) to drive the sensitivity warning below — the same trust class the sealed-egress gate reads, so the warning and the gate cannot disagree about a model.
 - **Temperature** (`aic_temperature`) and **Top-p** (`aic_top_p`) — sampling, forwarded to the provider only when set. The factory default `joinery_ai_default_temperature` ships at **0.3** (the diffuse provider default of 0.8 was the cause of vague replies); `joinery_ai_default_top_p` ships empty (provider default).
 - **Max tokens** (`aic_max_tokens`) — overrides `joinery_ai_chat_max_tokens` as the per-turn output budget.
 - **Instructions** (`aic_instructions`) — the per-chat voice-block override described above.
@@ -1089,7 +1089,7 @@ A message can carry uploaded files the model actually reads: images, PDFs, Offic
 
 **On-demand full files (`view_attachment`).** `on_demand` mode is the middle ground: attachments send as cheap text like `extract`, but the model can pull a specific file's full original when the text isn't enough. Each non-image attachment is labeled with a stable ref (its `File` id, shown as `[ref N]`), and the `view_attachment(ref)` tool — offered only in `on_demand` mode on a document-capable model, and only when the conversation has attachments — resolves that ref against **this conversation's** own in-context attachments, re-checks File ownership against the conversation owner, and returns the full original **inside the `tool_result`** (a `document`/`image` block built by the same encoder in `original` routing, framed as untrusted). Resolution is by ref, never filename, so two same-named files stay distinct; a ref outside the conversation just errors with the available list. Images are always sent whole, so they carry no ref and the tool is a no-op for them. Delivering a content-block `tool_result` is why a tool's `execute()` may return `['content' => [blocks], …]` — the loop passes the blocks through and records only a text summary in the audit trail.
 
-**Per-model capability gate (fail-loud).** Each model declares `modelCapabilities()` → `{vision, document}` (Claude models: both; Fireworks: neither today; the local host's `vision` follows the `joinery_ai_local_vision` setting, `document` always false). An upload the selected model can't consume — an image on a text-only model, or an original-mode PDF where the model lacks native-PDF support — is refused at ingress with a message telling the user to switch models, never silently dropped or downgraded.
+**Per-model capability gate (fail-loud).** Each catalog entry carries `attachments` → `{vision, document}` (Claude models: both; Fireworks and local models: neither today), read via `LlmProviderFactory::capabilitiesForModel()`; a model id the catalog doesn't know answers both false. An upload the selected model can't consume — an image on a text-only model, or an original-mode PDF where the model lacks native-PDF support — is refused at ingress with a message telling the user to switch models, never silently dropped or downgraded.
 
 **Storage.** Bytes live in a private `File` row (`fil_source = ai_chat_upload`, `fil_private`); an `AiMessageAttachment` link row ties it to the message and carries the text extracted **once** at ingress (`aia_extracted_text` / `aia_extract_status`) plus its own `aia_in_context` bit (the compactor's "objects as rows" shape). The MIME validated at ingress is the single type authority through storage and send: `commit()` hands it to the `File` row and, after the save, verifies the persisted `fil_type` still routes to the validated category — a mismatch drops the just-minted row and reports the file to the caller (a visible warning), so an attachment can never be half-stored into a state the send side silently omits. Deleting a message or conversation cascades through the link rows and removes the underlying `File` bytes — no orphaned links, no leaked files.
 
@@ -1380,7 +1380,7 @@ Extraction is pure string/DOM work on already-downloaded bytes — the SSRF guar
 
 For recipes that are expected to be expensive, raise the ceilings on the recipe row. For recipes that should be cheap, lower them.
 
-Only **paid** usage counts toward the monthly ceilings. A recipe run on a local provider costs nothing — its `estimateCost()` is `0.0`, so the run records `rcr_cost_estimate = 0` and is excluded. Cost is the signal rather than `isPrivate()`, which is about training policy: Fireworks is private *and* paid, and keeps counting. Chat turns count in full regardless of provider — the message row records tokens but neither a cost nor a model, so nothing distinguishes a free turn from a paid one, and counting them is the conservative direction.
+Only **paid** usage counts toward the monthly ceilings. A recipe run on the operator's own hardware costs nothing — a local model declares no cost in the catalog, so the run records `rcr_cost_estimate = 0` and is excluded. Cost is the signal rather than the trust class, which is about where content may travel: Fireworks is trusted *and* paid, and keeps counting. Chat turns count in full regardless of provider — the message row records tokens but neither a cost nor a model, so nothing distinguishes a free turn from a paid one, and counting them is the conservative direction.
 
 The one cost concern shared across surfaces is the **plugin-wide monthly ceiling** (`joinery_ai_global_monthly_token_cap`). `CostGuard::enforceGlobalCap()` checks it without a `Recipe` — both `RecipeRunner` (via `check($recipe)`) and each chat turn call it, and its month total unions recipe-run and chat-message tokens, so the cap is meaningful regardless of which surface spent them. The per-recipe caps and the 80% owner-alert emails stay recipe-only in `check($recipe)`.
 
