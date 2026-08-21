@@ -1,6 +1,6 @@
 # Spec: The sealed search index must persist in bounded memory
 
-**Status:** Draft (awaiting implementation)
+**Status:** Implemented 2026-08-21 (jeremytunnell search recovers on the first unlock after the next publish + upgrade — § 6)
 **Version:** 1.0
 **Area:** `plugins/mailbox/includes/MailboxIndex.php`, `includes/SealedBox.php`, `includes/VaultCrypto.php`
 **Related:** `docs/sealed_vault.md`, `docs/secret_box.md`, `specs/implemented/inbound_email_encryption_at_rest.md` (§ 6, the sealed FTS index), `tests/vault/sealed_read_paths_test.php` (the pinned decrypt-callsite enumeration)

@@ -18,7 +18,7 @@
  * different row and decrypt successfully — VaultCrypto enforces nothing about
  * the AD's shape, it just always requires one.
  *
- * @version 1.3
+ * @version 1.4
  */
 require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 require_once(PathHelper::getIncludePath('includes/SealedEgressGuard.php'));
@@ -117,6 +117,29 @@ class VaultCrypto {
 	/** Seal plaintext content under a (now-open) per-item DEK, bound to the consumer's AD. */
 	public function sealField(string $plaintext, string $dek, string $ad): string {
 		return $this->box->aeadEncrypt($plaintext, $dek, $ad);
+	}
+
+	/**
+	 * Seal a whole FILE under a per-item DEK, path to path, in memory bounded
+	 * by a chunk — the streaming sibling of sealField() for content too large
+	 * to ever hold as a string (the sealed mailbox search index). Same DEK,
+	 * same AD discipline; only the shape of what the DEK encrypts changes
+	 * (SealedBox::sealStreamFile, the `v1.stream.` format).
+	 */
+	public function sealFieldFile(string $src_path, string $dst_path, string $dek, string $ad): void {
+		$this->box->sealStreamFile($src_path, $dst_path, $dek, $ad);
+	}
+
+	/**
+	 * Open a file sealed by sealFieldFile(). Throws on tamper, truncation, or
+	 * an AD mismatch. A streaming open of STORED sealed content is a sealed
+	 * read like any other, so it arms the hot-turn rule exactly as openField()
+	 * does — tests/vault/sealed_read_paths_test.php pins this method as the
+	 * one sanctioned caller of SealedBox::openStreamFile.
+	 */
+	public function openFieldFile(string $src_path, string $dst_path, string $dek, string $ad): void {
+		$this->box->openStreamFile($src_path, $dst_path, $dek, $ad);
+		SealedEgressGuard::markHot($ad);
 	}
 
 	/**
