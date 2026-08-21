@@ -11,7 +11,7 @@
  * the Mailbox Reader's thread-key index is created here (same pattern as the
  * server_manager plugin's index migration).
  *
- * @version 1.26.0
+ * @version 1.27.0
  */
 return [
 	[
@@ -743,6 +743,30 @@ return [
 
 			$dblink->exec("ALTER TABLE ied_inbound_email_domains DROP COLUMN ied_ai_cloud_enabled");
 			echo "ied_ai_cloud_enabled dropped.\n";
+		},
+	],
+
+	[
+		// A Direct signing identity minted for an IMAP-source domain (the Setup
+		// tab's advanced run used to do this for gmail.com) claims an authority
+		// the deployment does not have, flips the messenger's siteReady, and
+		// dead-ends the operator on DNS records nobody can publish
+		// (specs/imap_source_domain_boundaries.md § 4). The mint now refuses;
+		// this removes any row minted before it did. Hard delete: the row is a
+		// keypair nothing may ever verify against, not history worth keeping.
+		'id' => 'jdi_001_drop_imap_source_identities',
+		'version' => '1.96.0',
+		'up' => function($dbconnector) {
+			$dblink = $dbconnector->get_db_link();
+			$count = $dblink->exec(
+				"DELETE FROM jdi_direct_identities
+				 WHERE jdi_domain IN (
+					SELECT ied_domain FROM ied_inbound_email_domains
+					WHERE ied_is_imap_source = true AND ied_delete_time IS NULL)"
+			);
+			echo ($count > 0)
+				? "Removed $count Direct signing identity row(s) on IMAP-source domains.\n"
+				: "No Direct signing identities on IMAP-source domains, nothing to remove.\n";
 		},
 	],
 ];

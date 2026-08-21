@@ -26,6 +26,8 @@
  * reference, so core never names a plugin symbol (the discipline
  * `MailIdentityGuard` already sets).
  *
+ * @version 1.1 - mint() refuses a domain the deployment is not authoritative
+ *   for, via a registered resolver (specs/imap_source_domain_boundaries.md)
  * @version 1.0
  */
 
@@ -40,6 +42,9 @@ class DirectSigningIdentity {
 	/** @var callable|null fn(string $domain): ?int — the vault owner whose key seals this domain's signing key */
 	private static $vault_owner_resolver = null;
 
+	/** @var callable|null fn(string $domain): bool — may this deployment sign for the domain at all? */
+	private static $authority_resolver = null;
+
 	/** @var array<string,DirectIdentity|null> request-scoped; signing runs per message */
 	private static $cache = array();
 
@@ -49,6 +54,18 @@ class DirectSigningIdentity {
 	 */
 	public static function registerVaultOwnerResolver(callable $fn): void {
 		self::$vault_owner_resolver = $fn;
+	}
+
+	/**
+	 * Register "is this deployment authoritative for $domain". Guarding here, at
+	 * the mint, is what keeps a signing identity from ever existing for a domain
+	 * this deployment merely mirrors (an IMAP-source anchor like gmail.com) —
+	 * whatever future caller asks for one (specs/imap_source_domain_boundaries.md
+	 * § 4). Same registered-callable shape as the vault-owner resolver, so core
+	 * never names a plugin symbol. Unregistered means allow.
+	 */
+	public static function registerAuthorityResolver(callable $fn): void {
+		self::$authority_resolver = $fn;
 	}
 
 	/** The owner whose vault should hold this domain's key, or null for box custody. */
@@ -131,6 +148,12 @@ class DirectSigningIdentity {
 
 	/** Mint and store a keypair under whichever custody applies to $domain. */
 	private static function mint(string $domain): DirectIdentity {
+		VaultUnlock::loadConsumerBootstraps();
+		if (self::$authority_resolver !== null
+				&& !call_user_func(self::$authority_resolver, $domain)) {
+			throw new RuntimeException('This deployment is not authoritative for '
+				. $domain . ', so no Joinery Direct signing identity may exist for it.');
+		}
 		$pair   = sodium_crypto_sign_keypair();
 		$secret = sodium_crypto_sign_secretkey($pair);
 		$public = sodium_crypto_sign_publickey($pair);

@@ -25,6 +25,9 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.45 - checkDomain() answers nothing for an IMAP-source domain: no
+ *   DNS grading, no Direct identity mint, no machine-sender card for a domain
+ *   this deployment merely mirrors (specs/imap_source_domain_boundaries.md)
  * @version 1.44 - the sealing-holders row: a protected mailbox nothing can seal
  *                 to is failing loudly on the Setup tab, inside the senders'
  *                 retry window
@@ -1546,6 +1549,17 @@ class InboundEmailSetupCheck {
 
 		// Is the domain registered in the plugin?
 		$model = InboundEmailDomain::GetByDomain($domain);
+
+		// An IMAP-source anchor (gmail.com behind a connected account) has no DNS
+		// of its own to be wrong: this deployment prescribes nothing for it — no
+		// MX/SPF grading, no Direct plan, no machine-sender offer
+		// (specs/imap_source_domain_boundaries.md § 3). Every enumerating caller
+		// (the Setup tab's advanced run, InboundEmailHealth::checkDomainDns) funnels
+		// through here, so this one gate is the skip for all of them — the same
+		// verdict CheckDomainSetup reaches in its own loop.
+		if ($model && $model->is_imap_source()) {
+			return array();
+		}
 		if ($model && $model->get('ied_is_enabled')) {
 			$out[] = $this->r('domain.row', $domain, 'domain', 'Domain registered in the plugin', self::REQUIRED, self::PASS,
 				$domain . ' is registered and enabled.');

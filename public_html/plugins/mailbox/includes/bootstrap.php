@@ -22,7 +22,10 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.9
+ * @version 1.10
+ * @changelog 1.10 - registers the Direct authority resolver, so a signing
+ *   identity can never be minted for an IMAP-source domain
+ *   (specs/imap_source_domain_boundaries.md)
  * @changelog 1.9 - registers the streaming decrypt hook for self-sealed
  *   attachment Files (specs/mailbox_attachment_byte_custody.md), so an adopted
  *   attachment answers ranges and a closed vault is a 423 before any header.
@@ -323,6 +326,10 @@ DirectContactGate::registerLookup(function (int $user_id, int $alias_id, string 
 });
 DirectSigningIdentity::registerVaultOwnerResolver(function (string $domain): ?int {
 	return MailboxDirectConsumer::signingVaultOwner($domain);
+});
+DirectSigningIdentity::registerAuthorityResolver(function (string $domain): bool {
+	$row = InboundEmailDomain::GetByDomain($domain);
+	return $row !== false && $row->is_authoritative();
 });
 
 // A relay-fronted deployment sends Direct THROUGH the relay, so the recipient

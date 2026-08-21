@@ -30,6 +30,8 @@
  * is what a content-sealing decision asks. Domain identity — DKIM, the protected
  * sending identity, the DNS shape, the relay map — stays this class's answer.
  *
+ * @version 1.10 - is_imap_source()/is_authoritative(), and the hosted-address
+ *   guards exclude IMAP-source domains (specs/imap_source_domain_boundaries.md)
  * @version 1.9 - maxSecurityLevelForUser() counts live mailboxes only, like
  *   the owned-domain pass beside it
  * @version 1.8
@@ -205,11 +207,41 @@ class InboundEmailDomain extends SystemBase {
 	}
 
 	/**
+	 * True when this row anchors a connected external account (a Gmail/Outlook
+	 * feed) rather than a domain this deployment runs mail for. Such a row is
+	 * bookkeeping for the alias FK — never an identity this deployment owns
+	 * (specs/imap_source_domain_boundaries.md § 2).
+	 */
+	function is_imap_source() {
+		$v = $this->get('ied_is_imap_source');
+		return ($v === true || $v === 't' || $v === 'true' || $v === '1' || $v === 1);
+	}
+
+	/**
+	 * Is this deployment AUTHORITATIVE for the domain — enabled, live, and not
+	 * an IMAP-source anchor? This is the question behind every identity-shaped
+	 * decision: may it hold a Direct signing key, is an address on it "hosted
+	 * here", is it local to the messenger, do we prescribe its DNS. A row can
+	 * exist and still answer no (specs/imap_source_domain_boundaries.md § 2).
+	 */
+	function is_authoritative() {
+		$enabled = $this->get('ied_is_enabled');
+		$enabled = ($enabled === true || $enabled === 't' || $enabled === 'true' || $enabled === '1' || $enabled === 1);
+		return $enabled && !$this->get('ied_delete_time') && !$this->is_imap_source();
+	}
+
+	/**
 	 * True when an email address sits on a mailbox domain hosted on this platform
 	 * (specs/mailbox_security_levels.md § Password reset, Population 2). A login OR
 	 * recovery email on a hosted domain is circular — a reset link would land in an
 	 * inbox that requires this very account to read. Shared by the register-time,
 	 * account-email, and recovery-address guards.
+	 *
+	 * An IMAP-source domain is NOT hosted: Gmail delivers gmail.com, this
+	 * deployment merely mirrors one mailbox on it, so nothing is circular —
+	 * and answering yes would refuse every @gmail.com signup on the site
+	 * (specs/imap_source_domain_boundaries.md § 3). A disabled hosted domain
+	 * still answers yes: it can be re-enabled, and the circularity returns.
 	 */
 	static function isHostedEmailAddress($email) {
 		$email = strtolower(trim((string)$email));
@@ -221,7 +253,8 @@ class InboundEmailDomain extends SystemBase {
 		if ($domain === '') {
 			return false;
 		}
-		return self::GetByDomain($domain) !== false;
+		$row = self::GetByDomain($domain);
+		return $row !== false && !$row->is_imap_source();
 	}
 
 	/**
@@ -326,6 +359,11 @@ class InboundEmailDomain extends SystemBase {
 		$owned = new MultiInboundEmailDomain(array('owner_id' => $user_id, 'deleted' => false));
 		$owned->load();
 		foreach ($owned as $d) {
+			// An IMAP-source anchor (gmail.com) is not a hosted inbox — a login
+			// email there is reachable without this account, so not circular.
+			if ($d->is_imap_source()) {
+				continue;
+			}
 			$names[strtolower((string)$d->get('ied_domain'))] = true;
 		}
 
@@ -344,7 +382,7 @@ class InboundEmailDomain extends SystemBase {
 			}
 			$seen_domains[$domain_id] = true;
 			$domain = new InboundEmailDomain($domain_id, true);
-			if ($domain->key) {
+			if ($domain->key && !$domain->is_imap_source()) {
 				$names[strtolower((string)$domain->get('ied_domain'))] = true;
 			}
 		}
