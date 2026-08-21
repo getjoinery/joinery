@@ -40,6 +40,14 @@
  *   advisory try-lock at the chokepoint both the scheduled poller and Fetch now
  *   pass through; a second fetch fails fast as ImapFetchBusyException instead
  *   of racing the cursors and holding a second worker
+ * @version 1.11
+ * @changelog 1.11 - the cursor decides where to look, the scope decides what to
+ *   keep (specs/imap_seed_scope_guard.md): a day-scoped backfill skips-and-counts
+ *   messages whose INTERNALDATE predates the window (out_of_scope, reconciled in
+ *   the run record) instead of trusting the seek cursor alone, confined to UIDs
+ *   at or below the seed-time high (iif_seed_high_uid) so later deliberate moves
+ *   still ingest; the boundary seek asks the server (`UID SEARCH SINCE`) before
+ *   bisecting, and the seed proof records which method answered (isp_method)
  * @version 1.10
  * @changelog 1.10 - a decades-old Gmail folder is mostly deleted UIDs, and both
  *   walkers now cross that desert instead of crawling it: the day-boundary seek
@@ -352,7 +360,7 @@ class ImapIngestor {
 	 * Pull → Ingest → Push cycle) owns the lifecycle (§6.2).
 	 *
 	 * Returns ['stored'=>int, 'dedup'=>int, 'seen'=>int, 'failed'=>int,
-	 * 'failed_detail'=>array, 'status'=>string].
+	 * 'out_of_scope'=>int, 'failed_detail'=>array, 'status'=>string].
 	 * Throws ImapIngestorException on connect/auth failure (the poller records it).
 	 *
 	 * One fetch per mailbox at a time, enforced here at the chokepoint every
@@ -430,13 +438,14 @@ class ImapIngestor {
 				InboundImapFolder::ROLE_INBOX);
 		}
 
-		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $totalFailed = 0;
+		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $totalFailed = 0; $totalOutOfScope = 0;
 		$parts = array(); $failedDetail = array();
 		foreach ($folders as $folder) {
 			try {
 				$res = $this->ingestFolder($folder, $maxPerRun, $folder->isMembership(), $alias, $domain, $recipient);
 				$totalStored += $res['stored']; $totalDedup += $res['dedup']; $totalSeen += $res['seen'];
 				$totalFailed += $res['failed'];
+				$totalOutOfScope += $res['out_of_scope'];
 				$failedDetail = array_merge($failedDetail, $res['failed_detail']);
 				$parts[] = $res['status'];
 			} catch (Throwable $e) {
@@ -450,10 +459,13 @@ class ImapIngestor {
 		}
 
 		$statusMsg = 'Ingested ' . count($folders) . ' folder(s): ' . $totalStored . ' stored, '
-			. $totalDedup . ' duplicate, ' . $totalFailed . ' failed. ' . implode(' | ', $parts);
+			. $totalDedup . ' duplicate, ' . $totalFailed . ' failed'
+			. ($totalOutOfScope ? ', ' . $totalOutOfScope . ' out of scope' : '')
+			. '. ' . implode(' | ', $parts);
 		$this->account->recordStatus($statusMsg);
 		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen,
-			'failed' => $totalFailed, 'failed_detail' => $failedDetail, 'status' => $statusMsg);
+			'failed' => $totalFailed, 'out_of_scope' => $totalOutOfScope,
+			'failed_detail' => $failedDetail, 'status' => $statusMsg);
 	}
 
 	/**
@@ -507,6 +519,11 @@ class ImapIngestor {
 		if ($storedUidValidity === null || intval($storedUidValidity) !== $serverUidValidity) {
 			$folder->set('iif_uidvalidity', $serverUidValidity);
 			$folder->set('iif_last_sync_modseq', null);
+			// Where the backfill ends: UIDs at or below this existed when the cursor
+			// was seeded and are governed by the day-window scope guard below; UIDs
+			// above it are live mail (or mail the member later moved in, which gets a
+			// fresh high UID) and are never date-filtered.
+			$folder->set('iif_seed_high_uid', $highUid);
 			$scope = $this->account->importScope();
 			if ($scope === InboundImapAccount::SCOPE_FULL) {
 				$lastSeenUid = 0;
@@ -517,7 +534,7 @@ class ImapIngestor {
 				$folder->set('iif_last_seen_uid', $highUid);
 				$folder->prepare();
 				$folder->save();
-				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0,
+				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
 					'failed_detail' => array(), 'status' => $folderName . ': seeded cursor');
 			}
 			$folder->set('iif_last_seen_uid', $lastSeenUid);
@@ -528,7 +545,7 @@ class ImapIngestor {
 			$folder->set('iif_last_seen_uid', max($lastSeenUid, $highUid));
 			$folder->prepare();
 			$folder->save();
-			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0,
+			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
 				'failed_detail' => array(), 'status' => $folderName . ': no new');
 		}
 
@@ -540,7 +557,18 @@ class ImapIngestor {
 
 		$router = new InboundEmailRouter();
 
-		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $failedDetail = array();
+		// Day-window scope guard (specs/imap_seed_scope_guard.md): the seek decides
+		// where to LOOK, the scope decides what to KEEP. During the backfill — UIDs
+		// at or below the seed-time high — a message whose INTERNALDATE predates the
+		// window is skipped and counted, with the cursor advancing past it, so a
+		// conservative seek cursor costs walk time, never out-of-scope mail in the
+		// mailbox. Beyond the seed-time high the guard is off: mail moved into the
+		// folder later gets a fresh high UID and is ingested whatever its age.
+		$scopeCutoffUtc = $this->account->importScope() === InboundImapAccount::SCOPE_DAYS
+			? (string)$this->account->importCutoffUtc() : '';
+		$seedHighUid = intval($folder->get('iif_seed_high_uid'));
+
+		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $outOfScope = 0; $failedDetail = array();
 		$maxUid = $windowEnd;
 		foreach ($uids as $uid) {
 			$seen++;
@@ -552,6 +580,11 @@ class ImapIngestor {
 				$failedDetail[] = array('uid' => $uid, 'folder' => $folderName,
 					'reason' => 'The server returned no data for this message.');
 				$maxUid = min($maxUid, $uid - 1);
+				continue;
+			}
+
+			if ($this->outOfScopeForBackfill($uid, $data, $scopeCutoffUtc, $seedHighUid)) {
+				$outOfScope++;
 				continue;
 			}
 
@@ -572,8 +605,9 @@ class ImapIngestor {
 		$folder->save();
 
 		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen,
-			'failed' => $failed, 'failed_detail' => $failedDetail,
-			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed');
+			'failed' => $failed, 'out_of_scope' => $outOfScope, 'failed_detail' => $failedDetail,
+			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed'
+				. ($outOfScope ? ', ' . $outOfScope . ' out of scope' : ''));
 	}
 
 	// ── Run record ─────────────────────────────────────────────────────────
@@ -630,33 +664,86 @@ class ImapIngestor {
 	 */
 	/**
 	 * Find where a "last N days" feed should start reading: the cursor just below
-	 * the oldest message still inside the window.
+	 * the oldest message still inside the window. Two strategies, tried in order:
 	 *
-	 * IMAP assigns UIDs in strictly ascending arrival order (RFC 3501 §2.3.1.1), so
-	 * the UID space is sorted by INTERNALDATE and can be bisected. Each probe is a
-	 * FETCH of a narrow UID band asking only for INTERNALDATE — cheap, and on the
-	 * same numeric `UID FETCH` path the ingest window uses. (The obvious
-	 * implementation, `UID SEARCH SINCE`, is not available to us: Gmail advertises
-	 * ESEARCH but rejects the `UID SEARCH RETURN (...)` form Horde emits, which is
-	 * why nothing in this class searches.)
+	 * 1. Server-side `UID SEARCH SINCE` (seekCursorBySearch) — exact, one round
+	 *    trip, when the server cooperates.
+	 * 2. Bisection (seekCursorInner). IMAP assigns UIDs in strictly ascending
+	 *    arrival order (RFC 3501 §2.3.1.1), so the UID space is sorted by
+	 *    INTERNALDATE and can be bisected. Each probe is a FETCH of a narrow UID
+	 *    band asking only for INTERNALDATE — cheap, and on the same numeric
+	 *    `UID FETCH` path the ingest window uses.
 	 *
 	 * A band rather than a single UID because deletions leave gaps — a lone probe
 	 * often lands on nothing. An empty band proves only that those UIDs are gone
-	 * — nothing about where the date boundary is — so the search never concedes
+	 * — nothing about where the date boundary is — so the bisection never concedes
 	 * unprobed UID space over one; it asks the bottom of the remaining range
 	 * instead, where the answer is definitive.
 	 *
 	 * Returns the seed cursor: one below the oldest in-window UID, or $highUid when
 	 * the whole mailbox predates the cutoff (nothing to backfill). Fail-soft: an
 	 * inconclusive seek returns the best lower bound reached, which imports somewhat
-	 * more than asked rather than silently importing nothing.
+	 * more than asked rather than silently importing nothing — and the storage-time
+	 * scope guard in ingestFolder() keeps the excess out of the mailbox, so the
+	 * fail-soft direction costs walk time, never out-of-scope mail.
 	 */
 	private function seekCursorForCutoff(ImapClient $client, string $folder, string $cutoffUtc, int $highUid): int {
 		if ($cutoffUtc === '' || $highUid < 1) { return max(0, $highUid); }
 
-		$found = $this->seekCursorInner($client, $folder, $cutoffUtc, $highUid);
+		// Ask the server outright before probing — exact and one round trip when
+		// the server cooperates, null when it does not (§3.4 of the spec).
+		$found = $this->seekCursorBySearch($client, $folder, $cutoffUtc, $highUid);
+		if ($found === null) {
+			$found = $this->seekCursorInner($client, $folder, $cutoffUtc, $highUid);
+			$found['method'] = 'bisect';
+		}
 		$this->recordSeedProof($client, $folder, $cutoffUtc, $highUid, $found);
 		return $found['cursor'];
+	}
+
+	/**
+	 * The boundary by server-side search: one `UID SEARCH SINCE` returns exactly
+	 * the in-window UIDs, so the cursor is one below their minimum — no probing,
+	 * no convergence question. Not every server cooperates (Gmail advertises
+	 * ESEARCH yet rejects the `UID SEARCH RETURN (...)` form Horde emits), so any
+	 * failure or unusable answer returns null and the bisection decides instead.
+	 *
+	 * SINCE compares INTERNALDATE at day granularity, so the cursor can sit up to
+	 * a day before the cutoff — the documented fail-toward-importing-more
+	 * direction; the storage-time scope guard keeps the excess out of the mailbox.
+	 * An empty result is a real answer (the whole mailbox predates the window)
+	 * and seeds at the top; the seed proof's bracketing probes are recorded for
+	 * this path exactly as for the bisection, so a server whose SEARCH lies still
+	 * leaves checkable evidence behind (`isp_below_time` / `boundaryHolds()`).
+	 *
+	 * @return array{cursor:int,probes:int,converged:bool,method:string}|null
+	 */
+	private function seekCursorBySearch(ImapClient $client, string $folder, string $cutoffUtc, int $highUid): ?array {
+		try {
+			// Horde's dateSearch requires a DateTime — the sanctioned third-party
+			// exception to the no-DateTime rule.
+			$since = new DateTime($cutoffUtc, new DateTimeZone('UTC'));
+			$query = new Horde_Imap_Client_Search_Query();
+			$query->dateSearch($since, Horde_Imap_Client_Search_Query::DATE_SINCE);
+			$res = $client->search($folder, $query);
+
+			$match = $res['match'] ?? null;
+			if (!$match instanceof Horde_Imap_Client_Ids) {
+				return null;
+			}
+			$ids = array_map('intval', iterator_to_array($match, false));
+			if (!count($ids)) {
+				return array('cursor' => $highUid, 'probes' => 0, 'converged' => true, 'method' => 'search');
+			}
+			$min = min($ids);
+			if ($min < 1) {
+				return null; // a nonsense UID — distrust the whole answer
+			}
+			return array('cursor' => max(0, min($min - 1, $highUid)),
+				'probes' => 0, 'converged' => true, 'method' => 'search');
+		} catch (Throwable $e) {
+			return null;
+		}
 	}
 
 	/**
@@ -750,6 +837,7 @@ class ImapIngestor {
 				'isp_cutoff_time' => $cutoffUtc,
 				'isp_high_uid'    => $highUid,
 				'isp_cursor_uid'  => $cursor,
+				'isp_method'      => (string)($found['method'] ?? 'bisect'),
 				'isp_probes'      => intval($found['probes']),
 				'isp_converged'   => (bool)$found['converged'],
 				'isp_below_uid'   => $below !== null ? $below['uid'] : null,
@@ -814,22 +902,48 @@ class ImapIngestor {
 
 		$data = $res[$edge] ?? null;
 		if ($data === null) { return null; }
+		return array('uid' => $edge, 'date' => $this->internalDateUtc($data));
+	}
+
+	/**
+	 * One fetched message's INTERNALDATE as a UTC 'Y-m-d H:i:s' string, or ''
+	 * when unreadable. Shared by the boundary probes and the scope guard so the
+	 * two compare against the cutoff on exactly the same clock, and so the
+	 * timezone handling exists exactly once:
+	 *
+	 * An unparsable INTERNALDATE (Horde falls back to epoch -1 and flags
+	 * error()) reports as '' — every caller treats unknown as in-window.
+	 *
+	 * The cutoff being compared against is a UTC string, and INTERNALDATE
+	 * carries the source server's own offset — which the DateTime KEEPS (a
+	 * constructed DateTime ignores its timezone argument when the string has
+	 * an offset), so formatting without converting first would shift the
+	 * boundary by up to ±14 hours.
+	 */
+	private function internalDateUtc($data): string {
 		$date = $data->getImapDate();
-
-		// An unparsable INTERNALDATE (Horde falls back to epoch -1 and flags
-		// error()) reports as '' — the caller treats unknown as in-window.
 		if (!$date || $date->error()) {
-			return array('uid' => $edge, 'date' => '');
+			return '';
 		}
-
-		// The cutoff being compared against is a UTC string, and INTERNALDATE
-		// carries the source server's own offset — which the DateTime KEEPS (a
-		// constructed DateTime ignores its timezone argument when the string has
-		// an offset), so formatting without converting first would shift the
-		// boundary by up to ±14 hours.
 		$date = clone $date;
 		$date->setTimezone(new DateTimeZone('UTC'));
-		return array('uid' => $edge, 'date' => $date->format('Y-m-d H:i:s'));
+		return $date->format('Y-m-d H:i:s');
+	}
+
+	/**
+	 * The scope-guard decision for one walked message: skip it only when ALL of —
+	 * the feed has a day window ($cutoffUtc non-empty), the UID is part of the
+	 * backfill (at or below the seed-time high; a later arrival or a message the
+	 * member moved in gets a higher UID and is never date-filtered), and its
+	 * INTERNALDATE is known and predates the window. Unknown ('') counts as
+	 * in-window — the same fail-toward-keeping direction the seek uses.
+	 */
+	private function outOfScopeForBackfill(int $uid, $data, string $cutoffUtc, int $seedHighUid): bool {
+		if ($cutoffUtc === '' || $seedHighUid < 1 || $uid > $seedHighUid) {
+			return false;
+		}
+		$idate = $this->internalDateUtc($data);
+		return $idate !== '' && $idate < $cutoffUtc;
 	}
 
 	/**
@@ -877,6 +991,7 @@ class ImapIngestor {
 		$query->structure();
 		$query->envelope();
 		$query->size();
+		$query->imapDate(); // INTERNALDATE, for the day-window scope guard
 		$query->headerText(array('peek' => true));
 		return $client->fetch($folder, $query, array(
 			'ids' => new Horde_Imap_Client_Ids($startUid . ':' . $endUid),
