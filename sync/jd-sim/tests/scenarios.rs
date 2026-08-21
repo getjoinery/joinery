@@ -3287,3 +3287,91 @@ fn folder_id_named(world: &World, name: &str) -> Option<i64> {
         })
         .map(|e| e.id.server_id)
 }
+
+/// Two files in one vault folder, both really called `report.txt`.
+///
+/// The server enforces name uniqueness on the title it stores, and for an
+/// encrypted file that title is an opaque per-file id — unique by construction.
+/// So it cannot refuse this, and nothing upstream stops it: two people can save
+/// a file of the same name into a shared vault at the same moment, and the
+/// server takes both without complaint.
+///
+/// Whichever loses is renamed, and both end up on the disk. Before that, the
+/// loser was marked unsyncable and stayed that way for good — a file that
+/// existed on the server and appeared on no computer anywhere.
+#[test]
+fn two_files_in_a_vault_with_one_name_both_end_up_on_the_disk() {
+    let vault = SimVault::new(9_401);
+    let mut world = World::new(9_401, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let first = b"the one that was there first";
+    let second = b"the one that arrived second";
+    world
+        .server
+        .seed_vault_file(Some(private), "report.txt", first, &vault.public_key_b64);
+    world
+        .server
+        .seed_vault_file(Some(private), "report.txt", second, &vault.public_key_b64);
+    committed.note("Private/report.txt", first);
+    committed.note("Private/report.txt", second);
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let disk = disk_tree(world.device("laptop"));
+    assert_eq!(
+        disk.get("Private/report.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(first)),
+        "the lower server id keeps the name, found: {disk:?}"
+    );
+    assert_eq!(
+        disk.get("Private/report (2).txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(second)),
+        "the other is numbered rather than parked, found: {disk:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+    assert_converged(&world);
+}
+
+/// ...and the second computer renames the same one, without being told.
+///
+/// The rule has to be a fact about the file, not about the computer looking at
+/// it. Ranking by anything local — which entry is already on this disk, what
+/// order the folder was read in — makes each device rename the other's file,
+/// and the two never hold still.
+#[test]
+fn both_computers_rename_the_same_file_in_a_vault() {
+    let vault = SimVault::new(9_402);
+    let mut world = World::new(9_402, &["laptop", "desktop"]);
+    world.give_vault("laptop", &vault);
+    world.give_vault("desktop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(
+        Some(private),
+        "report.txt",
+        b"the one that was there first",
+        &vault.public_key_b64,
+    );
+    world.server.seed_vault_file(
+        Some(private),
+        "report.txt",
+        b"the one that arrived second",
+        &vault.public_key_b64,
+    );
+
+    assert!(world.settle().is_some(), "it should settle");
+
+    let a = disk_tree(world.device("laptop"));
+    let b = disk_tree(world.device("desktop"));
+    assert_eq!(a, b, "the two computers should hold the same tree");
+    assert!(
+        a.contains_key("Private/report (2).txt"),
+        "both should have arrived at the same new name, found: {a:?}"
+    );
+    assert_converged(&world);
+}

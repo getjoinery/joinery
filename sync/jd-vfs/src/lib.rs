@@ -32,8 +32,8 @@ use std::path::{Path, PathBuf};
 
 pub use dirty::{DirtyPath, DirtySet, Hint};
 pub use names::{
-    comparison_key, conflict_copy_name, is_internal, nfc, path_fits, resolve_siblings,
-    to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
+    comparison_key, conflict_copy_name, is_internal, nfc, numbered_name, path_fits,
+    resolve_siblings, to_local_name, EscapeReason, LocalName, Resolved, UnsyncableReason,
 };
 pub use paths::{canonical_root, is_inside, is_verbatim, strip_verbatim};
 pub use personality::Personality;

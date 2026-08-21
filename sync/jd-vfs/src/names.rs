@@ -338,6 +338,46 @@ pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> 
     }
 }
 
+/// The same name under a number: `report.txt` at 2 is `report (2).txt`.
+///
+/// For the one case where two files really do hold one name and neither is a
+/// conflicted version of the other. Inside a vault the server stores an opaque
+/// per-file title and enforces uniqueness on that, which is unique by
+/// construction -- so it cannot refuse a duplicate real name, and two files can
+/// end up called the same thing in one folder. Whichever loses is renamed like
+/// this, and the number is the plainest thing a person could be shown: it is
+/// what a filesystem does when you copy a file next to itself.
+///
+/// Deliberately not `conflict_copy_name`. A conflict copy says two people
+/// edited one file at once, which is not what happened and would send the user
+/// looking for a disagreement that does not exist.
+///
+/// Any existing ` (n)` is replaced rather than appended to, so renaming twice
+/// cannot produce `report (2) (3).txt`.
+pub fn numbered_name(name: &str, n: u32) -> String {
+    let (stem, ext) = split_extension(name);
+    let stem = strip_number(stem);
+    match ext {
+        Some(e) => format!("{stem} ({n}).{e}"),
+        None => format!("{stem} ({n})"),
+    }
+}
+
+/// The stem with a trailing ` (n)` removed, if it has one.
+fn strip_number(stem: &str) -> &str {
+    let Some(open) = stem.rfind(" (") else {
+        return stem;
+    };
+    let inner = &stem[open + 2..];
+    let Some(digits) = inner.strip_suffix(')') else {
+        return stem;
+    };
+    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return stem;
+    }
+    &stem[..open]
+}
+
 /// The stem with any conflict-copy marker chain removed.
 ///
 /// A conflict copy can itself lose a conflict, and naming the result by
@@ -615,6 +655,31 @@ mod tests {
         assert!(path_fits(50, 40, &p));
         // Same file, root moved somewhere with a longer name: no longer fits.
         assert!(!path_fits(50, 60, &p));
+    }
+
+    #[test]
+    fn a_duplicate_is_numbered_the_way_a_filesystem_would() {
+        assert_eq!(numbered_name("report.txt", 2), "report (2).txt");
+        assert_eq!(numbered_name("Makefile", 2), "Makefile (2)");
+        assert_eq!(numbered_name("a.b.c", 3), "a.b (3).c");
+    }
+
+    #[test]
+    fn numbering_a_numbered_name_replaces_the_number() {
+        // Otherwise a file that loses the same clash twice becomes
+        // `report (2) (3).txt`, and a third time is worse. Every device has to
+        // arrive at the same name from the same starting point, and a name that
+        // grows each time it is computed never settles.
+        assert_eq!(numbered_name("report (2).txt", 3), "report (3).txt");
+        assert_eq!(numbered_name("report (2).txt", 2), "report (2).txt");
+    }
+
+    #[test]
+    fn a_name_that_merely_ends_in_brackets_is_left_alone() {
+        // `notes (draft).txt` is what the user called it, not a number this
+        // code put there.
+        assert_eq!(numbered_name("notes (draft).txt", 2), "notes (draft) (2).txt");
+        assert_eq!(numbered_name("notes ().txt", 2), "notes () (2).txt");
     }
 
     #[test]
