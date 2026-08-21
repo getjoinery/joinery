@@ -1469,12 +1469,17 @@ ceremony, and window-close) — it registers the File decrypt hook and mail's
 `plugins/mailbox/includes/MailboxIndex.php` is a disposable, per-owner SQLite FTS5
 index — sender, subject, both bodies, and attachment *filenames* (never attachment
 contents) — held **only** in `/dev/shm` (RAM-backed, never touches disk in the clear)
-for the lifetime of the unlock window. Every fold immediately re-seals and persists the
-working copy as a private File (seal-after-fold; the sealed blob and its bookkeeping —
-high-water mark, sealed DEK — live in `imi_inbound_mailbox_search_index`), so a crash
-never loses folded work and a fresh unlock restores instantly instead of rebuilding.
-Missing, stale, or corrupt → `rebuild()` from the sealed message rows; the cache is
-never the source of truth. `InboundMailboxSearchIndex::sweepWorkingCopies()` is the
+for the lifetime of the unlock window. A fold that changed anything immediately
+re-seals and persists the working copy as a private File (seal-after-fold; the sealed
+blob and its bookkeeping — high-water mark, sealed DEK — live in
+`imi_inbound_mailbox_search_index`), so a crash never loses folded work and a fresh
+unlock restores instantly instead of rebuilding; a fold that changed nothing persists
+nothing, so repeated searches over unchanged mail never rewrite the blob. Sealing and
+restoring stream path-to-path in the chunked `v1.stream.` secretstream format
+(`VaultCrypto::sealFieldFile`/`openFieldFile` over `SealedBox::sealStreamFile`/
+`openStreamFile`), so memory stays proportional to a chunk — never to the mailbox — at
+any index size. Missing, stale, corrupt, or in any other sealed shape → `rebuild()`
+from the sealed message rows; the cache is never the source of truth. `InboundMailboxSearchIndex::sweepWorkingCopies()` is the
 passive-close safety net for a working copy the wipe callback missed (an idle APCu
 expiry, a worker recycle); it is declared as that class's `$retention_policy` and runs
 in the daily retention sweep, so worst case a copy lingers until the next sweep.

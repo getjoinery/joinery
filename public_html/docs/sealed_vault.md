@@ -81,6 +81,8 @@ $sealed = $crypto->sealItemDek($dek, $public_key);       // store on the consume
 $dek    = $crypto->openItemDek($sealed, $secret_key);
 $blob   = $crypto->sealField($plaintext, $dek, $ad);     // $ad is the CONSUMER's row-binding string
 $plain  = $crypto->openField($blob, $dek, $ad);          // e.g. 'mail:{message_id}:body_plain'
+$crypto->sealFieldFile($src, $dst, $dek, $ad);           // whole FILE, path-to-path, memory bounded
+$crypto->openFieldFile($src, $dst, $dek, $ad);           //   by a chunk (SealedBox v1.stream. format)
 ```
 
 The AD (additional data) is entirely the consumer's convention — a stable
@@ -625,8 +627,9 @@ at one place, in `includes/SealedEgressGuard.php`:
 > Once a process has actually opened sealed content, any long string it writes
 > to the database must land somewhere that protects it.
 
-A process is **cold** until `VaultCrypto::openField()` hands out a plaintext,
-and **hot** from then on. Cold is virtually every request, and costs one boolean
+A process is **cold** until `VaultCrypto::openField()` hands out a plaintext
+(or its streaming sibling `openFieldFile()` writes one to disk), and **hot**
+from then on. Cold is virtually every request, and costs one boolean
 check per statement. Hot, an INSERT or UPDATE carrying a string longer than
 `SealedEgressGuard::THRESHOLD` (64 characters) must satisfy one of:
 
@@ -711,7 +714,8 @@ message on any server, so it is not a read of stored sealed content. It is
 the only such exception, and `tests/vault/sealed_read_paths_test.php` pins
 the entire caller set of the low-level decrypt primitives — a new direct
 caller fails the suite and has to argue its case against that criterion in
-review. Everything stored sealed is read through `openField()`, which arms.
+review. Everything stored sealed is read through `openField()` (strings) or
+`openFieldFile()` (whole files, streamed), both of which arm.
 
 **The accepted gap.** Any copy shorter than the threshold passes. That is a
 deliberate trade: the surfaces that actually carry short protected content —

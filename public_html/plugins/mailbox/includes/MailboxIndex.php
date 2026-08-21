@@ -16,7 +16,10 @@
  *   - fold()        folds every message newer than the high-water mark into
  *                    the open working copy, then immediately re-seals and
  *                    persists it (seal-after-fold) — never waits for window
- *                    close, so a crash never loses folded work.
+ *                    close, so a crash never loses folded work. A fold that
+ *                    changed nothing persists nothing: the already-persisted
+ *                    blob is exactly current, so repeated searches over
+ *                    unchanged mail never rewrite a multi-megabyte file.
  *   - search()       queries the already-open working copy; the caller (
  *                    MailboxService::listThreads()) calls fold() first so a
  *                    search always sees the latest mail.
@@ -53,7 +56,7 @@
  * whose content changed or whose row is about to go; the refold pass deletes the
  * FTS row and re-inserts only if the message still exists.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
@@ -100,8 +103,14 @@ class MailboxIndex {
 	public function fold(int $user_id, string $secret_key): void {
 		$this->ensureOpen($user_id, $secret_key);
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
-		$this->foldSince($user_id, intval($bookkeeping->get('imi_fts_high_water')));
-		$this->persist($user_id, $secret_key);
+		$changed = $this->foldSince($user_id, intval($bookkeeping->get('imi_fts_high_water')));
+		// Persist only when the fold wrote something, or when no persisted blob
+		// exists yet (first index; after purgePersisted(); a persist that failed
+		// best-effort last time). When nothing was folded the persisted blob is
+		// exactly current, so skipping the write loses nothing.
+		if ($changed || intval($bookkeeping->get('imi_fil_file_id')) <= 0) {
+			$this->persist($user_id, $secret_key);
+		}
 	}
 
 	/** Message ids matching $query in the (already-open) working copy. */
@@ -237,7 +246,18 @@ class MailboxIndex {
 		}
 	}
 
-	/** Restore the /dev/shm working copy from the persisted sealed blob. False if there is none / it fails to open. */
+	/**
+	 * Restore the /dev/shm working copy from the persisted sealed blob. False
+	 * if there is none / it fails to open — the caller then rebuild()s.
+	 *
+	 * Streams from the blob's on-disk path straight to the /dev/shm working
+	 * path (index blobs are private files on local disk), so restore memory is
+	 * bounded by a chunk, never by the index. A blob that is not in the stream
+	 * format — including one sealed by a build that used the whole-blob string
+	 * seal — is refused here, which is just the disposable-cache contract: the
+	 * caller rebuilds from the sealed message rows and the next persist writes
+	 * stream-format.
+	 */
 	private function restoreFromBlob(int $user_id, string $secret_key): bool {
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$fil_id = intval($bookkeeping->get('imi_fil_file_id'));
@@ -249,27 +269,25 @@ class MailboxIndex {
 		if (!$file->key || $file->get('fil_delete_time')) {
 			return false;
 		}
-		$ciphertext = $file->read_bytes('original');
-		if ($ciphertext === null) {
+		$blob = $file->_blob();
+		$src = $blob ? $blob->filesystem_path('original') : '';
+		if ($src === '' || !is_file($src) || !SealedBox::isStreamFile($src)) {
 			return false;
 		}
 		try {
 			$crypto = new VaultCrypto();
 			$dek = $crypto->openItemDek((string)$sealed_key, $secret_key);
-			$bytes = $crypto->openField($ciphertext, $dek, $this->blobAd($user_id));
+			$crypto->openFieldFile($src, $this->shmPath($user_id), $dek, $this->blobAd($user_id));
 		} catch (Throwable $e) {
 			error_log('MailboxIndex: restoreFromBlob failed for user ' . $user_id . ' (rebuilding): ' . $e->getMessage());
-			return false;
-		}
-		if (file_put_contents($this->shmPath($user_id), $bytes) === false) {
 			return false;
 		}
 		return $this->tryOpenDb($this->shmPath($user_id)) !== null;
 	}
 
 	/**
-	 * Seal-after-fold: read the /dev/shm bytes, seal fresh, persist as a private
-	 * File.
+	 * Seal-after-fold: seal the /dev/shm file path-to-path (memory bounded by
+	 * a chunk at any index size) and persist the sealed file as a private File.
 	 *
 	 * Never throws. The persisted blob is a restore shortcut for the next
 	 * unlock, not the index itself — the working copy in /dev/shm is already
@@ -292,10 +310,6 @@ class MailboxIndex {
 		if (!file_exists($path)) {
 			return;
 		}
-		$bytes = file_get_contents($path);
-		if ($bytes === false) {
-			return;
-		}
 		$vault = UserEncryptionVault::loadForUser($user_id);
 		if (!$vault) {
 			return;
@@ -304,15 +318,27 @@ class MailboxIndex {
 		$crypto = new VaultCrypto();
 		$dek = $crypto->newItemDek();
 		$sealed_key = $crypto->sealItemDek($dek, (string)$vault->get('uev_public_key'));
-		$blob = $crypto->sealField($bytes, $dek, $this->blobAd($user_id));
 
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$old_fil_id = intval($bookkeeping->get('imi_fil_file_id'));
 
-		$file = File::createFromBytes($blob, 'mailfts_' . $user_id . '.bin', 'application/octet-stream', $user_id, array(
-			'fil_private' => true,
-			'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
-		));
+		// Seal to a temp file, then hand it to the path-based ingest — the index
+		// content is never held as a string anywhere on this path.
+		$tmp = tempnam(sys_get_temp_dir(), 'mailfts_seal_');
+		if ($tmp === false) {
+			throw new MailboxIndexException('MailboxIndex: unable to create a temp file for the sealed index.');
+		}
+		try {
+			$crypto->sealFieldFile($path, $tmp, $dek, $this->blobAd($user_id));
+			$file = File::createFromUpload($tmp, 'mailfts_' . $user_id . '.bin', 'application/octet-stream', $user_id, array(
+				'fil_private' => true,
+				'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
+			));
+		} finally {
+			if (is_file($tmp)) {
+				@unlink($tmp);
+			}
+		}
 
 		$bookkeeping->set('imi_fil_file_id', intval($file->key));
 		$bookkeeping->set('imi_sealed_key', $sealed_key);
@@ -332,11 +358,14 @@ class MailboxIndex {
 	 * advancing the high-water mark as it goes. Reads content the same way a
 	 * viewer would (InboundEmailMessage::get(), routed through the sealed-field
 	 * hook), so it works identically for sealed and never-sealed rows.
+	 *
+	 * @return bool whether anything was written — a new row folded or a refold
+	 *              entry processed. fold() persists only when this is true.
 	 */
-	private function foldSince(int $user_id, int $since_id): void {
+	private function foldSince(int $user_id, int $since_id): bool {
 		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
 		if (!count($alias_ids)) {
-			return;
+			return false;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$in = implode(',', array_map('intval', $alias_ids));
@@ -364,7 +393,7 @@ class MailboxIndex {
 		$ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 
 		if (!count($ids) && !count($refold)) {
-			return; // nothing to fold and nothing queued — the early-out
+			return false; // nothing to fold and nothing queued — the early-out
 		}
 
 		// Which refold ids are still indexable (the row exists, non-draft, in the
@@ -429,6 +458,7 @@ class MailboxIndex {
 		$bookkeeping->set('imi_fts_high_water', $last_id);
 		$bookkeeping->set('imi_refold_ids', null);
 		$bookkeeping->save();
+		return true;
 	}
 
 	/**

@@ -17,7 +17,12 @@
  * tampered ciphertext, or an AD mismatch all raise RuntimeException; nothing
  * is ever returned half-verified.
  *
- * @version 1.2
+ * Alongside the string forms there is one FILE form: the chunked secretstream
+ * format (`v1.stream.`, sealStreamFile/openStreamFile), path-to-path with
+ * memory bounded by one chunk — for content too large to ever hold as a
+ * string, such as the sealed mailbox search index.
+ *
+ * @version 1.3
  */
 class SealedBox {
 
@@ -170,6 +175,178 @@ class SealedBox {
 			throw new RuntimeException('SealedBox: AEAD decryption failed (tampered, wrong key, or AD mismatch).');
 		}
 		return $plain;
+	}
+
+	// ------------------------------------------------------------------
+	// The streaming sealed-file format (v1.stream.) — authenticated encryption
+	// of a whole FILE in bounded memory, built on libsodium's secretstream.
+	//
+	// Layout: ASCII magic `v1.stream.` + the secretstream header + repeated
+	// frames of [4-byte big-endian ciphertext length][ciphertext]. The last
+	// frame carries the secretstream FINAL tag, so truncation is detectable
+	// and rejected exactly as the AEAD tag rejects tamper. The caller's AD is
+	// bound to EVERY frame, preserving the splice defense: a frame, or a whole
+	// file, sealed in one context can never decrypt in another.
+	// ------------------------------------------------------------------
+
+	const STREAM_MAGIC = 'v1.stream.';
+
+	/** Plaintext bytes per secretstream frame. Peak memory for a seal or an
+	 *  open is one chunk in and one chunk out, regardless of file size. */
+	const STREAM_CHUNK_BYTES = 1048576;
+
+	/**
+	 * Seal $src_path into the stream format at $dst_path, path to path — the
+	 * plaintext is never held as one string. The destination is written to a
+	 * temp name and renamed in only on success, so a failure never leaves a
+	 * partial sealed file behind. Uses the same 32-byte symmetric key size as
+	 * the AEAD string form.
+	 */
+	public function sealStreamFile(string $src_path, string $dst_path, string $key, string $ad): void {
+		if (strlen($key) !== SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES) {
+			throw new RuntimeException('SealedBox: secretstream key must be exactly '
+				. SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES . ' bytes.');
+		}
+		$in = @fopen($src_path, 'rb');
+		if ($in === false) {
+			throw new RuntimeException('SealedBox: cannot open stream source for reading.');
+		}
+		$tmp = $dst_path . '.sealing.' . bin2hex(random_bytes(6));
+		$out = @fopen($tmp, 'xb');
+		if ($out === false) {
+			fclose($in);
+			throw new RuntimeException('SealedBox: cannot open stream destination for writing.');
+		}
+		try {
+			list($state, $header) = sodium_crypto_secretstream_xchacha20poly1305_init_push($key);
+			if (fwrite($out, self::STREAM_MAGIC . $header) === false) {
+				throw new RuntimeException('SealedBox: stream header write failed.');
+			}
+			// Read one chunk ahead: only after seeing EOF is it known that the
+			// chunk in hand is the last, and the last frame must carry FINAL.
+			$chunk = fread($in, self::STREAM_CHUNK_BYTES);
+			if ($chunk === false) {
+				throw new RuntimeException('SealedBox: stream source read failed.');
+			}
+			do {
+				$next = fread($in, self::STREAM_CHUNK_BYTES);
+				if ($next === false) {
+					throw new RuntimeException('SealedBox: stream source read failed.');
+				}
+				$final = ($next === '' && feof($in));
+				$cipher = sodium_crypto_secretstream_xchacha20poly1305_push($state, $chunk, $ad,
+					$final ? SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL
+					       : SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_MESSAGE);
+				if (fwrite($out, pack('N', strlen($cipher)) . $cipher) === false) {
+					throw new RuntimeException('SealedBox: stream frame write failed.');
+				}
+				$chunk = $next;
+			} while (!$final);
+			fclose($out);
+			$out = null;
+			fclose($in);
+			$in = null;
+			if (!@rename($tmp, $dst_path)) {
+				throw new RuntimeException('SealedBox: cannot move the sealed stream into place.');
+			}
+		} catch (Throwable $e) {
+			if ($in) { fclose($in); }
+			if ($out) { fclose($out); }
+			@unlink($tmp);
+			throw ($e instanceof RuntimeException) ? $e
+				: new RuntimeException('SealedBox: stream seal failed: ' . $e->getMessage());
+		}
+	}
+
+	/**
+	 * Open a file sealed by sealStreamFile() into $dst_path, path to path.
+	 * Throws on tamper, truncation (a missing FINAL frame), trailing data
+	 * after the FINAL frame, a wrong key, or an AD mismatch. The destination
+	 * is written to a temp name and renamed in only on success, so a failed
+	 * open never leaves a partial plaintext file behind.
+	 */
+	public function openStreamFile(string $src_path, string $dst_path, string $key, string $ad): void {
+		if (strlen($key) !== SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES) {
+			throw new RuntimeException('SealedBox: secretstream key must be exactly '
+				. SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_KEYBYTES . ' bytes.');
+		}
+		$in = @fopen($src_path, 'rb');
+		if ($in === false) {
+			throw new RuntimeException('SealedBox: cannot open sealed stream for reading.');
+		}
+		$tmp = $dst_path . '.opening.' . bin2hex(random_bytes(6));
+		$out = @fopen($tmp, 'xb');
+		if ($out === false) {
+			fclose($in);
+			throw new RuntimeException('SealedBox: cannot open stream destination for writing.');
+		}
+		try {
+			if (fread($in, strlen(self::STREAM_MAGIC)) !== self::STREAM_MAGIC) {
+				throw new RuntimeException('SealedBox: not a sealed stream file.');
+			}
+			$header = fread($in, SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_HEADERBYTES);
+			if (!is_string($header) || strlen($header) !== SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_HEADERBYTES) {
+				throw new RuntimeException('SealedBox: sealed stream header truncated.');
+			}
+			$state = sodium_crypto_secretstream_xchacha20poly1305_init_pull($header, $key);
+			// A frame length outside what sealStreamFile can produce is corrupt;
+			// rejecting it here also refuses a forged length that would demand a
+			// giant allocation before decryption could catch it.
+			$max_frame = self::STREAM_CHUNK_BYTES + SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES;
+			$saw_final = false;
+			while (!$saw_final) {
+				$len_raw = fread($in, 4);
+				if ($len_raw === '' || $len_raw === false) {
+					throw new RuntimeException('SealedBox: sealed stream truncated (no FINAL frame).');
+				}
+				if (strlen($len_raw) !== 4) {
+					throw new RuntimeException('SealedBox: sealed stream frame length truncated.');
+				}
+				$len = unpack('N', $len_raw)[1];
+				if ($len < SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_ABYTES || $len > $max_frame) {
+					throw new RuntimeException('SealedBox: sealed stream frame length out of range.');
+				}
+				$cipher = fread($in, $len);
+				if (!is_string($cipher) || strlen($cipher) !== $len) {
+					throw new RuntimeException('SealedBox: sealed stream frame truncated.');
+				}
+				$pulled = sodium_crypto_secretstream_xchacha20poly1305_pull($state, $cipher, $ad);
+				if ($pulled === false) {
+					throw new RuntimeException('SealedBox: sealed stream decryption failed (tampered, wrong key, or AD mismatch).');
+				}
+				if (fwrite($out, $pulled[0]) === false) {
+					throw new RuntimeException('SealedBox: stream plaintext write failed.');
+				}
+				$saw_final = ($pulled[1] === SODIUM_CRYPTO_SECRETSTREAM_XCHACHA20POLY1305_TAG_FINAL);
+			}
+			if (fread($in, 1) !== '' || !feof($in)) {
+				throw new RuntimeException('SealedBox: sealed stream carries data after the FINAL frame.');
+			}
+			fclose($out);
+			$out = null;
+			fclose($in);
+			$in = null;
+			if (!@rename($tmp, $dst_path)) {
+				throw new RuntimeException('SealedBox: cannot move the opened stream into place.');
+			}
+		} catch (Throwable $e) {
+			if ($in) { fclose($in); }
+			if ($out) { fclose($out); }
+			@unlink($tmp);
+			throw ($e instanceof RuntimeException) ? $e
+				: new RuntimeException('SealedBox: stream open failed: ' . $e->getMessage());
+		}
+	}
+
+	/** Magic-prefix sniff: is this file in the sealed stream format? */
+	public static function isStreamFile(string $path): bool {
+		$fh = @fopen($path, 'rb');
+		if ($fh === false) {
+			return false;
+		}
+		$magic = fread($fh, strlen(self::STREAM_MAGIC));
+		fclose($fh);
+		return $magic === self::STREAM_MAGIC;
 	}
 
 	/**
