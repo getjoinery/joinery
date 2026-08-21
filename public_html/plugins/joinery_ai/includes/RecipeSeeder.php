@@ -31,7 +31,7 @@ class RecipeSeederException extends Exception {}
  * a member's own enabled copy of one via instantiateForUser() — same declared
  * fields, different identity and arming posture.
  *
- * @version 1.1
+ * @version 1.3
  */
 class RecipeSeeder {
 
@@ -41,9 +41,9 @@ class RecipeSeeder {
     /**
      * Fields a shipped recipe never carries, and why.
      *
-     * Named here rather than inline because both halves of the round trip need
-     * the same list: the marking action strips them on the way out, and seeding
-     * fixes them on the way in.
+     * recipes.json is hand-edited; this list is how a mistake in it is caught:
+     * the manifest test rejects any declaration carrying one of these, and
+     * seeding fixes their values on the way in regardless.
      */
     const NON_TRAVELLING_FIELDS = [
         'rcp_owner_user_id'        => 'points at a user on the publishing instance',
@@ -339,9 +339,18 @@ class RecipeSeeder {
         $recipe->set('rcp_schedule_frequency', (string)($declaration['schedule_frequency'] ?? 'weekly'));
         $recipe->set('rcp_schedule_day_of_week', $declaration['schedule_day_of_week'] ?? null);
         $recipe->set('rcp_schedule_time', $declaration['schedule_time'] ?? null);
-        $recipe->set('rcp_max_iterations', (int)($declaration['max_iterations'] ?? 5));
-        $recipe->set('rcp_max_tokens', (int)($declaration['max_tokens'] ?? 5000));
-        $recipe->set('rcp_monthly_token_cap', (int)($declaration['monthly_token_cap'] ?? 200000));
+        // A declaration that omits a limit inherits the field-spec default:
+        // save() fills any unset column with its declared default, so shipped
+        // recipes track the platform default unless they deliberately pin one.
+        if (isset($declaration['max_iterations'])) {
+            $recipe->set('rcp_max_iterations', (int)$declaration['max_iterations']);
+        }
+        if (isset($declaration['max_tokens'])) {
+            $recipe->set('rcp_max_tokens', (int)$declaration['max_tokens']);
+        }
+        if (isset($declaration['monthly_token_cap'])) {
+            $recipe->set('rcp_monthly_token_cap', (int)$declaration['monthly_token_cap']);
+        }
         $recipe->set('rcp_thinking_level', (string)($declaration['thinking_level'] ?? 'off'));
         $recipe->set('rcp_delivery_dashboard', true);
 
@@ -357,169 +366,4 @@ class RecipeSeeder {
         $recipe->set('rcp_model', '');
         return $recipe;
     }
-
-    // ========== Marking a recipe to ship ==========
-
-    /**
-     * Write a recipe into recipes.json as a declaration, creating or replacing
-     * the entry for its key.
-     *
-     * Only meaningful on an instance that publishes upgrades — see
-     * DeploymentHelper::isUpgradeServer(). Elsewhere the file is replaced
-     * wholesale by the next upgrade and the edit would be silently discarded,
-     * so callers gate the control rather than letting it lie.
-     *
-     * @return string the declared key now stored on the recipe
-     * @throws RecipeSeederException
-     */
-    public static function ship(Recipe $recipe, ?string $path = null): string {
-        if (!$recipe->key) {
-            throw new RecipeSeederException('Save the recipe before marking it to ship.');
-        }
-
-        $path = $path ?? self::manifestPath();
-        $data = ['recipes' => []];
-        if (file_exists($path)) {
-            $decoded = json_decode((string)file_get_contents($path), true);
-            if (!is_array($decoded)) {
-                throw new RecipeSeederException('recipes.json is not valid JSON — fix it before marking a recipe.');
-            }
-            $data = $decoded;
-            if (!isset($data['recipes']) || !is_array($data['recipes'])) $data['recipes'] = [];
-        }
-
-        $existing_keys = [];
-        foreach ($data['recipes'] as $entry) {
-            if (is_array($entry) && !empty($entry['key'])) $existing_keys[] = (string)$entry['key'];
-        }
-
-        $key = (string)$recipe->get('rcp_declared_key');
-        if ($key === '') {
-            // Keys already claimed by a row on this instance count as taken too:
-            // the column is unique, so a name that slugs onto one would fail the
-            // stamp-back save below rather than the file write.
-            $db = DbConnector::get_instance()->get_db_link();
-            $claimed = $db->query("SELECT rcp_declared_key FROM rcp_recipes WHERE rcp_declared_key IS NOT NULL")
-                          ->fetchAll(PDO::FETCH_COLUMN);
-            $key = self::makeKey((string)$recipe->get('rcp_name'),
-                array_merge($existing_keys, array_map('strval', $claimed)));
-        }
-
-        $declaration = self::declarationFrom($recipe, $key, $path);
-
-        $replaced = false;
-        foreach ($data['recipes'] as $i => $entry) {
-            if (is_array($entry) && (string)($entry['key'] ?? '') === $key) {
-                $data['recipes'][$i] = $declaration;
-                $replaced = true;
-                break;
-            }
-        }
-        if (!$replaced) $data['recipes'][] = $declaration;
-        $data['recipes'] = array_values($data['recipes']);
-
-        $json = json_encode($data, JSON_PRETTY_PRINT | JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-        if ($json === false) {
-            throw new RecipeSeederException('Could not encode recipes.json.');
-        }
-        if (@file_put_contents($path, $json . "\n") === false) {
-            throw new RecipeSeederException('Could not write ' . self::MANIFEST . ' — check file permissions.');
-        }
-        @chmod($path, 0666);
-
-        // Stamping the key back means marking the same recipe again updates its
-        // entry instead of adding a second one, and means this instance won't
-        // re-seed a duplicate of a recipe it already has.
-        if ((string)$recipe->get('rcp_declared_key') !== $key) {
-            $recipe->set('rcp_declared_key', $key);
-            $recipe->set('rcp_update_time', gmdate('Y-m-d H:i:s'));
-            $recipe->save();
-        }
-
-        return $key;
-    }
-
-    /**
-     * The travelling half of a recipe: what it does and how it is bounded,
-     * with identity and binding left off.
-     */
-    public static function declarationFrom(Recipe $recipe, string $key, ?string $path = null): array {
-        $declaration = [
-            'key'  => $key,
-            'name' => (string)$recipe->get('rcp_name'),
-        ];
-
-        $job = trim((string)$recipe->get('rcp_pipeline_job'));
-        if ($job !== '') $declaration['pipeline_job'] = $job;
-
-        // The prompt travels only when the operator wrote one. An empty prompt
-        // means the job class's own defaultPrompt() applies, and that is the
-        // wording we want on the destination — it improves with every upgrade,
-        // where a prompt frozen into this file never would.
-        $declaration['prompt'] = (string)$recipe->get('rcp_prompt');
-
-        $declaration['schedule_frequency'] = (string)$recipe->get('rcp_schedule_frequency');
-        $dow = $recipe->get('rcp_schedule_day_of_week');
-        if ($dow !== null && $dow !== '') $declaration['schedule_day_of_week'] = (int)$dow;
-        $time = $recipe->get('rcp_schedule_time');
-        if (is_object($time) && method_exists($time, 'format')) $time = $time->format('H:i:s');
-        if ($time) $declaration['schedule_time'] = (string)$time;
-
-        $declaration['max_iterations']    = (int)$recipe->get('rcp_max_iterations');
-        $declaration['max_tokens']        = (int)$recipe->get('rcp_max_tokens');
-        $declaration['monthly_token_cap'] = (int)$recipe->get('rcp_monthly_token_cap');
-        $declaration['thinking_level']    = (string)$recipe->get('rcp_thinking_level') ?: 'off';
-
-        // An AGENT-mode recipe carries its own requirement, because it has no
-        // job to declare one. A pipeline recipe carries none: its job is the
-        // single source, and repeating the floor here would be a second answer
-        // to keep in step. Only an operator's explicit override travels — a
-        // NULL column means "inherit", and shipping an inherited value would
-        // freeze whatever this publishing instance happened to resolve.
-        if ($job === '') {
-            foreach ([
-                'min_tier'          => 'rcp_min_tier',
-                'trust_floor'       => 'rcp_trust_floor',
-                'min_context'       => 'rcp_min_context',
-                'thinking_required' => 'rcp_thinking_required',
-            ] as $declared => $column) {
-                $v = $recipe->get($column);
-                if ($v === null || $v === '') continue;
-                $declaration[$declared] = ($declared === 'min_context') ? (int)$v
-                    : (($declared === 'thinking_required') ? (bool)$v : (string)$v);
-            }
-        }
-
-        // Carry forward a requires_plugin already declared for this key rather
-        // than dropping it — the marking action re-writes the whole entry.
-        try {
-            foreach (self::declarations($path) as $existing) {
-                if ((string)$existing['key'] === $key && !empty($existing['requires_plugin'])) {
-                    $declaration['requires_plugin'] = (string)$existing['requires_plugin'];
-                }
-            }
-        } catch (RecipeSeederException $e) {
-            // Unreadable manifest is reported by ship(); nothing to carry forward.
-        }
-
-        return $declaration;
-    }
-
-    /** A stable, readable key from the recipe name, unique within the file. */
-    public static function makeKey(string $name, array $existing_keys): string {
-        $slug = strtolower(trim($name));
-        $slug = preg_replace('/[^a-z0-9]+/', '_', $slug);
-        $slug = trim((string)$slug, '_');
-        if ($slug === '') $slug = 'recipe';
-        $slug = substr($slug, 0, 80);
-
-        $key = $slug;
-        $n = 2;
-        while (in_array($key, $existing_keys, true)) {
-            $key = $slug . '_' . $n;
-            $n++;
-        }
-        return $key;
-    }
-
 }

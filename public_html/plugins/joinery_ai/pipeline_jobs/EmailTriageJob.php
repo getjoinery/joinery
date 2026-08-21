@@ -19,7 +19,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_label_memb
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.2
+ * @version 1.3
  */
 class EmailTriageJob extends EmailPipelineJobBase {
 
@@ -36,8 +36,7 @@ class EmailTriageJob extends EmailPipelineJobBase {
     }
 
     protected function mailboxFieldHelp(): string {
-        return 'The stored mailboxes this recipe labels and summarizes — it covers exactly '
-             . 'the ones ticked here, nothing implicitly. The recipe owner must hold a grant '
+        return 'Only the ticked mailboxes are labeled and summarized; the owner needs a grant '
              . 'on each. The mail page\'s AI panel edits this same list.';
     }
 

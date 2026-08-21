@@ -3,7 +3,6 @@
 function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
     require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-    require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
@@ -47,9 +46,11 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $recipe->set('rcp_schedule_time', $default_utc_time);
         $recipe->set('rcp_delivery_dashboard', true);
         $recipe->set('rcp_enabled', false);
-        $recipe->set('rcp_max_iterations', 5);
-        $recipe->set('rcp_max_tokens', 5000);
-        $recipe->set('rcp_monthly_token_cap', 200000);
+        // Prefill from the field spec so the form shows the same defaults
+        // save() would apply — the spec is the single source for these.
+        $recipe->set('rcp_max_iterations', Recipe::$field_specifications['rcp_max_iterations']['default']);
+        $recipe->set('rcp_max_tokens', Recipe::$field_specifications['rcp_max_tokens']['default']);
+        $recipe->set('rcp_monthly_token_cap', Recipe::$field_specifications['rcp_monthly_token_cap']['default']);
     }
 
     // joinery-validate.js calls form.submit() directly, which strips the
@@ -61,28 +62,6 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         if (isset($input['btn_delete']) && $recipe->key) {
             $recipe->soft_delete();
             return LogicResult::redirect('/admin/joinery_ai');
-        }
-
-        // "Ship with new installs" — writes this recipe into recipes.json as a
-        // declaration, minus the fields that can't travel. The predicate is
-        // re-checked here and not only in the view: the control being hidden is
-        // presentation, this is the rule.
-        if (isset($input['btn_ship_template']) && $recipe->key) {
-            require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSeeder.php'));
-            if (!DeploymentHelper::isUpgradeServer()) {
-                return LogicResult::error(
-                    'This instance receives upgrades rather than publishing them, so an edit to '
-                    . 'recipes.json would be replaced by the next upgrade.',
-                    ['recipe' => $recipe, 'session' => $session]
-                );
-            }
-            try {
-                $shipped_key = RecipeSeeder::ship($recipe);
-            } catch (Throwable $e) {
-                return LogicResult::error($e->getMessage(), ['recipe' => $recipe, 'session' => $session]);
-            }
-            return LogicResult::redirect('/admin/joinery_ai/edit?rcp_recipe_id=' . $recipe->key
-                . '&shipped=' . urlencode($shipped_key));
         }
 
         // A saved recipe's SHAPE is fixed: its mode, and for a pipeline recipe
@@ -351,8 +330,6 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         'recipe' => $recipe,
         'session' => $session,
         'saved' => !empty($input['saved']),
-        'shipped_key' => (string)($input['shipped'] ?? ''),
-        'is_upgrade_server' => DeploymentHelper::isUpgradeServer(),
         // How this recipe's binding will honour whatever the Runs control says.
         // Computed from the SAVED recipe: a binding edited but not yet saved
         // keeps showing the previous classification, which is honest because
@@ -409,7 +386,9 @@ function joinery_ai_resolution_preview(Recipe $recipe): array {
  */
 function joinery_ai_schedule_fact(Recipe $recipe): string {
     if (!RecipeVaultScope::requiresWindow($recipe)) {
-        return 'The server runs this by itself.';
+        // Nothing sealed: nothing needs explaining, so no line at all. The
+        // view omits the paragraph when this is empty.
+        return '';
     }
     if (RecipeVaultScope::cronRunnable($recipe)) {
         return 'Some of what this recipe reads is encrypted. The encrypted part runs while '

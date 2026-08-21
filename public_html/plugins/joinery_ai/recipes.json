@@ -1,5 +1,5 @@
 {
-    "_comment": "Recipes seeded onto every install. Create-only: a declaration makes a recipe once and never edits or restores it. Leave prompt empty so the job class keeps ownership of the wording and upgrades can improve it. See specs/implemented/joinery_ai_shipped_recipes.md.",
+    "_comment": "Recipes seeded onto every install. Create-only: a declaration makes a recipe once and never edits or restores it. Leave prompt empty so the job class keeps ownership of the wording and upgrades can improve it. A limit field (max_iterations, max_tokens, monthly_token_cap) left out inherits the platform default from the Recipe field spec. See specs/implemented/joinery_ai_shipped_recipes.md.",
     "recipes": [
         {
             "key": "email_triage_default",
@@ -9,8 +9,6 @@
             "prompt": "",
             "schedule_frequency": "hourly",
             "max_iterations": 25,
-            "max_tokens": 5000,
-            "monthly_token_cap": 200000,
             "thinking_level": "off"
         },
         {
@@ -21,8 +19,6 @@
             "prompt": "",
             "schedule_frequency": "hourly",
             "max_iterations": 25,
-            "max_tokens": 5000,
-            "monthly_token_cap": 200000,
             "thinking_level": "off"
         },
         {
@@ -33,8 +29,6 @@
             "prompt": "",
             "schedule_frequency": "hourly",
             "max_iterations": 25,
-            "max_tokens": 5000,
-            "monthly_token_cap": 200000,
             "thinking_level": "off"
         },
         {
@@ -46,7 +40,6 @@
             "schedule_frequency": "hourly",
             "max_iterations": 50,
             "max_tokens": 4000,
-            "monthly_token_cap": 200000,
             "thinking_level": "off"
         }
     ]
