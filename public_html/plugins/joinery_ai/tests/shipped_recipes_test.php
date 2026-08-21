@@ -28,7 +28,7 @@
  *
  * Run: php tests/run.php db --filter=shipped_recipes
  *
- * @version 1.1
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -358,6 +358,42 @@ check($r->error === null || stripos((string)$r->error, 'cannot change its') === 
 check($r->error === null,
 	'and the unbound save completes — an empty mailbox list is legal',
 	var_export($r->error, true));
+
+// -----------------------------------------------------------------------------
+section('Customizing the prompt stamps its fork point');
+
+// The baseline is what makes the upstream-changed notice possible: it records
+// the built-in wording the operator forked FROM, so the edit page can say the
+// current built-in has since improved.
+$builtin_triage = (new EmailTriageJob())->defaultPrompt();
+
+$customize_input = $same_input;
+$customize_input['rcp_prompt'] = 'my own wording';
+$r = harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $customize_input);
+check($r->error === null, 'customizing the prompt saves', var_export($r->error, true));
+$row = $fetch($key_prefix . 'b');
+check($row && (string)$row['rcp_prompt_baseline'] === $builtin_triage,
+	'the job built-in as it stands NOW is stamped as the fork point');
+
+// Editing the wording again is not a new fork — the original point survives,
+// so a notice cannot be silenced by an unrelated later edit.
+$db->prepare("UPDATE rcp_recipes SET rcp_prompt_baseline = ? WHERE rcp_declared_key = ?")
+   ->execute(array('the built-in as it was at fork time', $key_prefix . 'b'));
+$customize_input['rcp_prompt'] = 'my own wording, edited again';
+harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $customize_input);
+$row = $fetch($key_prefix . 'b');
+check($row && (string)$row['rcp_prompt_baseline'] === 'the built-in as it was at fork time',
+	'editing an already-customized prompt keeps the original fork point');
+
+// Reverting to the built-in clears it — there is no fork to track any more.
+$customize_input['rcp_prompt'] = '';
+harness_call_logic('plugins/joinery_ai/logic/admin_edit_logic.php',
+	'admin_joinery_ai_edit_logic', $customize_input);
+$row = $fetch($key_prefix . 'b');
+check($row && $row['rcp_prompt_baseline'] === null,
+	'reverting to the built-in clears the fork point');
 
 // -----------------------------------------------------------------------------
 section('The sync hook is wired up');
