@@ -20,6 +20,7 @@
  *     question DKIM already asks, answered the same way, so a Fortress domain
  *     cannot sign in anyone's name from a locked box.
  *
+ * @version 1.3 - resolveAddress() refuses IMAP-source domains — not hosted here
  * @version 1.2
  * @changelog 1.2 - a resolved mailbox answers with its OWN protection posture;
  *   the domain's answer stands only while no mailbox has resolved
@@ -56,8 +57,13 @@ class MailboxDirectConsumer {
 			return null;
 		}
 
+		// Authoritative domains only. An IMAP-source anchor (gmail.com behind a
+		// connected account) is a domain this deployment mirrors, not hosts —
+		// answering a Direct preflight for it would claim an authority no
+		// sender's DNS lookup could ever route here anyway
+		// (specs/imap_source_domain_boundaries.md § 4).
 		$domain = InboundEmailDomain::GetByDomain($domain_name);
-		if (!$domain || !$domain->key || !$domain->get('ied_is_enabled')) {
+		if (!$domain || !$domain->key || !$domain->is_authoritative()) {
 			return null;
 		}
 

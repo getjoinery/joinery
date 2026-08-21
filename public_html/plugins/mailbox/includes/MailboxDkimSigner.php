@@ -12,6 +12,8 @@
  * Registered into the core MailIdentityGuard at plugin bootstrap so core send
  * code (SmtpProvider, EmailSender) never names a mailbox symbol.
  *
+ * @version 1.2 - relay-fronted in-app signing skips IMAP-source domains, ending
+ *   the permanent UNSIGNED false alarm for connected-account sends
  * @version 1.1
  */
 
@@ -72,7 +74,11 @@ class MailboxDkimSigner {
 			// is decommissioned, so sign in-app here with the same filesystem DKIM
 			// key opendkim would have used — otherwise standard hosted sends leave
 			// unsigned and get spam-foldered (specs/mailbox_relay_fix_pack.md § Fix 4).
-			if ($domain !== null && self::relayActive()) {
+			// An IMAP-source anchor (gmail.com) is skipped outright: this
+			// deployment never signs for a domain it merely mirrors, and looking
+			// for its key would cry UNSIGNED on every send forever
+			// (specs/imap_source_domain_boundaries.md § 4).
+			if ($domain !== null && !$domain->is_imap_source() && self::relayActive()) {
 				return self::standardFilesystemSigner($domain);
 			}
 			return null;

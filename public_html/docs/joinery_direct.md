@@ -64,6 +64,14 @@ silently. Publishing the records is the *last* step of enabling Direct for a
 domain; they only enter the plan once the channel is on and the domain holds a
 signing identity, which is minted the first time its plan is built.
 
+A signing identity exists only for a domain the deployment is **authoritative**
+for. The mint itself refuses anything else — in particular an IMAP-source
+domain (the anchor row a connected Gmail/Outlook account creates), whose DNS
+nobody here could ever publish records under. The authority answer comes from a
+resolver the mailbox plugin registers (`DirectSigningIdentity::
+registerAuthorityResolver`, backed by `InboundEmailDomain::is_authoritative()`),
+so core never names a plugin symbol.
+
 Every DNS driver publishes SRV. Vendors model it three different ways and each
 driver translates: some take the whole RDATA verbatim, some split the priority
 out and carry `weight port target` as content (the shape they already use for

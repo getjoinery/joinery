@@ -20,6 +20,7 @@
  *      actually doing (relay row => 'relay', else 'direct').
  *   3. Otherwise '' — undecided, which every consumer treats as direct.
  *
+ * @version 1.5 - IMAP-source domains do not decide the receive topology
  * @version 1.4 - a settled deployment reads its state in a sentence; the
  *                comparison is a decision aid and waits behind a disclosure
  * @version 1.3 - the choice no longer gates the mailbox surfaces
@@ -63,11 +64,22 @@ function mailbox_receive_relay_exists(): bool {
 function mailbox_receive_mode(): string {
 	require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 
+	// Only a domain this deployment actually receives for counts as a decided
+	// topology. An IMAP-source anchor (gmail.com behind a connected account)
+	// receives at its provider, so an IMAP-only deployment stays undecided
+	// (specs/imap_source_domain_boundaries.md § 3).
 	$domains = new MultiInboundEmailDomain(array('deleted' => false));
 	$domains->load();
+	$has_receiving_domain = false;
+	foreach ($domains as $d) {
+		if (!$d->is_imap_source()) {
+			$has_receiving_domain = true;
+			break;
+		}
+	}
 	$setting = (string)Globalvars::get_instance()->get_setting('mailbox_receive_mode');
 
-	return mailbox_receive_mode_resolve(mailbox_receive_relay_exists(), $setting, count($domains) > 0);
+	return mailbox_receive_mode_resolve(mailbox_receive_relay_exists(), $setting, $has_receiving_domain);
 }
 
 /**

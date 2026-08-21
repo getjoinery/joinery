@@ -16,6 +16,8 @@
  * that signed the request. A stranger cannot open a conversation with you, for
  * exactly the reason a stranger cannot send you direct mail.
  *
+ * @version 1.2.3 - localDomain() answers for authoritative domains only, so an
+ *   IMAP-source anchor no longer swallows chat to its provider's addresses
  * @version 1.2.2
  * @changelog 1.2.2 - a LOCKED send (vault-sealed signing key, owner absent) defers until presence like a sealed body read, instead of burning the retry budget on attempts nobody can make succeed
  * @changelog 1.2.1 - addressFor() prefers a PUBLISHED domain over a merely signable one: the Setup tab mints an identity for every enabled domain, so first-with-an-identity picked arbitrary unpublished domains and every send refused at the self-check
@@ -69,14 +71,20 @@ class MessengerFederation {
 	/**
 	 * Is $domain one of this site's own (enabled) inbound mail domains?
 	 * An address here never goes over the wire — it resolves internally.
+	 *
+	 * Authoritative domains only: an IMAP-source anchor (gmail.com behind a
+	 * connected account) is not local — treating it so would short-circuit
+	 * every @gmail.com correspondent as "cannot be reached by chat" and
+	 * local-trap chat to any real Joinery domain someone mirrors over IMAP
+	 * (specs/imap_source_domain_boundaries.md § 4).
 	 */
 	public static function localDomain(string $domain): bool {
 		$domain = strtolower(trim($domain));
 		if ($domain === '' || !PluginHelper::isPluginActive('mailbox')) {
 			return false;
 		}
-		$domains = new MultiInboundEmailDomain(array('domain' => $domain, 'enabled' => true));
-		return count($domains) > 0;
+		$row = InboundEmailDomain::GetByDomain($domain);
+		return $row !== false && $row->is_authoritative();
 	}
 
 	/**
