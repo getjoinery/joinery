@@ -95,6 +95,14 @@ try {
 	check($r['status'] === 409, 'different body under the same key → 409', 'status ' . $r['status'] . ' ' . $r['raw']);
 	check(($r['json']['errortype'] ?? '') === 'ActionError', '409 errortype is ActionError', $r['raw']);
 	check(strpos($r['raw'], 'already used') !== false, '409 names the key reuse', $r['raw']);
+	// The marker, not the prose. A client cannot branch on English, and this is
+	// the one refusal that will never come good on a retry -- without something
+	// to read, a client that retries keeps retrying for as long as it runs.
+	check(
+		($r['json']['data']['reason'] ?? '') === 'idempotency_key_reused',
+		'409 carries the idempotency_key_reused marker',
+		$r['raw']
+	);
 	$user_a->load();
 	check($user_a->get('usr_first_name') === 'MutatedBetween', 'conflicting request did not execute');
 

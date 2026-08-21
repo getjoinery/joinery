@@ -269,23 +269,32 @@ pub fn apply_naming(
             }
 
             // Two encrypted files in one folder holding one name, and this is
-            // the one that gives it up. Recorded and left otherwise untouched:
-            // the pass renames it on the server, the next scan sees the new
-            // name, and the ordinary recovery path clears whatever it was
-            // parked as. Marking it unsyncable here instead is what used to
+            // the one that gives it up. Marking it unsyncable is what used to
             // happen, and nothing ever released it -- the file existed on the
             // server and appeared on no disk anywhere, for good.
-            if let Some(to) = renamed.get(&entry.id) {
-                out.renames.push((
-                    entry.id,
-                    entry.remote.clone(),
-                    Placement {
-                        parent: entry.remote.parent,
-                        name: to.clone(),
-                    },
-                ));
-                continue;
-            }
+            //
+            // The new name is given to the entry here, in the same breath as
+            // the rename is recorded, and that ordering is the whole point. The
+            // rename is a request to a server that may not answer this pass, or
+            // the next one; the download is a local act that happens as soon as
+            // the queue reaches it. Left to disagree, the file lands on the
+            // occupied name, the occupied-name path preserves the occupant as a
+            // conflict copy, and the user is told two people edited one file
+            // when nobody did.
+            let (local_name, verdict) = match renamed.get(&entry.id) {
+                Some(to) => {
+                    out.renames.push((
+                        entry.id,
+                        entry.remote.clone(),
+                        Placement {
+                            parent: entry.remote.parent,
+                            name: to.clone(),
+                        },
+                    ));
+                    (Some(to.clone()), None)
+                }
+                None => (local_name, verdict),
+            };
 
             // Length is checked against the resolved name, because escaping
             // makes names longer — a colon becomes three characters — and a name

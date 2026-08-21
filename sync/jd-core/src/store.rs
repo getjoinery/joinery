@@ -797,6 +797,23 @@ impl Store {
         Ok(self.conn.last_insert_rowid())
     }
 
+    /// Keep what was sent, so a retry sends the same thing.
+    ///
+    /// An idempotency key is a promise that the request behind it does not
+    /// change. Almost every op keeps that promise for free, because its body is
+    /// a plain function of what the op says. A sealed body is the exception: it
+    /// is encrypted afresh under a new random nonce every time it is built, so
+    /// two attempts at one op produce two different requests and the server --
+    /// correctly -- refuses the second. Building it once and writing it down
+    /// here is what makes the retry a retry.
+    pub fn set_op_params(&self, op_id: i64, params_json: &str) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE ops SET params = ?2 WHERE op_id = ?1",
+            params![op_id, params_json],
+        )?;
+        Ok(())
+    }
+
     pub fn set_op_state(&self, op_id: i64, state: OpState) -> StoreResult<()> {
         self.conn.execute(
             "UPDATE ops SET state = ?2 WHERE op_id = ?1",

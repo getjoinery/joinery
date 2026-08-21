@@ -172,6 +172,11 @@ struct ServerState {
     /// second, different request that reuses it (`ApiLogicEndpoint`
     /// § idempotencyResolveExisting).
     idempotency: BTreeMap<String, (String, Value, Value)>,
+    /// How many times a key was offered for a second, different request. A
+    /// client that cannot reproduce its own request byte for byte is refused
+    /// here every time it asks, so any count above zero is a client that will
+    /// go on asking forever.
+    key_conflicts: usize,
     quota_bytes: Option<u64>,
     next_token: u64,
     /// Who is calling. Set by the network layer per device.
@@ -330,6 +335,7 @@ impl MockServer {
                 signed: BTreeMap::new(),
                 next_url: 0,
                 idempotency: BTreeMap::new(),
+                key_conflicts: 0,
                 quota_bytes: None,
                 next_token: 0,
                 actor: None,
@@ -827,17 +833,28 @@ impl MockServer {
     /// outlives the request it names, and every scenario here would pass while
     /// real devices wedged.
     pub fn action_idempotent(&self, name: &str, body: &Value, key: &str) -> ServerResult {
-        if let Some((prior_action, prior_body, prior_response)) =
-            self.state.lock().unwrap().idempotency.get(key)
-        {
-            if prior_action != name || prior_body != body {
-                return Err(refuse(
-                    409,
-                    "ActionError",
-                    "This Idempotency-Key was already used with a different request",
-                ));
+        let prior = {
+            let mut st = self.state.lock().unwrap();
+            match st.idempotency.get(key) {
+                None => None,
+                Some((prior_action, prior_body, prior_response)) => {
+                    if prior_action != name || prior_body != body {
+                        st.key_conflicts += 1;
+                        return Err(ApiRefusal {
+                            status: 409,
+                            errortype: "ActionError",
+                            message:
+                                "This Idempotency-Key was already used with a different request"
+                                    .into(),
+                            data: json!({ "reason": "idempotency_key_reused" }),
+                        });
+                    }
+                    Some(prior_response.clone())
+                }
             }
-            return Ok(prior_response.clone());
+        };
+        if let Some(prior_response) = prior {
+            return Ok(prior_response);
         }
         let out = self.action(name, body)?;
         self.state.lock().unwrap().idempotency.insert(
@@ -845,6 +862,11 @@ impl MockServer {
             (name.to_string(), body.clone(), out.clone()),
         );
         Ok(out)
+    }
+
+    /// How many times a key was offered for a second, different request.
+    pub fn key_conflicts(&self) -> usize {
+        self.state.lock().unwrap().key_conflicts
     }
 
     fn drive_changes(&self, body: &Value) -> ServerResult {

@@ -3375,3 +3375,63 @@ fn both_computers_rename_the_same_file_in_a_vault() {
     );
     assert_converged(&world);
 }
+
+/// A vault rename whose answer goes missing has to be able to ask again.
+///
+/// The name inside a vault lives in a sealed blob, and sealing draws a fresh
+/// random nonce every time. Build the blob once per attempt and each attempt is
+/// a different request under one idempotency key — which the server refuses,
+/// correctly, and refuses again identically for as long as anyone asks. The op
+/// never completes, no queue visibly grows, and no issue is raised.
+#[test]
+fn a_vault_rename_survives_a_lost_answer() {
+    let vault = SimVault::new(9_403);
+    let mut world = World::new(9_403, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    world.server.seed_vault_file(
+        Some(private),
+        "report.txt",
+        b"the one that was there first",
+        &vault.public_key_b64,
+    );
+    world.server.seed_vault_file(
+        Some(private),
+        "report.txt",
+        b"the one that arrived second",
+        &vault.public_key_b64,
+    );
+
+    // The answer to the rename is lost on the way back. The server did the
+    // work and the client was never told, so it asks again under the key it
+    // already spent -- and for an encrypted file it cannot even tell from the
+    // change feed that the rename landed, because the name the server holds
+    // for one of these never changes.
+    world.device("laptop").net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_rename".into()),
+        ..NetFaults::none()
+    });
+
+    assert!(
+        world.settle().is_some(),
+        "the rename never finished: a resealed blob makes every retry a \
+         different request under a key that was already spent"
+    );
+    let disk = disk_tree(world.device("laptop"));
+    assert!(
+        disk.contains_key("Private/report (2).txt"),
+        "the duplicate should still have been renamed, found: {disk:?}"
+    );
+    // Settling is not enough on its own: dropping the op and planning it again
+    // under a fresh key also gets there, and hides the defect. What is being
+    // asserted is that the retry asked the same question it asked the first
+    // time.
+    assert_eq!(
+        world.server.key_conflicts(),
+        0,
+        "a retry sent a different request under a key it had already spent"
+    );
+    assert_converged(&world);
+}

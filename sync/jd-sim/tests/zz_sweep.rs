@@ -1570,3 +1570,23 @@ fn scratch_hammer_one() {
     let spec: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
     hammer(seed, steps, &spec, chaos);
 }
+
+/// One vault-on-mixed-platforms seed, for tracing.
+#[test]
+#[ignore]
+fn scratch_vaultplat_one() {
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
+    let chaos: bool = std::env::var("CHAOS").unwrap_or("1".into()) == "1";
+    workload_core(
+        seed,
+        steps,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        chaos,
+        Vault::Shared,
+    );
+}

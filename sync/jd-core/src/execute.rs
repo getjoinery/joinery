@@ -338,6 +338,16 @@ fn classify(e: &ExecError) -> OpOutcome {
     // this one's: the convention for what a copy is called lives with naming,
     // and the executor has no business inventing one.
     if let ExecError::Proto(p) = e {
+        // A key already spent on something else. Nothing about this operation
+        // can be made to fit the request the key was spent on, so it is dropped
+        // and the next pass plans afresh with a key of its own. Retrying earns
+        // the same refusal every time, and the loop is silent: no growing
+        // queue, no issue, nothing anybody could look at.
+        if p.key_reused() {
+            return OpOutcome::Overtaken(
+                "the key on this was already used for something else; planning it again".into(),
+            );
+        }
         if p.name_taken() {
             return OpOutcome::Overtaken(
                 "something else is using that name; choosing again from what is there now".into(),
@@ -2160,15 +2170,35 @@ fn move_remote(
     //
     // Folders are not encrypted this way: a vault folder's own name is
     // plaintext on the server, and only its contents are private.
+    //
+    // Sealed once, and remembered. The blob carries a fresh random nonce every
+    // time it is built, so resealing on each attempt would send a different
+    // request under one idempotency key -- which the server refuses, and which
+    // is refused identically every time after, so the op retries for as long as
+    // the computer is on. Any transport hiccup during a vault rename was enough
+    // to trigger it.
     let rename_body = if entry.is_encrypted && op.entity.entity_type == EntityType::File {
-        match reseal_metadata(env, &entry, &to.name)? {
-            Ok(blob) => json!({
-                "entity_type": t,
-                "entity_id": op.entity.server_id,
-                "encrypted_metadata": blob,
-            }),
-            Err(why) => return Ok(why),
-        }
+        let stored: Option<String> = serde_json::from_str::<Value>(&op.params)
+            .ok()
+            .and_then(|p| p.get("sealed_name").and_then(Value::as_str).map(str::to_owned));
+        let blob = match stored {
+            Some(blob) => blob,
+            None => match reseal_metadata(env, &entry, &to.name)? {
+                Ok(blob) => {
+                    let mut params: Value =
+                        serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
+                    params["sealed_name"] = json!(blob);
+                    env.store.set_op_params(op.op_id, &params.to_string())?;
+                    blob
+                }
+                Err(why) => return Ok(why),
+            },
+        };
+        json!({
+            "entity_type": t,
+            "entity_id": op.entity.server_id,
+            "encrypted_metadata": blob,
+        })
     } else {
         json!({
             "entity_type": t,
