@@ -42,6 +42,10 @@ class MarkAdvertisementsJob implements PipelineJobInterface {
 
     public function label(): string { return 'Mark advertisements in the social feed'; }
 
+    /** Feed posts arrive the way mail does, so this job offers the arrival
+     *  option — in its own vocabulary, since nothing here is mail. */
+    public function arrivalLabel(): ?string { return 'As posts arrive'; }
+
     public function configDescriptor(): array { return ['input' => []]; }
 
     public function validateConfig(array $config, Recipe $recipe): void {}

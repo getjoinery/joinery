@@ -19,7 +19,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/aip_recipe_item
  * Lives in includes/, NOT pipeline_jobs/ — PipelineJobRegistry instantiates
  * every class it discovers there, and an abstract class cannot be.
  *
- * @version 1.0
+ * @version 1.1
  */
 abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJobInterface {
 
@@ -28,6 +28,10 @@ abstract class EmailPipelineJobBase implements PipelineJobInterface, AreaScopedJ
 
     /** The mailbox-list field's help text, in the job's own words. */
     abstract protected function mailboxFieldHelp(): string;
+
+    /** Mail is a stream of arrivals, so these jobs offer the option to run on
+     *  one — the wording an operator would use for their own inbox. */
+    public function arrivalLabel(): ?string { return 'As mail arrives'; }
 
     /** Whether nextItem() appends the attachment digest to the security
      *  digest. The scan job judges the message envelope and body alone. */

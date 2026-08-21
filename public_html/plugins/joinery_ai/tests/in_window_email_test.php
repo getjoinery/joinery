@@ -22,11 +22,15 @@
  *  - saving a recipe against a sealed domain is refused until that domain has
  *    opted in to AI processing;
  *  - selection rules: unread only, parsed only, newest first;
- *  - the deferred-work consumer reports and drains that work.
+ *  - the deferred-work consumer reports and drains that work, only when the
+ *    recipe's Runs setting says it is due, and adopts a Run Now row that no
+ *    worker could ever have claimed — including on a Manually-only recipe;
+ *  - a worker's run never satisfies the sealed side of a mixed clock recipe,
+ *    so cron claiming every fire point cannot starve the sealed subset.
  *
  * Run: php tests/run.php db --filter=in_window_email
  *
- * @version 1.1
+ * @version 1.3
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -49,6 +53,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mess
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_mailbox_grant_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/mailbox_contacts_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeWorkerSpawner.php'));
@@ -129,7 +134,10 @@ function iw_recipe(int $owner_id, string $job_id, string $address): Recipe {
 	$recipe->set('rcp_source_config', json_encode(array('mailbox_aliases' => array($address))));
 	$recipe->set('rcp_owner_user_id', $owner_id);
 	$recipe->set('rcp_enabled', true);
-	$recipe->set('rcp_schedule_frequency', 'hourly');
+	// Arrival, not a clock: a mail recipe's Runs setting is "as mail arrives",
+	// which is what makes pendingForOwner's answer track hasWork() the way the
+	// sections below assert (specs/recipe_run_scheduling.md).
+	$recipe->set('rcp_schedule_frequency', RecipeSchedule::FREQ_ARRIVAL);
 	$recipe->set('rcp_allow_tainted_writes', true);
 	$recipe->save();
 	$recipe->load();
@@ -186,6 +194,20 @@ try {
 		'a standard mailbox declares no scope');
 	check(!RecipeVaultScope::requiresWindow($std_recipe),
 		'so an ordinary recipe keeps its schedule');
+
+	// Built HERE, asserted at the very end ('a mixed clock recipe keeps its
+	// sealed side'): its two-address source_config is longer than the sealed-
+	// egress guard's free-text allowance, so the row has to exist before this
+	// process opens any sealed mail. It stays on Manually only until that
+	// section, so no intermediate pendingForOwner assertion sees it.
+	$mixed = iw_recipe($owner_id, 'email_triage', $address);
+	$mixed->set('rcp_source_config',
+		json_encode(array('mailbox_aliases' => array($address, $std_address))));
+	$mixed->set('rcp_schedule_frequency', RecipeSchedule::FREQ_DAILY);
+	$mixed->set('rcp_schedule_time', '00:00:01');
+	$mixed->set('rcp_enabled', false);
+	$mixed->save();
+	$mixed->load();
 
 	// -----------------------------------------------------------------------
 	section('sealed mail is invisible while locked');
@@ -881,6 +903,226 @@ try {
 		$message = $e->getMessage();
 	}
 	check($accepted, 'and accepted once the domain opts in', $message);
+
+	// -----------------------------------------------------------------------
+	section('the drain has a due gate, and adopts a stranded Run Now');
+
+	// Everything above proves the drain can READ sealed mail. This proves it
+	// only runs when the recipe's own Runs setting says so, and that a run a
+	// PERSON asked for is never left waiting for a worker that cannot exist
+	// (specs/recipe_run_scheduling.md § 2.5 and § 2.6).
+	VaultUnlock::open($owner_id, $secret, UserEncryptionVault::SCOPE_USER,
+		array('idle' => null, 'absolute' => null));
+	check(VaultUnlock::isOpen($owner_id), 'precondition: the window is open');
+
+	// Quiet baseline: every sealed message the earlier sections created is
+	// read, so no arrival-scheduled recipe of this owner has anything to do.
+	InboundEmailMessage::updateColumns($older, array('iem_is_read' => true));
+	InboundEmailMessage::updateColumns($newer, array('iem_is_read' => true));
+	InboundEmailMessage::updateColumns($late_msg, array('iem_is_read' => true));
+
+	// The pending row the spawner refused back in 'cron refuses an in-window
+	// recipe' is still sitting there — and under the adoption rule that row is
+	// now exactly what makes its recipe pending. Assert that, then retire it so
+	// the rest of this section starts from a quiet estate.
+	check(in_array((int)$recipe->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'a pending row no worker can claim keeps its recipe pending, mail or no mail');
+	// Retire every leftover pending row this suite built as a fixture — the
+	// spawner-refusal row above and the run-sealing rows further down were made
+	// to be INSPECTED, never dispatched, and under the adoption rule each one
+	// now keeps its recipe pending. Cancelling them gives this section a quiet
+	// estate to reason about.
+	$db->query("UPDATE rcr_recipe_runs SET rcr_status = '" . RecipeRun::STATUS_CANCELLED . "'
+		WHERE rcr_status = '" . RecipeRun::STATUS_PENDING . "'
+		  AND rcr_rcp_recipe_id IN (SELECT rcp_recipe_id FROM rcp_recipes
+		                            WHERE rcp_owner_user_id = " . intval($owner_id) . ")");
+
+	check(count(RecipeVaultScope::pendingForOwner($owner_id)) === 0,
+		'with nothing arrived, the work predicate is quiet — the heartbeat stops asking for drains',
+		json_encode(array_map(fn($r) => (string)$r->get('rcp_name'),
+			RecipeVaultScope::pendingForOwner($owner_id))));
+
+	// An ARRIVAL recipe is due exactly when sealed mail is waiting — today's
+	// behaviour, now opted into rather than imposed on every sealed recipe.
+	InboundEmailMessage::updateColumns($newer, array('iem_is_read' => false));
+	$arrival_ids = array_map(fn($r) => (int)$r->key, RecipeVaultScope::pendingForOwner($owner_id));
+	check(in_array((int)$recipe->key, $arrival_ids, true),
+		'unread sealed mail makes an arrival-scheduled recipe pending');
+	InboundEmailMessage::updateColumns($newer, array('iem_is_read' => true));
+	check(!in_array((int)$recipe->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'and it goes quiet again once nothing is unread');
+
+	// A CLOCK-scheduled sealed recipe is due on its fire point instead, whether
+	// or not it will find anything: an empty run costs one row per period, and
+	// the alternative is a schedule that silently never fires.
+	$clock = iw_recipe($owner_id, 'email_triage', $address);
+	$clock->set('rcp_schedule_frequency', RecipeSchedule::FREQ_DAILY);
+	$clock->set('rcp_schedule_time', '00:00:01');
+	$clock->save();
+	$clock->load();
+	check(RecipeVaultScope::cronRunnable($clock) === false,
+		'precondition: the clock recipe is fully sealed, so no worker can ever run it');
+	check(in_array((int)$clock->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'past its fire point with nothing run since, it is pending even with no mail waiting');
+
+	// One run since the fire point suppresses it until the next period — which
+	// is what stops a due-but-empty recipe draining on every beat.
+	$met = new RecipeRun(NULL);
+	$met->set('rcr_rcp_recipe_id', intval($clock->key));
+	$met->set('rcr_status', RecipeRun::STATUS_SUCCESS);
+	$met->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
+	$met->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$met->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
+	$met->save();
+	$met->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($met->key));
+	check(!in_array((int)$clock->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'a run at or after the fire point suppresses it until the next period');
+
+	// Now the stranded Run Now. Before adoption this row sat pending forever:
+	// the spawner refuses a fully-sealed recipe, the drain skipped the recipe
+	// because a pending row counted as an active run, and the pending reaper
+	// deliberately leaves in-window rows alone.
+	$manual = new RecipeRun(NULL);
+	$manual->set('rcr_rcp_recipe_id', intval($clock->key));
+	$manual->set('rcr_status', RecipeRun::STATUS_PENDING);
+	$manual->set('rcr_trigger', RecipeRun::TRIGGER_MANUAL);
+	$manual->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$manual->save();
+	$manual->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($manual->key));
+
+	check(RecipeWorkerSpawner::spawnIfUnderCap($manual) === false,
+		'no worker will take the Run Now row');
+	$pending_now = RecipeVaultScope::pendingForOwner($owner_id);
+	check(in_array((int)$clock->key, array_map(fn($r) => (int)$r->key, $pending_now), true),
+		'but the pending row makes the recipe pending regardless of the due gate — '
+		. 'a person pressed the button');
+	check(count($pending_now) === 1,
+		'and it is the only thing waiting, so the drain below runs exactly this row',
+		json_encode(array_map(fn($r) => (string)$r->get('rcp_name'), $pending_now)));
+
+	// Drive the drain with the kill flag set, so the run is claimed, executed
+	// and finished without a single model call. What is under test is which ROW
+	// the drain picked up, not what the model said.
+	RecipeRun::updateColumns(intval($manual->key), array('rcr_kill_requested' => true));
+	$runs_before = intval(DbConnector::get_instance()->get_db_link()
+		->query('SELECT count(*) FROM rcr_recipe_runs WHERE rcr_rcp_recipe_id = '
+			. intval($clock->key) . ' AND rcr_delete_time IS NULL')->fetchColumn());
+
+	$executed = RecipeVaultScope::drain($owner_id, $secret, microtime(true) + 30);
+	check($executed === 1, 'the drain executes exactly one run', (string)$executed);
+
+	$adopted = new RecipeRun(intval($manual->key), TRUE);
+	check((string)$adopted->get('rcr_status') !== RecipeRun::STATUS_PENDING,
+		'the Run Now row reached a terminal state instead of waiting forever',
+		(string)$adopted->get('rcr_status'));
+	check((string)$adopted->get('rcr_trigger') === RecipeRun::TRIGGER_MANUAL,
+		'and is still recorded as the manual run it was, not rewritten as a window run');
+
+	$runs_after = intval(DbConnector::get_instance()->get_db_link()
+		->query('SELECT count(*) FROM rcr_recipe_runs WHERE rcr_rcp_recipe_id = '
+			. intval($clock->key) . ' AND rcr_delete_time IS NULL')->fetchColumn());
+	check($runs_after === $runs_before,
+		'the drain ADOPTED the row rather than queueing a second one behind it',
+		"$runs_before -> $runs_after");
+
+	// -----------------------------------------------------------------------
+	section('Manually only still honours Run Now on a sealed recipe');
+
+	// The new-recipe default. Run Now is the ONE trigger Manually only keeps,
+	// and on a fully sealed recipe this drain is the only executor that
+	// trigger has — so the pending row must reach it even though every
+	// automatic path filters on rcp_enabled.
+	$manual_only = iw_recipe($owner_id, 'email_triage', $address);
+	$manual_only->set('rcp_enabled', false);
+	$manual_only->save();
+	$manual_only->load();
+
+	check(!in_array((int)$manual_only->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'idle, a Manually-only recipe owes the drain nothing');
+
+	$mo_run = new RecipeRun(NULL);
+	$mo_run->set('rcr_rcp_recipe_id', intval($manual_only->key));
+	$mo_run->set('rcr_status', RecipeRun::STATUS_PENDING);
+	$mo_run->set('rcr_trigger', RecipeRun::TRIGGER_MANUAL);
+	$mo_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$mo_run->save();
+	$mo_run->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($mo_run->key));
+
+	check(RecipeWorkerSpawner::spawnIfUnderCap($mo_run) === false,
+		'no worker will take its Run Now row');
+	check(in_array((int)$manual_only->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'but the row makes even a Manually-only recipe pending — a person pressed the button');
+
+	RecipeRun::updateColumns(intval($mo_run->key), array('rcr_kill_requested' => true));
+	check(RecipeVaultScope::drain($owner_id, $secret, microtime(true) + 30) === 1,
+		'the drain executes it');
+	$mo_done = new RecipeRun(intval($mo_run->key), TRUE);
+	check((string)$mo_done->get('rcr_status') !== RecipeRun::STATUS_PENDING,
+		'to a terminal state instead of waiting forever', (string)$mo_done->get('rcr_status'));
+	check(count(RecipeVaultScope::pendingForOwner($owner_id)) === 0,
+		'and the estate is quiet again');
+
+	// -----------------------------------------------------------------------
+	section('a mixed clock recipe keeps its sealed side');
+
+	// One sealed address, one standard address, on a clock (the $mixed fixture
+	// from the top of the file, switched on with one short column write — its
+	// long source_config could only be saved before this process opened sealed
+	// mail). Cron fires within a tick of every fire point and its worker reads
+	// only the standard side, so if a worker run satisfied the sealed posture
+	// too, the drain would never find this recipe due and its sealed mail
+	// would simply never be read. Only a window run — which reads the whole
+	// binding — satisfies the sealed side (RecipeSchedule::satisfyingTriggers).
+	Recipe::updateColumns(intval($mixed->key), array('rcp_enabled' => true));
+	$mixed = new Recipe(intval($mixed->key), TRUE);
+
+	check(RecipeVaultScope::requiresWindow($mixed) && RecipeVaultScope::cronRunnable($mixed),
+		'precondition: the binding is MIXED — a worker can run it, but not all of it');
+
+	// The worker's run: what cron produces within a tick of the fire point.
+	$worker_run = new RecipeRun(NULL);
+	$worker_run->set('rcr_rcp_recipe_id', intval($mixed->key));
+	$worker_run->set('rcr_status', RecipeRun::STATUS_SUCCESS);
+	$worker_run->set('rcr_trigger', RecipeRun::TRIGGER_SCHEDULE);
+	$worker_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$worker_run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
+	$worker_run->save();
+	$worker_run->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($worker_run->key));
+
+	check(RecipeSchedule::isDue($mixed, PipelineJobInterface::POSTURE_STANDARD,
+			gmdate('Y-m-d H:i:s')) === false,
+		'a worker run satisfies cron');
+	check(in_array((int)$mixed->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'but NOT the sealed side — the recipe is still due in the window');
+
+	// A window run reads the whole binding, so it satisfies both sides.
+	$window_run = new RecipeRun(NULL);
+	$window_run->set('rcr_rcp_recipe_id', intval($mixed->key));
+	$window_run->set('rcr_status', RecipeRun::STATUS_SUCCESS);
+	$window_run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
+	$window_run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+	$window_run->set('rcr_completed_time', gmdate('Y-m-d H:i:s'));
+	$window_run->save();
+	$window_run->load();
+	harness_register_row('rcr_recipe_runs', 'rcr_run_id', intval($window_run->key));
+
+	check(!in_array((int)$mixed->key, array_map(fn($r) => (int)$r->key,
+			RecipeVaultScope::pendingForOwner($owner_id)), true),
+		'a window run satisfies the sealed side');
+	check(RecipeSchedule::isDue($mixed, PipelineJobInterface::POSTURE_STANDARD,
+			gmdate('Y-m-d H:i:s')) === false,
+		'and cron stays satisfied too');
 
 	VaultUnlock::lockAll($owner_id);
 

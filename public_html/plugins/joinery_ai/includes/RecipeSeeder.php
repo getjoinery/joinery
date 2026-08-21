@@ -1,6 +1,7 @@
 <?php
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 
 class RecipeSeederException extends Exception {}
 
@@ -288,7 +289,8 @@ class RecipeSeeder {
      * panel's toggle-on of a template card (specs/implemented/ai_recipes_multi_mailbox_and_ai_panel.md
      * § Templates and per-user instances). Unlike a seeded row it arrives
      * ENABLED: the toggle is itself the enablement choice, and the tainted-
-     * writes acceptance rode the same dialog ($accepted_tainted_writes). It
+     * writes acceptance rode the same dialog ($accepted_tainted_writes), and
+     * it runs on ARRIVAL rather than on the declaration's clock. It
      * carries rcp_template_key (non-unique) rather than rcp_declared_key (the
      * seeder's unique identity), so any number of members can instantiate the
      * same declaration.
@@ -298,6 +300,11 @@ class RecipeSeeder {
         $recipe = self::fromDeclaration($declaration, $owner_id);
         $recipe->set('rcp_template_key', $declaration['key']);
         $recipe->set('rcp_enabled', true);
+        // And on arrivals, not on a clock. Someone who turns a mail card on
+        // from the panel is asking for their mail to be handled as it comes;
+        // a weekly template default would leave the toggle looking on while
+        // nothing happened for six days.
+        $recipe->set('rcp_schedule_frequency', RecipeSchedule::FREQ_ARRIVAL);
         $recipe->set('rcp_allow_tainted_writes', $accepted_tainted_writes);
         $recipe->save();
         $recipe->load();

@@ -7,6 +7,7 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 require_once(PathHelper::getIncludePath('includes/Pager.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 
 $session = SessionControl::get_instance();
@@ -101,7 +102,7 @@ $table_options = [
     'title' => 'Recipes',
     'altlinks' => ['New Recipe' => '/admin/joinery_ai/edit'],
 ];
-$headers = ['Name', 'Owner', 'Schedule', 'Model', 'Last Run', 'Enabled', 'Actions'];
+$headers = ['Name', 'Owner', 'Runs', 'Model', 'Last Run', 'Enabled', 'Actions'];
 $page->tableheader($headers, $table_options, $pager);
 
 foreach ($recipes as $recipe) {
@@ -123,8 +124,17 @@ foreach ($recipes as $recipe) {
         $row[] = '<span class="badge bg-danger">no owner</span>';
     }
 
-    $freq = $recipe->get('rcp_schedule_frequency');
-    $sched_label = $freq === 'none' ? 'No Schedule' : ucfirst($freq);
+    // The recipe's Runs setting, in the same words the edit page uses. A recipe
+    // with no automatic trigger reads as Manually only whatever frequency its
+    // row still remembers as a prefill.
+    $freq = RecipeSchedule::frequencyOf($recipe);
+    if ($freq === RecipeSchedule::FREQ_MANUAL) {
+        $sched_label = 'Manually only';
+    } elseif ($freq === RecipeSchedule::FREQ_ARRIVAL) {
+        $sched_label = RecipeSchedule::arrivalLabelFor($recipe) ?? 'As new items arrive';
+    } else {
+        $sched_label = ucfirst($freq);
+    }
     if ($freq === 'weekly') {
         $days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
         $dow = $recipe->get('rcp_schedule_day_of_week');

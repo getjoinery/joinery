@@ -18,13 +18,19 @@ class AiPanelConfirmRequired extends Exception {}
  *
  * Owner scoping IS the authorization — every path here reads and writes only
  * recipes belonging to $user_id, so the two API actions are member-callable
- * with no permission gate. The global kill switch (rcp_enabled) is
- * dashboard-only: a toggle against a globally disabled recipe is refused here,
- * server-side, so the panel's grayed control is a rendering of server truth.
+ * with no permission gate. The manual/automatic bit (rcp_enabled) is
+ * dashboard-only: a toggle against a recipe set to run manually only is
+ * refused here, server-side, so the panel's grayed control is a rendering of
+ * server truth.
  *
- * @version 1.0
+ * @version 1.1
  */
 class AiPanelService {
+
+    /** Why a toggle is refused, and what the card says, when a recipe has no
+     *  automatic trigger. One constant so the refusal and the rendering of it
+     *  cannot drift. */
+    const MANUAL_ONLY_TEXT = 'Set to run manually only — give it a schedule on the recipes dashboard.';
 
     /**
      * Every registered pipeline job that belongs to $area, keyed by job id.
@@ -119,10 +125,12 @@ class AiPanelService {
         $job = $area_jobs[$job_id];
 
         if ($recipe !== null && !$recipe->get('rcp_enabled')) {
-            // The kill switch is dashboard-only; the panel never writes it —
-            // and the seeded superadmin rows ship disabled on purpose, so
-            // their first enablement stays a dashboard act.
-            throw new AiPanelServiceException('Paused from the recipes dashboard.');
+            // The manual/automatic bit is dashboard-only; the panel never
+            // writes it — and the seeded superadmin rows ship on Manually only
+            // on purpose, so giving one a schedule stays a dashboard act. Named
+            // by what someone CHOSE, not by the column: "paused" describes a
+            // state nothing in this UI can produce or clear.
+            throw new AiPanelServiceException(self::MANUAL_ONLY_TEXT);
         }
 
         if ($enabled) {
@@ -256,7 +264,7 @@ class AiPanelService {
         $blocked_text = null;
         if ($paused) {
             $blocked_reason = 'paused';
-            $blocked_text = 'Paused from the recipes dashboard.';
+            $blocked_text = self::MANUAL_ONLY_TEXT;
         } elseif (!$covered) {
             // Would turning this ON here be refused? Dry-run the same bind +
             // validate the toggle would run, so the disabled control carries
