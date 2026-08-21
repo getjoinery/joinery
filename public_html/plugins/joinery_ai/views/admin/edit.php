@@ -5,7 +5,6 @@
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/logic/admin_edit_logic.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeToolRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ModelRegistry.php'));
@@ -27,9 +26,7 @@ function joinery_ai_has_model_override(Recipe $recipe): bool {
     return $recipe->get('rcp_thinking_required') !== null;
 }
 
-// Present on the render path; absent when the logic returned an error, so fall
-// back rather than letting the ship control disappear mid-correction.
-$is_upgrade_server = $is_upgrade_server ?? DeploymentHelper::isUpgradeServer();
+
 $declared_key = (string)$recipe->get('rcp_declared_key');
 
 $page = new AdminPage();
@@ -46,11 +43,6 @@ $page->admin_header([
 
 if (!empty($saved)) {
     echo '<div class="alert alert-success">Saved.</div>';
-}
-
-if (!empty($shipped_key)) {
-    echo '<div class="alert alert-success">Written to <code>plugins/joinery_ai/recipes.json</code> as <code>'
-       . htmlspecialchars($shipped_key) . '</code>. Commit the file to release it.</div>';
 }
 
 // A recipe that arrived with the install and hasn't been set up yet. Says so
@@ -296,12 +288,16 @@ foreach ($resolution['advisories'] as $advisory) {
 }
 echo '</div>';
 
-// Everything below is a power-user override. The normal case is an operator who
-// never opens it: the job that does the work declares the floor, because it is
-// the only party that knows what the work needs.
+// Everything from here to the submit buttons that is a power-user override
+// lives in the Advanced section at the foot of the form.
+ob_start();
+
+// The model override. The normal case is an operator who never opens it: the
+// job that does the work declares the floor, because it is the only party that
+// knows what the work needs.
 echo '<details class="mb-3" id="rcp_model_advanced"'
    . (joinery_ai_has_model_override($recipe) ? ' open' : '') . '>';
-echo '<summary class="form-label" style="cursor:pointer">Advanced — choose the model yourself</summary>';
+echo '<summary class="form-label" style="cursor:pointer">Choose the model yourself</summary>';
 echo '<div class="mt-2">';
 
 // The presence marker: a checkbox posts nothing when unticked, so the save path
@@ -370,21 +366,43 @@ $formwriter->dropinput('rcp_model', 'Pin to one model', [
 echo '</div>';
 echo '</details>';
 
+/** 0.1-step dropdown options from 0 to $max. Keys are the canonical float
+ *  string ((string)(float)) so a stored numeric(3,2) like 0.30 matches after
+ *  the same normalization; a stored off-grid value (e.g. 0.35 from the old
+ *  free-entry field) is added as its own option so it round-trips visibly. */
+function joinery_ai_tenths_options(float $max, string $default_label, ?string $stored): array {
+    $options = ['' => $default_label];
+    for ($i = 0; $i <= (int)round($max * 10); $i++) {
+        $k = (string)($i / 10);
+        $options[$k] = $k;
+    }
+    if ($stored !== null && $stored !== '' && !isset($options[$stored])) {
+        $options[$stored] = $stored . ' (current)';
+    }
+    return $options;
+}
+
+$default_temp = (string)$settings->get_setting('joinery_ai_default_temperature');
 $rcp_temp = $recipe->get('rcp_temperature');
-$formwriter->numberinput('rcp_temperature', 'Temperature', [
-    'value' => ($rcp_temp === null ? '' : $rcp_temp),
-    'min' => 0, 'max' => 2, 'step' => '0.1',
-    'placeholder' => $settings->get_setting('joinery_ai_default_temperature'),
-    'helptext' => 'How creative vs. focused the wording is. Blank = the global default.',
+$temp_value = ($rcp_temp === null ? '' : (string)(float)$rcp_temp);
+$formwriter->dropinput('rcp_temperature', 'Temperature', [
+    'value' => $temp_value,
+    'options' => joinery_ai_tenths_options(2.0,
+        'Default' . ($default_temp !== '' ? " ($default_temp)" : ''), $temp_value),
+    'helptext' => 'How creative vs. focused the wording is: 0 = most focused, 2 = most creative.',
 ]);
 
+$default_top_p = (string)$settings->get_setting('joinery_ai_default_top_p');
 $rcp_top_p = $recipe->get('rcp_top_p');
-$formwriter->numberinput('rcp_top_p', 'Top-p', [
-    'value' => ($rcp_top_p === null ? '' : $rcp_top_p),
-    'min' => 0, 'max' => 1, 'step' => '0.05',
-    'placeholder' => ($settings->get_setting('joinery_ai_default_top_p') ?: 'default'),
-    'helptext' => 'Nucleus-sampling cutoff. Blank = the global default.',
+$top_p_value = ($rcp_top_p === null ? '' : (string)(float)$rcp_top_p);
+$formwriter->dropinput('rcp_top_p', 'Word Variety (Top-p)', [
+    'value' => $top_p_value,
+    'options' => joinery_ai_tenths_options(1.0,
+        'Default' . ($default_top_p !== '' ? " ($default_top_p)" : ''), $top_p_value),
+    'helptext' => 'Limits word choice to the most likely candidates: 1 = no limit, lower = stricter.',
 ]);
+
+$advanced_model_html = ob_get_clean();
 
 $formwriter->dropinput('rcp_thinking_level', 'Thinking Level', [
     'value' => (string)$recipe->get('rcp_thinking_level') ?: 'off',
@@ -640,8 +658,6 @@ if (empty($job_registry)) {
         echo '<div class="form-group mb-3">';
         echo '<label class="form-label">Job</label>';
         echo '<p class="mb-0">' . htmlspecialchars($job_options[$selected_job_id]) . '</p>';
-        echo '<p class="text-muted small mb-0">What this recipe does. Fixed when it was created — '
-           . 'the work already recorded against it is only meaningful for this job.</p>';
         echo '<input type="hidden" name="rcp_pipeline_job" value="'
            . htmlspecialchars($selected_job_id) . '">';
         echo '</div>';
@@ -680,23 +696,27 @@ if (empty($job_registry)) {
 echo '</div>'; // #rcp_pipeline_fields_group_container
 
 // --- Delivery ---
+// The email override is rendered in the Advanced section below.
+ob_start();
 $formwriter->textinput('rcp_delivery_email', 'Delivery Email (blank = owner email)');
+$advanced_delivery_html = ob_get_clean();
 
 $formwriter->checkboxinput('rcp_delivery_dashboard', 'Show its latest result on the AI dashboard', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_delivery_dashboard'),
-    'helptext' => 'Adds a card for this recipe to /joinery_ai showing the output of its most '
-                 . 'recent successful run. That page is admin-only. Off means the recipe still '
-                 . 'runs; its results just are not shown there.',
+    'helptext' => 'Shows its most recent result as a card on the admin-only /joinery_ai page. '
+                 . 'The recipe runs either way.',
 ]);
 
-// --- Limits ---
+// --- Limits (rendered in the Advanced section below) ---
+ob_start();
 $formwriter->numberinput('rcp_max_iterations', 'Max Tool-Loop Iterations / Batch Size', [
     'min' => 1, 'max' => 50,
     'helptext' => 'Agent mode: max tool-loop iterations. Pipeline mode: max items processed per run.',
 ]);
 $formwriter->numberinput('rcp_max_tokens', 'Max Tokens Per Run', ['min' => 1000, 'max' => 200000]);
 $formwriter->numberinput('rcp_monthly_token_cap', 'Monthly Token Cap', ['min' => 0]);
+$advanced_limits_html = ob_get_clean();
 
 // --- Security ---
 // The old label ("Allow tainted writes") named the mechanism, so it told an
@@ -709,28 +729,28 @@ $formwriter->checkboxinput('rcp_allow_tainted_writes',
     'Let this recipe act on content written by other people', [
     'value' => 1,
     'checked' => (bool)$recipe->get('rcp_allow_tainted_writes'),
-    'helptext' => 'Some of what this recipe reads was written by someone else — the body of an '
-                 . 'email, a message a member submitted — and anyone can put text in there aimed '
-                 . 'at the AI, telling it to do something you did not ask for. Ticking this says '
-                 . 'you accept that risk for what this recipe is allowed to change. Recipes that '
-                 . 'judge one item at a time can only ever write one fixed field on the item they '
-                 . 'were shown, so the worst case is a wrong label or summary on one message. A '
-                 . 'recipe with write tools is broader: read what it can reach before agreeing.',
+    'helptext' => 'Anything written by other people — an email body, a member message — can carry '
+                 . 'hidden instructions aimed at the AI. Ticking this accepts that risk for '
+                 . 'whatever this recipe can change.',
 ]);
 
-$formwriter->submitbutton('btn_submit', $is_new ? 'Create' : 'Save');
+// --- Advanced ---
+// Everything a normal operator never touches, behind one link. Always starts
+// collapsed: a set model override is not hidden by this — its effect shows in
+// the Model line near the top, and the details element inside still opens
+// itself when expanded.
+echo '<div id="advanced-toggle" class="mb-3">'
+   . '<a href="#" class="btn btn-outline-secondary btn-sm" onclick="'
+   . "document.getElementById('advanced-fields').style.display='block';"
+   . "document.getElementById('advanced-toggle').style.display='none';return false;\">"
+   . 'Show Advanced Options</a></div>';
+echo '<div id="advanced-fields" style="display:none">';
+echo $advanced_model_html;
+echo $advanced_delivery_html;
+echo $advanced_limits_html;
+echo '</div>';
 
-// Ship with new installs — absent, not disabled, on an instance that consumes
-// upgrades: there recipes.json is replaced wholesale by the next upgrade, so
-// this isn't something the operator is missing out on.
-if (!$is_new && $is_upgrade_server) {
-    $formwriter->submitbutton('btn_ship_template', 'Ship with new installs', [
-        'class'          => 'btn btn-outline-secondary ms-2',
-        'onclick'        => "return confirm('Write this recipe into recipes.json so every new install gets it? "
-                          . "The owner, mailbox, model, enabled flag and standing-approval flag are not included.');",
-        'formnovalidate' => true,
-    ]);
-}
+$formwriter->submitbutton('btn_submit', $is_new ? 'Create' : 'Save');
 
 if (!$is_new) {
     $formwriter->submitbutton('btn_delete', 'Delete', [
@@ -738,12 +758,6 @@ if (!$is_new) {
         'onclick'        => "return confirm('Soft-delete this recipe?');",
         'formnovalidate' => true,
     ]);
-}
-
-if (!$is_new && $is_upgrade_server) {
-    echo '<p class="text-muted small mt-2 mb-0">Shipping writes <code>plugins/joinery_ai/recipes.json</code>, '
-       . 'which is under version control — review the diff and commit it to release the change. '
-       . 'A declaration creates the recipe once on each install and never edits or restores it afterwards.</p>';
 }
 
 echo $formwriter->end_form();

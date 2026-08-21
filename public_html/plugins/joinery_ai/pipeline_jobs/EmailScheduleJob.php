@@ -23,7 +23,7 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.3
+ * @version 1.4
  */
 class EmailScheduleJob extends EmailPipelineJobBase {
 
@@ -40,9 +40,8 @@ class EmailScheduleJob extends EmailPipelineJobBase {
     }
 
     protected function mailboxFieldHelp(): string {
-        return 'The stored mailboxes this recipe scans for dated events — it covers exactly '
-             . 'the ones ticked here, nothing implicitly. The recipe owner must hold a grant '
-             . 'on each; entries land on the owner\'s own calendar. The mail page\'s AI panel '
+        return 'Only the ticked mailboxes are read for dated events; the owner needs a grant '
+             . 'on each, and entries land on the owner\'s calendar. The mail page\'s AI panel '
              . 'edits this same list.';
     }
 

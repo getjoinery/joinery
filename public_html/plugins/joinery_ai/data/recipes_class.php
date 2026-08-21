@@ -59,8 +59,13 @@ class Recipe extends SystemBase {
         'rcp_delivery_dashboard'  => array('type'=>'bool', 'default'=>true),
         'rcp_enabled'             => array('type'=>'bool', 'default'=>true),
         'rcp_max_iterations'      => array('type'=>'int4', 'default'=>5),
-        'rcp_max_tokens'          => array('type'=>'int4', 'default'=>5000),
-        'rcp_monthly_token_cap'   => array('type'=>'int8', 'default'=>200000),
+        // Sized so ~95% of users never hit them. max_tokens is OUTPUT tokens
+        // per run (thinking counts); the monthly cap is input+output but only
+        // paid runs count (CostGuard skips zero-cost local models). These are
+        // THE defaults: the new-recipe prefill and the seeder both read this
+        // spec, and recipes.json declarations omit the fields to inherit it.
+        'rcp_max_tokens'          => array('type'=>'int4', 'default'=>20000),
+        'rcp_monthly_token_cap'   => array('type'=>'int8', 'default'=>10000000),
         'rcp_workspace'           => array('type'=>'text'),
         // Set only on a recipe seeded from plugins/joinery_ai/recipes.json; null
         // on anything an operator created. It is what lets a later sync tell an

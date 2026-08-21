@@ -674,7 +674,7 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 
 **Note:** A site acts as an upgrade server when the **Server Manager** plugin is active or the `upgrade_server_active` setting is on. `DeploymentHelper::isUpgradeServer()` answers that question; use it rather than re-deriving the pair, so publishing and consuming behaviour cannot drift apart. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
 
-The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Joinery AI's [Ship with new installs](../plugins/joinery_ai/docs/overview.md#shipped-recipes) action is gated this way.
+The distinction matters beyond the upgrade endpoint: any control that edits a file the upgrade replaces wholesale belongs only on a publishing instance, because on a consuming site the edit is discarded at the next upgrade. Version-controlled manifests like Joinery AI's [recipes.json](../plugins/joinery_ai/docs/overview.md#shipped-recipes) are for the same reason edited only on the publishing checkout.
 
 ### The deploy tier
 

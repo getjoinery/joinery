@@ -21,20 +21,20 @@
  *  - the system account is never a recipe owner, and an install with no
  *    administrator yet seeds nothing rather than creating an ownerless recipe;
  *  - a seeded recipe is invisible to the dispatcher while disabled, and cannot
- *    be enabled without accepting tainted writes;
- *  - the marking action strips every non-travelling field, and is gated on the
- *    same publisher predicate utils/upgrade.php uses.
+ *    be enabled without accepting tainted writes.
+ *
+ * The manifest is hand-edited; the well-formedness section is what catches a
+ * bad edit — an unknown field, a duplicate key, a non-travelling field.
  *
  * Run: php tests/run.php db --filter=shipped_recipes
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
 harness_boot();
 require_once(__DIR__ . '/../../../tests/lib/logic.php');
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
-require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 require_once(PathHelper::getIncludePath('includes/PluginManager.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSeeder.php'));
@@ -50,9 +50,6 @@ harness_defer(function () use ($db, $key_prefix) {
 	$db->prepare("DELETE FROM rcp_recipes WHERE rcp_declared_key LIKE ?")
 	   ->execute(array($key_prefix . '%'));
 });
-
-$tmp_manifest = sys_get_temp_dir() . '/shipped_recipes_' . $tag . '.json';
-harness_defer(function () use ($tmp_manifest) { @unlink($tmp_manifest); });
 
 /** One declaration, keyed into this run's namespace. */
 $declare = function (string $suffix, array $overrides = array()) use ($key_prefix) {
@@ -183,6 +180,23 @@ $row = $fetch($key_a);
 check($row !== null && $row['rcp_prompt'] === 'operator tuned this',
 	'dropping a declaration does not delete or alter the recipe it created');
 check($fetch($key_prefix . 'b') !== null, 'and a newly added declaration still seeds');
+
+// -----------------------------------------------------------------------------
+section('An omitted limit inherits the field-spec default');
+
+$key_g = $key_prefix . 'g';
+$decl_g = $declare('g');
+unset($decl_g['max_iterations'], $decl_g['max_tokens'], $decl_g['monthly_token_cap']);
+RecipeSeeder::seedDeclared(array($decl_g));
+$row = $fetch($key_g);
+$spec = Recipe::$field_specifications;
+check($row
+	&& (int)$row['rcp_max_iterations'] === (int)$spec['rcp_max_iterations']['default']
+	&& (int)$row['rcp_max_tokens'] === (int)$spec['rcp_max_tokens']['default']
+	&& (int)$row['rcp_monthly_token_cap'] === (int)$spec['rcp_monthly_token_cap']['default'],
+	'limits left out of a declaration seed as the spec defaults — the single source',
+	$row ? json_encode(array_intersect_key($row, array_flip(
+		['rcp_max_iterations', 'rcp_max_tokens', 'rcp_monthly_token_cap']))) : 'no row');
 
 // -----------------------------------------------------------------------------
 section('A deleted template stays deleted');
@@ -344,86 +358,6 @@ check($r->error === null || stripos((string)$r->error, 'cannot change its') === 
 check($r->error === null,
 	'and the unbound save completes — an empty mailbox list is legal',
 	var_export($r->error, true));
-
-// -----------------------------------------------------------------------------
-section('Marking a recipe to ship');
-
-// Assert the PREDICATE, not the host. Whether a given machine publishes
-// upgrades is a property of that machine — hard-asserting true here passes on
-// the dev checkout and fails on every node that merely consumes releases,
-// turning an environment difference into a red test.
-$publishes = DeploymentHelper::isUpgradeServer();
-check($publishes
-		=== (bool)(Globalvars::get_instance()->get_setting('upgrade_server_active')
-			|| PluginHelper::isPluginActive('server_manager')),
-	'the predicate is the same one utils/upgrade.php gates the upgrade endpoint on');
-if (!$publishes) {
-	harness_skip('ship control checks', 'this host does not publish upgrades');
-}
-
-// A fully-configured recipe, exactly what an author would mark.
-$author = new Recipe(NULL);
-$author->set('rcp_name', 'Shipped Test Author ' . $tag);
-$author->set('rcp_mode', Recipe::MODE_PIPELINE);
-$author->set('rcp_pipeline_job', 'email_triage');
-$author->set('rcp_prompt', '');
-$author->set('rcp_source_config', array('mailbox_aliases' => array('someone@example.com')));
-$author->set('rcp_model', 'claude-haiku-4-5');
-$author->set('rcp_enabled', true);
-$author->set('rcp_allow_tainted_writes', true);
-$author->set('rcp_owner_user_id', (int)$admin->key);
-$author->set('rcp_schedule_frequency', 'hourly');
-$author->set('rcp_max_iterations', 25);
-$author->set('rcp_max_tokens', 5000);
-$author->set('rcp_monthly_token_cap', 200000);
-$author->set('rcp_thinking_level', 'off');
-$author->save();
-$author->load();
-harness_register_row('rcp_recipes', 'rcp_recipe_id', (int)$author->key);
-
-file_put_contents($tmp_manifest, json_encode(array('recipes' => array())));
-$written_key = RecipeSeeder::ship($author, $tmp_manifest);
-$manifest = json_decode((string)file_get_contents($tmp_manifest), true);
-
-check(is_array($manifest) && count($manifest['recipes']) === 1,
-	'the declaration is written to the manifest');
-$entry = $manifest['recipes'][0];
-check($entry['key'] === $written_key && $entry['key'] !== '',
-	'it carries a stable key', var_export($entry['key'] ?? null, true));
-
-$stripped = array();
-foreach (array('rcp_owner_user_id' => 'owner_user_id', 'rcp_source_config' => 'source_config',
-		'rcp_model' => 'model', 'rcp_enabled' => 'enabled',
-		'rcp_allow_tainted_writes' => 'allow_tainted_writes') as $prefixed => $bare) {
-	if (array_key_exists($prefixed, $entry) || array_key_exists($bare, $entry)) $stripped[] = $bare;
-}
-check(empty($stripped), 'all five non-travelling fields are stripped',
-	'leaked: ' . implode(', ', $stripped));
-check(($entry['pipeline_job'] ?? '') === 'email_triage'
-	&& ($entry['schedule_frequency'] ?? '') === 'hourly'
-	&& (int)($entry['max_tokens'] ?? 0) === 5000,
-	'the job, schedule and caps do travel');
-
-$author->load();
-check((string)$author->get('rcp_declared_key') === $written_key,
-	'the key is stamped back on the recipe');
-
-// Marking it again updates the entry rather than adding a second one.
-$author->set('rcp_max_tokens', 6000);
-$author->save();
-$author->load();
-RecipeSeeder::ship($author, $tmp_manifest);
-$manifest = json_decode((string)file_get_contents($tmp_manifest), true);
-check(count($manifest['recipes']) === 1 && (int)$manifest['recipes'][0]['max_tokens'] === 6000,
-	're-marking replaces the entry instead of appending a duplicate',
-	'entries: ' . count($manifest['recipes']));
-
-// A recipe that was never saved has nothing to declare.
-$unsaved = new Recipe(NULL);
-$unsaved->set('rcp_name', 'never saved');
-$threw = false;
-try { RecipeSeeder::ship($unsaved, $tmp_manifest); } catch (RecipeSeederException $e) { $threw = true; }
-check($threw, 'marking an unsaved recipe is refused');
 
 // -----------------------------------------------------------------------------
 section('The sync hook is wired up');

@@ -20,7 +20,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailPipeli
  * panel contract all live in EmailPipelineJobBase, shared with the other two
  * email jobs.
  *
- * @version 1.5
+ * @version 1.6
  */
 class EmailSecurityScanJob extends EmailPipelineJobBase {
 
@@ -37,9 +37,8 @@ class EmailSecurityScanJob extends EmailPipelineJobBase {
     }
 
     protected function mailboxFieldHelp(): string {
-        return 'The stored mailboxes this recipe scans — it covers exactly the ones ticked '
-             . 'here, nothing implicitly. The recipe owner must hold a grant on each. The '
-             . 'mail page\'s AI panel edits this same list.';
+        return 'Only the ticked mailboxes are scanned; the owner needs a grant on each. '
+             . 'The mail page\'s AI panel edits this same list.';
     }
 
     /** The scan judges the message envelope and body alone. */

@@ -115,7 +115,8 @@ retired value `none`.
 
 **A fact line under the control** states how this recipe's binding will honour
 that intent, computed from `RecipeVaultScope::requiresWindow()` and the job's
-`hasUnsealedBinding()`. Nothing sealed: *The server runs this by itself.*
+`hasUnsealedBinding()`. Nothing sealed: no line at all — the server running it
+is the unremarkable case.
 Fully sealed: *This recipe reads mail only you can unlock, so the server can't
 run it alone. A due run starts the next time you're signed in with your vault
 unlocked; anything that arrives in between waits for you.* Mixed: *Some of what
@@ -192,13 +193,16 @@ A few recipes are worth having on every install — triage the inbox, score mail
       "prompt": "",
       "schedule_frequency": "hourly",
       "max_iterations": 25,
-      "max_tokens": 5000,
-      "monthly_token_cap": 200000,
       "thinking_level": "off"
     }
   ]
 }
 ```
+
+A limit field (`max_iterations`, `max_tokens`, `monthly_token_cap`) left out of
+a declaration inherits the platform default from the Recipe field spec
+(`data/recipes_class.php`) — the single source the new-recipe form and the
+seeder both read. A declaration states a limit only to deliberately pin one.
 
 **What travels is the judgement and the settings.** Five fields are fixed at seed time instead of declared, because they mean nothing away from the instance the recipe was built on:
 
@@ -226,7 +230,7 @@ Three rules govern seeding:
 
 Seeding is skipped, and retried at the next sync, when the install has no human administrator yet — `User::USER_SYSTEM` carries permission 10 and is excluded on purpose, so a shipped recipe never executes its writes as a service account.
 
-**Marking a recipe to ship.** Templates are authored like any recipe: build it in the admin, get it right, then use **Ship with new installs** on the edit page. It writes the current recipe into `recipes.json` minus the five fields above, assigns a stable `rcp_declared_key`, and stamps that key back on the recipe so marking it again updates the entry rather than adding a second one. The file is under version control, so the change is an ordinary diff to review and commit.
+**Authoring a shipped recipe.** Build and prove the recipe in the admin, then hand-write its declaration into `recipes.json` — the key, the job, the schedule, and any limit worth pinning; never the five fields above. `shipped_recipes_test` fails the manifest on an unknown field, a duplicate key, or a non-travelling field, so a bad edit is caught before it ships. The file is under version control: the change is an ordinary diff to review and commit.
 
 The control appears only on an instance that publishes upgrades (`DeploymentHelper::isUpgradeServer()`). Elsewhere `recipes.json` is replaced wholesale by the next upgrade, so an edit there would be silently discarded. Seeding is the opposite and is not gated — it runs on every install, which is the point.
 
