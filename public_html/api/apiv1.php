@@ -63,14 +63,14 @@ $api_start_time = microtime(true);
 /**
  * Send a JSON error response and exit.
  */
-function api_error($message, $error_type = 'TransactionError', $status_code = 400) {
+function api_error($message, $error_type = 'TransactionError', $status_code = 400, $data = array()) {
 	header("Content-Type: application/json");
 	http_response_code($status_code);
 	echo json_encode(array(
 		'api_version' => '1.0',
 		'errortype' => $error_type,
 		'error' => $message,
-		'data' => new stdClass()
+		'data' => $data ? $data : new stdClass()
 	)) . PHP_EOL;
 	exit;
 }

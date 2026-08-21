@@ -460,7 +460,16 @@ class ApiLogicEndpoint {
 				'error_type' => 'ActionError',
 				'note' => 'Idempotency-Key reused with a different request'
 			]);
-			api_error('This Idempotency-Key was already used with a different request', 'ActionError', 409);
+			// The marker matters as much as the message. A client that retried a
+			// request whose body it cannot reproduce byte for byte is refused
+			// identically on every attempt, and without something to read it
+			// keeps trying for as long as it is running.
+			api_error(
+				'This Idempotency-Key was already used with a different request',
+				'ActionError',
+				409,
+				array('reason' => 'idempotency_key_reused')
+			);
 		}
 
 		$stored_status = $row->get('aik_response_status');

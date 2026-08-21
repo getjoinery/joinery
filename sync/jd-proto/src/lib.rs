@@ -78,6 +78,23 @@ impl ProtoError {
         }
     }
 
+    /// Whether the server refused this because the key on it has already been
+    /// used for a different request.
+    ///
+    /// This is the one refusal that cannot improve with time and cannot improve
+    /// with a retry either: the key is fixed on the operation, the body will
+    /// not match the one the key was spent on, and so the same 409 comes back
+    /// for as long as anyone keeps asking. Read off the marker rather than the
+    /// prose, for the reason `name_taken` is.
+    pub fn key_reused(&self) -> bool {
+        match self {
+            ProtoError::Api { data, .. } => {
+                data.get("reason").and_then(Value::as_str) == Some("idempotency_key_reused")
+            }
+            _ => false,
+        }
+    }
+
     /// Whether the server refused this because the destination folder is in its
     /// trash. Read off the marker rather than the prose, for the reason
     /// `name_taken` is.
