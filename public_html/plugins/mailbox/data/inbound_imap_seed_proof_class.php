@@ -27,7 +27,9 @@
  *
  * See specs/mail_import_loss_proof.md § B.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - isp_method records whether the cursor came from a server-side
+ *   UID SEARCH SINCE or the bisection (specs/imap_seed_scope_guard.md §3.4)
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -53,6 +55,10 @@ class InboundImapSeedProof extends SystemBase {
 		'isp_high_uid'                    => array('type'=>'int8'),
 		// What was decided, and how hard it was to decide.
 		'isp_cursor_uid'                  => array('type'=>'int8'),
+		// How the cursor was found: 'search' (one server-side UID SEARCH SINCE
+		// answered exactly) or 'bisect' (the band-probe bisection). NULL on proofs
+		// recorded before the column existed — all of those bisected.
+		'isp_method'                      => array('type'=>'varchar(10)'),
 		'isp_probes'                      => array('type'=>'int4', 'default'=>'0'),
 		// FALSE when the probe budget ran out before the bisection closed. The
 		// cursor is still safe (it is the proven lower bound) but looser than asked.
@@ -114,7 +120,8 @@ class InboundImapSeedProof extends SystemBase {
 			. ', cutoff ' . (string)$this->get('isp_cutoff_time')
 			. ', below ' . ((string)$this->get('isp_below_time') ?: '-')
 			. ', above ' . ((string)$this->get('isp_above_time') ?: '-')
-			. ', ' . intval($this->get('isp_probes')) . ' probes'
+			. ', ' . ((string)$this->get('isp_method') === 'search'
+				? 'server search' : intval($this->get('isp_probes')) . ' probes')
 			. ($this->get('isp_converged') ? '' : ' (budget exhausted)')
 			. ' — ' . $verdict;
 	}

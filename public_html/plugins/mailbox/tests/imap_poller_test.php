@@ -256,7 +256,7 @@ class ImapPollerTest {
 			'failed' => 0, 'failed_detail' => array()));
 		$this->ok($s['success'] === true, 'fully reconciled run is successful');
 		$this->ok($s['unaccounted'] === 0, 'clean run has nothing unaccounted');
-		$this->ok(strpos($s['note'], 'seen 10, stored 8, duplicates 2, failed 0.') !== false,
+		$this->ok(strpos($s['note'], 'seen 10, stored 8, duplicates 2, out of scope 0, failed 0.') !== false,
 			'note carries the counts');
 
 		// Repeated failures collapse to one line with a count.

@@ -17,7 +17,10 @@
  *
  * See specs/two_way_imap_sync.md (§5, §6) and ImapSyncer.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - iif_seed_high_uid: where the backfill ends and live ingest
+ *   begins, recorded at seed time so the day-window scope guard knows which
+ *   UIDs it governs (specs/imap_seed_scope_guard.md)
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -58,6 +61,12 @@ class InboundImapFolder extends SystemBase {
 		'iif_role'                        => array('type'=>'varchar(20)'),
 		'iif_uidvalidity'                 => array('type'=>'int8'),
 		'iif_last_seen_uid'               => array('type'=>'int8'),
+		// The folder's high UID at the moment its cursor was seeded. The day-window
+		// scope guard applies only to UIDs at or below this — the backfill — so a
+		// message the member later moves into the folder (a fresh, higher UID) is
+		// ingested whatever its age (specs/imap_seed_scope_guard.md §3.2). NULL on
+		// folders seeded before the column existed: no guard, the pre-guard behavior.
+		'iif_seed_high_uid'               => array('type'=>'int8'),
 		'iif_last_sync_modseq'            => array('type'=>'int8'),
 		'iif_is_tracked'                  => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		// A folder created in Joinery that does not yet exist on the source. The sync

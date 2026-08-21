@@ -23,15 +23,22 @@
  * while an archive import can also skip a message the user did not select — so
  * they are passed in rather than fixed here.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - the poll dimensions gain out_of_scope, the day-window
+ *   backfill guard's bucket (specs/imap_seed_scope_guard.md §3.3)
  */
 
 require_once(PathHelper::getIncludePath('data/event_logs_class.php'));
 
 class MailRunRecord {
 
-	/** The buckets an IMAP poll uses: counter key => the word for it in the note. */
-	const DIMENSIONS_POLL = array('stored' => 'stored', 'dedup' => 'duplicates', 'failed' => 'failed');
+	/** The buckets an IMAP poll uses: counter key => the word for it in the note.
+	 *  out_of_scope is the day-window backfill guard's bucket — a message walked
+	 *  but deliberately not stored because it predates the feed's window
+	 *  (specs/imap_seed_scope_guard.md §3.3). A first-class bucket, never a silent
+	 *  skip, so the reconciliation tripwire still balances. */
+	const DIMENSIONS_POLL = array('stored' => 'stored', 'dedup' => 'duplicates',
+		'out_of_scope' => 'out of scope', 'failed' => 'failed');
 
 	/** The buckets an archive import uses — the same, plus what the user left out. */
 	const DIMENSIONS_IMPORT = array('stored' => 'stored', 'dedup' => 'duplicates',

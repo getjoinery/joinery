@@ -3612,15 +3612,31 @@ editor — how far back into the source the feed reaches:
 - **Full history** — the cursor starts at 0 and the whole mailbox backfills
   oldest-first.
 
-**Finding the day boundary.** IMAP assigns UIDs in strictly ascending arrival
-order (RFC 3501 §2.3.1.1), so the UID space is sorted by INTERNALDATE and can be
-bisected. `ImapIngestor::seekCursorForCutoff()` probes narrow UID bands
-(`SEEK_BAND`) asking only for INTERNALDATE, on the same numeric `UID FETCH` path
-the ingest window uses — bands rather than single UIDs because deletions leave
-gaps a lone probe would land in. `SEEK_MAX_PROBES` bounds the seek; an
+**Finding the day boundary.** `ImapIngestor::seekCursorForCutoff()` first asks
+the server outright — one `UID SEARCH SINCE` returns exactly the in-window UIDs,
+so the cursor is one below their minimum. Not every server cooperates (Gmail
+advertises ESEARCH yet rejects the `UID SEARCH RETURN (...)` form Horde emits),
+so any refusal or unusable answer falls through to bisection: IMAP assigns UIDs
+in strictly ascending arrival order (RFC 3501 §2.3.1.1), so the UID space is
+sorted by INTERNALDATE and can be bisected. The bisection probes narrow UID
+bands (`SEEK_BAND`) asking only for INTERNALDATE, on the same numeric `UID FETCH`
+path the ingest window uses — bands rather than single UIDs because deletions
+leave gaps a lone probe would land in. `SEEK_MAX_PROBES` bounds the seek; an
 inconclusive one falls back to the best lower bound reached, importing somewhat
-more than asked rather than silently importing nothing. (`UID SEARCH SINCE` is the
-obvious implementation and is not available here — see the `UID FETCH` note below.)
+more than asked rather than silently importing nothing.
+
+**The cursor decides where to look; the scope decides what to keep.** The seek
+is fail-open, so on a sparse UID space (a decades-old Gmail folder is mostly
+deleted UIDs) the cursor can land far below the true boundary. What keeps that
+from filling the mailbox with out-of-window mail is a storage-time guard: during
+a day-scoped backfill, a walked message whose INTERNALDATE predates the window
+is skipped and counted (`out of scope` in the run record), with the cursor
+advancing past it — a conservative cursor costs walk time, never scope. The
+guard governs only the backfill: `iif_seed_high_uid` records the folder's high
+UID at seed time, and above it no date filter applies, so a message the member
+later moves into a tracked folder (a fresh, higher UID) is ingested whatever its
+age. An unreadable INTERNALDATE counts as in-window — the same fail-toward-
+keeping direction the seek uses (specs/imap_seed_scope_guard.md).
 
 The choice is editable at any time. **Any** change to it — a different scope, or a
 different day count — rewinds every folder cursor of that feed
@@ -3632,10 +3648,10 @@ re-walk from storing a second copy of mail already in the mailbox, and
 already-imported mail is never removed by narrowing.
 
 Whatever the scope, each fetch walks **one bounded UID window** (`(cursor+1):(cursor+max_per_account)`,
-a numeric `UID FETCH` range — never `SEARCH`: Gmail advertises ESEARCH but rejects
-the `UID SEARCH RETURN (...)` form Horde emits, so nothing in the ingest path
-searches), so a backfill of a large mailbox imports in batches across successive
-fetches rather than one enormous fetch. A UIDVALIDITY change re-seeds per the same
+a numeric `UID FETCH` range — the walk never depends on `SEARCH`, since Gmail
+rejects the form Horde emits; the boundary seek's `SEARCH` attempt is exactly
+that, an attempt with a fetch-based fallback), so a backfill of a large mailbox
+imports in batches across successive fetches rather than one enormous fetch. A UIDVALIDITY change re-seeds per the same
 choice. Failures are per-account and non-fatal: one unreachable mailbox or expired
 token never stops the rest, and the reason is recorded in the account's last status
 (`iia_needs_reauth` is set when a token refresh/auth fails, surfacing a Reconnect).
@@ -3647,15 +3663,18 @@ every pass, and a full-history backfill is hundreds of passes — so neither can
 answer *what did the import lose two hours ago*. Every poll that did something
 therefore leaves a durable row in `evl_event_logs` under the event
 **`mailbox_imap_ingest`**, holding the counts (`seen`, `stored`, `duplicates`,
-`failed`) and each distinct failure reason with the number of messages it hit.
-Fifty messages failing the same way read as one line, not fifty.
+`out of scope` — the day-window guard's bucket — and `failed`) and each distinct
+failure reason with the number of messages it hit. Fifty messages failing the
+same way read as one line, not fifty.
 
 Two things make an otherwise-silent loss visible:
 
 - **`unaccounted`** — `seen` counts every UID the window walked. If
-  `stored + duplicates + failed` does not reconcile against it, the shortfall is
-  named in the note and the row is marked unsuccessful. This is the only signal
-  for a message that disappeared without anything reporting a reason.
+  `stored + duplicates + out of scope + failed` does not reconcile against it,
+  the shortfall is named in the note and the row is marked unsuccessful. This is
+  the only signal for a message that disappeared without anything reporting a
+  reason. A scope-guard skip is a first-class bucket for exactly this reason:
+  provable-on-purpose, never unaccounted.
 - **A UID the server returned no data for** is a counted failure rather than a
   skip, so the reconciliation above stays honest.
 
@@ -3685,12 +3704,13 @@ collision cleanly.
 
 ### Proving where a day-windowed feed started reading
 
-A feed set to **Last N days** bisects the UID space for the oldest message still
-inside the window and starts just below it. That decision is made once per
-folder and it decides what the user will and will not receive, so each seek
-writes a row to `isp_inbound_imap_seed_proofs`: the cutoff and high UID that went
-in, the cursor that came out, how many probes it took, whether the bisection
-converged or ran out of budget, and two boundary probes.
+A feed set to **Last N days** seeks the oldest message still inside the window
+and starts just below it. That decision is made once per folder and it decides
+what the user will and will not receive, so each seek writes a row to
+`isp_inbound_imap_seed_proofs`: the cutoff and high UID that went in, the cursor
+that came out, which method answered (`isp_method` — `search` for a server-side
+`UID SEARCH SINCE`, `bisect` for the band-probe bisection), how many probes it
+took, whether it converged or ran out of budget, and two boundary probes.
 
 - **below** — the newest message at or under the cursor. Its date should be
   *older* than the cutoff. If it is not, the seek started too high and skipped
