@@ -137,6 +137,16 @@ re-encrypts under the same FK, and submits the blob (`drive_rename` with
 `encrypted_metadata`); a plaintext `name` for an encrypted file is refused, so
 the chosen name never reaches the server.
 
+**Two files in one folder can hold one name.** Name uniqueness is enforced on
+the stored title, and an encrypted file's title is an opaque per-file id, which
+is unique by construction — so the server cannot see a duplicate real name and
+cannot refuse one. Two people saving `report.txt` into a shared vault at the
+same moment both succeed. A sync client resolves it: the lowest file id keeps
+the name and every other holder is renamed to `report (2).txt`, `report (3).txt`
+and so on, by resealing its metadata. The rule is the file id rather than
+anything a device can see for itself, so every device renames the same file to
+the same name without having to agree first.
+
 ## What the platform keeps doing, unchanged
 
 The entire Drive pipeline operates on bytes it never interprets.

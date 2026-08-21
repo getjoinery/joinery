@@ -1418,3 +1418,155 @@ fn scratch_already_here() {
         );
     }
 }
+
+// ---------------------------------------------------------------------------
+// Two people editing the same handful of files, without pausing
+// ---------------------------------------------------------------------------
+
+/// The rig's shape, which the generator above has never had.
+///
+/// Two differences, and both of them are the point.
+///
+/// **Density.** `drive` syncs on one step in twenty and advances the clock
+/// twenty minutes when it does, so every pass begins long after the last thing
+/// anybody typed and the world is quiet by construction. The rig interleaves
+/// saves and syncs three seconds apart, all day. A save landing while the last
+/// one is still in flight is the ordinary case there and unreachable here.
+///
+/// **Collision.** Both computers work on the SAME small set of names, and an
+/// editor touches three paths per save -- the document, its backup, and a swap
+/// file it writes and deletes. The rig's only two confirmed losses were both of
+/// a file two computers wrote within a tenth of a second of each other, one of
+/// them a `~` backup, and neither left a conflict copy behind.
+///
+/// The per-pass custody check is what is really being asked here: anything on a
+/// disk when a pass begins and gone when it ends has to be findable somewhere.
+fn hammer(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
+    let world = World::of(seed, devices);
+    let mut rng = SimRng::new(seed ^ 0xED17_0BE5);
+    if chaos {
+        for d in &world.devices {
+            d.net.set_faults(NetFaults::chaos());
+        }
+    }
+
+    for step in 0..steps {
+        let device = &world.devices[rng.below(world.devices.len() as u64) as usize];
+        let doc = format!("notes-{}.txt", rng.below(3));
+        match rng.below(10) {
+            // An editor saving: the backup first, then the document itself
+            // through a temporary, then the swap file it keeps beside them.
+            0..=5 => {
+                let salt = rng.below(1_000_000);
+                let body = |what: &str| {
+                    format!("{what} {step} {} {salt}", device.name).into_bytes()
+                };
+                device.fs.user_write(&format!("{doc}~"), &body("backup"));
+                let tmp = format!(".{doc}.new");
+                device.fs.user_write(&tmp, &body("document"));
+                device.fs.user_rename(&tmp, &doc);
+                device.fs.user_write(&format!(".{doc}.swp"), &body("swap"));
+                device.fs.user_remove(&format!(".{doc}.swp"));
+            }
+            // Both of them at once, a tenth of a second apart. Written as one
+            // step because that is what it is: neither computer has had the
+            // chance to hear about the other.
+            6 => {
+                for d in &world.devices {
+                    d.fs.user_write(
+                        &format!("{doc}~"),
+                        format!("racing {step} from {}", d.name).as_bytes(),
+                    );
+                    world.clock.advance_secs(0);
+                }
+            }
+            // Sync -- often, and without leaving the moment. Twenty minutes of
+            // quiet between passes is what makes the ordinary generator a calm
+            // world; three seconds is what the rig actually does.
+            _ => {
+                world.clock.advance_secs(3);
+                world.pass(device);
+            }
+        }
+    }
+
+    assert!(
+        world.settle().is_some(),
+        "seed {seed}: the world never went quiet"
+    );
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+    assert_no_live_orphan_on_the_server(&world);
+
+    // Did it reach the shape it exists for? An arm that never produces a
+    // conflict is two computers taking turns, not two computers colliding, and
+    // it would pass forever without testing anything. Counted rather than
+    // asserted per seed -- a single quiet seed is fine, a quiet ARM is not.
+    let copies = jd_sim::scenario::server_tree(&world.server)
+        .into_iter()
+        .filter(|(p, h)| h.is_some() && p.contains("(conflicted copy "))
+        .count();
+    CONFLICTS.fetch_add(copies, std::sync::atomic::Ordering::Relaxed);
+}
+
+static CONFLICTS: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+
+fn hammer_sweep(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+) -> Vec<(String, u64)> {
+    let spec: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    let total = (seeds.end - seeds.start) as usize;
+    let mut failures = Vec::new();
+    for seed in seeds {
+        let owned: Vec<(String, Platform)> =
+            spec.iter().map(|(n, p)| (n.to_string(), *p)).collect();
+        let r = std::panic::catch_unwind(|| {
+            let refs: Vec<(&str, Platform)> =
+                owned.iter().map(|(n, p)| (n.as_str(), *p)).collect();
+            hammer(seed, steps, &refs, chaos);
+        });
+        if r.is_err() {
+            failures.push(seed);
+        }
+    }
+    let collided = CONFLICTS.swap(0, std::sync::atomic::Ordering::Relaxed);
+    println!(
+        "SWEEP {label}: {} of {total} failed: {:?} ({collided} conflict copies)",
+        failures.len(),
+        failures
+    );
+    assert!(
+        collided > 0,
+        "{label}: not one conflict copy in {total} seeds -- the arm never \
+         reached the collision it exists for"
+    );
+    failures.into_iter().map(|s| (label.to_string(), s)).collect()
+}
+
+#[test]
+#[ignore]
+fn scratch_hammer_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(hammer_sweep("hammer-clean-2dev", 80000..80300, 120, &["laptop", "desktop"], false));
+    arms.push(hammer_sweep("hammer-hostile-2dev", 80300..80600, 120, &["laptop", "desktop"], true));
+    arms.push(hammer_sweep("hammer-hostile-3dev", 80600..80800, 120, &["a", "b", "c"], true));
+    no_seed_failed(arms);
+}
+
+/// One hammer seed, for tracing.
+#[test]
+#[ignore]
+fn scratch_hammer_one() {
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let steps: usize = std::env::var("STEPS").unwrap_or("120".into()).parse().unwrap();
+    let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
+    let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
+    let spec: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
+    hammer(seed, steps, &spec, chaos);
+}

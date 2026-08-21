@@ -207,7 +207,7 @@ Three reasons, and they are told apart because the fixes differ:
 |---|---|---|
 | `case_clash` | Two names differ only by capitalization, on a disk that cannot tell them apart | Rename one |
 | `unicode_clash` | Two names are different bytes that normalize to one form — `café` typed two ways | Pick one spelling |
-| `duplicate_name` | The server is holding two live items in one folder under the *same* name | Nothing they can do from here — the second item has no path to be seen at, so the message points them at the web |
+| `duplicate_name` | The server is holding two live items in one folder under the *same* name, and neither is an encrypted file | Nothing they can do from here — the second item has no path to be seen at, so the message points them at the web |
 
 `duplicate_name` should be rare outside a vault: the server refuses a name a
 live sibling already holds. It is reported rather than folded into
@@ -219,8 +219,18 @@ entirely.
 enforced on the stored title, and an encrypted file's title is an opaque
 per-file identifier that is unique by construction — so two files in one vault
 folder whose real names are both `notes.txt` are a state the server cannot see,
-let alone refuse. The client is the only thing that can tell, and it parks one
-of them.
+let alone refuse. The client is the only thing that can tell, and it resolves it
+by renaming: the lowest server id keeps the name, and every other holder becomes
+`notes (2).txt`, `notes (3).txt` and so on, applied by resealing that file's
+metadata.
+
+The rule is the server id rather than anything a device can see for itself.
+Resolution order ranks materialized entries first, so a file already on disk
+here and not on the other computer would win here and lose there — each device
+renaming the other's file, neither ever holding still. An id is the same number
+everywhere, so every device arrives at the same answer without having to agree
+first. An entry the server has never seen loses to one it has: it has no id to
+compare and nobody has been told about it, so renaming it disturbs nothing.
 
 A parked entry keeps recording the placement it is waiting for, and that record
 is **not** ownership of the path: it holds no bytes there and never did. Whatever

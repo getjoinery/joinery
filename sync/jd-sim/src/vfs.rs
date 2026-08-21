@@ -229,6 +229,7 @@ impl MemFs {
             let id = Self::alloc_id(&mut st);
             st.file_ids.insert(key.clone(), id);
         }
+        Self::watch_loss(&st, &key, "the user saving over it");
         st.nodes.insert(
             key,
             Node::File {
@@ -266,6 +267,7 @@ impl MemFs {
             .cloned()
             .collect();
         for v in victims {
+            Self::watch_loss(&st, &v, "the user deleting it");
             st.nodes.remove(&v);
             if let Some(id) = st.file_ids.remove(&v) {
                 st.freed_ids.push(id);
@@ -489,7 +491,40 @@ impl MemFs {
         }
     }
 
+    /// Say where content stopped existing, when `LOSE` names its hash.
+    ///
+    /// Set `LOSE` to the first few characters of a sha256 and every disk in the
+    /// world reports the moment that content is built over, with the stack that
+    /// did it. Content vanishing is the one failure that leaves no trace of
+    /// itself: the file is simply not there at the end, and the tree, the
+    /// entries and the queue all look right because by then they are.
+    /// Reconstructing it from a settled world is guesswork, and this is the
+    /// answer instead -- it named the actor behind a suspected engine loss in
+    /// one command, and the actor was the harness.
+    fn watch_loss(st: &MemFsState, key: &str, why: &str) {
+        static WATCH: std::sync::OnceLock<Option<String>> = std::sync::OnceLock::new();
+        let Some(prefix) = WATCH
+            .get_or_init(|| std::env::var("LOSE").ok())
+            .as_deref()
+        else {
+            return;
+        };
+        let Some(Node::File { bytes, .. }) = st.nodes.get(key) else {
+            return;
+        };
+        let hash = crate::sha256_hex(bytes);
+        if !hash.starts_with(prefix) {
+            return;
+        }
+        eprintln!(
+            "LOSE {} left {key} by {why}\n{}",
+            &hash[..12],
+            std::backtrace::Backtrace::force_capture()
+        );
+    }
+
     fn move_subtree(st: &mut MemFsState, from: &str, to: &str) {
+        Self::watch_loss(st, to, "a rename landing on it");
         let moving: Vec<String> = st
             .nodes
             .keys()
@@ -887,6 +922,7 @@ impl SpoolFile for MemSpool {
             return Err(VfsError::AlreadyExists(MemFs::path_of(&blocker)));
         }
 
+        MemFs::watch_loss(&st, &key, "a download committing on top of it");
         MemFs::ensure_parents(&mut st, &key);
         // Replacing a file keeps its id — the rename lands on top of it, which
         // is what a real filesystem does and what makes "same inode, new

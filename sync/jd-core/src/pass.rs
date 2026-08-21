@@ -373,6 +373,28 @@ pub fn run_pass(
             (env.now_ms)() as i64,
         )?;
     }
+    // The duplicate-name renames first, and in their own batch. They exist to
+    // free a name somebody else is waiting on, so running them ahead of the
+    // round's own work is the point rather than an accident of ordering -- and
+    // they are decided before the scan, so they cannot be part of the round.
+    if !out.naming.renames.is_empty() {
+        let freeing = crate::order::Plan {
+            ops: out
+                .naming
+                .renames
+                .iter()
+                .map(|(id, from, to)| crate::order::PlannedOp {
+                    entity: *id,
+                    action: crate::reconcile::Action::ApplyLocalMove { to: to.clone() },
+                    stage: crate::order::Stage::Move,
+                    rank: 0,
+                    from: Some(from.clone()),
+                })
+                .collect(),
+            broken_cycles: Vec::new(),
+        };
+        journal(env.store, &freeing, key_for)?;
+    }
     journal(env.store, &out.round.plan, key_for)?;
     out.exec = run_queued(env)?;
 

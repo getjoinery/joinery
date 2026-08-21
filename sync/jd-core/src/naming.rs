@@ -31,7 +31,7 @@ use std::collections::HashMap;
 use jd_vfs::{LocalName, Personality, UnsyncableReason};
 
 use crate::execute::{ExecEnv, ExecError};
-use crate::model::{EntityId, EntityType, Entry, LocalStatus};
+use crate::model::{EntityId, EntityType, Entry, LocalStatus, Placement};
 
 /// What one round of naming changed.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
@@ -44,12 +44,100 @@ pub struct NamingOutcome {
     /// in the way got renamed or deleted. Recovery has to be automatic, or a
     /// user who fixes the clash sees nothing happen.
     pub recovered: Vec<EntityId>,
+    /// Encrypted files this device is renaming because two of them hold one
+    /// name, with where each is now and what it is to be called.
+    ///
+    /// Carried out of here rather than acted on here: renaming is the pass's
+    /// business, journalled with a key like every other order, and this stage
+    /// only decides.
+    pub renames: Vec<(EntityId, Placement, Placement)>,
 }
 
 impl NamingOutcome {
     pub fn is_empty(&self) -> bool {
-        self.escaped == 0 && self.unsyncable.is_empty() && self.recovered.is_empty()
+        self.escaped == 0
+            && self.unsyncable.is_empty()
+            && self.recovered.is_empty()
+            && self.renames.is_empty()
     }
+}
+
+/// Who keeps a name when two encrypted files in one folder hold it.
+///
+/// **The problem.** The server enforces name uniqueness on the title it stores,
+/// and an encrypted file's stored title is an opaque per-file id — unique by
+/// construction. So it cannot refuse a duplicate real name, and two files in
+/// one vault folder can genuinely be called the same thing. Neither is a
+/// conflicted version of the other; they are two files that arrived at one
+/// name. The name resolver marks the loser unsyncable, and unsyncable is not a
+/// state this one can leave: nothing about a settled tree changes to release
+/// it, so one of the two files simply never appears on any disk, forever.
+///
+/// **The rule.** The lowest server id keeps the name. Not resolution order,
+/// which ranks materialized entries first and therefore differs from one
+/// computer to the next: two devices would each rename the other's file and
+/// neither would ever hold still. A server id is the same number everywhere and
+/// does not move, so every device renames the same file to the same thing and
+/// arrives without needing to agree first.
+///
+/// An entry the server has never seen loses to one it has. It has no id to
+/// compare and nothing has been told about it yet, so renaming it costs
+/// nothing.
+fn duplicate_losers(
+    pairs: &[(Entry, jd_vfs::Resolved)],
+    personality: &Personality,
+) -> HashMap<EntityId, String> {
+    // Only files, and only encrypted ones. A plaintext duplicate cannot happen
+    // -- the server refuses it -- so renaming on the strength of one would mean
+    // acting on a state the server says is impossible.
+    let mut groups: HashMap<String, Vec<&Entry>> = HashMap::new();
+    for (entry, resolved) in pairs {
+        if !entry.is_encrypted || entry.id.entity_type != EntityType::File {
+            continue;
+        }
+        let name = &competing_placement(entry).name;
+        groups
+            .entry(jd_vfs::comparison_key(name, personality))
+            .or_default()
+            .push(entry);
+        let _ = resolved;
+    }
+
+    // Every name in the folder, so a chosen replacement does not walk into
+    // another sibling. Includes the plaintext ones: they are on the same disk
+    // and compete for the same slots.
+    let taken: Vec<String> = pairs
+        .iter()
+        .map(|(e, _)| jd_vfs::comparison_key(&competing_placement(e).name, personality))
+        .collect();
+
+    let mut out = HashMap::new();
+    for (_, mut group) in groups {
+        if group.len() < 2 {
+            continue;
+        }
+        // Provisional last, then by id. `sort_by_key` is stable, so equal keys
+        // keep the order they came in -- which cannot happen here, because two
+        // entries never share a server id.
+        group.sort_by_key(|e| (e.id.is_provisional(), e.id.server_id));
+        let mut assigned: Vec<String> = Vec::new();
+        for loser in group.into_iter().skip(1) {
+            let name = &competing_placement(loser).name;
+            // From 2, the way a person counts copies. Bounded for the same
+            // reason the conflict-copy search is: a folder that defeats this
+            // has something else wrong with it.
+            let free = (2..=1000).find_map(|n| {
+                let candidate = jd_vfs::numbered_name(name, n);
+                let key = jd_vfs::comparison_key(&candidate, personality);
+                (!taken.contains(&key) && !assigned.contains(&key)).then_some(candidate)
+            });
+            if let Some(free) = free {
+                assigned.push(jd_vfs::comparison_key(&free, personality));
+                out.insert(loser.id, free);
+            }
+        }
+    }
+    out
 }
 
 /// Where an entry is competing for a name, and under what name.
@@ -138,13 +226,18 @@ pub fn apply_naming(
             .map(|e| competing_placement(e).name.clone())
             .collect();
         let resolved = jd_vfs::resolve_siblings(&names, personality);
+        let pairs: Vec<(Entry, jd_vfs::Resolved)> =
+            siblings.into_iter().zip(resolved).collect();
+        // Decided over the whole folder, before any single entry is judged: who
+        // keeps a duplicated name depends on who else is holding it.
+        let renamed = duplicate_losers(&pairs, personality);
 
         let parent_len = parent
             .and_then(|id| folder_paths.get(&id).copied())
             .map(|len| len + 1) // the separator
             .unwrap_or(0);
 
-        for (entry, r) in siblings.into_iter().zip(resolved) {
+        for (entry, r) in pairs {
             let (local_name, verdict) = match r.outcome {
                 LocalName::AsIs(name) => {
                     // Equal to the server's spelling in the common case. Not
@@ -172,6 +265,25 @@ pub fn apply_naming(
                 if updated != entry {
                     env.store.put_entry(&updated)?;
                 }
+                continue;
+            }
+
+            // Two encrypted files in one folder holding one name, and this is
+            // the one that gives it up. Recorded and left otherwise untouched:
+            // the pass renames it on the server, the next scan sees the new
+            // name, and the ordinary recovery path clears whatever it was
+            // parked as. Marking it unsyncable here instead is what used to
+            // happen, and nothing ever released it -- the file existed on the
+            // server and appeared on no disk anywhere, for good.
+            if let Some(to) = renamed.get(&entry.id) {
+                out.renames.push((
+                    entry.id,
+                    entry.remote.clone(),
+                    Placement {
+                        parent: entry.remote.parent,
+                        name: to.clone(),
+                    },
+                ));
                 continue;
             }
 
@@ -1119,4 +1231,110 @@ mod tests {
             "the key arrived; it is not waiting for one any more"
         );
     }
+    // ---- two encrypted files with one name ---------------------------------
+
+    fn vault_file(id: i64, name: &str) -> Entry {
+        let mut e = entry(
+            EntityId {
+                entity_type: EntityType::File,
+                server_id: id,
+            },
+            name,
+        );
+        e.is_encrypted = true;
+        e
+    }
+
+    fn losers(entries: &[Entry]) -> Vec<(i64, String)> {
+        let names: Vec<String> = entries.iter().map(|e| e.remote.name.clone()).collect();
+        let p = Personality::linux();
+        let resolved = jd_vfs::resolve_siblings(&names, &p);
+        let pairs: Vec<(Entry, jd_vfs::Resolved)> =
+            entries.iter().cloned().zip(resolved).collect();
+        let mut out: Vec<(i64, String)> = duplicate_losers(&pairs, &p)
+            .into_iter()
+            .map(|(id, name)| (id.server_id, name))
+            .collect();
+        out.sort();
+        out
+    }
+
+    #[test]
+    fn the_lower_server_id_keeps_a_duplicated_name() {
+        let got = losers(&[vault_file(7, "report.txt"), vault_file(9, "report.txt")]);
+        assert_eq!(got, vec![(9, "report (2).txt".to_string())]);
+    }
+
+    #[test]
+    fn who_gives_up_the_name_does_not_depend_on_the_order_they_are_seen_in() {
+        // The whole reason the rule is the server id. Resolution order ranks
+        // materialized entries first, so a file already on disk here and not on
+        // the other computer would be the winner here and the loser there --
+        // each device renaming the other's file, forever, neither ever holding
+        // still. The id is the same number on every computer.
+        let mut here = vault_file(9, "report.txt");
+        here.synced_placement = Some(here.remote.clone());
+        let there = vault_file(7, "report.txt");
+        assert_eq!(
+            losers(&[here.clone(), there.clone()]),
+            losers(&[there, here]),
+            "both computers have to rename the same file"
+        );
+    }
+
+    #[test]
+    fn a_third_file_with_the_same_name_gets_the_next_number() {
+        let got = losers(&[
+            vault_file(7, "report.txt"),
+            vault_file(9, "report.txt"),
+            vault_file(11, "report.txt"),
+        ]);
+        assert_eq!(
+            got,
+            vec![
+                (9, "report (2).txt".to_string()),
+                (11, "report (3).txt".to_string()),
+            ]
+        );
+    }
+
+    #[test]
+    fn a_number_already_taken_by_a_sibling_is_skipped() {
+        let got = losers(&[
+            vault_file(7, "report.txt"),
+            vault_file(9, "report.txt"),
+            vault_file(11, "report (2).txt"),
+        ]);
+        assert_eq!(got, vec![(9, "report (3).txt".to_string())]);
+    }
+
+    #[test]
+    fn a_file_the_server_has_never_seen_is_the_one_that_gives_way() {
+        // It has no id to compare and nobody has been told about it, so
+        // renaming it costs nothing and disturbs nothing.
+        let mut fresh = vault_file(-4, "report.txt");
+        fresh.id.server_id = -4;
+        let known = vault_file(9, "report.txt");
+        let got = losers(&[fresh, known]);
+        assert_eq!(got, vec![(-4, "report (2).txt".to_string())]);
+    }
+
+    #[test]
+    fn a_plaintext_duplicate_is_left_alone() {
+        // The server enforces uniqueness on a plaintext title, so two of them
+        // cannot exist. Renaming on the strength of one would mean acting on a
+        // state the server says is impossible -- and the name resolver's
+        // ordinary clash reporting is the right answer if it somehow does.
+        let mut a = vault_file(7, "report.txt");
+        let mut b = vault_file(9, "report.txt");
+        a.is_encrypted = false;
+        b.is_encrypted = false;
+        assert!(losers(&[a, b]).is_empty());
+    }
+
+    #[test]
+    fn two_different_names_are_not_a_duplicate() {
+        assert!(losers(&[vault_file(7, "a.txt"), vault_file(9, "b.txt")]).is_empty());
+    }
+
 }
