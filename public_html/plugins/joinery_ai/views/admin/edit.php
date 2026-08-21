@@ -175,7 +175,31 @@ echo '<button type="button" class="btn btn-sm btn-outline-secondary mt-2" id="rc
    . 'Customize</button>';
 echo '</div>';
 
+// Upstream-changed notice: the operator forked the wording, and a release has
+// since improved the built-in they forked from. Compares the fork-point copy
+// (rcp_prompt_baseline) to the job's CURRENT built-in. A NULL baseline means
+// the fork point is unknown (customized before the column existed) — say
+// nothing rather than guess.
+$prompt_upstream_changed = false;
+$upstream_builtin = '';
+if ($prompt_is_custom) {
+    $prompt_baseline = trim((string)$recipe->get('rcp_prompt_baseline'));
+    $notice_job = trim((string)$recipe->get('rcp_pipeline_job'));
+    if ($prompt_baseline !== '' && isset($job_default_prompts[$notice_job])) {
+        $upstream_builtin = $job_default_prompts[$notice_job];
+        $prompt_upstream_changed = $prompt_baseline !== trim($upstream_builtin);
+    }
+}
+
 echo '<div id="rcp_prompt_edit_wrap">';
+if ($prompt_upstream_changed) {
+    echo '<div class="alert alert-info py-2 mb-2">';
+    echo 'The built-in instructions for this job have improved since you customized. ';
+    echo 'Your wording still applies — merge the changes by hand, or use the revert link below the box.';
+    echo '<details class="mt-2"><summary style="cursor:pointer">View the current built-in instructions</summary>';
+    echo '<pre class="joai-prompt-builtin mt-2 mb-0">' . htmlspecialchars($upstream_builtin) . '</pre>';
+    echo '</details></div>';
+}
 $formwriter->textarea('rcp_prompt', 'Prompt', [
     'rows' => 12,
     'placeholder' => 'Describe what the recipe should do, what tools to use, what to deliver.',

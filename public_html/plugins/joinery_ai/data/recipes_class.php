@@ -19,6 +19,12 @@ class Recipe extends SystemBase {
         'rcp_recipe_id'           => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
         'rcp_name'                => array('type'=>'varchar(255)', 'required'=>true),
         'rcp_prompt'              => array('type'=>'text'),
+        // The job's built-in prompt as it stood when the operator customized
+        // rcp_prompt — the fork point. NULL when the prompt is not customized
+        // (or was customized before this column existed). The edit page
+        // compares it to the job's CURRENT built-in to tell the operator the
+        // upstream wording improved after they forked.
+        'rcp_prompt_baseline'     => array('type'=>'text'),
         // agent: the model drives via tools, one conversation per run.
         // pipeline: PHP drives, one bounded exchange per item — see
         // specs/joinery_ai_item_pipeline.md.

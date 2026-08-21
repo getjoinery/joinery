@@ -115,6 +115,10 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             'rcp_monthly_token_cap',
             'rcp_workspace',
         ]);
+        // Captured before the field loop overwrites it: the prompt-baseline
+        // stamping below needs to know whether THIS save is the customization.
+        $prompt_before = trim((string)$recipe->get('rcp_prompt'));
+
         // Blank means INHERIT, not zero. The requirement columns are overrides:
         // NULL is how a recipe says "whatever my job asks for", and writing a
         // materialised value would freeze the floor at save time and stop a
@@ -128,6 +132,23 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
                     $value = null;
                 }
                 $recipe->set($f, $value);
+            }
+        }
+
+        // Prompt baseline — the fork point for the upstream-changed notice.
+        // Customizing (empty -> non-empty) stamps the job's built-in wording as
+        // it stands right now; reverting (-> empty) clears it. A prompt that
+        // was already customized keeps its original fork point, including the
+        // NULL a pre-column customization left behind (unknown, so no notice).
+        if (array_key_exists('rcp_prompt', $input)) {
+            $prompt_now = trim((string)$recipe->get('rcp_prompt'));
+            if ($prompt_now === '') {
+                $recipe->set('rcp_prompt_baseline', null);
+            } elseif ($prompt_before === '') {
+                $job_id = trim((string)$recipe->get('rcp_pipeline_job'));
+                $job_class = $job_id !== '' ? (PipelineJobRegistry::all()[$job_id] ?? null) : null;
+                $recipe->set('rcp_prompt_baseline',
+                    $job_class ? (new $job_class())->defaultPrompt() : null);
             }
         }
 
