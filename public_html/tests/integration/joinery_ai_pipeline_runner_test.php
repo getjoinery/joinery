@@ -55,6 +55,9 @@ class FixtureJudgeJob implements PipelineJobInterface {
 
     public function id(): string { return 'test_fixture_job'; }
     public function label(): string { return 'Test fixture job'; }
+
+    /** No arrival concept: the item list is set by the test, not by a stream. */
+    public function arrivalLabel(): ?string { return null; }
     public function configDescriptor(): array { return ['input' => []]; }
     public function validateConfig(array $config, Recipe $recipe): void {}
     public function untrustedDigest(): bool { return false; }

@@ -363,7 +363,8 @@ class ScheduledTaskRegistry {
 		$fired = [];
 
 		foreach ($candidates as $recipe) {
-			// Never resurrect a recipe the operator turned off or left unconfigured.
+			// A recipe set to run manually only means no automatic runs of any
+			// kind, and a task chain is an automatic run.
 			if (!$recipe->get('rcp_enabled')) continue;
 
 			// Don't stack a second run on top of one already in flight.

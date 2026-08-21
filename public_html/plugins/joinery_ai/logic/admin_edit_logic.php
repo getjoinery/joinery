@@ -10,6 +10,8 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/ActionRegistry.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/TaintGate.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
+    require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
     require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/llm/LlmProviderFactory.php'));
 
     $session = SessionControl::get_instance();
@@ -34,11 +36,17 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $default_utc_time = LibraryFunctions::convert_time(
             $today . ' ' . $default_local_time, $session->get_timezone(), 'UTC', 'H:i:s'
         );
+        // A new recipe arrives on MANUALLY ONLY (rcp_enabled false), the same
+        // posture a seeded one arrives in: running something by itself is a
+        // choice someone makes, not a default they have to notice and undo.
+        // The frequency/day/time below are prefills for the moment they do —
+        // picking Daily or Weekly then lands on Monday 07:00 local rather than
+        // on midnight UTC.
         $recipe->set('rcp_schedule_frequency', 'weekly');
         $recipe->set('rcp_schedule_day_of_week', 1);
         $recipe->set('rcp_schedule_time', $default_utc_time);
         $recipe->set('rcp_delivery_dashboard', true);
-        $recipe->set('rcp_enabled', true);
+        $recipe->set('rcp_enabled', false);
         $recipe->set('rcp_max_iterations', 5);
         $recipe->set('rcp_max_tokens', 5000);
         $recipe->set('rcp_monthly_token_cap', 200000);
@@ -114,7 +122,6 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         $simple_fields = array_merge($shape_fields, [
             'rcp_name',
             'rcp_prompt',
-            'rcp_schedule_frequency',
             'rcp_schedule_day_of_week',
             'rcp_model',
             'rcp_min_tier',
@@ -160,9 +167,9 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             $recipe->set('rcp_schedule_time', null);
         }
 
-        // Checkboxes — absent = false
+        // Checkboxes — absent = false. rcp_enabled is NOT one: it is written by
+        // the Runs control below, which owns the manual/automatic decision.
         $recipe->set('rcp_delivery_dashboard', !empty($input['rcp_delivery_dashboard']));
-        $recipe->set('rcp_enabled', !empty($input['rcp_enabled']));
 
         // Allowed tools — checkboxes post as `rcp_allowed_tools[]`. Absent
         // means no tools selected. query_model is never user-facing here;
@@ -212,6 +219,50 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
             }
         }
         $recipe->set('rcp_source_config', $source_config);
+
+        // --- Runs: the one scheduling control ---------------------------------
+        //
+        // The form asks one question — when should this run by itself — and the
+        // answer lands in two columns. `rcp_enabled` is the manual/automatic
+        // bit, load-bearing far beyond this page (the dispatcher and the drain
+        // filter on it, the pending reaper reads it, the AI panel refuses a
+        // toggle while it is false), so Manually only IS enabled false, and
+        // switching TO it still cancels queued and in-flight runs (below).
+        // Any other answer is an automatic one and names its frequency.
+        //
+        // The stored frequency is deliberately left alone on Manually only: it
+        // is what the day/time fields prefill from when someone picks a clock
+        // option again. The retired value 'none' is never written back.
+        $ran_automatically_before = (bool)$recipe->get('rcp_enabled');
+        $runs = trim((string)($input['rcp_runs'] ?? ''));
+        if ($runs !== '') {
+            if ($runs === RecipeSchedule::FREQ_MANUAL) {
+                $recipe->set('rcp_enabled', false);
+            } else {
+                if ($runs === RecipeSchedule::FREQ_ARRIVAL) {
+                    // A job switch must not be able to strand a value that means
+                    // nothing: only a job with an arrival concept can offer it.
+                    $arrival_label = null;
+                    if ($pipeline_job !== null) {
+                        try { $arrival_label = $pipeline_job->arrivalLabel(); } catch (Throwable $e) {}
+                    }
+                    if ($arrival_label === null || trim((string)$arrival_label) === '') {
+                        return LogicResult::error(
+                            'This recipe\'s work does not arrive on its own, so it cannot run on '
+                            . 'arrival. Choose Hourly, Daily or Weekly instead — or Manually only.',
+                            ['recipe' => $recipe, 'session' => $session]
+                        );
+                    }
+                } elseif (!RecipeSchedule::isClockFrequency($runs)) {
+                    return LogicResult::error(
+                        'That is not a schedule this recipe can run on.',
+                        ['recipe' => $recipe, 'session' => $session]
+                    );
+                }
+                $recipe->set('rcp_enabled', true);
+                $recipe->set('rcp_schedule_frequency', $runs);
+            }
+        }
 
         // Tainted-writes opt-in. The save-time gate below verifies this is
         // set if the recipe is tainted-capable.
@@ -274,9 +325,13 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         }
         $recipe->save();
 
-        // Disabling a recipe should also halt its in-flight runs. Otherwise
-        // "stop everything" requires hunting through the runs view.
-        if (!$recipe->get('rcp_enabled') && $recipe->key) {
+        // CHOOSING Manually only is also a stop button: it cancels queued runs
+        // and halts one in progress, so "stop everything" does not mean hunting
+        // through the runs view. On the TRANSITION only — a recipe that was
+        // already manual has no automatic runs to stop, and firing this on
+        // every save of one would kill the Run Now a person had just queued and
+        // is waiting on.
+        if ($ran_automatically_before && !$recipe->get('rcp_enabled') && $recipe->key) {
             $db = DbConnector::get_instance()->get_db_link();
             $q = $db->prepare("UPDATE rcr_recipe_runs
                               SET rcr_kill_requested = TRUE
@@ -298,6 +353,12 @@ function admin_joinery_ai_edit_logic(array $input): LogicResult {
         'saved' => !empty($input['saved']),
         'shipped_key' => (string)($input['shipped'] ?? ''),
         'is_upgrade_server' => DeploymentHelper::isUpgradeServer(),
+        // How this recipe's binding will honour whatever the Runs control says.
+        // Computed from the SAVED recipe: a binding edited but not yet saved
+        // keeps showing the previous classification, which is honest because
+        // saving revalidates and re-renders.
+        'runs_value' => RecipeSchedule::frequencyOf($recipe),
+        'schedule_fact' => joinery_ai_schedule_fact($recipe),
         // What this recipe would run on right now, recomputed on load — so
         // "Automatic" never means "unknowable".
         'resolution' => joinery_ai_resolution_preview($recipe),
@@ -335,4 +396,26 @@ function joinery_ai_resolution_preview(Recipe $recipe): array {
         'advisories'  => $resolution->advisories(),
         'requirement' => $req->describe(),
     ];
+}
+
+/**
+ * What this recipe's binding does with the Runs setting, as one plain sentence.
+ *
+ * Not help text about the options — a statement about THIS recipe. Where the
+ * mail it reads is encrypted to its owner, no server-side process can read it,
+ * so a due run waits for that person to be signed in with their vault open.
+ * Saying so is the difference between a schedule and a promise the system
+ * cannot keep (specs/recipe_run_scheduling.md § 2.2).
+ */
+function joinery_ai_schedule_fact(Recipe $recipe): string {
+    if (!RecipeVaultScope::requiresWindow($recipe)) {
+        return 'The server runs this by itself.';
+    }
+    if (RecipeVaultScope::cronRunnable($recipe)) {
+        return 'Some of what this recipe reads is encrypted. The encrypted part runs while '
+             . 'you\'re signed in with your vault unlocked; the rest runs on the server.';
+    }
+    return 'This recipe reads mail only you can unlock, so the server can\'t run it alone. '
+         . 'A due run starts the next time you\'re signed in with your vault unlocked; '
+         . 'anything that arrives in between waits for you.';
 }

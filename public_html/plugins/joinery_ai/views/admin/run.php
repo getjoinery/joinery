@@ -46,7 +46,22 @@ $page->admin_header([
     'session' => $session,
 ]);
 
-if ($is_in_flight) {
+// A pending row on a recipe no CLI worker can ever claim is not queued behind
+// anything — it is waiting for its owner. Saying "in progress, refreshing" there
+// promises a queue position that will never advance: the run starts when the
+// owner is signed in with their vault open, and the in-window drain adopts this
+// very row (specs/recipe_run_scheduling.md § 2.6).
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+$waiting_for_window = $run->get('rcr_status') === 'pending'
+    && $recipe->key && !RecipeVaultScope::cronRunnable($recipe);
+
+if ($waiting_for_window) {
+    echo '<div class="alert alert-info">'
+       . '<strong>Waiting for you.</strong> This recipe reads mail only you can unlock, so the '
+       . 'run starts while you are signed in with your vault unlocked. This page refreshes every '
+       . '5 seconds.'
+       . '</div>';
+} elseif ($is_in_flight) {
     echo '<div class="alert alert-info">'
        . 'Run is in progress — this page will refresh every 5 seconds until it completes.'
        . '</div>';

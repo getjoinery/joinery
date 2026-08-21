@@ -27,7 +27,7 @@
  * future task composer (renders nothing until that feature exists). The AI
  * button carries a pending-actions count badge.
  *
- * Vanilla JS, jy-ui styling, no framework. @version 1.1.0
+ * Vanilla JS, jy-ui styling, no framework. @version 1.1.1
  */
 (function () {
 	'use strict';
@@ -251,7 +251,7 @@
 				var blockedLine = el('p', 'aip-card-blocked-text', card.blocked_text || '');
 				if (card.paused && card.dashboard_url) {
 					blockedLine.textContent = '';
-					var link = el('a', null, card.blocked_text || 'Paused from the recipes dashboard.');
+					var link = el('a', null, card.blocked_text || 'Set to run manually only — give it a schedule on the recipes dashboard.');
 					link.href = card.dashboard_url;
 					blockedLine.appendChild(link);
 				}

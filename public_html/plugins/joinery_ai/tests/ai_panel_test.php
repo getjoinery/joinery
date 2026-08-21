@@ -45,6 +45,7 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxAliasCo
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/EmailJobCandidates.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/AiPanelService.php'));
 
 function aip_domain(string $level, bool $ai_ok): InboundEmailDomain {
@@ -276,8 +277,9 @@ try {
 } catch (AiPanelServiceException $e) {
 	$refused = $e->getMessage();
 }
-check(stripos($refused, 'paused') !== false,
-	'a toggle against a globally disabled recipe is refused server-side', $refused);
+check(stripos($refused, 'manually only') !== false,
+	'a toggle against a Manually-only recipe is refused server-side, named by what was chosen',
+	$refused);
 
 // -----------------------------------------------------------------------------
 section('Toggle round-trips, including last-mailbox removal');
@@ -355,6 +357,9 @@ check((string)$instance->get('rcp_declared_key') === '',
 check(intval($instance->get('rcp_owner_user_id')) === $member_id, 'owner = the caller');
 check((bool)$instance->get('rcp_enabled') === true,
 	'created ENABLED — the toggle is itself the enablement choice');
+check((string)$instance->get('rcp_schedule_frequency') === RecipeSchedule::FREQ_ARRIVAL,
+	'and set to run as mail arrives — the whole point of turning a mail card on',
+	(string)$instance->get('rcp_schedule_frequency'));
 check((bool)$instance->get('rcp_allow_tainted_writes') === true,
 	'with the acceptance made in the same dialog');
 

@@ -35,6 +35,24 @@ interface PipelineJobInterface {
     public function label(): string;
 
     /**
+     * Label for this job's arrival-driven schedule option, in the job's own
+     * vocabulary ('As mail arrives'), or null when its items have no arrival
+     * concept.
+     *
+     * The recipe form offers this as one more choice in the Runs control, so
+     * the wording has to finish the sentence "this recipe runs…". When it is
+     * non-null the recipe may use the schedule frequency 'arrival': due
+     * whenever hasWork() answers true for the asking scheduler's posture,
+     * rather than on a clock.
+     *
+     * Only the job can answer. A mailbox job has a stream of arrivals to react
+     * to; a job that recomputes a report over the same rows has nothing that
+     * "arrives", and offering it the option would promise a trigger that never
+     * fires.
+     */
+    public function arrivalLabel(): ?string;
+
+    /**
      * Per-recipe binding config, DescriptorValidator shape (the `input` map
      * consumed by DescriptorValidator::coerce()). Rendered on the edit form
      * via FormWriter's fromDescriptor(); validated at recipe save time.

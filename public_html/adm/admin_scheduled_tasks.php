@@ -373,14 +373,15 @@ if (isset($_GET['edit'])) {
 			$selected_chain = array_map('intval', is_array($selected_chain) ? $selected_chain : array());
 			$recipe_options = array();
 			foreach ($chain_recipes as $cr) {
-				$recipe_options[$cr['id']] = $cr['name'] . ($cr['enabled'] ? '' : ' (disabled)');
+				$recipe_options[$cr['id']] = $cr['name'] . ($cr['enabled'] ? '' : ' (manual only)');
 			}
 			$formwriter->checkboxList('chain_recipes', 'Run recipes when this task succeeds', array(
 				'options'  => $recipe_options,
 				'checked'  => $selected_chain,
 				'helptext' => 'After a successful run, queue these AI recipes immediately instead of '
 				            . 'waiting for their own schedule. A recipe judges only new work, so one '
-				            . 'with nothing to do is a cheap no-op. Disabled recipes never fire.',
+				            . 'with nothing to do is a cheap no-op. A recipe set to run manually only '
+				            . 'never fires from here — that setting means no automatic runs of any kind.',
 			));
 		}
 

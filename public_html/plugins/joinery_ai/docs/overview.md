@@ -90,12 +90,92 @@ A recipe is a row in `rcp_recipes` with:
 - **allowed tools** (`rcp_allowed_tools`) — JSON array of tool names. Only listed tools are exposed to the LLM. Unknown names are silently skipped (the runner logs them to the trace). Agent mode only.
 - **allowed models** (`rcp_allowed_models`) — JSON array of class names. Drives both the schema block in the system prompt and the per-recipe gate in `query_model`. Empty array = no model reads. Agent mode only.
 - **pipeline job** (`rcp_pipeline_job`) / **source config** (`rcp_source_config`) — which registered job drives the run, and its per-recipe binding config. Pipeline mode only. Like mode, the job is chosen at creation and static afterwards: `aip_recipe_item_log` is unique on `(recipe, item_key)` and item keys are job-scoped, so repointing a saved recipe at another job would reinterpret everything it has already processed against a different namespace — the new job would read every past item as done and silently do nothing.
-- **runs automatically** (`rcp_enabled`) — whether the recipe runs on its own, via the dispatcher's schedule or the in-window drain. Off, it still runs from **Run Now**; turning it off also flags in-flight runs for a kill.
+- **Runs** (`rcp_enabled` + `rcp_schedule_frequency`) — when the recipe runs by itself. One control on the edit form; see [Scheduling](#scheduling).
 - **dashboard card** (`rcp_delivery_dashboard`) — whether `/joinery_ai` shows a card with this recipe's most recent successful output. Independent of whether it runs.
 - **acts on others' content** (`rcp_allow_tainted_writes`) — the admin's acknowledgment that the recipe reads text other people wrote and writes based on it. The edit form computes whether the recipe even needs it, live, from the same inputs `TaintGate::evaluate()` reads, and says so above the checkbox.
-- **schedule** — cron expression, "manual only", or "interactive only".
 
 Recipes are configured at `/admin/joinery_ai` (dashboard) and edited at `/admin/joinery_ai/edit`. `rcp_max_iterations` is the max tool-loop iterations in agent mode and the max items processed per run (batch size) in pipeline mode; `rcp_allowed_actions` and `rcp_workspace` are agent-mode only, same as the tool/model allow-lists.
+
+### Scheduling
+
+One control on the edit form, labelled **Runs**, answers one question: when
+should this recipe run by itself?
+
+| Choice | Meaning | Storage |
+|---|---|---|
+| Manually only | No automatic runs of any kind. **Run Now** is the only trigger. Choosing it also cancels queued runs and stops one in progress. | `rcp_enabled` false |
+| *the arrival option* | Due whenever the job reports unhandled items. Present only when the selected job offers it, worded by the job (`As mail arrives`, `As posts arrive`). | `rcp_enabled` true, frequency `arrival` |
+| Hourly / Daily / Weekly | "At most this often" — due when no run has started since the most recent scheduled fire point. | `rcp_enabled` true, frequency `hourly`/`daily`/`weekly` |
+
+`rcp_enabled` is the manual/automatic bit and is read far beyond this form: the
+dispatcher and the in-window drain filter on it, the pending reaper reads it,
+and the area AI panel refuses a toggle while it is false. A recipe whose stored
+frequency is empty reads as Manually only, and so does one still carrying the
+retired value `none`.
+
+**A fact line under the control** states how this recipe's binding will honour
+that intent, computed from `RecipeVaultScope::requiresWindow()` and the job's
+`hasUnsealedBinding()`. Nothing sealed: *The server runs this by itself.*
+Fully sealed: *This recipe reads mail only you can unlock, so the server can't
+run it alone. A due run starts the next time you're signed in with your vault
+unlocked; anything that arrives in between waits for you.* Mixed: *Some of what
+this recipe reads is encrypted. The encrypted part runs while you're signed in
+with your vault unlocked; the rest runs on the server.* Where a due run
+executes is a property of the binding, never a choice the operator makes.
+
+**Dueness lives in `RecipeSchedule`**, asked by both schedulers so they cannot
+drift. A clock frequency is defined by its most recent **fire point** — hourly:
+the top of the current UTC hour; daily: today's scheduled time, or yesterday's
+when today's has not arrived; weekly: the most recent target-day-at-time at or
+before now. Due ⇔ no run of the recipe started at or after that point, whatever
+triggered it, so a manual run satisfies the schedule. The fire point stays in
+the past until something runs, which is what gives **catch-up**: a fire point
+nothing was around to meet — the server down over Monday 07:00, or a sealed
+recipe's owner not signed in at the moment it came due — is claimed late rather
+than dropped until the next calendar occurrence. Fire points are computed in
+UTC from the stored UTC time, so a local schedule shifts by an hour across a
+DST boundary.
+
+On a **mixed** binding, which runs satisfy a fire point depends on who is
+asking. A window run reads the whole binding and satisfies both schedulers. A
+worker's run (schedule or manual trigger) never touches the sealed subset, so
+from the drain's sealed posture it satisfies nothing — each side of a mixed
+clock recipe gets its own run per period, and cron claiming the fire point
+within a tick cannot starve the sealed half. Items are still judged once each:
+`aip_recipe_item_log` is unique per item, whichever executor got there.
+
+`arrival` is due whenever the job's `hasWork()` answers true for the asking
+scheduler's posture. `hasWork()` is contract-bound to a single indexed EXISTS,
+so the dispatcher affords one call per tick per arrival recipe.
+
+**Where each scheduler asks.** `RecipeDispatcher::scheduleDueRecipes()` skips a
+recipe that is not `cronRunnable`, then asks `RecipeSchedule::isDue(…,
+POSTURE_STANDARD)`. `RecipeVaultScope::pendingForOwner()` — the in-window
+drain's list, and the vault heartbeat's work predicate — asks the same question
+with `POSTURE_SEALED`, so the heartbeat stops requesting drains for sealed
+recipes nothing is waiting on. A clock-scheduled sealed recipe fires when due
+even if it finds nothing; the fire-point comparison then suppresses it until
+the next period, so an empty run costs at most one row per period.
+
+**A stranded Run Now is adopted.** Run Now on a fully sealed recipe inserts a
+pending row that no worker can ever claim (the spawner refuses it, and the
+pending reaper deliberately leaves in-window rows alone). When such a row
+exists, `RecipeVaultScope::drain()` claims and runs **that** row instead of
+creating a new one, keeping its `manual` trigger — and its recipe counts as
+pending regardless of the due gate, because a person pressed the button. That
+includes a recipe set to **Manually only**: Run Now is the one trigger that
+setting keeps, so `pendingForOwner()` scans disabled recipes for exactly this
+(a cheap pending-row check gates the scan, so idle manual recipes cost the
+heartbeat nothing). A row on a *mixed* binding is left alone: a worker will
+claim that one. A recipe already `running` is skipped either way. The run
+status page names this state rather than showing a queue position that will
+never advance.
+
+**Adding an arrival option to a job.** Return a label from
+`PipelineJobInterface::arrivalLabel()`, in the job's own vocabulary; return
+`null` when the job's items have no arrival concept. Save-time validation
+refuses `arrival` on a recipe whose job offers no label, so a job switch cannot
+strand a meaningless stored value.
 
 ## Shipped recipes
 
@@ -134,7 +214,7 @@ A few recipes are worth having on every install — triage the inbox, score mail
 
 **Leave `prompt` empty.** An empty prompt means the job class's `defaultPrompt()` applies, which is the normal case and the one that keeps improving: an upgrade can better that wording for every install, including ones seeded years earlier. Seeding is create-only, so a prompt written into `recipes.json` is a one-time snapshot that a later, better prompt never reaches.
 
-**The schedule is advisory.** A recipe whose job reads sealed content never runs from cron — the dispatcher skips it and it runs in slices inside the owner's unlock window instead ([Sealed Vault](../../../docs/sealed_vault.md)). A declared `hourly` is honoured on an ordinary mailbox and disregarded on an encrypted one.
+**The declared schedule is a prefill.** A seeded recipe arrives on Manually only (`rcp_enabled` false); the declared `schedule_frequency` / `schedule_day_of_week` / `schedule_time` are what the Runs control offers when the operator gives it one. A declaration may name `arrival` like any other frequency. The panel's own copy of a declaration is the exception — `instantiateForUser()` creates it enabled on `arrival`, because turning a mail card on means "handle my mail as it comes".
 
 **`requires_plugin`** holds a declaration back until the named plugin is active, so a template for a job that isn't installed doesn't arrive as clutter. It lands at the sync following that plugin's activation.
 
@@ -251,6 +331,7 @@ interface PipelineJobInterface {
 - **`untrustedDigest()`** — whether item digests carry attacker-controlled text (an inbound email body, a user-submitted message). Drives the taint posture (below).
 - **`requiresVaultScope()`** — the vault scope this binding's items need, or null. Answered from `$config` because the same job can need a window for one binding and not another: the email jobs need one only when an address on their list is on a domain that encrypts mail at rest. A job returning non-null puts the recipe's sealed subset on the in-window path described below.
 - **`hasUnsealedBinding()`** — whether any part of the binding is readable without a vault window, i.e. whether a cron worker can make progress at all. Only consulted when `requiresVaultScope()` is non-null; a job with nothing sealed returns true.
+- **`arrivalLabel()`** — the label for this job's arrival-driven schedule option, in the job's own vocabulary (`'As mail arrives'`), or `null` when its items have no arrival concept. See [Scheduling](#scheduling).
 - **`hasWork()` / `countWork()`** — the same question `nextItem()` answers, without building an item; `hasWork()` must stay a single indexed query, since the vault heartbeat calls it for every in-window recipe on every beat. The optional `$posture` (`POSTURE_SEALED` / `POSTURE_STANDARD`) narrows the answer to one subset of the binding — the heartbeat asks about the sealed subset only, so standard-mailbox backlogs stay on cron's schedule instead of draining on window-open.
 - **`coverageNotes()`** — one plain-language line per part of the binding the run cannot cover right now (a revoked grant, a disabled mailbox, a domain that sealed itself without the AI opt-in). Rendered on the run tally so coverage never shrinks silently.
 - **`nextItem()`** — the next unhandled item, oldest first, or `null` when the recipe is caught up. Returns `['item_key' => ..., 'digest' => ..., 'label' => ...]`. Must exclude items already in the processing log — `MultiAipRecipeItemLog::notExistsClause()` gives the NOT-EXISTS SQL fragment to splice into the job's own item-source query. The job owns the digest's size cap so it fits the smallest intended model's context.
@@ -293,7 +374,7 @@ Pipeline mode is deliberately narrow. When a recipe idea doesn't fit, here's wha
 
 - **Comparing items to each other** (find the five most important this week, dedupe similar items, cluster feedback) — the pipeline shows the model exactly one item per exchange; that isolation is the source of its reliability and its injection containment, so it isn't relaxed per-job. Use agent mode with `query_model` for modest cross-item questions.
 - **Looking something up mid-judgment** (check a URL against a blocklist, fetch a sender's order history) — a pipeline exchange has no tools, by design. Enrich the digest instead: the job's PHP can look up anything deterministically and hand it to the model as evidence. A lookup that genuinely depends on what the model concludes mid-thought doesn't fit the pipeline; use agent mode.
-- **Running the instant an item arrives** — recipes poll on a schedule; there is no on-arrival trigger anywhere in the recipe system. Shorten the schedule instead.
+- **Running the instant an item arrives** — a recipe set to its job's arrival option is due as soon as `hasWork()` says so, but it still starts on the next dispatcher tick or the next open vault window, never inside the request that delivered the item. Nothing pushes.
 - **Forcing JSON output natively** — the pipeline validates and retries once rather than relying on a provider-specific JSON-forcing feature, because that guarantee doesn't exist uniformly across every local runtime this must run on. Fix the verdict descriptor or the prompt if validation keeps failing.
 - **State between items or runs** — pipeline recipes are stateless on purpose; there is no workspace. State belongs in the data the handler writes — the verdict fields and the processing log are queryable, so "already alerted this sender" is a `nextItem()` or handler-side check in PHP.
 - **Reusing another job's digest or verdict shape** — there's one job interface, not separate pluggable source/presenter/verdict parts. Jobs share code the ordinary way: extract a shared class and have each job delegate to it.
@@ -334,15 +415,18 @@ can span both postures:
 - A **mixed** binding is scheduled normally: on the CLI worker its sealed
   addresses fail closed out of the candidate set and the run drains the
   standard remainder. Run Now behaves the same way.
-- The vault heartbeat asks `hasWork(…, POSTURE_SEALED)`, so an open window
-  drains only the sealed subset — standard-mailbox backlogs stay on the
-  recipe's own schedule.
+- The vault heartbeat asks about the sealed subset only, so an open window
+  drains only that — standard-mailbox backlogs stay on the recipe's own
+  schedule. It asks through `RecipeVaultScope::pendingForOwner()`, which
+  applies the recipe's Runs setting as a due gate before it asks the job
+  anything (see [Scheduling](#scheduling)).
 
 The sealed subset runs through `RecipeVaultScope`, registered as a
 [deferred-work consumer](../../../docs/sealed_vault.md#deferred-work-in-the-window):
 in slices, inside the owner's own request, while their vault is open. Each slice
-creates an ordinary `RecipeRun` with `rcr_trigger = 'window'`, so run history,
-token accounting, the kill switch, and delivery all work unchanged. The slice
+creates an ordinary `RecipeRun` with `rcr_trigger = 'window'` — or adopts a
+stranded `manual` row and keeps its trigger — so run history, token accounting,
+the kill switch, and delivery all work unchanged. The slice
 deadline reaches `PipelineRunner`, which checks it before starting each item and
 stops with `stop_reason = 'deadline'` — a normal partial batch, not a failure.
 The pipeline already records each item as it completes, so a slice that ends
@@ -408,17 +492,19 @@ the authorization, there is no permission gate):
   tainted-capable recipe before its owner has accepted tainted writes answers
   `{confirm_required, confirm_text}` — the `TaintGate::explain()` wording — and
   the panel renders a `<dialog>` and retries with `accept_tainted_writes`. A
-  toggle against a globally disabled recipe is refused: the kill switch
-  (`rcp_enabled`) is dashboard-only, and the panel's grayed "Paused from the
-  recipes dashboard" control is a rendering of that server truth.
+  toggle against a Manually-only recipe is refused: the manual/automatic bit
+  (`rcp_enabled`) is dashboard-only, and the panel's grayed "Set to run
+  manually only — give it a schedule on the recipes dashboard" control is a
+  rendering of that server truth.
 
 **Templates and per-user instances.** A recipe runs as its owner — the grant
 check, the vault window, the taint acceptance and the token cap are all the
 owner's — so a member "running" a shipped recipe means their **own instance**
 of it. First toggle-ON of a template card creates one from the declaration via
-`RecipeSeeder::instantiateForUser()`: owner = the caller, created *enabled*
-(the toggle is itself the enablement choice; the taint acceptance rode the
-same dialog), carrying `rcp_template_key` — non-unique, never the seeder's
+`RecipeSeeder::instantiateForUser()`: owner = the caller, created *enabled* and
+on the `arrival` frequency (the toggle is itself the enablement choice, and
+turning a mail card on means "handle my mail as it comes"; the taint acceptance
+rode the same dialog), carrying `rcp_template_key` — non-unique, never the seeder's
 unique `rcp_declared_key` — and bound to the clicked mailbox. Every later
 toggle edits that instance; the seeded row is never mutated by the panel.
 Members still cannot *create* recipes — the dashboard stays superadmin-only;

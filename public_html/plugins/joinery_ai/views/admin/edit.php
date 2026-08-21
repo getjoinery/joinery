@@ -194,22 +194,49 @@ echo '<button type="button" class="btn btn-sm btn-link ps-0" id="rcp_prompt_reve
    . 'Use the built-in instructions instead</button>';
 echo '</div>';
 
-// --- Schedule ---
-// Show/hide day_of_week and time fields based on frequency. timeinput's
-// Bootstrap renderer doesn't emit a container id, so we wrap it ourselves
-// and target the wrapper. The dropinput already emits {name}_container.
-$formwriter->dropinput('rcp_schedule_frequency', 'Schedule Frequency', [
-    'options' => [
-        'none'   => 'No Schedule',
-        'hourly' => 'Hourly',
-        'daily'  => 'Daily',
-        'weekly' => 'Weekly',
-    ],
+// --- Runs ---
+// One control for one question: when should this run by itself? The mechanism
+// underneath (a cron worker, or a slice inside the owner's unlock window) is a
+// property of what the recipe reads, not a choice — so it is stated as a fact
+// below the control rather than offered as an option.
+//
+// "Manually only" is rcp_enabled false. The frequency subfields keep their
+// show/hide behaviour, now keyed to the option values.
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
+
+$runs_value = $runs_value ?? RecipeSchedule::frequencyOf($recipe);
+
+// The arrival option belongs to the JOB, in the job's own words. Rendered for
+// every job that offers one and narrowed client-side to the selected job, the
+// same way the built-in prompt text is swapped without a round trip.
+$job_arrival_labels = [];
+foreach (PipelineJobRegistry::all() as $ja_id => $ja_class) {
+    $ja_label = (new $ja_class())->arrivalLabel();
+    if ($ja_label !== null && trim($ja_label) !== '') {
+        $job_arrival_labels[$ja_id] = trim($ja_label);
+    }
+}
+$selected_job_for_runs = (string)$recipe->get('rcp_pipeline_job');
+$arrival_label_now = $job_arrival_labels[$selected_job_for_runs] ?? 'As new items arrive';
+
+$runs_options = [
+    RecipeSchedule::FREQ_MANUAL  => 'Manually only',
+    RecipeSchedule::FREQ_ARRIVAL => $arrival_label_now,
+    RecipeSchedule::FREQ_HOURLY  => 'Hourly',
+    RecipeSchedule::FREQ_DAILY   => 'Daily',
+    RecipeSchedule::FREQ_WEEKLY  => 'Weekly',
+];
+$hide_subfields = ['hide' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']];
+$formwriter->dropinput('rcp_runs', 'Runs', [
+    'value'   => $runs_value,
+    'options' => $runs_options,
     'visibility_rules' => [
-        'none'   => ['hide' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
-        'hourly' => ['hide' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
-        'daily'  => ['show' => ['rcp_schedule_time_wrap'], 'hide' => ['rcp_schedule_day_of_week']],
-        'weekly' => ['show' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
+        RecipeSchedule::FREQ_MANUAL  => $hide_subfields,
+        RecipeSchedule::FREQ_ARRIVAL => $hide_subfields,
+        RecipeSchedule::FREQ_HOURLY  => $hide_subfields,
+        RecipeSchedule::FREQ_DAILY   => ['show' => ['rcp_schedule_time_wrap'],
+                                         'hide' => ['rcp_schedule_day_of_week']],
+        RecipeSchedule::FREQ_WEEKLY  => ['show' => ['rcp_schedule_day_of_week', 'rcp_schedule_time_wrap']],
     ],
 ]);
 
@@ -229,6 +256,14 @@ $formwriter->dropinput('rcp_schedule_day_of_week', 'Day of Week', [
 echo '<div id="rcp_schedule_time_wrap">';
 $formwriter->timeinput('rcp_schedule_time', 'Time of Day');
 echo '</div>';
+
+// The fact line. Computed from the SAVED recipe's binding — never generic help
+// text about the options above.
+$schedule_fact = $schedule_fact ?? '';
+if ($schedule_fact !== '') {
+    echo '<p class="text-muted small mb-3" id="rcp_schedule_fact">'
+       . htmlspecialchars($schedule_fact) . '</p>';
+}
 
 // --- Model & tools ---
 $settings = Globalvars::get_instance();
@@ -655,14 +690,6 @@ $formwriter->checkboxinput('rcp_delivery_dashboard', 'Show its latest result on 
                  . 'runs; its results just are not shown there.',
 ]);
 
-$formwriter->checkboxinput('rcp_enabled', 'Run automatically', [
-    'value' => 1,
-    'checked' => (bool)$recipe->get('rcp_enabled'),
-    'helptext' => 'On, the recipe runs by itself — on the schedule above, or while your vault is '
-                 . 'unlocked for a job that reads encrypted mail. Off, it only runs when you press '
-                 . 'Run Now, and turning it off also stops any run already in progress.',
-]);
-
 // --- Limits ---
 $formwriter->numberinput('rcp_max_iterations', 'Max Tool-Loop Iterations / Batch Size', [
     'min' => 1, 'max' => 50,
@@ -798,6 +825,88 @@ foreach (PipelineJobRegistry::all() as $tj_id => $tj_class) {
 
     if (modeEl) modeEl.addEventListener('change', sync);
     if (jobEl)  jobEl.addEventListener('change', sync);
+    sync();
+})();
+
+(function () {
+    // The arrival option belongs to the selected job, so it appears, disappears
+    // and changes wording with the job select — the same client-side swap the
+    // built-in prompt text gets.
+    //
+    // One exception, and it is the reason this is not two lines: a recipe ALREADY
+    // saved on 'arrival' whose job has since stopped offering one (a plugin
+    // upgrade, a removed job) keeps the option on screen, so the value round-trips
+    // and the save path refuses it by name. Dropping it silently instead would
+    // turn an unrelated edit — renaming the recipe — into switching it off.
+    var ARRIVAL_LABELS = <?php echo json_encode((object)$job_arrival_labels,
+        JSON_UNESCAPED_UNICODE | JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT); ?>;
+    var ARRIVAL   = <?php echo json_encode(RecipeSchedule::FREQ_ARRIVAL); ?>;
+    var MANUAL    = <?php echo json_encode(RecipeSchedule::FREQ_MANUAL); ?>;
+    var PIPELINE  = <?php echo json_encode(Recipe::MODE_PIPELINE); ?>;
+
+    var runsEl = document.querySelector('[name="rcp_runs"]');
+    var modeEl = document.querySelector('[name="rcp_mode"]');
+    var jobEl  = document.querySelector('[name="rcp_pipeline_job"]');
+    if (!runsEl) return;
+
+    var arrivalOpt = null;
+    for (var i = 0; i < runsEl.options.length; i++) {
+        if (runsEl.options[i].value === ARRIVAL) { arrivalOpt = runsEl.options[i]; break; }
+    }
+    if (!arrivalOpt) return;
+    // Detached rather than hidden: a disabled option still posts if it is the
+    // selection, and `hidden` is not honoured everywhere.
+    var slot = document.createComment('arrival-option');
+    var attached = true;
+    var strandedText = arrivalOpt.textContent;
+    var stranded = false;   // set below, once labelFor() is defined
+
+    function labelFor() {
+        var mode = modeEl ? modeEl.value : PIPELINE;
+        var job  = jobEl ? jobEl.value : '';
+        if (mode !== PIPELINE || !job) return null;
+        return Object.prototype.hasOwnProperty.call(ARRIVAL_LABELS, job) ? ARRIVAL_LABELS[job] : null;
+    }
+
+    function sync() {
+        var label = labelFor();
+        if (label === null && stranded && runsEl.value === ARRIVAL) {
+            // Saved on a value its job no longer offers. Keep it selectable so
+            // the server gets the chance to say so.
+            arrivalOpt.textContent = strandedText;
+            return;
+        }
+        stranded = false;
+        if (label === null) {
+            if (attached) {
+                // Detach BEFORE moving the selection: the change event below
+                // re-enters here, and a second detach of an already-detached
+                // option would throw on a null parent.
+                arrivalOpt.parentNode.replaceChild(slot, arrivalOpt);
+                // A detached option keeps its selected flag, and re-inserting a
+                // selected option steals the selection back — so a later job
+                // that DOES offer arrivals would silently re-pick it.
+                arrivalOpt.selected = false;
+                attached = false;
+                if (runsEl.value !== MANUAL) {
+                    runsEl.value = MANUAL;
+                    runsEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+            }
+            return;
+        }
+        arrivalOpt.textContent = label;
+        if (!attached) {
+            slot.parentNode.replaceChild(arrivalOpt, slot);
+            attached = true;
+        }
+    }
+
+    stranded = (runsEl.value === ARRIVAL && labelFor() === null);
+
+    if (modeEl)  modeEl.addEventListener('change', sync);
+    if (jobEl)   jobEl.addEventListener('change', sync);
+    runsEl.addEventListener('change', sync);
     sync();
 })();
 

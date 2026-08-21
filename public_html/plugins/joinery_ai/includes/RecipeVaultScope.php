@@ -12,13 +12,14 @@
  * dispatcher and refused by the spawner outright; a mixed binding still runs
  * from cron for its standard remainder.
  *
- * @version 1.2.0
+ * @version 1.4.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/PipelineJobInterface.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 
 class RecipeVaultScope {
 
@@ -72,7 +73,7 @@ class RecipeVaultScope {
 		if ((string)$recipe->get('rcp_mode') !== Recipe::MODE_PIPELINE) {
 			return null;
 		}
-		// The job resolves WITHOUT the swallow here, unlike job(): a registry
+		// The job resolves WITHOUT the swallow here, unlike jobFor(): a registry
 		// failure must throw so the consent path treats it as protected, not as
 		// "needs nothing". A recipe with an EMPTY job id genuinely declares no
 		// job, needs no scope, and can produce no items — that is a clean null.
@@ -84,7 +85,7 @@ class RecipeVaultScope {
 		if (!($job instanceof PipelineJobInterface)) {
 			throw new RuntimeException("Pipeline job '$job_id' did not resolve to a job.");
 		}
-		return $job->requiresVaultScope(self::config($recipe));
+		return $job->requiresVaultScope(self::configFor($recipe));
 	}
 
 	/**
@@ -96,7 +97,7 @@ class RecipeVaultScope {
 	 * reports itself properly when the runner tries to execute it. Logging here
 	 * as well would repeat the same fact every 25 seconds.
 	 */
-	private static function job(Recipe $recipe): ?PipelineJobInterface {
+	public static function jobFor(Recipe $recipe): ?PipelineJobInterface {
 		$job_id = trim((string)$recipe->get('rcp_pipeline_job'));
 		if ($job_id === '') {
 			return null;
@@ -119,7 +120,7 @@ class RecipeVaultScope {
 	 * value defensively, and a stale binding resolves to no alias and therefore
 	 * no work.
 	 */
-	private static function config(Recipe $recipe): array {
+	public static function configFor(Recipe $recipe): array {
 		$config = Recipe::decodeSourceConfig($recipe);
 		return is_array($config) ? $config : array();
 	}
@@ -145,12 +146,12 @@ class RecipeVaultScope {
 		if (!self::requiresWindow($recipe)) {
 			return true;
 		}
-		$job = self::job($recipe);
+		$job = self::jobFor($recipe);
 		if ($job === null) {
 			return true;
 		}
 		try {
-			return $job->hasUnsealedBinding(self::config($recipe));
+			return $job->hasUnsealedBinding(self::configFor($recipe));
 		} catch (\Throwable $e) {
 			error_log('RecipeVaultScope: unsealed-binding check failed for recipe '
 				. (int)$recipe->key . ': ' . $e->getMessage());
@@ -180,9 +181,9 @@ class RecipeVaultScope {
 
 		$consent = InboundEmailDomain::CONSENT_LOCAL;
 		try {
-			$job = self::job($recipe);
+			$job = self::jobFor($recipe);
 			if ($job !== null) {
-				$consent = (string)$job->processingConsent(self::config($recipe));
+				$consent = (string)$job->processingConsent(self::configFor($recipe));
 			}
 		} catch (\Throwable $e) {
 			error_log('RecipeVaultScope: consent check failed for recipe '
@@ -284,9 +285,31 @@ class RecipeVaultScope {
 	}
 
 	/**
-	 * Enabled, window-requiring recipes owned by this user that currently have
-	 * something to do. Used by both the work predicate and the drain, so the
-	 * heartbeat and the drain always agree about whether there is work.
+	 * Window-requiring recipes owned by this user that are DUE to run right
+	 * now. Used by both the work predicate and the drain, so the heartbeat and
+	 * the drain always agree about whether there is work.
+	 *
+	 * Two ways a recipe lands here:
+	 *
+	 *  - it is due by its own Runs setting, answered from the SEALED subset of
+	 *    its binding (RecipeSchedule::isDue). An arrival recipe is due when
+	 *    sealed mail is waiting; a clock recipe is due once its fire point has
+	 *    passed unmet, whether or not it will find anything — the fire-point
+	 *    comparison then suppresses it until the next period, so an empty run
+	 *    costs at most one row per period;
+	 *  - a person pressed Run Now and the resulting row is still pending on a
+	 *    recipe no worker can ever claim (§ adoption in drain()). Dueness is
+	 *    about AUTOMATIC runs, so a human's request outranks it entirely —
+	 *    including the manual/automatic bit itself. A recipe set to Manually
+	 *    only (rcp_enabled false) is scanned for exactly this and nothing
+	 *    else: Run Now is the one trigger that setting keeps, and on a fully
+	 *    sealed recipe this drain is the only executor Run Now has.
+	 *
+	 * Without the due gate an open window drains every sealed recipe with
+	 * anything to do, which makes Manually only and every clock frequency mean
+	 * the same thing on a sealed binding. Since this is also the heartbeat's
+	 * work predicate, the gate additionally stops the heartbeat asking for
+	 * drains nothing is waiting on.
 	 *
 	 * @return Recipe[]
 	 */
@@ -294,32 +317,114 @@ class RecipeVaultScope {
 		if ($user_id <= 0) {
 			return array();
 		}
-		$recipes = new MultiRecipe(array('enabled' => true, 'deleted' => false, 'owner_user_id' => $user_id));
+		$recipes = new MultiRecipe(array('deleted' => false, 'owner_user_id' => $user_id));
 		$recipes->load();
 
+		$now_utc = gmdate('Y-m-d H:i:s');
 		$pending = array();
 		foreach ($recipes as $recipe) {
+			// The cheap question first for a Manually-only recipe: with no row
+			// pending there is nothing it could possibly owe this drain, and
+			// answering requiresWindow() below costs alias resolution per
+			// recipe per heartbeat.
+			$manual_only = !$recipe->get('rcp_enabled');
+			if ($manual_only && !self::hasPendingRun((int)$recipe->key)) {
+				continue;
+			}
 			if (!self::requiresWindow($recipe)) {
 				continue;
 			}
-			$job = self::job($recipe);
-			if ($job === null) {
+			if (self::jobFor($recipe) === null) {
 				continue;
 			}
-			try {
-				// The SEALED subset only: standard-mailbox work on a mixed
-				// binding belongs to cron's schedule — answering for it here
-				// would turn every open window into a drain-on-arrival bypass
-				// of the recipe's schedule.
-				if ($job->hasWork(self::config($recipe), $recipe, PipelineJobInterface::POSTURE_SEALED)) {
-					$pending[] = $recipe;
-				}
-			} catch (\Throwable $e) {
-				error_log('RecipeVaultScope: work check failed for recipe '
-					. (int)$recipe->key . ': ' . $e->getMessage());
+			// A pending row on a recipe no worker will ever claim is this
+			// drain's to run, and it exists because someone asked for it.
+			if (self::adoptableRunId($recipe) !== null) {
+				$pending[] = $recipe;
+				continue;
+			}
+			// Manually only means no AUTOMATIC runs; with nothing to adopt,
+			// dueness is not a question this recipe answers. (A pending row on
+			// a MIXED manual-only recipe lands here too — that row is a
+			// worker's to claim, exactly as when the recipe was automatic.)
+			if ($manual_only) {
+				continue;
+			}
+			// POSTURE_SEALED: standard-mailbox work on a mixed binding belongs
+			// to cron's schedule — answering for it here would turn every open
+			// window into a drain-on-arrival bypass of the recipe's schedule.
+			if (RecipeSchedule::isDue($recipe, PipelineJobInterface::POSTURE_SEALED, $now_utc)) {
+				$pending[] = $recipe;
 			}
 		}
 		return $pending;
+	}
+
+	/**
+	 * The pending run this drain should ADOPT for $recipe rather than queue
+	 * behind, or null when there is none.
+	 *
+	 * Only for a recipe no CLI worker can ever claim (cronRunnable false).
+	 * Run Now on such a recipe inserts a pending row, the spawner refuses it,
+	 * and the pending reaper deliberately leaves in-window rows alone — so
+	 * without adoption the row waits forever while the drain skips the recipe
+	 * for "already has an active run". The row IS the work; the drain runs it.
+	 *
+	 * A row on a MIXED binding is left alone: a worker will claim that one, and
+	 * two executors on one row is worse than a wait. A recipe already RUNNING
+	 * somewhere is not adoptable either — that is a live run, not a stranded
+	 * request.
+	 */
+	private static function adoptableRunId(Recipe $recipe): ?int {
+		if (self::cronRunnable($recipe)) {
+			return null;
+		}
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT rcr_run_id FROM rcr_recipe_runs
+			  WHERE rcr_rcp_recipe_id = ?
+			    AND rcr_status = ?
+			    AND rcr_delete_time IS NULL
+			  ORDER BY rcr_started_time ASC, rcr_run_id ASC
+			  LIMIT 1");
+		$q->execute(array((int)$recipe->key, RecipeRun::STATUS_PENDING));
+		$id = $q->fetchColumn();
+		return $id === false ? null : (int)$id;
+	}
+
+	/**
+	 * Does any run of this recipe sit queued right now? The one question worth
+	 * asking about a Manually-only recipe before resolving its binding.
+	 */
+	private static function hasPendingRun(int $recipe_id): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT 1 FROM rcr_recipe_runs
+			  WHERE rcr_rcp_recipe_id = ?
+			    AND rcr_status = ?
+			    AND rcr_delete_time IS NULL
+			  LIMIT 1");
+		$q->execute(array($recipe_id, RecipeRun::STATUS_PENDING));
+		return (bool)$q->fetchColumn();
+	}
+
+	/**
+	 * Is a run of this recipe actually executing somewhere right now?
+	 *
+	 * Narrower than hasActiveRun(): a PENDING row means queued, and on a
+	 * fully-sealed recipe queued means stranded, which is the one thing this
+	 * drain exists to fix.
+	 */
+	private static function hasRunningRun(int $recipe_id): bool {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT 1 FROM rcr_recipe_runs
+			  WHERE rcr_rcp_recipe_id = ?
+			    AND rcr_status = ?
+			    AND rcr_delete_time IS NULL
+			  LIMIT 1");
+		$q->execute(array($recipe_id, RecipeRun::STATUS_RUNNING));
+		return (bool)$q->fetchColumn();
 	}
 
 	/** Does this user have any in-window recipe work waiting? */
@@ -334,16 +439,21 @@ class RecipeVaultScope {
 	 * heartbeat, which asks the cheaper hasWork(). Three recipes on one mailbox
 	 * each count the same message once, which is correct: each has to judge it
 	 * separately.
+	 *
+	 * Counts only what is DUE, because pendingForOwner() is the source. Mail
+	 * held back by a recipe's own clock schedule is not waiting on the person
+	 * reading this number, and offering them a Catch up button for it would be
+	 * offering to override a schedule they set.
 	 */
 	public static function outstandingItemCount(int $user_id): int {
 		$total = 0;
 		foreach (self::pendingForOwner($user_id) as $recipe) {
-			$job = self::job($recipe);
+			$job = self::jobFor($recipe);
 			if ($job === null) {
 				continue;
 			}
 			try {
-				$total += $job->countWork(self::config($recipe), $recipe, PipelineJobInterface::POSTURE_SEALED);
+				$total += $job->countWork(self::configFor($recipe), $recipe, PipelineJobInterface::POSTURE_SEALED);
 			} catch (\Throwable $e) {
 				error_log('RecipeVaultScope: count failed for recipe '
 					. (int)$recipe->key . ': ' . $e->getMessage());
@@ -359,7 +469,10 @@ class RecipeVaultScope {
 	 * Each recipe gets its own RecipeRun row, exactly as a scheduled run would,
 	 * so run history, token accounting, the kill switch, and delivery all work
 	 * unchanged. The trigger is recorded as 'window' to distinguish these from
-	 * schedule and manual runs.
+	 * schedule and manual runs — except where the drain ADOPTS a stranded
+	 * pending row, which keeps the trigger it was queued with, because a run
+	 * someone pressed Run Now for is a manual run wherever it ends up
+	 * executing.
 	 *
 	 * A recipe already mid-run elsewhere is skipped rather than doubled up.
 	 */
@@ -369,16 +482,30 @@ class RecipeVaultScope {
 			if (microtime(true) >= $deadline) {
 				break;
 			}
-			if (self::hasActiveRun((int)$recipe->key)) {
+			if (self::hasRunningRun((int)$recipe->key)) {
 				continue;
 			}
-			$run = new RecipeRun(NULL);
-			$run->set('rcr_rcp_recipe_id', (int)$recipe->key);
-			$run->set('rcr_status', RecipeRun::STATUS_PENDING);
-			$run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
-			$run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
-			$run->prepare();
-			$run->save();
+			$adopt_id = self::adoptableRunId($recipe);
+			if ($adopt_id !== null) {
+				$run = new RecipeRun($adopt_id, TRUE);
+				if (!$run->key || (string)$run->get('rcr_status') !== RecipeRun::STATUS_PENDING) {
+					continue;   // claimed or cancelled since pendingForOwner looked
+				}
+			} else {
+				// A pending row that is NOT adoptable belongs to a worker
+				// (mixed binding) — queueing a second one behind it would run
+				// the same recipe twice.
+				if (self::hasActiveRun((int)$recipe->key)) {
+					continue;
+				}
+				$run = new RecipeRun(NULL);
+				$run->set('rcr_rcp_recipe_id', (int)$recipe->key);
+				$run->set('rcr_status', RecipeRun::STATUS_PENDING);
+				$run->set('rcr_trigger', RecipeRun::TRIGGER_WINDOW);
+				$run->set('rcr_started_time', gmdate('Y-m-d H:i:s'));
+				$run->prepare();
+				$run->save();
+			}
 
 			require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeRunner.php'));
 			RecipeRunner::run($run, $deadline);

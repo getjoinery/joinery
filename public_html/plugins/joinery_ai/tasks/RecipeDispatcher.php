@@ -4,6 +4,7 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipes_class.p
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/data/recipe_runs_class.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeWorkerSpawner.php'));
 require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVaultScope.php'));
+require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeSchedule.php'));
 
 /**
  * Recipe dispatcher — runs every cron tick.
@@ -19,16 +20,17 @@ require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/RecipeVault
  *      recipe can't be re-scheduled while a dead one lingers. In-window
  *      (fully-sealed) rows are left alone — they wait for the owner's browser
  *      session, not a worker.
- *   3. Schedule — for each enabled recipe, decide whether it's due based
- *      on rcp_schedule_frequency / day_of_week / time vs current UTC. If
- *      due and the recipe doesn't already have an active run, insert a
- *      pending row.
+ *   3. Schedule — for each enabled recipe, ask RecipeSchedule whether it is
+ *      due from the STANDARD posture (this process holds no vault window, so
+ *      the sealed subset of a binding is never cron's to answer for). If due
+ *      and the recipe doesn't already have an active run, insert a pending row.
  *   4. Drain — spawn workers for pending rows up to the concurrency cap.
  *
- * Schedule comparison is done in UTC — rcp_schedule_time is stored as the
- * UTC equivalent of the user's chosen local time. DST flips will shift the
- * actual local fire-time by ±1 hour twice a year; this is a known v1 trade-
- * off documented in the spec.
+ * Dueness lives in RecipeSchedule and not here, because the in-window drain
+ * has to give the same answer for the sealed half of the same recipe
+ * (specs/recipe_run_scheduling.md).
+ *
+ * @version 1.1.0
  */
 class RecipeDispatcher implements ScheduledTaskInterface {
 
@@ -80,7 +82,11 @@ class RecipeDispatcher implements ScheduledTaskInterface {
      * against the queue and a recurring recipe can be re-scheduled. Three ways
      * a pending row goes dead:
      *   - its recipe was deleted after the row was queued;
-     *   - its recipe was disabled (the operator turned it off);
+     *   - its recipe has no automatic trigger any more (set to Manually only,
+     *     i.e. rcp_enabled false) AND the row was queued by the schedule or a
+     *     window rather than by a person. A MANUAL row on such a recipe is not
+     *     dead at all — Run Now is precisely what "manually only" leaves, and
+     *     the spawner will still give it a worker;
      *   - it is cron-runnable but has sat pending past STUCK_PENDING_SECONDS —
      *     a worker was never going to start.
      * A cron-runnable row still inside the window is left to drain normally.
@@ -97,7 +103,7 @@ class RecipeDispatcher implements ScheduledTaskInterface {
         $db = DbConnector::get_instance()->get_db_link();
         $cutoff = gmdate('Y-m-d H:i:s', time() - self::STUCK_PENDING_SECONDS);
 
-        $q = $db->prepare("SELECT rcr_run_id, rcr_rcp_recipe_id, rcr_started_time
+        $q = $db->prepare("SELECT rcr_run_id, rcr_rcp_recipe_id, rcr_started_time, rcr_trigger
                            FROM rcr_recipe_runs
                            WHERE rcr_status = ? AND rcr_delete_time IS NULL");
         $q->execute([RecipeRun::STATUS_PENDING]);
@@ -126,8 +132,9 @@ class RecipeDispatcher implements ScheduledTaskInterface {
             $rid = (int)$row['rcr_rcp_recipe_id'];
             if (!array_key_exists($rid, $enabled_by_id)) {
                 $reason = 'reaper: recipe no longer exists';
-            } elseif (!$enabled_by_id[$rid]) {
-                $reason = 'reaper: recipe disabled while run was queued';
+            } elseif (!$enabled_by_id[$rid]
+                    && (string)$row['rcr_trigger'] !== RecipeRun::TRIGGER_MANUAL) {
+                $reason = 'reaper: recipe set to manual only while run was queued';
             } elseif (!RecipeVaultScope::cronRunnable(new Recipe($rid, true))) {
                 continue;   // in-window: waits for the owner's session, not stuck
             } elseif ((string)$row['rcr_started_time'] < $cutoff) {
@@ -163,8 +170,16 @@ class RecipeDispatcher implements ScheduledTaskInterface {
             // scheduled: on the worker its sealed mailboxes fail closed out of
             // the candidate set and the standard remainder drains.
             if (!RecipeVaultScope::cronRunnable($recipe)) continue;
-            if (!$this->isDue($recipe, $now_utc)) continue;
+            // The active-run check comes first because it is the cheaper of the
+            // two: dueness on an arrival recipe asks its job whether anything
+            // is unhandled, and there is no point asking about a recipe that is
+            // already queued or running.
             if ($this->hasActiveRun((int)$recipe->key)) continue;
+            // POSTURE_STANDARD: an arrival-scheduled recipe is due when the
+            // part of its binding a worker can actually read has something
+            // unhandled. Answering for the sealed subset here would queue runs
+            // whose only possible outcome is "caught up".
+            if (!RecipeSchedule::isDue($recipe, PipelineJobInterface::POSTURE_STANDARD, $now_utc)) continue;
 
             $run = new RecipeRun(NULL);
             $run->set('rcr_rcp_recipe_id', (int)$recipe->key);
@@ -189,64 +204,6 @@ class RecipeDispatcher implements ScheduledTaskInterface {
         $q = $db->prepare($sql);
         $q->execute([$recipe_id, RecipeRun::STATUS_PENDING, RecipeRun::STATUS_RUNNING]);
         return (bool)$q->fetchColumn();
-    }
-
-    /**
-     * Has this recipe been started since $cutoff_utc?
-     */
-    private function lastStartedAfter(int $recipe_id, string $cutoff_utc): bool {
-        $db = DbConnector::get_instance()->get_db_link();
-        $sql = "SELECT 1 FROM rcr_recipe_runs
-                WHERE rcr_rcp_recipe_id = ?
-                  AND rcr_started_time >= ?
-                  AND rcr_delete_time IS NULL
-                LIMIT 1";
-        $q = $db->prepare($sql);
-        $q->execute([$recipe_id, $cutoff_utc]);
-        return (bool)$q->fetchColumn();
-    }
-
-    /**
-     * Is this recipe due to fire now?
-     *
-     * Times are compared in UTC. Edge cases:
-     *   - none:   never auto-fires; manual Run Now is the only trigger
-     *   - hourly: due if it hasn't run in the current UTC clock hour
-     *   - daily:  due if past schedule_time today (UTC) and no run today
-     *   - weekly: due if today is the correct day_of_week (UTC), past
-     *             schedule_time, and no run today
-     *   - schedule_time NULL: treat as 00:00 (midnight UTC)
-     */
-    private function isDue(Recipe $recipe, string $now_utc): bool {
-        $freq = (string)$recipe->get('rcp_schedule_frequency');
-        $rid = (int)$recipe->key;
-
-        if ($freq === 'hourly') {
-            $hour_start = gmdate('Y-m-d H:00:00', strtotime($now_utc));
-            return !$this->lastStartedAfter($rid, $hour_start);
-        }
-
-        $sched_time = (string)$recipe->get('rcp_schedule_time');
-        if ($sched_time === '' || $sched_time === null) $sched_time = '00:00:00';
-
-        $today_at_sched = gmdate('Y-m-d', strtotime($now_utc)) . ' ' . $sched_time;
-
-        if ($freq === 'daily') {
-            if ($now_utc < $today_at_sched) return false;
-            $today_start = gmdate('Y-m-d 00:00:00', strtotime($now_utc));
-            return !$this->lastStartedAfter($rid, $today_start);
-        }
-
-        if ($freq === 'weekly') {
-            $dow_target = (int)$recipe->get('rcp_schedule_day_of_week');
-            $dow_today = (int)gmdate('w', strtotime($now_utc)); // 0 = Sunday
-            if ($dow_target !== $dow_today) return false;
-            if ($now_utc < $today_at_sched) return false;
-            $today_start = gmdate('Y-m-d 00:00:00', strtotime($now_utc));
-            return !$this->lastStartedAfter($rid, $today_start);
-        }
-
-        return false;
     }
 
 }

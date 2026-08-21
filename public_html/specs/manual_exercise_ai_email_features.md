@@ -31,9 +31,11 @@ joineryemailtests" (#127). Both are manual-run right now.
   Newsletters, Travel, Money) in the mailbox admin's label management.
   *Judge:* was creating labels findable and painless?
 - [ ] **Put the recipes on a schedule.** Open each recipe and change
-  Schedule from "No Schedule" to Hourly. *Judge:* is the recipe form
-  self-explanatory? Anything confusing about the Job/Mailbox fields, the
-  batch size, or "Allow tainted writes"?
+  **Runs** from "Manually only" to "As mail arrives". *Judge:* does the one
+  control, and the sentence under it about how this recipe's mailbox is
+  handled, answer "when will this run?" without further reading? Anything
+  confusing about the Job/Mailbox fields, the batch size, or "Allow tainted
+  writes"?
 - [ ] **Optional: seed a security-scan recipe** (same form, job "Inbound
   email security scan") on the same mailbox, so danger scoring runs
   continuously too.
@@ -45,7 +47,7 @@ joineryemailtests" (#127). Both are manual-run right now.
   meeting in prose ("can we talk Thursday at 2pm?"), and one with a
   **calendar invite attached** (create an event in Google Calendar and
   invite the test address — that sends a real .ics).
-- [ ] Wait for the hourly runs (or open each recipe and Run Now).
+- [ ] Wait for the arrival-triggered runs (or open each recipe and Run Now).
   *Judge:* is "did it run? did it work?" easy to answer from the Run
   History page and the dashboard tally, or did you have to dig?
 
