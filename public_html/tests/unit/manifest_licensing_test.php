@@ -17,12 +17,18 @@
  * the maturity status field only ever holds a known value. Each of those is
  * a one-line regression if a manifest edit drops it, so this suite pins them.
  *
+ * The business license's scope is pinned too. A business buyer pays for the
+ * whole suite, so that license must cover core plus every bundled plugin and
+ * theme, carving out only the ones sold separately under their own commercial
+ * license — and every noncommercial license file must say where business use
+ * is bought, or a commercial reader reaches a dead end.
+ *
  * The unknown-status rejection is exercised through PluginManager's real
  * validatePlugin() against a throwaway plugin directory, cleaned at exit.
  *
  * Run: php tests/unit/manifest_licensing_test.php
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -74,6 +80,17 @@ check(stripos($business_license, 'grants you an additional copyright license to'
 check(strpos($business_license, 'Shield') === false && strpos($business_license, 'Elastic') === false,
 	'business license names no third-party license');
 
+// The paid grant is what a buyer walks away with, so its scope has to match
+// what the marketing promises: the whole bundled suite, minus what is sold
+// separately. Scoping it to core alone would leave mail, events, bookings and
+// the AI assistant noncommercial with nothing to buy.
+check(strpos($business_license, 'together with every plugin and theme included in the') !== false,
+	'business license covers the bundled plugins and themes');
+check(strpos($business_license, 'Joinery Commercial Plugin License') !== false,
+	'business license carves out the separately sold plugins');
+check(strpos($core_license, 'LICENSE-BUSINESS.md') !== false,
+	'core license points a commercial reader at the business license');
+
 // ---------------------------------------------------------------------------
 section('Plugin manifests and license files');
 // ---------------------------------------------------------------------------
@@ -102,6 +119,8 @@ foreach ($manifests as $name => $manifest) {
 	if ($license === $NONCOMMERCIAL_LICENSE) {
 		check(strpos($license_text, 'PolyForm Noncommercial License 1.0.0') !== false,
 			"$name: LICENSE.md agrees with manifest (Noncommercial)");
+		check(strpos($license_text, 'LICENSE-BUSINESS.md') !== false,
+			"$name: noncommercial license names the business license");
 	} elseif ($license === $COMMERCIAL_LICENSE) {
 		check(strpos($license_text, 'Joinery Commercial Plugin License') !== false,
 			"$name: LICENSE.md agrees with manifest (commercial)");

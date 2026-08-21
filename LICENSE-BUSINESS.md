@@ -102,9 +102,11 @@ affect licenses you hold for other software.
 The **licensor** is Joinery, the individual or entity offering these terms.
 
 The **software** is the Joinery core platform the licensor makes available
-under these terms. Plugins and themes included in the official
-distribution are each governed by the `LICENSE.md` file in their own
-directory; some are sold separately.
+under these terms, together with every plugin and theme included in the
+official distribution whose own directory does not contain a
+Joinery Commercial Plugin License. A plugin or theme carrying that
+license in its own directory is sold separately and is not covered by your
+purchase of these terms.
 
 **You** refers to the individual or entity agreeing to these terms.
 

@@ -309,6 +309,14 @@ exception means third-party authors license their own plugins however they
 choose — a plugin that interfaces with the platform through its extension
 points is not a derivative work of the core.
 
+The two values also decide what a business licence buys. The Joinery Business
+License covers the core platform together with every bundled plugin and theme
+whose directory does not carry a Joinery Commercial Plugin License, so a
+`PolyForm-Noncommercial-1.0.0` plugin is included in that purchase, while a
+`Joinery-Commercial` one is sold on its own. Free-plugin `LICENSE.md` files
+carry a business-use notice pointing at `LICENSE-BUSINESS.md`, so a commercial
+reader is never left at a licence with no path to purchase.
+
 **`status`** is an honest maturity label: one of `experimental`, `beta`,
 `stable`, or `deprecated`. Absent means `stable` and renders no badge; any
 other value renders a badge wherever the plugin is listed (the admin Plugins

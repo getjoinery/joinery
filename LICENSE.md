@@ -2,6 +2,14 @@
 
 <https://polyformproject.org/licenses/noncommercial/1.0.0>
 
+> **Business use.** These terms cover personal, household, educational and
+> nonprofit use, which is free and requires no purchase. Commercial use is
+> licensed separately under the Joinery Business License
+> (`LICENSE-BUSINESS.md`, beside this file), which covers this platform
+> together with every plugin and theme in the official distribution except
+> those sold separately under their own commercial license. Business
+> licenses are sold at <https://getjoinery.com>.
+
 ## Acceptance
 
 In order to get any license under these terms, you must agree
