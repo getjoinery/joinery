@@ -1750,6 +1750,10 @@ missing, but should be declared explicitly:
   `publish_upgrade.php` packages this theme into the upgrade archive and the
   marketplace catalog advertises it. If `false`, it is skipped. Manifest-only
   (no DB column, no admin UI).
+- **`is_system`** — *platform infrastructure, never removable.* `default`,
+  `joinery-system`, and `plugin` declare it. A system theme refuses deletion,
+  and any cleanup keeps it regardless of what a catalog offers. Mirrored to
+  the database (`thm_is_system`).
 
 - **`audience`** — *publisher-side, who it is listed for.* A list of site
   domains the extension was built for. Absent (the usual case) means every
