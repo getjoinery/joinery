@@ -1,7 +1,10 @@
 {
     "name": "galactictribune-html5",
     "display_name": "Galactic Tribune HTML5",
-    "version": "1.0.4",
+    "version": "1.0.5",
+    "audience": [
+        "galactictribune.net"
+    ],
     "description": "Zero-dependency HTML5 version of the Galactic Tribune theme",
     "author": "Joinery Team",
     "receives_upgrades": true,
