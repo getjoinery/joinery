@@ -1,10 +1,11 @@
 {
     "name": "Bookings Management",
-    "version": "1.2.9",
+    "version": "1.2.10",
     "depends": { "store": ">=1.0.0" },
     "description": "Booking and booking type management system",
     "author": "System Developer",
     "license": "PolyForm-Noncommercial-1.0.0",
+    "status": "experimental",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": ["assets/css/bookings.css"],

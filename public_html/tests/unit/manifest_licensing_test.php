@@ -150,10 +150,19 @@ sort($entitled);
 check($entitled === array('server_manager', 'store'),
 	'exactly store and server_manager require entitlement', implode(',', $entitled));
 
-check(($manifests['mailbox']['status'] ?? null) === 'beta', 'mailbox is labeled beta');
-check(($manifests['vault']['status'] ?? null) === 'experimental', 'vault is labeled experimental');
-check(!array_key_exists('status', $manifests['event_manager'] ?? array()),
-	'event_manager carries no maturity badge');
+// Every plugin states its maturity outright. The catalog reads an absent
+// status as stable, so silence is the one answer a plugin can give by
+// accident — and "stable" is the worst thing to claim by accident. Asserting
+// the set rather than three named values means a re-badging is a manifest
+// edit, while a new plugin that forgets to say anything is a failure.
+$unlabeled = array();
+foreach ($manifests as $name => $manifest) {
+	if (!array_key_exists('status', $manifest)) {
+		$unlabeled[] = $name;
+	}
+}
+check($unlabeled === array(), 'every plugin declares a maturity status',
+	'unlabeled: ' . implode(', ', $unlabeled));
 
 // ---------------------------------------------------------------------------
 section('Unknown status is a manifest validation error');

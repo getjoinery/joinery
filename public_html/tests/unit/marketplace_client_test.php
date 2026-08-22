@@ -69,32 +69,81 @@ check(MarketplaceClient::audience_allows(null, 'zoukphilly.com'), 'No audience i
 check(MarketplaceClient::audience_allows(array(), 'zoukphilly.com'), 'An empty audience is public');
 check(MarketplaceClient::audience_allows(null, ''), 'No audience is public even to an unidentified caller');
 
-// An audience names the sites the extension was built for.
-$audience = array('zoukphilly.com', 'dev.getjoinery.com');
-check(MarketplaceClient::audience_allows($audience, 'zoukphilly.com'), 'A named site sees it');
-check(MarketplaceClient::audience_allows($audience, 'dev.getjoinery.com'), 'A second named site sees it');
-check(!MarketplaceClient::audience_allows($audience, 'zoukroom.com'), 'An unnamed site does not');
+// An audience names the sites the extension was built for. Reserved .example
+// domains throughout: a real domain here could collide with whatever this
+// site names as its root node, and the root sees everything — which would
+// make these checks pass for a reason they are not testing.
+$audience = array('zoukphilly.example', 'second.example');
+check(MarketplaceClient::audience_allows($audience, 'zoukphilly.example'), 'A named site sees it');
+check(MarketplaceClient::audience_allows($audience, 'second.example'), 'A second named site sees it');
+check(!MarketplaceClient::audience_allows($audience, 'zoukroom.example'), 'An unnamed site does not');
 check(!MarketplaceClient::audience_allows($audience, ''), 'A caller claiming nothing does not');
 
 // Hosts are compared in one normalized form, so an operator can write the
 // domain the way it appears in a browser and still have it match.
-check(MarketplaceClient::audience_allows($audience, 'https://www.ZoukPhilly.com/'),
+check(MarketplaceClient::audience_allows($audience, 'https://www.ZoukPhilly.example/'),
 	'Scheme, www, case and trailing path do not break the match');
-check(MarketplaceClient::audience_allows(array('https://ZoukPhilly.com'), 'zoukphilly.com'),
+check(MarketplaceClient::audience_allows(array('https://ZoukPhilly.example'), 'zoukphilly.example'),
 	'An audience entry written as a URL still matches');
 check(MarketplaceClient::normalize_host('http://Example.com:8080/path') === 'example.com',
 	'normalize_host strips scheme, port and path');
 
 // A malformed audience hides the extension rather than publishing it — a
 // manifest typo must not be the thing that leaks a private theme.
-check(!MarketplaceClient::audience_allows('zoukphilly.com', 'zoukphilly.com'),
+check(!MarketplaceClient::audience_allows('zoukphilly.example', 'zoukphilly.example'),
 	'A bare string audience hides the extension instead of matching');
-check(!MarketplaceClient::audience_allows(array(array('site' => 'zoukphilly.com')), 'zoukphilly.com'),
+check(!MarketplaceClient::audience_allows(array(array('site' => 'zoukphilly.example')), 'zoukphilly.example'),
 	'A structured audience entry does not match');
 
 // A subdomain is a different site, not a member of the parent's audience.
-check(!MarketplaceClient::audience_allows(array('getjoinery.com'), 'dev.getjoinery.com'),
+check(!MarketplaceClient::audience_allows(array('parent.example'), 'sub.parent.example'),
 	'A subdomain is not covered by the parent domain');
+
+
+// ------------------------------------------------------------- the root node
+
+section('the root node');
+
+// One deployment is the origin of the estate: the code is written there and
+// the extensions are published from there. It holds every extension already,
+// so it sees the whole catalog — and no manifest has to spend a line naming
+// the box the work is done on.
+$root = MarketplaceClient::root_node();
+
+check($root === MarketplaceClient::normalize_host($root),
+	'root_node is stored in the normalized form audience entries compare in');
+
+if ($root !== '') {
+	check(MarketplaceClient::audience_allows(array('nobody.example'), $root),
+		'The root node sees an extension whose audience does not name it');
+	check(MarketplaceClient::audience_allows(array('nobody.example'), 'HTTPS://WWW.' . strtoupper($root) . '/'),
+		'and however the root writes its own domain');
+	check(MarketplaceClient::is_root() === (MarketplaceClient::site_identity() === $root),
+		'is_root() is this site measured against that name, nothing else');
+}
+
+if (MarketplaceClient::is_root()) {
+	// The catalog here is this site's own disk, so everything in it is already
+	// installed; an install could only overwrite the working tree with a
+	// cached archive of itself.
+	check(mkt_threw(function () { MarketplaceClient::install('theme', 'default'); }, 'Exception'),
+		'The origin refuses an install that would overwrite its own working copy');
+	check(MarketplaceClient::source() === 'https://' . $root || MarketplaceClient::source() === 'http://' . $root,
+		'and it sources the catalog from itself rather than from upgrade_source',
+		'source() is ' . var_export(MarketplaceClient::source(), true));
+} else {
+	// No origin named — the ordinary case for a site that consumes releases.
+	// The rule must then be inert rather than opening the catalog to anyone.
+	check(!MarketplaceClient::audience_allows(array('nobody.example'), 'anyone.example'),
+		'With no root node named, an audience still hides the extension');
+	check(!MarketplaceClient::is_root(), 'and no site reads as the origin');
+}
+
+// Naming the origin by domain rather than by a flag is what makes a clone or
+// a restored backup safe: it carries the same value, still naming the origin,
+// and correctly concludes it is not the origin itself.
+check(!MarketplaceClient::audience_allows(array('nobody.example'), 'a-clone-of-the-root.example'),
+	'A site that is not the named origin gets no such pass');
 
 // ------------------------------------------- FormWriter handler-side validateCSRF
 

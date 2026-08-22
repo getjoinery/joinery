@@ -961,11 +961,19 @@ class PluginManager extends AbstractExtensionManager {
      * @param string $name Plugin name
      */
     public function refreshFromUpstream($name) {
-        $settings = Globalvars::get_instance();
-        $upgrade_source = $settings->get_setting('upgrade_source');
+        // The origin has no upstream — these files are what it publishes. A
+        // self-download would tar this tree and extract it back over itself,
+        // and the publisher caches archives per version, so an edit made
+        // without a version bump would be overwritten by the cached copy of
+        // the code it replaced. On-disk is authoritative here.
+        if (MarketplaceClient::is_root()) {
+            return;
+        }
+
+        $upgrade_source = MarketplaceClient::source();
 
         if (empty($upgrade_source)) {
-            error_log("refreshFromUpstream: upgrade_source not configured; skipping refresh for '$name'");
+            error_log("refreshFromUpstream: no source configured; skipping refresh for '$name'");
             return;
         }
 

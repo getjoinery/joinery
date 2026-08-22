@@ -1,9 +1,10 @@
 {
     "name": "Items Management",
-    "version": "1.0.8",
+    "version": "1.0.9",
     "description": "Item tracking and relationship management system",
     "author": "System Developer",
     "license": "PolyForm-Noncommercial-1.0.0",
+    "status": "experimental",
     "receives_upgrades": true,
     "included_in_publish": true,
     "styles": ["assets/css/items.css"]

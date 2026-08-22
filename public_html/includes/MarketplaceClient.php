@@ -4,22 +4,69 @@
  *
  * Fetches the theme/plugin catalogs a source site publishes and installs an
  * archive from them. The publishing side (catalog + archive serving) lives in
- * the server_manager plugin on the source site; this class needs only the
- * `upgrade_source` setting and ships in core so every site can acquire
- * extensions. Used by the /admin/admin_marketplace page and the
- * marketplace_catalog / marketplace_install API actions.
+ * the server_manager plugin on the source site; this class ships in core so
+ * every site can acquire extensions. It reads two settings: `upgrade_source`,
+ * the site to fetch from, and `root_node`, which names the one deployment the
+ * estate originates from — that site serves its own catalog, sees every
+ * extension whatever audience it declares, and refuses an install that would
+ * overwrite its working copy with an archive of itself. Used by the
+ * /admin/admin_marketplace page and the marketplace_catalog /
+ * marketplace_install API actions.
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 class MarketplaceClient {
 
+	/** Memoized root_node: the catalog asks per extension, each miss a query. */
+	private static $root_node = null;
+
 	/**
-	 * The configured source site base URL, or null when unset.
+	 * The site to fetch catalogs and archives from, or null when unset.
+	 *
+	 * The root node is the origin of what it serves, so it answers with
+	 * itself. `upgrade_source` records where a site was installed from,
+	 * which on the root names a site running an older copy of the root's
+	 * own code — reading a catalog from it would show the origin a stale
+	 * mirror of itself, and offer to install yesterday's theme over today's.
 	 */
 	public static function source() {
+		if (self::is_root()) {
+			// Not get_absolute_url(): under 'auto' that sniffs $_SERVER, and
+			// a plugin refresh runs from CLI too, where sniffing yields
+			// http:// for an https-only site. Only an explicit setting of
+			// 'http' means http.
+			$scheme = Globalvars::get_instance()->get_setting('protocol_mode') === 'http'
+				? 'http' : 'https';
+			return $scheme . '://' . self::site_identity();
+		}
 		$source = Globalvars::get_instance()->get_setting('upgrade_source');
 		return empty($source) ? null : rtrim($source, '/');
+	}
+
+	/**
+	 * Domain of the deployment the whole estate originates from — where the
+	 * code is written and the extensions are published. Empty when no site
+	 * has been named, which is the ordinary case.
+	 */
+	public static function root_node() {
+		if (self::$root_node === null) {
+			self::$root_node = self::normalize_host(
+				Globalvars::get_instance()->get_setting('root_node'));
+		}
+		return self::$root_node;
+	}
+
+	/**
+	 * Whether this site is that origin.
+	 *
+	 * The setting names a domain rather than raising a flag so a clone or a
+	 * restored backup carries it unchanged: it still names the origin, and
+	 * still correctly concludes that it is not the origin itself.
+	 */
+	public static function is_root() {
+		$root = self::root_node();
+		return $root !== '' && $root === self::site_identity();
 	}
 
 	/**
@@ -74,6 +121,13 @@ class MarketplaceClient {
 		$want = self::normalize_host($requesting_site);
 		if ($want === '') {
 			return false;
+		}
+		// The origin holds every extension already and is where each one is
+		// published from. It sees the whole catalog without every audience
+		// having to name it, so no manifest carries a line about the box the
+		// work is done on.
+		if ($want === self::root_node()) {
+			return true;
 		}
 		foreach ($audience as $entry) {
 			if (self::normalize_host($entry) === $want) {
@@ -184,6 +238,15 @@ class MarketplaceClient {
 		if ($name === '' || $name === '.' || $name === '..') {
 			throw new InvalidArgumentException('No item specified.');
 		}
+		// On the origin the catalog is this site's own disk, so every entry in
+		// it is already installed and an install can only mean overwriting the
+		// working tree with a cached archive of itself — which the publisher
+		// caches per version, so an edit made without a version bump would be
+		// replaced by the code it replaced.
+		if (self::is_root()) {
+			throw new Exception('This site publishes the marketplace catalog, so its extensions are already here. Installing one would overwrite the working copy with an archive of itself.');
+		}
+
 		$source = self::source();
 		if ($source === null) {
 			throw new Exception('No upgrade source configured. Set the upgrade_source setting to use the marketplace.');

@@ -1,10 +1,10 @@
 {
     "name": "Mailbox",
     "description": "Self-hosted email: receiving, forwarding, local mailboxes, webmail reader, IMAP sync, DKIM/SRS",
-    "version": "1.96.1",
+    "version": "1.96.2",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
-    "status": "beta",
+    "status": "stable",
     "receives_upgrades": true,
     "included_in_publish": true,
     "requires": {

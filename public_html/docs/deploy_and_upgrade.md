@@ -670,6 +670,7 @@ Cross-shape rebuilds work in both directions with no extra step: a container bac
 | `site_template` | Site directory name (e.g., `joinerytest`) |
 | `system_version` | Current version (e.g., `3.25`) |
 | `upgrade_source` | URL of upgrade server to download from (e.g., `https://getjoinery.com`) |
+| `root_node` | Domain of the deployment this code is written and published from. Empty everywhere else. Machine-written, not shown on the settings page. |
 | `composerAutoLoad` | Composer vendor path |
 
 **Note:** A site acts as an upgrade server when the **Server Manager** plugin is active or the `upgrade_server_active` setting is on. `DeploymentHelper::isUpgradeServer()` answers that question; use it rather than re-deriving the pair, so publishing and consuming behaviour cannot drift apart. The `upgrade_source` setting specifies where a site *downloads* upgrades from.
@@ -703,6 +704,44 @@ The sweep compiles rather than lints: `opcache_compile_file()` parses without ex
 It is not a decision anyone makes twice. `_site_init.sh` writes it at install time from the endpoint the install actually fetched its code from — `install.sh`'s `UPGRADE_SERVER`, which defaults to `https://getjoinery.com` and is overridden with `--upgrade-server=URL`. One rule covers both audiences: leave the flag off and the site tracks stable releases; pass it and the site follows wherever it was installed from.
 
 Clones are the exception: `UPGRADE_SERVER` points at the clone source for the duration of a clone, and that is a peer site rather than a release endpoint, so the cloned database keeps the source's own `upgrade_source`.
+
+### The root node
+
+One deployment is the origin of the estate: the code is written there, and the
+themes and plugins are published from there. The `root_node` setting names it
+by domain — `dev.getjoinery.com` — and a site is the origin when its own
+`webDir` matches that name. It is machine-written and never rendered on the
+settings page, because it is a fact about the estate's shape rather than a
+preference anyone tunes.
+
+Naming it by domain rather than raising a flag is what makes a clone or a
+restored backup safe. The copy carries the same value, which still names the
+origin, and the copy correctly concludes it is not the origin itself.
+
+Four behaviours follow from it, each fixing a state that has no sensible
+reading otherwise:
+
+- **It serves its own catalog.** `MarketplaceClient::source()` answers with
+  the site itself rather than `upgrade_source`, so the Marketplace lists what
+  is actually on this disk. `upgrade_source` records where a site was
+  installed from, which on the origin is a site running an older copy of this
+  very tree — reading a catalog from it offers to install yesterday's theme
+  over today's.
+- **It sees every extension.** An `audience` naming a customer's sites does
+  not have to also name the origin; see
+  [Plugin Developer Guide](/docs/plugin_developer_guide.md).
+- **It refuses to upgrade itself.** `upgrade.php` stops before its first fetch,
+  because applying the last release published from here would replace new work
+  with an older copy of itself. Serving upgrades to other sites is a different
+  branch and is unaffected — the origin still publishes normally.
+- **It refuses to install over itself.** Everything in its catalog is already
+  on its disk, so a marketplace install, or the upstream refresh a plugin
+  install performs, could only overwrite the working copy with an archive of
+  itself. The publisher caches archives per version, so an edit made without a
+  version bump would be replaced by the code it replaced.
+
+Every other site leaves `root_node` empty, which is the ordinary case and
+changes nothing.
 
 ### The release channel
 
@@ -748,7 +787,8 @@ The client is core and ships to every site; only the *source* site needs the ser
 
 ### Prerequisites
 
-- `upgrade_source` setting must be configured (URL of the upgrade server)
+- `upgrade_source` setting must be configured (URL of the upgrade server), or
+  the site is the origin named by `root_node` and serves its own catalog
 - The upgrade server must have the **Server Manager** plugin active
 
 ### Overwrite Protection
@@ -779,4 +819,4 @@ The `publish_theme.php` catalog endpoints (`?list=themes`, `?list=plugins`) incl
 
 ---
 
-*Last Updated: 2026-05-16*
+*Last Updated: 2026-08-22*
