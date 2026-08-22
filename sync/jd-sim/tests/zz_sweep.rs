@@ -39,6 +39,13 @@
 //!   `VAULT=1` is the everyone-has-the-key shape.
 //! - `scratch_vault_fresh_sweep` — vault seeds nothing has run.
 //!
+//! - `scratch_kill_sweep` — machines that die with work still on their
+//!   lists, plaintext and vault, clean and hostile. `KILLS=1` on the
+//!   diagnostics reproduces one.
+//! - `scratch_kill_platform_sweep` — the same, on disks that disagree about
+//!   what a name is, because re-running an op after a kill is where the two
+//!   dimensions meet.
+//!
 //! And the tools for the seed a sweep hands back. All take `SEED`, `STEPS`,
 //! `DEVS`, `CHAOS`, `VAULT`, and — for a platform failure — `PLATFORMS` and
 //! `NAMES`:
@@ -827,6 +834,25 @@ fn sweep_killing(
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
     sweep_core(label, seeds, steps, &named, chaos, vault, true)
+}
+
+/// The same, on computers that disagree about what a name is.
+///
+/// A kill is answered by re-running the op, and what an op does with a name is
+/// decided by the disk it lands on: one machine folds case, another decomposes
+/// the accent, and neither agrees with what the plan was written against. Every
+/// killing arm above runs on one kind of disk, where a re-run always lands the
+/// same way it would have the first time.
+#[must_use]
+fn sweep_killing_on(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[(&str, Platform)],
+    chaos: bool,
+    vault: Vault,
+) -> Vec<(String, u64)> {
+    sweep_core(label, seeds, steps, devices, chaos, vault, true)
 }
 
 #[must_use]
@@ -1730,6 +1756,59 @@ fn scratch_kill_sweep() {
     arms.push(sweep_killing("kill-hostile-3dev", 79800..80100, 30, &["a", "b", "c"], true, Vault::None));
     arms.push(sweep_killing("kill-vault-2dev", 80100..80500, 40, &["laptop", "desktop"], false, Vault::Shared));
     arms.push(sweep_killing("kill-vault-hostile", 80500..80800, 30, &["laptop", "desktop"], true, Vault::Shared));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
+/// Machines that die, on disks that disagree about names.
+///
+/// The two dimensions the estate had covered only apart. Recovery re-runs an op
+/// whose plan was written before the kill, and a mixed fleet is where re-running
+/// it is not the same as running it: the name it asks for may already be taken
+/// by its own earlier attempt under a spelling this disk calls identical and the
+/// server calls different. The last arm adds the vault only one device can open,
+/// where no server is available as a second opinion about any of it.
+#[test]
+#[ignore]
+fn scratch_kill_platform_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_killing_on(
+        "killplat-mac-pc",
+        81000..81400,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+        false,
+        Vault::None,
+    ));
+    arms.push(sweep_killing_on(
+        "killplat-mac-hfs",
+        81400..81800,
+        40,
+        &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
+        false,
+        Vault::None,
+    ));
+    arms.push(sweep_killing_on(
+        "killplat-hostile-mixed",
+        81800..82100,
+        30,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("box", Platform::Linux),
+        ],
+        true,
+        Vault::None,
+    ));
+    arms.push(sweep_killing_on(
+        "killplat-vault-onekey",
+        82100..82400,
+        30,
+        &[("holder", Platform::MacOs), ("guest", Platform::Windows)],
+        true,
+        Vault::OneKeyHolder,
+    ));
     let _ = std::panic::take_hook();
     no_seed_failed(arms);
 }

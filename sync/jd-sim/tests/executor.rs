@@ -2151,6 +2151,84 @@ fn a_folder_created_from_a_stale_plan_does_not_overwrite_where_the_server_says_i
 }
 
 #[test]
+fn a_local_move_from_a_stale_plan_does_not_overwrite_where_the_server_says_it_is() {
+    // Same hazard as the folder above, on the other operation that carries a
+    // placement it did not learn from the server. `move_local` is told where to
+    // put the file by the plan that queued it, and a plan outlives the pass that
+    // wrote it: a pass reads the feed at the top and runs the queue at the
+    // bottom, so an op journaled by a pass that died carries a destination the
+    // next pass has already been told is wrong.
+    //
+    // Moving the file to the old place is fine and self-correcting -- the
+    // disagreement that is left is exactly what plans the next move. Writing the
+    // old place into the record of where the SERVER has it is not: it destroys
+    // the newer answer, sets the agreement to match, and both sides then read as
+    // settled. The change that would have said otherwise is already behind the
+    // cursor, so nothing ever raises it again and the file stays in the wrong
+    // folder with the record agreeing that it belongs there.
+    let (_clock, server, device) = world();
+    let alpha = server.seed_folder(None, "Alpha");
+    let beta = server.seed_folder(None, "Beta");
+    let file = server.seed_file(Some(beta), "notes.txt", b"a note");
+
+    for (fid, name) in [(alpha, "Alpha"), (beta, "Beta")] {
+        let mut folder = fresh(EntityId::folder(fid), None, name, LocalStatus::Synced);
+        folder.synced_placement = Some(Placement {
+            parent: None,
+            name: name.into(),
+        });
+        device.store.put_entry(&folder).unwrap();
+        device.fs.user_mkdir(name);
+    }
+    device.fs.user_write("notes.txt", b"a note");
+
+    // What this device knows now: the server has it in Beta, the disk has it at
+    // the root.
+    let id = EntityId::file(file);
+    let mut entry = fresh(id, Some(beta), "notes.txt", LocalStatus::Synced);
+    entry.synced_placement = Some(Placement {
+        parent: None,
+        name: "notes.txt".into(),
+    });
+    device.store.put_entry(&entry).unwrap();
+
+    // The op, planned back when the server still had it in Alpha.
+    let op_id = device
+        .store
+        .queue_op(
+            "move_local",
+            id,
+            &serde_json::json!({ "parent": alpha, "name": "notes.txt" }).to_string(),
+            "key-move-local",
+        )
+        .unwrap();
+    let now = device.now();
+    let e = env(&device, &now);
+    let op = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .find(|o| o.op_id == op_id)
+        .unwrap();
+    jd_core::execute::run_one(&e, &op).unwrap();
+
+    let after = device.store.get_entry(id).unwrap().expect("still tracked");
+    assert_eq!(
+        after.remote.parent,
+        Some(beta),
+        "the operation invented an answer about the server and overwrote the real one"
+    );
+    assert_eq!(
+        after.synced_placement.map(|p| p.parent),
+        Some(Some(alpha)),
+        "the agreement has to describe what is actually on this disk"
+    );
+    // And the mismatch is what makes the next pass fix it.
+    assert!(device.fs.exists("Alpha/notes.txt"));
+}
+
+#[test]
 fn a_folder_rescued_onto_a_name_somebody_else_took_lands_beside_it() {
     // The folder was deleted on the server while this device still had edits
     // under it, so the edits win and the folder is re-created to hold them.
