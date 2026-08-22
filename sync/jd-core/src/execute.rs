@@ -2481,8 +2481,16 @@ fn move_local(
             Err(e) => return Err(e.into()),
         }
     }
-    entry.remote = to;
-    entry.synced_placement = Some(entry.remote.clone());
+    // Only the agreement, never where the server has it. This operation is told
+    // its destination by the plan that queued it, and a plan outlives the pass
+    // that wrote it: the feed is read at the top of a pass and the queue is run
+    // at the bottom, so an op left over from a pass that died carries a place
+    // the device has since been told is wrong. Writing that into `remote`
+    // destroys the newer answer and then agrees with itself, which reads as
+    // settled -- and the change that said otherwise is already behind the
+    // cursor. Recording only what this disk now holds leaves the disagreement
+    // that plans the next move.
+    entry.synced_placement = Some(to);
     entry.synced_fingerprint = env.vfs.fingerprint(&dest)?;
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
