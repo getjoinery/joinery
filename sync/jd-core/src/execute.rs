@@ -1956,13 +1956,55 @@ fn create_remote_folder(
             "the folder it belongs in is not on the server yet".into(),
         ));
     }
-    let mut body = json!({ "name": placement.name });
-    if let Some(parent) = placement.parent {
-        body["parent_id"] = json!(parent);
-    }
-    let out = env
-        .api
-        .action_idempotent("drive_folder_create", body, &op.idempotency_key)?;
+    // The name the plan chose may already be spoken for, by a folder belonging
+    // to a device this one has never met -- so nothing in this store can see
+    // it, and the refusal is the only way to find out.
+    //
+    // Which makes the refusal an answer rather than a dead end. Dropping the op
+    // and re-deciding re-decides the same thing: reconcile hands back the last
+    // place the folder was known to live, every pass, and nothing it can see
+    // has changed. Three operations overtaken per pass, forever, no error
+    // raised and nothing queued -- a device that never goes quiet against a
+    // server that said exactly what was wrong. Landing beside the occupant is
+    // what the local side does when two things want one name, and it is the
+    // same answer here: both survive, one wears a conflict name.
+    //
+    // Only ever in answer to a refusal, never ahead of one. Asking for a
+    // different name up front -- because this store happens to hold an entry
+    // under that name -- breaks the case this operation most needs to survive:
+    // a create that landed while the answer was lost. The retry carries the
+    // same key, the server replays the same folder, and the two records are
+    // folded together below, but only if the retry asks for the SAME name.
+    // Renaming first makes it a different request, and there are then
+    // genuinely two folders with nothing to fold.
+    let mut attempt = 0u32;
+    let mut wanted = placement.name.clone();
+    let out = loop {
+        let mut body = json!({ "name": wanted });
+        if let Some(parent) = placement.parent {
+            body["parent_id"] = json!(parent);
+        }
+        // A fresh key per name. The key is a promise that the request behind it
+        // does not change, and asking for a different name is a different
+        // request -- under the original key the server would refuse every
+        // attempt after the first, identically and forever.
+        let key = match attempt {
+            0 => op.idempotency_key.clone(),
+            n => format!("{}-n{n}", op.idempotency_key),
+        };
+        match env.api.action_idempotent("drive_folder_create", body, &key) {
+            Ok(out) => break out,
+            Err(e) if e.name_taken() && attempt < 1000 => {
+                attempt += 1;
+                wanted = (env.conflict_name)(&placement.name, attempt);
+            }
+            Err(e) => return Err(e.into()),
+        }
+    };
+    let placement = Placement {
+        name: wanted,
+        parent: placement.parent,
+    };
     let folder = out
         .get("folder")
         .ok_or_else(|| ExecError::Contract("folder create returned no folder".into()))?;
@@ -2075,9 +2117,24 @@ fn create_local_folder(
             "the entry is no longer tracked".into(),
         ));
     };
-    entry.remote = placement;
+    // Where the SERVER has it is not this operation's to say, and it used to
+    // say it anyway. The placement here is the one the plan chose, which can be
+    // older than what the device already knows: the feed is read at the top of
+    // a pass and the queue is run at the bottom, so an op journaled by a pass
+    // that died carries a name the next pass has already been told is wrong.
+    //
+    // Writing it over `remote` destroyed the only copy of the newer answer, and
+    // then agreed with it. Both sides looked settled, nothing was queued and
+    // nothing was planned, and the change that would have said otherwise was
+    // long past the cursor -- a folder left under a name the rest of the fleet
+    // had stopped using, for good.
+    //
+    // The agreement describes what is on this disk, which is the folder just
+    // created under the planned name. If the server has moved on, that now
+    // disagrees with `remote`, and disagreeing is precisely what gets the move
+    // planned on the next pass.
     agree(&mut entry, None, None);
-    entry.synced_placement = Some(entry.remote.clone());
+    entry.synced_placement = Some(placement);
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
 }
@@ -2722,107 +2779,39 @@ fn adopt_placement(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, E
 // Recovery
 // ---------------------------------------------------------------------------
 
-/// What the crash window left behind, resolved against what the server has.
+/// What the crash window left behind, put back on the queue.
 ///
-/// Every `InFlight` op died at an unknowable instruction. Re-running it blindly
-/// is wrong: some are safe to repeat and some create a second copy. Asking the
-/// server settles it in one call, and the answer is either "already done" or
-/// "not done" — both of which the engine knows what to do with.
+/// Every `InFlight` op died at an unknowable instruction, so nothing here knows
+/// whether the server acted on it. It does not need to: every op is written to
+/// survive being run a second time, which is what its idempotency key, the
+/// server's replay cache and its own check of where the server has the thing
+/// now are all for. Re-running one is how it finds out.
+///
+/// This used to ask the server instead -- one call per op, and if the answer
+/// was yes, the op was marked done. That is where it went wrong. Done is not
+/// the same as finished: the op's own success path is what writes down what
+/// happened, so an op retired on the strength of the answer left the record
+/// naming the place the server had already moved the thing out of. Both sides
+/// then believed they agreed, nothing was queued and nothing was planned, and
+/// the device stayed quiet forever with a folder under a name the rest of the
+/// fleet had stopped using.
+///
+/// Asking also made recovery need the network, at the one moment it is least
+/// likely to be there -- a machine coming back up. An op nobody could ask about
+/// stayed in flight, and an op in flight is not run and its entity is not
+/// re-planned, so a single unreachable server froze a set of files with no
+/// error and no symptom.
 pub fn recover(env: &ExecEnv) -> Result<ExecReport, ExecError> {
     let mut report = ExecReport::default();
-    let mut unanswered = None;
     for op in env.store.interrupted_ops()? {
-        // Asked one at a time, and a question that cannot be asked stops only
-        // its own operation. Most kinds need no question at all -- an upload
-        // and a download are answered without the server -- and letting the
-        // first unanswerable one abort the loop held those behind it for the
-        // life of the process. Nothing runs an interrupted op, because only
-        // queued ops run; nothing re-plans its entity, because a round leaves
-        // anything with an open op alone. So one unreachable server at the
-        // wrong moment froze a set of files with no error, no queue and no
-        // symptom: the device reports itself quiet and stays that way.
-        match already_satisfied(env, &op) {
-            Ok(true) => {
-                env.store.set_op_state(op.op_id, OpState::Done)?;
-                report.done += 1;
-            }
-            Ok(false) => {
-                // Back in the queue under its original key, which is what makes
-                // the retry recognizable rather than repeated.
-                env.store.set_op_state(op.op_id, OpState::Queued)?;
-                report.retrying += 1;
-            }
-            Err(e) => {
-                // Left in flight on purpose. Guessing either way is worse than
-                // waiting: called done, an operation that never happened is
-                // lost; called queued, one that did happen may be repeated.
-                report.deferred += 1;
-                unanswered = unanswered.or(Some(e));
-            }
-        }
+        // Back in the queue under its original key, which is what makes the
+        // retry recognizable rather than repeated -- and counted as the attempt
+        // it was, so that everything downstream asking whether this is a retry
+        // gets the true answer.
+        env.store.requeue_interrupted_op(op.op_id)?;
+        report.retrying += 1;
     }
-    // Still an error to the caller, so a daemon that cannot reach the server
-    // says so where the user can see it -- but only after everything that
-    // could be settled has been.
-    match unanswered {
-        Some(e) => Err(e),
-        None => Ok(report),
-    }
-}
-
-/// Did the interrupted op already take effect?
-///
-/// Answered from the server's current state, never from local bookkeeping — the
-/// bookkeeping is precisely what did not get written.
-fn already_satisfied(env: &ExecEnv, op: &Op) -> Result<bool, ExecError> {
-    let params: Value = serde_json::from_str(&op.params).unwrap_or_else(|_| json!({}));
-    match op.kind.as_str() {
-        // Anything that only touches this computer is settled by looking at
-        // this computer, and re-running it is harmless if it is not.
-        "download"
-        | "create_local_folder"
-        | "move_local"
-        | "trash_local"
-        | "adopt"
-        | "adopt_placement"
-        | "remove_from_scope"
-        | "forget"
-        | "preserve_local_as"
-        | "park_local" => Ok(false),
-
-        // A creation that landed cannot be found by id — the id we hold is the
-        // provisional one. The server's replay cache is what answers this, so
-        // the retry is safe and this need not guess.
-        "create_remote_folder" | "upload_new" | "upload_version" => Ok(false),
-
-        "move_remote" | "park_remote" => {
-            let Some(item) = stat(env, op.entity, false)? else {
-                return Ok(false);
-            };
-            let want = read_place(&params)?;
-            let name = item.get("name").and_then(Value::as_str).unwrap_or("");
-            let parent = item
-                .get(if op.entity.entity_type == EntityType::Folder {
-                    "parent_id"
-                } else {
-                    "folder_id"
-                })
-                .and_then(Value::as_i64);
-            Ok(name == want.name && parent == want.parent)
-        }
-
-        "trash_remote" => {
-            if op.entity.is_provisional() {
-                return Ok(false);
-            }
-            match stat(env, op.entity, false)? {
-                None => Ok(true),
-                Some(item) => Ok(item.get("deleted").and_then(Value::as_bool) == Some(true)),
-            }
-        }
-
-        _ => Ok(false),
-    }
+    Ok(report)
 }
 
 // ---------------------------------------------------------------------------

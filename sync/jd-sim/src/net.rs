@@ -75,7 +75,26 @@ pub struct NetFaults {
     /// while everything around it succeeded could not be built, and every one
     /// of them went untested.
     pub refuse_before: Option<String>,
+
+    /// Stop the process dead after this many more calls have been answered.
+    ///
+    /// Not a network fault at all, and it sits here only because a network call
+    /// is the one moment worth dying at. The server has acted and the client
+    /// has not yet written down that it did, which is the entire reason
+    /// recovery exists: a retry would repeat the act, and giving up would lose
+    /// it, and only asking the server settles which.
+    ///
+    /// Every kill the simulator could stage before this one landed BETWEEN
+    /// passes, so a pass always ran to completion and no decision was ever left
+    /// half-written. This is the other half, and it reaches states nothing else
+    /// can -- an op recorded in flight with the work behind it already done, a
+    /// change cursor moved past entries that were never absorbed.
+    pub die_after_calls: Option<u64>,
 }
+
+/// What a simulated death panics with, so a harness can tell it from a test
+/// failure and nothing else has to guess.
+pub const DIED: &str = "jd-sim: the process died here";
 
 impl NetFaults {
     /// Everything off.
@@ -98,6 +117,7 @@ impl NetFaults {
             // about hitting a single call a rate would drown.
             lose_answer_to: None,
             refuse_before: None,
+            die_after_calls: None,
         }
     }
 }
@@ -150,6 +170,16 @@ impl SimNet {
 
     pub fn set_faults(&self, faults: NetFaults) {
         self.inner.lock().unwrap().faults = faults;
+    }
+
+    /// Arm a death without disturbing whatever else is set.
+    ///
+    /// Deliberately not `set_faults`, which replaces the lot: a workload that
+    /// armed a death by that route would quietly switch the network back to
+    /// perfect for the rest of the run, and the arm would be testing a kill on
+    /// a healthy network while claiming to test one under chaos.
+    pub fn arm_death(&self, after_calls: u64) {
+        self.inner.lock().unwrap().faults.die_after_calls = Some(after_calls);
     }
 
     pub fn stats(&self) -> NetStats {
@@ -241,6 +271,24 @@ impl SimNet {
         }
     }
 
+    /// Count down to the death, and report the moment it arrives. Nothing is
+    /// held when this returns true -- panicking with a lock in hand would
+    /// poison it and turn every later use into a failure of its own.
+    fn died_now(&self) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        match inner.faults.die_after_calls {
+            Some(0) => {
+                inner.faults.die_after_calls = None;
+                true
+            }
+            Some(n) => {
+                inner.faults.die_after_calls = Some(n - 1);
+                false
+            }
+            None => false,
+        }
+    }
+
     fn run(&self, name: &str, body: &Value, key: Option<&str>) -> jd_proto::Result<Value> {
         if self.refused_before(name) {
             return Err(ProtoError::Transport(
@@ -256,6 +304,11 @@ impl SimNet {
             None => self.server.action(name, body),
         };
         let value = out.map_err(to_proto)?;
+        // Deliberately after the server committed and before the caller can
+        // record it. See `die_after_calls`.
+        if self.died_now() {
+            panic!("{DIED}");
+        }
         if self.answer_lost() || self.answer_lost_to(name) {
             // Deliberately after the server committed. This is the case the
             // whole idempotency discipline exists for, and the only way to test

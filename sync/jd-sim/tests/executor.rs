@@ -573,10 +573,14 @@ fn a_move_into_a_provisional_folder_that_no_longer_exists_is_replanned_not_await
 }
 
 #[test]
-fn an_interrupted_remote_move_that_actually_landed_is_recognized_not_repeated() {
-    // The crash window. The op is in flight, the machine dies, and on restart
-    // the journal cannot say whether the server got it. Asking the server is
-    // the only honest answer.
+fn an_interrupted_remote_move_the_server_already_did_leaves_one_file_named_right() {
+    // The crash window. The op is in flight, the machine dies, and the journal
+    // cannot say whether the server got it.
+    //
+    // Recovery does not ask -- it puts the op back on the queue and lets it
+    // find out, because running it is the only thing that also writes down what
+    // happened. What has to hold is the outcome: one file, under the name the
+    // move asked for, with the record agreeing.
     let (_clock, server, device) = world();
     let file_id = server.seed_file(None, "a.txt", b"unchanged");
     let id = EntityId::file(file_id);
@@ -607,9 +611,18 @@ fn an_interrupted_remote_move_that_actually_landed_is_recognized_not_repeated() 
 
     let now = device.now();
     let e = env(&device, &now);
-    let report = recover(&e).unwrap();
-    assert_eq!(report.done, 1, "the server had already done it");
-    assert!(device.store.queued_ops().unwrap().is_empty());
+    assert_eq!(recover(&e).unwrap().retrying, 1, "it goes back on the queue");
+    assert_eq!(run_queued(&e).unwrap().done, 1);
+
+    assert_eq!(
+        device.store.get_entry(id).unwrap().unwrap().remote.name,
+        "b.txt"
+    );
+    let names: Vec<String> = jd_sim::scenario::server_tree(&server)
+        .into_iter()
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(names, vec!["b.txt".to_string()], "and only one of it");
 }
 
 #[test]
@@ -1959,16 +1972,19 @@ fn a_rename_retried_after_its_answer_was_lost_records_where_the_file_actually_is
 
 
 #[test]
-fn an_interrupted_op_nobody_can_ask_about_does_not_strand_the_ones_beside_it() {
-    // Recovery asks the server, per operation, whether the operation already
-    // happened. Some kinds need no question at all -- an upload is answered
-    // without leaving the machine -- and those must not be held behind one that
-    // does while the server is out of reach.
+fn recovery_needs_no_network_so_nothing_it_finds_can_be_stranded() {
+    // A machine comes back up while the network is still down, which is the
+    // ordinary case rather than the unlucky one -- startup is exactly when the
+    // network is least likely to be there.
     //
-    // Holding them is not a delay. Nothing runs an interrupted op, because only
-    // queued ops run, and nothing re-plans its entity, because a round leaves
-    // anything with an open op alone. So an operation stranded here is a file
-    // that stops syncing, on a device that reports itself perfectly quiet.
+    // Recovery used to ask the server whether each interrupted op had already
+    // happened, one call apiece, and an op nobody could ask about stayed in
+    // flight. Nothing runs an interrupted op, because only queued ops run, and
+    // nothing re-plans its entity, because a round leaves anything with an open
+    // op alone -- so an unanswered question was not a delay but a freeze, and
+    // the first one aborted the loop and froze everything after it too.
+    //
+    // Asking nothing is what makes that impossible rather than fixed.
     let (_clock, server, device) = world();
     let file_id = server.seed_file(None, "gone.txt", b"the one being deleted");
     let trashed = EntityId::file(file_id);
@@ -1976,17 +1992,12 @@ fn an_interrupted_op_nobody_can_ask_about_does_not_strand_the_ones_beside_it() {
         .store
         .put_entry(&fresh(trashed, None, "gone.txt", LocalStatus::Synced))
         .unwrap();
-
-    // The one that needs a question. Written first, so it is reached first --
-    // recovery walks the ops in the order they were journaled, and the whole
-    // failure is about what happens to everything after the one that fails.
     let asking = device
         .store
         .queue_op("trash_remote", trashed, "{}", "key-trash")
         .unwrap();
     device.store.set_op_state(asking, OpState::InFlight).unwrap();
 
-    // And the one that does not.
     let new_id = EntityId::file(device.store.next_provisional_id().unwrap());
     device
         .store
@@ -2003,18 +2014,22 @@ fn an_interrupted_op_nobody_can_ask_about_does_not_strand_the_ones_beside_it() {
         .unwrap();
     device.store.set_op_state(quiet, OpState::InFlight).unwrap();
 
-    // The machine came back to a network that is not there.
+    // Not a packet gets out.
     device.net.set_faults(NetFaults {
         drop_before: 1000,
         ..NetFaults::none()
     });
     let now = device.now();
     let e = env(&device, &now);
-    assert!(
-        recover(&e).is_err(),
-        "the server was unreachable, and the caller has to hear about it"
+    assert_eq!(
+        recover(&e).unwrap().retrying,
+        2,
+        "both come back, on a network that answers nothing"
     );
-
+    assert!(
+        device.store.interrupted_ops().unwrap().is_empty(),
+        "an op left in flight here is one nothing will ever run or re-plan"
+    );
     let queued: Vec<String> = device
         .store
         .queued_ops()
@@ -2022,21 +2037,257 @@ fn an_interrupted_op_nobody_can_ask_about_does_not_strand_the_ones_beside_it() {
         .into_iter()
         .map(|op| op.kind)
         .collect();
-    assert_eq!(
-        queued,
-        vec!["upload_new".to_string()],
-        "the upload needed no question and should be runnable again"
-    );
+    assert_eq!(queued, vec!["trash_remote".to_string(), "upload_new".to_string()]);
+}
 
-    // The one that could not be asked about stays where it was. Guessing is
-    // worse than waiting: called done it is lost, called queued it may happen
-    // twice.
-    let waiting: Vec<i64> = device
+#[test]
+fn an_interrupted_move_the_server_already_did_still_records_where_it_went() {
+    // Recovery asks the server whether the interrupted op happened, and when
+    // the answer is yes it marks the op done. Done is not the same as finished:
+    // the op's own success path is what writes down where the thing now lives,
+    // and skipping it leaves the record naming the old place while the server
+    // holds the new one.
+    //
+    // Both sides then believe they agree. Nothing is queued, nothing is
+    // planned, and the device is quiet forever with a folder under a name the
+    // rest of the fleet stopped using.
+    let (_clock, server, device) = world();
+    let file_id = server.seed_file(None, "a.txt", b"unchanged");
+    let id = EntityId::file(file_id);
+    device
         .store
-        .interrupted_ops()
+        .put_entry(&fresh(id, None, "a.txt", LocalStatus::Synced))
+        .unwrap();
+
+    // The rename reached the server, and the machine died before the answer
+    // could be written down.
+    server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "file", "entity_id": file_id, "name": "b.txt" }),
+        )
+        .unwrap();
+    let op_id = device
+        .store
+        .queue_op(
+            "move_remote",
+            id,
+            &serde_json::json!({ "parent": null, "name": "b.txt" }).to_string(),
+            "key-move-3",
+        )
+        .unwrap();
+    device.store.set_op_state(op_id, OpState::InFlight).unwrap();
+
+    let now = device.now();
+    let e = env(&device, &now);
+    recover(&e).unwrap();
+    run_queued(&e).unwrap();
+
+    let entry = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(
+        entry.remote.name, "b.txt",
+        "the record still names the place the server moved it out of"
+    );
+    assert_eq!(
+        entry.synced_placement.map(|p| p.name),
+        Some("b.txt".to_string()),
+        "the agreement was never updated, so neither side will ever raise it again"
+    );
+}
+
+#[test]
+fn a_folder_created_from_a_stale_plan_does_not_overwrite_where_the_server_says_it_is() {
+    // An op carries the placement that was chosen when it was planned. If the
+    // pass that planned it died before running it, the server can have moved
+    // the folder in the meantime -- and the next pass will have absorbed that,
+    // because the change feed is read before the queue is run.
+    //
+    // Creating the folder under the old name is fine and self-correcting. What
+    // is not is writing that old name into the record of where the SERVER has
+    // it: that is the one field this operation cannot know anything about, and
+    // overwriting it destroys the only copy of the newer answer. The agreement
+    // is then set to match, both sides look settled, and the change that would
+    // have said otherwise has already gone past the cursor.
+    let (_clock, server, device) = world();
+    let folder_id = server.seed_folder(None, "renamed on the server");
+    let id = EntityId::folder(folder_id);
+    let mut entry = fresh(id, None, "renamed on the server", LocalStatus::PendingDownload);
+    entry.synced_placement = None;
+    device.store.put_entry(&entry).unwrap();
+
+    // Planned back when the server still called it something else.
+    let op_id = device
+        .store
+        .queue_op(
+            "create_local_folder",
+            id,
+            &serde_json::json!({ "parent": null, "name": "the old name" }).to_string(),
+            "key-mkdir",
+        )
+        .unwrap();
+    let now = device.now();
+    let e = env(&device, &now);
+    let op = device
+        .store
+        .queued_ops()
         .unwrap()
         .into_iter()
-        .map(|op| op.op_id)
+        .find(|o| o.op_id == op_id)
+        .unwrap();
+    jd_core::execute::run_one(&e, &op).unwrap();
+
+    let entry = device.store.get_entry(id).unwrap().unwrap();
+    assert_eq!(
+        entry.remote.name, "renamed on the server",
+        "the operation invented an answer about the server and overwrote the real one"
+    );
+    assert_eq!(
+        entry.synced_placement.map(|p| p.name),
+        Some("the old name".to_string()),
+        "the agreement has to describe what is actually on this disk"
+    );
+    // And the mismatch is what makes the next pass fix it.
+    assert!(device.fs.exists("the old name"));
+}
+
+#[test]
+fn a_folder_rescued_onto_a_name_somebody_else_took_lands_beside_it() {
+    // The folder was deleted on the server while this device still had edits
+    // under it, so the edits win and the folder is re-created to hold them.
+    // Something else has taken the name in the meantime.
+    //
+    // The refusal is the only way to find that out. Nothing in the store
+    // mentions the occupant -- it belongs to a device this one has never
+    // synced with -- so no amount of planning ahead can see it, and the plan
+    // that comes back from reconcile is the same plan every time. Dropping the
+    // op and re-deciding therefore decides the identical thing, which is a
+    // device that never goes quiet: three ops overtaken every pass, no error,
+    // nothing queued, against a server that said exactly what was wrong.
+    let (_clock, server, device) = world();
+
+    // Somebody else's folder, holding the name, unknown to this device.
+    server.seed_folder(None, "Shared");
+
+    let id = EntityId::folder(-3);
+    let mut entry = fresh(id, None, "Shared", LocalStatus::PendingUpload);
+    entry.synced_placement = None;
+    device.store.put_entry(&entry).unwrap();
+    let op_id = device
+        .store
+        .queue_op(
+            "create_remote_folder",
+            id,
+            &serde_json::json!({ "parent": null, "name": "Shared" }).to_string(),
+            "key-rescue",
+        )
+        .unwrap();
+    let now = device.now();
+    let e = env(&device, &now);
+    let op = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .find(|o| o.op_id == op_id)
+        .unwrap();
+    let outcome = jd_core::execute::run_one(&e, &op).unwrap();
+
+    assert!(
+        matches!(outcome, OpOutcome::Done),
+        "the rescue has to land somewhere, not be dropped: {outcome:?}"
+    );
+    // Both folders exist, and the rescue is not the one holding the plain name.
+    let names: Vec<String> = jd_sim::scenario::server_tree(&server)
+        .into_iter()
+        .map(|(p, _)| p)
         .collect();
-    assert_eq!(waiting, vec![asking], "only the unanswerable one waits");
+    assert_eq!(names.len(), 2, "one folder each, not one folder: {names:?}");
+    assert!(names.contains(&"Shared".to_string()));
+
+    // And the record says where it actually went, or the next pass rescues it
+    // all over again under the same taken name.
+    let entry = device.store.get_entry(EntityId::folder(-3)).unwrap();
+    let landed = match entry {
+        Some(e) => e.remote.name,
+        None => device
+            .store
+            .every_entry()
+            .unwrap()
+            .into_iter()
+            .find(|e| e.id.entity_type == jd_core::model::EntityType::Folder)
+            .map(|e| e.remote.name)
+            .unwrap(),
+    };
+    assert_ne!(landed, "Shared", "it kept claiming the name it could not have");
+    assert!(names.contains(&landed), "the record names a folder the server does not have: {landed}");
+}
+
+#[test]
+fn a_create_interrupted_by_a_kill_is_treated_as_the_retry_it_is() {
+    // An idempotent replay answers with what the first attempt produced -- a
+    // snapshot of a moment that has passed. So a create whose answer never
+    // arrived can come back describing a folder somebody has since deleted, and
+    // recording that as a fresh agreement leaves this device the only one that
+    // believes the folder exists. Believing it AGREES with the server, nothing
+    // it ever does will disagree: an empty directory, on one disk, for good.
+    //
+    // The guard for that asks whether this is a retry, and it asked the attempt
+    // count -- which a kill never touches. A failure is counted because
+    // something came back to count it; a process that died mid-flight comes back
+    // with the attempt unrecorded, so the one case the guard exists for was the
+    // one case it sat out.
+    let (_clock, server, device) = world();
+    let id = EntityId::folder(-3);
+    let mut entry = fresh(id, None, "Sub 15", LocalStatus::PendingUpload);
+    entry.synced_placement = None;
+    device.store.put_entry(&entry).unwrap();
+
+    // The first attempt reached the server. The answer did not come back.
+    let made = server
+        .action_idempotent(
+            "drive_folder_create",
+            &serde_json::json!({ "name": "Sub 15" }),
+            "key-mkfolder",
+        )
+        .unwrap();
+    let folder_id = made["folder"]["id"].as_i64().unwrap();
+
+    // And while this device was down, the folder was deleted.
+    server
+        .action(
+            "drive_trash",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": folder_id }),
+        )
+        .unwrap();
+
+    // The machine comes back with the op recorded in flight and no attempt
+    // against it, which is exactly what a kill leaves.
+    let op_id = device
+        .store
+        .queue_op(
+            "create_remote_folder",
+            id,
+            &serde_json::json!({ "parent": null, "name": "Sub 15" }).to_string(),
+            "key-mkfolder",
+        )
+        .unwrap();
+    device.store.set_op_state(op_id, OpState::InFlight).unwrap();
+
+    let now = device.now();
+    let e = env(&device, &now);
+    recover(&e).unwrap();
+    run_queued(&e).unwrap();
+
+    let live: Vec<String> = device
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .filter(|en| !en.remote_deleted)
+        .map(|en| en.remote.name.clone())
+        .collect();
+    assert!(
+        live.is_empty(),
+        "the device is the only thing in the world that thinks this folder exists: {live:?}"
+    );
 }

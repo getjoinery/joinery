@@ -841,11 +841,35 @@ impl Store {
         Ok(())
     }
 
+    /// Put an interrupted op back on the queue, counting the attempt nobody was
+    /// left to count.
+    ///
+    /// The attempt really was made -- the process died in the middle of it --
+    /// and everything downstream that asks *is this a retry?* reads this
+    /// number. A failure gets counted because something came back to count it;
+    /// a kill leaves nobody, so an op that had been half-way to the server came
+    /// back looking untouched. The one question that matters most after a kill
+    /// -- can the server's answer be taken at face value, or is it a replay of
+    /// a moment that has passed? -- was then answered wrongly, every time.
+    ///
+    /// No backoff. There is nothing to wait for: the process just started.
+    pub fn requeue_interrupted_op(&self, op_id: i64) -> StoreResult<()> {
+        self.conn.execute(
+            "UPDATE ops
+                SET attempts = attempts + 1,
+                    state = 'queued'
+              WHERE op_id = ?1",
+            params![op_id],
+        )?;
+        Ok(())
+    }
+
     /// Ops that were interrupted mid-act.
     ///
-    /// These are the crash window made visible. Each is re-derived — both sides
-    /// are re-checked — rather than re-run, because the server may have applied
-    /// it before the process died.
+    /// These are the crash window made visible. Each goes back on the queue and
+    /// runs again: the server may have applied it before the process died, and
+    /// running it is the only thing that both finds that out and writes down
+    /// what happened.
     pub fn interrupted_ops(&self) -> StoreResult<Vec<Op>> {
         self.ops_in_state(OpState::InFlight)
     }
