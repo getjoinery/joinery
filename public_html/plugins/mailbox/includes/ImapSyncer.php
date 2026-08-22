@@ -28,6 +28,10 @@
  *
  * See specs/two_way_imap_sync.md and specs/inbound_email_labels.md.
  *
+ * @version 2.1 - a modseq of 0 is "unknown", never a cursor: pull skips a folder
+ *   whose server reports no HIGHESTMODSEQ, and a stored cursor <= 0 re-baselines
+ *   instead of reconciling — CHANGEDSINCE 0 is dropped by the client library,
+ *   which turns the flag pull into an unbounded full-mailbox FLAGS fetch
  * @version 2.0
  */
 
@@ -135,22 +139,33 @@ class ImapSyncer {
 			return array('flags' => 0, 'vanished' => 0);
 		}
 
-		$cursor = $folder->get('iif_last_sync_modseq');
-		if ($cursor === null) {
+		$cursor = intval($folder->get('iif_last_sync_modseq') ?? 0);
+		if ($cursor <= 0) {
 			// First sync of this folder: establish the baseline, reconcile nothing.
-			$folder->set('iif_last_sync_modseq', $highestModseq);
-			$folder->prepare();
-			$folder->save();
+			// A cursor <= 0 is always "not established" — a modseq of 0 means the
+			// server reported none (STATUS answers 0 when CONDSTORE is unavailable),
+			// and reconciling from it would fetch FLAGS for the entire mailbox:
+			// the fetch layer treats CHANGEDSINCE 0 as no CHANGEDSINCE at all.
+			if ($highestModseq > 0) {
+				$folder->set('iif_last_sync_modseq', $highestModseq);
+				$folder->prepare();
+				$folder->save();
+			}
+			// No real modseq from the server → leave the cursor unestablished and
+			// sync nothing this cycle rather than sync everything.
 			return array('flags' => 0, 'vanished' => 0);
 		}
-		$cursor = intval($cursor);
 
 		$flags = $this->reconcileFlags($name, $cursor, $highUid);
 		$vanished = $folder->isMembership() ? $this->reconcileVanished($folder, $cursor, $highUid) : 0;
 
-		$folder->set('iif_last_sync_modseq', $highestModseq);
-		$folder->prepare();
-		$folder->save();
+		if ($highestModseq > 0) {
+			// Advance only to a real value: overwriting a good cursor with 0 (a
+			// STATUS that failed to report modseq) would un-baseline the folder.
+			$folder->set('iif_last_sync_modseq', $highestModseq);
+			$folder->prepare();
+			$folder->save();
+		}
 
 		return array('flags' => $flags, 'vanished' => $vanished);
 	}

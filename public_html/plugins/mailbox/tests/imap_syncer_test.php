@@ -106,6 +106,8 @@ class FakeImapClient implements ImapClient {
 	 * probe look like it landed on the oldest message in the folder).
 	 */
 	public function fetch(string $mailbox, Horde_Imap_Client_Fetch_Query $query, array $options = array()) {
+		$this->ops[] = array('op' => 'fetch', 'mailbox' => $mailbox,
+			'ids' => (string)($options['ids'] ?? ''), 'changedsince' => $options['changedsince'] ?? null);
 		$wanted = $this->idsFilter($options['ids'] ?? null);
 		$rows = array();
 		foreach (($this->folders[$mailbox]['messages'] ?? array()) as $uid => $m) {
@@ -237,6 +239,9 @@ class ImapSyncerTest {
 			$this->setUp();
 			$this->testFlagsPullCleanApplied();
 			$this->testFlagsPullDirtySkipped();
+			$this->testZeroCursorRebaselinesWithoutFetch();
+			$this->testNoServerModseqSkipsPull();
+			$this->testRealCursorNotClobberedByZeroModseq();
 			$this->testFlagsPush();
 			$this->testPushCreatesPendingFolder();
 			$this->testMembershipPushNonExclusiveCopy();
@@ -479,6 +484,57 @@ class ImapSyncerTest {
 		$this->syncer($client)->pull();
 		$this->ok(!$this->pgBool($this->reload($msg)->get('iem_is_read')),
 			'pull skips a dirty row (local-wins): remote \\Seen not applied');
+	}
+
+	// ── modseq cursor validity (a 0 is "unknown", never a cursor) ────────────
+	//
+	// The failure being pinned: a stored cursor of 0 used to fall through to
+	// reconcileFlags, whose CHANGEDSINCE 0 the fetch layer DROPS — turning the
+	// pull into a full-mailbox FLAGS fetch (OOM on a 685k-message folder). And a
+	// server that reports no HIGHESTMODSEQ (0) used to have that 0 written as the
+	// baseline, manufacturing the same state on every later cycle.
+
+	private function testZeroCursorRebaselinesWithoutFetch() {
+		$client = new FakeImapClient();
+		$folder = $this->makeFolder('INBOX', 'inbox', 1, 0); // pre-fix baseline: literal 0
+		$msg = $this->makeMessage('INBOX', 12, array('is_read' => false));
+		$client->folders['INBOX'] = array('uidvalidity' => 1, 'highestmodseq' => 9,
+			'messages' => array(12 => array('flags' => array('\seen'), 'message_id' => $msg->get('iem_message_id_header'))));
+
+		$this->syncer($client)->pull();
+		$this->ok($client->opCount('fetch') === 0,
+			'cursor 0 issues NO fetch (a full-mailbox FLAGS fetch is what CHANGEDSINCE 0 degrades to)');
+		$f = new InboundImapFolder($folder->key, TRUE);
+		$this->ok(intval($f->get('iif_last_sync_modseq')) === 9,
+			'cursor 0 re-baselines to the server\'s real HIGHESTMODSEQ');
+		$this->ok(!$this->pgBool($this->reload($msg)->get('iem_is_read')),
+			'the re-baseline cycle reconciles nothing (baseline, not sync)');
+	}
+
+	private function testNoServerModseqSkipsPull() {
+		$client = new FakeImapClient();
+		$folder = $this->makeFolder('INBOX', 'inbox', 1, 0);
+		$client->folders['INBOX'] = array('uidvalidity' => 1, 'highestmodseq' => 0,
+			'messages' => array(13 => array('flags' => array('\seen'), 'message_id' => '<x13@x>')));
+
+		$this->syncer($client)->pull();
+		$this->ok($client->opCount('fetch') === 0,
+			'no server modseq + no cursor: folder skipped, no fetch');
+		$f = new InboundImapFolder($folder->key, TRUE);
+		$this->ok(intval($f->get('iif_last_sync_modseq')) <= 0,
+			'no server modseq: 0 is never written as an established baseline');
+	}
+
+	private function testRealCursorNotClobberedByZeroModseq() {
+		$client = new FakeImapClient();
+		$folder = $this->makeFolder('INBOX', 'inbox', 1, 5);
+		$client->folders['INBOX'] = array('uidvalidity' => 1, 'highestmodseq' => 0,
+			'messages' => array());
+
+		$this->syncer($client)->pull();
+		$f = new InboundImapFolder($folder->key, TRUE);
+		$this->ok(intval($f->get('iif_last_sync_modseq')) === 5,
+			'a real cursor survives a STATUS that reports no modseq (never overwritten with 0)');
 	}
 
 	private function testFlagsPush() {

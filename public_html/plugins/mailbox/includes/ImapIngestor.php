@@ -35,6 +35,15 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * @version 1.12
+ * @changelog 1.12 - mark CONDSTORE usable on the connection when the server
+ *   advertises it: Horde only ENABLEs it when its own cache backend is
+ *   configured (ours is not), and without the mark Horde answers every
+ *   STATUS (HIGHESTMODSEQ) with 0 without asking the server — which the sync
+ *   pull then stored as a baseline cursor of 0, degrading every flag pull to
+ *   a full-mailbox FLAGS fetch. Client-side marking is protocol-correct with
+ *   no ENABLE round trip: STATUS (HIGHESTMODSEQ) and FETCH (CHANGEDSINCE)
+ *   are themselves CONDSTORE-enabling commands (RFC 7162 §3.1)
  * @version 1.11
  * @changelog 1.11 - one fetch per mailbox at a time: poll() takes a per-account
  *   advisory try-lock at the chokepoint both the scheduled poller and Fetch now
@@ -185,6 +194,18 @@ class ImapIngestor {
 		} catch (Throwable $e) {
 			throw new ImapIngestorException('IMAP connection failed: ' . $e->getMessage());
 		}
+
+		// Let modseqs flow: Horde refuses to put HIGHESTMODSEQ in a STATUS (and
+		// answers 0 without asking the server) unless CONDSTORE is marked enabled,
+		// but it only sends ENABLE when its own cache backend is configured — ours
+		// is not. Marking the capability client-side is protocol-correct without an
+		// ENABLE round trip: the first STATUS (HIGHESTMODSEQ) or FETCH (CHANGEDSINCE)
+		// it unlocks is itself a CONDSTORE-enabling command (RFC 7162 §3.1).
+		try {
+			if ($socket->capability->query('CONDSTORE')) {
+				$socket->capability->enable('CONDSTORE');
+			}
+		} catch (Throwable $e) { /* capability probing must never break a login */ }
 
 		$this->client = new HordeImapClient($socket);
 		return $this->client;
