@@ -76,6 +76,17 @@
 		$formwriter->submitbutton('submit_' . $plugin, 'Save ' . $plugin_label($plugin) . ' Settings');
 		$formwriter->end_form();
 
+		// A plugin that ships includes/settings_actions.php gets that fragment
+		// rendered under its form — buttons that belong with the settings but
+		// are not settings themselves (a connection test, a probe). $plugin is
+		// already validated against the active-plugin allowlist above.
+		$actions_fragment = PathHelper::getIncludePath('plugins/' . $plugin . '/includes/settings_actions.php');
+		if (is_file($actions_fragment)) {
+			echo '<div class="plugin-settings-actions jy-mt-2">';
+			require_once($actions_fragment);
+			echo '</div>';
+		}
+
 		echo '</div>';
 	}
 

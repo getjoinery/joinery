@@ -997,7 +997,9 @@ parameters) proves the platform can actually reach a model: it resolves the weak
 requirement under the site's own selection policy — so it tests whatever real work would
 reach for — runs `reachabilityProbe()`, then a one-token `createMessage()`. Success
 returns `{ok, model, label, endpoint, ms}`; failure returns the transport/auth error. The
-setup wizard's AI step drives it; the flow is always save-then-test.
+"Test it" button (`includes/test_connection_button.php`) drives it from both the setup
+wizard's AI step and the plugin's Plugin Settings subtab (`includes/settings_actions.php`);
+the flow is always save-then-test.
 
 **Errors.** Each provider throws `LlmProviderException` with a message carrying its own
 label (`Local model …`, `Fireworks …`, `Anthropic …`, via the overridable

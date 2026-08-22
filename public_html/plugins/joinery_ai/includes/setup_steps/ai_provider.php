@@ -7,14 +7,14 @@
  * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - Test button extracted to the shared test_connection_button.php partial (also mounted on Plugin Settings)
  */
 
 $setup_ai_local_url = (string)$settings->get_setting('joinery_ai_local_base_url');
 $setup_ai_local_model = (string)$settings->get_setting('joinery_ai_local_model');
 $setup_ai_has_anthropic = (string)$settings->get_setting('joinery_ai_anthropic_api_key') !== '';
 $setup_ai_has_fireworks = (string)$settings->get_setting('joinery_ai_fireworks_api_key') !== '';
-$setup_ai_configured = $setup_ai_has_anthropic || $setup_ai_has_fireworks || $setup_ai_local_model !== '';
 
 // There is no "active provider" to remember: every configured endpoint is
 // available at once, and what a piece of work runs on is decided from what it
@@ -79,10 +79,7 @@ $setup_ai_form->end_form();
 ?>
 
 	<div class="jy-mt-2">
-<?php if ($setup_ai_configured) { ?>
-		<button type="button" class="btn btn-secondary" id="setup-ai-test">Test it</button>
-		<span class="jy-muted" id="setup-ai-test-result"></span>
-<?php } ?>
+<?php require_once(PathHelper::getIncludePath('plugins/joinery_ai/includes/test_connection_button.php')); ?>
 	</div>
 
 	<form method="POST" action="/setup" class="jy-mt-3">
@@ -106,21 +103,5 @@ $setup_ai_form->end_form();
 		document.querySelectorAll('input[name="ai_choice"]').forEach(function (r) { r.addEventListener('change', sync); });
 		cloudWhich.addEventListener('change', sync);
 		sync();
-
-		var test = document.getElementById('setup-ai-test');
-		if (test) {
-			test.addEventListener('click', function () {
-				var out = document.getElementById('setup-ai-test-result');
-				out.textContent = 'Testing…';
-				test.disabled = true;
-				joineryApi.post('joinery_ai/test_connection', {}).then(function (data) {
-					out.textContent = 'It answers — ' + data.model + ' replied in ' + data.ms + ' ms.';
-					test.disabled = false;
-				}).catch(function (e) {
-					out.textContent = e.message || 'The test failed.';
-					test.disabled = false;
-				});
-			});
-		}
 	})();
 	</script>

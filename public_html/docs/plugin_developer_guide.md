@@ -869,6 +869,14 @@ never overwritten.
 The full field-spec reference, including how a plugin admin page requests a group
 and wraps it with context, is in [Settings](settings.md).
 
+**Action fragment:** a plugin that ships `includes/settings_actions.php` gets that
+fragment rendered under its form on the Plugin Settings subtab — for buttons that
+belong with the settings but are not settings themselves (a connection test, a
+probe). The fragment runs with the admin page in scope and typically drives an
+API action via `joineryApi`; gate anything privileged on the session's permission
+itself, since the page renders at permission 8 (the joinery_ai plugin's test
+button is the reference example).
+
 **Validation rules** (enforced on activate and sync):
 1. Every declared `name` must start with the plugin's directory name (e.g., a plugin at `/plugins/bookings/` must declare settings named `bookings_*`) — unless the entry sets `"legacy_core": true`.
 2. No declared `name` may collide with a core setting in `settings.json` at the `public_html/` root.
