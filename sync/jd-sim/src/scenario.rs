@@ -443,7 +443,43 @@ impl World {
         let e: ExecEnv = env(device, &now);
         let mut keys = device.key_source();
         let mut tokens = |id: EntityId| format!("{}-{}", device.name, id.server_id.abs());
-        run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens)
+        // The pass can be stopped dead part-way through, which is what a real
+        // kill does and what nothing here could stage before. Only the death is
+        // caught: an assertion that fires inside a pass is a finding, and
+        // swallowing it would be the harness hiding the thing it exists to
+        // show, so anything else is re-raised exactly as it was.
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens)
+        }));
+        match outcome {
+            Ok(o) => o,
+            Err(payload) => {
+                let died = payload
+                    .downcast_ref::<String>()
+                    .map(|m| m.as_str() == crate::net::DIED)
+                    .unwrap_or(false);
+                if !died {
+                    std::panic::resume_unwind(payload);
+                }
+                // The machine comes back up. Nothing is marked in flight here
+                // and that is the point: the executor already recorded the one
+                // op it was really running, which is exactly what a kill leaves
+                // and what the between-passes kill has to approximate.
+                *self.power_cycles.lock().unwrap() += 1;
+                let now = device.now();
+                let e = env(device, &now);
+                let _ = jd_core::execute::recover(&e);
+                // A pass that died is NOT a quiet pass, and the default outcome
+                // is quiet -- empty plan, nothing attempted, nothing deferred.
+                // Reported that way, a device could die during the very round
+                // that settling was waiting on and the fleet would be declared
+                // finished on the strength of it. The op it was part-way
+                // through is going back on the queue, so say so.
+                let mut cut_short = jd_core::pass::PassOutcome::default();
+                cut_short.exec.retrying = 1;
+                Ok(cut_short)
+            }
+        }
     }
 
     /// Cut the power on a device, then bring it back.

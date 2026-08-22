@@ -1074,11 +1074,14 @@ impl MockServer {
             .values()
             .any(|f| !f.trashed && f.parent == parent && f.name == name)
         {
-            return Err(refuse(
-                400,
-                "ActionError",
-                "A folder with that name already exists here.",
-            ));
+            // The marker, like every other name collision here and like the
+            // real endpoint, which has sent `reason: name_taken` from this path
+            // all along. Refusing in English only meant the client could not
+            // tell this apart from a refusal it can do nothing about, so it
+            // withdrew the operation and planned the identical one next pass --
+            // a device that never goes quiet, against a server that had told it
+            // exactly what was wrong.
+            return Err(name_taken("A folder with that name already exists here."));
         }
         st.next_folder_id += 1;
         let id = st.next_folder_id;

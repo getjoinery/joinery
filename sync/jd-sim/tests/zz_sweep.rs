@@ -421,8 +421,18 @@ fn drive(
         // the run it always had.
         if kills && rng.below(8) == 0 {
             world.clock.advance_secs(20 * 60);
-            world.pass(device);
-            world.power_cycle(device);
+            if rng.below(2) == 0 {
+                // Dead in the middle of the pass, at a call the server has
+                // already acted on. The executor has recorded that one op as in
+                // flight and nothing else; whether repeating it is safe is a
+                // question only the server can answer.
+                device.net.arm_death(rng.below(6));
+                world.pass(device);
+            } else {
+                // Dead between passes, with a queue still on the list.
+                world.pass(device);
+                world.power_cycle(device);
+            }
             trace(world, &format!("step {step} kill on {}", device.name));
         }
 
@@ -1259,7 +1269,7 @@ fn scratch_dump() {
             out.exec
         );
     }
-    println!("=== server");
+    println!("=== server (latest change {})", world.server.latest_change_id());
     for (p, h) in jd_sim::scenario::server_tree(&world.server) {
         println!("  {p} {h:?}");
     }
@@ -1288,7 +1298,11 @@ fn scratch_dump() {
         }
     }
     for d in &world.devices {
-        println!("=== {} disk", d.name);
+        println!(
+            "=== {} disk (cursor {})",
+            d.name,
+            d.store.cursor().unwrap()
+        );
         for (p, h) in jd_sim::scenario::disk_tree(d) {
             println!("  {p} {h:?}");
         }
@@ -1330,6 +1344,17 @@ fn scratch_dump() {
                 "  op {} {:?} {} {} attempts={} err={:?}",
                 op.op_id, op.kind, op.entity.server_id, op.params, op.attempts, op.last_error
             );
+        }
+        // What the engine decided it could not do, and told the user about. A
+        // withdrawn op explains itself in exactly one place and this dump never
+        // showed it, so an op that gave up looked identical to one that never
+        // ran.
+        let issues = d.store.open_issues().unwrap();
+        if !issues.is_empty() {
+            println!("=== {} issues", d.name);
+            for i in issues {
+                println!("  {:?} {:?}: {}", i.entity, i.kind, i.detail);
+            }
         }
         // What a kill left behind. These are invisible in every other view:
         // nothing runs them, because only queued ops run; nothing re-plans
