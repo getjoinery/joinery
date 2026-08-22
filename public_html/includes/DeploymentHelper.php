@@ -42,6 +42,37 @@ class DeploymentHelper {
     }
 
     /**
+     * Whether this deployment is the origin the estate is published from.
+     *
+     * Lives here rather than on MarketplaceClient because upgrade.php asks it,
+     * and upgrade.php self-updates AHEAD of the rest of a release: on that pass
+     * a new upgrade.php runs against the site's OLD core, where anything added
+     * to a core class in the same release does not exist yet. Only the four
+     * deployment files travel together, so only they can be called. The
+     * is_root() helper on MarketplaceClient defers here, so there is one rule.
+     * A test asserts these four files never name that class at all.
+     */
+    public static function isOriginNode() {
+        try {
+            $settings = Globalvars::get_instance();
+            $root = self::normalizeDeploymentHost((string)$settings->get_setting('root_node'));
+            if ($root === '') return false;   // no origin named — nobody is it
+            return self::normalizeDeploymentHost((string)$settings->get_setting('webDir')) === $root;
+        } catch (Throwable $e) {
+            return false;
+        }
+    }
+
+    /** Reduce a host to the form these comparisons use: no scheme, port, path or www. */
+    public static function normalizeDeploymentHost($host) {
+        $host = strtolower(trim((string)$host));
+        $host = preg_replace('#^[a-z][a-z0-9+.-]*://#', '', $host);
+        $host = explode('/', $host)[0];
+        $host = preg_replace('/:\d+$/', '', $host);
+        return preg_replace('/^www\./', '', $host);
+    }
+
+    /**
      * Whether this deployment may mint a NEW release number.
      *
      * Only the site where the code is written may. Everywhere else a publish
@@ -84,18 +115,10 @@ class DeploymentHelper {
      * @param string $own_domain  This site's own domain
      */
     public static function mintingAllowed($root_node, $own_domain) {
-        $normalize = function ($host) {
-            $host = strtolower(trim((string)$host));
-            $host = preg_replace('#^[a-z][a-z0-9+.-]*://#', '', $host);
-            $host = explode('/', $host)[0];
-            $host = preg_replace('/:\d+$/', '', $host);
-            return preg_replace('/^www\./', '', $host);
-        };
-
-        $root = $normalize($root_node);
+        $root = self::normalizeDeploymentHost($root_node);
         if ($root === '') return true;   // no origin named — an independent site authors freely
 
-        return $normalize($own_domain) === $root;
+        return self::normalizeDeploymentHost($own_domain) === $root;
     }
 
     // ============================================

@@ -152,4 +152,39 @@ check(strpos($publisher_src, 'Nothing has been written') !== false,
     'and it refuses before writing anything');
 
 
+section('The self-updating deployment files call only each other');
+
+// upgrade.php, update_database.php, DatabaseUpdater.php and DeploymentHelper.php
+// replace themselves AHEAD of the rest of a release, so on that pass they run
+// against the site's OLD core. A call to anything a release adds to a core class
+// is an undefined method there — and it aborts the upgrade before the release
+// that would fix it can land, which takes hand-editing a file on every node to
+// recover. Verified the expensive way on 2026-08-22.
+$deployment_set = array(
+    'utils/upgrade.php',
+    'utils/update_database.php',
+    'includes/DatabaseUpdater.php',
+    'includes/DeploymentHelper.php',
+);
+
+check(strpos($upgrader_src, "'utils/upgrade.php',") !== false
+    && strpos($upgrader_src, "'includes/DeploymentHelper.php',") !== false,
+    'the self-update list still names the set this check assumes');
+
+// MarketplaceClient is core and does NOT self-update, so it is the specific
+// class this went wrong with; the origin predicate lives on DeploymentHelper
+// for exactly that reason.
+foreach ($deployment_set as $rel) {
+    $path = PathHelper::getIncludePath($rel);
+    $src  = is_file($path) ? (string)file_get_contents($path) : '';
+    check($src !== '', "$rel is readable", $path);
+    check(strpos($src, 'MarketplaceClient::') === false,
+        "$rel does not call MarketplaceClient",
+        'it is core, it does not travel with these files, and the call fatals mid-upgrade');
+}
+
+check(strpos($helper_src, 'function isOriginNode') !== false,
+    'DeploymentHelper owns the origin predicate, so upgrade.php can ask it');
+
+
 harness_finish();
