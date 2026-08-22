@@ -86,6 +86,25 @@ pub fn run_pass(
         return Ok(out);
     }
 
+    // ---- anything a kill left half-done -------------------------------------
+    //
+    // Asked again on every pass that finds something outstanding, rather than
+    // once when the process starts. A machine that comes back up while the
+    // network is still down cannot answer the question then, and the operation
+    // it cannot answer is one nothing else will ever touch: interrupted ops are
+    // not run, and their entities are not re-planned. Asked only at startup,
+    // that is permanent -- the network comes back, the device carries on
+    // reporting itself quiet, and the work stays frozen until somebody happens
+    // to restart it.
+    //
+    // Cheap when there is nothing to do, which is almost always: one indexed
+    // lookup that comes back empty.
+    if !env.store.interrupted_ops()?.is_empty() {
+        // The error is not this pass's to report. It means the server is out of
+        // reach, which the poll below is about to say for itself.
+        let _ = crate::execute::recover(env);
+    }
+
     // ---- what the server did ------------------------------------------------
     let (fresh, next_cursor, reset) = poll_remote(env)?;
     out.reset = reset;

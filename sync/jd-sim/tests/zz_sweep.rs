@@ -197,7 +197,7 @@ fn sweep_world(
 }
 
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
-    workload_core(seed, steps, devices, chaos, Vault::None)
+    let _ = workload_core(seed, steps, devices, chaos, Vault::None, false);
 }
 
 fn workload_core(
@@ -206,12 +206,18 @@ fn workload_core(
     devices: &[(&str, Platform)],
     chaos: bool,
     vault: Vault,
-) {
+    kills: bool,
+) -> usize {
     let root = sweep_root(vault);
     let world = sweep_world(seed, devices, steps, chaos, vault);
     let committed = Committed::default();
-    drive(&world, seed, steps, chaos, root, vault);
-
+    drive(&world, seed, steps, chaos, root, vault, kills);
+    // Counted before settling, because settling is where a seed panics and a
+    // panicking seed never reports anything.
+    let kills_made = world.power_cycles();
+    if std::env::var("OPS").is_ok() {
+        println!("  KILLS {kills_made}");
+    }
     if world.settle().is_none() {
         let mut lines = Vec::new();
         for d in &world.devices {
@@ -250,6 +256,7 @@ fn workload_core(
         // server would flag the workload's own ordinary files.
         assert_the_server_was_never_told_a_real_name(&world, root, seed);
     }
+    kills_made
 }
 
 /// Nothing under the vault is stored where the server can read it.
@@ -338,7 +345,15 @@ fn trace(world: &World, tag: &str) {
 /// `root` is the folder the whole workload hangs off -- empty for the drive
 /// root, or a vault folder, in which case every path the generator invents is
 /// inside it and every byte that leaves a device has to be encrypted first.
-fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str, vault: Vault) {
+fn drive(
+    world: &World,
+    seed: u64,
+    steps: usize,
+    chaos: bool,
+    root: &str,
+    vault: Vault,
+    kills: bool,
+) {
     let mut rng = SimRng::new(seed ^ 0x5EED_1234);
     if chaos {
         for d in &world.devices {
@@ -386,6 +401,30 @@ fn drive(world: &World, seed: u64, steps: usize, chaos: bool, root: &str, vault:
                 format!("{d}/{n}")
             }
         };
+
+        // Sometimes the machine dies with work still on its list.
+        //
+        // A kill is not a network fault and does not behave like one: the disk
+        // and the journal survive, and every op the device was part-way through
+        // comes back recorded as in flight with nobody left who knows how far
+        // it got. Whether repeating one is safe is a question only the server
+        // can answer, and asking it is a different code path from anything a
+        // dropped packet reaches.
+        //
+        // A roll of its own rather than a rider on the sync arm. Hung off that
+        // arm it inherited the arm's one-in-twenty and fired on barely a third
+        // of seeds -- the arm was green because most of its seeds never died at
+        // all, which is exactly what the counter below is here to catch.
+        //
+        // Guarded on `kills` first, and that ordering is the point: the draw is
+        // never made in an arm that does not kill, so every existing seed keeps
+        // the run it always had.
+        if kills && rng.below(8) == 0 {
+            world.clock.advance_secs(20 * 60);
+            world.pass(device);
+            world.power_cycle(device);
+            trace(world, &format!("step {step} kill on {}", device.name));
+        }
 
         match rng.below(20) {
             // Create a file, sometimes deep.
@@ -718,7 +757,7 @@ fn sweep_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, Vault::None)
+    sweep_core(label, seeds, steps, devices, chaos, Vault::None, false)
 }
 
 /// The same sweep with the whole workload inside a vault every device can open.
@@ -731,7 +770,7 @@ fn sweep_vault(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, Vault::Shared)
+    sweep_core(label, seeds, steps, &named, chaos, Vault::Shared, false)
 }
 
 /// A vault only the first device can open, with the rest working around it.
@@ -744,7 +783,7 @@ fn sweep_vault_one_key(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, Vault::OneKeyHolder)
+    sweep_core(label, seeds, steps, &named, chaos, Vault::OneKeyHolder, false)
 }
 
 /// A vault workload on computers that disagree about what a name is.
@@ -756,7 +795,28 @@ fn sweep_vault_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, Vault::Shared)
+    sweep_core(label, seeds, steps, devices, chaos, Vault::Shared, false)
+}
+
+/// The same sweep on machines that die with work still on their lists.
+///
+/// Its own dimension rather than part of `chaos`, for two reasons. A kill
+/// reaches recovery, which no network fault does -- an op comes back recorded
+/// as in flight with nobody left who knows how far it got, and only the server
+/// can say whether repeating it is safe. And folding it into the existing arms
+/// would change what every seed in them means, so a suite that is a regression
+/// suite by construction would stop being one.
+#[must_use]
+fn sweep_killing(
+    label: &str,
+    seeds: std::ops::Range<u64>,
+    steps: usize,
+    devices: &[&str],
+    chaos: bool,
+    vault: Vault,
+) -> Vec<(String, u64)> {
+    let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    sweep_core(label, seeds, steps, &named, chaos, vault, true)
 }
 
 #[must_use]
@@ -767,23 +827,39 @@ fn sweep_core(
     devices: &[(&str, Platform)],
     chaos: bool,
     vault: Vault,
+    kills: bool,
 ) -> Vec<(String, u64)> {
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
+    let mut kills_made = 0usize;
     for seed in seeds {
         let owned: Vec<(String, Platform)> =
             devices.iter().map(|(n, p)| (n.to_string(), *p)).collect();
         let r = std::panic::catch_unwind(|| {
             let refs: Vec<(&str, Platform)> =
                 owned.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-            workload_core(seed, steps, &refs, chaos, vault);
+            workload_core(seed, steps, &refs, chaos, vault, kills)
         });
-        if r.is_err() {
-            failures.push(seed);
+        match r {
+            Ok(made) => kills_made += made,
+            Err(_) => failures.push(seed),
         }
     }
+    // An arm that kills has to be able to say it killed. Asserted here rather
+    // than per seed: whether any one seed draws a kill is the seed's business,
+    // and demanding it of every one turned a fifty-to-one draw into a failed
+    // seed and buried the real findings among them.
+    assert!(
+        !kills || kills_made > 0,
+        "SWEEP {label}: the killing arm never killed anything"
+    );
+    let killed = if kills {
+        format!(" ({kills_made} kills)")
+    } else {
+        String::new()
+    };
     println!(
-        "SWEEP {label}: {} of {total} failed: {:?}",
+        "SWEEP {label}: {} of {total} failed: {:?}{killed}",
         failures.len(),
         failures
     );
@@ -1157,6 +1233,7 @@ fn scratch_dump() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let kills: bool = std::env::var("KILLS").unwrap_or("0".into()) == "1";
     let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
         "1" => Vault::Shared,
         "2" => Vault::OneKeyHolder,
@@ -1168,7 +1245,7 @@ fn scratch_dump() {
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, chaos, sweep_root(vault), vault);
+        drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills);
         world.settle();
     }));
 
@@ -1254,6 +1331,21 @@ fn scratch_dump() {
                 op.op_id, op.kind, op.entity.server_id, op.params, op.attempts, op.last_error
             );
         }
+        // What a kill left behind. These are invisible in every other view:
+        // nothing runs them, because only queued ops run; nothing re-plans
+        // their entities, because a round leaves anything with an open op
+        // alone; and nothing shows them, because this dump only ever listed
+        // the queue. A device carrying one looks idle and correct.
+        let interrupted = d.store.interrupted_ops().unwrap();
+        if !interrupted.is_empty() {
+            println!("=== {} INTERRUPTED ops", d.name);
+            for op in interrupted {
+                println!(
+                    "  op {} {:?} {} {} attempts={} err={:?}",
+                    op.op_id, op.kind, op.entity.server_id, op.params, op.attempts, op.last_error
+                );
+            }
+        }
     }
 }
 
@@ -1310,6 +1402,7 @@ fn scratch_trace() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let kills: bool = std::env::var("KILLS").unwrap_or("0".into()) == "1";
     let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
         "1" => Vault::Shared,
         "2" => Vault::OneKeyHolder,
@@ -1320,7 +1413,7 @@ fn scratch_trace() {
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
-    drive(&world, seed, steps, chaos, sweep_root(vault), vault);
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills);
     for round in 0..12 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -1343,6 +1436,7 @@ fn scratch_one() {
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let n: usize = std::env::var("DEVS").unwrap_or("2".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("0".into()) == "1";
+    let kills: bool = std::env::var("KILLS").unwrap_or("0".into()) == "1";
     let vault = match std::env::var("VAULT").unwrap_or("0".into()).as_str() {
         "1" => Vault::Shared,
         "2" => Vault::OneKeyHolder,
@@ -1351,7 +1445,7 @@ fn scratch_one() {
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    workload_core(seed, steps, &refs, chaos, vault);
+    let _ = workload_core(seed, steps, &refs, chaos, vault, kills);
 }
 
 /// Scratch: watch what happens to an entry the server has told us about, whose
@@ -1578,6 +1672,7 @@ fn scratch_vaultplat_one() {
     let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
     let steps: usize = std::env::var("STEPS").unwrap_or("40".into()).parse().unwrap();
     let chaos: bool = std::env::var("CHAOS").unwrap_or("1".into()) == "1";
+    let kills: bool = std::env::var("KILLS").unwrap_or("0".into()) == "1";
     workload_core(
         seed,
         steps,
@@ -1588,5 +1683,28 @@ fn scratch_vaultplat_one() {
         ],
         chaos,
         Vault::Shared,
+        kills,
     );
+}
+
+/// Machines that die with work still on their lists.
+///
+/// The one fault the rig has that these sweeps did not. Its three unexplained
+/// losses across a hundred and fifty-nine campaigns all landed on the device it
+/// kills, and each was the last thing written there before the kill -- a shape
+/// no number of dropped packets reaches, because recovery is a different code
+/// path from a retry. Plaintext and vault, clean and hostile, because a kill is
+/// orthogonal to both and the interesting seeds are where they combine.
+#[test]
+#[ignore]
+fn scratch_kill_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_killing("kill-clean-2dev", 79000..79400, 40, &["laptop", "desktop"], false, Vault::None));
+    arms.push(sweep_killing("kill-hostile-2dev", 79400..79800, 30, &["laptop", "desktop"], true, Vault::None));
+    arms.push(sweep_killing("kill-hostile-3dev", 79800..80100, 30, &["a", "b", "c"], true, Vault::None));
+    arms.push(sweep_killing("kill-vault-2dev", 80100..80500, 40, &["laptop", "desktop"], false, Vault::Shared));
+    arms.push(sweep_killing("kill-vault-hostile", 80500..80800, 30, &["laptop", "desktop"], true, Vault::Shared));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
 }
