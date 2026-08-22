@@ -114,6 +114,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
                 'directory_exists' => true,
                 'deprecated' => false,
                 'superseded_by' => null,
+                'status' => 'stable',
+                'audience' => array(),
             );
 
             // Read manifest for deprecation metadata
@@ -129,6 +131,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
             if ($metadata) {
                 $theme_data['deprecated'] = !empty($metadata['deprecated']);
                 $theme_data['superseded_by'] = $metadata['superseded_by'] ?? null;
+                $theme_data['status'] = $metadata['status'] ?? 'stable';
+                $theme_data['audience'] = is_array($metadata['audience'] ?? null) ? $metadata['audience'] : array();
                 $theme_data['requires_joinery'] = $metadata['requires']['joinery'] ?? null;
             } else {
                 $theme_data['requires_joinery'] = null;
@@ -171,6 +175,8 @@ class Theme extends SystemBase {    public static $prefix = 'thm';
                     'directory_exists' => false,
                     'deprecated' => false,
                     'superseded_by' => null,
+                    'status' => 'stable',
+                    'audience' => array(),
                     'theme' => $theme,
                     'is_active' => (bool)$theme->get('thm_is_active'),
                     'display_name' => $theme->get('thm_display_name') ?: $theme_name,

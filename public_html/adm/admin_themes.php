@@ -114,8 +114,26 @@ $page->begin_box(array('altlinks' => $altlinks));
                                     $status_badge = '<span class="badge bg-secondary">Inactive</span>';
                                 }
 
+                                // Maturity badge from the manifest status field. Labels only —
+                                // an experimental theme installs and activates like a stable one.
+                                $maturity_badges = array(
+                                    'experimental' => '<span class="badge bg-warning">Experimental</span>',
+                                    'beta' => '<span class="badge bg-info">Beta</span>',
+                                );
+                                $maturity = $theme_data['status'] ?? 'stable';
+
                                 // Get type badge - System and Preserved-on-deploy can co-appear.
                                 $badges = array();
+                                if (isset($maturity_badges[$maturity])) {
+                                    $badges[] = $maturity_badges[$maturity];
+                                }
+                                // Audience-scoped themes are absent from other sites'
+                                // marketplaces, so the operator is told here instead.
+                                $audience = $theme_data['audience'] ?? array();
+                                if (!empty($audience)) {
+                                    $badges[] = '<span class="badge bg-info" title="Listed only for: '
+                                        . htmlspecialchars(implode(', ', $audience)) . '">Unlisted</span>';
+                                }
                                 if ($is_system) {
                                     $badges[] = '<span class="badge bg-primary"><i class="fas fa-lock me-1"></i>System</span>';
                                 }

@@ -15,6 +15,12 @@
 	 *   is_system           — flagged in theme.json/plugin.json as "must always be
 	 *                         present on every site" (e.g. the admin theme). Always
 	 *                         pulled fresh on upgrade regardless of receives_upgrades.
+	 *
+	 *   audience            — operator on the *source* site says: this was built for
+	 *                         these sites. A list of domains in the manifest; absent
+	 *                         means every site. It decides catalog LISTING only — the
+	 *                         extension is still published, still upgraded on the sites
+	 *                         running it, and still downloadable by name.
 	 */
 
 	// Detect CLI mode early to avoid loading unnecessary UI components

@@ -1158,6 +1158,9 @@ select.form-control {
 .bg-success { background: var(--success); color: #fff; }
 .bg-danger  { background: var(--danger); color: #fff; }
 .bg-warning { background: var(--warning); color: #fff; }
+.bg-info    { background: var(--info); color: #fff; }
+.bg-secondary { background: var(--secondary); color: #fff; }
+.bg-dark    { background: var(--dark); color: #fff; }
 
 /* Simple grid */
 .row {

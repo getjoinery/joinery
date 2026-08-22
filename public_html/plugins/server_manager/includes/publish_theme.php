@@ -5,11 +5,18 @@
  * Handles:
  *   ?list=themes       - List available themes (included_in_publish=true) with metadata
  *   ?list=plugins      - List available plugins (included_in_publish=true) with metadata
+ *                        Both accept &site=DOMAIN, the caller's own domain. An
+ *                        extension whose manifest declares an `audience` is
+ *                        listed only for a site that audience names; one with
+ *                        no audience is listed for everybody. Downloads stay
+ *                        open by name — an audience is listing visibility, not
+ *                        access control.
+
  *   ?download=name     - Download a theme archive
  *   ?download=name&type=plugin - Download a plugin archive
  *   ?core              - Redirect to core archive download
  *
- * Version: 1.3.0
+ * Version: 1.5.0
  */
 
 // When loaded via route, core classes are pre-loaded.
@@ -25,12 +32,29 @@ $baseDir = $settings->get_setting('baseDir');
 $site_template = $settings->get_setting('site_template');
 $full_site_dir = $baseDir . $site_template;
 
+/**
+ * Whether an extension declaring this `audience` is listed for this caller.
+ *
+ * method_exists, not a bare call: the catalog every site's marketplace reads
+ * is served by this file, and a release can land it ahead of the core class
+ * it calls. Without the guard that ordering fatals the catalog for every
+ * site at once. Falling back to "list only what declares no audience" keeps
+ * public extensions listed and errs toward hiding the rest.
+ */
+function catalog_audience_allows($audience, $requesting_site) {
+    if (method_exists('MarketplaceClient', 'audience_allows')) {
+        return MarketplaceClient::audience_allows($audience, $requesting_site);
+    }
+    return empty($audience);
+}
+
 // Handle ?list=themes
 if (isset($_GET['list']) && $_GET['list'] === 'themes') {
     header('Content-Type: application/json');
 
     $themes = [];
     $theme_dir = $full_site_dir . '/public_html/theme';
+    $requesting_site = $_GET['site'] ?? '';
 
     foreach (glob($theme_dir . '/*/theme.json') as $json_file) {
         $theme_data = json_decode(file_get_contents($json_file), true);
@@ -38,6 +62,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
             // Only include themes with included_in_publish=true and not deprecated
             $included = $theme_data['included_in_publish'] ?? true;
             $is_deprecated = !empty($theme_data['deprecated']);
+            $audience = $theme_data['audience'] ?? null;
+            if (!catalog_audience_allows($audience, $requesting_site)) {
+                continue;
+            }
             if ($included && !$is_deprecated) {
                 $themes[] = [
                     'name' => $theme_data['name'] ?? basename(dirname($json_file)),
@@ -47,6 +75,8 @@ if (isset($_GET['list']) && $_GET['list'] === 'themes') {
                     'description' => $theme_data['description'] ?? '',
                     'author' => $theme_data['author'] ?? '',
                     'is_system' => $theme_data['is_system'] ?? false,
+                    'status' => $theme_data['status'] ?? 'stable',
+                    'unlisted' => !empty($audience),
                     'included_in_publish' => true,
                 ];
             }
@@ -63,6 +93,7 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
 
     $plugins = [];
     $plugin_dir = $full_site_dir . '/public_html/plugins';
+    $requesting_site = $_GET['site'] ?? '';
 
     foreach (glob($plugin_dir . '/*/plugin.json') as $json_file) {
         $plugin_data = json_decode(file_get_contents($json_file), true);
@@ -70,6 +101,10 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
             // Only include plugins with included_in_publish=true and not deprecated
             $included = $plugin_data['included_in_publish'] ?? true;
             $is_deprecated = !empty($plugin_data['deprecated']);
+            $audience = $plugin_data['audience'] ?? null;
+            if (!catalog_audience_allows($audience, $requesting_site)) {
+                continue;
+            }
             if ($included && !$is_deprecated) {
                 $plugins[] = [
                     'name' => basename(dirname($json_file)),
@@ -81,6 +116,7 @@ if (isset($_GET['list']) && $_GET['list'] === 'plugins') {
                     'is_system' => $plugin_data['is_system'] ?? false,
                     'license' => $plugin_data['license'] ?? null,
                     'status' => $plugin_data['status'] ?? 'stable',
+                    'unlisted' => !empty($audience),
                     'requires_entitlement' => $plugin_data['requires_entitlement'] ?? false,
                     'included_in_publish' => true,
                 ];
