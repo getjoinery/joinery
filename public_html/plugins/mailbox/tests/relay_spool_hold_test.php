@@ -18,9 +18,15 @@
  *  - disabled/missing domain, old    → 'aged_out'   (past grace window, ack-drop)
  *  - Fortress blob, no owner, recent → 'hold'       (Fix 7 — never an invisible row)
  *
+ * Plus the half-acked-entry outcomes (consumer 1.9): an entry whose .meta an
+ * older joinery-ack deleted (it removed only .seal + .meta, so acked .direct
+ * artifacts stayed behind) must RESOLVE — dedup for an already-stored .seal,
+ * normal classification for a .direct (its container is self-describing) —
+ * instead of throwing "missing .meta" on every pull forever.
+ *
  * Run: php plugins/mailbox/tests/relay_spool_hold_test.php  (schema synced).
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -47,6 +53,8 @@ class RelaySpoolHoldTest {
 			$this->testDisabledDomainHolds();
 			$this->testDisabledDomainAgesOut();
 			$this->testFortressOwnerlessHolds();
+			$this->testStoredSealDedupsWithoutMeta();
+			$this->testDirectNeedsNoMeta();
 		} catch (\Throwable $e) {
 			check(false, 'EXCEPTION', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -145,15 +153,104 @@ class RelaySpoolHoldTest {
 		check(intval($stmt->fetchColumn()) === 0, 'ownerless Fortress hold stored NO row');
 	}
 
+	// ── half-acked entries (an older joinery-ack deleted only the .meta) ─────
+
+	private function testStoredSealDedupsWithoutMeta() {
+		// The stored-but-half-acked shape: a message row already carries this
+		// spool id, and the sidecar is gone. Must dedup (→ re-ack), not throw.
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
+		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
+		$a = new InboundEmailAlias(NULL);
+		$a->set('iea_ied_inbound_email_domain_id', $this->disabled_domain_id);
+		$a->set('iea_alias', 'rsh' . $this->suffix);
+		$a->set('iea_delivery_mode', InboundEmailAlias::MODE_STORE);
+		$a->set('iea_is_enabled', true);
+		$a->prepare(); $a->save();
+		$this->alias_id = intval($a->key);
+
+		$spool_id = '1700000001-' . bin2hex(random_bytes(4));
+		$m = new InboundEmailMessage(NULL);
+		$m->set('iem_ied_inbound_email_domain_id', $this->disabled_domain_id);
+		$m->set('iem_iea_inbound_email_alias_id', $this->alias_id);
+		$m->set('iem_sender', 'from@x.test');
+		$m->set('iem_recipient', 'rsh' . $this->suffix . '@rsh-off-' . $this->suffix . '.example');
+		$m->set('iem_subject', 'stored earlier');
+		$m->set('iem_message_id_header', '<' . uniqid('rsh') . '@x>');
+		$m->set('iem_direction', 'inbound');
+		$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
+		$m->set('iem_relay_spool_id', $spool_id);
+		$m->save();
+
+		$seal = $this->stage . '/' . $spool_id . '.seal';
+		file_put_contents($seal, 'SEALEDBLOB');
+		$missing_meta = $this->stage . '/' . $spool_id . '.meta'; // never written
+		try {
+			$o = (string)$this->ingest->invoke($this->consumer, $seal, $missing_meta, $spool_id);
+			check($o === 'dedup', "already-stored .seal with no .meta → 'dedup', re-ackable (got '$o')");
+		} catch (\Throwable $e) {
+			check(false, 'already-stored .seal with no .meta must not throw (got: ' . $e->getMessage() . ')');
+		}
+	}
+
+	private function testDirectNeedsNoMeta() {
+		$direct = new ReflectionMethod(RelaySpoolConsumer::class, 'ingestDirect');
+		$direct->setAccessible(true);
+
+		// A .direct is self-describing: with the sidecar gone (older ack deleted
+		// it), classification still runs off the container.
+		$spool_id = '1700000002-' . bin2hex(random_bytes(4));
+		$data = $this->stage . '/' . $spool_id . '.direct';
+		file_put_contents($data, json_encode(array('recipient' => ''))); // malformed → unroutable
+		try {
+			$o = (string)$direct->invoke($this->consumer, $data, $this->stage . '/' . $spool_id . '.meta', $spool_id);
+			check($o === 'unroutable', ".direct with no .meta is classified from its container (got '$o')");
+		} catch (\Throwable $e) {
+			check(false, '.direct with no .meta must not throw (got: ' . $e->getMessage() . ')');
+		}
+
+		// The live orphan shape: delivery already stored (nonce dedup), sidecar
+		// gone. Must answer 'dedup' so the pull re-acks it off the relay.
+		$nonce = bin2hex(random_bytes(16));
+		$row = new DirectSpool(NULL);
+		$row->set('jdp_kind', 'mail');
+		$row->set('jdp_nonce', $nonce);
+		$row->set('jdp_sender_address', 'peer@remote.example');
+		$row->set('jdp_sender_domain', 'remote.example');
+		$row->set('jdp_recipient', 'rsh' . $this->suffix . '@rsh-off-' . $this->suffix . '.example');
+		$row->set('jdp_domain', 'rsh-off-' . $this->suffix . '.example');
+		$row->set('jdp_manifest', '[]');
+		$row->save();
+		$this->direct_spool_id = intval($row->key);
+
+		$spool_id2 = '1700000003-' . bin2hex(random_bytes(4));
+		$data2 = $this->stage . '/' . $spool_id2 . '.direct';
+		file_put_contents($data2, json_encode(array(
+			'recipient' => 'rsh' . $this->suffix . '@rsh-off-' . $this->suffix . '.example',
+			'nonce'     => $nonce,
+		)));
+		try {
+			$o2 = (string)$direct->invoke($this->consumer, $data2, $this->stage . '/' . $spool_id2 . '.meta', $spool_id2);
+			check($o2 === 'dedup', "already-stored .direct with no .meta → 'dedup', re-ackable (got '$o2')");
+		} catch (\Throwable $e) {
+			check(false, 'already-stored .direct with no .meta must not throw (got: ' . $e->getMessage() . ')');
+		}
+	}
+
 	private $enabled_domain_id = 0;
+	private $alias_id = 0;
+	private $direct_spool_id = 0;
 
 	private function tearDown() {
 		try {
 			foreach (array($this->disabled_domain_id, $this->enabled_domain_id) as $did) {
 				if ($did) {
 					$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = " . intval($did));
+					$this->db->exec("DELETE FROM iea_inbound_email_aliases WHERE iea_ied_inbound_email_domain_id = " . intval($did));
 					$this->db->exec("DELETE FROM ied_inbound_email_domains WHERE ied_inbound_email_domain_id = " . intval($did));
 				}
+			}
+			if ($this->direct_spool_id) {
+				$this->db->exec("DELETE FROM jdp_direct_spool WHERE jdp_direct_spool_id = " . intval($this->direct_spool_id));
 			}
 			if ($this->stage && is_dir($this->stage)) {
 				foreach (glob($this->stage . '/*') ?: array() as $f) { @unlink($f); }

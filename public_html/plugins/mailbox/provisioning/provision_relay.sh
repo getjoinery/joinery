@@ -84,7 +84,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="2.7"
+RELAY_VERSION="2.8"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -482,11 +482,14 @@ case "${TOK[0]}" in
     ;;
   joinery-ack)
     # Delete-after-store ack: ids only (no path separators — the tmp/ working
-    # dir and the forward-rate bucket are unreachable).
+    # dir and the forward-rate bucket are unreachable). An id names whichever
+    # artifact kind the entry is (.seal from the MX path, .direct from Joinery
+    # Direct) plus its .meta sidecar — the ack must remove every kind, or an
+    # acked entry of the unhandled kind is left orphaned on the spool forever.
     IDS=("${TOK[@]:1}")
     for id in "${IDS[@]}"; do
       [[ "${id}" =~ ^[A-Za-z0-9._-]+$ ]] || { echo "denied: bad id" >&2; exit 1; }
-      rm -f "${SPOOL}/${id}.seal" "${SPOOL}/${id}.meta"
+      rm -f "${SPOOL}/${id}.seal" "${SPOOL}/${id}.direct" "${SPOOL}/${id}.meta"
     done
     echo "ACKED ${#IDS[@]}"
     ;;

@@ -28,6 +28,12 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.9 - a .direct needs no .meta sidecar (the container is
+ *   self-describing and the sidecar's fields are never read), and a .seal is
+ *   dedup-checked before its sidecar is required — both so an entry whose
+ *   sidecar an older joinery-ack deleted (it removed only .seal + .meta,
+ *   leaving acked .direct artifacts orphaned) resolves instead of throwing
+ *   "missing .meta" on every pull forever
  * @version 1.8 - one pull at a time: pull() takes a per-relay advisory
  *   try-lock at the chokepoint both the scheduled reconcile and the reader's
  *   check-mail action pass through; a second pull reports 'skipped' instead of
@@ -221,9 +227,12 @@ class RelaySpoolConsumer {
 	 * recorded hash is what the Direct framework verified them under.
 	 */
 	private function ingestDirect(string $data_path, string $meta_path, string $spool_id): string {
-		if (!is_file($meta_path)) {
-			throw new \RuntimeException('missing .meta for ' . $spool_id);
-		}
+		// No .meta requirement: the container is self-describing (recipient, kind,
+		// nonce, key kind all travel inside it) and nothing below reads the sidecar.
+		// The writer commits .meta first and the artifact is temp-name + rename, so
+		// a visible .direct is complete — a missing sidecar means it was deleted
+		// afterwards (an older joinery-ack removed only .seal + .meta), and the
+		// nonce dedup inside DirectRelayIngest::store makes re-processing safe.
 		$container = json_decode((string)file_get_contents($data_path), true);
 		if (!is_array($container) || empty($container['recipient'])) {
 			error_log('RelaySpoolConsumer: malformed .direct container ' . $spool_id . ' — dropping');
@@ -235,6 +244,14 @@ class RelaySpoolConsumer {
 	}
 
 	private function ingestOne(string $seal_path, string $meta_path, string $spool_id): string {
+		// Idempotency FIRST, before the sidecar is required: if this spool id is
+		// already stored, the prior pull just failed to ack — nothing to do but ack
+		// it now. Checking after the .meta gate left a stored entry whose sidecar a
+		// half-completed ack had already deleted throwing "missing .meta" forever.
+		if ($this->alreadyStored($spool_id)) {
+			return 'dedup';
+		}
+
 		if (!is_file($meta_path)) {
 			// A .seal with no committed .meta is a torn pair; skip without acking so
 			// the next pull (after the relay finishes writing) sees the complete pair.
@@ -247,12 +264,6 @@ class RelaySpoolConsumer {
 		$sealed_raw = trim((string)file_get_contents($seal_path));
 		if ($sealed_raw === '') {
 			throw new \RuntimeException('empty .seal for ' . $spool_id);
-		}
-
-		// Idempotency: if this spool id is already stored, the prior pull just failed
-		// to ack — nothing to do but ack it now.
-		if ($this->alreadyStored($spool_id)) {
-			return 'dedup';
 		}
 
 		// The raw recipient keeps its local-part case — SRS bounce addresses encode
