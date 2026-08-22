@@ -41,6 +41,63 @@ class DeploymentHelper {
         return PluginHelper::isPluginActive('server_manager');
     }
 
+    /**
+     * Whether this deployment may mint a NEW release number.
+     *
+     * Only the site where the code is written may. Everywhere else a publish
+     * is a *re*publish of what arrived from upstream, and minting a number
+     * there produces two different trees carrying one version — which nothing
+     * downstream can tell apart, and which neither site detects, because the
+     * duplicate check reads the local upgrades table and neither has seen the
+     * other's row.
+     *
+     * The answer comes from `root_node`, which names the origin by domain. An
+     * estate that has not named one reads as "unknown topology" and is allowed
+     * to mint: that is every independent deployment, which authors its own
+     * code and must keep working with no configuration at all.
+     *
+     * Read through the settings singleton rather than MarketplaceClient so
+     * this stays inside the self-updating deployment set (see isUpgradeServer
+     * above) — during the early-self-update window a call into core would be
+     * an undefined method.
+     */
+    public static function mayMintReleaseVersion() {
+        try {
+            $settings = Globalvars::get_instance();
+            return self::mintingAllowed(
+                (string)$settings->get_setting('root_node'),
+                (string)$settings->get_setting('webDir')
+            );
+        } catch (Throwable $e) {
+            return true;   // settings unavailable — never block a publish over this
+        }
+    }
+
+    /**
+     * The decision above, with both domains passed in.
+     *
+     * Split out so the rule can be tested exhaustively: the site that runs the
+     * tests is the origin, so the interesting answer — the refusal — never
+     * occurs there and would otherwise go unexercised.
+     *
+     * @param string $root_node   Domain naming the origin; empty means unknown
+     * @param string $own_domain  This site's own domain
+     */
+    public static function mintingAllowed($root_node, $own_domain) {
+        $normalize = function ($host) {
+            $host = strtolower(trim((string)$host));
+            $host = preg_replace('#^[a-z][a-z0-9+.-]*://#', '', $host);
+            $host = explode('/', $host)[0];
+            $host = preg_replace('/:\d+$/', '', $host);
+            return preg_replace('/^www\./', '', $host);
+        };
+
+        $root = $normalize($root_node);
+        if ($root === '') return true;   // no origin named — an independent site authors freely
+
+        return $normalize($own_domain) === $root;
+    }
+
     // ============================================
     // VALIDATION METHODS
     // ============================================

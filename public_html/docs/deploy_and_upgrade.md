@@ -718,7 +718,7 @@ Naming it by domain rather than raising a flag is what makes a clone or a
 restored backup safe. The copy carries the same value, which still names the
 origin, and the copy correctly concludes it is not the origin itself.
 
-Four behaviours follow from it, each fixing a state that has no sensible
+Five behaviours follow from it, each fixing a state that has no sensible
 reading otherwise:
 
 - **It serves its own catalog.** `MarketplaceClient::source()` answers with
@@ -734,6 +734,7 @@ reading otherwise:
   because applying the last release published from here would replace new work
   with an older copy of itself. Serving upgrades to other sites is a different
   branch and is unaffected — the origin still publishes normally.
+- **It is the only site that may mint a release number.** Everywhere else a publish republishes the version that arrived from upstream; see [The release channel](#the-release-channel).
 - **It refuses to install over itself.** Everything in its catalog is already
   on its disk, so a marketplace install, or the upstream refresh a plugin
   install performs, could only overwrite the working copy with an archive of
@@ -751,14 +752,19 @@ A release reaches it by being published *there*, and `publish_upgrade.php` build
 
 1. Publish on dev.
 2. `upgrade.php` brings getjoinery to that build.
-3. Publish on getjoinery, **passing the version explicitly**.
+3. Publish on getjoinery.
 
-Step 3 needs the explicit version because `publish_upgrade.php` auto-detects the next patch from `VERSION` and writes the new number back — so upgrade-to-0.8.199-then-publish would emit 0.8.200 carrying 0.8.199's code, and dev's next publish would also be 0.8.200. Two archives, one number. Nothing blocks passing it: the downgrade guard rejects only *lower*, and the duplicate check reads the local `upg_upgrades` table, which does not hold dev's rows.
+**Only the origin may mint a release number.** `DeploymentHelper::mayMintReleaseVersion()` answers that from `root_node`, and the publisher asks before anything else: a site that is not the origin republishes the version it is running, and refuses a version that differs from it. So step 3 takes release notes and nothing more — the number is already decided by what step 2 delivered.
 
 ```bash
 # on getjoinery, after upgrade.php brings it to 0.8.199
-php plugins/server_manager/includes/publish_upgrade.php 0.8.199 "release notes"
+php plugins/server_manager/includes/publish_upgrade.php "release notes"
+# -> Republishing 0.8.199 -- this deployment serves what it received, not new work.
 ```
+
+The rule guards a failure with no local symptom. Auto-detect reads the next patch from `VERSION`, so upgrade-to-0.8.199-then-publish would emit 0.8.200 carrying 0.8.199's code, and dev's next publish would mint 0.8.200 from a different tree. Two archives, one number, and nothing notices: the downgrade guard rejects only *lower*, and the duplicate check reads the local `upg_upgrades` table, which does not hold the other site's rows. The check sits ahead of the auto-detect block precisely because an explicitly supplied version skips that block — a guard inside it would protect only the case nobody gets wrong. The dashboard's publish form is covered too: on a site that may not mint, it offers the running version read-only rather than the next patch.
+
+An estate that names no `root_node` mints freely. That is every independent deployment: it authors its own code, and it is configured with nothing.
 
 The ordering earns something beyond housekeeping: getjoinery is running the code it serves, so a build reaching strangers has at least come up on a real site first.
 

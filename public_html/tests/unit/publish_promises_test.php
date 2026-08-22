@@ -120,4 +120,36 @@ check(!preg_match("/upgrade_source[^\n]*\?\?[^\n]*relay|relay[^\n]*upgrade_sourc
     "dev's upgrade_source is getjoinery, so it cannot carry this");
 
 
+section('Only the origin may mint a release number');
+
+// The rule itself, exhaustively — the site running these tests is the origin,
+// so the refusal never happens here and would otherwise never be exercised.
+check(DeploymentHelper::mintingAllowed('', 'anything.example'),
+    'an estate that names no origin mints freely',
+    'independent deployments author their own code and are configured with nothing');
+check(DeploymentHelper::mintingAllowed('origin.example', 'origin.example'),
+    'the origin mints');
+check(!DeploymentHelper::mintingAllowed('origin.example', 'channel.example'),
+    'a site that is not the origin does not');
+check(DeploymentHelper::mintingAllowed('origin.example', 'https://WWW.Origin.Example/'),
+    'however the site writes its own domain');
+check(!DeploymentHelper::mintingAllowed('origin.example', ''),
+    'a site with no domain of its own does not mint',
+    'it cannot show it is the origin, and minting is the unrecoverable direction');
+
+// Placement is the whole point. An explicitly supplied version skips the
+// auto-detect block, so a check living inside it protects nothing — which is
+// exactly how a relay came to publish a number the origin had not reached.
+$mint_at   = strpos($publisher_src, 'mayMintReleaseVersion');
+$detect_at = strpos($publisher_src, 'Auto-detect next version if not specified');
+check($mint_at !== false, 'the publisher asks whether it may mint at all');
+check($mint_at !== false && $detect_at !== false && $mint_at < $detect_at,
+    'and asks before the auto-detect block, which an explicit version skips');
+check(substr_count($publisher_src, 'mayMintReleaseVersion') >= 3,
+    'on the CLI path, the web handler, and the form that offers the number',
+    'the dashboard is the documented publish route, so a CLI-only guard is half a guard');
+check(strpos($publisher_src, 'Nothing has been written') !== false,
+    'and it refuses before writing anything');
+
+
 harness_finish();
