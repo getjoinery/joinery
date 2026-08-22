@@ -302,6 +302,7 @@ class MultiPlugin extends SystemMultiBase {
                 'deprecated' => false,
                 'superseded_by' => null,
                 'maturity' => null,
+                'audience' => array(),
             );
 
             // Read manifest for deprecation metadata
@@ -319,6 +320,7 @@ class MultiPlugin extends SystemMultiBase {
                 $plugin_data['superseded_by'] = $metadata['superseded_by'] ?? null;
                 $plugin_data['requires_joinery'] = $metadata['requires']['joinery'] ?? null;
                 $plugin_data['maturity'] = $metadata['status'] ?? null;
+                $plugin_data['audience'] = is_array($metadata['audience'] ?? null) ? $metadata['audience'] : array();
             } else {
                 $plugin_data['requires_joinery'] = null;
             }
@@ -368,6 +370,7 @@ class MultiPlugin extends SystemMultiBase {
                     'deprecated' => false,
                     'superseded_by' => null,
                     'maturity' => null,
+                    'audience' => array(),
                     'plugin' => $plugin,
                     'is_active' => $plugin->is_active(),
                     'status_badge' => '<span class="badge bg-warning">Missing</span>',

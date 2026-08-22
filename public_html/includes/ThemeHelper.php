@@ -68,7 +68,32 @@ class ThemeHelper extends ComponentBase {
         if (empty($this->manifestData['name'])) {
             $errors[] = "Theme manifest missing required field: name";
         }
+
+        // Maturity status is honest labeling only and gates nothing, but an
+        // unknown value is a manifest error, not a silently ignored string.
+        if (isset($this->manifestData['status'])
+            && !in_array($this->manifestData['status'], array('experimental', 'beta', 'stable', 'deprecated'), true)) {
+            $errors[] = "Unknown status '" . $this->manifestData['status'] . "' — must be one of: experimental, beta, stable, deprecated";
+        }
         
+        // An audience is a list of site domains. A string or object here would
+        // silently hide the theme from every catalog, so it fails loudly.
+        if (isset($this->manifestData['audience'])) {
+            $audience = $this->manifestData['audience'];
+            $audience_valid = is_array($audience) && $audience === array_values($audience);
+            if ($audience_valid) {
+                foreach ($audience as $audience_entry) {
+                    if (!is_string($audience_entry) || trim($audience_entry) === '') {
+                        $audience_valid = false;
+                        break;
+                    }
+                }
+            }
+            if (!$audience_valid) {
+                $errors[] = "Invalid audience — must be a list of site domains, e.g. [\"example.com\"]";
+            }
+        }
+
         return empty($errors) ? true : $errors;
     }
     

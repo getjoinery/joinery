@@ -59,6 +59,43 @@ check(mkt_threw(function () { MarketplaceClient::install('plugin', '..'); }, 'In
 check(mkt_threw(function () { MarketplaceClient::fetch_catalog('theme'); }, 'InvalidArgumentException'),
 	"fetch_catalog takes the list nouns 'themes'/'plugins', not the singular");
 
+// ------------------------------------------------------- audience visibility
+
+section('audience visibility');
+
+// An extension that names no audience is everybody's — the case almost every
+// extension is in, and the reason the manifest key is optional.
+check(MarketplaceClient::audience_allows(null, 'zoukphilly.com'), 'No audience is public');
+check(MarketplaceClient::audience_allows(array(), 'zoukphilly.com'), 'An empty audience is public');
+check(MarketplaceClient::audience_allows(null, ''), 'No audience is public even to an unidentified caller');
+
+// An audience names the sites the extension was built for.
+$audience = array('zoukphilly.com', 'dev.getjoinery.com');
+check(MarketplaceClient::audience_allows($audience, 'zoukphilly.com'), 'A named site sees it');
+check(MarketplaceClient::audience_allows($audience, 'dev.getjoinery.com'), 'A second named site sees it');
+check(!MarketplaceClient::audience_allows($audience, 'zoukroom.com'), 'An unnamed site does not');
+check(!MarketplaceClient::audience_allows($audience, ''), 'A caller claiming nothing does not');
+
+// Hosts are compared in one normalized form, so an operator can write the
+// domain the way it appears in a browser and still have it match.
+check(MarketplaceClient::audience_allows($audience, 'https://www.ZoukPhilly.com/'),
+	'Scheme, www, case and trailing path do not break the match');
+check(MarketplaceClient::audience_allows(array('https://ZoukPhilly.com'), 'zoukphilly.com'),
+	'An audience entry written as a URL still matches');
+check(MarketplaceClient::normalize_host('http://Example.com:8080/path') === 'example.com',
+	'normalize_host strips scheme, port and path');
+
+// A malformed audience hides the extension rather than publishing it — a
+// manifest typo must not be the thing that leaks a private theme.
+check(!MarketplaceClient::audience_allows('zoukphilly.com', 'zoukphilly.com'),
+	'A bare string audience hides the extension instead of matching');
+check(!MarketplaceClient::audience_allows(array(array('site' => 'zoukphilly.com')), 'zoukphilly.com'),
+	'A structured audience entry does not match');
+
+// A subdomain is a different site, not a member of the parent's audience.
+check(!MarketplaceClient::audience_allows(array('getjoinery.com'), 'dev.getjoinery.com'),
+	'A subdomain is not covered by the parent domain');
+
 // ------------------------------------------- FormWriter handler-side validateCSRF
 
 section('validateCSRF from a POST handler');

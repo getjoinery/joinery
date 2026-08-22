@@ -156,6 +156,13 @@ $page->begin_box(array('altlinks' => $altlinks));
                     $status_cell .= ' ' . $maturity_badges[$maturity];
                 }
 
+                // Audience-scoped plugins are absent from other sites' marketplaces,
+                // so the operator is told here instead.
+                if (!empty($plugin['audience'])) {
+                    $status_cell .= ' <span class="badge bg-info" title="Listed only for: '
+                        . htmlspecialchars(implode(', ', $plugin['audience'])) . '">Unlisted</span>';
+                }
+
                 // Add Preserved-on-deploy badge only when receives_upgrades=false
                 if ($plugin['plugin']) {
                     if (!$plugin['plugin']->receives_upgrades()) {

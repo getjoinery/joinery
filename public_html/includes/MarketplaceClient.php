@@ -9,7 +9,7 @@
  * extensions. Used by the /admin/admin_marketplace page and the
  * marketplace_catalog / marketplace_install API actions.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 class MarketplaceClient {
@@ -23,7 +23,71 @@ class MarketplaceClient {
 	}
 
 	/**
+	 * This site's own domain, as the catalog knows it — what an extension's
+	 * `audience` list names. Empty when the site has no webDir configured,
+	 * which reads as "some anonymous caller" and sees only public items.
+	 */
+	public static function site_identity() {
+		return self::normalize_host(Globalvars::get_instance()->get_setting('webDir'));
+	}
+
+	/**
+	 * Reduce a host to the form audience entries are compared in: no scheme,
+	 * no path, no port, no leading www, lowercase. So an operator can write
+	 * "https://www.ZoukPhilly.com/" and mean zoukphilly.com.
+	 */
+	public static function normalize_host($host) {
+		if (!is_string($host) && !is_numeric($host)) {
+			return '';
+		}
+		$host = strtolower(trim((string)$host));
+		$host = preg_replace('#^[a-z][a-z0-9+.-]*://#', '', $host);
+		$host = explode('/', $host)[0];
+		$host = preg_replace('/:\d+$/', '', $host);
+		$host = preg_replace('/^www\./', '', $host);
+		return $host;
+	}
+
+	/**
+	 * Whether a caller may see an extension whose manifest declares `audience`.
+	 *
+	 * No audience means public — every site sees it, which is what the great
+	 * majority of extensions want and why the key is optional. An audience
+	 * names the sites the extension was built for: everyone else is not shown
+	 * it. A malformed audience hides the extension rather than publishing it,
+	 * so a manifest typo cannot leak a site's private theme.
+	 *
+	 * This is listing visibility, not access control — the archive download is
+	 * anonymous by design, so an audience keeps an extension out of catalogs
+	 * and fresh installs, it does not keep a determined caller out.
+	 *
+	 * @param mixed  $audience        Manifest `audience` value (array, or absent)
+	 * @param string $requesting_site Domain the caller claims
+	 */
+	public static function audience_allows($audience, $requesting_site) {
+		if ($audience === null || $audience === '' || $audience === array()) {
+			return true;
+		}
+		if (!is_array($audience)) {
+			return false;
+		}
+		$want = self::normalize_host($requesting_site);
+		if ($want === '') {
+			return false;
+		}
+		foreach ($audience as $entry) {
+			if (self::normalize_host($entry) === $want) {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * Fetch a catalog from the source site.
+	 *
+	 * Sends this site's own domain so the source can include extensions whose
+	 * audience names it.
 	 *
 	 * @param string $type 'themes' or 'plugins'
 	 * @return array Catalog items; empty on any failure (logged)
@@ -37,7 +101,8 @@ class MarketplaceClient {
 			return array();
 		}
 
-		$url = $source . '/admin/server_manager/publish_theme?list=' . urlencode($type);
+		$url = $source . '/admin/server_manager/publish_theme?list=' . urlencode($type)
+			. '&site=' . urlencode(self::site_identity());
 
 		$ch = curl_init($url);
 		curl_setopt_array($ch, [

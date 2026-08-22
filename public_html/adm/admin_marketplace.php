@@ -38,6 +38,26 @@ $page->admin_header(array(
 $page->begin_box(array('altlinks' => $altlinks));
 
 /**
+ * Maturity badge for a catalog item. Every item gets exactly one, so a card
+ * always answers "how finished is this?" — an unmarked item is stable.
+ * Labels only: an experimental extension installs like a stable one.
+ */
+function marketplace_maturity_badge(array $item): string {
+	$badges = array(
+		'experimental' => array('Experimental', 'badge-warning'),
+		'beta'         => array('Beta', 'badge-info'),
+		'deprecated'   => array('Deprecated', 'badge-secondary'),
+		'stable'       => array('Stable', 'badge-subtle-secondary'),
+	);
+	$status = strtolower(trim((string)($item['status'] ?? 'stable')));
+	if (!isset($badges[$status])) {
+		$status = 'stable';
+	}
+	list($label, $class) = $badges[$status];
+	return '<span class="badge ' . $class . '">' . htmlspecialchars($label) . '</span>';
+}
+
+/**
  * One catalog card: name, version, author, description, and either an
  * Installed badge or an Install action button.
  */
@@ -54,15 +74,21 @@ function marketplace_render_card(array $item, string $type, string $csrf_token) 
 				<?php if (!empty($item['author'])): ?>
 					<p class="card-text text-muted small mb-1">by <?= htmlspecialchars($item['author']) ?></p>
 				<?php endif; ?>
+				<div class="marketplace-card-badges">
+					<?= marketplace_maturity_badge($item) ?>
+					<?php if (!empty($item['is_system'])): ?>
+						<span class="badge badge-primary">System</span>
+					<?php endif; ?>
+					<?php if (!empty($item['unlisted'])): ?>
+						<span class="badge badge-subtle-primary" title="Built for named sites — it is not listed in the public catalog">Unlisted</span>
+					<?php endif; ?>
+				</div>
 				<?php if (!empty($item['description'])): ?>
 					<p class="card-text small"><?= htmlspecialchars($item['description']) ?></p>
 				<?php endif; ?>
-				<?php if (!empty($item['is_system'])): ?>
-					<span class="badge bg-primary mb-2 align-self-start">System</span>
-				<?php endif; ?>
 				<div class="mt-auto">
 					<?php if ($item['install_status'] === 'installed'): ?>
-						<span class="badge bg-success">Installed</span>
+						<span class="badge badge-success">Installed</span>
 					<?php else: ?>
 						<?= AdminPage::action_button('Install', '/admin/admin_marketplace', array(
 							'hidden' => array(
@@ -82,6 +108,17 @@ function marketplace_render_card(array $item, string $type, string $csrf_token) 
 	<?php
 }
 ?>
+
+<style>
+/* The card body is a flex column, so a bare badge would stretch across the
+   whole card. Badges sit in one wrapping row of their own instead. */
+.marketplace-card-badges {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 0.35rem;
+	margin-bottom: 0.6rem;
+}
+</style>
 
 <div class="container-fluid">
 	<div class="row">

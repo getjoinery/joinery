@@ -274,6 +274,7 @@ Routes outside the namespace are dropped with a logged warning.
     "author": "Your Name or Company",
     "license": "MIT",
     "status": "beta",
+    "audience": ["mysite.com"],
     "homepage": "https://yoursite.com/plugin-docs",
     "requires": {
         "php": ">=8.0",
@@ -296,8 +297,8 @@ Routes outside the namespace are dropped with a logged warning.
 > declaring `provides: ["widget-support"]` does not make another plugin able to `depends` on it.
 > The keys the loader actually consumes are `name`, `version`, `description`, `requires`,
 > `depends`/`conflicts`, `settings`, `adminMenu`, `profileMenu`, `provisioners`,
-> `directKinds`, `host_installer`, `receives_upgrades`, `included_in_publish`, `status`,
-> and `deprecated`/`superseded_by`.
+> `directKinds`, `host_installer`, `receives_upgrades`, `included_in_publish`,
+> `audience`, `status`, and `deprecated`/`superseded_by`.
 
 #### Licensing and maturity metadata
 
@@ -318,12 +319,14 @@ carry a business-use notice pointing at `LICENSE-BUSINESS.md`, so a commercial
 reader is never left at a licence with no path to purchase.
 
 **`status`** is an honest maturity label: one of `experimental`, `beta`,
-`stable`, or `deprecated`. Absent means `stable` and renders no badge; any
-other value renders a badge wherever the plugin is listed (the admin Plugins
-page and the distribution catalog). An unknown value is a manifest validation
+`stable`, or `deprecated`. Absent means `stable`. It renders as a badge
+wherever the extension is listed — the admin Plugins and Themes pages, and
+the Marketplace cards, which badge every catalog item so a stable extension
+says so rather than saying nothing. The distribution catalog publishes the
+value for both plugins and themes. An unknown value is a manifest validation
 error, not a silently ignored string. Status gates nothing — an
-`experimental` plugin installs, activates, and updates exactly like a
-`stable` one.
+`experimental` extension installs, activates, and updates exactly like a
+`stable` one. Themes declare it in `theme.json` with the same vocabulary.
 
 **`requires_entitlement`** marks a commercial plugin whose license is sold as
 a store product. It is surfaced by the distribution catalog
@@ -1735,7 +1738,8 @@ All themes should include a `theme.json` file for proper system integration.
 #### Distribution Flags
 
 Two boolean flags control how a theme moves between the publisher and customer
-sites. Both default to `true` if missing, but should be declared explicitly:
+sites, and one list controls who is shown it. The flags default to `true` if
+missing, but should be declared explicitly:
 
 - **`receives_upgrades`** — *customer-side, deploy preservation.* If `true`, the
   on-disk copy is replaced from the upgrade payload during a deploy swap and
@@ -1747,9 +1751,44 @@ sites. Both default to `true` if missing, but should be declared explicitly:
   marketplace catalog advertises it. If `false`, it is skipped. Manifest-only
   (no DB column, no admin UI).
 
+- **`audience`** — *publisher-side, who it is listed for.* A list of site
+  domains the extension was built for. Absent (the usual case) means every
+  site: it is listed in every marketplace catalog and offered to fresh
+  installs. Present means the catalog lists it only for a site whose own
+  domain the list names, and fresh installs do not pick it up — so a theme
+  built for one customer stops being advertised to everybody else.
+
 For a freshly authored site theme that should stay on its origin site and not
 ship downstream, set both flags to `false`. For a theme published via the
-upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`.
+upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`,
+as does `audience`.
+
+**Choosing between `included_in_publish: false` and an `audience`:** they
+answer different questions. `included_in_publish: false` means "do not package
+this at all" — nothing is built, so the sites running it get no updates and
+must be hand-copied. An `audience` means "package and update this normally,
+just do not advertise it" — the customer's site upgrades exactly like any
+other, it simply does not appear in other sites' marketplaces. A customer
+theme you still push changes to wants an `audience`.
+
+```json
+"audience": ["zoukphilly.com", "dev.getjoinery.com"]
+```
+
+Domains are compared with the scheme, port, path, a leading `www.`, and case
+ignored, so `https://www.ZoukPhilly.com/` and `zoukphilly.com` are the same
+site. A subdomain is a separate site: `getjoinery.com` does not cover
+`dev.getjoinery.com`, so list the development site too when you want the
+extension visible there. A site knows its own domain from the `webDir`
+setting, and sends it with the catalog request. A malformed `audience` — a
+bare string rather than a list — is a manifest validation error, and until it
+is fixed the extension is hidden rather than published.
+
+**An audience is listing visibility, not access control.** Archive downloads
+are anonymous by design, so anyone who knows an extension's directory name can
+still fetch it, and that is what a clone or restore depends on when it
+re-downloads an extension the site already has. Use an `audience` to keep
+customer work out of everyone's marketplace, not to keep a secret.
 
 **Basic theme.json:**
 ```json
@@ -1761,6 +1800,7 @@ upgrade pipeline, set both to `true`. The same pair applies to `plugin.json`.
   "author": "Your Name",
   "receives_upgrades": false,
   "included_in_publish": false,
+  "audience": ["mysite.com"],
   "requires": {
     "php": ">=7.4",
     "joinery": ">=1.0.0"
@@ -1836,7 +1876,7 @@ The `requires_plugins` field declares plugins that must be active for the theme 
 
 Use this when the theme directly uses plugin-provided classes, helpers, or pages — for example, a theme that renders a widget from a specific plugin's helper class, or whose navigation links to plugin-namespaced URLs.
 
-Themes also support the `deprecated` and `superseded_by` fields described in the [plugin.json Deprecation Fields](#deprecation-fields) section above. The behavior is identical for themes and plugins.
+Themes also support the `status`, `deprecated`, and `superseded_by` fields described in the [plugin.json](#deprecation-fields) sections above. The behavior is identical for themes and plugins.
 
 ## ThemeHelper Enhanced Capabilities
 

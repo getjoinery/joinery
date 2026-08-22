@@ -489,6 +489,25 @@ class PluginManager extends AbstractExtensionManager {
             $results['errors'][] = "Unknown status '" . $manifest['status'] . "' — must be one of: experimental, beta, stable, deprecated";
         }
 
+        // An audience is a list of site domains. A string or object here would
+        // silently hide the plugin from every catalog, so it fails loudly.
+        if (isset($manifest['audience'])) {
+            $audience = $manifest['audience'];
+            $audience_valid = is_array($audience) && $audience === array_values($audience);
+            if ($audience_valid) {
+                foreach ($audience as $audience_entry) {
+                    if (!is_string($audience_entry) || trim($audience_entry) === '') {
+                        $audience_valid = false;
+                        break;
+                    }
+                }
+            }
+            if (!$audience_valid) {
+                $results['valid'] = false;
+                $results['errors'][] = "Invalid audience — must be a list of site domains, e.g. [\"example.com\"]";
+            }
+        }
+
         // Check PHP version requirement
         if (isset($manifest['requires']['php'])) {
             $required_php = $manifest['requires']['php'];
