@@ -65,6 +65,16 @@ pub struct NetFaults {
     /// exactly why an upload whose *completion* answer went missing went
     /// untested here while devices wedged on it.
     pub lose_answer_to: Option<String>,
+
+    /// Refuse one named action, once, before the server sees it — then stop.
+    ///
+    /// The other half of [`NetFaults::lose_answer_to`], and it exists for the
+    /// same reason: a rate high enough to fail one chosen call fails the change
+    /// poll at the top of the pass too, and a pass that cannot poll plans
+    /// nothing at all. So the states that need *one* operation left queued
+    /// while everything around it succeeded could not be built, and every one
+    /// of them went untested.
+    pub refuse_before: Option<String>,
 }
 
 impl NetFaults {
@@ -84,9 +94,10 @@ impl NetFaults {
             corrupt_chunk: 20,
             truncate_download: 20,
             latency_ms: 5,
-            // Aimed, not random: chaos is about volume, and this one is about
-            // hitting a single call a rate would drown.
+            // Aimed, not random: chaos is about volume, and these two are
+            // about hitting a single call a rate would drown.
             lose_answer_to: None,
+            refuse_before: None,
         }
     }
 }
@@ -218,7 +229,24 @@ impl SimNet {
         }
     }
 
+    /// Refuse this one named call before the server sees it, then disarm.
+    fn refused_before(&self, name: &str) -> bool {
+        let mut inner = self.inner.lock().unwrap();
+        if inner.faults.refuse_before.as_deref() == Some(name) {
+            inner.faults.refuse_before = None;
+            inner.stats.dropped_before += 1;
+            true
+        } else {
+            false
+        }
+    }
+
     fn run(&self, name: &str, body: &Value, key: Option<&str>) -> jd_proto::Result<Value> {
+        if self.refused_before(name) {
+            return Err(ProtoError::Transport(
+                "connection reset before the request was sent".into(),
+            ));
+        }
         if let Some(e) = self.before_call() {
             return Err(e);
         }

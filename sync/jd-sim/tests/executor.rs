@@ -1957,3 +1957,86 @@ fn a_rename_retried_after_its_answer_was_lost_records_where_the_file_actually_is
     );
 }
 
+
+#[test]
+fn an_interrupted_op_nobody_can_ask_about_does_not_strand_the_ones_beside_it() {
+    // Recovery asks the server, per operation, whether the operation already
+    // happened. Some kinds need no question at all -- an upload is answered
+    // without leaving the machine -- and those must not be held behind one that
+    // does while the server is out of reach.
+    //
+    // Holding them is not a delay. Nothing runs an interrupted op, because only
+    // queued ops run, and nothing re-plans its entity, because a round leaves
+    // anything with an open op alone. So an operation stranded here is a file
+    // that stops syncing, on a device that reports itself perfectly quiet.
+    let (_clock, server, device) = world();
+    let file_id = server.seed_file(None, "gone.txt", b"the one being deleted");
+    let trashed = EntityId::file(file_id);
+    device
+        .store
+        .put_entry(&fresh(trashed, None, "gone.txt", LocalStatus::Synced))
+        .unwrap();
+
+    // The one that needs a question. Written first, so it is reached first --
+    // recovery walks the ops in the order they were journaled, and the whole
+    // failure is about what happens to everything after the one that fails.
+    let asking = device
+        .store
+        .queue_op("trash_remote", trashed, "{}", "key-trash")
+        .unwrap();
+    device.store.set_op_state(asking, OpState::InFlight).unwrap();
+
+    // And the one that does not.
+    let new_id = EntityId::file(device.store.next_provisional_id().unwrap());
+    device
+        .store
+        .put_entry(&fresh(new_id, None, "notes.txt", LocalStatus::PendingUpload))
+        .unwrap();
+    let quiet = device
+        .store
+        .queue_op(
+            "upload_new",
+            new_id,
+            &serde_json::json!({ "parent": null, "name": "notes.txt" }).to_string(),
+            "key-upload",
+        )
+        .unwrap();
+    device.store.set_op_state(quiet, OpState::InFlight).unwrap();
+
+    // The machine came back to a network that is not there.
+    device.net.set_faults(NetFaults {
+        drop_before: 1000,
+        ..NetFaults::none()
+    });
+    let now = device.now();
+    let e = env(&device, &now);
+    assert!(
+        recover(&e).is_err(),
+        "the server was unreachable, and the caller has to hear about it"
+    );
+
+    let queued: Vec<String> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .map(|op| op.kind)
+        .collect();
+    assert_eq!(
+        queued,
+        vec!["upload_new".to_string()],
+        "the upload needed no question and should be runnable again"
+    );
+
+    // The one that could not be asked about stays where it was. Guessing is
+    // worse than waiting: called done it is lost, called queued it may happen
+    // twice.
+    let waiting: Vec<i64> = device
+        .store
+        .interrupted_ops()
+        .unwrap()
+        .into_iter()
+        .map(|op| op.op_id)
+        .collect();
+    assert_eq!(waiting, vec![asking], "only the unanswerable one waits");
+}

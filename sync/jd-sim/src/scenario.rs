@@ -112,6 +112,13 @@ pub struct World {
     /// The set above is cleared each pass, so a scenario cannot use it to ask
     /// the question that keeps it honest: did the window ever actually open?
     landing_seen: std::sync::Arc<std::sync::Mutex<usize>>,
+    /// How many times a device was power-cycled in this world.
+    ///
+    /// Counted so a sweep arm that kills can prove it killed. A knob that
+    /// silently never fires makes the arm green for the wrong reason, and a
+    /// suite that reports coverage it does not have is worse than one that
+    /// reports none.
+    power_cycles: std::sync::Arc<std::sync::Mutex<usize>>,
 }
 
 /// Which operating system's filesystem a device has.
@@ -171,6 +178,7 @@ impl World {
             destroyed_by_the_user: Default::default(),
             landing_saves: Default::default(),
             landing_seen: Default::default(),
+            power_cycles: Default::default(),
         }
     }
 
@@ -436,6 +444,51 @@ impl World {
         let mut keys = device.key_source();
         let mut tokens = |id: EntityId| format!("{}-{}", device.name, id.server_id.abs());
         run_pass(&e, &ctx, DeletePolicy::Guard, &mut keys, &mut tokens)
+    }
+
+    /// Cut the power on a device, then bring it back.
+    ///
+    /// A kill is not a network fault and does not behave like one. The disk and
+    /// the journal survive it; everything the process was holding does not, and
+    /// the work it was part-way through is left recorded as in flight with no
+    /// way to know how far it got. Coming back means asking the server, which
+    /// is what `recover` is for.
+    ///
+    /// Every op the device holds is marked in flight rather than the one that
+    /// was really running, because the harness cannot know which that was and
+    /// the conservative direction is the safe one: an op that had not started
+    /// is asked about and found not done, which is where it already was.
+    ///
+    /// Worth having as something a scenario can do at any moment rather than a
+    /// story one test tells. The soak rig kills a device twice a campaign, and
+    /// every unexplained loss it has found landed on the device it killed --
+    /// while nothing in the sweeps ever died at all.
+    ///
+    /// What this does not reach: the pass itself always finishes first, so the
+    /// death lands between passes and no reconcile decision is ever lost
+    /// half-written. A real kill can arrive inside one. Killing mid-pass needs
+    /// a hook inside `run_pass`, and until there is one, a seed that survives
+    /// this has been asked the easier of the two questions.
+    pub fn power_cycle(&self, device: &Device) {
+        for op in device.store.queued_ops().unwrap() {
+            device
+                .store
+                .set_op_state(op.op_id, jd_core::store::OpState::InFlight)
+                .unwrap();
+        }
+        let now = device.now();
+        let e = env(device, &now);
+        // A recovery that cannot reach the server is not a harness failure, and
+        // unwrapping here made it one. The daemon records a blocker and carries
+        // on, so this does the same -- a machine that comes back up while the
+        // network is still down is an ordinary morning, not an impossible one.
+        let _ = jd_core::execute::recover(&e);
+        *self.power_cycles.lock().unwrap() += 1;
+    }
+
+    /// How many times a device died and came back here.
+    pub fn power_cycles(&self) -> usize {
+        *self.power_cycles.lock().unwrap()
     }
 
     /// Run passes on every device until nothing changes any more.

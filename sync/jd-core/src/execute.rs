@@ -2730,18 +2730,44 @@ fn adopt_placement(env: &ExecEnv, op: &Op, to: Placement) -> Result<OpOutcome, E
 /// "not done" — both of which the engine knows what to do with.
 pub fn recover(env: &ExecEnv) -> Result<ExecReport, ExecError> {
     let mut report = ExecReport::default();
+    let mut unanswered = None;
     for op in env.store.interrupted_ops()? {
-        if already_satisfied(env, &op)? {
-            env.store.set_op_state(op.op_id, OpState::Done)?;
-            report.done += 1;
-        } else {
-            // Back in the queue under its original key, which is what makes
-            // the retry recognizable rather than repeated.
-            env.store.set_op_state(op.op_id, OpState::Queued)?;
-            report.retrying += 1;
+        // Asked one at a time, and a question that cannot be asked stops only
+        // its own operation. Most kinds need no question at all -- an upload
+        // and a download are answered without the server -- and letting the
+        // first unanswerable one abort the loop held those behind it for the
+        // life of the process. Nothing runs an interrupted op, because only
+        // queued ops run; nothing re-plans its entity, because a round leaves
+        // anything with an open op alone. So one unreachable server at the
+        // wrong moment froze a set of files with no error, no queue and no
+        // symptom: the device reports itself quiet and stays that way.
+        match already_satisfied(env, &op) {
+            Ok(true) => {
+                env.store.set_op_state(op.op_id, OpState::Done)?;
+                report.done += 1;
+            }
+            Ok(false) => {
+                // Back in the queue under its original key, which is what makes
+                // the retry recognizable rather than repeated.
+                env.store.set_op_state(op.op_id, OpState::Queued)?;
+                report.retrying += 1;
+            }
+            Err(e) => {
+                // Left in flight on purpose. Guessing either way is worse than
+                // waiting: called done, an operation that never happened is
+                // lost; called queued, one that did happen may be repeated.
+                report.deferred += 1;
+                unanswered = unanswered.or(Some(e));
+            }
         }
     }
-    Ok(report)
+    // Still an error to the caller, so a daemon that cannot reach the server
+    // says so where the user can see it -- but only after everything that
+    // could be settled has been.
+    match unanswered {
+        Some(e) => Err(e),
+        None => Ok(report),
+    }
 }
 
 /// Did the interrupted op already take effect?

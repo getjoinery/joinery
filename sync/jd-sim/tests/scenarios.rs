@@ -3435,3 +3435,159 @@ fn a_vault_rename_survives_a_lost_answer() {
     );
     assert_converged(&world);
 }
+
+#[test]
+fn a_save_made_while_an_upload_was_finishing_survives_the_machine_dying() {
+    // The shape the soak rig's remaining losses all sit on. Three campaigns
+    // have ended with a file whose last version was nowhere -- not on a disk,
+    // not in a trash, not in the server's version history -- and all three were
+    // the last thing written on the one device the rig kills.
+    //
+    // What makes that device different is not the kill on its own. An upload
+    // that finishes against a file the user has already saved over leaves the
+    // engine holding an agreement about bytes the disk no longer has, and
+    // deliberately no fingerprint: a fingerprint is only ever a licence to skip
+    // reading the file, so leaving it off is what makes the next scan re-hash
+    // and send the newer save. Until that scan runs, the repair is owed by a
+    // record rather than done -- and a kill is what lands in the middle.
+    //
+    // The other device moving the file on is what turns an owed repair into a
+    // loss: with a download to apply and a local edit nobody has looked at, the
+    // only copy of what the user typed is one careless overwrite from gone,
+    // with no conflict copy and nothing raised.
+    let world = World::new(9_311, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/report.txt", b"the first draft");
+    assert!(world.settle().is_some(), "the fleet agrees before anything hard");
+
+    // The save that only this disk will ever have, made at the one instant the
+    // client cannot see: the bytes are the server's and the answer is not back.
+    let disk = laptop.fs.clone();
+    let fired = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let count = fired.clone();
+    world.server.while_completing_an_upload(move || {
+        if count.fetch_add(1, std::sync::atomic::Ordering::SeqCst) > 0 {
+            return;
+        }
+        disk.user_write("Work/report.txt", ONLY_HERE);
+    });
+
+    laptop.fs.user_write("Work/report.txt", b"the second draft");
+    world.pass(laptop);
+    assert!(
+        fired.load(std::sync::atomic::Ordering::SeqCst) > 0,
+        "the upload never completed, so the window was never entered"
+    );
+    assert_eq!(
+        laptop.fs.peek("Work/report.txt").as_deref(),
+        Some(ONLY_HERE),
+        "the harness did not manage to save inside the window"
+    );
+
+    // The machine dies before the scan that would have sent those bytes.
+    world.power_cycle(laptop);
+
+    // And the other device moves the file on while it is down.
+    world.pass(desktop);
+    desktop.fs.user_write("Work/report.txt", b"the desktop's own third draft");
+    world.pass(desktop);
+
+    assert!(world.settle().is_some(), "the fleet settles again afterwards");
+    assert_converged(&world);
+
+    // Custody, not any particular winner: those bytes are the only copy of
+    // themselves anywhere, so they have to be somewhere -- under the plain
+    // name, under a conflict name, it does not matter which.
+    let paths = laptop.fs.all_paths();
+    assert!(
+        paths
+            .iter()
+            .any(|p| laptop.fs.peek(p).as_deref() == Some(ONLY_HERE)),
+        "the laptop lost the save nothing else had a copy of: {paths:?}"
+    );
+}
+
+/// The bytes in the test above that exist on exactly one disk and nowhere else.
+const ONLY_HERE: &[u8] = b"what the user typed while it was going up";
+
+#[test]
+fn a_kill_while_the_network_is_down_does_not_freeze_the_files_it_interrupted() {
+    // Two ordinary things, one after the other: the machine dies with work
+    // outstanding, and the network is still down when it comes back.
+    //
+    // What a kill leaves behind is a set of operations recorded as in flight,
+    // and nobody may act on one until the server has been asked whether it
+    // already happened. Until that question is answered the entity behind it is
+    // deliberately left alone -- the journal is the plan of record, and planning
+    // afresh over it would make a second operation doing the same thing. So an
+    // unanswered question is not a delay. It is a freeze.
+    //
+    // Two things then have to hold, and only one of them is obvious. The
+    // question is asked per operation, so an operation nobody can ask about
+    // must not strand the ones asked about happily beside it -- an upload needs
+    // no question at all, and was being held behind a trash that did. And the
+    // asking has to happen again: it used to run once, at startup, so a machine
+    // that came back to a dead network stayed frozen until somebody restarted
+    // it, however long the network had been fine by then.
+    //
+    // A frozen device does not look frozen. Nothing is queued, nothing is
+    // attempted, nothing is deferred, so the pass reports itself quiet and the
+    // fleet reports itself settled -- with a file on one disk that the server
+    // has never heard of and never will.
+    let world = World::new(9_317, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/keep.txt", b"the one that stays");
+    laptop.fs.user_write("Work/gone.txt", b"the one the user deletes");
+    assert!(world.settle().is_some(), "the fleet agrees before anything hard");
+
+    // Two pieces of work in one pass. The delete has to ask the server a
+    // question when it comes back; the new file does not, and is the one that
+    // must not be held behind it.
+    laptop.fs.user_remove("Work/gone.txt");
+    laptop.fs.user_write("Work/notes.txt", ONLY_ON_THE_LAPTOP);
+    laptop.net.set_faults(NetFaults {
+        refuse_before: Some("drive_trash".into()),
+        ..NetFaults::none()
+    });
+    laptop
+        .fs
+        .fail_next(FsOp::OpenRead, Some("Work/notes.txt"), FailureKind::Io, 1);
+    world.pass(laptop);
+    laptop.fs.clear_failures();
+
+    // The machine dies with both of them outstanding, and comes back to a
+    // network that is not there.
+    laptop.net.set_faults(NetFaults {
+        drop_before: 1000,
+        ..NetFaults::none()
+    });
+    world.power_cycle(laptop);
+    assert_eq!(world.power_cycles(), 1, "the kill has to have happened");
+
+    // The network comes back, and from here everything the user did must
+    // arrive. Nothing restarts the process again -- that is the point.
+    laptop.net.set_faults(NetFaults::none());
+    assert!(
+        world.settle().is_some(),
+        "the fleet should settle once the network is back"
+    );
+    assert_converged(&world);
+
+    let disk = disk_tree(world.device("desktop"));
+    assert!(
+        disk.contains_key("Work/notes.txt"),
+        "the file written before the kill never reached the other device: {disk:?}"
+    );
+    assert!(
+        !disk.contains_key("Work/gone.txt"),
+        "the delete made before the kill never took effect: {disk:?}"
+    );
+}
+
+/// The bytes in the test above that exist on exactly one disk until they sync.
+const ONLY_ON_THE_LAPTOP: &[u8] = b"written just before the machine died";
