@@ -22,7 +22,7 @@
  *
  * Run:  php tests/unit/publish_promises_test.php
  *
- * @version 1.0
+ * @version 1.2
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -120,22 +120,50 @@ check(!preg_match("/upgrade_source[^\n]*\?\?[^\n]*relay|relay[^\n]*upgrade_sourc
     "dev's upgrade_source is getjoinery, so it cannot carry this");
 
 
-section('Only the origin may mint a release number');
+section('Only the site that authored the code may mint a version');
 
-// The rule itself, exhaustively — the site running these tests is the origin,
-// so the refusal never happens here and would otherwise never be exercised.
-check(DeploymentHelper::mintingAllowed('', 'anything.example'),
-    'an estate that names no origin mints freely',
-    'independent deployments author their own code and are configured with nothing');
-check(DeploymentHelper::mintingAllowed('origin.example', 'origin.example'),
-    'the origin mints');
-check(!DeploymentHelper::mintingAllowed('origin.example', 'channel.example'),
-    'a site that is not the origin does not');
-check(DeploymentHelper::mintingAllowed('origin.example', 'https://WWW.Origin.Example/'),
-    'however the site writes its own domain');
-check(!DeploymentHelper::mintingAllowed('origin.example', ''),
-    'a site with no domain of its own does not mint',
-    'it cannot show it is the origin, and minting is the unrecoverable direction');
+// The rule itself, exhaustively — the site running these tests authors its own
+// code, so the refusal never happens here and would otherwise go unexercised.
+// The question is local: is the running tree exactly what upstream delivered?
+check(DeploymentHelper::mintingAllowed('', '0.8.319'),
+    'a site that has never received an upgrade mints',
+    'it authored what it is running; this is every independent deployment');
+check(!DeploymentHelper::mintingAllowed('0.8.319', '0.8.319'),
+    'a site running exactly what upstream delivered does not',
+    'publishing there means serve what I received, under the number it already has');
+check(DeploymentHelper::mintingAllowed('0.8.319', '0.8.320'),
+    'a site whose tree has moved past what it received mints again',
+    'the difference is local authorship, which is the thing being asked about');
+check(!DeploymentHelper::mintingAllowed(' 0.8.319 ', '0.8.319'),
+    'whitespace in a stored version does not read as new work');
+check(!DeploymentHelper::mintingAllowed('0.8.319', ''),
+    'a site that received something but cannot read its running version does not mint',
+    'it cannot show authorship, and minting is the unrecoverable direction');
+check(DeploymentHelper::mintingAllowed('', ''),
+    'a site that never received anything mints even with no readable version',
+    'there is nothing it could be republishing');
+
+// The rule needs no configuration on a node, deliberately. Requiring
+// root_node there would mean every node had to be told which estate it is
+// in, and on 2026-08-22 seven of nine production nodes had not been — being
+// told is a thing that can be missed, and a missed answer reads as
+// permission to mint. The one topological read is the origin escape, which
+// costs nodes nothing: their root_node is empty, isOriginNode() is false,
+// and the local rule decides. On the origin it means minting does not hang
+// on never having received an upgrade.
+$mint_start = strpos($helper_src, 'function mayMintReleaseVersion');
+$mint_end   = strpos($helper_src, 'function mintingAllowed');
+$mint_src   = ($mint_start === false || $mint_end === false) ? ''
+    : substr($helper_src, $mint_start, $mint_end - $mint_start);
+check($mint_src !== '', 'the minting rule is readable');
+check(strpos($mint_src, 'root_node') === false,
+    'the refusal side of the rule is local, not topological',
+    'a rule that needs configuring on every node fails wherever it was not');
+check(strpos($mint_src, 'upgrade_received_version') !== false,
+    'and reads what upstream last delivered here');
+check(strpos($mint_src, 'isOriginNode') !== false,
+    'the origin always mints, whatever it has received',
+    'so a restore or an accidental self-upgrade cannot silently strand dev');
 
 // Placement is the whole point. An explicitly supplied version skips the
 // auto-detect block, so a check living inside it protects nothing — which is
