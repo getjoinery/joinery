@@ -298,7 +298,11 @@
 	// this very tree — so an upgrade here would overwrite new work with the
 	// last release made from it. Serving upgrades to others is untouched;
 	// that branch ran far above, before this one.
-	if (class_exists('MarketplaceClient') && MarketplaceClient::is_root()) {
+	// DeploymentHelper, not MarketplaceClient: this file self-updates ahead of
+	// the release, so on that pass it runs against the OLD core and a method
+	// added to a core class in the same release does not exist yet. Only the
+	// four deployment files travel together.
+	if (DeploymentHelper::isOriginNode()) {
 		upgrade_abort(
 			'This deployment is the origin, so it has nothing to upgrade from',
 			'It is named by the root_node setting as the site where this code is written. '

@@ -65,8 +65,7 @@ class MarketplaceClient {
 	 * still correctly concludes that it is not the origin itself.
 	 */
 	public static function is_root() {
-		$root = self::root_node();
-		return $root !== '' && $root === self::site_identity();
+		return DeploymentHelper::isOriginNode();
 	}
 
 	/**
