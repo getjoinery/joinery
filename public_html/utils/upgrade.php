@@ -293,6 +293,22 @@
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
+	// The root node authors the code it serves. Its `upgrade_source` records
+	// where it was installed from, which is a site running an older copy of
+	// this very tree — so an upgrade here would overwrite new work with the
+	// last release made from it. Serving upgrades to others is untouched;
+	// that branch ran far above, before this one.
+	if (class_exists('MarketplaceClient') && MarketplaceClient::is_root()) {
+		upgrade_abort(
+			'This deployment is the origin, so it has nothing to upgrade from',
+			'It is named by the root_node setting as the site where this code is written. '
+			. 'Its upgrade source (' . htmlspecialchars((string)$settings->get_setting('upgrade_source'))
+			. ') runs an older copy of this tree, and applying it would replace new work with '
+			. 'the last release published from here. Nothing has been changed.',
+			false
+		);
+	}
+
 	//GET THE UPGRADE INFO
 	$upgrade_source = $settings->get_setting('upgrade_source').'/utils/upgrade?serve-upgrade=1';
 	$access_token = '';

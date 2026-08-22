@@ -1772,17 +1772,24 @@ other, it simply does not appear in other sites' marketplaces. A customer
 theme you still push changes to wants an `audience`.
 
 ```json
-"audience": ["zoukphilly.com", "dev.getjoinery.com"]
+"audience": ["zoukphilly.com"]
 ```
+
+List only the sites the extension was built for. The development site is not
+one of them: the deployment named by the `root_node` setting is where the
+extension is authored and published from, and it sees the whole catalog
+whatever any audience says. That keeps the manifest a statement about the
+customer rather than a note about the machine the work is done on, and means
+a forgotten line cannot hide a theme from its own author.
 
 Domains are compared with the scheme, port, path, a leading `www.`, and case
 ignored, so `https://www.ZoukPhilly.com/` and `zoukphilly.com` are the same
 site. A subdomain is a separate site: `getjoinery.com` does not cover
-`dev.getjoinery.com`, so list the development site too when you want the
-extension visible there. A site knows its own domain from the `webDir`
-setting, and sends it with the catalog request. A malformed `audience` — a
-bare string rather than a list — is a manifest validation error, and until it
-is fixed the extension is hidden rather than published.
+`orgs.getjoinery.com`, so a theme shared by both lists both. A site knows its
+own domain from the `webDir` setting, and sends it with the catalog request. A
+malformed `audience` — a bare string rather than a list — is a manifest
+validation error, and until it is fixed the extension is hidden rather than
+published.
 
 **An audience is listing visibility, not access control.** Archive downloads
 are anonymous by design, so anyone who knows an extension's directory name can

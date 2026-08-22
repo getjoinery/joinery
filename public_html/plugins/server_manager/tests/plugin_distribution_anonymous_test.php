@@ -25,7 +25,7 @@
  *
  * Run: php plugins/server_manager/tests/plugin_distribution_anonymous_test.php
  *
- * @version 1.1.0
+ * @version 1.2.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -52,12 +52,32 @@ if (isset($by_name['store'])) {
 		'store lists its commercial license');
 	check(!empty($by_name['store']['requires_entitlement']),
 		'store declares requires_entitlement in the catalog');
-	check(($by_name['store']['status'] ?? null) === 'stable',
-		'absent manifest status reads as stable');
 }
 if (isset($by_name['mailbox'])) {
-	check(($by_name['mailbox']['status'] ?? null) === 'beta', 'mailbox status flows into the catalog');
 	check(empty($by_name['mailbox']['requires_entitlement']), 'free plugin carries no entitlement flag');
+}
+
+// A maturity badge reaches the catalog from the manifest. Derived rather than
+// named: re-badging a plugin should be a manifest edit, not a test edit. It
+// has to be a plugin badged something other than stable, or the check passes
+// on the ?? 'stable' default and proves nothing.
+$non_stable = null;
+foreach (glob(PathHelper::getAbsolutePath('plugins') . '/*/plugin.json') as $manifest_file) {
+	$manifest = json_decode((string)file_get_contents($manifest_file), true);
+	$declared = is_array($manifest) ? ($manifest['status'] ?? null) : null;
+	if ($declared !== null && $declared !== 'stable' && isset($by_name[basename(dirname($manifest_file))])) {
+		$non_stable = array(basename(dirname($manifest_file)), $declared);
+		break;
+	}
+}
+if ($non_stable === null) {
+	check(true, 'no plugin is badged below stable, so the badge path has nothing to carry');
+} else {
+	list($plugin_name, $declared) = $non_stable;
+	check(($by_name[$plugin_name]['status'] ?? null) === $declared,
+		'a manifest maturity badge reaches the catalog',
+		$plugin_name . ' declares ' . $declared . ', catalog says '
+			. var_export($by_name[$plugin_name]['status'] ?? null, true));
 }
 
 // ---------------------------------------------------------------------------
@@ -119,10 +139,31 @@ if ($fixture_made) {
 	check(isset($named['audience_fixture_theme']),
 		'a site the audience names sees it, however the domain is written');
 	if (isset($named['audience_fixture_theme'])) {
+		// The fixture manifest declares no status, so this is the defaulting
+		// rule itself rather than a real extension that happens to be stable.
+		check(($named['audience_fixture_theme']['status'] ?? null) === 'stable',
+			'an absent manifest status reads as stable');
+	}
+	if (isset($named['audience_fixture_theme'])) {
 		check(!empty($named['audience_fixture_theme']['unlisted']),
 			'the catalog marks it unlisted so the marketplace can badge it');
 		check(!isset($named['audience_fixture_theme']['audience']),
 			'the catalog does not echo the audience list back to the caller');
+	}
+
+	// The root node is the origin these extensions are published from, so it
+	// sees the whole catalog without every audience naming it. Without this,
+	// each private theme would carry a line about the box the work is done
+	// on, and forgetting that line would hide the theme from its own author.
+	$root = MarketplaceClient::root_node();
+	if ($root !== '') {
+		$r = harness_request('GET', '/admin/server_manager/publish_theme?list=themes&site=' . urlencode($root));
+		$root_names = array_column($r['json']['themes'] ?? array(), 'directory_name');
+		check(in_array('audience_fixture_theme', $root_names, true),
+			'the root node sees an audience-scoped theme its audience does not name',
+			'root_node is ' . $root);
+	} else {
+		check(true, 'no root node named on this site — the origin rule is inert here');
 	}
 
 	// Listing visibility is not access control: the download stays open by

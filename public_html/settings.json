@@ -1890,6 +1890,12 @@
       "helptext": "The deployment this site pulls upgrades from."
     },
     {
+      "name": "root_node",
+      "default": "",
+      "managed": true,
+      "helptext": "Domain of the deployment where this code is written and from which themes and plugins are published \u2014 the origin of the whole estate. Empty on every site that consumes releases, which is nearly all of them, and that is the ordinary case. A site whose own webDir matches this value serves its own catalog instead of fetching one, sees every extension whatever audience it declares, and refuses to upgrade itself from a downstream copy of its own code. Named by domain rather than a flag so a clone or a restored backup carries it unchanged and still reads as not-the-origin."
+    },
+    {
       "name": "webmaster_email",
       "default": "",
       "group": "email_identity",

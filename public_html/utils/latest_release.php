@@ -79,10 +79,13 @@ foreach ($recent as $upgrade) {
 }
 
 // No servable local release — chain to the upstream this site receives its
-// own upgrades from.
+// own upgrades from. The root node has no upstream: `upgrade_source` there
+// names a site running an older copy of this very code, so chaining would
+// answer "the latest release" with an older one than the asker was told to
+// expect. Better to say plainly that there is nothing to serve.
 $settings = Globalvars::get_instance();
 $upgrade_source = rtrim((string)$settings->get_setting('upgrade_source'), '/');
-if ($upgrade_source !== '') {
+if ($upgrade_source !== '' && !MarketplaceClient::is_root()) {
     header('Location: ' . $upgrade_source . '/utils/latest_release');
     exit;
 }
