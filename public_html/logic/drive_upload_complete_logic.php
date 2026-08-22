@@ -31,6 +31,15 @@ function drive_upload_complete_logic(array $input): LogicResult {
 		return LogicResult::error('You must be signed in to upload.');
 	}
 
+	// Finishing an upload verifies and ingests the WHOLE file — hashing and
+	// moving work that scales with its size, so a multi-GB archive cannot fit
+	// inside the web tier's ordinary execution limit. The bytes are already here
+	// and the client is only waiting for a receipt, so this request runs to
+	// completion even if the caller (or a proxy in front) gives up first — dying
+	// mid-ingest is the one outcome with nothing to recommend it.
+	@set_time_limit(0);
+	@ignore_user_abort(true);
+
 	$token = (string)($input['upload_token'] ?? '');
 	$up = FileUpload::load_by_token($token);
 	if (!$up || (int)$up->get('fup_usr_user_id') !== $user_id) {
