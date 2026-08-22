@@ -734,7 +734,7 @@ reading otherwise:
   because applying the last release published from here would replace new work
   with an older copy of itself. Serving upgrades to other sites is a different
   branch and is unaffected — the origin still publishes normally.
-- **It is the only site that may mint a release number.** Everywhere else a publish republishes the version that arrived from upstream; see [The release channel](#the-release-channel).
+- **It always may mint a release number.** Everywhere else that is decided locally, by whether the tree has moved past what upstream delivered; on the origin it must not depend on anything — see [The release channel](#the-release-channel).
 - **It refuses to install over itself.** Everything in its catalog is already
   on its disk, so a marketplace install, or the upstream refresh a plugin
   install performs, could only overwrite the working copy with an archive of
@@ -742,7 +742,9 @@ reading otherwise:
   version bump would be replaced by the code it replaced.
 
 Every other site leaves `root_node` empty, which is the ordinary case and
-changes nothing.
+changes nothing: empty answers every question it is asked with "not the
+origin", so there is nothing to configure on a node and nothing that can be
+forgotten there.
 
 ### The release channel
 
@@ -754,17 +756,19 @@ A release reaches it by being published *there*, and `publish_upgrade.php` build
 2. `upgrade.php` brings getjoinery to that build.
 3. Publish on getjoinery.
 
-**Only the origin may mint a release number.** `DeploymentHelper::mayMintReleaseVersion()` answers that from `root_node`, and the publisher asks before anything else: a site that is not the origin republishes the version it is running, and refuses a version that differs from it. So step 3 takes release notes and nothing more — the number is already decided by what step 2 delivered.
+**Only the site that authored the code may mint a release number.** `DeploymentHelper::mayMintReleaseVersion()` answers that from a local fact — whether the running `VERSION` is still exactly what `upgrade_received_version` says upstream delivered — and the publisher asks before anything else: a site running what it was handed republishes that number, and refuses a version that differs from it. So step 3 takes release notes and nothing more; the number is already decided by what step 2 delivered.
+
+The question is deliberately local. Asking which site is the origin would mean every deployment had to be told, and a deployment that was never told reads as free to mint — so the rule would fail exactly where nobody had thought to apply it. The one exception is the origin itself, which always may mint: its `root_node` is already set, and its authorship should not hang on never having received an upgrade — a restore or one accidental `upgrade.php` run would otherwise strand it. A site that has received something but cannot read its running version at all is refused; minting is the unrecoverable direction.
 
 ```bash
 # on getjoinery, after upgrade.php brings it to 0.8.199
 php plugins/server_manager/includes/publish_upgrade.php "release notes"
-# -> Republishing 0.8.199 -- this deployment serves what it received, not new work.
+# -> Republishing 0.8.199 -- this deployment is running exactly what it received, not new work.
 ```
 
 The rule guards a failure with no local symptom. Auto-detect reads the next patch from `VERSION`, so upgrade-to-0.8.199-then-publish would emit 0.8.200 carrying 0.8.199's code, and dev's next publish would mint 0.8.200 from a different tree. Two archives, one number, and nothing notices: the downgrade guard rejects only *lower*, and the duplicate check reads the local `upg_upgrades` table, which does not hold the other site's rows. The check sits ahead of the auto-detect block precisely because an explicitly supplied version skips that block — a guard inside it would protect only the case nobody gets wrong. The dashboard's publish form is covered too: on a site that may not mint, it offers the running version read-only rather than the next patch.
 
-An estate that names no `root_node` mints freely. That is every independent deployment: it authors its own code, and it is configured with nothing.
+A site that has never received an upgrade mints freely, as does one whose tree has moved past what it received. That is every independent deployment: it authors its own code, and it is configured with nothing.
 
 The ordering earns something beyond housekeeping: getjoinery is running the code it serves, so a build reaching strangers has at least come up on a real site first.
 

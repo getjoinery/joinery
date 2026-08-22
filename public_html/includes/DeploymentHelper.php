@@ -75,29 +75,40 @@ class DeploymentHelper {
     /**
      * Whether this deployment may mint a NEW release number.
      *
-     * Only the site where the code is written may. Everywhere else a publish
+     * Only the site where the code was written may. Everywhere else a publish
      * is a *re*publish of what arrived from upstream, and minting a number
      * there produces two different trees carrying one version — which nothing
      * downstream can tell apart, and which neither site detects, because the
      * duplicate check reads the local upgrades table and neither has seen the
      * other's row.
      *
-     * The answer comes from `root_node`, which names the origin by domain. An
-     * estate that has not named one reads as "unknown topology" and is allowed
-     * to mint: that is every independent deployment, which authors its own
-     * code and must keep working with no configuration at all.
+     * The question is local and needs no configuration: is the code running
+     * here exactly the code upstream handed me? `upgrade_received_version` is
+     * stamped by upgrade.php with each version it applies, so a site whose
+     * VERSION still matches it has authored nothing since. A site that has
+     * never received anything, or whose tree has moved past what it received,
+     * is authoring and mints freely — which is every independent deployment,
+     * configured with nothing.
      *
-     * Read through the settings singleton rather than MarketplaceClient so
-     * this stays inside the self-updating deployment set (see isUpgradeServer
-     * above) — during the early-self-update window a call into core would be
-     * an undefined method.
+     * Deliberately NOT read from `upgrade_source`: that records where a site
+     * was installed from, not who authors its code. Deliberately not read from
+     * estate topology either — knowing which site is the origin would mean
+     * every node had to be told, and being told is a thing that can be missed.
+     *
+     * The origin itself is the one exception. Its ability to mint should not
+     * hang on never having received an upgrade — a restore or a single
+     * accidental upgrade.php run would stamp a received version and silently
+     * refuse it forever. `root_node` is already set there (and only there),
+     * so the escape costs the rest of the estate nothing: everywhere else it
+     * is empty, isOriginNode() is false, and the local rule decides.
      */
     public static function mayMintReleaseVersion() {
+        if (self::isOriginNode()) return true;
         try {
             $settings = Globalvars::get_instance();
             return self::mintingAllowed(
-                (string)$settings->get_setting('root_node'),
-                (string)$settings->get_setting('webDir')
+                (string)$settings->get_setting('upgrade_received_version'),
+                self::runningVersion()
             );
         } catch (Throwable $e) {
             return true;   // settings unavailable — never block a publish over this
@@ -105,20 +116,41 @@ class DeploymentHelper {
     }
 
     /**
-     * The decision above, with both domains passed in.
+     * The VERSION file, read directly so this stays inside the self-updating
+     * deployment set. Sites upgraded from tarballs that predate VERSION have
+     * no file; for them the `system_version` setting is the same fact.
+     */
+    public static function runningVersion() {
+        $file = PathHelper::getIncludePath('VERSION');
+        if (is_file($file)) {
+            $v = trim((string)file_get_contents($file));
+            if ($v !== '') return $v;
+        }
+        try {
+            return trim((string)Globalvars::get_instance()->get_setting('system_version'));
+        } catch (Throwable $e) {
+            return '';
+        }
+    }
+
+    /**
+     * The decision above, with both versions passed in.
      *
      * Split out so the rule can be tested exhaustively: the site that runs the
-     * tests is the origin, so the interesting answer — the refusal — never
-     * occurs there and would otherwise go unexercised.
+     * tests authors its own code, so the interesting answer — the refusal —
+     * never occurs there and would otherwise go unexercised.
      *
-     * @param string $root_node   Domain naming the origin; empty means unknown
-     * @param string $own_domain  This site's own domain
+     * @param string $received_version Version upstream last delivered; empty if never
+     * @param string $running_version  Version in this tree's VERSION file
      */
-    public static function mintingAllowed($root_node, $own_domain) {
-        $root = self::normalizeDeploymentHost($root_node);
-        if ($root === '') return true;   // no origin named — an independent site authors freely
-
-        return self::normalizeDeploymentHost($own_domain) === $root;
+    public static function mintingAllowed($received_version, $running_version) {
+        $received = trim((string)$received_version);
+        $running  = trim((string)$running_version);
+        if ($received === '') return true;   // nothing was ever handed here
+        if ($running === '') return false;   // received something, running version unreadable —
+                                             // cannot show authorship, and minting is the
+                                             // unrecoverable direction
+        return $received !== $running;       // the tree has moved past it
     }
 
     // ============================================
