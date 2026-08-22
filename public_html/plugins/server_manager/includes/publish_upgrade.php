@@ -55,6 +55,37 @@
 			$cli_notes = $cli_args[0] ?? 'CLI publish';
 		}
 
+		// A site that is not the origin does not choose its release number: it
+		// serves what it runs, under the number that arrived with it. Handled
+		// BEFORE the auto-detect block below, because an explicitly supplied
+		// version skips that block entirely — and the documented relay workflow
+		// used to ask the operator to supply one by hand, which is a number
+		// nothing then checked against the code being published.
+		if (!DeploymentHelper::mayMintReleaseVersion()) {
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$running = LibraryFunctions::get_joinery_version();
+			if (!preg_match('/^(\d+)\.(\d+)\.(\d+)$/', (string)$running, $rm)) {
+				echo "This deployment is not the origin, so it republishes the version it is running -- but that version could not be read.\n";
+				exit(1);
+			}
+			$asked = ($cli_major !== null && $cli_minor !== null && $cli_patch !== null)
+				? $cli_major . '.' . $cli_minor . '.' . $cli_patch : null;
+			if ($asked !== null && $asked !== $running) {
+				echo "Refusing to publish {$asked} from a deployment that is running {$running}.\n";
+				echo "This site is not the origin named by root_node, so it serves what it received rather than\n";
+				echo "authoring new work. Publishing {$asked} here would mint a number for a tree this site did\n";
+				echo "not write, and the origin would later mint that same number from a different tree.\n";
+				echo "Upgrade this site first if you meant to serve newer code. Nothing has been written.\n";
+				exit(1);
+			}
+			if ($asked === null) {
+				echo "Republishing {$running} -- this deployment serves what it received, not new work.\n";
+			}
+			$cli_major = $rm[1];
+			$cli_minor = $rm[2];
+			$cli_patch = $rm[3];
+		}
+
 		// Auto-detect next version if not specified. Prefer the VERSION file as source of
 		// truth (it's authoritative for "what's currently published"); fall back to the
 		// last upg_upgrades row if VERSION doesn't exist yet.
@@ -186,6 +217,23 @@
 		$version_minor = $_REQUEST['version_minor'];
 		$version_patch = $_REQUEST['version_patch'];
 		$verbose = isset($_GET['verbose']) ? true : false;
+
+		// Same rule as the CLI path: a site that is not the origin serves what
+		// it runs. The form below offers only the running version, so reaching
+		// here with a different one means the field was edited or the POST was
+		// hand-made.
+		if (!DeploymentHelper::mayMintReleaseVersion()) {
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$running = LibraryFunctions::get_joinery_version();
+			$asked = $version_major . '.' . $version_minor . '.' . $version_patch;
+			if ($asked !== $running) {
+				publish_output("Refusing to publish {$asked} from a deployment that is running {$running}. "
+					. 'This site is not the origin named by root_node, so it republishes what it received '
+					. 'rather than minting a number for a tree it did not write. Upgrade this site first if '
+					. 'you meant to serve newer code. Nothing has been written.');
+				exit;
+			}
+		}
 
 		// Check if this version already exists in the database
 		$existing = new MultiUpgrade(
@@ -917,16 +965,34 @@
 			$patch_version = 1;
 		}
 
+		// On a site that is not the origin, the number is not the operator's to
+		// pick: it republishes the version it is running. Offering the next
+		// patch here is what made a bumped number one unremarkable click.
+		$may_mint = DeploymentHelper::mayMintReleaseVersion();
+		if (!$may_mint) {
+			require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+			$running = LibraryFunctions::get_joinery_version();
+			if (preg_match('/^(\d+)\.(\d+)\.(\d+)$/', (string)$running, $rm)) {
+				list(, $major_version, $minor_version, $patch_version) = $rm;
+			}
+			echo '<div class="jy-callout jy-callout-info">This deployment is not the origin, so it '
+				. 'republishes the version it is running (' . htmlspecialchars((string)$running) . ') '
+				. 'rather than minting a new number. Upgrade it first to serve newer code.</div>';
+		}
+
 		echo $formwriter->textinput('version_major', 'Major Version', [
 			'value' => $major_version,
+			'readonly' => !$may_mint,
 			'validation' => ['required' => true]
 		]);
 		echo $formwriter->textinput('version_minor', 'Minor Version', [
 			'value' => $minor_version,
+			'readonly' => !$may_mint,
 			'validation' => ['required' => true]
 		]);
 		echo $formwriter->textinput('version_patch', 'Patch Version', [
 			'value' => $patch_version,
+			'readonly' => !$may_mint,
 			'validation' => ['required' => true]
 		]);
 		echo $formwriter->textbox('release_notes', 'Release notes', [
