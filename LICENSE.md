@@ -133,6 +133,17 @@ the `LICENSE.md` file in their own directory. A plugin or theme
 directory without its own `LICENSE.md` is licensed under these
 same terms.
 
+## Managed Operation Exception
+
+Work done with the software on your instance by a contractor or
+service provider you engage — installing, configuring, updating,
+operating, or maintaining it — is your use under these terms,
+not theirs, provided they act at your direction and on your
+behalf. This applies only to an instance you control: your
+domain, your hosting account, your data. It does not permit
+anyone to offer the software or its functionality to others as
+their own hosted or managed service.
+
 ## Definitions
 
 The **licensor** is the individual or entity offering these
