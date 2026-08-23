@@ -23,7 +23,9 @@
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.5
+ * @version 1.6
+ * @changelog 1.6 - the finished-run summary calls the skipped bucket 'in
+ *   excluded folders' instead of 'left out'.
  * @changelog 1.5 - a moving run shows a live countdown to the worker's next
  *   pass and how many messages it takes, from the status action's next_batch;
  *   a worker that has gone silent is called out instead of counted down to.
@@ -244,7 +246,7 @@ function mailbox_import_runs_html(array $runs): string {
 
 		$html .= '<td>' . number_format($run['stored']) . ' imported';
 		if ($run['dedup'] > 0)   { $html .= ', ' . number_format($run['dedup']) . ' already here'; }
-		if ($run['skipped'] > 0) { $html .= ', ' . number_format($run['skipped']) . ' left out'; }
+		if ($run['skipped'] > 0) { $html .= ', ' . number_format($run['skipped']) . ' in excluded folders'; }
 		if ($run['failed'] > 0)  { $html .= ', ' . number_format($run['failed']) . ' failed'; }
 
 		// The reconciliation line. It appears only when there IS something to
@@ -637,7 +639,7 @@ function mailbox_import_panel_script(): void {
 
 			var result = r.stored.toLocaleString() + ' imported';
 			if (r.dedup > 0)   { result += ', ' + r.dedup.toLocaleString() + ' already here'; }
-			if (r.skipped > 0) { result += ', ' + r.skipped.toLocaleString() + ' left out'; }
+			if (r.skipped > 0) { result += ', ' + r.skipped.toLocaleString() + ' in excluded folders'; }
 			if (r.failed > 0)  { result += ', ' + r.failed.toLocaleString() + ' failed'; }
 			html += '<td>' + result + '</td><td>';
 
