@@ -21,7 +21,11 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.7
+ * @version 1.8
+ * @changelog 1.8 - The vendor autoloader loads at file scope: the counter
+ *   checker implements a vendor interface at declaration time, so a lean
+ *   request (the pre-auth 2FA passkey actions) fataled before the
+ *   constructor's require ever ran.
  * @changelog 1.7 - A missing PRF output stamps pkc_prf_failed_time only when
  *   the signed authenticator data carries no PRF/hmac-secret evaluation —
  *   clientExtensionResults are browser-assembled and unsigned, so a stripped
@@ -34,6 +38,14 @@
  *   parameterized assertion ceremony (UV / PRF / credential subset) for the
  *   superadmin passkey lab; grants nothing on success.
  */
+
+// At file scope, not in the constructor: PasskeyFlaggingCounterChecker below
+// implements a vendor interface, so the vendor autoloader must be registered
+// the moment this file loads. Leaving it to the constructor made the class
+// declaration depend on whether anything EARLIER in the request happened to
+// load composer — true on a busy deployment, false on a lean one, where the
+// 2FA passkey actions then fatal with "CounterChecker not found".
+require_once(PathHelper::getComposerAutoloadPath());
 
 use ParagonIE\ConstantTime\Base64UrlSafe;
 use Webauthn\AttestationStatement\AttestationStatementSupportManager;
@@ -116,7 +128,6 @@ class PasskeyService {
 	private $request_ceremony;
 
 	public function __construct() {
-		require_once(PathHelper::getComposerAutoloadPath());
 		require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 		require_once(PathHelper::getIncludePath('data/passkey_ceremonies_class.php'));
 		require_once(PathHelper::getIncludePath('data/users_class.php'));

@@ -5,7 +5,7 @@ require_once(__DIR__ . '/ErrorHandler.php');
  * Error Classes - Exceptions and Handlers
  * 
  * All exceptions and error handlers consolidated into one file for maximum minimalism.
- * Contains: All exception classes + WebErrorHandler, AdminErrorHandler, AjaxErrorHandler, CliErrorHandler
+ * Contains: All exception classes + WebErrorHandler, AdminErrorHandler, AjaxErrorHandler, ApiErrorHandler, CliErrorHandler
  */
 
 // ================================
@@ -751,6 +751,83 @@ class AjaxErrorHandler implements ErrorHandlerInterface {
             return true; // Default to production mode if we can't determine
         }
     }
+}
+
+/**
+ * An /api/ request speaks the /api/v1 envelope even when the failure is an
+ * uncaught exception: {api_version, errortype, error: <string>, data} — the
+ * exact shape api_error() sends, so a consumer parses one format however the
+ * request died. Falling through to the Ajax handler put an OBJECT in `error`
+ * ({message, type}, the legacy /ajax/ shape), which API clients render as
+ * "[object Object]".
+ */
+class ApiErrorHandler implements ErrorHandlerInterface {
+
+	public function handle(\Throwable $exception, ErrorContext $context): ErrorResponse {
+		return new JsonResponse([
+			'api_version' => '1.0',
+			'errortype' => $this->errorType($exception),
+			'error' => $this->userMessage($exception),
+			'data' => new \stdClass(),
+		], $this->statusCode($exception));
+	}
+
+	public function supports(ErrorContext $context): bool {
+		return strpos($context->getRequestUri(), '/api/') === 0;
+	}
+
+	private function errorType(\Throwable $exception): string {
+		if ($exception instanceof ValidationException) {
+			return 'ValidationError';
+		}
+		if ($exception instanceof AuthenticationException) {
+			return 'AuthenticationError';
+		}
+		if ($exception instanceof AuthorizationException) {
+			return 'AuthenticationError';
+		}
+		return 'ServerError';
+	}
+
+	private function statusCode(\Throwable $exception): int {
+		if ($exception instanceof ValidationException) {
+			return 400;
+		}
+		if ($exception instanceof AuthenticationException) {
+			return 401;
+		}
+		if ($exception instanceof AuthorizationException) {
+			return 403;
+		}
+		return 500;
+	}
+
+	/** The same user-safe rules the other handlers apply, as one string. */
+	private function userMessage(\Throwable $exception): string {
+		if ($exception instanceof ValidationException
+				|| $exception instanceof AuthenticationException
+				|| $exception instanceof AuthorizationException) {
+			return $exception->getUserMessage();
+		}
+		if ($exception instanceof \DisplayableErrorMessage
+				|| $exception instanceof \DisplayableErrorMessageNoLog
+				|| $exception instanceof \DisplayablePermanentErrorMessage
+				|| $exception instanceof \DisplayablePermanentErrorMessageNoLog) {
+			return $exception->getMessage();
+		}
+		return $this->isProduction()
+			? 'An error occurred processing your request.'
+			: $exception->getMessage();
+	}
+
+	private function isProduction(): bool {
+		try {
+			$settings = Globalvars::get_instance();
+			return !$settings->get_setting('show_errors');
+		} catch (\Throwable $e) {
+			return true;
+		}
+	}
 }
 
 class CliErrorHandler implements ErrorHandlerInterface {
