@@ -382,11 +382,11 @@ class InboundEmailSetupCheck {
 	 * (local key or the provider's own issued records), the DMARC reporting
 	 * policy, and the Joinery Direct pair (SRV + signing key — self-gating,
 	 * published only when Direct is on and something signs for the domain).
-	 * No MX, no A — nothing that would move where the domain's mail ARRIVES,
-	 * which is a consent the receiving step collects separately. This is what
-	 * the setup wizard's sending step publishes: the operator hands over a
-	 * DNS credential exactly once, so everything safe to publish at that
-	 * moment rides along.
+	 * No MX, no A — nothing that would move where the domain's mail ARRIVES.
+	 * This is the slice for a domain that has only sending consent: the setup
+	 * wizard's Email step publishes the full dnsPlan() for a domain that
+	 * receives here, and falls back to this one when it cannot (no enabled
+	 * receiving row, or an IMAP source whose mail arrives by pull).
 	 *
 	 * A domain under the protected identity shape gets an empty plan: its
 	 * records are prescribed by the protect ceremony, and the unprotected
