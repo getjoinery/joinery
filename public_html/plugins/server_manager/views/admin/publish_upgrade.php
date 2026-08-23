@@ -6,7 +6,7 @@
  * Lists published upgrade archives (with delete), and provides the
  * Publish New Upgrade form with optional version override.
  *
- * @version 1.6
+ * @version 1.7
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -199,6 +199,17 @@ if ($current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
 	$next_patch = 1;
 }
 
+// On a site running exactly what upstream delivered, the number is not the
+// operator's to pick: it republishes the version it is running. Offering the
+// next patch here is what made a bumped number one unremarkable click — the
+// CLI guard behind this form refuses it, but the form should not invite it.
+$may_mint = DeploymentHelper::mayMintReleaseVersion();
+if (!$may_mint && $current !== '' && preg_match('/^(\d+)\.(\d+)\.(\d+)$/', $current, $m)) {
+	$next_major = (int)$m[1];
+	$next_minor = (int)$m[2];
+	$next_patch = (int)$m[3];
+}
+
 $page = new AdminPage();
 $page->admin_header([
 	'menu-id' => 'server-manager',
@@ -334,7 +345,13 @@ $page->end_box();
 $pageoptions = ['title' => 'Publish New Upgrade'];
 $page->begin_box($pageoptions);
 ?>
+<?php if ($may_mint): ?>
 <p class="text-muted">Build upgrade archives from the current control plane source code. The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
+<?php else: ?>
+<div class="jy-callout jy-callout-info">This deployment is running exactly the version upstream
+delivered (<?php echo htmlspecialchars($current); ?>), so it republishes that version rather than
+minting a new number. Upgrade it first to serve newer code.</div>
+<?php endif; ?>
 <?php
 $formwriter = $page->getFormWriter('publish_form');
 $formwriter->begin_form();
@@ -344,23 +361,26 @@ $formwriter->numberinput('version_major', 'Major', [
 	'required' => true,
 	'value'    => $next_major,
 	'min'      => 0,
+	'readonly' => !$may_mint,
 ]);
 $formwriter->numberinput('version_minor', 'Minor', [
 	'required' => true,
 	'value'    => $next_minor,
 	'min'      => 0,
+	'readonly' => !$may_mint,
 ]);
 $formwriter->numberinput('version_patch', 'Patch', [
 	'required' => true,
 	'value'    => $next_patch,
 	'min'      => 0,
+	'readonly' => !$may_mint,
 ]);
 $formwriter->textarea('release_notes', 'Release notes', [
 	'required'    => true,
 	'rows'        => 4,
 	'placeholder' => 'Describe what changed in this release...',
 ]);
-$formwriter->submitbutton('btn_submit', 'Publish Upgrade');
+$formwriter->submitbutton('btn_submit', $may_mint ? 'Publish Upgrade' : 'Republish ' . htmlspecialchars($current));
 $formwriter->end_form();
 ?>
 <a href="/admin/server_manager" class="btn btn-link">Cancel</a>
