@@ -769,4 +769,27 @@ return [
 				: "No Direct signing identities on IMAP-source domains, nothing to remove.\n";
 		},
 	],
+
+	[
+		// Rebuild the full-text index with the capped expression. FULLTEXT_SQL
+		// now left()-caps each column because the old uncapped expression made
+		// any message whose text exceeded the 1 MiB tsvector limit UNSTORABLE —
+		// the GIN index is evaluated on INSERT, so the insert itself failed
+		// ("string is too long for tsvector"; three archive-import messages hit
+		// this live on 2026-08-23). The index and the search WHERE must stay
+		// byte-identical, so the old index has to go the moment the constant
+		// changes; built from the constant, not retyped, as before.
+		'id' => 'iem_014_cap_fulltext_index_input',
+		'version' => '1.97.0',
+		'up' => function($dbconnector) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxService.php'));
+			$dblink = $dbconnector->get_db_link();
+			$dblink->exec("DROP INDEX IF EXISTS iem_fulltext_idx");
+			$dblink->exec(
+				"CREATE INDEX iem_fulltext_idx
+				 ON iem_inbound_email_messages
+				 USING GIN (" . MailboxService::FULLTEXT_SQL . ")");
+			echo "Full-text index rebuilt with capped input.\n";
+		},
+	],
 ];

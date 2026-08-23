@@ -25,7 +25,10 @@
  *
  * See specs/safe_attachment_preview.md and docs/document_text.md.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - emlText() parses through MimeParse (a body quoting its own
+ *   MIME boundary hangs the Horde parser); toUtf8() is now the platform-wide
+ *   charset ladder, delegated to by the mailbox ingest paths
  * @changelog 1.1.0 - review fixes: staged /dev/shm cleanup survives a killed child; RTF skip-group and \uN fallback correctness; unknown declared charsets fall back to detection; sandbox stdout pinned clean of PHP diagnostics; single hardened XML parse; canPreview() as the one eligibility rule; multi-attendee .ics
  */
 
@@ -982,7 +985,7 @@ class DocumentText {
 			}
 			if (count($out)) $out[] = '';
 
-			$message = Horde_Mime_Part::parseMessage($bytes);
+			$message = MimeParse::parseMessage($bytes);
 			$body = '';
 			foreach ($message->contentTypeMap() as $section => $type) {
 				$type = self::normalizeMime($type);

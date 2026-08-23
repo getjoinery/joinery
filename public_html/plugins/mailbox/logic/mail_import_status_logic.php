@@ -10,7 +10,9 @@
  * run row and are advanced by the importer as it goes, and the folder breakdown
  * is one GROUP BY rather than half a million loaded models.
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - the history answer carries next_batch: the countdown to the
+ *   worker's next pass, its batch size, and a stall verdict.
  */
 
 function mail_import_status_logic(array $input): LogicResult {
@@ -34,6 +36,10 @@ function mail_import_status_logic(array $input): LogicResult {
 			// out from the history, so the page and the start action cannot disagree
 			// about whether a second import is allowed.
 			'busy_run' => $service->activeRun(),
+			// When the worker next picks the run up and how much it takes per
+			// pass — the page's countdown — plus how long the worker has been
+			// silent when it appears to be stuck.
+			'next_batch' => MailImportService::nextBatch(),
 		));
 	}
 

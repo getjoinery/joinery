@@ -2448,6 +2448,12 @@
       "helptext": "Timestamp of the last scheduled-task cron tick. Written by the runner; read by the health display."
     },
     {
+      "name": "scheduled_tasks_cron_observed_interval",
+      "default": "300",
+      "managed": true,
+      "helptext": "Seconds between the runner's last two cron ticks, measured by the runner itself. This is how pages predict when the next tick lands without anyone configuring the crontab twice."
+    },
+    {
       "name": "file_signed_url_key",
       "default": "",
       "managed": true,

@@ -29,7 +29,10 @@
  *
  * See specs/mail_archive_import.md.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - importBatch() time-boxes every entry (ENTRY_TIMEOUT_SECONDS,
+ *   SIGALRM): a message that sends any parser into a loop becomes one failed
+ *   entry with a reason, never a cron worker pinned until someone notices.
  * @changelog 1.6 - a seal-target refusal HOLDS the batch (entries stay pending,
  *   the run stays importing) instead of failing every remaining entry of a
  *   repairable mailbox
@@ -75,6 +78,17 @@ class MailArchiveImporter {
 	/** Imported mail carries no verdict this deployment can vouch for. */
 	const IMPORT_AUTH = array('dkim' => 'unverified', 'spf' => 'unverified',
 		'dmarc' => 'unverified', 'source' => 'none');
+
+	/**
+	 * Wall-clock seconds one entry may take before it is failed and the batch
+	 * moves on. Generous by an order of magnitude — the biggest legitimate
+	 * message observed (28 MB with attachments, sealed) stores in seconds —
+	 * because its job is not pacing, it is making an infinite loop survivable.
+	 * A cron worker has no execution limit, so without this a single message
+	 * that hangs a parser wedges the import (and its "already running" lock)
+	 * until a person finds the pinned process.
+	 */
+	const ENTRY_TIMEOUT_SECONDS = 300;
 
 	/** @var MailImportRun */
 	private $run;
@@ -362,10 +376,33 @@ class MailArchiveImporter {
 		$counts = array('seen' => 0, 'stored' => 0, 'dedup' => 0, 'failed' => 0, 'skipped' => 0);
 		$detail = array();
 
+		// The watchdog: fail an entry that overruns rather than letting it pin
+		// the process. SIGALRM interrupts a loop stuck between PHP opcodes —
+		// which is what a parser loop is — and the throw lands in the same
+		// per-entry catch as any other failure. CLI-only by nature (pcntl does
+		// not exist under FPM), which matches where batches run: the cron task.
+		$watchdog = function_exists('pcntl_alarm') && function_exists('pcntl_async_signals');
+		if ($watchdog) {
+			pcntl_async_signals(true);
+			pcntl_signal(SIGALRM, function () {
+				throw new RuntimeException('Entry exceeded ' . self::ENTRY_TIMEOUT_SECONDS
+					. 's and was aborted — the message likely hangs a parser.');
+			});
+		}
+
 		foreach ($entries as $entry) {
 			$counts['seen']++;
 			try {
-				$outcome = $this->importEntry($entry, $alias, $domain);
+				if ($watchdog) {
+					pcntl_alarm(self::ENTRY_TIMEOUT_SECONDS);
+				}
+				try {
+					$outcome = $this->importEntry($entry, $alias, $domain);
+				} finally {
+					if ($watchdog) {
+						pcntl_alarm(0);
+					}
+				}
 				$counts[$outcome]++;
 			} catch (MailboxSealTargetMissing $e) {
 				// The mailbox cannot seal right now, so the store REFUSED — and
@@ -388,6 +425,13 @@ class MailArchiveImporter {
 					'folder' => (string)$entry->get('mie_source_folder'), 'reason' => $reason);
 				MailImportEntry::recordOutcome(intval($entry->key), MailImportEntry::STATE_FAILED, $reason);
 			}
+		}
+
+		if ($watchdog) {
+			// Leave the process as it was found: the runner executes other tasks
+			// after this one, and none of them expect an armed SIGALRM handler.
+			pcntl_alarm(0);
+			pcntl_signal(SIGALRM, SIG_DFL);
 		}
 
 		MailImportRun::addCounts(intval($this->run->key), array(

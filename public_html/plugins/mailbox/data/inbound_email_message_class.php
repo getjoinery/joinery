@@ -103,6 +103,10 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.21
+ * @changelog 1.21 - getRawMimePart() parses through MimeParse, so a message
+ *   whose body quotes its own MIME boundary answers null instead of hanging
+ *   the request
  * @version 1.20
  * @changelog 1.20 - openSealedAttachment() understands the self-sealed File
  *   shape (specs/mailbox_attachment_byte_custody.md) alongside the legacy
@@ -1087,9 +1091,8 @@ class InboundEmailMessage extends SystemBase {
 			return null;
 		}
 
-		require_once(PathHelper::getComposerAutoloadPath());
 		try {
-			$message = Horde_Mime_Part::parseMessage($raw);
+			$message = MimeParse::parseMessage($raw);
 			$part = $message->getPart($section);
 			if ($part === null) {
 				return null;

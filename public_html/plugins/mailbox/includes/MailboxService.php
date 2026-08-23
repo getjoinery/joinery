@@ -49,7 +49,10 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
- * @version 1.24
+ * @version 1.25
+ * @changelog 1.25 - FULLTEXT_SQL left()-caps each column: an uncapped expression
+ *   made any message past the 1 MiB tsvector limit unstorable at INSERT
+ *   (migration iem_014 rebuilds the index to match)
  * @changelog 1.24 - each mailbox in the switcher reports its OWN protection level
  * @changelog 1.23 - The Inbox view excludes outbound rows: a sent-only thread lives in All Mail until a reply arrives
  */
@@ -146,12 +149,21 @@ class MailboxService {
 	 * indexes only its link text. (A preview built with strip_tags gets no such
 	 * help, which is why MailboxHtmlSanitizer::toReadableText exists for the
 	 * reader — the two problems look alike and are not.)
+	 *
+	 * Each column is capped with left() because a tsvector has a hard 1 MiB
+	 * limit and the expression is evaluated on INSERT (the GIN index), so one
+	 * multi-megabyte body would otherwise make the message UNSTORABLE — the
+	 * insert itself fails with "string is too long for tsvector". The caps sum
+	 * to ~½ MiB of input, comfortably inside the limit even for pathological
+	 * word shapes; search inside the first 250 KB of each body is the whole of
+	 * what a person searches for, and the messages this size are almost always
+	 * markup or encoded blobs anyway.
 	 */
 	const FULLTEXT_SQL = "to_tsvector('english',
-					coalesce(iem_sender, '')      || ' ' ||
-					coalesce(iem_subject, '')     || ' ' ||
-					coalesce(iem_body_plain, '')  || ' ' ||
-					coalesce(iem_body_html, ''))";
+					left(coalesce(iem_sender, ''), 1000)        || ' ' ||
+					left(coalesce(iem_subject, ''), 4000)       || ' ' ||
+					left(coalesce(iem_body_plain, ''), 250000)  || ' ' ||
+					left(coalesce(iem_body_html, ''), 250000))";
 
 	/**
 	 * Neutral product placeholder shown wherever sealed content cannot be read

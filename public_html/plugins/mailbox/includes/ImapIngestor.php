@@ -35,6 +35,10 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * @version 1.13
+ * @changelog 1.13 - toUtf8 delegates to the shared DocumentText ladder: an
+ *   unknown sender-declared charset degrades the conversion (raw is preserved
+ *   regardless) instead of throwing under PHP 8
  * @version 1.12
  * @changelog 1.12 - mark CONDSTORE usable on the connection when the server
  *   advertises it: Horde only ENABLEs it when its own cache backend is
@@ -1580,10 +1584,12 @@ class ImapIngestor {
 	}
 
 	private function toUtf8(string $text, string $charset): string {
-		if ($text === '' || !function_exists('mb_convert_encoding')) { return $text; }
-		$charset = $charset !== '' ? strtoupper($charset) : 'UTF-8';
-		$converted = @mb_convert_encoding($text, 'UTF-8', $charset);
-		return $converted !== false ? $converted : $text;
+		if ($text === '') { return $text; }
+		// Shared ladder: a sender-declared charset PHP does not recognise must
+		// degrade the conversion, never throw (PHP 8 mb_convert_encoding raises
+		// ValueError on unknown names). The raw message is preserved verbatim
+		// either way.
+		return DocumentText::toUtf8($text, $charset);
 	}
 
 	/** The account's bound alias, validated store-capable. */

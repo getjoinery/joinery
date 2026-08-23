@@ -15,7 +15,9 @@
  * stop the tasks ordered after it, and it cannot leave its row showing a stale
  * last-run-success.
  *
- * @version 2.0
+ * @version 2.1
+ * @changelog 2.1 - the runner measures its own tick spacing into
+ *   scheduled_tasks_cron_observed_interval, so pages can predict the next pass.
  */
 
 // Reject non-CLI access
@@ -75,11 +77,22 @@ register_shutdown_function(function () use (&$current_task_id) {
 	echo "[" . date('Y-m-d H:i:s') . "]   FATAL: $message\n";
 });
 
-// Update the heartbeat setting
+// Update the heartbeat setting, and measure the tick spacing while the previous
+// heartbeat is still in hand. The observed interval is what lets a page say
+// "the next pass lands in about 90 seconds" without the crontab being
+// configured in two places; bounded so a one-off gap (a reboot, a paused VM)
+// never becomes the prediction.
 $dbconnector = DbConnector::get_instance();
 $dblink = $dbconnector->get_db_link();
 try {
 	require_once(PathHelper::getIncludePath('data/settings_class.php'));
+	$previous_run = (string)Globalvars::get_instance()->get_setting('scheduled_tasks_last_cron_run');
+	if ($previous_run !== '') {
+		$gap = strtotime($timestamp) - strtotime($previous_run);
+		if ($gap >= 30 && $gap <= 3600) {
+			Setting::put('scheduled_tasks_cron_observed_interval', (string)$gap);
+		}
+	}
 	Setting::put('scheduled_tasks_last_cron_run', $timestamp);
 } catch (Throwable $e) {
 	echo "[$timestamp] Warning: Could not update heartbeat setting: " . $e->getMessage() . "\n";
