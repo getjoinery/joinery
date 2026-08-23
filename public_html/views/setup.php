@@ -123,7 +123,10 @@
 			</div>
 <?php } elseif ($current_step !== null) { ?>
 			<h1><?php echo htmlspecialchars($current_step['title']); ?></h1>
-			<p class="setup-copy"><?php echo htmlspecialchars(SetupSteps::copyFor($current_step, $viewer)); ?></p>
+<?php $setup_step_copy = SetupSteps::copyFor($current_step, $viewer); ?>
+<?php if ($setup_step_copy !== '') { ?>
+			<p class="setup-copy"><?php echo htmlspecialchars($setup_step_copy); ?></p>
+<?php } ?>
 
 <?php
 		$force_render = ($page_vars['force_render_step'] ?? '') === $current_key;

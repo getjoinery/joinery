@@ -32,7 +32,13 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.6
+ * @version 1.9
+ * @changelog 1.9 - mail_send's configured-but-unproven copy is empty: the
+ *   step's panel leads with a stage-accurate intro of its own.
+ * @changelog 1.8 - mail_send's configured-but-unproven intro covers the DNS
+ *   stage as well as the test send.
+ * @changelog 1.7 - mail_send's unconfigured intro recommends Mailgun and its
+ *   free daily allowance instead of a neutral pick-a-provider line.
  * @changelog 1.6 - The https step speaks plainly: "Secure connection", no
  *   protocol names in the title or copy.
  * @changelog 1.5 - New core step: 'https' (site scope, order 5) — the secure
@@ -462,10 +468,13 @@ class SetupSteps {
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 				if (EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none') {
-					return "Your site needs a way to send mail — receipts, reminders, sign-in codes. Pick a provider and we'll check it actually works before moving on.";
+					return "Your site needs a way to send mail. We recommend Mailgun, because the free account gives you 100 free emails per day.";
 				}
 				if ((string)Globalvars::get_instance()->get_setting('email_test_send_last_success') === '') {
-					return "Your site is already set up to send mail. One check remains: send yourself a test message and confirm it arrived — a provider accepting mail is not the same as delivering it.";
+					// The panel leads with its own stage-specific intro (DNS
+					// records vs test send), so a generic line here would just
+					// sit above the accurate one.
+					return '';
 				}
 				return "Your site sends mail — receipts, reminders and sign-in codes all have a way out, and a test delivery has been confirmed.";
 			},

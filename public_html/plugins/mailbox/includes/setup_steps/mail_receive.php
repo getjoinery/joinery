@@ -6,7 +6,9 @@
  * re-rendering after a partial failure always tells the truth.
  * Included by views/setup.php with $page, $viewer, $settings, $next_key in scope.
  *
- * @version 1.0
+ * @version 1.1
+ * @changelog 1.1 - The DNS provider select and credential inputs pick up the
+ *   kit's form-control styling.
  */
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -131,7 +133,7 @@ foreach ($setup_mr_aliases as $setup_mr_alias) {
 
 		<div id="setup-mr-publish" class="d-none">
 			<label for="dns_provider">DNS provider</label>
-			<select name="dns_provider" id="dns_provider" class="jy-w-full">
+			<select name="dns_provider" id="dns_provider" class="form-control">
 				<option value="">Choose…</option>
 <?php foreach ($setup_mr_drivers as $setup_mr_key => $setup_mr_class) { ?>
 				<option value="<?php echo htmlspecialchars($setup_mr_key); ?>"><?php echo htmlspecialchars($setup_mr_class::getLabel()); ?></option>
@@ -144,7 +146,7 @@ foreach ($setup_mr_aliases as $setup_mr_alias) {
 			$setup_mr_input_type = !empty($setup_mr_spec['secret']) ? 'password' : 'text';
 ?>
 				<label><?php echo htmlspecialchars($setup_mr_spec['label'] ?? $setup_mr_field); ?></label>
-				<input type="<?php echo $setup_mr_input_type; ?>" name="dns_cred_<?php echo htmlspecialchars($setup_mr_field); ?>" class="jy-w-full" autocomplete="off">
+				<input type="<?php echo $setup_mr_input_type; ?>" name="dns_cred_<?php echo htmlspecialchars($setup_mr_field); ?>" class="form-control" autocomplete="off">
 <?php if (!empty($setup_mr_spec['help'])) { ?>
 				<p class="jy-muted"><?php echo htmlspecialchars($setup_mr_spec['help']); ?></p>
 <?php } ?>

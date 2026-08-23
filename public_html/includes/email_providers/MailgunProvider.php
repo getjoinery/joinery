@@ -17,7 +17,10 @@
  * Implements SendingDomainRegistrar: the same API can create a sending domain,
  * which is what makes the machine sender ceremony's register step a button.
  *
- * @version 1.6
+ * @version 1.7
+ * @changelog 1.7 - verifySendingDomain(): asks Mailgun to re-check a sending
+ *   domain's DNS now and reports the fresh state, so a wizard's Check button
+ *   is not at the mercy of Mailgun's own re-check schedule.
  */
 
 require_once(PathHelper::getComposerAutoloadPath());
@@ -388,6 +391,27 @@ class MailgunProvider implements EmailServiceProvider, InboundEmailProvider, Api
             error_log('[MailgunProvider] createSendingDomain(' . $domain . ') failed: ' . $e->getMessage());
             return ['status' => 'error', 'error' => $e->getMessage()];
         }
+    }
+
+    /**
+     * Ask Mailgun to re-check a sending domain's DNS right now and report the
+     * fresh state (same vocabulary as getSendingDomainState()). Without this,
+     * a just-published record sits 'unverified' until Mailgun's own re-check
+     * schedule comes around. Never throws.
+     */
+    public static function verifySendingDomain(string $domain): string {
+        try {
+            self::client()->domains()->verify($domain);
+        } catch (\Mailgun\Exception\HttpClientException $e) {
+            if ($e->getCode() === 404) {
+                self::$sending_domain_state[$domain] = 'not_registered';
+                return 'not_registered';
+            }
+        } catch (\Throwable $e) {
+            error_log('[MailgunProvider] verifySendingDomain(' . $domain . ') failed: ' . $e->getMessage());
+        }
+        unset(self::$sending_domain_state[$domain]);
+        return self::getSendingDomainState($domain);
     }
 
     /**

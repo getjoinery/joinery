@@ -12,7 +12,10 @@
  * reasoning about the deployment, which is the page's job. What it may not do
  * is invent a field the manifest does not declare.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - field_options learns skip_options and option_labels for
+ *   selects, so a page can drop a choice it cannot offer or annotate one —
+ *   still narrowing and labeling only, never inventing a choice.
  */
 class SettingsFieldRenderer {
 
@@ -51,12 +54,19 @@ class SettingsFieldRenderer {
 	 *   @type array       $skip      Field names this page handles itself.
 	 *   @type array       $values    Override stored values, name => value.
 	 *   @type array       $field_options  name => extra FormWriter options, for
-	 *                                page context around a declared field. Two
+	 *                                page context around a declared field. Four
 	 *                                keys are read here rather than passed on:
 	 *                                `helptext_append` adds to the declared help
-	 *                                rather than replacing it, and
+	 *                                rather than replacing it;
 	 *                                `clearable => false` drops a credential's
-	 *                                Clear box on a page that cannot honour it.
+	 *                                Clear box on a page that cannot honour it;
+	 *                                `skip_options` (select only) drops declared
+	 *                                choices the page cannot offer — narrowing
+	 *                                only, it cannot invent a choice; and
+	 *                                `option_labels` (select only, key => label)
+	 *                                annotates a declared choice's label for
+	 *                                page context, ignored for keys the
+	 *                                declaration does not offer.
 	 * }
 	 * @return string[] The names actually rendered.
 	 */
@@ -337,6 +347,9 @@ class SettingsFieldRenderer {
 			$field['helptext'] = trim(($field['helptext'] ?? '') . ' ' . $extra['helptext_append']);
 			unset($extra['helptext_append']);
 		}
+		$skip_options  = (array)($extra['skip_options'] ?? array());
+		$option_labels = (array)($extra['option_labels'] ?? array());
+		unset($extra['skip_options'], $extra['option_labels']);
 		$field = array_merge($field, $extra);
 
 		if (!empty($declaration['secret'])) {
@@ -358,7 +371,16 @@ class SettingsFieldRenderer {
 				return;
 
 			case 'select':
-				$field['options'] = SettingsDeclarations::resolveOptions($declaration);
+				// A page may narrow the declared choices or annotate a label,
+				// never add a choice the declaration does not offer.
+				$choices = SettingsDeclarations::resolveOptions($declaration);
+				foreach ($skip_options as $choice) {
+					unset($choices[$choice]);
+				}
+				foreach ($option_labels as $choice => $choice_label) {
+					if (isset($choices[$choice])) $choices[$choice] = $choice_label;
+				}
+				$field['options'] = $choices;
 				$field['value'] = $value;
 				$field['empty_option'] = $declaration['empty_option'] ?? false;
 				$form->dropinput($name, $label, $field);
