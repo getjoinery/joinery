@@ -17,6 +17,8 @@
  *    cannot leak into a session, a log line or an error report. There is no
  *    persistence path in this code at all.
  *
+ * @version 1.5 - zoneNameservers() defaults to the vendor's fixed set; per-account vendors override
+ * @version 1.4 - apiGateNote() defaults open: only a vendor with a gate declares one
  * @version 1.3 - srvNameFromParts() reassembles a whole SRV name from split labels
  * @version 1.2 - SRV decomposition helpers for providers that split the RDATA
  * @version 1.1 - rate limiting (429) is retried on reads, never on writes, and
@@ -105,6 +107,7 @@ abstract class DnsDriverBase implements DnsProvider {
 	public static function oauthScopes(): array { return array(); }
 	public static function credentialFields(): array { return array(); }
 	public static function prerequisiteNote(): string { return ''; }
+	public static function apiGateNote(): string { return ''; }
 	public static function credentialGuide(): ?array { return null; }
 	public static function nameservers(): array { return array(); }
 	public static function supportsZones(): bool { return false; }
@@ -114,6 +117,11 @@ abstract class DnsDriverBase implements DnsProvider {
 	 * Vendors that assign per-zone names override this with the shared fragment.
 	 */
 	public static function nameserverSuffixes(): array { return static::nameservers(); }
+
+	/** The vendor's fixed set; a per-account vendor overrides by reading the zone. */
+	public function zoneNameservers(string $zone): array {
+		return static::nameservers();
+	}
 
 	public function createZone(string $domain): string {
 		throw new DnsProviderException(static::getLabel() . ' cannot create zones through its API; '

@@ -279,6 +279,13 @@
       }
     },
     {
+      "name": "dns_move_pending",
+      "default": "",
+      "group": "dns",
+      "managed": true,
+      "helptext": "JSON state of an in-flight DNS relocation (domain, target, nameservers, copied records). Written when the guided move seeds the destination zone; cleared when the domain's nameservers reach the target or the operator cancels. Lets the wizard's dns stage keep showing the handover across reloads while delegation propagates."
+    },
+    {
       "name": "dns_default_provider",
       "default": "linode",
       "helptext": "The DNS host the publish box leads with. A provider NAME, never a secret — the key of a driver in includes/dns/drivers/ (linode, cloudflare, route53, …). Any other driver stays available behind the box's \"use another provider\" link.",

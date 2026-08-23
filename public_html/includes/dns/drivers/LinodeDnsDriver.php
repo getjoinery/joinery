@@ -2,18 +2,24 @@
 /**
  * LinodeDnsDriver - Linode (Akamai Cloud) DNS Manager, API v4.
  *
- * The reference driver and the deployment default. It is the compute driver's
- * HTTP plumbing on the same API base with the domains:read_write scope, and it
- * rides LinodeOAuthProvider so a publish is authorized by consent with no key
- * pasted into a form. Linode issues no refresh token and its access token lasts
- * two hours, so a Linode grant is ephemeral by construction — exactly the
- * property this subsystem wants everywhere.
+ * The reference driver and the deployment default. It authenticates with a
+ * personal access token (Cloud Manager → username → API Tokens, scope Domains
+ * read/write) pasted at the publish moment — tokens are self-serve at any
+ * account size, which is what qualifies Linode as the host the setup wizard
+ * steers gated-registrar users toward. The token rides the same
+ * `Authorization: Bearer` header as every Linode API v4 caller and is used for
+ * the one publish, never stored.
  *
  * Linode is also the platform-authoritative host: it can create a zone, and its
  * nameserver set is published here so the publish box can detect delegation by
  * resolving the domain's live NS records.
  *
  * Vendor notes worth knowing:
+ *  - Linode serves a zone only for accounts with at least one active Linode
+ *    service; the driver cannot see that, so it is a declared prerequisite.
+ *  - A token scoped to Domains alone cannot read the account label or the
+ *    reseller child-account list; both calls degrade (generic label,
+ *    single-account behavior) rather than fail the publish.
  *  - Record names are relative to the domain; the apex is the empty string.
  *  - TXT targets are stored whole and split into 255-byte character-strings by
  *    Linode when serving, so the driver sends the raw value.
@@ -24,6 +30,7 @@
  *    and Linode prepends the underscore itself, so those labels are submitted
  *    bare and reassembled on read.
  *
+ * @version 1.2 - Authorized by a pasted personal access token; the OAuth consent path is retired
  * @version 1.1 - SRV writes the service/protocol fields Linode requires
  * @version 1.0
  */
@@ -48,10 +55,39 @@ class LinodeDnsDriver extends DnsDriverBase {
 	public static function getKey(): string { return 'linode'; }
 	public static function getLabel(): string { return 'Linode DNS'; }
 
-	public static function credentialMode(): string { return self::CREDENTIAL_OAUTH2; }
-	public static function oauthProviderKey(): string { return 'linode'; }
-	public static function oauthScopes(): array { return array('domains:read_write'); }
 	public static function supportsZones(): bool { return true; }
+
+	public static function prerequisiteNote(): string {
+		return 'Linode serves a zone only for accounts with at least one active Linode service — '
+			. 'a running Linode counts. Without one, records save but are never answered.';
+	}
+
+	public static function credentialFields(): array {
+		// The field is named access_token so the base class's accessToken()
+		// reads the pasted token with no translation layer.
+		return array(
+			'access_token' => array(
+				'label'  => 'Linode personal access token',
+				'help'   => 'From your Linode profile, under API Tokens. Used for this one publish and never stored.',
+				'secret' => true,
+			),
+		);
+	}
+
+	public static function credentialGuide(): ?array {
+		return array(
+			'title'     => 'Create a Linode personal access token',
+			'url'       => 'https://cloud.linode.com/profile/tokens',
+			'url_label' => 'Open Linode API Tokens',
+			'steps'     => array(
+				'Sign in to Linode, click your username at the top right, and choose API Tokens.',
+				'Click Create a Personal Access Token.',
+				'Set every scope to None, then set Domains to Read/Write — the token needs nothing else.',
+				'Pick an expiry. Shorter is safer; the token is used once here, so you can always make another.',
+				'Click Create Token, copy the token shown — Linode shows it only once — and paste it here.',
+			),
+		);
+	}
 
 	public static function nameservers(): array {
 		return array('ns1.linode.com', 'ns2.linode.com', 'ns3.linode.com',
@@ -315,7 +351,7 @@ class LinodeDnsDriver extends DnsDriverBase {
 
 	/**
 	 * The token API calls actually use. When the publish chose a child account,
-	 * the parent grant is exchanged once for that child's scoped token — held in
+	 * the parent's token is exchanged once for that child's scoped token — held in
 	 * memory for this request only, like every other DNS credential.
 	 */
 	private function token(): string {
@@ -342,8 +378,8 @@ class LinodeDnsDriver extends DnsDriverBase {
 	protected function translateError(RequestException $e, string $method, string $url, int $status): DnsProviderException {
 		$reason = $this->errorBody($e);
 		if ($status === 401 || $status === 403) {
-			return new DnsProviderException('Linode refused the grant (' . $status . '): ' . $reason
-				. ' — Linode access tokens last two hours, so authorize again and re-publish.', $status, $e);
+			return new DnsProviderException('Linode refused the token (' . $status . '): ' . $reason
+				. ' — check that it has the Domains Read/Write scope and has not expired.', $status, $e);
 		}
 		return parent::translateError($e, $method, $url, $status);
 	}

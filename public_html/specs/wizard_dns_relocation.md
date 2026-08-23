@@ -1,6 +1,19 @@
 # Wizard DNS Relocation — Move the Domain's Records to a Host We Can Automate
 
-**Status:** Draft, not started.
+**Status:** All three parts built and deployed. Part 1: Linode
+personal-access-token support. Part 2: NS detection with the honest
+gated/automatable offering (gates declared per-driver as `apiGateNote()`),
+in the wizard's sending step and the shared publish box. Part 3: the guided
+move (`DnsRelocation` + `dns_relocation_render`), mounted on both surfaces;
+an in-flight move persists as the `dns_move_pending` setting until the
+domain's NS records answer from the target or the operator cancels, and
+choosing Linode in the provider dropdown while the DNS lives elsewhere runs
+the move rather than a doomed publish. The seed is live-verified (real
+token, zone created and filled at Linode). Open: a full delegation
+switch-over has not been exercised end to end, and detection of a completed
+move is pull-only — a scheduled watcher (poll pending moves, auto-verify,
+notify the owner) is a candidate follow-up, as is the receiving step's
+adoption of detection.
 
 ## Problem
 
@@ -37,40 +50,60 @@ later. That is the pitch, and the wizard should make it.
 
 ## Targets
 
-Two recommended destinations, in this order:
+Two recommended destinations, offered side by side with their preconditions
+stated (no platform detection — the user picks the account they already have):
 
-1. **Linode DNS** — for deployments that run on Linode (the quick-deploy
-   audience already holds a Linode account, so there is nothing new to sign up
-   for). Free with any active Linode service. Requires driver work (below).
-2. **Cloudflare (free plan)** — the zero-precondition universal target: free
-   at any account size, scoped API tokens, and `CloudflareDnsDriver` accepts
-   them today unchanged.
+1. **Linode DNS** — the primary target: the quick-deploy audience already
+   holds a Linode account, so there is nothing new to sign up for. Free, but
+   Linode serves a zone only for accounts with **at least one active Linode
+   service** — a precondition the primary audience meets by definition,
+   because the deployment itself is that service. A deployment running
+   anywhere else must not be steered here unless the user separately has a
+   Linode; that is what the second target is for.
+2. **Cloudflare (free plan)** — the zero-precondition fallback: free at any
+   account size, scoped API tokens, and `CloudflareDnsDriver` accepts them
+   today unchanged.
 
 deSEC, Hetzner, DigitalOcean and the other open-API drivers remain in the
 dropdown as they are; the two above are what the wizard actively recommends.
 
 ## Part 1 — Linode personal access token support
 
-`LinodeDnsDriver` is `CREDENTIAL_OAUTH2` today: publishes ride an OAuth
-consent grant, which requires a one-time per-deployment app registration at
-Linode before the first publish. Right for the mail Setup tab; too much
-ceremony for a first-run wizard.
+**Verified feasible; the mechanism is decided.** A Linode personal access
+token (Cloud Manager → username → API Tokens, scope Domains read/write) and
+an OAuth access token are interchangeable on API v4: both authenticate as
+`Authorization: Bearer <token>` — the exact header `LinodeDnsDriver` already
+sends. Every endpoint the driver calls (`domains` list/create/delete, records
+CRUD) is covered by the Domains scope. The two ancillary calls a Domains-only
+token cannot make — `GET /account` for the account label, and the reseller
+child-account listing — already catch their failures and degrade (generic
+label; single-account behavior). So the token path needs **no HTTP changes at
+all**; the driver's OAuth-ness is bookkeeping, three lines deep.
 
-Linode also issues **personal access tokens** (Profile → API Tokens, scope
-Domains read/write) that authenticate against the same API with the same
-bearer-token header. The driver should accept either:
+The change:
 
-- Add a credential field for a personal access token and report a mode the
-  publish surfaces can treat as `CREDENTIAL_API` when a token is supplied.
-  Decide the mechanism during build: either the driver becomes
-  `CREDENTIAL_API` with the OAuth path kept as an upgrade the Setup tab still
-  uses, or the registry learns that one driver can carry both modes. The
-  deciding constraint: the wizard's dropdown filters on
-  `credentialMode() === CREDENTIAL_API`, and the Setup tab's consent flow must
-  keep working unchanged.
-- `credentialGuide()` for the token path: Linode → Profile → API Tokens →
-  Create token, scope Domains read/write, expiry the user's choice. Same
-  used-once-never-stored contract as every other API credential.
+- `credentialMode()` returns `CREDENTIAL_API`. `credentialFields()` declares
+  one field named `access_token` — that name is deliberate: the base class's
+  `accessToken()` reads `credential['access_token']`, so the pasted token
+  flows through the existing code untouched.
+- `credentialGuide()`: Linode → click your username → API Tokens → Create
+  Personal Access Token, scope Domains read/write, expiry the user's choice.
+  Same used-once-never-stored contract as every other API credential.
+- The OAuth constants (`oauthProviderKey()`, `oauthScopes()`) and the
+  Linode consent path are **dropped for this driver, not kept as a dual
+  mode**. All three `CREDENTIAL_OAUTH2` branch points (consent hand-off in
+  `DnsPublishBox::startApply`, app-registration collection in
+  `renderVars`, the footer copy in `dns_publish_box.php`) fall through to
+  the API path with no edits. Consequence: the mail Setup tab asks for a
+  pasted token instead of sending the operator through consent — which also
+  deletes the per-deployment OAuth app registration ceremony that consent
+  required. One credential story everywhere; the OAuth machinery itself
+  stays for any future driver that needs it.
+- Trade-off named honestly: an OAuth grant expired in two hours by
+  construction; a PAT lives until its chosen expiry. The platform never
+  stores either (used within the request, discarded), so the exposure
+  difference is on the user's side of the fence, and the guide tells them to
+  set an expiry.
 
 ## Part 2 — Nameserver detection and honest offering
 
@@ -82,8 +115,8 @@ result against a small static map of NS suffixes:
 | --- | --- |
 | `registrar-servers.com` | Namecheap BasicDNS (API gated) |
 | `domaincontrol.com` | GoDaddy (API gated) |
-| `ns.cloudflare.com` | Cloudflare (automatable now) |
-| `linode.com` | Linode (automatable once Part 1 lands) |
+| `ns.cloudflare.com` | Cloudflare (automatable) |
+| `linode.com` | Linode (automatable) |
 | `digitalocean.com`, `hetzner.*`, `desec.*`, … | automatable now |
 | anything else | unknown |
 
@@ -152,15 +185,12 @@ depends on core DNS only.
 - **Managed domain registration** — separate existing spec
   (`managed_domain_registration.md`), unbuilt; complementary, not replaced.
 
-## Open questions
+## Decisions
 
-- Cloudflare free-plan zone creation requires the account to add the site and
-  returns the assigned nameserver pair; confirm the token scopes needed for
-  zone creation (Zone.Zone edit) versus record edits (Zone.DNS edit) and
-  whether the guide should have the user create the zone in the dashboard
-  instead (fewer scopes, one manual step).
-- How the wizard knows a deployment runs on Linode (to lead with Linode over
-  Cloudflare): detect via the Linode metadata service at install time, or
-  simply always offer both and let the user pick the account they have.
-- Whether the receiving step's `wizard_provision` publish should also adopt
-  the detection + relocation offer in the same change or a follow-up.
+- **Cloudflare zone creation happens in Cloudflare's dashboard**, not through
+  our API call: its "Add a site" flow shows the assigned per-account
+  nameserver pair on screen, and the token the user then creates needs only
+  the Zone · DNS · Edit scope. Part 3's guide walks that flow; Linode zones
+  are created through the driver's `createZone()`.
+- **The receiving step adopts detection + the relocation offer as a
+  follow-up**, after Part 3 exists — the sending step is the proving ground.

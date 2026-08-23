@@ -6,7 +6,13 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.7
+ * @version 1.9
+ * @changelog 1.9 - A successful move persists as dns_move_pending (domain,
+ *   target, nameservers, copied records) so the handover survives reloads
+ *   while delegation propagates; mail_send_move_cancel forgets it.
+ * @changelog 1.8 - mail_send_move runs the guided DNS move: seeds the chosen
+ *   open-API host's zone (deployment records + what the domain visibly
+ *   answers) before the operator's one nameserver change, via DnsRelocation.
  * @changelog 1.7 - Save and register also ensure the mailbox receiving-domain
  *   row exists (domain only, no alias, no MX) — authority is what lets the
  *   Direct signing identity mint, which puts the two Joinery Direct records
@@ -329,11 +335,11 @@ function setup_logic(array $input): LogicResult {
 	// a DNS driver with a credential used once and never stored. State is
 	// always re-derived on render — nothing here trusts the POST beyond which
 	// button was pressed.
-	if (in_array($action, array('mail_send_register', 'mail_send_verify', 'mail_send_publish'), true)
-			&& $permission >= 10) {
+	if (in_array($action, array('mail_send_register', 'mail_send_verify', 'mail_send_publish',
+			'mail_send_move', 'mail_send_move_cancel'), true) && $permission >= 10) {
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		$notice = array('registered' => null, 'register_error' => '',
-			'publish_summary' => '', 'publish_error' => '', 'checked_state' => '');
+			'publish_summary' => '', 'publish_error' => '', 'checked_state' => '', 'move' => null);
 		$sending_domain = _setup_sending_domain();
 		$service = EmailSender::activeServiceKey();
 		$provider_class = ($service !== '') ? (EmailSender::getDiscoveredProviders()[$service] ?? null) : null;
@@ -406,6 +412,68 @@ function setup_logic(array $input): LogicResult {
 					}
 				}
 			}
+		}
+
+		// The guided move to an open-API DNS host: create and seed the
+		// destination zone — the deployment's records plus everything the
+		// domain visibly answers — BEFORE the operator's one manual step, the
+		// nameserver change at their registrar. Idempotent; the credential
+		// lives inside this request only.
+		if ($action === 'mail_send_move') {
+			require_once(PathHelper::getIncludePath('includes/dns/DnsRelocation.php'));
+			$targets = DnsRelocation::targets();
+			$target = trim((string)($input['dns_move_target'] ?? ''));
+			if (!isset($targets[$target])) {
+				$notice['move'] = array('error' => 'Choose where your DNS should live.');
+			} else {
+				$target_class = $targets[$target];
+				$credential = array('account_id' => '');
+				$missing = false;
+				foreach ($target_class::credentialFields() as $field => $spec) {
+					$credential[$field] = trim((string)($input['move_cred_' . $field] ?? ''));
+					if ($credential[$field] === '' && empty($spec['optional'])
+							&& $field !== 'session_token' && $field !== 'client_ip') {
+						$missing = true;
+					}
+				}
+				if ($missing) {
+					$notice['move'] = array('error' => 'Enter the ' . $target_class::getLabel()
+						. ' credential to set up your DNS there.');
+				} else {
+					$own_plan = class_exists('InboundEmailSetupCheck')
+						? (new InboundEmailSetupCheck())->sendingDnsPlan($sending_domain)
+						: new DnsRecordPlan($sending_domain, 'setup_wizard');
+					$move = DnsRelocation::seed($target_class, $credential, $sending_domain, $own_plan);
+					unset($credential);   // the only copy, gone before the response is built
+					$move['target'] = $target;
+					$move['target_label'] = $target_class::getLabel();
+					$notice['move'] = $move;
+					if (($move['error'] ?? '') === '') {
+						// The move now outlives this page load: delegation takes
+						// hours to days, so the handover face must survive every
+						// reload until the domain's NS records answer from the
+						// target (the dns stage clears this when they do) or the
+						// operator cancels. Nothing here is secret — it is the
+						// same record data the manual tab prints.
+						Setting::put('dns_move_pending', json_encode(array(
+							'domain'       => $sending_domain,
+							'target'       => $target,
+							'target_label' => $target_class::getLabel(),
+							'nameservers'  => $move['nameservers'],
+							'copied'       => $move['copied'],
+							'summary'      => $move['summary'],
+							'time'         => gmdate('Y-m-d H:i:s'),
+						)));
+					}
+				}
+			}
+		}
+
+		// The operator changed their mind mid-move: forget the pending state
+		// and the dns stage asks its question fresh. The seeded zone stays at
+		// the destination — records at a host nothing delegates to are inert.
+		if ($action === 'mail_send_move_cancel') {
+			Setting::put('dns_move_pending', '');
 		}
 
 		$_SESSION['setup_mail_send_result'] = $notice;

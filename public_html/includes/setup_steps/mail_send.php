@@ -23,7 +23,49 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
- * @version 2.4
+ * @version 2.15
+ * @changelog 2.15 - Picking a host the domain's DNS does not live at says so
+ *   (amber mismatch notice), and picking Linode that way IS the move: the
+ *   move form replaces the publish form, which is what the dropdown answer
+ *   meant. Publishing into a host that could never answer is no longer the
+ *   default outcome of that click.
+ * @version 2.14
+ * @changelog 2.14 - A started move persists across reloads: while
+ *   dns_move_pending is set the auto tab IS the handover (plus a cancel
+ *   button), whatever the dropdown would have detected; the stage clears
+ *   the state itself once the domain's NS records answer from the target.
+ * @changelog 2.13 - The move choice reveals just the token field and button
+ *   (the radio already said Linode): lead-in paragraph gone, renderer asks
+ *   no destination question for a single target.
+ * @changelog 2.12 - The gate radio is a FormWriter radioinput — stacked
+ *   form-check rows, not hand-rolled inline labels.
+ * @changelog 2.11 - A gated provider selection asks its question in place: an
+ *   amber restriction notice and a three-way radio (use an API key / add
+ *   manually at the vendor / move DNS to Linode). The choice drives the
+ *   page; the always-on gated callout and its inline relocation mount are
+ *   gone, the move now lives behind the third choice, and a gated detected
+ *   host is preselected like any other.
+ * @changelog 2.10 - The detected host is marked "(autodetected)" in the
+ *   dropdown option itself; the detection helptext is gone.
+ * @changelog 2.9 - The publish form is fields and one "How do I do this?"
+ *   link: per-field helptext and the vendor note paragraph are gone, the
+ *   gate/prerequisite rides as the guide modal's caution, and the used-once
+ *   reassurance paragraph is removed.
+ * @changelog 2.8 - The detection status is an amber banner under the intro
+ *   ("We don't detect your DNS entries yet…") with the check control inside
+ *   it, vertically centered on the right and named Refresh; the muted
+ *   unverified line at the bottom is gone.
+ * @changelog 2.7 - The dns stage reconciles the receiving-domain row on view
+ *   (server_initiated_write): without it, a deployment whose save predates
+ *   the row's creation renders the manual tab without the two Joinery
+ *   Direct records, and the copied list is silently incomplete.
+ * @changelog 2.6 - A gated host's callout now carries the whole guided move
+ *   (dns_relocation_render): destination choice, credential, seeded zone,
+ *   nameserver handover — the mail_send_move action runs the seed.
+ * @changelog 2.5 - The dns stage reads the domain's live NS records first and
+ *   is honest about what it finds: a host we can automate is preselected; a
+ *   host whose API is gated (apiGateNote) leads with the one-time
+ *   move-your-DNS fix instead of a form that cannot work.
  * @changelog 2.4 - The check link is a chrome-free button (the kit has no
  *   btn-link, so .btn was drawing button chrome) with real padding and margin.
  * @changelog 2.3 - "Check now" is a right-aligned refresh link directly under
@@ -143,9 +185,21 @@ if ($setup_send_stage === 'prove') {
 if ($setup_send_stage === 'dns') {
 	$setup_send_plan = null;
 	if (class_exists('InboundEmailSetupCheck')) {
+		// The two Joinery Direct records exist only once this deployment is
+		// authoritative for the domain — the signing identity lives behind
+		// its receiving-domain row. The save creates that row; on a
+		// deployment whose save predates it, rendering without this
+		// reconciliation shows a manual tab MISSING the Direct pair, and an
+		// operator who copies that list publishes an incomplete record set.
+		// Idempotent: once the row exists this is a read.
+		SystemBase::server_initiated_write(function () use ($setup_send_domain) {
+			_setup_ensure_receiving_domain($setup_send_domain);
+		});
 		$setup_send_plan = (new InboundEmailSetupCheck())->sendingDnsPlan($setup_send_domain);
 	}
 	require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+	require_once(PathHelper::getIncludePath('includes/dns/dns_relocation_box.php'));
 	$setup_send_drivers = array();
 	foreach (DnsDriverRegistry::all() as $setup_send_drv_key => $setup_send_drv_class) {
 		if ($setup_send_drv_class::credentialMode() === DnsProvider::CREDENTIAL_API) {
@@ -153,24 +207,81 @@ if ($setup_send_stage === 'dns') {
 		}
 	}
 	$setup_send_has_plan = ($setup_send_plan !== null && !$setup_send_plan->isEmpty());
+
+	// Where the domain's DNS actually lives, read from its live NS records —
+	// only the host that answers for the domain can take these records, so the
+	// form is honest about it instead of offering every driver as if any could
+	// work. A gated host (apiGateNote) is one most accounts cannot get a key
+	// for, and the form says so up front rather than after a doomed signup.
+	$setup_send_dns_host  = '';
+	$setup_send_dns_label = '';
+	if ($setup_send_domain !== '') {
+		$setup_send_dns_host = (string)DnsDriverRegistry::identifyHost(
+			DnsPublishBox::liveNameservers($setup_send_domain));
+		$setup_send_dns_class = $setup_send_dns_host !== '' ? DnsDriverRegistry::get($setup_send_dns_host) : null;
+		if ($setup_send_dns_class !== null) {
+			$setup_send_dns_label = $setup_send_dns_class::getLabel();
+		}
+	}
+	// Preselected whether or not the host gates its API — a gated selection
+	// asks its question with the radio choice below the dropdown.
+	$setup_send_dns_auto = isset($setup_send_drivers[$setup_send_dns_host]);
+	$setup_send_move = is_array($setup_send_notice) ? ($setup_send_notice['move'] ?? null) : null;
+	$setup_send_can_move = array_key_exists('linode', DnsRelocation::targets());
+
+	// An in-flight move outlives page loads: the choice and the seeded
+	// handover persist (dns_move_pending) until the domain's NS records
+	// answer from the target — completion, observed here and cleared — or
+	// the operator cancels. A pending row for some other domain is stale
+	// (the From address changed) and is cleared the same way.
+	$setup_send_move_pending = null;
+	$setup_send_mp_raw = trim((string)$settings->get_setting('dns_move_pending'));
+	if ($setup_send_mp_raw !== '') {
+		$setup_send_mp = json_decode($setup_send_mp_raw, true);
+		$setup_send_mp = is_array($setup_send_mp) ? $setup_send_mp : array();
+		if ((string)($setup_send_mp['domain'] ?? '') !== $setup_send_domain
+				|| $setup_send_dns_host === (string)($setup_send_mp['target'] ?? '')) {
+			SystemBase::server_initiated_write(function () {
+				Setting::put('dns_move_pending', '');
+			});
+		} else {
+			$setup_send_move_pending = $setup_send_mp;
+		}
+	}
+
+	// The move face this render shows: a result from the press that just
+	// happened (success or error), else the persisted mid-move handover.
+	$setup_send_move_face = $setup_send_move;
+	if ($setup_send_move_face === null && $setup_send_move_pending !== null) {
+		$setup_send_move_face = array_merge(array('error' => '', 'zone_created' => false,
+			'nameservers' => array(), 'copied' => array(), 'summary' => ''), $setup_send_move_pending);
+	}
 ?>
 	<p>Before <?php echo htmlspecialchars($setup_send_service_label); ?> will send your mail, it needs to see
 		a few records at your domain — that's how it knows <strong><?php echo htmlspecialchars($setup_send_domain); ?></strong> is really yours.
 		Tell us where your domain is managed and we'll add them for you.</p>
 
-	<div style="text-align:right; margin:8px 0 12px">
-		<form method="POST" action="/setup" style="display:inline">
+<?php if ($setup_send_state !== 'not_registered') { ?>
+	<!-- The detection status: amber because it is the one thing still standing
+	     between here and a working sender. The refresh control lives inside it,
+	     vertically centered on the right — the message names the button that
+	     answers it. (The kit has no amber alert or btn-link, hence the inline
+	     styles and the chrome-free button.) -->
+	<div style="display:flex; align-items:center; justify-content:space-between; gap:12px; background:#fffaeb; border:1px solid #fec84b; border-radius:8px; padding:10px 14px; margin:8px 0 12px">
+		<div>
+			We don't detect your DNS entries yet. Set them below, and then come back and press refresh to recheck.
+<?php if (is_array($setup_send_notice) && ($setup_send_notice['checked_state'] ?? '') !== '') { ?>
+			<div class="jy-muted" style="margin-top:4px">Checked just now, at
+				<?php echo htmlspecialchars(LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s'), 'UTC', SessionControl::get_instance()->get_timezone(), 'g:i:s a')); ?>.</div>
+<?php } ?>
+		</div>
+		<form method="POST" action="/setup" style="flex:none; margin:0">
 			<input type="hidden" name="action" value="mail_send_verify">
 			<input type="hidden" name="step" value="mail_send">
-			<!-- The kit has no btn-link style, so this is a plain button drawn
-			     as a link on purpose — no .btn chrome to fight. -->
-			<button type="submit" style="background:none; border:none; padding:6px 8px; cursor:pointer; font:inherit; color:var(--jy-color-link, #2563eb); text-decoration:underline; text-underline-offset:3px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:4px"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>Check now</button>
+			<button type="submit" style="background:none; border:none; padding:6px 8px; cursor:pointer; font:inherit; color:var(--jy-color-link, #2563eb); text-decoration:underline; text-underline-offset:3px"><svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round" style="vertical-align:-2px; margin-right:4px"><path d="M21 12a9 9 0 1 1-2.64-6.36"/><polyline points="21 3 21 9 15 9"/></svg>Refresh</button>
 		</form>
-<?php if (is_array($setup_send_notice) && ($setup_send_notice['checked_state'] ?? '') !== '') { ?>
-		<p class="jy-muted" style="margin:4px 0 0">Checked just now, at
-			<?php echo htmlspecialchars(LibraryFunctions::convert_time(gmdate('Y-m-d H:i:s'), 'UTC', SessionControl::get_instance()->get_timezone(), 'g:i:s a')); ?>.</p>
-<?php } ?>
 	</div>
+<?php } ?>
 
 <?php if (is_array($setup_send_notice)) { ?>
 <?php if ($setup_send_notice['registered'] === true) { ?>
@@ -200,7 +311,7 @@ if ($setup_send_stage === 'dns') {
 		</form>
 <?php } else { ?>
 <?php if ($setup_send_state === '') { ?>
-		<p class="jy-muted"><?php echo htmlspecialchars($setup_send_service_label); ?> didn't answer just now — the records may be incomplete. Try "Check now" in a moment.</p>
+		<p class="jy-muted"><?php echo htmlspecialchars($setup_send_service_label); ?> didn't answer just now — the records may be incomplete. Press Refresh in a moment.</p>
 <?php } ?>
 <?php if ($setup_send_has_plan && $setup_send_drivers) { ?>
 		<ul class="jy-tabs-list" role="tablist">
@@ -208,6 +319,31 @@ if ($setup_send_stage === 'dns') {
 			<li role="presentation"><button type="button" role="tab" data-ms-tab="manual" aria-selected="false">Add records manually</button></li>
 		</ul>
 		<div class="jy-tabs-panel active" id="setup-ms-tab-auto">
+<?php if ($setup_send_move_face !== null) { ?>
+<?php
+		// A move is the whole story of this tab while it is under way (or just
+		// ran, or just failed): the handover with the nameserver errand — or
+		// the error with the form open to retry — and a way out. The question
+		// flow below only returns once the move completes or is cancelled.
+		dns_relocation_render($page, array(
+			'domain'       => $setup_send_domain,
+			'source_key'   => $setup_send_dns_host,
+			'source_label' => $setup_send_dns_label !== '' ? $setup_send_dns_label : 'your current DNS host',
+			'form_action'  => '/setup',
+			'hidden'       => array('action' => 'mail_send_move', 'step' => 'mail_send'),
+			'result'       => $setup_send_move_face,
+			'recheck_hint' => 'press Refresh at the top of this page',
+			'only'         => array((string)($setup_send_move_face['target'] ?? 'linode')),
+		));
+?>
+<?php if ($setup_send_move_pending !== null) { ?>
+		<form method="POST" action="/setup" class="jy-mt-2">
+			<input type="hidden" name="action" value="mail_send_move_cancel">
+			<input type="hidden" name="step" value="mail_send">
+			<button type="submit" class="btn btn-secondary">Cancel the move — choose another way</button>
+		</form>
+<?php } ?>
+<?php } else { ?>
 <?php
 		// The same fields the mail Setup tab's publish box draws, guides
 		// included — the driver's credentialGuide() hangs off its first
@@ -218,20 +354,87 @@ if ($setup_send_stage === 'dns') {
 		$setup_pub->hiddeninput('step', '', array('value' => 'mail_send'));
 		$setup_send_drv_options = array();
 		foreach ($setup_send_drivers as $setup_send_drv_key => $setup_send_drv_class) {
-			$setup_send_drv_options[$setup_send_drv_key] = $setup_send_drv_class::getLabel();
+			// The host answering the domain's NS records is the only one that
+			// can take these records: it is preselected, and the option itself
+			// says why.
+			$setup_send_drv_options[$setup_send_drv_key] = $setup_send_drv_class::getLabel()
+				. (($setup_send_dns_auto && $setup_send_drv_key === $setup_send_dns_host) ? ' (autodetected)' : '');
 		}
 		$setup_pub->dropinput('dns_provider', 'Where is your domain managed?', array(
 			'options' => $setup_send_drv_options,
 			'empty_option' => 'Choose…',
-			'value' => '',
+			'value' => $setup_send_dns_auto ? $setup_send_dns_host : '',
 		));
+		// A vendor that gates its API away from ordinary accounts asks its
+		// question before showing a form most people cannot fill: the gate as
+		// an amber notice, then the operator's three honest ways forward.
+		// Which one they pick drives the page (script at the bottom): the API
+		// choice reveals the credential form, manual grays this tab and lands
+		// on the manual one, and the move choice opens the guided transfer.
+		foreach ($setup_send_drivers as $setup_send_drv_key => $setup_send_drv_class) {
+			$setup_send_drv_gate = $setup_send_drv_class::apiGateNote();
+			if ($setup_send_drv_gate === '') { continue; }
+?>
+		<div class="setup-ms-gate d-none" data-dns-driver="<?php echo htmlspecialchars($setup_send_drv_key); ?>">
+			<div class="setup-ms-gate-amber" style="background:#fffaeb; border:1px solid #fec84b; border-radius:8px; padding:10px 14px; margin:8px 0">
+				<?php echo htmlspecialchars($setup_send_drv_gate); ?>
+			</div>
+<?php
+			$setup_send_gate_choices = array(
+				'api'    => 'I meet the requirements and will use an API key',
+				'manual' => 'I will enter the DNS entries at ' . $setup_send_drv_class::getLabel() . ' manually',
+			);
+			if ($setup_send_can_move) {
+				$setup_send_gate_choices['move'] = 'I will move DNS management to Linode';
+			}
+			$setup_pub->radioinput('gate_choice_' . $setup_send_drv_key, '', array(
+				'options' => $setup_send_gate_choices,
+			));
+?>
+		</div>
+<?php
+		}
+		// Choosing a host the domain's DNS does not actually live at is an
+		// honest mistake the dropdown invites — "where is your domain
+		// managed?" reads as "where do you WANT it managed?". Say the
+		// mismatch plainly; for Linode, the answer IS the move, so the move
+		// form takes over (script below).
+		if ($setup_send_dns_label !== '') {
+			foreach ($setup_send_drivers as $setup_send_drv_key => $setup_send_drv_class) {
+				if ($setup_send_drv_key === $setup_send_dns_host) { continue; }
+				$setup_send_drv_move_instead = ($setup_send_drv_key === 'linode' && $setup_send_can_move);
+?>
+		<div class="setup-ms-mismatch d-none" data-dns-driver="<?php echo htmlspecialchars($setup_send_drv_key); ?>"<?php echo $setup_send_drv_move_instead ? ' data-move-instead="1"' : ''; ?>>
+			<div style="background:#fffaeb; border:1px solid #fec84b; border-radius:8px; padding:10px 14px; margin:8px 0">
+				<strong><?php echo htmlspecialchars($setup_send_domain); ?></strong>'s DNS is currently answered by
+				<?php echo htmlspecialchars($setup_send_dns_label); ?>, not <?php echo htmlspecialchars($setup_send_drv_class::getLabel()); ?> —
+				records added at <?php echo htmlspecialchars($setup_send_drv_class::getLabel()); ?> won't be used until your DNS moves there.<?php
+				if ($setup_send_drv_move_instead) {
+					echo ' Set the move up below: your records get created at Linode first, then you make one nameserver change at your registrar.';
+				} ?>
+			</div>
+		</div>
+<?php
+			}
+		}
 		foreach ($setup_send_drivers as $setup_send_drv_key => $setup_send_drv_class) {
 			echo '<div class="setup-ms-cred d-none" data-dns-driver="' . htmlspecialchars($setup_send_drv_key) . '">';
+			// The form is fields and one "How do I do this?" link; every note
+			// and instruction lives inside that modal. The vendor's account
+			// gate (unless the callout above already said it) and any setup
+			// prerequisite, like Namecheap's IP allowlist, ride as the
+			// modal's caution rather than as paragraphs over the fields.
+			$setup_send_drv_note = trim(
+				($setup_send_drv_key === $setup_send_dns_host ? '' : $setup_send_drv_class::apiGateNote() . ' ')
+				. $setup_send_drv_class::prerequisiteNote());
 			$setup_send_drv_guide = $setup_send_drv_class::credentialGuide();
+			if ($setup_send_drv_note !== '' && is_array($setup_send_drv_guide)) {
+				$setup_send_drv_guide['caution'] = trim($setup_send_drv_note . ' '
+					. (string)($setup_send_drv_guide['caution'] ?? ''));
+			}
 			foreach ($setup_send_drv_class::credentialFields() as $setup_send_drv_field => $setup_send_drv_spec) {
 				if ($setup_send_drv_field === 'session_token' || $setup_send_drv_field === 'client_ip') { continue; }
 				$setup_send_drv_opts = array(
-					'helptext' => $setup_send_drv_spec['help'] ?? '',
 					'autocomplete' => 'off',
 					'help_modal' => $setup_send_drv_guide,
 				);
@@ -245,13 +448,33 @@ if ($setup_send_stage === 'dns') {
 			echo '</div>';
 		}
 ?>
-			<p class="jy-muted jy-mt-2">Your sign-in details are used once to add the records and never stored. Records that already exist are left alone.</p>
-			<div class="jy-mt-2">
+			<div class="jy-mt-2" id="setup-ms-submit">
 				<?php echo $setup_pub->submitbutton('btn_ms_publish', 'Add the records for me', array('class' => 'btn btn-primary')); ?>
 			</div>
 <?php
 		$setup_pub->end_form();
+		// The guided move (its own form, so it sits AFTER the publish form —
+		// forms never nest), revealed by the radio's move choice.
+		if ($setup_send_can_move) {
 ?>
+		<div id="setup-ms-move" class="d-none">
+<?php
+			dns_relocation_render($page, array(
+				'domain'       => $setup_send_domain,
+				'source_key'   => $setup_send_dns_host,
+				'source_label' => $setup_send_dns_label !== '' ? $setup_send_dns_label : 'your current DNS host',
+				'form_action'  => '/setup',
+				'hidden'       => array('action' => 'mail_send_move', 'step' => 'mail_send'),
+				'result'       => null,
+				'recheck_hint' => 'press Refresh at the top of this page',
+				'only'         => array('linode'),
+			));
+?>
+		</div>
+<?php
+		}
+?>
+<?php } ?>
 		</div>
 		<div class="jy-tabs-panel" id="setup-ms-tab-manual">
 			<p class="jy-muted jy-mt-2">Add these wherever your domain's records live — the same place you'd change an A record.</p>
@@ -283,14 +506,12 @@ if ($setup_send_stage === 'dns') {
 			</table>
 		</div>
 <?php } elseif ($setup_send_plan !== null) { ?>
-		<p class="jy-muted">The record list isn't available just now — press "Check now" in a moment to refresh it.</p>
+		<p class="jy-muted">The record list isn't available just now — press Refresh in a moment.</p>
 <?php } else { ?>
 		<p class="jy-muted">Find the records to add in your <?php echo htmlspecialchars($setup_send_service_label); ?> dashboard, under your domain.</p>
 <?php } ?>
 
-<?php if ($setup_send_state === 'unverified') { ?>
-		<p class="jy-muted jy-mt-2"><?php echo htmlspecialchars($setup_send_service_label); ?> can see your domain but not all of the records yet. New records can take a little while to show up — press "Check now" (top right) whenever you like.</p>
-<?php } elseif ($setup_send_state !== '' && $setup_send_state !== 'not_registered') { ?>
+<?php if ($setup_send_state !== '' && $setup_send_state !== 'not_registered' && $setup_send_state !== 'unverified') { ?>
 		<p class="jy-muted jy-mt-2"><?php echo htmlspecialchars($setup_send_service_label); ?> currently reports your domain as "<?php echo htmlspecialchars($setup_send_state); ?>".</p>
 <?php } ?>
 <?php } ?>
@@ -447,17 +668,52 @@ if ($setup_send_stage === 'prove') {
 	});
 })();
 
-// The DNS-stage publish form: only the chosen DNS host's credential fields
-// are on screen.
+// The DNS-stage publish form. Ungated host: its credential fields, nothing
+// else. Gated host: the amber restriction notice and the three-way radio
+// lead, and the choice drives the page — "api" drops the amber and reveals
+// the credential form, "manual" grays this tab and lands on the manual one,
+// "move" opens the guided Linode transfer below the form.
 (function () {
 	var provider = document.getElementById('dns_provider');
 	if (!provider) { return; }
+	var autoTab = document.querySelector('[data-ms-tab="auto"]');
+	var manualTab = document.querySelector('[data-ms-tab="manual"]');
+	var submitRow = document.getElementById('setup-ms-submit');
+	var moveBlock = document.getElementById('setup-ms-move');
 	function sync() {
-		document.querySelectorAll('.setup-ms-cred').forEach(function (div) {
-			div.classList.toggle('d-none', div.getAttribute('data-dns-driver') !== provider.value);
+		var key = provider.value;
+		var gate = document.querySelector('.setup-ms-gate[data-dns-driver="' + key + '"]');
+		var checked = gate ? gate.querySelector('input[type="radio"]:checked') : null;
+		var choice = checked ? checked.value : '';
+		var mismatch = document.querySelector('.setup-ms-mismatch[data-dns-driver="' + key + '"]');
+		// A Linode pick when the domain lives elsewhere means "move me there":
+		// the mismatch notice plus the move form replace the publish form.
+		var moveInstead = !!(mismatch && mismatch.getAttribute('data-move-instead') === '1');
+		document.querySelectorAll('.setup-ms-gate').forEach(function (div) {
+			div.classList.toggle('d-none', div.getAttribute('data-dns-driver') !== key);
 		});
+		document.querySelectorAll('.setup-ms-mismatch').forEach(function (div) {
+			div.classList.toggle('d-none', div.getAttribute('data-dns-driver') !== key);
+		});
+		if (gate) {
+			var amber = gate.querySelector('.setup-ms-gate-amber');
+			if (amber) { amber.classList.toggle('d-none', choice === 'api'); }
+		}
+		document.querySelectorAll('.setup-ms-cred').forEach(function (div) {
+			var mine = div.getAttribute('data-dns-driver') === key;
+			div.classList.toggle('d-none', !mine || (!!gate && choice !== 'api') || moveInstead);
+		});
+		if (submitRow) { submitRow.classList.toggle('d-none', (!!gate && choice !== 'api') || moveInstead); }
+		if (moveBlock) { moveBlock.classList.toggle('d-none', !moveInstead && (!gate || choice !== 'move')); }
+		if (autoTab) { autoTab.style.opacity = (gate && choice === 'manual') ? '0.5' : ''; }
+		if (gate && choice === 'manual' && manualTab && manualTab.getAttribute('aria-selected') !== 'true') {
+			manualTab.click();
+		}
 	}
 	provider.addEventListener('change', sync);
+	document.querySelectorAll('.setup-ms-gate input[type="radio"]').forEach(function (radio) {
+		radio.addEventListener('change', sync);
+	});
 	sync();
 })();
 </script>
