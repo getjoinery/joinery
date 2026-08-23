@@ -15,6 +15,55 @@ use jd_sim::engine::{env, Device};
 use jd_sim::{sha256_hex, MockServer, NetFaults, SimClock};
 
 // ---------------------------------------------------------------------------
+// The rule, enforced mechanically
+// ---------------------------------------------------------------------------
+
+/// Only an operation that heard from the server may say where the server has it.
+///
+/// `entry.remote` is the server's side of the record and `synced_placement` is
+/// this computer's. Four separate defects came from one operation writing the
+/// other's field, and each looked the same from outside: the two sides agree,
+/// reconcile plans nothing for an entry that agrees, and the file sits in the
+/// wrong place with no error, no queued work and nothing to look at. The change
+/// that would have said otherwise is behind the cursor by then.
+///
+/// Reviewing for it does not work -- `move_remote` carried the guard the other
+/// three lacked, with a comment recording what the rig went through to earn it,
+/// and the shape still got copied wrong three times. So the file is read here
+/// instead, and a new writer of the field has to come and argue with this list.
+///
+/// Whole-field assignments only. The by-part writes in `apply_export` and the
+/// encrypted-name fixup fold a server export into the entry, which is the one
+/// thing that is always entitled to.
+#[test]
+fn only_an_answer_from_the_server_may_say_where_the_server_has_it() {
+    const SOURCE: &str = include_str!("../../jd-core/src/execute.rs");
+    // Every one of these takes its placement from a server response in the same
+    // breath: the folder the server just created, or a stat of where the thing
+    // actually ended up. None of them takes it from the plan.
+    const MAY_WRITE: [&str; 2] = ["create_remote_folder", "move_remote"];
+
+    let mut enclosing = "<none>";
+    let mut offenders = Vec::new();
+    for (n, line) in SOURCE.lines().enumerate() {
+        if let Some(rest) = line.strip_prefix("fn ") {
+            enclosing = rest.split(['(', '<']).next().unwrap_or("<none>");
+        }
+        let code = line.split("//").next().unwrap_or("");
+        if code.contains("entry.remote = ") && !MAY_WRITE.contains(&enclosing) {
+            offenders.push(format!("{} (execute.rs:{})", enclosing, n + 1));
+        }
+    }
+    assert!(
+        offenders.is_empty(),
+        "these write where the SERVER has the entry, without having asked it: {offenders:?}. \
+         An operation that only touched this disk records synced_placement and leaves the \
+         disagreement that plans the next pass. If one of these really did hear from the \
+         server, add it to MAY_WRITE and say so at the callsite."
+    );
+}
+
+// ---------------------------------------------------------------------------
 // Fixtures
 // ---------------------------------------------------------------------------
 
@@ -1969,7 +2018,6 @@ fn a_rename_retried_after_its_answer_was_lost_records_where_the_file_actually_is
         "and the agreement says the same"
     );
 }
-
 
 #[test]
 fn recovery_needs_no_network_so_nothing_it_finds_can_be_stranded() {
