@@ -24,7 +24,9 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
- * @version 1.3
+ * @version 1.5
+ * @changelog 1.5 - handle() runs the dns_move action (DnsRelocation::seed against the chosen open-API host) and stashes the outcome for one render
+ * @changelog 1.4 - Carries the driver's apiGateNote() as its own var (the view forks on it), and liveNameservers() is public for the setup wizard
  * @changelog 1.3 - Carries the removal confirmations through to the reconciler, and counts a deletion as a write
  * @changelog 1.2 - Publish banners carry a severity: success only when the whole plan is in place, warning when partial, error when nothing reached the provider
  * @changelog 1.1 - Collects an OAuth app registration in place when the chosen provider has none, gated at permission 10, then continues to consent in the same request; carries credentialGuide() through to the box
@@ -72,6 +74,42 @@ class DnsPublishBox {
 
 		$plan = $plan_factory();
 		if (!($plan instanceof DnsRecordPlan) || $plan->isEmpty()) {
+			return LogicResult::redirect($return_url);
+		}
+
+		// The guided move to an open-API host, offered when the domain's own
+		// host gates its API. The destination comes from the form, not from
+		// where the domain lives; the seed is idempotent and the credential
+		// dies with this request. The outcome is stashed for one render so the
+		// box can show the nameserver handover and what was copied.
+		if ($action === 'dns_move') {
+			require_once(PathHelper::getIncludePath('includes/dns/DnsRelocation.php'));
+			$targets = DnsRelocation::targets();
+			$target = trim((string)($input['dns_move_target'] ?? ''));
+			if (!isset($targets[$target])) {
+				$move = array('error' => 'Choose where your DNS should live.');
+			} else {
+				$target_class = $targets[$target];
+				$credential = array('account_id' => '');
+				$missing = false;
+				foreach ($target_class::credentialFields() as $field => $spec) {
+					$credential[$field] = trim((string)($input['move_cred_' . $field] ?? ''));
+					if ($credential[$field] === '' && empty($spec['optional'])
+							&& $field !== 'session_token' && $field !== 'client_ip') {
+						$missing = true;
+					}
+				}
+				if ($missing) {
+					$move = array('error' => 'Enter the ' . $target_class::getLabel()
+						. ' credential to set up your DNS there.');
+				} else {
+					$move = DnsRelocation::seed($target_class, $credential, $plan->getDomain(), $plan);
+					unset($credential);   // the only copy, gone before the response is built
+					$move['target'] = $target;
+					$move['target_label'] = $target_class::getLabel();
+				}
+			}
+			$_SESSION['dns_relocation_result'][$plan->getDomain()] = $move;
 			return LogicResult::redirect($return_url);
 		}
 
@@ -319,6 +357,8 @@ class DnsPublishBox {
 			'detected_key'   => '',
 			'detected_label' => '',
 			'prerequisite'  => '',
+			'gate'          => '',
+			'relocation_result' => null,
 			'credential_fields' => array(),
 			'credential_guide'  => null,
 			'oauth_config_fields' => array(),
@@ -337,6 +377,12 @@ class DnsPublishBox {
 		// configured where it already is, not where the deployment would prefer.
 		$vars['live_ns'] = self::liveNameservers($plan->getDomain());
 		$vars['detected_key'] = (string)DnsDriverRegistry::identifyHost($vars['live_ns']);
+
+		// A just-run relocation's outcome, stashed by handle() for one render.
+		if (isset($_SESSION['dns_relocation_result'][$plan->getDomain()])) {
+			$vars['relocation_result'] = $_SESSION['dns_relocation_result'][$plan->getDomain()];
+			unset($_SESSION['dns_relocation_result'][$plan->getDomain()]);
+		}
 		if ($vars['detected_key'] !== '') {
 			$detected_class = DnsDriverRegistry::get($vars['detected_key']);
 			$vars['detected_label'] = $detected_class ? $detected_class::getLabel() : '';
@@ -355,6 +401,7 @@ class DnsPublishBox {
 		$vars['provider_class']    = $driver_class;
 		$vars['provider_label']    = $driver_class::getLabel();
 		$vars['prerequisite']      = $driver_class::prerequisiteNote();
+		$vars['gate']              = $driver_class::apiGateNote();
 		$vars['credential_fields'] = $driver_class::credentialFields();
 		$vars['credential_guide']  = $driver_class::credentialGuide();
 		$vars['state']             = self::STATE_READY;
@@ -431,9 +478,12 @@ class DnsPublishBox {
 	 * match no driver anyway, so an over-long walk identifies nothing rather
 	 * than identifying something wrong.
 	 *
+	 * Public because the setup wizard asks the same question before deciding
+	 * what to lead with — one resolver walk, one per-request cache.
+	 *
 	 * @return string[] Empty when nothing in the chain answers.
 	 */
-	private static function liveNameservers(string $domain): array {
+	public static function liveNameservers(string $domain): array {
 		$domain = DnsRecord::normalizeName($domain);
 		if (isset(self::$ns_cache[$domain])) {
 			return self::$ns_cache[$domain];

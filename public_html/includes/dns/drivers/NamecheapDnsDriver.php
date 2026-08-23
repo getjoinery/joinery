@@ -20,6 +20,7 @@
  * BasicDNS, and it has no concept of a delegated subdomain zone: the zone is
  * always the registered domain.
  *
+ * @version 1.2 - The large-account gate is declared as apiGateNote()
  * @version 1.1 - SRV write fails closed on an unread list; a sub-host SRV is refused
  * @version 1.0
  */
@@ -53,6 +54,11 @@ class NamecheapDnsDriver extends DnsDriverBase {
 	public static function prerequisiteNote(): string {
 		return 'Namecheap only accepts API calls from allowlisted addresses. Add this server\'s public IP to '
 			. 'Profile · Tools · API Access in your Namecheap account, and make sure the domain is on BasicDNS.';
+	}
+
+	public static function apiGateNote(): string {
+		return 'Namecheap grants API access only to accounts with 20 or more domains, $50 in the account '
+			. 'balance, or $50 spent in the last two years.';
 	}
 
 	public static function credentialFields(): array {

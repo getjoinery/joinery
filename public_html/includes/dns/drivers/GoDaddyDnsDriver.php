@@ -15,6 +15,7 @@
  * therefore scoped to a single service on read and the other services are re-sent
  * on every write and delete, or publishing one would erase the rest.
  *
+ * @version 1.2 - The account-size gate is declared as apiGateNote(), not a prerequisite
  * @version 1.1 - SRV read-modify-write preserves the host's other services
  * @version 1.0
  */
@@ -39,7 +40,7 @@ class GoDaddyDnsDriver extends DnsRrsetDriverBase {
 	/** GoDaddy assigns per-zone names, e.g. ns37.domaincontrol.com. */
 	public static function nameserverSuffixes(): array { return array('domaincontrol.com'); }
 
-	public static function prerequisiteNote(): string {
+	public static function apiGateNote(): string {
 		return 'GoDaddy issues production API keys only to accounts holding at least ten domains or a '
 			. 'Discount Domain Club membership; a key outside that grants read-only access.';
 	}

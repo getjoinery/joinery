@@ -20,6 +20,8 @@
  *    disable Email Routing in the Cloudflare dashboard — rather than as a
  *    generic API failure.
  *
+ * @version 1.3 - the token field carries no help line; the guide behind its link holds the instructions
+ * @version 1.2 - zoneNameservers() reads the account's assigned pair from the zone listing
  * @version 1.1
  */
 
@@ -34,6 +36,9 @@ class CloudflareDnsDriver extends DnsDriverBase {
 	/** @var array<string,string>|null zone name => Cloudflare zone id. */
 	private $zones = null;
 
+	/** @var array<string,string[]> zone name => the account's assigned NS pair. */
+	private $zone_ns = array();
+
 	public static function getKey(): string { return 'cloudflare'; }
 	public static function getLabel(): string { return 'Cloudflare'; }
 
@@ -41,11 +46,12 @@ class CloudflareDnsDriver extends DnsDriverBase {
 	public static function nameserverSuffixes(): array { return array('ns.cloudflare.com'); }
 
 	public static function credentialFields(): array {
+		// No per-field help: the token's permission, scoping, and lifetime all
+		// live in credentialGuide(), behind the field's own "How do I do
+		// this?" link.
 		return array(
 			'api_token' => array(
 				'label'  => 'Cloudflare API token',
-				'help'   => 'Create a token with the Zone · DNS · Edit permission, scoped to this zone if you can. '
-					. 'It is used for this one publish and never stored.',
 				'secret' => true,
 			),
 		);
@@ -67,6 +73,12 @@ class CloudflareDnsDriver extends DnsDriverBase {
 			'caution'   => 'Not the Global API Key sitting next to it — that is a different credential '
 				. 'and Cloudflare will refuse the write.',
 		);
+	}
+
+	/** Cloudflare assigns each account its own pair, read from the zone listing. */
+	public function zoneNameservers(string $zone): array {
+		$this->zoneMap();
+		return $this->zone_ns[DnsRecord::normalizeName($zone)] ?? array();
 	}
 
 	public function zoneFor(string $domain): ?string {
@@ -137,6 +149,10 @@ class CloudflareDnsDriver extends DnsDriverBase {
 				$name = DnsRecord::normalizeName((string)($row['name'] ?? ''));
 				if ($name !== '' && !empty($row['id'])) {
 					$this->zones[$name] = (string)$row['id'];
+					// The account's assigned pair rides the same listing, so the
+					// relocation handover costs no extra call.
+					$this->zone_ns[$name] = array_values(array_filter(array_map('strval',
+						(array)($row['name_servers'] ?? array()))));
 				}
 			}
 			$info = (array)($body['result_info'] ?? array());

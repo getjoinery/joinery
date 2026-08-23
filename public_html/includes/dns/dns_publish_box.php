@@ -10,10 +10,18 @@
  * operator saw and confirmed on screen, so an untested driver misbehaving shows
  * up as a wrong diff to decline rather than a silent bad write.
  *
- * The box never asks anyone to move their nameservers. Configuring a domain
- * where it already is has no blast radius; moving a zone takes the website and
- * every other name with it, and is not something this platform offers.
+ * The box never performs a nameserver move itself — configuring a domain where
+ * it already is has no blast radius, and moving a zone takes the website and
+ * every other name with it. But when the domain's own host gates its API away
+ * from normal accounts (apiGateNote), "configure it where it is" is not really
+ * on offer, so the box says so and recommends the one-time move to a host
+ * whose API is open to everyone. The gated hosts are also named as such in the
+ * provider list — a fact about the vendor, not a tier label.
  *
+ * @version 1.10 - the gated-host callout mounts the guided move itself
+ *                (dns_relocation_render), handled by the box's dns_move action
+ * @version 1.9 - a gated host is called out with the move-your-DNS way out,
+ *                and marked in the provider chooser
  * @version 1.8 - renders removals: a record the plan requires gone reads as
  *                Remove, carries its own confirmation, and copies its name
  * @version 1.7 - every action label is a verb, and colour grades by what is at
@@ -27,6 +35,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+require_once(PathHelper::getIncludePath('includes/dns/dns_relocation_box.php'));
 
 /**
  * @param AdminPage $page
@@ -63,6 +72,33 @@ function dns_publish_box_render($page, array $vars, string $title = '', string $
 
 	// Where the DNS lives, stated before the action that will write to it.
 	dns_publish_box_host_line($vars);
+
+	// A gate is different in kind from a prerequisite: a prerequisite is
+	// something this operator can go and do, a gate is a qualification most
+	// never meet. So when the domain actually lives at the gated host, the
+	// honest lead is the way out: the guided move to an open-API host renders
+	// right here. A settled board gets neither — the work is done, however it
+	// was done — and a gated provider the domain does not even use gets the
+	// gate sentence alone (the mismatch line above covers the rest).
+	if (($vars['gate'] ?? '') !== '' && $vars['state'] !== DnsPublishBox::STATE_ALL_GREEN) {
+		echo '<div class="alert alert-warning">' . htmlspecialchars($vars['gate']);
+		if ($vars['detected_key'] === $vars['provider_key']) {
+			echo ' If your account qualifies, carry on below. Otherwise the lasting fix is to move this'
+				. ' domain\'s DNS — not the domain itself — to a free host whose API is open to everyone:';
+		}
+		echo '</div>';
+		if ($vars['detected_key'] === $vars['provider_key']) {
+			dns_relocation_render($page, array(
+				'domain'       => $vars['domain'],
+				'source_key'   => $vars['provider_key'],
+				'source_label' => $vars['provider_label'],
+				'form_action'  => $vars['return_url'],
+				'hidden'       => array('dns_action' => 'dns_move'),
+				'result'       => $vars['relocation_result'] ?? null,
+				'recheck_hint' => 'come back to this page',
+			));
+		}
+	}
 
 	// A prerequisite is a real blocker for this provider — say it before the
 	// action rather than letting the API fail opaquely.
@@ -500,10 +536,20 @@ function dns_publish_box_chooser($page, array $vars): void {
 			. '">Use another provider</a></p>';
 		return;
 	}
+	// A gated vendor is named as such in the list — the operator deserves to
+	// know before picking it, and it is a fact about the vendor, not a tier.
+	$options = array();
+	foreach ($vars['provider_options'] as $key => $option_label) {
+		$option_class = DnsDriverRegistry::get($key);
+		if ($option_class !== null && $option_class::apiGateNote() !== '') {
+			$option_label .= ' — large accounts only';
+		}
+		$options[$key] = $option_label;
+	}
 	$form = $page->getFormWriter('dns_provider_form', array('method' => 'GET', 'action' => $vars['return_url']));
 	echo $form->begin_form();
 	$form->dropinput('dns_provider', 'DNS provider', array(
-		'options' => $vars['provider_options'],
+		'options' => $options,
 		'value'   => $vars['provider_key'],
 	));
 	$form->submitbutton('btn_dns_provider', 'Use this provider');

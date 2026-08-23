@@ -17,7 +17,9 @@
  * publish box reads those to decide what to show without instantiating
  * anything.
  *
- * @version 1.2
+ * @version 1.4
+ * @changelog 1.4 - Added zoneNameservers(): what a registrar's nameserver setting should say for this zone, for the relocation flow's handover
+ * @changelog 1.3 - Added apiGateNote(): a vendor that opens its API only to large accounts says so, so a publish surface can be honest before the operator goes looking for a key
  * @changelog 1.2 - Added DnsRateLimitedException: a 429 is the account being limited, not this server, and carries the vendor Retry-After
  * @changelog 1.1 - Added credentialGuide(): a driver says where its credential comes from, rendered beside the field it fills
  */
@@ -122,6 +124,19 @@ interface DnsProvider {
 	 * none. Surfaced in the publish box rather than left to fail silently.
 	 */
 	public static function prerequisiteNote(): string;
+
+	/**
+	 * Who the vendor's API is open to, when that is not everyone — Namecheap
+	 * grants keys only to large accounts, for instance. '' for the normal case
+	 * of an API any account can use.
+	 *
+	 * Distinct from prerequisiteNote() because the two fail differently: a
+	 * prerequisite is something this operator can go and do, a gate is a
+	 * qualification most operators will never meet. A publish surface treats a
+	 * gated host as a reason to lead with an alternative (moving the domain's
+	 * DNS to an open host), not just as a note beside the form.
+	 */
+	public static function apiGateNote(): string;
 
 	/**
 	 * Where this provider's credential comes from: the clicks that produce it,
@@ -230,6 +245,16 @@ interface DnsProvider {
 	 * @throws DnsProviderException when unsupported or on API failure.
 	 */
 	public function deleteZone(string $zone): void;
+
+	/**
+	 * The nameservers the vendor expects this zone delegated to — what an
+	 * operator types into their registrar's nameserver setting. The vendor's
+	 * fixed set where there is one; read from the zone itself for a vendor
+	 * that assigns names per account (Cloudflare).
+	 *
+	 * @return string[] Empty when the vendor has no answer to give.
+	 */
+	public function zoneNameservers(string $zone): array;
 
 	/**
 	 * Accounts this credential reaches. One entry is the common case and is used

@@ -401,6 +401,7 @@ The static half declares capability, read before any credential exists:
 | `oauthProviderKey()` / `oauthScopes()` | The `OAuth2Provider` to consent through |
 | `credentialFields()` | What an API driver collects at the publish moment |
 | `prerequisiteNote()` | A setup step that must happen first (Namecheap's IP allowlist) — surfaced in the box rather than failing silently |
+| `apiGateNote()` | Who the vendor's API is open to, when that is not everyone (Namecheap's 20-domain/$50 gate, GoDaddy's ten-domain gate). A prerequisite is something the operator can go and do; a gate is a qualification most never meet, so a publish surface leads with an alternative — the setup wizard recommends moving the domain's DNS to an open host |
 | `credentialGuide()` | Where that credential comes from: the clicks that produce it, opened in a modal from the field itself |
 | `nameservers()` | The vendor's fixed nameserver set, where it publishes one |
 | `nameserverSuffixes()` | **How the driver is recognised.** Fragments of a nameserver name, matched as substrings. Defaults to `nameservers()`; override with the shared fragment for a vendor that assigns per-zone names, or the box can never lead with it |
@@ -409,7 +410,10 @@ The static half declares capability, read before any credential exists:
 
 The instance half is `zoneFor()`, `listRecords()`, `createRecord()`,
 `updateRecord()`, `deleteRecord()`, and optionally `createZone()`,
-`deleteZone()`, `accounts()` and `afterPublish()`.
+`deleteZone()`, `accounts()`, `afterPublish()` and `zoneNameservers()` — the
+names a registrar's nameserver setting should hold for the zone, defaulting to
+the vendor's fixed set; Cloudflare overrides it to read the account's assigned
+pair.
 
 ### Saying where the credential comes from
 
@@ -493,7 +497,8 @@ to turn off instead of reporting a generic failure.
 
 Every driver is behind the one interface, listed in the chooser with no tier
 labels and no warnings. **Live-verified: Linode and Namecheap** — between them
-they cover both credential modes and both topologies. Every other driver ships
+they cover both topologies: the platform-authoritative zone-creating host, and
+registrar-hosted DNS. Every other driver ships
 built with quirk-level unit tests but without live verification. That is a chosen
 trade, and the diff-before-write rail is what makes it safe: a driver can only
 write what the operator saw and confirmed on screen, so a real-world quirk in an
@@ -501,7 +506,7 @@ untested driver surfaces as a wrong diff to decline, never a silent bad write.
 
 | Provider | Credential |
 |---|---|
-| **Linode DNS** *(default)* | OAuth2 · `LinodeOAuthProvider` — no refresh token, two-hour access token, so ephemeral by construction |
+| **Linode DNS** *(default)* | Personal access token, scope Domains read/write — self-serve at any account size. Prerequisite: Linode serves a zone only for accounts with at least one active Linode service |
 | Google Cloud DNS | OAuth2 · `GoogleOAuthProvider`; the zone lives in a GCP project the driver selects |
 | Azure DNS | OAuth2 · `MicrosoftOAuthProvider`; the zone sits under a subscription the driver selects |
 | DigitalOcean DNS | OAuth2 · `DigitalOceanOAuthProvider` |
@@ -537,6 +542,41 @@ mismatch.
 DNS hosting is independent of where compute runs: a Cloudflare zone can hold the
 A record for a node on Linode — the record simply points at that node's IP.
 Adding VPS providers changes nothing here.
+
+## The guided move to an open host
+
+When a domain's DNS lives at a host whose API is gated (`apiGateNote()`),
+`DnsRelocation` (`includes/dns/DnsRelocation.php`) turns the honest advice —
+move your nameservers, once, to a host that automates for everyone — into a
+guided flow, rendered by `dns_relocation_render()`
+(`includes/dns/dns_relocation_box.php`) and mounted on two surfaces: the setup
+wizard's sending step (`mail_send_move` action) and the publish box's
+gated-host callout (`dns_action=dns_move`, handled in
+`DnsPublishBox::handle()`).
+
+- **Destinations** are a deliberate pair, not a capability scan:
+  `DnsRelocation::targets()` offers Linode DNS (free with any active Linode
+  service) and Cloudflare's free plan (free for anyone). Linode zones are
+  created through the driver; Cloudflare zones are created by the operator in
+  Cloudflare's own "Add a site" flow, which also shows them their assigned
+  nameserver pair — the driver reads that pair back via `zoneNameservers()`.
+- **The order is the whole design.** `seed()` creates and fills the
+  destination zone — the caller's plan plus everything the domain visibly
+  answers — before the operator's one manual step, the nameserver change at
+  their registrar. Flipping first would take the site down over an empty zone.
+- **The copy is honest about its limits.** Only guessable names are resolved
+  (apex, www, `_dmarc`, common DKIM selectors) and recreated verbatim; the
+  handover shows exactly what was copied and says plainly that an unguessed
+  subdomain did not carry over.
+- **Copied reality outranks the plan at seed time** (`seedPlan()`): an
+  existing SPF or DMARC is recreated as-is even when the plan wants a
+  different value, because two SPF records is a permanent failure and the move
+  must change nothing observable. After delegation, the ordinary diff rail is
+  where a change of value gets consented to.
+- **Nothing is persisted.** Before the nameserver change, pressing the button
+  again re-runs an idempotent seed; after it, the domain's own NS records
+  identify the new host and every surface takes its normal path. The
+  credential lives inside the one request, like every publish credential.
 
 ## Tests
 
