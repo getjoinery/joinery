@@ -6,7 +6,10 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - Runs the HTTPS step's diagnosis server-side when that step
+ *   is on screen: the step exists because the site is on plain HTTP, where the
+ *   API face correctly refuses to answer — so the page cannot fetch it itself.
  */
 
 function setup_logic(array $input): LogicResult {
@@ -368,6 +371,17 @@ function setup_logic(array $input): LogicResult {
 
 	$current_index = ($current_key === 'done') ? count($keys) : (int)array_search($current_key, $keys, true);
 
+	// The HTTPS step's live diagnosis (DNS, TLS probe, retry-timer state) —
+	// run only when its panel will actually render, since the checks talk to
+	// the network and take a few seconds. "Check again" is simply a reload of
+	// this page: every render re-runs the checks fresh.
+	$https_diagnosis = null;
+	if ($current_key === 'https' && $permission >= 10
+		&& (($statuses['https'] ?? '') !== SetupSteps::STATUS_GREEN || !empty($declined['https']))) {
+		require_once(PathHelper::getIncludePath('logic/setup_https_check_logic.php'));
+		$https_diagnosis = setup_https_diagnose();
+	}
+
 	// The done screen surfaces the scheduled-task heartbeat only when it is
 	// broken — imports, reminders, and backups all silently stall without it.
 	$heartbeat_warning = '';
@@ -398,6 +412,7 @@ function setup_logic(array $input): LogicResult {
 		'heartbeat_warning' => $heartbeat_warning,
 		'force_render_step' => $force_render_step,
 		'calendar_import_summary' => $calendar_import_summary,
+		'https_diagnosis' => $https_diagnosis,
 	), $totp_forward));
 }
 
