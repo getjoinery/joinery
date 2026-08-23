@@ -59,7 +59,6 @@ class NamecheapDnsDriver extends DnsDriverBase {
 		return array(
 			'api_user' => array(
 				'label'  => 'Namecheap username',
-				'help'   => 'The account that owns the API key.',
 				'secret' => false,
 			),
 			'api_key' => array(

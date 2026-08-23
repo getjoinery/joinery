@@ -25,6 +25,12 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.47 - sendingDnsPlan() carries the Joinery Direct pair too (self-
+ *                 gating), so the wizard's one credential pass publishes them
+ * @version 1.46 - sendingDnsPlan(): the outbound-only record slice (SPF, DKIM,
+ *                 DMARC — no MX) for the setup wizard's sending step, sharing
+ *                 sendingRecords() with dnsPlan() so the two surfaces cannot
+ *                 prescribe different SPF values for one domain
  * @version 1.45 - checkDomain() answers nothing for an IMAP-source domain: no
  *   DNS grading, no Direct identity mint, no machine-sender card for a domain
  *   this deployment merely mirrors (specs/imap_source_domain_boundaries.md)
@@ -371,6 +377,73 @@ class InboundEmailSetupCheck {
 	 * instead; this flag exists for surfaces that need to SHOW the finished shape
 	 * (what it will become), not to write it.
 	 */
+	/**
+	 * The outbound-only slice of the mail DNS shape for a domain: SPF, DKIM
+	 * (local key or the provider's own issued records), the DMARC reporting
+	 * policy, and the Joinery Direct pair (SRV + signing key — self-gating,
+	 * published only when Direct is on and something signs for the domain).
+	 * No MX, no A — nothing that would move where the domain's mail ARRIVES,
+	 * which is a consent the receiving step collects separately. This is what
+	 * the setup wizard's sending step publishes: the operator hands over a
+	 * DNS credential exactly once, so everything safe to publish at that
+	 * moment rides along.
+	 *
+	 * A domain under the protected identity shape gets an empty plan: its
+	 * records are prescribed by the protect ceremony, and the unprotected
+	 * SPF/DKIM rows below would contradict them.
+	 */
+	public function sendingDnsPlan($domain) {
+		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
+		$domain = strtolower(trim((string)$domain));
+		$plan = new DnsRecordPlan($domain, 'mailbox');
+		if ($domain === '') {
+			return $plan;
+		}
+		$model = InboundEmailDomain::GetByDomain($domain);
+		if ($this->protectedShapeApplies($model)) {
+			return $plan;
+		}
+		$this->sendingRecords($plan, $domain);
+		$fronted = $this->fronted();
+		$mx_target = $fronted ? (string)($this->topology()['mx_hostname'] ?? '') : $this->mailHostname;
+		$this->directRecords($plan, $domain, $fronted, $mx_target);
+		return $plan;
+	}
+
+	/**
+	 * The unprotected sending rows, shared by dnsPlan() and sendingDnsPlan()
+	 * so the wizard and the Setup tab can never prescribe two different SPF
+	 * values for one domain.
+	 */
+	private function sendingRecords(DnsRecordPlan $plan, string $domain): void {
+		$spf = $this->spfPlan($domain);
+		if ($spf['prescribe'] === 'record') {
+			$this->planAdd($plan, 'TXT', $domain, $spf['value'], null,
+				'SPF — authorizes ' . $spf['label'] . ' to send for ' . $domain . '.');
+		}
+
+		$dkim = $this->dkimPlan();
+		if (!empty($dkim['local'])) {
+			$local = $this->readDkimKey('/etc/opendkim/keys/' . $domain . '/mail.txt');
+			if ($local !== '') {
+				$this->planAdd($plan, 'TXT', 'mail._domainkey.' . $domain, $local, null,
+					'DKIM — matches the signing key on this server.');
+			}
+		}
+		if (!empty($dkim['provider']) && $dkim['class'] !== null) {
+			$status = $this->providerDkimStatus($dkim['class'], $domain);
+			foreach ((array)($status['records'] ?? array()) as $record) {
+				$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
+					(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
+					'DKIM — required by ' . $dkim['label'] . '.');
+			}
+		}
+
+		$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
+			'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain, null,
+			'DMARC — reporting policy, recommended once SPF and DKIM pass.');
+	}
+
 	public function dnsPlan($domain, bool $force_protected = false, bool $machine_stage = false) {
 		require_once(PathHelper::getIncludePath('includes/dns/DnsRecordPlan.php'));
 		$domain = strtolower(trim((string)$domain));
@@ -434,32 +507,7 @@ class InboundEmailSetupCheck {
 					. ' — it can send as ' . $domain . ' and pass DMARC.');
 			}
 		} else {
-			$spf = $this->spfPlan($domain);
-			if ($spf['prescribe'] === 'record') {
-				$this->planAdd($plan, 'TXT', $domain, $spf['value'], null,
-					'SPF — authorizes ' . $spf['label'] . ' to send for ' . $domain . '.');
-			}
-
-			$dkim = $this->dkimPlan();
-			if (!empty($dkim['local'])) {
-				$local = $this->readDkimKey('/etc/opendkim/keys/' . $domain . '/mail.txt');
-				if ($local !== '') {
-					$this->planAdd($plan, 'TXT', 'mail._domainkey.' . $domain, $local, null,
-						'DKIM — matches the signing key on this server.');
-				}
-			}
-			if (!empty($dkim['provider']) && $dkim['class'] !== null) {
-				$status = $this->providerDkimStatus($dkim['class'], $domain);
-				foreach ((array)($status['records'] ?? array()) as $record) {
-					$this->planAdd($plan, (string)($record['type'] ?? 'TXT'),
-						(string)($record['name'] ?? ''), (string)($record['value'] ?? ''), null,
-						'DKIM — required by ' . $dkim['label'] . '.');
-				}
-			}
-
-			$this->planAdd($plan, 'TXT', '_dmarc.' . $domain,
-				'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain, null,
-				'DMARC — reporting policy, recommended once SPF and DKIM pass.');
+			$this->sendingRecords($plan, $domain);
 		}
 
 		// Joinery Direct's capability record (docs/joinery_direct.md § Discovery).

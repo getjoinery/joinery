@@ -1518,7 +1518,25 @@
       "default": "",
       "secret": true,
       "group": "email_provider_mailgun",
-      "label": "Mailgun API key"
+      "label": "Mailgun API key",
+      "help_modal": {
+        "trigger": "How do I do this?",
+        "title": "Get a Mailgun API key",
+        "steps": [
+          {
+            "text": "Create a Mailgun account, or sign in.",
+            "url": "https://signup.mailgun.com/new/signup",
+            "url_label": "Open Mailgun signup"
+          },
+          {
+            "text": "Open your account's API keys page and create a new key.",
+            "url": "https://app.mailgun.com/settings/api_security",
+            "url_label": "Open Mailgun API keys"
+          },
+          "Copy the key — Mailgun shows it only once — and paste it here. Joinery will take care of everything automatically."
+        ],
+        "caution": "Not the webhook signing key or the public validation key that live nearby — sending needs a Mailgun API key."
+      }
     },
     {
       "name": "mailgun_domain",

@@ -6,7 +6,20 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.4
+ * @version 1.7
+ * @changelog 1.7 - Save and register also ensure the mailbox receiving-domain
+ *   row exists (domain only, no alias, no MX) — authority is what lets the
+ *   Direct signing identity mint, which puts the two Joinery Direct records
+ *   into the sending step's DNS plan.
+ * @changelog 1.6 - The sending step does the provider's dashboard errand
+ *   itself: mail_send_save derives mailgun_domain from the From address and
+ *   registers it at the provider (SendingDomainRegistrar); new actions
+ *   mail_send_register / mail_send_verify / mail_send_publish drive the DNS
+ *   stage — publish writes the sendingDnsPlan() records APPLY_ADDITIVE
+ *   through a DNS driver with a credential used once and never stored.
+ * @changelog 1.5 - mail_send_save maps the wizard's single From question
+ *   (wizard_from_address) to defaultemail and defaults an empty
+ *   defaultemailname to the owner's name.
  * @changelog 1.4 - Runs the HTTPS step's diagnosis server-side when that step
  *   is on screen: the step exists because the site is on plain HTTP, where the
  *   API face correctly refuses to answer — so the page cannot fetch it itself.
@@ -245,9 +258,31 @@ function setup_logic(array $input): LogicResult {
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		require_once(PathHelper::getIncludePath('includes/SettingsWriter.php'));
 		require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+		// The wizard asks one question about the From identity — the address —
+		// and derives the rest: defaultemail comes from the answer, and an
+		// empty defaultemailname defaults to the owner's name (site name for a
+		// nameless account). Both stay editable on the email settings page.
+		$from_address = trim((string)($input['wizard_from_address'] ?? ''));
+		if ($from_address !== '') {
+			$input['defaultemail'] = $from_address;
+			if (trim((string)$settings->get_setting('defaultemailname')) === '') {
+				$from_name = trim(trim((string)$viewer->get('usr_first_name')) . ' ' . trim((string)$viewer->get('usr_last_name')));
+				if ($from_name === '') {
+					$from_name = trim((string)$settings->get_setting('site_name'));
+				}
+				if ($from_name !== '') {
+					$input['defaultemailname'] = $from_name;
+				}
+			}
+		}
 		// Credentials arrive in this same POST, so write first, then validate
 		// the chosen service against what was just saved.
 		$service = trim((string)($input['email_service'] ?? ''));
+		// The Mailgun sending domain is the From address's domain — the wizard
+		// asks no separate question for it.
+		if ($service === 'mailgun' && $from_address !== '' && strrpos($from_address, '@') !== false) {
+			$input['mailgun_domain'] = strtolower(rtrim(substr($from_address, strrpos($from_address, '@') + 1), '.'));
+		}
 		$names = array('email_service', 'defaultemail', 'defaultemailname');
 		foreach (EmailSender::getDiscoveredProviders() as $provider_key => $provider_class) {
 			$names = array_merge($names, SettingsFieldRenderer::namesFor('email_provider_' . $provider_key, 'core'));
@@ -267,9 +302,115 @@ function setup_logic(array $input): LogicResult {
 			}
 		}
 		if ($error === '') {
+			// The provider's dashboard errand, done by the platform: register
+			// the From domain as a sending domain when the provider's API can.
+			// A failure is not fatal to the save — the DNS stage names it and
+			// offers a retry button.
+			$sending_domain = _setup_sending_domain();
+			$provider_class = EmailSender::getDiscoveredProviders()[$service] ?? null;
+			if ($sending_domain !== '' && $provider_class !== null
+					&& in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true)) {
+				_setup_ensure_receiving_domain($sending_domain);
+				$reg = $provider_class::createSendingDomain($sending_domain);
+				$_SESSION['setup_mail_send_result'] = array(
+					'registered' => (($reg['status'] ?? '') === 'ok'),
+					'register_error' => (string)($reg['error'] ?? ''),
+					'publish_summary' => '', 'publish_error' => '', 'checked_state' => '',
+				);
+			}
 			SetupSteps::invalidateSessionCache();
 			return LogicResult::redirect('/setup?step=mail_send');
 		}
+	}
+
+	// The sending step's DNS stage: three buttons against the From domain.
+	// Register re-runs the provider-side registration; verify asks the
+	// provider to re-check DNS now; publish writes the sending records through
+	// a DNS driver with a credential used once and never stored. State is
+	// always re-derived on render — nothing here trusts the POST beyond which
+	// button was pressed.
+	if (in_array($action, array('mail_send_register', 'mail_send_verify', 'mail_send_publish'), true)
+			&& $permission >= 10) {
+		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
+		$notice = array('registered' => null, 'register_error' => '',
+			'publish_summary' => '', 'publish_error' => '', 'checked_state' => '');
+		$sending_domain = _setup_sending_domain();
+		$service = EmailSender::activeServiceKey();
+		$provider_class = ($service !== '') ? (EmailSender::getDiscoveredProviders()[$service] ?? null) : null;
+		$registrar = $provider_class !== null
+			&& in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true);
+		if ($sending_domain === '' || !$registrar) {
+			return LogicResult::redirect('/setup?step=mail_send');
+		}
+
+		// Idempotent, and cheap once the row exists — run for every button so
+		// a site that reached this stage without a wizard save (or before this
+		// code existed) still becomes authoritative and gains the Direct
+		// records on its next press.
+		_setup_ensure_receiving_domain($sending_domain);
+
+		if ($action === 'mail_send_register') {
+			$reg = $provider_class::createSendingDomain($sending_domain);
+			$notice['registered'] = (($reg['status'] ?? '') === 'ok');
+			$notice['register_error'] = (string)($reg['error'] ?? '');
+		}
+
+		if ($action === 'mail_send_verify') {
+			$notice['checked_state'] = is_callable(array($provider_class, 'verifySendingDomain'))
+				? (string)$provider_class::verifySendingDomain($sending_domain)
+				: (string)$provider_class::getSendingDomainState($sending_domain);
+		}
+
+		if ($action === 'mail_send_publish') {
+			if (!class_exists('InboundEmailSetupCheck')) {
+				$notice['publish_error'] = 'Publishing needs the mailbox plugin — add the records at your DNS host instead.';
+			} else {
+				$plan = (new InboundEmailSetupCheck())->sendingDnsPlan($sending_domain);
+				if ($plan->isEmpty()) {
+					$notice['publish_error'] = 'No records to publish yet — press "Check now" and try again.';
+				} else {
+					require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
+					require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
+					$driver_class = DnsDriverRegistry::get(trim((string)($input['dns_provider'] ?? '')));
+					if ($driver_class === null) {
+						$notice['publish_error'] = 'Choose a DNS provider to publish the records.';
+					} elseif ($driver_class::credentialMode() !== DnsProvider::CREDENTIAL_API) {
+						$notice['publish_error'] = $driver_class::getLabel()
+							. ' publishes through a sign-in consent flow — use the mail Setup tab for that, or add the records yourself.';
+					} else {
+						$credential = array('account_id' => trim((string)($input['dns_account'] ?? '')));
+						$missing = false;
+						foreach ($driver_class::credentialFields() as $field => $spec) {
+							$credential[$field] = trim((string)($input['dns_cred_' . $field] ?? ''));
+							if ($credential[$field] === '' && empty($spec['optional'])
+									&& $field !== 'session_token' && $field !== 'client_ip') {
+								$missing = true;
+							}
+						}
+						if ($missing) {
+							$notice['publish_error'] = 'Enter the ' . $driver_class::getLabel() . ' credential to publish.';
+						} else {
+							$publish = DnsPublishBox::publish($driver_class, $credential, $plan,
+								array(), DnsReconciler::APPLY_ADDITIVE);
+							unset($credential);   // the only copy, gone before the response is built
+							$notice['publish_summary'] = DnsPublishBox::summarizeResults($publish);
+							if (!empty($publish['error'])) {
+								$notice['publish_error'] = (string)$publish['error'];
+							}
+							// A publish worth doing is worth checking: ask the
+							// provider to look at the fresh records right away.
+							if ($notice['publish_error'] === '' && is_callable(array($provider_class, 'verifySendingDomain'))) {
+								$notice['checked_state'] = (string)$provider_class::verifySendingDomain($sending_domain);
+							}
+						}
+					}
+				}
+			}
+		}
+
+		$_SESSION['setup_mail_send_result'] = $notice;
+		SetupSteps::invalidateSessionCache();
+		return LogicResult::redirect('/setup?step=mail_send');
 	}
 
 	// Test send goes to the acting user; success is recorded only when they
@@ -417,6 +558,37 @@ function setup_logic(array $input): LogicResult {
 }
 
 /** The key of the step after $after_key in flow order, or 'done'. */
+/**
+ * Ensure the mailbox plugin's receiving-domain row exists for the sending
+ * domain (idempotent, domain only — no alias, no MX record, so where the
+ * domain's mail arrives does not move). The row is what makes this deployment
+ * authoritative for the domain, which is what lets a Joinery Direct signing
+ * identity be minted, which is what puts the two Direct records (SRV +
+ * signing key) into the sending step's DNS plan — the operator hands over a
+ * DNS credential once, so those ride along. Without the mailbox plugin this
+ * quietly does nothing.
+ */
+function _setup_ensure_receiving_domain(string $domain): void {
+	if ($domain === '' || !class_exists('InboundEmailDomain')) {
+		return;
+	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
+	$result = mailbox_provision_domain($domain);
+	if (!empty($result['error'])) {
+		error_log('setup_logic: could not ensure receiving domain ' . $domain . ': ' . $result['error']);
+	}
+}
+
+/**
+ * Domain of the stored From address — what the sending step registers at the
+ * provider and publishes DNS for. Empty when no From address is stored yet.
+ */
+function _setup_sending_domain(): string {
+	$email = trim((string)Globalvars::get_instance()->get_setting('defaultemail'));
+	$at = strrpos($email, '@');
+	return ($at !== false) ? strtolower(rtrim(substr($email, $at + 1), '.')) : '';
+}
+
 function _setup_next_key(array $steps, string $after_key): string {
 	$found = false;
 	foreach ($steps as $step) {
