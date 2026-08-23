@@ -327,6 +327,10 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
     // user had simply overwritten seven seconds after renaming its folder.
     let mut renamed_from: std::collections::HashMap<String, String> =
         std::collections::HashMap::new();
+    // The other names each folder is known by. Only ever added to: a name a
+    // device used is a name a claim may have been filed under, and that stays
+    // true for the rest of the campaign.
+    let mut aliases = Aliases::default();
     for record in records {
         if let Record::ActorCommit {
             actor,
@@ -360,6 +364,7 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                 }
                 "rename_into" => {
                     if let Some(from) = renamed_from.remove(actor) {
+                        aliases.union(&from, path);
                         for key in under(&out, &from) {
                             let Some(mut claim) = out.remove(&key) else {
                                 continue;
@@ -369,16 +374,114 @@ pub fn last_committed(records: &[Record]) -> std::collections::BTreeMap<String, 
                             out.insert(moved, claim);
                         }
                     }
+                    supersede_aliases(&mut out, &aliases, path);
                     insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
                 _ => {
                     renamed_from.remove(actor);
+                    supersede_aliases(&mut out, &aliases, path);
                     insert_claim(&mut out, path, sha256, *size, actor, persona, *ts_ms);
                 }
             }
         }
     }
     out
+}
+
+/// The names one folder is known by, because a folder can have more than one.
+///
+/// Each device renames its own copy, and during a storm neither rename has
+/// reached the other yet, so one folder genuinely wears two names at once —
+/// `Projects (4) (8)` on the device that renamed it first and
+/// `Projects (4) (11)` on the device that renamed its own copy second. Sync
+/// settles that later; the oracle sees it while it is still true.
+///
+/// A claim can only be filed under one name. Whichever it is, a later write by
+/// the OTHER device's name for the same folder has to be recognised as landing
+/// on the same file — otherwise it supersedes nothing, and the original claim
+/// is left demanding content its own author replaced. That is run 177: reported
+/// as a lost file, for the rest of the campaign.
+#[derive(Default)]
+struct Aliases {
+    group_of: std::collections::HashMap<String, usize>,
+    groups: Vec<Vec<String>>,
+}
+
+impl Aliases {
+    /// Two names for one folder, from here on.
+    fn union(&mut self, a: &str, b: &str) {
+        let ga = self.group_of.get(a).copied();
+        let gb = self.group_of.get(b).copied();
+        match (ga, gb) {
+            (Some(x), Some(y)) if x != y => {
+                let moved = std::mem::take(&mut self.groups[y]);
+                for name in &moved {
+                    self.group_of.insert(name.clone(), x);
+                }
+                self.groups[x].extend(moved);
+            }
+            // Already the same group: nothing to join.
+            (Some(_), Some(_)) => {}
+            (Some(x), None) => {
+                self.groups[x].push(b.to_string());
+                self.group_of.insert(b.to_string(), x);
+            }
+            (None, Some(y)) => {
+                self.groups[y].push(a.to_string());
+                self.group_of.insert(a.to_string(), y);
+            }
+            (None, None) => {
+                let id = self.groups.len();
+                self.groups.push(vec![a.to_string(), b.to_string()]);
+                self.group_of.insert(a.to_string(), id);
+                self.group_of.insert(b.to_string(), id);
+            }
+        }
+    }
+
+    /// Every path that names the same place as `path`, itself excluded.
+    ///
+    /// An ancestor carries its whole subtree: renaming `Projects (4)` renames
+    /// what is inside it too, so `Projects (4)/Sub 7` is the same folder as
+    /// `Projects (4) (8)/Sub 7`. Each ancestor split is tried, longest first,
+    /// because the nearest rename is the one most likely to be the answer.
+    fn others(&self, path: &str) -> Vec<String> {
+        let mut out = Vec::new();
+        let mut cut = Some(path.len());
+        while let Some(at) = cut {
+            let (prefix, rest) = path.split_at(at);
+            let rest = rest.strip_prefix('/').unwrap_or(rest);
+            if let Some(id) = self.group_of.get(prefix) {
+                for name in &self.groups[*id] {
+                    if name == prefix {
+                        continue;
+                    }
+                    out.push(if rest.is_empty() {
+                        name.clone()
+                    } else {
+                        format!("{name}/{rest}")
+                    });
+                }
+            }
+            cut = prefix.rfind('/');
+        }
+        out
+    }
+}
+
+/// Drop any claim on this same file filed under another of its folder's names.
+fn supersede_aliases(
+    out: &mut std::collections::BTreeMap<String, Committed>,
+    aliases: &Aliases,
+    path: &str,
+) {
+    let Some(cut) = path.rfind('/') else {
+        return;
+    };
+    let (dir, name) = (&path[..cut], &path[cut + 1..]);
+    for other in aliases.others(dir) {
+        out.remove(&format!("{other}/{name}"));
+    }
 }
 
 /// Every claimed path that sits inside `dir`.
@@ -533,6 +636,68 @@ mod tests {
             !out.contains_key("Projects/doc.txt"),
             "and must not be left behind at a path that no longer exists: {keys:?}"
         );
+    }
+
+    #[test]
+    fn two_devices_renaming_one_folder_do_not_strand_each_others_claims() {
+        // Run 177, reduced. Both devices rename their own copy of a shared
+        // folder during a storm, so the one folder acquires two names, one per
+        // device -- neither of which is wrong, and sync settles it later.
+        //
+        // A claim keyed by path alone can only follow one of them. Device-b's
+        // rename carried device-a's claim off into device-b's lineage, so when
+        // device-a overwrote that very file under the name ITS OWN tree used,
+        // the write landed on a different key and superseded nothing. The
+        // stranded claim then demanded content its own author had replaced, and
+        // was reported as a lost file for the rest of the campaign.
+        let records = vec![
+            commit_by(
+                1,
+                "device-a/messy",
+                "write",
+                "Projects (4)/notes.txt",
+                Some("e3ac"),
+                10,
+            ),
+            // Device-b renames the shared folder its way.
+            commit_by(2, "device-b/messy", "rename", "Projects (4)", None, 20),
+            commit_by(
+                3,
+                "device-b/messy",
+                "rename_into",
+                "Projects (4) (8)",
+                None,
+                21,
+            ),
+            // Device-a renames the same folder its own way.
+            commit_by(4, "device-a/messy", "rename", "Projects (4)", None, 30),
+            commit_by(
+                5,
+                "device-a/messy",
+                "rename_into",
+                "Projects (4) (11)",
+                None,
+                31,
+            ),
+            // And device-a overwrites its own file, under the name it knows.
+            commit_by(
+                6,
+                "device-a/messy",
+                "write",
+                "Projects (4) (11)/notes.txt",
+                Some("1f8b"),
+                40,
+            ),
+        ];
+        let latest = last_committed(&records);
+        let held: Vec<&str> = latest.values().map(|c| c.sha256.as_str()).collect();
+        assert!(
+            !held.contains(&"e3ac"),
+            "the author replaced those bytes itself; demanding they survive \
+             reports the user's own overwrite as data loss: {:?}",
+            latest.keys().collect::<Vec<_>>()
+        );
+        assert_eq!(held, vec!["1f8b"], "one file, one claim, the last content");
     }
 
     #[test]

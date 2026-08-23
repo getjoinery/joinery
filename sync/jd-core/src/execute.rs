@@ -1932,6 +1932,45 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
 // Structure
 // ---------------------------------------------------------------------------
 
+/// Is that name held by something this batch is already about to move off it?
+///
+/// The refusal itself cannot say. `name_taken` means the server has something
+/// there, and the useful question is whether this device already knows what and
+/// has decided it is leaving.
+///
+/// It nearly always does, when it does at all. Folders are created before
+/// anything is moved -- a child cannot be created before its parent exists --
+/// so a batch that both renames a folder and builds a new one under its old
+/// name attempts them in exactly the order that collides. The whole plan is
+/// journaled before any of it runs, so the rename is sitting in the queue at
+/// the moment the create is refused.
+///
+/// Waiting costs one pass. Stepping around it costs the user a conflict name,
+/// on every device, permanently, for a collision that was about to resolve
+/// itself.
+fn held_by_a_rename_this_device_owes(
+    env: &ExecEnv,
+    name: &str,
+    parent: Option<i64>,
+) -> Result<bool, ExecError> {
+    let holders: Vec<EntityId> = env
+        .store
+        .children_of(parent)?
+        .into_iter()
+        .filter(|e| e.remote.name == name && !e.remote_deleted)
+        .map(|e| e.id)
+        .collect();
+    if holders.is_empty() {
+        return Ok(false);
+    }
+    // Only the operations that change a name ON THE SERVER. A local move
+    // rearranges this disk and leaves the server calling it exactly what it
+    // calls it now, so waiting for one would be waiting for nothing.
+    Ok(env.store.queued_ops()?.iter().any(|op| {
+        holders.contains(&op.entity) && matches!(op.kind.as_str(), "move_remote" | "park_remote")
+    }))
+}
+
 fn create_remote_folder(
     env: &ExecEnv,
     op: &Op,
@@ -1994,6 +2033,22 @@ fn create_remote_folder(
         };
         match env.api.action_idempotent("drive_folder_create", body, &key) {
             Ok(out) => break out,
+            // A name this device can account for is not a name to step around.
+            // The whole case for landing beside an occupant is that nothing in
+            // this store can see it, so no amount of re-planning learns
+            // anything new. When the holder IS tracked here and is on its way
+            // to another name, the refusal is temporary and the answer is to
+            // wait: renaming around it would give the user a conflict name for
+            // a collision that resolves itself moments later, permanently, on
+            // every device.
+            Err(e)
+                if e.name_taken()
+                    && held_by_a_rename_this_device_owes(env, &wanted, placement.parent)? =>
+            {
+                return Ok(OpOutcome::Retry(
+                    "the name is spoken for by something this device is renaming".into(),
+                ));
+            }
             Err(e) if e.name_taken() && attempt < 1000 => {
                 attempt += 1;
                 wanted = (env.conflict_name)(&placement.name, attempt);

@@ -45,8 +45,10 @@ pub type StoreResult<T> = Result<T, StoreError>;
 
 /// Where an operation has got to. The three states exist to make the crash
 /// window explicit: anything found `InFlight` at startup was interrupted
-/// mid-act, and is re-derived rather than blindly retried — the server may
-/// already have applied it.
+/// mid-act, with nobody left who knows how far it got. Recovery puts it back on
+/// the queue and runs it again, which is what its idempotency key and the
+/// server's replay cache are for -- running it is how it finds out whether the
+/// server already did it.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum OpState {
     Queued,
