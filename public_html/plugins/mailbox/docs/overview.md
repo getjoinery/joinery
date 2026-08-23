@@ -2506,7 +2506,10 @@ an embedded stylesheet contributes no lexemes and an `<a href>` indexes only its
 link text. The expression lives once in `MailboxService::FULLTEXT_SQL` and the
 migration builds the index **from that constant** — the index serves the query
 only while the two match byte for byte, and a silently-unused index is
-indistinguishable from a slow one. A mailbox whose IMAP feed has discovered
+indistinguishable from a slow one. Each column in the expression is
+`left()`-capped (250 KB per body) because a `tsvector` has a hard 1 MiB limit
+and the index is evaluated on INSERT — uncapped, a message with more text than
+that is not merely unsearchable but **unstorable**, failing the insert itself. A mailbox whose IMAP feed has discovered
 folders also lists them **indented under the selected mailbox** (an "All Mail"
 root for the folder-unfiltered view, then each tracked folder); see the Sync
 subsection for how membership drives folder contents.
@@ -4181,6 +4184,25 @@ Progress is `mir_processed` against `mir_total_entries`, advanced by the importe
 one atomic `UPDATE` per batch. Every write to a live run is a targeted column update
 rather than a model save, because the counters move underneath any model instance held
 for more than an instant.
+
+**Every entry is time-boxed.** `importBatch()` arms a SIGALRM watchdog
+(`MailArchiveImporter::ENTRY_TIMEOUT_SECONDS`, 300s) around each entry, so a message
+that sends a parser into a loop becomes one failed entry with a reason rather than a
+cron worker pinned at 100% CPU holding the task's "already running" lock. The guard is
+CLI-only by nature (pcntl does not exist under FPM), which matches where batches run.
+Raw MIME parsing itself goes through core `MimeParse::parseMessage()`, which refuses
+the one input shape known to hang the Horde parser — a declared boundary quoted
+mid-line in the body — with `MimeParseHazardException`; the body walk then falls back
+to the legacy splitter and the message still imports.
+
+**The page shows when the next batch lands.** The import panel's poll carries
+`next_batch` from `MailImportService::nextBatch()`: a countdown to the runner's next
+pass (from the cron runner's own measured tick spacing,
+`scheduled_tasks_cron_observed_interval`, plus its heartbeat) and how many messages
+that pass takes (`mailbox_import_batch_size`, capped by what remains). When the
+import task has been silent far longer than its cadence while a run is active, the
+page reports the worker as stalled instead of counting down to a batch that will not
+come.
 
 ### The run record
 

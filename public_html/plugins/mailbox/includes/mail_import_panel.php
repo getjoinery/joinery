@@ -23,7 +23,10 @@
  * platform's resumable chunk transport under the mail_import_archive upload
  * purpose, so its size is not bounded by any single-request limit.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - a moving run shows a live countdown to the worker's next
+ *   pass and how many messages it takes, from the status action's next_batch;
+ *   a worker that has gone silent is called out instead of counted down to.
  * @changelog 1.4 - a finished run with something worth checking says so on its
  *   own row; a clean one stays a single line.
  */
@@ -145,6 +148,10 @@ function mailbox_render_import_panel($page, array $vars): void {
 	echo '</div>';
 
 	echo '<div id="mail-import-feedback" class="jy-mt-2" role="status" aria-live="polite"></div>';
+	// Filled by the script while a run is moving: the countdown to the next
+	// batch. Empty markup here on purpose — the numbers it needs (the runner's
+	// cadence) are the status action's to answer, not this render's.
+	echo '<div id="mail-import-next" class="jy-mt-2" aria-live="polite"></div>';
 	echo '<div id="mail-import-runs" class="jy-mt-3">' . mailbox_import_runs_html($runs) . '</div>';
 
 	mailbox_import_panel_script();
@@ -307,7 +314,55 @@ function mailbox_import_panel_script(): void {
 	var attentionBox = document.getElementById('mail-import-attention');
 	var startBox = document.getElementById('mail-import-start');
 	var busyBox = document.getElementById('mail-import-busy');
+	var nextBox = document.getElementById('mail-import-next');
 	var polling = null;
+
+	// The countdown to the worker's next pass. Each poll re-anchors the
+	// deadline from the server's seconds_until (the server knows the runner's
+	// cadence; the browser only keeps the seconds ticking between polls), and
+	// a one-second ticker repaints it. Shown only while a run is moving.
+	var nextInfo = null;      // last next_batch payload from the status action
+	var nextDeadline = null;  // ms epoch the countdown runs to
+	var movingRun = null;     // the busy run while it is queued/scanning/importing
+	var ticker = null;
+
+	function renderNext() {
+		if (!nextBox) { return; }
+		if (!movingRun || !nextInfo) {
+			nextBox.innerHTML = '';
+			return;
+		}
+		if (nextInfo.stalled_seconds > 0) {
+			nextBox.innerHTML = '<div class="jy-callout jy-callout-warning">'
+				+ 'The import worker has not reported for '
+				+ Math.round(nextInfo.stalled_seconds / 60) + ' minutes. The import is safe '
+				+ 'and resumes where it left off, but nothing moves until an administrator '
+				+ 'looks at the worker.</div>';
+			return;
+		}
+		if (nextDeadline === null) {
+			nextBox.innerHTML = '';
+			return;
+		}
+		var left = Math.max(0, Math.round((nextDeadline - Date.now()) / 1000));
+		var mm = Math.floor(left / 60);
+		var ss = ('0' + (left % 60)).slice(-2);
+		var clock = '<strong>' + mm + ':' + ss + '</strong>';
+
+		var text;
+		if (movingRun.state === 'importing') {
+			var remaining = Math.max(0, (movingRun.total || 0) - (movingRun.processed || 0));
+			var size = Math.min(nextInfo.batch_size, remaining || nextInfo.batch_size);
+			text = left > 0
+				? 'Next batch — up to ' + size.toLocaleString() + ' messages — starts in ' + clock + '.'
+				: 'Next batch — up to ' + size.toLocaleString() + ' messages — is due now.';
+		} else {
+			text = left > 0
+				? 'The next pass starts in ' + clock + '.'
+				: 'The next pass is due now.';
+		}
+		nextBox.innerHTML = '<p class="jy-muted">' + text + '</p>';
+	}
 
 	// Calls go through the shared transport (window.joineryApi), which owns the
 	// CSRF token and its cookie-first lookup. The panel's own callers read the
@@ -525,10 +580,26 @@ function mailbox_import_panel_script(): void {
 		return api('mail_import_status', {}).then(function (j) {
 			var runs = (j && j.data && j.data.runs) || [];
 			render(runs);
-			renderStart((j && j.data && j.data.busy_run) || null);
+			var busy = (j && j.data && j.data.busy_run) || null;
+			renderStart(busy);
 			var moving = runs.some(function (r) {
 				return ['queued', 'scanning', 'importing'].indexOf(r.state) !== -1;
 			});
+
+			// Re-anchor the countdown from this poll's answer.
+			movingRun = (busy && ['queued', 'scanning', 'importing'].indexOf(busy.state) !== -1)
+				? busy : null;
+			nextInfo = (j && j.data && j.data.next_batch) || null;
+			nextDeadline = (nextInfo && typeof nextInfo.seconds_until === 'number')
+				? Date.now() + nextInfo.seconds_until * 1000 : null;
+			if (movingRun && !ticker) {
+				ticker = setInterval(renderNext, 1000);
+			} else if (!movingRun && ticker) {
+				clearInterval(ticker);
+				ticker = null;
+			}
+			renderNext();
+
 			if (moving && !polling) {
 				polling = setInterval(refresh, 4000);
 			} else if (!moving && polling) {

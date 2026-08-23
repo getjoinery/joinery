@@ -14,7 +14,10 @@
  *
  * See specs/mail_archive_import.md § 10.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - nextBatch(): when the next batch lands and how big it is,
+ *   from the runner's own observed cadence — what the page's countdown shows —
+ *   plus a stall verdict when the worker has not reported for too long.
  * @changelog 1.3 - startRun refuses an archive the disk cannot hold, naming the
  *   numbers, while the user is still there to be told.
  * @changelog 1.2 - describe() carries an `attention` block for a finished run:
@@ -231,6 +234,73 @@ class MailImportService {
 			return null;
 		}
 		return null;
+	}
+
+	/**
+	 * When the next import batch lands and how big it is — what the page's
+	 * countdown shows next to a moving run.
+	 *
+	 * The prediction needs no configuration: the cron runner measures its own
+	 * tick spacing (scheduled_tasks_cron_observed_interval) and stamps a
+	 * heartbeat at the start of every pass, so the next pass is the heartbeat
+	 * plus the spacing — folded forward with a modulo so a poll landing after a
+	 * missed tick still counts down to the tick after rather than into the past.
+	 *
+	 * Also answers "has the worker stopped?": the import task updates its own
+	 * last-run time at the end of every pass, so that time falling far behind a
+	 * heartbeat that is still fresh means a pass started and never finished — a
+	 * pinned process — and a countdown promising a batch that will never come
+	 * would be worse than no countdown. The page shows the stall instead.
+	 */
+	public static function nextBatch(): array {
+		$settings = Globalvars::get_instance();
+
+		require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/RunMailImports.php'));
+		$batch = intval($settings->get_setting('mailbox_import_batch_size'));
+
+		$interval = intval($settings->get_setting('scheduled_tasks_cron_observed_interval')) ?: 300;
+		$seconds_until = null;
+		$heartbeat = (string)$settings->get_setting('scheduled_tasks_last_cron_run');
+		$hb_time = $heartbeat !== '' ? strtotime($heartbeat) : false;
+		if ($hb_time !== false) {
+			$since = max(0, time() - $hb_time);
+			$seconds_until = $interval - ($since % $interval);
+		}
+
+		$stalled_seconds = 0;
+		try {
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"SELECT extract(epoch FROM now() - sct_last_run_time)::int,
+				        COALESCE(sct_task_config, '')
+				 FROM sct_scheduled_tasks
+				 WHERE sct_task_class = 'RunMailImports' AND sct_delete_time IS NULL LIMIT 1");
+			$stmt->execute();
+			$row = $stmt->fetch(PDO::FETCH_NUM);
+			if ($row) {
+				$config = json_decode((string)$row[1], true);
+				if (is_array($config) && intval($config['batch_size'] ?? 0) > 0) {
+					$batch = intval($config['batch_size']);
+				}
+				// The task reports at the end of every pass even when idle, so
+				// silence much longer than the batch cadence means a pass is
+				// pinned mid-batch, not that there was nothing to do.
+				$quiet = intval($row[0]);
+				$threshold = max(3 * $interval, RunMailImports::STALE_CLAIM_SECONDS);
+				if ($quiet > $threshold) {
+					$stalled_seconds = $quiet;
+				}
+			}
+		} catch (Throwable $e) {
+			// Unanswerable is not stalled; the countdown alone is still useful.
+		}
+
+		return array(
+			'batch_size'      => $batch > 0 ? $batch : RunMailImports::DEFAULT_BATCH_SIZE,
+			'interval'        => $interval,
+			'seconds_until'   => $seconds_until,
+			'stalled_seconds' => $stalled_seconds,
+		);
 	}
 
 	/**

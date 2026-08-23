@@ -90,6 +90,12 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.36
+ * @changelog 1.36 - every raw MIME parse goes through MimeParse (a message
+ *   quoting its own boundary mid-line hangs Horde's parser; observed pinning
+ *   the import cron worker for 8 hours), and toUtf8 delegates to the shared
+ *   DocumentText ladder so a sender-declared charset PHP does not recognise
+ *   degrades the conversion instead of failing the whole message
  * @version 1.35
  * @changelog 1.35 - the spam-held store path defers (75) on a seal-target
  *   refusal like every other path, instead of reporting delivery for a message
@@ -1478,9 +1484,7 @@ class InboundEmailRouter {
 	 * @return Horde_Mime_Part[]
 	 */
 	public function enumerateNonTextParts(string $raw_email): array {
-		require_once(PathHelper::getComposerAutoloadPath());
-
-		$message = Horde_Mime_Part::parseMessage($raw_email);
+		$message = MimeParse::parseMessage($raw_email);
 
 		$bodyPlainId = null; $bodyHtmlId = null; $parts = array();
 		foreach ($message->partIterator() as $part) {
@@ -2982,8 +2986,7 @@ class InboundEmailRouter {
 	 */
 	public function extractBodies($raw_email, $parsed) {
 		try {
-			require_once(PathHelper::getComposerAutoloadPath());
-			$message = Horde_Mime_Part::parseMessage($raw_email);
+			$message = MimeParse::parseMessage($raw_email);
 
 			$result = ['plain' => '', 'html' => ''];
 			foreach ($message->partIterator() as $part) {
@@ -3160,13 +3163,15 @@ class InboundEmailRouter {
 		if ($text === '' || $text === null) {
 			return '';
 		}
-		if (!function_exists('mb_convert_encoding')) {
-			return $text;
-		}
-		$charset = $charset !== '' ? $charset : 'UTF-8';
-		// mb_convert_encoding tolerates unknown charsets by falling back to UTF-8
-		$converted = @mb_convert_encoding($text, 'UTF-8', $charset);
-		return $converted !== false ? $converted : $text;
+		// DocumentText::toUtf8 is the platform's one answer to "make these
+		// sender-authored bytes valid UTF-8". Senders declare charsets PHP has
+		// never heard of (KS_C_5601-1987, WINDOWS-1256, a literal "charset=US-
+		// ASCII"), and on PHP 8 an unknown name makes mb_convert_encoding THROW
+		// — @ silences warnings, not ValueError — which was failing whole
+		// messages whose raw bytes were fine. The shared ladder catches both
+		// converters, falls back to detection, and always returns usable text;
+		// the pristine original is preserved in iem_raw_message regardless.
+		return DocumentText::toUtf8((string)$text, (string)$charset);
 	}
 
 	/**
