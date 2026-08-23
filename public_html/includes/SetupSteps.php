@@ -32,7 +32,13 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.4
+ * @version 1.6
+ * @changelog 1.6 - The https step speaks plainly: "Secure connection", no
+ *   protocol names in the title or copy.
+ * @changelog 1.5 - New core step: 'https' (site scope, order 5) — the secure
+ *   connection gate, since passkeys and the personal encryption key only
+ *   exist in secure contexts. Green when the request arrives over HTTPS;
+ *   declinable for deliberately HTTP-only deployments.
  */
 
 class SetupSteps {
@@ -326,6 +332,52 @@ class SetupSteps {
 					$ok = $ok && trim((string)Globalvars::get_instance()->get_setting('site_name')) !== '';
 				}
 				return $ok ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+			},
+		));
+
+		// The site's canonical hostname, cheap enough for register-time
+		// closures: webDir when configured, else the request host.
+		$https_domain = function (): string {
+			$web = trim((string)Globalvars::get_instance()->get_setting('webDir'));
+			$host = $web !== ''
+				? preg_replace('#^https?://#', '', rtrim($web, '/'))
+				: (string)($_SERVER['HTTP_HOST'] ?? '');
+			$host = preg_replace('/:\d+$/', '', (string)$host);
+			return strtolower(trim($host));
+		};
+		// Green means "this very request arrived encrypted" — the one check
+		// that is true on every topology (direct TLS and terminated-in-front
+		// alike) and costs nothing. The expensive diagnosis (DNS, probe) runs
+		// only when the step's panel renders (setup_logic → setup_https_diagnose).
+		$https_secure = function (?User $viewer): string {
+			return LibraryFunctions::isSecure() ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
+		};
+
+		self::register('https', array(
+			'title' => 'Secure connection',
+			'scope' => 'site',
+			'order' => 5,
+			'copy'  => function (?User $viewer): string {
+				if (LibraryFunctions::isSecure()) {
+					return 'Your connection to this site is secure — the padlock is on in your browser, and everything you type here is protected.';
+				}
+				return "Your connection to this site isn't secure yet: anything typed here — passwords included — could be read along the way, and browsers keep some sign-in features switched off until this is fixed. It's usually automatic once your web address points at this server.";
+			},
+			'render_file' => 'includes/setup_steps/https.php',
+			'dismiss_line' => "The site's connection is not secure.",
+			'decision' => 'site',
+			// A host that can never hold a certificate has nothing to set up here.
+			'active' => function (?User $viewer) use ($https_domain): bool {
+				$domain = $https_domain();
+				return $domain !== '' && $domain !== 'localhost' && !filter_var($domain, FILTER_VALIDATE_IP);
+			},
+			'real_status' => $https_secure,
+			'status' => function (?User $viewer) use ($https_secure): string {
+				if (call_user_func($https_secure, $viewer) === SetupSteps::STATUS_GREEN) {
+					return SetupSteps::STATUS_GREEN;
+				}
+				return SetupSteps::hasDecision('https', NULL)
+					? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_NONE;
 			},
 		));
 

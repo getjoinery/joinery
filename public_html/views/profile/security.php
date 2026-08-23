@@ -271,9 +271,11 @@
 
                 <div class="jy-mt-2 d-none" id="passkey-password-row">
                     <label for="passkey-current-password">Confirm your password to add your first passkey</label>
-                    <input type="password" id="passkey-current-password" autocomplete="current-password">
-                    <button type="button" class="btn btn-primary" id="passkey-password-continue">Continue</button>
-                    <button type="button" class="btn btn-secondary" id="passkey-password-cancel">Cancel</button>
+                    <input type="password" id="passkey-current-password" autocomplete="current-password" class="form-control">
+                    <div class="jy-mt-2">
+                        <button type="button" class="btn btn-primary" id="passkey-password-continue">Continue</button>
+                        <button type="button" class="btn btn-secondary" id="passkey-password-cancel">Cancel</button>
+                    </div>
                 </div>
 
                 <button type="button" class="btn btn-primary jy-mt-2" id="passkey-add-btn">Add a Passkey</button>

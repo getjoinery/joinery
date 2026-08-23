@@ -6,7 +6,13 @@
  * (start_enable / confirm_enable). Included by views/setup.php with $page,
  * $page_vars, $viewer, $settings, $next_key in scope.
  *
- * @version 1.0
+ * @version 1.2
+ * @changelog 1.2 - The insecure-context hint names the Secure connection step
+ *   instead of protocol jargon.
+ * @changelog 1.1 - Password-confirm input uses the jy-ui form-control style;
+ *   when the passkey ceremony is unavailable the password row hides and the
+ *   hint distinguishes an insecure (non-HTTPS) context from a browser that
+ *   lacks WebAuthn.
  */
 require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 
@@ -70,7 +76,7 @@ $totp_backup_codes = $page_vars['totp_backup_codes'] ?? array();
 <?php if ($setup_has_password) { ?>
 		<div id="setup-pk-password-row">
 			<label for="setup-pk-password">Confirm your password to add your first passkey</label>
-			<input type="password" id="setup-pk-password" autocomplete="current-password" class="jy-w-full">
+			<input type="password" id="setup-pk-password" autocomplete="current-password" class="form-control">
 		</div>
 <?php } ?>
 <?php } ?>
@@ -122,7 +128,11 @@ document.addEventListener('DOMContentLoaded', function () {
 	if (!btn) { return; }
 	if (!window.JoineryPasskeys || !JoineryPasskeys.isSupported()) {
 		btn.disabled = true;
-		hint.textContent = 'This browser does not support passkeys — use the authenticator app below.';
+		var pwRow = document.getElementById('setup-pk-password-row');
+		if (pwRow) { pwRow.style.display = 'none'; }
+		hint.textContent = window.isSecureContext
+			? 'This browser does not support passkeys — use the authenticator app below.'
+			: 'Passkeys only work on the secure version of the site — finish the "Secure connection" step first, or use the authenticator app below.';
 		return;
 	}
 	btn.addEventListener('click', async function () {
