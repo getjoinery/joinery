@@ -6,7 +6,13 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
- * @version 1.9
+ * @version 2.0
+ * @changelog 2.0 - Email is one step, sending and receiving: the save also
+ *   provisions the owner's mailbox from the From address (domain row, store
+ *   alias, grant — the one address question is the whole consent), the DNS
+ *   actions publish the FULL mail plan (MX and the receiving stack included),
+ *   and Refresh re-grades the receiving domain's verdict alongside the
+ *   provider check. The separate receiving step no longer exists.
  * @changelog 1.9 - A successful move persists as dns_move_pending (domain,
  *   target, nameservers, copied records) so the handover survives reloads
  *   while delegation propagates; mail_send_move_cancel forgets it.
@@ -313,10 +319,13 @@ function setup_logic(array $input): LogicResult {
 			// A failure is not fatal to the save — the DNS stage names it and
 			// offers a retry button.
 			$sending_domain = _setup_sending_domain();
+			// The address is also the owner's mailbox: domain row, store alias
+			// and grant, provisioned now so the DNS published next routes mail
+			// that has somewhere to land. Every provider, registrar or not.
+			_setup_ensure_receiving_mailbox($viewer);
 			$provider_class = EmailSender::getDiscoveredProviders()[$service] ?? null;
 			if ($sending_domain !== '' && $provider_class !== null
 					&& in_array('SendingDomainRegistrar', class_implements($provider_class) ?: array(), true)) {
-				_setup_ensure_receiving_domain($sending_domain);
 				$reg = $provider_class::createSendingDomain($sending_domain);
 				$_SESSION['setup_mail_send_result'] = array(
 					'registered' => (($reg['status'] ?? '') === 'ok'),
@@ -349,11 +358,11 @@ function setup_logic(array $input): LogicResult {
 			return LogicResult::redirect('/setup?step=mail_send');
 		}
 
-		// Idempotent, and cheap once the row exists — run for every button so
+		// Idempotent, and cheap once the rows exist — run for every button so
 		// a site that reached this stage without a wizard save (or before this
-		// code existed) still becomes authoritative and gains the Direct
+		// code existed) still gains the mailbox and, with it, the Direct
 		// records on its next press.
-		_setup_ensure_receiving_domain($sending_domain);
+		_setup_ensure_receiving_mailbox($viewer);
 
 		if ($action === 'mail_send_register') {
 			$reg = $provider_class::createSendingDomain($sending_domain);
@@ -365,15 +374,18 @@ function setup_logic(array $input): LogicResult {
 			$notice['checked_state'] = is_callable(array($provider_class, 'verifySendingDomain'))
 				? (string)$provider_class::verifySendingDomain($sending_domain)
 				: (string)$provider_class::getSendingDomainState($sending_domain);
+			// One Refresh answers for the whole step: the receiving verdict
+			// (MX and friends) is re-graded now, not left to the daily pass.
+			_setup_refresh_receiving_verdict($sending_domain);
 		}
 
 		if ($action === 'mail_send_publish') {
 			if (!class_exists('InboundEmailSetupCheck')) {
 				$notice['publish_error'] = 'Publishing needs the mailbox plugin — add the records at your DNS host instead.';
 			} else {
-				$plan = (new InboundEmailSetupCheck())->sendingDnsPlan($sending_domain);
-				if ($plan->isEmpty()) {
-					$notice['publish_error'] = 'No records to publish yet — press "Check now" and try again.';
+				$plan = _setup_wizard_dns_plan($sending_domain);
+				if ($plan === null || $plan->isEmpty()) {
+					$notice['publish_error'] = 'No records to publish yet — press Refresh and try again.';
 				} else {
 					require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
 					require_once(PathHelper::getIncludePath('includes/dns/DnsReconciler.php'));
@@ -440,9 +452,8 @@ function setup_logic(array $input): LogicResult {
 					$notice['move'] = array('error' => 'Enter the ' . $target_class::getLabel()
 						. ' credential to set up your DNS there.');
 				} else {
-					$own_plan = class_exists('InboundEmailSetupCheck')
-						? (new InboundEmailSetupCheck())->sendingDnsPlan($sending_domain)
-						: new DnsRecordPlan($sending_domain, 'setup_wizard');
+					$own_plan = _setup_wizard_dns_plan($sending_domain)
+						?? new DnsRecordPlan($sending_domain, 'setup_wizard');
 					$move = DnsRelocation::seed($target_class, $credential, $sending_domain, $own_plan);
 					unset($credential);   // the only copy, gone before the response is built
 					$move['target'] = $target;
@@ -645,6 +656,83 @@ function _setup_ensure_receiving_domain(string $domain): void {
 	if (!empty($result['error'])) {
 		error_log('setup_logic: could not ensure receiving domain ' . $domain . ': ' . $result['error']);
 	}
+}
+
+/**
+ * Ensure the owner's mailbox exists for the stored From address: the domain
+ * row, the store-mode alias, and the grant, in one idempotent call (grants
+ * are added by union, so nobody's existing access narrows). The wizard's one
+ * address question is the whole receiving consent — mail to that address
+ * arrives at this site — so the mailbox switch flips on with it. Quietly
+ * nothing without the mailbox plugin or a stored From address.
+ */
+function _setup_ensure_receiving_mailbox(User $viewer): void {
+	$email = trim((string)Globalvars::get_instance()->get_setting('defaultemail'));
+	$at = strrpos($email, '@');
+	if ($at === false || !class_exists('InboundEmailDomain')) {
+		return;
+	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/provisioning.php'));
+	$result = mailbox_provision_mailbox(
+		strtolower(rtrim(substr($email, $at + 1), '.')),
+		substr($email, 0, $at),
+		(int)$viewer->key
+	);
+	if (!empty($result['error'])) {
+		error_log('setup_logic: could not ensure the mailbox for ' . $email . ': ' . $result['error']);
+		return;
+	}
+	if ((string)Globalvars::get_instance()->get_setting('mailbox_enabled') !== '1') {
+		Setting::put('mailbox_enabled', '1');
+	}
+}
+
+/**
+ * The wizard's DNS plan for the mail domain: the FULL mail shape — MX and
+ * the receiving stack included — because the wizard sets up email as one
+ * thing and the operator hands over a DNS credential exactly once. The
+ * outbound-only slice remains for a domain that cannot receive here: no
+ * enabled receiving row, or an IMAP source whose mail arrives by pull.
+ * Null without the mailbox plugin.
+ */
+function _setup_wizard_dns_plan(string $domain): ?DnsRecordPlan {
+	if ($domain === '' || !class_exists('InboundEmailSetupCheck')) {
+		return null;
+	}
+	$checker = new InboundEmailSetupCheck();
+	$model = InboundEmailDomain::GetByDomain($domain);
+	if ($model && $model->get('ied_is_enabled') && !$model->get('ied_is_imap_source')) {
+		return $checker->dnsPlan($domain);
+	}
+	return $checker->sendingDnsPlan($domain);
+}
+
+/**
+ * Re-grade the receiving domain's DNS verdict now — the same check entry
+ * point and the same grading rules as the daily CheckDomainSetup pass — so
+ * one Refresh answers for arriving mail as well as for the provider.
+ */
+function _setup_refresh_receiving_verdict(string $domain): void {
+	if ($domain === '' || !class_exists('InboundEmailSetupCheck')) {
+		return;
+	}
+	$model = InboundEmailDomain::GetByDomain($domain);
+	if (!$model || $model->get('ied_is_imap_source')) {
+		return;
+	}
+	require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/CheckDomainSetup.php'));
+	try {
+		$status = CheckDomainSetup::verdictFor((new InboundEmailSetupCheck())->runDomainChecks($domain));
+	} catch (Throwable $e) {
+		return;
+	}
+	// Nothing evaluable is no new information — keep the standing verdict.
+	if ($status === 'unknown' && (string)$model->get('ied_setup_status') !== '') {
+		return;
+	}
+	$model->set('ied_setup_status', $status);
+	$model->set('ied_setup_checked_time', gmdate('Y-m-d H:i:s'));
+	$model->save();
 }
 
 /**

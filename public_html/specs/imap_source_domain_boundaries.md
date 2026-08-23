@@ -52,7 +52,7 @@ Where a consumer needs the distinction, it asks the model — not a scattered `i
 | `plugins/mailbox/includes/receive_mode.php:66-72` `mailbox_receive_mode()` | has the operator decided a receiving topology? | counts gmail.com → reports `direct` | exclude IMAP source |
 | `plugins/mailbox/includes/MailboxDkimSigner.php:66-79, 129-142` `standardFilesystemSigner()` | do we sign for this domain? | error_log "gmail.com leaving UNSIGNED" every relay-fronted send | return null for IMAP source, no log |
 | `includes/OutboundTransport.php:79-137` `forHostedAlias()` | may platform egress carry this From? | falls through when feed disabled | refuse IMAP source (§5) |
-| `plugins/mailbox/includes/bootstrap.php:383-411` `mail_receive` status | is receiving set up? | permanently amber | connected-account arm (§6) |
+| `includes/SetupSteps.php` `mail_send` (Email step) status, receiving arm | is receiving set up? | permanently amber | connected-account arm (§6) |
 
 Already correct, no change: `RelayMapExporter.php:108-114`, `FleetClient.php:88-97`, `protect_identity.php:208-210`, `tasks/CheckDomainSetup.php:48-54`, `InboundEmailSetupCheck.php:2400-2412` (relay cutover), `mailbox_setup_scope.php` / `mailbox_setup_hints.php` (IMAP branches), `admin_mailbox_setup_logic.php:462-465` (domain picker).
 
@@ -80,11 +80,11 @@ Already correct, no change: `RelayMapExporter.php:108-114`, `FleetClient.php:88-
 
 ## 6. Work item C — the setup wizard accepts a connected account as done
 
-`mail_receive` (`plugins/mailbox/includes/bootstrap.php:383-411`) waits for `ied_setup_status = 'ok'`, which `CheckDomainSetup` deliberately never writes for IMAP sources — permanent amber, "waiting for DNS" against a working Gmail mailbox, and no `decision` key so it cannot be declined.
+The Email step's receiving arm (`includes/SetupSteps.php`, `mail_send` status) waits for `ied_setup_status = 'ok'`, which `CheckDomainSetup` deliberately never writes for IMAP sources — permanent amber, "waiting for DNS" against a working Gmail mailbox, and no `decision` key so it cannot be declined.
 
 1. **Status**: green when every enabled store alias is either on a domain with `ied_setup_status = 'ok'` **or** on an IMAP-source domain whose bound feed is enabled. (A connected account that is syncing *is* the receiving arrangement.)
-2. **Rendering** (`includes/setup_steps/mail_receive.php:50-70`): an IMAP-source mailbox row reads "connected account" with a green dot when its feed is enabled, "connection paused" when not — never "waiting for DNS". The DNS-plan block already skips IMAP sources; the label catches up.
-3. **Copy**: the step description and the dismissal `dismiss_line` ("This site has no mailbox of its own yet") acknowledge the connected-account arrangement instead of denying it exists.
+2. **Rendering** (`includes/setup_steps/mail_send.php`, the prove stage's receiving checklist): an IMAP-source mailbox row reads "connected account" with a green dot when its feed is enabled, "connection paused" when not — never "waiting for DNS". The DNS-plan block already skips IMAP sources; the label catches up.
+3. **Copy**: the Email step's description and dismissal `dismiss_line` acknowledge the connected-account arrangement instead of denying it exists.
 4. **The setup pill honors dismissal** (`SetupSteps::pillCounts()` / `PublicPageBase.php:58-70` ignore `usr_setup_dismissed_time` today). A dismissed wizard stops counting against the header pill. This is a core wizard defect independent of IMAP, fixed here because this walkthrough exposed it.
 
 ## 7. Work item D — compose coherence on a connected account
@@ -104,7 +104,7 @@ On a deployment whose only mail configuration is one connected Gmail account:
 5. The Setup tab's advanced run and `InboundEmailHealth` produce no gmail.com DNS checks, no gmail.com signing identity, no machine-sender offer for `mail.gmail.com`, and `jdi_direct_identities` stays empty.
 6. Messenger: picking a `@gmail.com` correspondent performs a capability lookup (and correctly reports unreachable); the user attempting cross-site chat still gets the honest S4 "You need a Joinery email address on this site" — never "publish this site's DNS records".
 7. Relay-fronted sends log no "leaving UNSIGNED" line for the Gmail From.
-8. Existing hosted-domain behavior is unchanged: a protected-identity domain still refuses, `mail_receive` still keys off `ied_setup_status` for real domains, Direct still works between two published instances.
+8. Existing hosted-domain behavior is unchanged: a protected-identity domain still refuses, the Email step's receiving arm still keys off `ied_setup_status` for real domains, Direct still works between two published instances.
 
 Tests: a `db`-tier suite provisioning an IMAP-source domain + alias + disabled feed and asserting the guard answers (registration allowed, `forHostedAlias` refusal, `ensureFor` refusal, `localDomain` null, wizard status), plus a unit test pinning `is_authoritative()`.
 

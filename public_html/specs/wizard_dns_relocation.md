@@ -9,11 +9,13 @@ an in-flight move persists as the `dns_move_pending` setting until the
 domain's NS records answer from the target or the operator cancels, and
 choosing Linode in the provider dropdown while the DNS lives elsewhere runs
 the move rather than a doomed publish. The seed is live-verified (real
-token, zone created and filled at Linode). Open: a full delegation
-switch-over has not been exercised end to end, and detection of a completed
-move is pull-only — a scheduled watcher (poll pending moves, auto-verify,
-notify the owner) is a candidate follow-up, as is the receiving step's
-adoption of detection.
+token, zone created and filled at Linode). The wizard now has a single Email
+step covering sending and receiving, so detection, the gate radio, and the
+move serve the whole mail record set — there is no separate receiving step
+left to adopt them. Open: a full delegation switch-over has not been
+exercised end to end, and detection of a completed move is pull-only — a
+scheduled watcher (poll pending moves, auto-verify, notify the owner) is a
+candidate follow-up.
 
 ## Problem
 
@@ -194,3 +196,5 @@ depends on core DNS only.
   are created through the driver's `createZone()`.
 - **The receiving step adopts detection + the relocation offer as a
   follow-up**, after Part 3 exists — the sending step is the proving ground.
+  (Superseded: the wizard's mail steps merged into one Email step, whose DNS
+  stage publishes the full sending + receiving plan through this machinery.)

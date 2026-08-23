@@ -1,28 +1,41 @@
 <?php
 /**
- * Setup wizard step: Sending email (specs/setup_wizard.md § Step 3).
+ * Setup wizard step: Email — sending AND receiving, one step.
  * The same declared settings the email settings page renders — one renderer,
  * no parallel form — plus a test send that records its last success.
  * Included by views/setup.php with $page, $viewer, $settings, $site_name in scope.
+ *
+ * The one address question answers everything: the From address is the
+ * sending identity AND (with the mailbox plugin) the owner's mailbox, so the
+ * save provisions both and the DNS stage publishes the domain's whole mail
+ * shape — MX and the receiving stack included — in the one pass where the
+ * operator hands over a DNS credential.
  *
  * The step wears three faces, derived fresh on every render:
  *
  *   form   No working provider yet. One question (the From address), the
  *          provider picker with Mailgun preselected, and the API key. No
- *          domain field — the domain is the From address's domain, and the
- *          save handler registers it at the provider through its API
- *          (SendingDomainRegistrar), so the dashboard errand disappears.
+ *          domain field — the domain is the From address's domain; the save
+ *          handler provisions the mailbox for the address and registers the
+ *          domain at the provider through its API (SendingDomainRegistrar),
+ *          so both dashboard errands disappear.
  *   dns    Provider configured, but the provider does not yet report the
- *          sending domain verified. Shows the sending records
- *          (InboundEmailSetupCheck::sendingDnsPlan()), offers to publish
- *          them through a DNS driver (credential used once, never stored),
- *          and a check button that asks the provider to re-verify now.
+ *          sending domain verified. Shows the full record plan
+ *          (_setup_wizard_dns_plan), offers to publish it through a DNS
+ *          driver (credential used once, never stored), and a Refresh that
+ *          re-asks the provider and re-grades the receiving verdict.
  *   prove  Verified (or the provider has no registrar API to ask). Send a
- *          test, press "It arrived".
+ *          test, press "It arrived" — with the mailbox's receiving state
+ *          alongside, records shown while its DNS still pends.
  *
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.0
+ * @changelog 3.0 - Sending and receiving are one step (the separate receiving
+ *   step is gone): the DNS stage publishes the full mail plan, the intro says
+ *   mail will arrive here too, and the prove stage reports each mailbox
+ *   address with its receiving verdict, records folded open while DNS pends.
  * @version 2.15
  * @changelog 2.15 - Picking a host the domain's DNS does not live at says so
  *   (amber mismatch notice), and picking Linode that way IS the move: the
@@ -96,6 +109,9 @@
  */
 require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
+require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
+require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
+require_once(PathHelper::getIncludePath('includes/dns/dns_relocation_box.php'));
 
 $setup_send_blocker = EmailSender::transactionalSendBlocker();
 $setup_send_last = (string)$settings->get_setting('email_test_send_last_success');
@@ -127,6 +143,42 @@ if ($setup_send_ready) {
 	}
 }
 
+// The receiving-domain row, reconciled before anything reads it. The two
+// Joinery Direct records exist only once this deployment is authoritative
+// for the domain — the signing identity lives behind its receiving-domain
+// row. The save creates it; on a deployment whose save predates that,
+// rendering without this reconciliation shows a record list MISSING the
+// Direct pair, and an operator who copies it publishes an incomplete set.
+// Idempotent: once the row exists this is a read.
+if ($setup_send_stage === 'dns' && $setup_send_domain !== '' && class_exists('InboundEmailSetupCheck')) {
+	SystemBase::server_initiated_write(function () use ($setup_send_domain) {
+		_setup_ensure_receiving_domain($setup_send_domain);
+	});
+}
+
+// ---- The receiving half: the From address's mailbox, read fresh ----
+// null = mailbox plugin off, no domain row yet, or an IMAP-source domain
+// (its mail arrives by pull — no MX to wait for). Otherwise the domain's
+// stored DNS verdict and the store-mode addresses on it, for the prove
+// stage's checklist and the DNS intro's honesty about what the records do.
+$setup_send_rcv = null;
+if ($setup_send_stage !== 'form' && $setup_send_domain !== '' && class_exists('InboundEmailSetupCheck')) {
+	$setup_send_rcv_model = InboundEmailDomain::GetByDomain($setup_send_domain);
+	if ($setup_send_rcv_model && $setup_send_rcv_model->get('ied_is_enabled')
+			&& !$setup_send_rcv_model->get('ied_is_imap_source')) {
+		$setup_send_rcv = array('status' => (string)$setup_send_rcv_model->get('ied_setup_status'),
+			'addresses' => array());
+		$setup_send_rcv_aliases = new MultiInboundEmailAlias(array(
+			'domain_id' => (int)$setup_send_rcv_model->key,
+			'delivery_mode' => InboundEmailAlias::MODE_STORE,
+			'enabled' => true, 'deleted' => false,
+		));
+		foreach ($setup_send_rcv_aliases as $setup_send_rcv_alias) {
+			$setup_send_rcv['addresses'][] = $setup_send_rcv_alias->get_full_address();
+		}
+	}
+}
+
 // Prefills for a site configuring email for the first time. Stored values
 // always win — these only fill what is still empty, and nothing is written
 // until the operator presses Save.
@@ -144,8 +196,8 @@ if ($setup_host === 'localhost' || filter_var($setup_host, FILTER_VALIDATE_IP)) 
 	$setup_host = '';
 }
 
-// From address: the owner's first address on their own domain — the same
-// {first name}@{domain} the receiving-email step offers to create next.
+// From address: the owner's first address on their own domain — the
+// {first name}@{domain} mailbox the save provisions along with sending.
 $setup_from_email = $setup_send_from;
 if ($setup_from_email === '' && $setup_host !== '') {
 	$setup_local = strtolower((string)preg_replace('/[^a-zA-Z0-9]/', '', (string)$viewer->get('usr_first_name')));
@@ -179,27 +231,54 @@ if ($setup_send_stage === 'prove') {
 <?php } ?>
 	</div>
 <?php
+	// Receiving rides the same step: each mailbox address with its verdict,
+	// and — while the domain's DNS still pends — the records that get it
+	// there. DNS still propagating is an amber wait, never a block.
+	if ($setup_send_rcv !== null && $setup_send_rcv['addresses']) {
+		$setup_send_rcv_ok = ($setup_send_rcv['status'] === 'ok');
+?>
+	<ul class="setup-checklist jy-mt-2">
+<?php foreach ($setup_send_rcv['addresses'] as $setup_send_rcv_addr) { ?>
+		<li>
+			<span class="setup-dot <?php echo $setup_send_rcv_ok ? 'green' : 'amber'; ?>"></span>
+			<span><?php echo htmlspecialchars($setup_send_rcv_addr); ?></span>
+			<span class="jy-muted"><?php echo $setup_send_rcv_ok ? 'receiving mail at this site' : 'waiting for DNS'; ?></span>
+		</li>
+<?php } ?>
+	</ul>
+<?php
+		if (!$setup_send_rcv_ok) {
+			$setup_send_rcv_plan = _setup_wizard_dns_plan($setup_send_domain);
+			if ($setup_send_rcv_plan !== null && !$setup_send_rcv_plan->isEmpty()) {
+?>
+	<details class="jy-mt-2"><summary>DNS records for <?php echo htmlspecialchars($setup_send_domain); ?></summary>
+		<p class="jy-muted jy-mt-2">Add any that are missing wherever your domain's records live. New records
+			can take a while to propagate — check back here, or on the mail Setup tab.</p>
+		<div style="overflow-x:auto">
+			<table class="jy-table">
+				<tr><th>Type</th><th>Name</th><th>Value</th></tr>
+<?php foreach ($setup_send_rcv_plan->getRecords() as $setup_send_record) { if ($setup_send_record->absent) { continue; } ?>
+				<tr>
+					<td><?php echo htmlspecialchars($setup_send_record->type); ?></td>
+					<td><code><?php echo htmlspecialchars($setup_send_record->name); ?></code></td>
+					<td><code style="word-break:break-all"><?php echo htmlspecialchars($setup_send_record->value); ?></code></td>
+				</tr>
+<?php } ?>
+			</table>
+		</div>
+	</details>
+<?php
+			}
+		}
+	}
 }
 
 // ---- The DNS stage: connect the domain, then prove it ----
 if ($setup_send_stage === 'dns') {
-	$setup_send_plan = null;
-	if (class_exists('InboundEmailSetupCheck')) {
-		// The two Joinery Direct records exist only once this deployment is
-		// authoritative for the domain — the signing identity lives behind
-		// its receiving-domain row. The save creates that row; on a
-		// deployment whose save predates it, rendering without this
-		// reconciliation shows a manual tab MISSING the Direct pair, and an
-		// operator who copies that list publishes an incomplete record set.
-		// Idempotent: once the row exists this is a read.
-		SystemBase::server_initiated_write(function () use ($setup_send_domain) {
-			_setup_ensure_receiving_domain($setup_send_domain);
-		});
-		$setup_send_plan = (new InboundEmailSetupCheck())->sendingDnsPlan($setup_send_domain);
-	}
-	require_once(PathHelper::getIncludePath('includes/dns/DnsDriverRegistry.php'));
-	require_once(PathHelper::getIncludePath('includes/dns/DnsPublishBox.php'));
-	require_once(PathHelper::getIncludePath('includes/dns/dns_relocation_box.php'));
+	// The whole mail shape in one pass: sending verification AND the records
+	// that route mail for the domain to this site, because the operator hands
+	// over a DNS credential exactly once.
+	$setup_send_plan = _setup_wizard_dns_plan($setup_send_domain);
 	$setup_send_drivers = array();
 	foreach (DnsDriverRegistry::all() as $setup_send_drv_key => $setup_send_drv_class) {
 		if ($setup_send_drv_class::credentialMode() === DnsProvider::CREDENTIAL_API) {
@@ -257,9 +336,16 @@ if ($setup_send_stage === 'dns') {
 			'nameservers' => array(), 'copied' => array(), 'summary' => ''), $setup_send_move_pending);
 	}
 ?>
+<?php if ($setup_send_rcv !== null) { ?>
+	<p>Your domain needs a few DNS records. They show <?php echo htmlspecialchars($setup_send_service_label); ?> that
+		<strong><?php echo htmlspecialchars($setup_send_domain); ?></strong> is really yours, and they route mail
+		for <?php echo htmlspecialchars($setup_send_domain); ?> to this site — sending and receiving in one go.
+		Tell us where your domain is managed and we'll add them for you.</p>
+<?php } else { ?>
 	<p>Before <?php echo htmlspecialchars($setup_send_service_label); ?> will send your mail, it needs to see
 		a few records at your domain — that's how it knows <strong><?php echo htmlspecialchars($setup_send_domain); ?></strong> is really yours.
 		Tell us where your domain is managed and we'll add them for you.</p>
+<?php } ?>
 
 <?php if ($setup_send_state !== 'not_registered') { ?>
 	<!-- The detection status: amber because it is the one thing still standing
@@ -573,7 +659,7 @@ SettingsFieldRenderer::renderGroup($formwriter, 'email_delivery', array(
 // handler writes it to defaultemail, defaults defaultemailname to the owner's
 // name, and — for a provider whose API can register sending domains — derives
 // the sending domain from it and registers it, so no domain question exists.
-// A wizard question (like mail_receive's local_part), not a settings field.
+// A wizard question, not a settings field.
 $formwriter->textinput('wizard_from_address', 'What email address would you like to use?', array(
 	'value' => $setup_from_email,
 	'required' => true,

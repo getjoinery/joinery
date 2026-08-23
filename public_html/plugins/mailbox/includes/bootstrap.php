@@ -22,7 +22,10 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.10
+ * @version 1.11
+ * @changelog 1.11 - the mail_receive wizard step is gone: the core Email step
+ *   provisions the mailbox and publishes the receiving DNS itself, so the
+ *   plugin registers only mail_import.
  * @changelog 1.10 - registers the Direct authority resolver, so a signing
  *   identity can never be minted for an IMAP-source domain
  *   (specs/imap_source_domain_boundaries.md)
@@ -381,41 +384,13 @@ UploadPurposeRegistry::register('mail_import_archive', array(
 	},
 ));
 
-// ---- Setup wizard steps (specs/setup_wizard.md §§ Step 4-5) ----
+// ---- Setup wizard step (specs/setup_wizard.md) ----
 // Registered here (not queried) so the wizard and the admin dashboard read
 // mail state through the same registry; predicates run only when a wizard
-// or pill actually asks.
+// or pill actually asks. Receiving itself needs no step of its own: the core
+// Email step provisions the mailbox and its DNS, and reads receiving state
+// through this plugin's classes when they resolve.
 require_once(PathHelper::getIncludePath('includes/SetupSteps.php'));
-
-SetupSteps::register('mail_receive', array(
-	'title' => 'Receiving email',
-	'scope' => 'site',
-	'order' => 40,
-	'copy'  => "Give this site a mail domain and it becomes your mail server. Tell us the domain and your address, and we'll set everything up in one go.",
-	'render_file' => 'plugins/mailbox/includes/setup_steps/mail_receive.php',
-	'home_url' => '/plugins/mailbox/admin/admin_mailbox_setup',
-	'dismiss_line' => 'This site has no mailbox of its own yet.',
-	'status' => function (?User $viewer): string {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
-		$aliases = new MultiInboundEmailAlias(array(
-			'delivery_mode' => InboundEmailAlias::MODE_STORE,
-			'enabled' => true,
-			'deleted' => false,
-		));
-		if ($aliases->count_all() === 0) {
-			return SetupSteps::STATUS_NONE;
-		}
-		// Amber while DNS still pends; the domain row carries the verdict.
-		$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
-		$domains->load();
-		foreach ($domains as $domain) {
-			if ((string)$domain->get('ied_setup_status') === 'ok') {
-				return SetupSteps::STATUS_GREEN;
-			}
-		}
-		return SetupSteps::STATUS_AMBER;
-	},
-));
 
 SetupSteps::register('mail_import', array(
 	'title' => 'Bring your old mail',

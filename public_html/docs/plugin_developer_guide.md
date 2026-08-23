@@ -116,8 +116,8 @@ registration is all a step needs to appear in `/setup`, the header pill, and
 the login gate. Keep the step's `render_file` partial under the plugin's
 `includes/` (not `views/`, which would make it routable), and keep `status()`
 cheap — it runs when the wizard or pill asks, wrapped so a throw reads as
-not-started rather than a fatal. The mailbox plugin's `mail_receive` /
-`mail_import` steps are the reference implementations.
+not-started rather than a fatal. The mailbox plugin's `mail_import` step is
+the reference implementation.
 
 ### Classes Resolve By Name
 

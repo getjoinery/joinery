@@ -32,7 +32,11 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
- * @version 1.9
+ * @version 1.10
+ * @changelog 1.10 - The mail_send step is "Email", the whole of it: its copy
+ *   says the chosen address is also a mailbox here (mailbox plugin present),
+ *   and green additionally requires a receiving domain's DNS verdict once a
+ *   store mailbox exists — the separate receiving step is gone.
  * @changelog 1.9 - mail_send's configured-but-unproven copy is empty: the
  *   step's panel leads with a stage-accurate intro of its own.
  * @changelog 1.8 - mail_send's configured-but-unproven intro covers the DNS
@@ -459,16 +463,22 @@ class SetupSteps {
 		));
 
 		self::register('mail_send', array(
-			'title' => 'Sending email',
+			'title' => 'Email',
 			'scope' => 'site',
 			'order' => 30,
-			// Two different situations wear this step: a site with no working
-			// provider needs to pick one, a site that already sends only owes
-			// the delivery proof — the intro must not ask for keys it has.
+			// One step for the whole of email — the address the owner picks is
+			// the sending identity AND (with the mailbox plugin) their mailbox
+			// here. Two different situations wear the intro: a site with no
+			// working provider needs to pick one, a site that already sends
+			// only owes the delivery proof — it must not ask for keys it has.
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 				if (EmailSender::transactionalSendBlocker() !== null || EmailSender::detectServiceType() === 'none') {
-					return "Your site needs a way to send mail. We recommend Mailgun, because the free account gives you 100 free emails per day.";
+					$line = "Your site needs a way to send mail. We recommend Mailgun, because the free account gives you 100 free emails per day.";
+					if (class_exists('InboundEmailAlias')) {
+						$line .= " The address you choose also becomes a mailbox here — mail sent to it arrives at this site.";
+					}
+					return $line;
 				}
 				if ((string)Globalvars::get_instance()->get_setting('email_test_send_last_success') === '') {
 					// The panel leads with its own stage-specific intro (DNS
@@ -480,14 +490,37 @@ class SetupSteps {
 			},
 			'render_file' => 'includes/setup_steps/mail_send.php',
 			'home_url' => '/admin/admin_settings_email',
-			'dismiss_line' => 'This site cannot send email yet.',
+			'dismiss_line' => 'Email is not set up for this site yet.',
 			'status' => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 				if (EmailSender::transactionalSendBlocker() !== null) {
 					return SetupSteps::STATUS_NONE;
 				}
 				$last = (string)Globalvars::get_instance()->get_setting('email_test_send_last_success');
-				return $last !== '' ? SetupSteps::STATUS_GREEN : SetupSteps::STATUS_AMBER;
+				if ($last === '') {
+					return SetupSteps::STATUS_AMBER;
+				}
+				// Receiving rides the same step: once a mailbox exists, green
+				// additionally means a receiving domain's DNS verdict is ok —
+				// until then the step stays amber, exactly as arriving mail
+				// does. Without the mailbox plugin there is nothing to wait on.
+				if (class_exists('InboundEmailAlias')) {
+					$aliases = new MultiInboundEmailAlias(array(
+						'delivery_mode' => InboundEmailAlias::MODE_STORE,
+						'enabled' => true,
+						'deleted' => false,
+					));
+					if ($aliases->count_all() > 0) {
+						$domains = new MultiInboundEmailDomain(array('enabled' => true, 'deleted' => false));
+						foreach ($domains as $domain) {
+							if ((string)$domain->get('ied_setup_status') === 'ok') {
+								return SetupSteps::STATUS_GREEN;
+							}
+						}
+						return SetupSteps::STATUS_AMBER;
+					}
+				}
+				return SetupSteps::STATUS_GREEN;
 			},
 		));
 
