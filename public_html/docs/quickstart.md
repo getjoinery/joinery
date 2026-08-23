@@ -18,7 +18,7 @@ Joinery has a one-click installer on **Linode** (part of Akamai Cloud), a well-e
 
 ## Before You Start
 
-You'll need two things:
+You'll need three things:
 
 ### 1. A domain name
 
@@ -35,6 +35,12 @@ It takes about five minutes and costs roughly $10–15 a year. [Namecheap](https
 ### 2. A credit card
 
 For the server rental. Expect **$5/month**. Billing is hourly, so experimenting costs pennies — if you make a mistake, you can throw the server away and start over for less than a dime.
+
+### 3. A free Mailgun account
+
+Your server can't deliver email by itself: server rental companies — Linode included — block servers from sending mail directly, an anti-spam measure across the whole industry. So every self-hosted site hands its outgoing mail to a delivery service. The one this guide assumes is **Mailgun**, whose free account gives you 100 free emails per day — plenty for a personal or small-group site.
+
+[Sign up at Mailgun](https://www.mailgun.com) now. That's all you need to do for the moment — after your site is running, its setup wizard will ask you for a Mailgun **API key** and show you exactly where to find it.
 
 ---
 
@@ -113,10 +119,20 @@ Log in with the **admin email and admin password you chose on the form** in Step
 
 You'll be asked to set a new password right away. Do it, and save the new one in your password manager.
 
-**Then, before anything else, do these two things:**
+---
 
-1. **Set up email sending** — go to **Settings → Email** (`/admin/admin_settings_email`) and connect an email provider. This matters more than it sounds: if you ever forget your password, a reset email is the way back in — and a brand-new site has no way to send one until you connect a provider. (Server rental companies, Linode included, block servers from sending mail directly — an anti-spam measure across the whole industry — so a sending service is required, not optional.)
-2. **Name your site** — go to **Settings** (`/admin/admin_settings`) and set the Site Name.
+## Step 5 — Walk Through the Setup Wizard
+
+The first time you log in, your site opens its **setup wizard** — a checklist that walks you through everything a new site needs: your name and the site's name, sign-in security, your personal encryption key, email, calendar, and backups. Each step explains itself, and you can leave and come back at any point.
+
+Go through it in order. The step that matters most is **Email**:
+
+- **Choose your email address** — something like `you@yourname.com`. This becomes the address your site sends from *and* a real mailbox on your site: mail sent to it arrives right there.
+- **Paste your Mailgun API key** — from the Mailgun account you created earlier. The wizard shows you exactly where in Mailgun to find it, and registers your domain with Mailgun for you.
+- **Add the DNS records it shows** — a handful of entries that prove to the world your domain sends and receives mail here. They go in the same place you added the A record in Step 3. If your DNS host has an open API, the wizard can add them all for you; otherwise it lists them to copy and paste.
+- **Confirm the test email** — the wizard sends you a message, and when it arrives, email is proven working end to end.
+
+Don't skip the email step. If you ever forget your password, a reset email is the way back in — and a brand-new site has no way to send one until this is done.
 
 ---
 
@@ -126,8 +142,8 @@ Your site comes ready with:
 
 - **Drive** — file storage, like your own private Dropbox
 - **Calendar** — events, reminders, and imports from other calendars
-- **Mail** — a full mailbox on your own domain. It's installed but needs a few settings from you before it can send and receive; its **Setup tab** walks you through them.
-- **AI assistant** — installed, and needs one thing from you: an API key from an AI provider (such as Anthropic or OpenAI). Add it under **Settings → AI**. You create that key in an account *you* own, so your AI usage is billed to you directly and never passes through anyone else.
+- **Mail** — a full mailbox on your own domain. The address you chose in the setup wizard sends and receives here; more addresses can be added from the mail admin.
+- **AI assistant** — installed, and needs one thing from you: an API key from an AI provider (such as Anthropic or OpenAI). The setup wizard asks for it, or add it later under **Settings → AI**. You create that key in an account *you* own, so your AI usage is billed to you directly and never passes through anyone else.
 
 More is available under **Admin → Plugins** — events, an online store, and others — each a click to add.
 
