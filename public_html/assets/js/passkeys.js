@@ -5,7 +5,11 @@
  * pass them to register()/authenticate()/derive(), then POST the returned
  * object back to the matching verify action.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - runFlow() reads the error message out of whatever envelope
+ *   the failure arrived in (the API's error string, or an exception handler's
+ *   {message, type} object), so a server fault alerts as words, never
+ *   "[object Object]".
  * @changelog 1.4 - Registration responses forward authenticatorAttachment, one
  *   of the signals behind a credential's vault capability.
  * @changelog 1.3 - runFlow() merges extraBody into the verify POST too, so
@@ -247,6 +251,14 @@ window.JoineryPasskeys = (function () {
 	 * { redirect, second_factor_required }). Throws with the server error message on
 	 * any failure so callers can surface it uniformly.
 	 */
+	/** The server's error message as a string, whatever envelope it arrived in. */
+	function serverError(json, fallback) {
+		var e = json && json.error;
+		if (typeof e === 'string' && e) return e;
+		if (e && typeof e.message === 'string' && e.message) return e.message;
+		return fallback;
+	}
+
 	async function runFlow(optionsUrl, verifyUrl, extraBody) {
 		var optRes = await fetch(optionsUrl, {
 			method: 'POST',
@@ -254,7 +266,7 @@ window.JoineryPasskeys = (function () {
 			body: JSON.stringify(extraBody || {}),
 		});
 		var optJson = await optRes.json();
-		if (!optRes.ok) throw new Error((optJson && optJson.error) || 'Unable to start passkey ceremony.');
+		if (!optRes.ok) throw new Error(serverError(optJson, 'Unable to start passkey ceremony.'));
 
 		var credential = await authenticate(optJson.data.options);
 
@@ -264,7 +276,7 @@ window.JoineryPasskeys = (function () {
 			body: JSON.stringify(Object.assign({}, extraBody || {}, { credential: credential })),
 		});
 		var verJson = await verRes.json();
-		if (!verRes.ok) throw new Error((verJson && verJson.error) || 'Passkey verification failed.');
+		if (!verRes.ok) throw new Error(serverError(verJson, 'Passkey verification failed.'));
 
 		return (verJson && verJson.data) || {};
 	}

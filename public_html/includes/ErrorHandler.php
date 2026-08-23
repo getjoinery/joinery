@@ -333,7 +333,14 @@ class ErrorManager {
         if ($context->isCli()) {
             return $this->handlers['cli'];
         }
-        
+
+        // API requests get the /api/v1 error envelope (error as a string),
+        // checked before the ajax handler because API requests also read as
+        // ajax and its legacy envelope carries error as an object.
+        if (strpos($context->getRequestUri(), '/api/') === 0) {
+            return $this->handlers['api'];
+        }
+
         if ($context->isAjax()) {
             return $this->handlers['ajax'];
         }
@@ -362,6 +369,7 @@ class ErrorManager {
         $this->handlers = [
             'web' => new WebErrorHandler(),
             'ajax' => new AjaxErrorHandler(),
+            'api' => new ApiErrorHandler(),
             'admin' => new AdminErrorHandler(),
             'cli' => new CliErrorHandler()
         ];
