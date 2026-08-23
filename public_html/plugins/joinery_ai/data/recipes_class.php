@@ -63,7 +63,10 @@ class Recipe extends SystemBase {
         'rcp_thinking_level'      => array('type'=>'varchar(10)', 'default'=>'off'),
         'rcp_delivery_email'      => array('type'=>'varchar(255)'),
         'rcp_delivery_dashboard'  => array('type'=>'bool', 'default'=>true),
-        'rcp_enabled'             => array('type'=>'bool', 'default'=>true),
+        // False = Manually only. A recipe runs on the schedule only after
+        // someone explicitly switches it on — a bare save() (a test fixture,
+        // an import) must never mint a cron-schedulable recipe.
+        'rcp_enabled'             => array('type'=>'bool', 'default'=>false),
         'rcp_max_iterations'      => array('type'=>'int4', 'default'=>5),
         // Sized so ~95% of users never hit them. max_tokens is OUTPUT tokens
         // per run (thinking counts); the monthly cap is input+output but only
