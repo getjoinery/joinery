@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.50
+ * No framework. @version 2.51
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -2797,15 +2797,19 @@
 		}).slice(0, 8);
 	}
 
-	// The token being typed = text after the last comma in the field.
+	// The compose fields accept commas, semicolons, and whitespace between
+	// addresses, so the token being typed starts after the last of any of them.
+	function tokenBoundary(value) {
+		var m = /[,;\s][^,;\s]*$/.exec(value);
+		return m ? m.index + 1 : 0;
+	}
 	function currentToken(value) {
-		var i = value.lastIndexOf(',');
-		return i === -1 ? value : value.slice(i + 1);
+		return value.slice(tokenBoundary(value));
 	}
 	function commitToken(input, address) {
 		var v = input.value;
-		var i = v.lastIndexOf(',');
-		var prefix = i === -1 ? '' : v.slice(0, i + 1) + ' ';
+		var prefix = v.slice(0, tokenBoundary(v));
+		if (prefix && !/\s$/.test(prefix)) prefix += ' ';
 		input.value = prefix + address + ', ';
 		input.focus();
 	}
