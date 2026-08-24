@@ -37,7 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.18.0
+ * @version 1.19.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -162,8 +162,9 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			?>
 			</div>
 			<?php
-			$compose->textinput('to', 'To', array('id' => 'mbx_to',
-				'helptext' => 'Separate multiple addresses with commas.'));
+			// No separator helptext: the send path accepts commas, semicolons,
+			// spaces, or tabs between addresses, so there is nothing to teach.
+			$compose->textinput('to', 'To', array('id' => 'mbx_to'));
 			// Joinery Direct's compose indicator (docs/joinery_direct.md § The
 			// social signal). This is the lever, not the reward: showing which
 			// path a message will take BEFORE you send is what makes people want

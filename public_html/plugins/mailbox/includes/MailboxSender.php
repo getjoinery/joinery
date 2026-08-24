@@ -51,7 +51,7 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
- * @version 1.11
+ * @version 1.12
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -1293,8 +1293,9 @@ class MailboxSender {
 	// ── address parsing ──────────────────────────────────────────────────────
 
 	/**
-	 * Parse a To/Cc field into validated email addresses. Accepts comma/semicolon
-	 * separated "Name <email>" or bare "email" tokens. Throws on any invalid token.
+	 * Parse a To/Cc field into validated email addresses. Accepts 'Name <email>'
+	 * groups and bare addresses, separated by any mix of commas, semicolons,
+	 * spaces, and tabs — whatever a person types. Throws on any invalid token.
 	 *
 	 * @return string[] email addresses
 	 */
@@ -1304,18 +1305,25 @@ class MailboxSender {
 			return array();
 		}
 		$out = array();
-		foreach (preg_split('/[,;]+/', $raw) as $token) {
-			$token = trim($token);
-			if ($token === '') {
-				continue;
+		$add = function ($email) use (&$out) {
+			$email = trim($email);
+			if ($email === '') {
+				return;
 			}
-			if (preg_match('/<([^>]+)>/', $token, $m)) {
-				$token = trim($m[1]);
+			if (!filter_var($email, FILTER_VALIDATE_EMAIL)) {
+				throw new MailboxSenderException('Not a valid email address: ' . $email);
 			}
-			if (!filter_var($token, FILTER_VALIDATE_EMAIL)) {
-				throw new MailboxSenderException('Not a valid email address: ' . $token);
-			}
-			$out[strtolower($token)] = $token;
+			$out[strtolower($email)] = $email;
+		};
+		// 'Name <email>' groups come out first: a display name may contain the
+		// very whitespace treated as a separator between bare addresses below.
+		$rest = preg_replace_callback('/[^,;<>]*<([^<>]*)>/', function ($m) use ($add) {
+			$add($m[1]);
+			return ' ';
+		}, $raw);
+		// Whatever remains is bare addresses.
+		foreach (preg_split('/[\s,;]+/', (string)$rest, -1, PREG_SPLIT_NO_EMPTY) as $token) {
+			$add($token);
 		}
 		return array_values($out);
 	}

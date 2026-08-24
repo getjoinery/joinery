@@ -23,7 +23,7 @@
  * nothing — but it does let a signed-in caller drive resolver work, so it is
  * rate-limited per caller and served from the same cache the send path uses.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 require_once(__DIR__ . '/../../../includes/PathHelper.php');
@@ -52,20 +52,25 @@ function direct_status_logic(array $input): LogicResult {
 	}
 	RequestLogger::log('mailbox_direct_status', 'lookup', true);
 
+	// Same tolerant split as MailboxSender::parseAddressList — the field this
+	// reads is the live compose To box, so it must accept whatever separators a
+	// person types (commas, semicolons, spaces, tabs). Non-addresses are skipped
+	// rather than refused: the hint has no business rejecting a half-typed field.
 	$addresses = array();
-	foreach (preg_split('/[,;]+/', (string)($input['to'] ?? '')) as $token) {
-		$token = trim($token);
-		if ($token === '') {
-			continue;
-		}
-		// Accept "Name <addr>" the way the compose field holds it.
-		if (preg_match('/<([^>]+)>/', $token, $m)) {
-			$token = $m[1];
-		}
-		$token = strtolower(trim($token));
-		if (filter_var($token, FILTER_VALIDATE_EMAIL)) {
+	$collect = function ($token) use (&$addresses) {
+		$token = strtolower(trim((string)$token));
+		if ($token !== '' && filter_var($token, FILTER_VALIDATE_EMAIL)) {
 			$addresses[$token] = true;
 		}
+	};
+	// 'Name <addr>' groups first — a display name may contain the whitespace
+	// treated as a separator between bare addresses below.
+	$rest = preg_replace_callback('/[^,;<>]*<([^<>]*)>/', function ($m) use ($collect) {
+		$collect($m[1]);
+		return ' ';
+	}, (string)($input['to'] ?? ''));
+	foreach (preg_split('/[\s,;]+/', (string)$rest, -1, PREG_SPLIT_NO_EMPTY) as $token) {
+		$collect($token);
 	}
 	if (empty($addresses)) {
 		return LogicResult::render($empty);
