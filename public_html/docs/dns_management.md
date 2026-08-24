@@ -554,6 +554,16 @@ wizard's sending step (`mail_send_move` action) and the publish box's
 gated-host callout (`dns_action=dns_move`, handled in
 `DnsPublishBox::handle()`).
 
+- **The move is only offered to a domain that serves nothing but this
+  deployment.** `DnsRelocation::foreignUse()` reads the apex — addresses,
+  mail routing, sender policy — and any sign of life pointing elsewhere (an
+  MX the deployment's plan does not carry, an address that is not this
+  server's, an SPF for another setup) withholds the offer on both surfaces
+  and refuses the POST server-side. A lived-in domain is exactly the one
+  whose unguessable records a relocation would strand; its operator pastes
+  the records by hand instead. The check fails closed: when this server's
+  own addresses cannot be established, the offer is withheld, never
+  mis-shown.
 - **Destinations** are a deliberate pair, not a capability scan:
   `DnsRelocation::targets()` offers Linode DNS (free with any active Linode
   service) and Cloudflare's free plan (free for anyone). Linode zones are
@@ -566,8 +576,9 @@ gated-host callout (`dns_action=dns_move`, handled in
   their registrar. Flipping first would take the site down over an empty zone.
 - **The copy is honest about its limits.** Only guessable names are resolved
   (apex, www, `_dmarc`, common DKIM selectors) and recreated verbatim; the
-  handover shows exactly what was copied and says plainly that an unguessed
-  subdomain did not carry over.
+  handover shows exactly what was copied, and an always-visible notice says
+  plainly that an unguessed name did not carry over and must be added at the
+  destination before the nameserver change.
 - **Copied reality outranks the plan at seed time** (`seedPlan()`): an
   existing SPF or DMARC is recreated as-is even when the plan wants a
   different value, because two SPF records is a permanent failure and the move
@@ -591,5 +602,9 @@ gated-host callout (`dns_action=dns_move`, handled in
 - `tests/dns/dns_publish_banner_test.php` — the severity of the banner a publish
   leaves behind: green only when the whole plan is in place, amber when it is
   partial, red when nothing reached the provider.
+- `tests/dns/dns_relocation_test.php` — the guided move's pure parts: the
+  offered destinations, the lived-in classification that decides whether the
+  move is offered at all, the seed plan's merge rules, and the handover
+  helpers.
 
-All three are `safe` tier and need no credential or network.
+All four are `safe` tier and need no credential or network.

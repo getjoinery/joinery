@@ -6,6 +6,10 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.1
+ * @changelog 2.1 - mail_send_move refuses a lived-in domain
+ *   (DnsRelocation::foreignUse) — the same rule that hides the offer on the
+ *   page holds when the POST arrives anyway.
  * @version 2.0
  * @changelog 2.0 - Email is one step, sending and receiving: the save also
  *   provisions the owner's mailbox from the From address (domain row, store
@@ -451,6 +455,14 @@ function setup_logic(array $input): LogicResult {
 				if ($missing) {
 					$notice['move'] = array('error' => 'Enter the ' . $target_class::getLabel()
 						. ' credential to set up your DNS there.');
+				} elseif (($setup_foreign = DnsRelocation::foreignUse($sending_domain,
+						_setup_wizard_dns_plan($sending_domain))) !== '') {
+					// The page hides the offer for a lived-in domain; a POST
+					// that arrives anyway (a stale page, a changed domain) is
+					// refused for the same reason it was hidden.
+					$notice['move'] = array('error' => 'Moving this domain\'s DNS is not offered: '
+						. $setup_foreign . '. Add the records by hand instead — a move cannot see '
+						. 'records on names it does not know about, and would leave them behind.');
 				} else {
 					$own_plan = _setup_wizard_dns_plan($sending_domain)
 						?? new DnsRecordPlan($sending_domain, 'setup_wizard');

@@ -18,6 +18,9 @@
  *           copied, and here is why a subdomain we could not guess is not in
  *           that list.
  *
+ * @version 1.4 - the could-not-copy caveat is an always-visible amber notice on
+ *                the handover, no longer folded inside the copied-records
+ *                details; the reassurance line claims only what was copied
  * @version 1.3 - the handover no longer claims the nameserver change happens
  *                at the source DNS host; the per-registrar help line says where
  * @version 1.2 - a single destination asks nothing: no dropdown (hidden
@@ -74,14 +77,24 @@ function dns_relocation_render($page, array $vars): void {
 		}
 		echo '</p>';
 		echo '<p>' . htmlspecialchars(DnsRelocation::registrarNameserverHelp((string)($vars['source_key'] ?? ''))) . '</p>';
-		echo '<p class="jy-muted">Your site and mail keep working through the change — everything is '
-			. 'already in place at ' . htmlspecialchars($target_label) . '. The switch usually reaches the '
-			. 'internet within an hour, sometimes a day; '
+		echo '<p class="jy-muted">Everything the domain publicly answers today was copied to '
+			. htmlspecialchars($target_label) . ' first, so what it already does keeps working through '
+			. 'the change. The switch usually reaches the internet within an hour, sometimes a day; '
 			. htmlspecialchars((string)($vars['recheck_hint'] ?? 'check back here'))
 			. ' and this page will pick it up.</p>';
 		echo '</div>';
 
-		// Exactly what carried over — and, plainly, what could not have.
+		// The one thing the copy cannot promise, said in the open — not folded
+		// away — because the fix has to happen before the nameserver change.
+		echo '<div style="background:#fffaeb; border:1px solid #fec84b; border-radius:8px; '
+			. 'padding:10px 14px; margin:8px 0">'
+			. '<strong>One check before you switch:</strong> DNS does not let anyone list a domain\'s '
+			. 'records from outside, so only well-known names could be copied. A name we could not guess '
+			. '— a subdomain like <code>shop.' . htmlspecialchars($domain) . '</code>, or an SRV record — '
+			. 'did <strong>not</strong> carry over. If this domain has any, add them at '
+			. htmlspecialchars($target_label) . ' before changing the nameservers.</div>';
+
+		// Exactly what carried over.
 		echo '<details class="jy-mt-2"><summary>What was copied to ' . htmlspecialchars($target_label) . '</summary>';
 		if (!empty($result['copied'])) {
 			echo '<div style="overflow-x:auto"><table class="jy-table">'
@@ -97,10 +110,7 @@ function dns_relocation_render($page, array $vars): void {
 				. 'still created.</p>';
 		}
 		echo '<p class="jy-muted">This is everything the domain answers publicly at the names we could '
-			. 'guess. DNS does not let anyone list a domain\'s records from outside, so a name we did not '
-			. 'guess — <code>shop.' . htmlspecialchars($domain) . '</code>, <code>blog.' . htmlspecialchars($domain)
-			. '</code> — did <strong>not</strong> carry over. If you use one, add it at '
-			. htmlspecialchars($target_label) . ' before changing the nameservers.</p>';
+			. 'guess, plus the records this site needs.</p>';
 		echo '</details>';
 
 		echo '<details class="jy-mt-2"><summary>Run the setup again</summary>';

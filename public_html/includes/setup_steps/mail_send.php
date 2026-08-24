@@ -31,6 +31,11 @@
  * The expensive work (provider API lookups, the record plan) runs only when
  * its stage renders — the step's status closure stays cheap.
  *
+ * @version 3.1
+ * @changelog 3.1 - The move-your-DNS offer only renders for a domain that
+ *   serves nothing but this site (DnsRelocation::foreignUse) — a lived-in
+ *   domain's operator pastes the records by hand instead of risking a
+ *   relocation that cannot see all their records.
  * @version 3.0
  * @changelog 3.0 - Sending and receiving are one step (the separate receiving
  *   step is gone): the DNS stage publishes the full mail plan, the intro says
@@ -306,7 +311,14 @@ if ($setup_send_stage === 'dns') {
 	// asks its question with the radio choice below the dropdown.
 	$setup_send_dns_auto = isset($setup_send_drivers[$setup_send_dns_host]);
 	$setup_send_move = is_array($setup_send_notice) ? ($setup_send_notice['move'] ?? null) : null;
-	$setup_send_can_move = array_key_exists('linode', DnsRelocation::targets());
+	// The move is offered only when the domain serves nothing but this site:
+	// visible mail routing, addresses, or a sender policy pointing anywhere
+	// else means a lived-in domain, whose unguessable records a relocation
+	// would strand. Those operators paste the records by hand instead. An
+	// in-flight move renders its handover regardless — that state was made
+	// under this same rule.
+	$setup_send_can_move = array_key_exists('linode', DnsRelocation::targets())
+		&& DnsRelocation::foreignUse($setup_send_domain, $setup_send_plan) === '';
 
 	// An in-flight move outlives page loads: the choice and the seeded
 	// handover persist (dns_move_pending) until the domain's NS records

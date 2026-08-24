@@ -8,7 +8,8 @@
 
 /**
  * The guided DNS move (specs/wizard_dns_relocation.md Part 3) — the pure
- * parts: which destinations are offered, how the seed plan merges copied
+ * parts: which destinations are offered, the lived-in classification that
+ * decides whether the move is offered at all, how the seed plan merges copied
  * reality with the deployment's own records, and the handover helpers. Each
  * merge rule guards a real wire-level defect: two SPF records is a permanent
  * SPF failure, a second DMARC is undefined behaviour, and nothing may sit
@@ -102,6 +103,55 @@ $plan = DnsRelocation::seedPlan($own2, array(new DnsRecord('A', 'example.com', '
 $values = relocation_plan_values($plan);
 check($values === array('A example.com 203.0.113.9'),
 	'an exact duplicate collapses and an absent record is dropped', implode(' | ', $values));
+
+// ---------------------------------------------------------------------------
+section('The move is only offered to a domain that serves nothing but this site');
+// ---------------------------------------------------------------------------
+
+// classifyForeign is the pure half of foreignUse: given what the apex
+// visibly answers, is there any sign the domain is lived-in? A lived-in
+// domain has records the relocation cannot see, so the offer is withheld.
+
+$mine = new DnsRecordPlan('example.com', 'mailbox');
+$mine->addRecord('MX', 'example.com', 'example.com');
+$mine->addRecord('A', 'mail.example.com', '203.0.113.9');
+$mine->addRecord('TXT', 'example.com', 'v=spf1 include:mailgun.org ~all');
+
+check(DnsRelocation::classifyForeign('example.com', array(), $mine) === '',
+	'an empty apex forecloses nothing');
+
+$fresh = array(
+	new DnsRecord('A', 'example.com', '203.0.113.9'),
+	new DnsRecord('MX', 'example.com', 'example.com.', null, 10),
+	new DnsRecord('TXT', 'example.com', 'v=spf1 include:mailgun.org ~all'),
+	new DnsRecord('TXT', 'example.com', 'google-site-verification=abc'),
+);
+check(DnsRelocation::classifyForeign('example.com', $fresh, $mine) === '',
+	'a domain matching the plan is offered the move — the plan\'s address counts as this server, '
+	. 'and a benign apex TXT blocks nothing');
+
+check(DnsRelocation::classifyForeign('example.com',
+		array(new DnsRecord('A', 'example.com', '198.51.100.7')), $mine, array('198.51.100.7')) === '',
+	'the apex pointing at this server itself is not foreign');
+
+$reason = DnsRelocation::classifyForeign('example.com',
+	array(new DnsRecord('MX', 'example.com', 'aspmx.l.google.com', null, 1)), $mine);
+check($reason !== '' && stripos($reason, 'mail') !== false,
+	'a foreign MX forecloses the move and the reason names mail', $reason);
+
+$reason = DnsRelocation::classifyForeign('example.com',
+	array(new DnsRecord('A', 'example.com', '198.51.100.7')), $mine);
+check($reason !== '' && strpos($reason, '198.51.100.7') !== false,
+	'an apex address that is not this server forecloses the move', $reason);
+
+$reason = DnsRelocation::classifyForeign('example.com',
+	array(new DnsRecord('TXT', 'example.com', 'v=spf1 include:_spf.google.com ~all')), $mine);
+check($reason !== '' && stripos($reason, 'sender policy') !== false,
+	'an SPF for another setup forecloses the move', $reason);
+
+check(DnsRelocation::classifyForeign('example.com',
+		array(new DnsRecord('MX', 'example.com', 'example.com', null, 10)), null) !== '',
+	'with no plan at all, any visible MX forecloses the move');
 
 // ---------------------------------------------------------------------------
 section('The handover knows each vendor\'s answers');

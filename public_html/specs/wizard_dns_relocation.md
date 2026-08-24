@@ -12,10 +12,11 @@ the move rather than a doomed publish. The seed is live-verified (real
 token, zone created and filled at Linode). The wizard now has a single Email
 step covering sending and receiving, so detection, the gate radio, and the
 move serve the whole mail record set — there is no separate receiving step
-left to adopt them. Open: a full delegation switch-over has not been
-exercised end to end, and detection of a completed move is pull-only — a
-scheduled watcher (poll pending moves, auto-verify, notify the owner) is a
-candidate follow-up.
+left to adopt them. The move is offered only to a domain that serves nothing
+but the deployment (`DnsRelocation::foreignUse()` — see Part 3's safety
+addendum). Open: a full delegation switch-over has not been exercised end to
+end, and detection of a completed move is pull-only — a scheduled watcher
+(poll pending moves, auto-verify, notify the owner) is a candidate follow-up.
 
 ## Problem
 
@@ -162,6 +163,20 @@ the new host takes the user's site (and any existing mail) down. The flow:
 5. **Watch the delegation.** "Check now" resolves NS until the destination
    answers, then falls through to the normal publish/verify loop (which
    becomes a formality — the records were seeded in step 3).
+
+**Safety addendum — who gets the offer at all.** A relocation can only carry
+what it can see, and DNS cannot be enumerated from outside — so a lived-in
+domain (mail delivered elsewhere, an apex pointing at another server, a
+sender policy for another setup) is exactly the domain a move could break,
+and exactly the audience that does not need one: pasting a handful of records
+by hand is cheap next to a stranded subdomain or dead mail routing.
+`DnsRelocation::foreignUse()` reads the apex (four resolver questions —
+addresses, MX, TXT) and classifies each answer against the deployment's own
+plan and this server's addresses; the first foreign sign withholds the offer
+on both mounts and refuses the POST server-side. Fails closed: when the
+server's own addresses cannot be established, the offer is withheld. The
+seeded copy plus the always-visible could-not-copy notice on the handover
+remain as the second net for what the apex cannot reveal.
 
 State machine note: the move spans days-long DNS propagation and page
 reloads. Persist nothing beyond what is re-derivable: destination choice can
