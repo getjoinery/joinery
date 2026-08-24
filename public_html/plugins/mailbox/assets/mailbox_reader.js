@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.49
+ * No framework. @version 2.50
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -3052,6 +3052,19 @@
 		if (f) f.value = '';
 	}
 
+	// Cc hides behind its own toggle exactly like Bcc. Setting a value decides
+	// the presentation: a populated field (reply-all, a saved draft) is shown, an
+	// empty one goes back behind its toggle.
+	function setCc(value) {
+		var row = document.getElementById('mbx-cc-row');
+		var toggle = document.getElementById('mbx-cc-toggle');
+		var f = document.getElementById('mbx_cc');
+		if (f) f.value = value || '';
+		var show = !!value;
+		if (row) row.hidden = !show;
+		if (toggle) toggle.hidden = show;
+	}
+
 	function openCompose(mode, t, source) {
 		var titles = { reply: 'Reply', reply_all: 'Reply All', forward: 'Forward' };
 		$('#mbx-compose-title').textContent = titles[mode] || 'Reply';
@@ -3081,7 +3094,7 @@
 			}
 		}
 		document.getElementById('mbx_to').value = to;
-		document.getElementById('mbx_cc').value = cc;
+		setCc(cc);
 
 		var subj = t.subject || source.subject || '';
 		subj = (mode === 'forward')
@@ -3141,7 +3154,7 @@
 		if (fromRow) fromRow.hidden = false;
 
 		document.getElementById('mbx_to').value = '';
-		document.getElementById('mbx_cc').value = '';
+		setCc('');
 		document.getElementById('mbx_subject').value = '';
 		clearComposer();
 		resetBcc();
@@ -3326,7 +3339,7 @@
 		if (fromRow) fromRow.hidden = false;
 
 		document.getElementById('mbx_to').value = data.to || '';
-		document.getElementById('mbx_cc').value = data.cc || '';
+		setCc(data.cc || '');
 		if (data.bcc) {
 			document.getElementById('mbx_bcc').value = data.bcc;
 			var row = document.getElementById('mbx-bcc-row'); if (row) row.hidden = false;
@@ -3756,7 +3769,15 @@
 			updateRichPlaceholder();
 		}
 
-		// Bcc reveal (Gmail-style): the toggle shows the field, then hides itself.
+		// Cc / Bcc reveal (Gmail-style): each toggle shows its field, then hides itself.
+		var ccToggle = document.getElementById('mbx-cc-toggle');
+		if (ccToggle) ccToggle.addEventListener('click', function () {
+			var row = document.getElementById('mbx-cc-row');
+			if (row) row.hidden = false;
+			ccToggle.hidden = true;
+			var f = document.getElementById('mbx_cc');
+			if (f) f.focus();
+		});
 		var bccToggle = document.getElementById('mbx-bcc-toggle');
 		if (bccToggle) bccToggle.addEventListener('click', function () {
 			var row = document.getElementById('mbx-bcc-row');
