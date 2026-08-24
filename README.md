@@ -107,6 +107,20 @@ Start here:
   [Deploy and Upgrade](public_html/docs/deploy_and_upgrade.md)
 - [Full documentation index](public_html/docs/index.md)
 
+## Contributions
+
+Small fixes are welcome — bug fixes, documentation corrections, and similar
+focused changes can come straight in as pull requests.
+
+Large features generally can't be accepted into core. The right home for a
+substantial feature is almost always a plugin or theme, which you own outright
+and may license however you choose. If you believe something truly belongs in
+core, open a discussion before writing code.
+
+Joinery core ships under both a noncommercial and a commercial license, so by
+submitting a pull request you agree that your contribution may be distributed
+under both.
+
 ## License
 
 Joinery core is source-available under the
