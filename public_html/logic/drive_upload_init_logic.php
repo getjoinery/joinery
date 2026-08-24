@@ -176,7 +176,16 @@ function drive_upload_init_logic(array $input): LogicResult {
 		if ($cand) {
 			if ($target_file) {
 				if (FileBlob::retain($cand->key)) {
-					FileVersion::save_new_content($target_file, $cand, $user_id);
+					// Taken before the version row that will hold it exists. If
+					// making that row fails, the count has to come back down --
+					// otherwise the bytes are pinned for good, still counted
+					// against the owner and reachable by nobody.
+					try {
+						FileVersion::save_new_content($target_file, $cand, $user_id);
+					} catch (Exception $e) {
+						FileBlob::release($cand->key);
+						throw $e;
+					}
 					if ($modified_time !== null) {
 						$target_file->set('fil_content_modified_time', $modified_time);
 						$target_file->save();

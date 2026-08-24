@@ -112,6 +112,10 @@ pub struct World {
     /// The set above is cleared each pass, so a scenario cannot use it to ask
     /// the question that keeps it honest: did the window ever actually open?
     landing_seen: std::sync::Arc<std::sync::Mutex<usize>>,
+    /// How many name swaps actually fired mid-upload. A hunt that finds
+    /// nothing proves nothing unless the disk really did move under the
+    /// engine, so the count is readable rather than merely hoped for.
+    swaps_seen: std::sync::Arc<std::sync::Mutex<usize>>,
     /// How many times a device was power-cycled in this world.
     ///
     /// Counted so a sweep arm that kills can prove it killed. A knob that
@@ -178,6 +182,7 @@ impl World {
             destroyed_by_the_user: Default::default(),
             landing_saves: Default::default(),
             landing_seen: Default::default(),
+            swaps_seen: Default::default(),
             power_cycles: Default::default(),
         }
     }
@@ -275,6 +280,70 @@ impl World {
         });
     }
 
+    /// The user rearranges *names* mid-upload, rather than rewriting bytes.
+    ///
+    /// `user_saves_during_uploads` above covers the application that saves over
+    /// a file while it is going up. This is the other half, and the soak rig
+    /// reaches it constantly: a rotation, a slot swap, a Save As that shuffles
+    /// two names — nothing is written and nothing is destroyed, two files
+    /// simply exchange places while the engine is mid-pass.
+    ///
+    /// It is a harder input than a save, because a swap hands each file the
+    /// other one's inode and the other one's mtime. The engine sees neither an
+    /// edit nor a fresh file: it sees a rename cycle, arriving half-observed,
+    /// with every fingerprint it had cached now pointing at the wrong content.
+    ///
+    /// Nothing may go missing, and that is a sharper claim here than anywhere
+    /// else in the harness. A save legitimately destroys what it overwrote, so
+    /// the content it replaced has to be excused. A swap destroys nothing —
+    /// both bodies are still on the disk when it returns — so every content
+    /// that was committed before it is still owed afterwards, with no excuses
+    /// to make. Anything the engine drops is a loss with nowhere to hide.
+    pub fn user_rearranges_names_during_uploads(&mut self, one_in: u64, budget: u64) {
+        let disks: Vec<MemFs> = self.devices.iter().map(|d| d.fs.clone()).collect();
+        let rng = std::sync::Arc::new(std::sync::Mutex::new(SimRng::new(
+            self.rng.next_u64() ^ 0x5a1d_5eed,
+        )));
+        let seen = self.swaps_seen.clone();
+        let mut round: u64 = 0;
+        self.server.while_completing_an_upload(move || {
+            if round >= budget {
+                return;
+            }
+            let mut rng = rng.lock().unwrap();
+            if one_in > 1 && rng.below(one_in) != 0 {
+                return;
+            }
+            let disk = &disks[rng.below(disks.len() as u64) as usize];
+            // Files only, for the reason the save hook gives: renaming a
+            // directory over a file is not something a user can do, and the
+            // engine is entitled to assume the harness will not invent it.
+            let files: Vec<String> = disk
+                .all_paths()
+                .into_iter()
+                .filter(|p| disk.peek(p).is_some())
+                .collect();
+            if files.len() < 2 {
+                return;
+            }
+            let a = &files[rng.below(files.len() as u64) as usize];
+            let b = &files[rng.below(files.len() as u64) as usize];
+            if a == b {
+                return;
+            }
+            round += 1;
+            // Through a temp name, the way a filesystem without an atomic swap
+            // forces every application to do it. The window where the first
+            // name holds nothing is the whole point.
+            let (a, b) = (a.clone(), b.clone());
+            let parked = format!(".swap-{round}.tmp");
+            disk.user_rename(&a, &parked);
+            disk.user_rename(&b, &a);
+            disk.user_rename(&parked, &b);
+            *seen.lock().unwrap() += 1;
+        });
+    }
+
     /// The user saves the very file a download is landing on, in the window
     /// between the engine clearing the path and the file arriving there.
     ///
@@ -344,6 +413,12 @@ impl World {
     /// never enters it would otherwise pass for the wrong reason.
     pub fn saves_made_while_downloads_landed(&self) -> usize {
         *self.landing_seen.lock().unwrap()
+    }
+
+    /// How many mid-upload name swaps `user_rearranges_names_during_uploads`
+    /// actually performed.
+    pub fn swaps_made_during_uploads(&self) -> usize {
+        *self.swaps_seen.lock().unwrap()
     }
 
     /// One pass on one device, with custody checked around it.

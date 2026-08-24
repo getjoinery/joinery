@@ -514,7 +514,24 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         "trash_remote" => trash_remote(env, op),
         "preserve_local_as" => preserve_local_as(env, op, &params),
         "forget" => {
-            env.store.delete_entry(op.entity)?;
+            // Everything under a folder names it as their parent, and
+            // `all_entries` builds its list by walking DOWN from the root -- so
+            // dropping the folder alone leaves its children with no way back.
+            // No pass visits them, nothing plans against them, nothing clears
+            // them, and no issue is raised: they are simply never seen again.
+            // Soak run 209 left six live files that way, under a folder this
+            // very operation had forgotten. `delete_subtree` was written for
+            // exactly this and its doc comment describes the same failure.
+            //
+            // Folders only. `children_of` matches on parent id alone, with
+            // nothing to say the parent is a folder, and a file's server id can
+            // coincide with a folder's -- so handing it a file id would sweep
+            // away an unrelated folder's contents.
+            if op.entity.entity_type == EntityType::Folder {
+                env.store.delete_subtree(op.entity)?;
+            } else {
+                env.store.delete_entry(op.entity)?;
+            }
             Ok(OpOutcome::Done)
         }
         "adopt" => adopt(env, op),

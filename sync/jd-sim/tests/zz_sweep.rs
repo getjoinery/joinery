@@ -198,7 +198,22 @@ fn sweep_world(
         // of themselves and the custody check cannot see them -- written and
         // built over inside one pass, they are in neither of its snapshots --
         // so they are demanded back by hash below.
-        world.user_saves_while_downloads_land(8, (steps / 4).max(2) as u64);
+        world.user_saves_while_downloads_land(1, (steps / 4).max(2) as u64);
+        // The third way a user moves the disk under a pass, and the one the
+        // soak rig does constantly: not writing bytes at all, just exchanging
+        // two names. A swap hands each file the other one's inode and the other
+        // one's mtime, so it reaches the engine as a rename cycle rather than
+        // an edit, with every fingerprint it cached now pointing at the wrong
+        // content.
+        world.user_rearranges_names_during_uploads(1, (steps / 4).max(2) as u64);
+        // And a real disk hands a deleted file's inode straight back to the
+        // next file that wants one. Until now every sweep ran on a world where
+        // an inode, once used, was never seen again -- which quietly excused
+        // the engine from ever being wrong about a recycled one. The soak rig
+        // has no such manners.
+        for device in &world.devices {
+            device.fs.reuse_file_ids(true);
+        }
     }
     world
 }
@@ -222,6 +237,14 @@ fn workload_core(
     // Counted before settling, because settling is where a seed panics and a
     // panicking seed never reports anything.
     let kills_made = world.power_cycles();
+    if std::env::var("DIALS").is_ok() {
+        eprintln!(
+            "DIALS seed {seed}: swaps={} landing_saves={} kills={}",
+            world.swaps_made_during_uploads(),
+            world.saves_made_while_downloads_landed(),
+            kills_made
+        );
+    }
     if std::env::var("OPS").is_ok() {
         println!("  KILLS {kills_made}");
     }

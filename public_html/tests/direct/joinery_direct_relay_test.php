@@ -174,6 +174,26 @@ require_once(PathHelper::getIncludePath('includes/joinery_direct/DirectCapabilit
 require_once(PathHelper::getIncludePath('data/direct_capability_cache_class.php'));
 
 $SENDER_DOMAIN = 'sender-test.invalid';
+
+// The sender's signing identity belongs to the SENDER's deployment, which is
+// authoritative for its own domain. Standing one up here is what lets this test
+// produce the signatures the box re-verifies. The guard that would otherwise
+// refuse the mint exists to stop a box minting for a domain it merely mirrors
+// (an IMAP-source anchor like gmail.com) -- a different question from this one,
+// so it is answered for this domain only and put back afterwards.
+$authority_prop = new ReflectionProperty('DirectSigningIdentity', 'authority_resolver');
+$authority_prop->setAccessible(true);
+$authority_prev = $authority_prop->getValue();
+$authority_prop->setValue(null, function (string $domain) use ($SENDER_DOMAIN, $authority_prev): bool {
+	if ($domain === $SENDER_DOMAIN) {
+		return true;
+	}
+	return $authority_prev === null ? true : (bool)call_user_func($authority_prev, $domain);
+});
+harness_defer(function () use ($authority_prop, $authority_prev) {
+	$authority_prop->setValue(null, $authority_prev);
+});
+
 $sender_identity = DirectSigningIdentity::ensureFor($SENDER_DOMAIN);
 $SENDER_KEY_ID = (string)$sender_identity->get('jdi_key_id');
 harness_defer(function () use ($sender_identity) { try { $sender_identity->permanent_delete(); } catch (Throwable $e) {} });

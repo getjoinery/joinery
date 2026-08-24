@@ -10,7 +10,8 @@
 //! regression test.
 
 use jd_sim::scenario::{
-    assert_converged, assert_invariants, assert_nothing_lost, disk_tree, Committed, World,
+    assert_converged, assert_invariants, assert_no_entry_is_stranded, assert_nothing_lost,
+    disk_tree, Committed, World,
 };
 use jd_sim::{FailureKind, FsOp, NetFaults, SimRng, SimVault};
 
@@ -533,6 +534,52 @@ fn a_file_that_lost_a_naming_race_still_converges() {
         .map(|e| format!("{:?} {}", e.id, e.remote.name))
         .collect();
     assert!(stuck.is_empty(), "still stuck: {stuck:?}");
+}
+
+#[test]
+fn forgetting_a_folder_takes_what_was_under_it() {
+    use jd_core::model::EntityId;
+
+    // Reconcile forgets an entry when both sides agree it is gone. Everything
+    // under a folder names it as their parent, and `all_entries` builds its
+    // list by walking DOWN from the root -- so forgetting the folder alone
+    // leaves its children with no way back. No pass visits them, nothing plans
+    // against them, nothing clears them, and no issue is raised: they are
+    // simply never seen again.
+    //
+    // Soak run 209 ended with six live files in exactly that state, under a
+    // folder whose own `forget` op had completed. The op is given here directly
+    // because that is how it reaches the executor -- a planner cannot reach an
+    // entry it can no longer resolve, so the damage is done by the one
+    // operation and only then becomes invisible.
+    let world = World::new(2091, &["laptop"]);
+    let device = world.device("laptop");
+
+    let folder = world.server.seed_folder(None, "Sub 12 (14)");
+    for name in ["doc-19.txt", "doc-20.txt", "doc-21.txt"] {
+        world.server.seed_file(Some(folder), name, b"live on the server");
+    }
+    assert!(world.settle().is_some());
+
+    let before = device.store.every_entry().unwrap().len();
+    assert!(before >= 4, "the folder and its files should have arrived: {before}");
+
+    // The folder is gone from the server too -- which is WHY reconcile forgets
+    // it. Without this the next index walk simply fetches it back and the
+    // children are reachable again, which proves nothing.
+    assert!(world.server.forget_folder(folder));
+
+    device
+        .store
+        .queue_op("forget", EntityId::folder(folder), "{}", "forget-the-folder")
+        .unwrap();
+    for _ in 0..5 {
+        world.pass(device);
+    }
+
+    // The point of the test: whatever else is true, nothing may be left naming
+    // a parent the store no longer has.
+    assert_no_entry_is_stranded(&world);
 }
 
 #[test]
