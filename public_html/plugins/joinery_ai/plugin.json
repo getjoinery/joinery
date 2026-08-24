@@ -1,6 +1,6 @@
 {
     "name": "Joinery AI",
-    "version": "0.21.7",
+    "version": "0.21.8",
     "description": "Scheduled LLM recipes that gather information, write to a workspace, and deliver results to a dashboard or email.",
     "author": "Joinery",
     "license": "PolyForm-Noncommercial-1.0.0",
@@ -127,7 +127,7 @@
             "group": "provider",
             "label": "Local Model",
             "type": "text",
-            "helptext": "Model id(s) your host serves, comma-separated, exactly as it names them. Each is graded automatically from its tag against the shipped model reference, so there is nothing to bind and no slots to keep straight - swap a model here and every recipe follows, because none of them names one."
+            "helptext": "Model id(s) your host serves, comma-separated, exactly as it names them."
         },
         {
             "name": "joinery_ai_local_api_key",

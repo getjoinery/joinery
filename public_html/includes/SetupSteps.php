@@ -32,6 +32,10 @@
  * Plugins register from their serve.php (loaded every request while active),
  * so registration must stay cheap: closures only, no queries at register time.
  *
+ * @version 1.11
+ * @changelog 1.11 - Backups step copy says the key turns on nightly backups —
+ *   activation is automatic, so the copy names the payoff rather than the key
+ *   handling.
  * @version 1.10
  * @changelog 1.10 - The mail_send step is "Email", the whole of it: its copy
  *   says the chosen address is also a mailbox here (mailbox plugin present),
@@ -559,7 +563,7 @@ class SetupSteps {
 				if (BackupHistory::manager_coverage() !== null) {
 					return 'This site is already backed up: the control plane that manages this server takes regular archives, sealed to a recovery key its operator holds. Nothing here needs your attention unless you also want backups this site runs itself.';
 				}
-				return 'Everything here should survive this server dying. Point backups at a storage bucket, and create the recovery key that encrypts them — shown once, held only by you.';
+				return 'Everything here should survive this server dying. Point backups at a storage bucket, and create the recovery key that encrypts them to turn on nightly backups.';
 			},
 			'render_file' => 'includes/setup_steps/backups.php',
 			'home_url' => '/admin/admin_backups',
