@@ -24,6 +24,8 @@
  *   diff           the four outcomes, with cutovers called out
  *   all_green      every record is published as planned
  *
+ * @version 1.6
+ * @changelog 1.6 - The move offer is gated on DnsRelocation::foreignUse (move_veto var): a lived-in domain gets the gate note without the offer, and dns_move refuses server-side too
  * @version 1.5
  * @changelog 1.5 - handle() runs the dns_move action (DnsRelocation::seed against the chosen open-API host) and stashes the outcome for one render
  * @changelog 1.4 - Carries the driver's apiGateNote() as its own var (the view forks on it), and liveNameservers() is public for the setup wizard
@@ -102,6 +104,12 @@ class DnsPublishBox {
 				if ($missing) {
 					$move = array('error' => 'Enter the ' . $target_class::getLabel()
 						. ' credential to set up your DNS there.');
+				} elseif (($veto = DnsRelocation::foreignUse($plan->getDomain(), $plan)) !== '') {
+					// The box hides the offer for a lived-in domain; a POST
+					// arriving anyway is refused for the same reason.
+					$move = array('error' => 'Moving this domain\'s DNS is not offered: ' . $veto
+						. '. Add the records by hand instead — a move cannot see records on names '
+						. 'it does not know about, and would leave them behind.');
 				} else {
 					$move = DnsRelocation::seed($target_class, $credential, $plan->getDomain(), $plan);
 					unset($credential);   // the only copy, gone before the response is built
@@ -358,6 +366,7 @@ class DnsPublishBox {
 			'detected_label' => '',
 			'prerequisite'  => '',
 			'gate'          => '',
+			'move_veto'     => '',
 			'relocation_result' => null,
 			'credential_fields' => array(),
 			'credential_guide'  => null,
@@ -425,6 +434,15 @@ class DnsPublishBox {
 			$vars['settled']      = DnsReconciler::settled($vars['rows']);
 			$vars['last_written'] = DnsReconciler::lastWritten($vars['rows']);
 			$vars['state']        = $vars['settled'] ? self::STATE_ALL_GREEN : self::STATE_DIFF;
+		}
+
+		// Whether the gate callout may offer the guided move: only for a
+		// domain that serves nothing but this deployment. Computed exactly
+		// where the view would render the offer, so the lookups run only then.
+		if ($vars['gate'] !== '' && $vars['detected_key'] === $vars['provider_key']
+				&& $vars['state'] !== self::STATE_ALL_GREEN) {
+			require_once(PathHelper::getIncludePath('includes/dns/DnsRelocation.php'));
+			$vars['move_veto'] = DnsRelocation::foreignUse($plan->getDomain(), $plan);
 		}
 
 		return $vars;

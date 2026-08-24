@@ -18,6 +18,9 @@
  * whose API is open to everyone. The gated hosts are also named as such in the
  * provider list — a fact about the vendor, not a tier label.
  *
+ * @version 1.11 - the move offer only renders for a domain that serves nothing
+ *                but this deployment (move_veto); a lived-in domain gets the
+ *                gate note with by-hand guidance instead
  * @version 1.10 - the gated-host callout mounts the guided move itself
  *                (dns_relocation_render), handled by the box's dns_move action
  * @version 1.9 - a gated host is called out with the move-your-DNS way out,
@@ -81,13 +84,24 @@ function dns_publish_box_render($page, array $vars, string $title = '', string $
 	// was done — and a gated provider the domain does not even use gets the
 	// gate sentence alone (the mismatch line above covers the rest).
 	if (($vars['gate'] ?? '') !== '' && $vars['state'] !== DnsPublishBox::STATE_ALL_GREEN) {
+		// The move is only offered to a domain that serves nothing but this
+		// deployment (move_veto, from DnsRelocation::foreignUse) — a lived-in
+		// domain has records a relocation cannot see, so its way forward is
+		// pasting the records by hand.
+		$offer_move = ($vars['detected_key'] === $vars['provider_key'])
+			&& (string)($vars['move_veto'] ?? '') === '';
 		echo '<div class="alert alert-warning">' . htmlspecialchars($vars['gate']);
-		if ($vars['detected_key'] === $vars['provider_key']) {
+		if ($offer_move) {
 			echo ' If your account qualifies, carry on below. Otherwise the lasting fix is to move this'
 				. ' domain\'s DNS — not the domain itself — to a free host whose API is open to everyone:';
+		} elseif ($vars['detected_key'] === $vars['provider_key']) {
+			echo ' If your account qualifies, carry on below. Otherwise add the records by hand where'
+				. ' the domain\'s DNS lives — this domain is already in use ('
+				. htmlspecialchars((string)$vars['move_veto'])
+				. '), so moving its DNS is not offered.';
 		}
 		echo '</div>';
-		if ($vars['detected_key'] === $vars['provider_key']) {
+		if ($offer_move) {
 			dns_relocation_render($page, array(
 				'domain'       => $vars['domain'],
 				'source_key'   => $vars['provider_key'],
@@ -97,6 +111,11 @@ function dns_publish_box_render($page, array $vars, string $title = '', string $
 				'result'       => $vars['relocation_result'] ?? null,
 				'recheck_hint' => 'come back to this page',
 			));
+		} elseif (!empty($vars['relocation_result']['error'])) {
+			// A refused move POST stashed its reason; without the offer's
+			// renderer on the page, say it here so the press is answered.
+			echo '<div class="alert alert-danger">'
+				. htmlspecialchars((string)$vars['relocation_result']['error']) . '</div>';
 		}
 	}
 

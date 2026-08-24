@@ -32,6 +32,17 @@
  * idempotent seed; after it, the domain's own NS records identify the new
  * host and every surface takes its normal automatable path.
  *
+ * **The move is only offered to a domain that serves nothing but this
+ * deployment.** foreignUse() reads the apex — addresses, mail routing, sender
+ * policy — and answers with the first sign the domain is lived-in: mail
+ * delivered somewhere else, an address record for another server, an SPF for
+ * another setup. A lived-in domain is exactly the one whose unguessable
+ * records make a relocation dangerous, and its operator pastes a handful of
+ * records by hand instead. The check fails closed: when this server's own
+ * address cannot be established, the offer is withheld, never mis-shown.
+ *
+ * @version 1.2 - foreignUse()/classifyForeign(): the lived-in detection that
+ *                gates whether a move is offered at all
  * @version 1.1 - registrarNameserverHelp knows a Cloudflare-hosted source: the
  *                nameserver change happens at the registrar, not Cloudflare
  * @version 1.0
@@ -140,6 +151,121 @@ class DnsRelocation {
 			$out['error'] = $e->getMessage();
 		}
 		return $out;
+	}
+
+	/**
+	 * The first visible sign that the domain is used for anything beyond this
+	 * deployment, or '' when the move is safe to offer. Four resolver
+	 * questions, apex only — cheap enough for a render.
+	 *
+	 * @param string             $domain   The domain the move would relocate.
+	 * @param DnsRecordPlan|null $own_plan What this deployment itself wants
+	 *                                     published; its values count as ours.
+	 */
+	public static function foreignUse(string $domain, ?DnsRecordPlan $own_plan): string {
+		$domain = DnsRecord::normalizeName($domain);
+		if ($domain === '') {
+			return '';
+		}
+		$visible = array();
+		foreach (self::lookup($domain, DNS_A) as $row) {
+			$visible[] = new DnsRecord(DnsRecord::TYPE_A, $domain, (string)$row['ip']);
+		}
+		foreach (self::lookup($domain, DNS_AAAA) as $row) {
+			$visible[] = new DnsRecord(DnsRecord::TYPE_AAAA, $domain, (string)$row['ipv6']);
+		}
+		foreach (self::lookup($domain, DNS_MX) as $row) {
+			$visible[] = new DnsRecord(DnsRecord::TYPE_MX, $domain,
+				DnsRecord::normalizeName((string)$row['target']), null, (int)($row['pri'] ?? 10));
+		}
+		foreach (self::lookup($domain, DNS_TXT) as $row) {
+			$visible[] = new DnsRecord(DnsRecord::TYPE_TXT, $domain, (string)$row['txt']);
+		}
+		return self::classifyForeign($domain, $visible, $own_plan, self::serverAddresses());
+	}
+
+	/**
+	 * Every address this machine answers as, from the request socket and the
+	 * local interfaces — no network call. On the bare-VPS topology this
+	 * platform deploys to, the public address is on an interface, so the apex
+	 * pointing here is recognized from the CLI as well as from a request. A
+	 * fronted deployment's apex holds the proxy's address instead, which no
+	 * list here contains — the offer is withheld there, which is fail-closed
+	 * and correct: a proxied domain is configured, not fresh.
+	 */
+	private static function serverAddresses(): array {
+		$out = array();
+		$addr = trim((string)($_SERVER['SERVER_ADDR'] ?? ''));
+		if ($addr !== '') {
+			$out[] = $addr;
+		}
+		if (function_exists('net_get_interfaces')) {
+			foreach ((array)@net_get_interfaces() as $iface) {
+				foreach ((array)($iface['unicast'] ?? array()) as $unicast) {
+					$ip = (string)($unicast['address'] ?? '');
+					if ($ip !== '' && filter_var($ip, FILTER_VALIDATE_IP)) {
+						$out[] = $ip;
+					}
+				}
+			}
+		}
+		return array_values(array_unique($out));
+	}
+
+	/**
+	 * The classification itself, separated from the lookups so it is testable.
+	 * A record is ours when the deployment's own plan carries its value or it
+	 * names this server; anything else visible at the apex is evidence of a
+	 * lived-in domain. Only the signals whose loss is catastrophic are read —
+	 * mail routing, addresses, sender policy. A benign apex TXT (a site
+	 * verification) blocks nothing: it is copied verbatim by the seed anyway.
+	 *
+	 * @param DnsRecord[] $visible What the apex answers.
+	 * @return string '' when nothing forecloses the move, else one sentence.
+	 */
+	public static function classifyForeign(string $domain, array $visible,
+			?DnsRecordPlan $own, array $server_ips = array()): string {
+
+		$plan_mx = array();
+		$plan_addr = array();
+		$plan_spf = '';
+		if ($own !== null) {
+			foreach ($own->getRecords() as $record) {
+				if (!empty($record->absent)) {
+					continue;
+				}
+				if ($record->type === DnsRecord::TYPE_MX) {
+					$plan_mx[DnsRecord::normalizeName($record->value)] = true;
+				} elseif ($record->type === DnsRecord::TYPE_A || $record->type === DnsRecord::TYPE_AAAA) {
+					// Keyed by value alone on purpose: any address the plan
+					// publishes anywhere in the zone is this deployment's.
+					$plan_addr[$record->value] = true;
+				} elseif ($record->type === DnsRecord::TYPE_TXT
+						&& DnsRecord::normalizeName($record->name) === $domain
+						&& stripos(trim($record->value), 'v=spf1') === 0) {
+					$plan_spf = trim($record->value);
+				}
+			}
+		}
+
+		foreach ($visible as $record) {
+			if ($record->type === DnsRecord::TYPE_MX) {
+				$target = DnsRecord::normalizeName($record->value);
+				if (!isset($plan_mx[$target])) {
+					return 'mail for ' . $domain . ' is already delivered elsewhere (MX ' . $target . ')';
+				}
+			} elseif ($record->type === DnsRecord::TYPE_A || $record->type === DnsRecord::TYPE_AAAA) {
+				if (!in_array($record->value, $server_ips, true) && !isset($plan_addr[$record->value])) {
+					return $domain . ' points at a server that is not this one (' . $record->value . ')';
+				}
+			} elseif ($record->type === DnsRecord::TYPE_TXT
+					&& stripos(trim($record->value), 'v=spf1') === 0) {
+				if (trim($record->value) !== $plan_spf) {
+					return $domain . ' already publishes a sender policy for another setup (SPF)';
+				}
+			}
+		}
+		return '';
 	}
 
 	/**
