@@ -1,6 +1,9 @@
 # Deliverability Report Ingest
 
-**Status: UNBUILT — proposed 2026-07-25.** Design only.
+**Status: BUILT 2026-08-24** — all four build-plan phases in one pass
+(detector + dispatch, aggregate parser + storage, views, TLS-RPT + ARF).
+Tests: `deliverability_report` (safe) and `deliverability_report_ingest` (db),
+both green. Live: verified on dev with a real Google aggregate report.
 
 ## What this is
 
@@ -85,6 +88,24 @@ hand. What persists afterwards is **derived data**, which is not sensitive: IP
 addresses, counts, and pass/fail verdicts about mail *claiming* to be from the
 domain. The original message then follows the domain's security level like any
 other message.
+
+**Amendment (2026-08-24): "ingest" is two moments, not one.** Since this was
+written, the hardened relay landed: a Fortress message pulled from the relay
+stores as a pending row whose raw is sealed to the owner's vault — receive-time
+ingest never sees its plaintext at all. Content for those rows first exists at
+the next unlock, inside `InboundEmailRouter::parsePendingMessage()`. The
+detector therefore runs at **both** plaintext moments — receive-time
+(`processEmail`, before the alias branch, so a report to an address with no
+alias is still caught per D1) and deferred parse at unlock. A report caught at
+deferred parse removes its pending message row once filed; until that unlock it
+sits as an ordinary pending message, which is acceptable and bounded by the
+unlock cadence.
+
+**Scope of detection: live delivery only.** IMAP-mirrored accounts and archive
+imports are excluded — that mail is a mirror of an external mailbox, not the
+domain's report stream, and consuming a message there would diverge from the
+source of truth. Joinery Direct is excluded because reports arrive over SMTP by
+construction.
 
 ### D3 — Reports are filed, not delivered
 
@@ -185,7 +206,11 @@ Two tables, following the platform's prefix convention:
 
 - **`dvr_deliverability_reports`** — one row per report: kind, reporting
   organisation, the domain it concerns, the time window it covers, the report
-  id, a reference to the stored raw message, and a parse status.
+  id, and a parse status. The raw report is held inline in this row **only
+  while unparsed** (parse failures and kinds with no parser yet) and cleared
+  the moment a parse succeeds, per D6. Dedup on provider retry is the unique
+  key (domain, kind, organisation, report id); a report with no extractable id
+  uses a hash of its raw bytes.
 - **`dvs_deliverability_report_sources`** — one row per source line within a
   report: source IP, message count, disposition, SPF result and alignment, DKIM
   result and alignment, and the identity domains involved.
