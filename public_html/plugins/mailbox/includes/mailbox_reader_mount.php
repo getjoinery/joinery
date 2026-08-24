@@ -21,8 +21,10 @@
  * fields. See specs/implemented/inbound_email_new_message_compose.md.
  *
  * Compose maturity (specs/mailbox_compose_maturity.md § Phase 1): the plain body
- * textarea is a rich-text contenteditable + toolbar; a Bcc field hides behind a
- * toggle; inline images paste/drag into the editor. The reader JS owns all of it.
+ * textarea is a rich-text contenteditable + toolbar; the Cc and Bcc fields hide
+ * behind toggles; inline images paste/drag into the editor. The toolbar buttons
+ * carry tabindex=-1 so tabbing from Subject lands in the message body, not on
+ * seven formatting buttons. The reader JS owns all of it.
  *
  * The mount also emits the quiet lowering convergence
  * (specs/mailbox_lowering_unseal.md § 6): a signed-in holder with sealed rows
@@ -35,7 +37,7 @@
  * mailbox is open. See plugins/mailbox/docs/overview.md § The list toolbar and
  * multi-select.
  *
- * @version 1.17.0
+ * @version 1.18.0
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxSender.php'));
@@ -137,7 +139,7 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			<div class="mbx-compose-head">
 				<span class="mbx-compose-title" id="mbx-compose-title">Reply</span>
 				<button type="button" class="mbx-iconbtn" id="mbx-compose-discard" title="Discard draft">&#128465;</button>
-					<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Save &amp; close">&times;</button>
+				<button type="button" class="mbx-iconbtn" id="mbx-compose-close" title="Save &amp; close">&times;</button>
 			</div>
 			<div class="mbx-compose-error" id="mbx-compose-error" hidden></div>
 			<?php
@@ -171,10 +173,17 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			// delivery is theirs to answer, live, and is deliberately not
 			// queryable.
 			echo '<div class="mbx-direct-hint" id="mbx-direct-hint" hidden></div>';
+			// Cc and Bcc both hide behind toggles (Gmail-style); the reader JS
+			// reveals a field that arrives populated (reply-all, a saved draft).
+			// Bcc rides its own sealed column server-side (iem_bcc), never merged
+			// into the recipient list.
+			echo '<div class="mbx-bcc-toggle-row">'
+				. '<button type="button" class="mbx-bcc-toggle" id="mbx-cc-toggle">Add Cc</button>'
+				. '<button type="button" class="mbx-bcc-toggle" id="mbx-bcc-toggle">Add Bcc</button>'
+				. '</div>';
+			echo '<div class="mbx-cc-row" id="mbx-cc-row" hidden>';
 			$compose->textinput('cc', 'Cc', array('id' => 'mbx_cc', 'placeholder' => 'Optional'));
-			// Bcc is hidden behind a toggle (Gmail-style). It rides its own sealed
-			// column server-side (iem_bcc), never merged into the recipient list.
-			echo '<div class="mbx-bcc-toggle-row"><button type="button" class="mbx-bcc-toggle" id="mbx-bcc-toggle">Add Bcc</button></div>';
+			echo '</div>';
 			echo '<div class="mbx-bcc-row" id="mbx-bcc-row" hidden>';
 			$compose->textinput('bcc', 'Bcc', array('id' => 'mbx_bcc',
 				'placeholder' => 'Blind copy — hidden from other recipients'));
@@ -188,15 +197,15 @@ function mailbox_render_mailbox_reader($page, array $opts): void {
 			<div class="mbx-field mbx-richwrap">
 				<span class="mbx-rich-label">Message</span>
 				<div class="mbx-toolbar" id="mbx-toolbar" role="toolbar" aria-label="Formatting">
-					<button type="button" class="mbx-tb" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
-					<button type="button" class="mbx-tb" data-cmd="italic" title="Italic (Ctrl+I)"><em>I</em></button>
-					<button type="button" class="mbx-tb" data-cmd="underline" title="Underline (Ctrl+U)"><span style="text-decoration:underline">U</span></button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="bold" title="Bold (Ctrl+B)"><b>B</b></button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="italic" title="Italic (Ctrl+I)"><em>I</em></button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="underline" title="Underline (Ctrl+U)"><span style="text-decoration:underline">U</span></button>
 					<span class="mbx-tb-sep" aria-hidden="true"></span>
-					<button type="button" class="mbx-tb" data-cmd="insertUnorderedList" title="Bulleted list">&#8226; List</button>
-					<button type="button" class="mbx-tb" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="insertUnorderedList" title="Bulleted list">&#8226; List</button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="insertOrderedList" title="Numbered list">1. List</button>
 					<span class="mbx-tb-sep" aria-hidden="true"></span>
-					<button type="button" class="mbx-tb" data-cmd="createLink" title="Insert link">&#128279;</button>
-					<button type="button" class="mbx-tb" data-cmd="removeFormat" title="Clear formatting">&#10005;</button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="createLink" title="Insert link">&#128279;</button>
+					<button type="button" class="mbx-tb" tabindex="-1" data-cmd="removeFormat" title="Clear formatting">&#10005;</button>
 				</div>
 				<div class="mbx-rich" id="mbx_body_rich" contenteditable="true" role="textbox" aria-multiline="true" data-placeholder="Write your message…"></div>
 			</div>
