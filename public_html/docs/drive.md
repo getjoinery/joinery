@@ -114,6 +114,14 @@ rules):
   and the blob row. A blob still referenced by another file is left untouched.
 - `FileBlob::retain($blob_id)` is the increment twin (a new file pointing at an
   existing blob — the dedup path calls it).
+- **A reference is taken before the row that holds it exists.** `createFromPath`
+  inserts a fresh blob already counting one, and `createFromExistingBlob` /
+  `drive_upload_init`'s dedup branch call `retain` before inserting. Every path
+  out from there has to give the reference back if the row is not created —
+  the insert legitimately fails when two uploads race for one name, and the
+  partial unique index refuses the loser. A blob left counting a reference
+  nothing holds is never reclaimed: the bytes stay on disk, keep billing against
+  the owner, and can be reached by nobody.
 
 The at-zero delete takes the offload engine's per-row advisory lock before
 removing bytes, so it never unlinks bytes the `CloudOffloadEngine` is mid-push.
@@ -470,7 +478,11 @@ daily retention sweep.
 Saving new content to a file **demotes the current head blob to a `FileVersion`
 and repoints the file at the freshly-ingested blob** — the head blob's reference
 is transferred to the version row, so refcounts stay correct without a
-retain/release. Restoring swaps the roles back. Both prune to the owner's
+retain/release. The demotion holds the file's row (`SELECT ... FOR UPDATE`) and
+reads the head from inside that hold rather than from the caller's copy, which
+is what stops two uploads finishing at once from demoting the same blob twice
+and leaving the head one of them installed referenced by nothing. The same hold
+serialises `fvr_version_number`, which is `MAX + 1` against a unique index. Restoring swaps the roles back. Both prune to the owner's
 `drive_versioning_depth` (oldest versions released and deleted). Because a version
 IS a reference to its blob, `FileVersion::permanent_delete` releases it, and the
 file's `fvr_fil_file_id` rule is `permanent_delete` so deleting a file releases
