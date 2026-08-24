@@ -46,6 +46,10 @@ This item sits on both this list and the parent spec's *Later / Out of Scope*
 list, deliberately: it is out of scope for the engine as built, and it is the
 first thing that will force itself back in.
 
+**It did, 2026-08-23** — jeremytunnell.com's incremental hit 5.9 GB after the
+Takeout import and B2 refused the PUT. Specced as
+`specs/backup_multipart_upload.md`, which closes this item.
+
 ## Related, still out of scope
 
 Recorded so they are not mistaken for gaps:

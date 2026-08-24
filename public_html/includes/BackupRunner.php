@@ -31,6 +31,10 @@
  * it is handed cannot delete, and pruning that shelf belongs to the party that
  * owns it.
  *
+ * @version 1.4 - a failed chain run also deletes its own artifacts and restores the
+ *                pre-run manifest: the chain is being abandoned, so its half-made run
+ *                must not strand gigabytes on disk until chain retention gets there,
+ *                and the local manifest must never describe a run the bucket lacks
  * @version 1.3 - the meta artifact carries shape.json, so a restore knows what machine the
  *                backup came off and can reconcile it to the one it is landing on
  * @version 1.2 - profiles: a run is one party's backup end to end (paths, lock, snapshot,
@@ -553,6 +557,11 @@ class BackupRunner {
 		$key_file = $chain_d . '/.run.key';
 		self::write_private($key_file, $data_key);
 
+		// The manifest as it stood before this run, so a failure can put it back.
+		// A brand-new chain has no before — its manifest file is deleted instead.
+		$manifest_pre  = ($reason !== '') ? null : $manifest;
+		$manifest_path = $chain_d . '/' . BackupChain::MANIFEST_NAME;
+
 		$artifacts = array();
 		try {
 			try {
@@ -576,7 +585,6 @@ class BackupRunner {
 			$level = (int)$artifacts['files']['level'];
 
 			$manifest = BackupChain::add_run($manifest, $seq, $level, $artifacts);
-			$manifest_path = $chain_d . '/' . BackupChain::MANIFEST_NAME;
 			BackupChain::write($manifest, $manifest_path);
 
 			$uploaded = self::upload_chain($plan, $chain_id, $artifacts, $manifest_path);
@@ -592,6 +600,13 @@ class BackupRunner {
 			// the next run start a fresh chain — one extra full, never a
 			// silently broken backup.
 			@unlink($snar);
+			// And since the chain is now abandoned, this run's half-made output
+			// is deleted and the manifest put back the way it was. Local artifact
+			// deletion otherwise happens only after success, so a failed run of a
+			// large site would strand its archives on disk until chain retention
+			// finally removed the whole chain — weeks, on a disk that may not
+			// have them to spare.
+			self::discard_failed_run($chain_d, $seq, $artifacts, $manifest_path, $manifest_pre);
 			throw $e;
 		}
 
@@ -625,6 +640,39 @@ class BackupRunner {
 		if ($swept)  { $msg .= "; swept {$swept} local file" . ($swept === 1 ? '' : 's'); }
 
 		return array('status' => 'success', 'message' => $msg);
+	}
+
+	/**
+	 * Remove everything a failed chain run left behind. The artifacts collected
+	 * so far are deleted by their recorded paths, then every artifact name this
+	 * sequence number could have produced is deleted by name — an engine can
+	 * write its file and throw before the artifact is recorded. The manifest is
+	 * restored to its pre-run state ($manifest_before), or deleted when the run
+	 * was starting a brand-new chain and there was no pre-run state to restore.
+	 *
+	 * Every step is best-effort: this runs on the failure path, and the failure
+	 * being reported must stay the real one.
+	 */
+	private static function discard_failed_run($chain_d, $seq, array $artifacts, $manifest_path, $manifest_before) {
+		foreach ($artifacts as $a) {
+			if (!empty($a['path'])) { @unlink($a['path']); }
+		}
+		foreach (BackupChain::KINDS as $kind) {
+			@unlink($chain_d . '/' . BackupChain::artifact_name($kind, $seq, true));
+			@unlink($chain_d . '/' . BackupChain::artifact_name($kind, $seq, false));
+		}
+		if ($manifest_before === null) {
+			@unlink($manifest_path);
+			return;
+		}
+		try {
+			BackupChain::write($manifest_before, $manifest_path);
+		} catch (\Throwable $e) {
+			// A manifest that cannot be put back must not stay one run ahead of
+			// the bucket. With it gone (and the snapshot already cleared) the
+			// next run starts a fresh chain, which is the safe direction.
+			@unlink($manifest_path);
+		}
 	}
 
 	/** Archive the file tree, incrementally when the chain is being extended. */

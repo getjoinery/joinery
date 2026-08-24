@@ -84,6 +84,9 @@ implementation covers them — but it has to be written. The mailbox and file
 stores use the AWS SDK through `CloudStorageS3Driver`, which already ships
 `MultipartUploader`; deciding whether the backup path adopts that driver instead
 of extending `S3Signer` is the first architectural call in this spec.
+`specs/backup_multipart_upload.md` (2026-08-24) makes that call — extend
+`S3Signer` — and supplies the multipart primitive for file-on-disk artifacts;
+what remains here is feeding parts from a pipe rather than a seekable file.
 
 **SigV4 needs to know the payload hash before it signs.** That is impossible for
 a body being generated as it is sent. The two ways out are `UNSIGNED-PAYLOAD`

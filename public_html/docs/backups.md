@@ -197,7 +197,11 @@ A run that **fails** partway clears the snapshot for the same reason: the
 snapshot advances while tar runs, before the run is committed to the manifest
 and confirmed in the bucket, so carrying it past a failure would quietly leave
 the failed run's changes out of the chain. The next run starts a fresh chain
-instead — one extra full, never a silently broken backup.
+instead — one extra full, never a silently broken backup. The failed run also
+deletes its own artifacts and puts the manifest back to its pre-run state: the
+abandoned run's archives can be gigabytes a small disk does not have to spare
+until chain retention removes the chain, and a local manifest describing a run
+the bucket never received must not survive to be uploaded by anything later.
 
 Runs are serialized with a lock in the working directory; a run that finds
 another in progress reports itself skipped rather than racing it for the
@@ -318,6 +322,32 @@ site is unprotected: a control plane managing it takes its own copies, sealed to
 its own key, which it carries with each run. Those are separate backups under
 separate custody, and either party can have them without the other — see
 [Server Manager](../plugins/server_manager/docs/overview.md#backups-across-the-fleet).
+
+## Uploads
+
+Artifacts reach the bucket through `S3Signer` — hand-rolled SigV4 against any
+S3-compatible endpoint, so the backup path carries no SDK dependency. An
+artifact of 1 GiB or less goes up as one signed streamed PUT. Above that,
+`put_file()` switches to the **multipart API** on its own: no setting, no
+caller involvement. The threshold sits deliberately far below the 5 GB
+single-PUT cap every provider enforces, so the multipart path is exercised by
+routine artifacts (a nightly database dump crosses it) rather than only by the
+oversized archive it exists for.
+
+Parts are 100 MiB: each is read into memory, hashed, and signed with its real
+payload hash, so the provider verifies every part's bytes against the
+signature, and a failed part is re-read from disk and retried on the same
+budget as any other request. One part is also the peak memory cost, sized for
+the smallest node. `CompleteMultipartUpload` responses are checked by **body**,
+not just status — a provider can answer HTTP 200 with an `<Error>` document,
+and that response is retried and then surfaced as a failure, never recorded as
+a backup. Any failure aborts the multipart upload so no partial object is left
+claimable; because an abort can itself be lost (the process can die), the
+bucket should carry a cancel-unfinished-multipart lifecycle rule (B2: cancel
+unfinished large files after 7 days) as the backstop.
+
+`sha256` and `bytes` are computed from the local file either way; a restore
+verifies against them and cannot tell how the object was uploaded.
 
 ## Retention
 
