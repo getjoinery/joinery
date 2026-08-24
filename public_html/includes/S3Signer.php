@@ -9,6 +9,10 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.4 - multipart upload: put_file() switches to the S3 multipart API above
+ *                MULTIPART_THRESHOLD_BYTES, lifting the 5 GB single-PUT ceiling; parts
+ *                are hashed and signed individually, retried on the existing budget,
+ *                and an incomplete upload is aborted rather than left claimable
  * @version 1.3 - transient provider failures (5xx, 429, transport errors) are retried with
  *                backoff inside request(), bounded by a wall-clock budget
  * @version 1.2 - list() (ListObjectsV2, continuation-token paged) so the control plane
@@ -27,9 +31,12 @@ class S3Signer {
 	const SERVICE = 's3';
 
 	// Retry policy. Every request this class makes is idempotent — a PUT overwrites
-	// its key (single PUT, never multipart, so there are no orphaned parts), and
+	// its key, an UploadPart overwrites its part number within its uploadId, and
 	// GET/DELETE/list have no cumulative effect — so a repeat is a no-op rather than
-	// a duplicate. That is what makes retrying safe here.
+	// a duplicate. That is what makes retrying safe here. The one repeat that could
+	// leave residue is a CreateMultipartUpload whose response was lost: the retry
+	// mints a second uploadId and the first is orphaned, which is why the bucket
+	// carries a cancel-unfinished-multipart lifecycle rule as backstop.
 	const MAX_ATTEMPTS = 3;
 	const RETRY_BASE_DELAY_SECONDS = 2;
 	// Extra wall clock, on top of one attempt's timeout, that retries may consume.
@@ -37,6 +44,19 @@ class S3Signer {
 	// timeout leaves no room for another, which is the right answer — a transfer
 	// that cannot finish in an hour will not finish on the second try either.
 	const RETRY_WINDOW_SECONDS = 1200;
+
+	// Objects above the threshold upload via the S3 multipart API; the single PUT
+	// every provider caps at 5 GB stays the path for everything smaller. The
+	// threshold is deliberately well under the cap so the multipart path runs
+	// routinely (a nightly database dump crosses it) instead of only in the
+	// emergency it exists for — a path exercised only in emergencies is broken
+	// when the emergency comes. Parts are read into memory one at a time to be
+	// hashed and signed, so the part size is also the peak memory cost, chosen to
+	// fit the smallest fleet VPS. 100 MiB × the API's 10,000-part cap ≈ 1 TB per
+	// object, far beyond any plausible artifact.
+	const MULTIPART_THRESHOLD_BYTES = 1073741824;   // 1 GiB
+	const MULTIPART_PART_BYTES = 104857600;         // 100 MiB
+	const MULTIPART_MAX_PARTS = 10000;
 
 	/**
 	 * Execute a signed GET against a bucket path with querystring params.
@@ -133,13 +153,18 @@ class S3Signer {
 	}
 
 	/**
-	 * Execute a signed PUT from a local file path (streamed).
-	 * Uses x-amz-content-sha256: UNSIGNED-PAYLOAD so we do not have to pre-hash.
+	 * Upload a local file to a bucket key. At or below MULTIPART_THRESHOLD_BYTES
+	 * this is one signed streamed PUT (x-amz-content-sha256: UNSIGNED-PAYLOAD so
+	 * the file is never pre-hashed); above it the multipart API takes over
+	 * transparently — same arguments, same return shape, no caller involvement.
 	 */
 	public static function put_file($creds, $bucket, $path, $local_path, $content_type = 'application/octet-stream') {
 		$size = filesize($local_path);
 		if ($size === false) {
 			throw new S3SignerException('Cannot stat local file: ' . $local_path);
+		}
+		if ($size > self::MULTIPART_THRESHOLD_BYTES) {
+			return self::put_file_multipart($creds, $bucket, $path, $local_path, $content_type);
 		}
 		$fh = fopen($local_path, 'rb');
 		if (!$fh) {
@@ -153,7 +178,200 @@ class S3Signer {
 	}
 
 	/**
-	 * Low-level signed request. $body can be null (GET/DELETE) or a stream resource (PUT).
+	 * Multipart upload: CreateMultipartUpload, one signed UploadPart per planned
+	 * part, CompleteMultipartUpload. Each part is read into memory, hashed, and
+	 * signed with its real payload hash — the source is a seekable file, so a
+	 * failed part is simply re-read and retried on the ordinary request budget.
+	 * Any failure aborts the upload (best-effort) so no partial object survives
+	 * to be mistaken for a backup.
+	 *
+	 * Returns the same ['status','body','headers',...] shape as a single PUT: a
+	 * failed sub-request hands back that sub-request's response so the caller's
+	 * status check and error extraction work unchanged.
+	 *
+	 * Public, with an overridable part size, so the flow is testable against a
+	 * local fixture without a gigabyte file; production callers go through
+	 * put_file() and never pass $part_size.
+	 */
+	public static function put_file_multipart($creds, $bucket, $path, $local_path, $content_type = 'application/octet-stream', $part_size = self::MULTIPART_PART_BYTES) {
+		$size = filesize($local_path);
+		if ($size === false) {
+			throw new S3SignerException('Cannot stat local file: ' . $local_path);
+		}
+		$parts = self::plan_parts($size, $part_size);
+
+		$create = self::request('POST', $creds, $bucket, $path, ['uploads' => ''], null, 0, $content_type);
+		if ((int)$create['status'] < 200 || (int)$create['status'] >= 300) {
+			return $create;
+		}
+		$upload_id = null;
+		if (preg_match('#<UploadId>(.*?)</UploadId>#s', (string)$create['body'], $m)) {
+			$upload_id = html_entity_decode(trim($m[1]), ENT_XML1 | ENT_QUOTES, 'UTF-8');
+		}
+		if ($upload_id === null || $upload_id === '') {
+			throw new S3SignerException('CreateMultipartUpload returned no uploadId.');
+		}
+
+		$fh = fopen($local_path, 'rb');
+		if (!$fh) {
+			self::abort_multipart($creds, $bucket, $path, $upload_id);
+			throw new S3SignerException('Cannot open local file: ' . $local_path);
+		}
+
+		$done = false;
+		try {
+			$etags = [];
+			foreach ($parts as $p) {
+				$chunk = self::read_exactly($fh, $p['bytes'], $local_path);
+				$resp = self::request('PUT', $creds, $bucket, $path,
+					['partNumber' => (string)$p['number'], 'uploadId' => $upload_id],
+					$chunk, strlen($chunk));
+				if ((int)$resp['status'] < 200 || (int)$resp['status'] >= 300) {
+					$resp['retry_log'][] = 'multipart: part ' . $p['number'] . ' of ' . count($parts) . ' failed; upload aborted';
+					return $resp;
+				}
+				$etag = trim((string)($resp['headers']['etag'] ?? ''));
+				if ($etag === '') {
+					throw new S3SignerException('UploadPart returned no ETag for part ' . $p['number'] . '.');
+				}
+				$etags[$p['number']] = $etag;
+			}
+
+			$xml = self::build_complete_xml($etags);
+			// CompleteMultipartUpload has its own trap: a provider can answer
+			// HTTP 200 with an <Error> document in the body (the assembly failed
+			// server-side after the response line was committed). Providers
+			// document that as retryable, so it gets a bounded retry of its own;
+			// what must never happen is a 200-with-Error read as success.
+			$resp = null;
+			for ($try = 1; $try <= self::MAX_ATTEMPTS; $try++) {
+				$resp = self::request('POST', $creds, $bucket, $path, ['uploadId' => $upload_id],
+					$xml, strlen($xml), 'application/xml');
+				if ((int)$resp['status'] < 200 || (int)$resp['status'] >= 300) {
+					$resp['retry_log'][] = 'multipart: CompleteMultipartUpload failed; upload aborted';
+					return $resp;
+				}
+				if (self::complete_body_ok($resp['body'])) {
+					$done = true;
+					return $resp;
+				}
+				if ($try < self::MAX_ATTEMPTS) {
+					sleep(self::RETRY_BASE_DELAY_SECONDS * (1 << ($try - 1)));
+				}
+			}
+			// Semantically a server failure, whatever the status line said: hand
+			// back a 5xx so no caller's success check can be fooled by the 200.
+			$resp['retry_log'][] = 'multipart: CompleteMultipartUpload answered HTTP ' . $resp['status']
+				. ' with an error body after ' . self::MAX_ATTEMPTS . ' attempts; upload aborted';
+			$resp['status'] = 500;
+			return $resp;
+		} finally {
+			fclose($fh);
+			if (!$done) {
+				self::abort_multipart($creds, $bucket, $path, $upload_id);
+			}
+		}
+	}
+
+	/**
+	 * Slice an object into upload parts: every part is $part_size except the
+	 * last, which takes the remainder. Pure and public so the arithmetic —
+	 * boundaries, the last part, the part-count cap — is testable without a
+	 * network.
+	 *
+	 * Returns [['number' => 1-based part number, 'offset' => byte offset,
+	 * 'bytes' => part length], ...].
+	 */
+	public static function plan_parts($size, $part_size = self::MULTIPART_PART_BYTES) {
+		$size = (int)$size;
+		$part_size = (int)$part_size;
+		if ($size <= 0) {
+			throw new S3SignerException('Cannot plan a multipart upload of ' . $size . ' bytes.');
+		}
+		if ($part_size <= 0) {
+			throw new S3SignerException('Invalid multipart part size: ' . $part_size . '.');
+		}
+		$count = (int)ceil($size / $part_size);
+		if ($count > self::MULTIPART_MAX_PARTS) {
+			throw new S3SignerException('An object of ' . $size . ' bytes needs ' . $count
+				. ' parts of ' . $part_size . ' bytes, over the ' . self::MULTIPART_MAX_PARTS . '-part API cap.');
+		}
+		$parts = [];
+		for ($i = 0; $i < $count; $i++) {
+			$offset = $i * $part_size;
+			$parts[] = [
+				'number' => $i + 1,
+				'offset' => $offset,
+				'bytes'  => min($part_size, $size - $offset),
+			];
+		}
+		return $parts;
+	}
+
+	/**
+	 * The CompleteMultipartUpload request body: every part number with the ETag
+	 * the provider returned for it. Pure and public for the same testability
+	 * reason as plan_parts().
+	 *
+	 * @param array $etags [part number => ETag as returned, quotes and all]
+	 */
+	public static function build_complete_xml(array $etags) {
+		ksort($etags);
+		$xml = '<CompleteMultipartUpload>';
+		foreach ($etags as $number => $etag) {
+			$xml .= '<Part><PartNumber>' . (int)$number . '</PartNumber><ETag>'
+				. htmlspecialchars((string)$etag, ENT_XML1 | ENT_QUOTES, 'UTF-8') . '</ETag></Part>';
+		}
+		return $xml . '</CompleteMultipartUpload>';
+	}
+
+	/**
+	 * Did a CompleteMultipartUpload body actually report completion? A 2xx status
+	 * alone does not answer that — see the trap note at the call site. Pure and
+	 * public so the trap has a test.
+	 */
+	public static function complete_body_ok($body) {
+		return is_string($body) && $body !== ''
+			&& !preg_match('#<Error\b#i', $body)
+			&& stripos($body, 'CompleteMultipartUploadResult') !== false;
+	}
+
+	/**
+	 * Best-effort AbortMultipartUpload. Called on every failure path; a failure
+	 * here is logged and swallowed, because the caller is already reporting the
+	 * real error and the bucket's cancel-unfinished-multipart lifecycle rule is
+	 * the backstop for an abort that never lands.
+	 */
+	private static function abort_multipart($creds, $bucket, $path, $upload_id) {
+		try {
+			self::request('DELETE', $creds, $bucket, $path, ['uploadId' => $upload_id]);
+		} catch (\Throwable $e) {
+			error_log('S3Signer: could not abort multipart upload ' . $upload_id . ': ' . $e->getMessage());
+		}
+	}
+
+	/** Read exactly $bytes from an open handle, or throw — a short read silently
+	 *  truncating an upload part is the kind of corruption a signed per-part hash
+	 *  exists to prevent, so it must not get as far as the wire. */
+	private static function read_exactly($fh, $bytes, $local_path) {
+		$chunk = '';
+		$remaining = (int)$bytes;
+		while ($remaining > 0) {
+			$piece = fread($fh, min($remaining, 8388608));
+			if ($piece === false || $piece === '') {
+				throw new S3SignerException('Short read from ' . $local_path . ' ('
+					. $remaining . ' of ' . $bytes . ' part bytes missing).');
+			}
+			$chunk .= $piece;
+			$remaining -= strlen($piece);
+		}
+		return $chunk;
+	}
+
+	/**
+	 * Low-level signed request. $body can be null (GET/DELETE), a stream resource
+	 * (streamed PUT, signed UNSIGNED-PAYLOAD), or a string (a multipart part or a
+	 * small XML control body, signed with its real payload hash).
 	 *
 	 * Transient provider failures are retried with backoff. A single HTTP 500 from
 	 * the storage provider used to strand a backup on the node with no offsite copy
@@ -207,8 +425,9 @@ class S3Signer {
 			// length, so without this rewind curl sends nothing and then blocks
 			// waiting for data that never arrives until the timeout expires — a
 			// silent hang, not an error. A stream that cannot seek cannot be
-			// replayed at all, so stop rather than PUT a truncated object.
-			if ($attempts_used > 1 && $body !== null && !@rewind($body)) {
+			// replayed at all, so stop rather than PUT a truncated object. String
+			// bodies replay themselves and need none of this.
+			if ($attempts_used > 1 && $body !== null && !is_string($body) && !@rewind($body)) {
 				$retry_log[] = 'not retried: upload stream could not be rewound';
 				$attempts_used--;
 				break;
@@ -284,8 +503,18 @@ class S3Signer {
 		$amz_date = gmdate('Ymd\THis\Z');
 		$date_stamp = gmdate('Ymd');
 
-		// For GET/DELETE (no body) use SHA256(""). For PUT streaming, use UNSIGNED-PAYLOAD.
-		$payload_hash = ($body === null) ? hash('sha256', '') : 'UNSIGNED-PAYLOAD';
+		// No body: SHA256(""). String body (a multipart part, a control XML): its
+		// real hash, so the provider verifies the bytes it received are the bytes
+		// that were signed. Stream body: UNSIGNED-PAYLOAD, because the payload
+		// hash must be known before the first byte is sent and a stream is not
+		// read twice.
+		if ($body === null) {
+			$payload_hash = hash('sha256', '');
+		} elseif (is_string($body)) {
+			$payload_hash = hash('sha256', $body);
+		} else {
+			$payload_hash = 'UNSIGNED-PAYLOAD';
+		}
 
 		$headers = [
 			'host' => $host,
@@ -353,7 +582,9 @@ class S3Signer {
 		} else {
 			curl_setopt($ch, CURLOPT_RETURNTRANSFER, true);
 			curl_setopt($ch, CURLOPT_HEADER, true); // include response headers in body
-			if ($body !== null) {
+			if (is_string($body)) {
+				curl_setopt($ch, CURLOPT_POSTFIELDS, $body);
+			} elseif ($body !== null) {
 				curl_setopt($ch, CURLOPT_UPLOAD, true);
 				curl_setopt($ch, CURLOPT_INFILE, $body);
 				curl_setopt($ch, CURLOPT_INFILESIZE, $body_size);
