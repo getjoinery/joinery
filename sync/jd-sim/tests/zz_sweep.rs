@@ -206,6 +206,11 @@ fn sweep_world(
         // an edit, with every fingerprint it cached now pointing at the wrong
         // content.
         world.user_rearranges_names_during_uploads(1, (steps / 4).max(2) as u64);
+        // One machine renaming a folder while another is still building it. The
+        // rig does this constantly -- its folder names accumulate suffixes all
+        // run -- and until now the simulator never had: every sweep materialised
+        // folders whose names stood still while it worked.
+        world.a_folder_is_renamed_while_a_device_creates_it(1, (steps / 4).max(2) as u64);
         // And a real disk hands a deleted file's inode straight back to the
         // next file that wants one. Until now every sweep ran on a world where
         // an inode, once used, was never seen again -- which quietly excused
@@ -239,9 +244,10 @@ fn workload_core(
     let kills_made = world.power_cycles();
     if std::env::var("DIALS").is_ok() {
         eprintln!(
-            "DIALS seed {seed}: swaps={} landing_saves={} kills={}",
+            "DIALS seed {seed}: swaps={} landing_saves={} folder_renames={} kills={}",
             world.swaps_made_during_uploads(),
             world.saves_made_while_downloads_landed(),
+            world.folder_renames_during_creation(),
             kills_made
         );
     }

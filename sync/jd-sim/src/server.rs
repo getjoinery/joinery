@@ -423,6 +423,17 @@ impl MockServer {
         )
     }
 
+    /// The live folder standing at this path, if any. Paths are the same
+    /// slash-joined form [`tree`](Self::tree) reports.
+    pub fn folder_id_at(&self, path: &str) -> Option<i64> {
+        let st = self.state.lock().unwrap();
+        st.folders
+            .values()
+            .filter(|f| !f.trashed)
+            .find(|f| Self::folder_path(&st, f.id).as_deref() == Some(path))
+            .map(|f| f.id)
+    }
+
     /// Destroy one folder outright, whatever state it is in. The single-entity
     /// form of [`purge_trashed`](Self::purge_trashed).
     pub fn forget_folder(&self, id: i64) -> bool {

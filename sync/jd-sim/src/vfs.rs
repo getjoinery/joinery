@@ -122,6 +122,7 @@ pub struct MemFs {
     /// and under a storm they do" -- and nothing could reach it from a test.
     #[allow(clippy::type_complexity)]
     landing: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
+    dir_creating: Arc<Mutex<Option<Box<dyn FnMut(&Path) + Send>>>>,
 }
 
 impl std::fmt::Debug for MemFs {
@@ -152,6 +153,7 @@ impl MemFs {
             personality,
             clock,
             landing: Arc::new(Mutex::new(None)),
+            dir_creating: Arc::new(Mutex::new(None)),
         }
     }
 
@@ -160,6 +162,14 @@ impl MemFs {
     /// the window the engine believes it has already cleared.
     pub fn while_a_download_lands(&self, f: impl FnMut(&Path) + Send + 'static) {
         *self.landing.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Run this the instant a directory is about to be created, before it
+    /// exists. Use it to move the name out from under a device that is
+    /// materialising a folder -- the shape the soak rig produces constantly and
+    /// the simulator never has.
+    pub fn while_creating_a_dir(&self, f: impl FnMut(&Path) + Send + 'static) {
+        *self.dir_creating.lock().unwrap() = Some(Box::new(f));
     }
 
     pub fn linux(clock: SimClock) -> MemFs {
@@ -664,6 +674,12 @@ impl Vfs for MemFs {
     fn create_dir(&self, path: &Path) -> VfsResult<()> {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::CreateDir, &key, path)?;
+        // Taken and released before the state lock below, the way the landing
+        // hook is: the closure reaches back into the server and another disk,
+        // and holding this disk's lock across that deadlocks the run.
+        if let Some(f) = self.dir_creating.lock().unwrap().as_mut() {
+            f(path);
+        }
         let mut st = self.state.lock().unwrap();
         // `create_dir_all` is what the real one calls, and it is content with a
         // directory that is already there. Only a FILE in the way is a refusal,

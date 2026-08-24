@@ -2184,6 +2184,23 @@ fn create_local_folder(
         }
         Err(e) => return Err(e.into()),
     }
+    // Look before recording agreement. `create_dir` answering Ok and a directory
+    // actually standing at that path are two different claims, and the rig has
+    // ended runs with folders recorded `synced`, under the server's exact name,
+    // with nothing on the disk: reconcile then plans nothing forever and every
+    // server-side file underneath is unreachable, while convergence passes and
+    // the device reports itself quiet.
+    //
+    // Whether the directory is never made or made and then taken away is not
+    // settled -- this guard tells the two apart, because it fires only in the
+    // first case. Retrying is bounded and costs a syscall; recording agreement
+    // on a directory that is not there is neither bounded nor visible.
+    if let Err(why) = env.vfs.read_dir(&path) {
+        return Ok(OpOutcome::Retry(format!(
+            "{} was created but is not there: {why}",
+            path.display()
+        )));
+    }
     let Some(mut entry) = require_entry(env, op.entity)? else {
         return Ok(OpOutcome::Overtaken(
             "the entry is no longer tracked".into(),
