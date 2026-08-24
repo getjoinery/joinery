@@ -35,6 +35,15 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * @version 1.14
+ * @changelog 1.14 - a Sent-folder message already stored by another pass is
+ *   promoted to outbound on the dedup paths, not only when stored fresh: Gmail's
+ *   \All coverage folder sorts before Sent Mail in discovery, so it always won
+ *   the race and stored every sent message as an ordinary inbound row — which
+ *   the §9 dedup then left in place, showing your own sent mail in the Inbox as
+ *   an incoming message from yourself. Self-addressed sends stay inbound (they
+ *   belong in the Inbox), the promotion never demotes outbound/draft rows, and
+ *   it stands down when a live outbound sibling already holds the dedup key.
  * @version 1.13
  * @changelog 1.13 - toUtf8 delegates to the shared DocumentText ladder: an
  *   unknown sender-declared charset degrades the conversion (raw is preserved
@@ -1157,6 +1166,16 @@ class ImapIngestor {
 				if ($recordMembership) {
 					$this->recordFolderMembership($folder, $existingId, intval($uid), intval($serverUidValidity));
 				}
+				// The existing row is usually the \All coverage pass's copy — Gmail's
+				// All Mail sorts before Sent Mail in discovery, so it always stores a
+				// sent message first, as an ordinary inbound row. Being filed in Sent
+				// is the source's own word that the user sent it: promote the row to
+				// outbound so the reader shows sent mail, not an incoming message
+				// from yourself. A self-addressed send stays inbound — it belongs in
+				// the Inbox exactly like it does in the source mailbox.
+				if (!$this->envelopeAddressedToSelf($envelope)) {
+					$this->markDirectionOutbound($existingId);
+				}
 				return array('dedup' => true, 'message_id' => $existingId);
 			}
 		}
@@ -1177,12 +1196,19 @@ class ImapIngestor {
 			$this->writeManifest($messageId, $attachParts);
 			// A brand-new Sent-folder message is mail the user sent — mark it outbound
 			// so the reader renders it as a sent message (native-client or Gmail
-			// no-local-row path, §9).
-			if ((string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT) {
+			// no-local-row path, §9). Self-addressed mail stays inbound (see above).
+			if ((string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT
+					&& !$this->envelopeAddressedToSelf($envelope)) {
 				$this->markDirectionOutbound($messageId);
 			}
 		} elseif ($result['dedup']) {
 			$messageId = $this->existingMessageId((string)$envelope->message_id, $recipient);
+			// Same promotion on the (Message-ID, recipient) dedup path — reachable
+			// when the §9 lookup missed because the alias's copy is soft-deleted.
+			if ($messageId > 0 && (string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT
+					&& !$this->envelopeAddressedToSelf($envelope)) {
+				$this->markDirectionOutbound($messageId);
+			}
 		}
 
 		// Attach this folder's label (the message carries the binding's label; the ilm_
@@ -1292,13 +1318,66 @@ class ImapIngestor {
 		$stmt->execute(array($messageId));
 	}
 
-	/** Mark a row as outbound (a Sent-folder message the user sent). */
+	/**
+	 * Mark a row as outbound (a Sent-folder message the user sent). Only ever
+	 * promotes an inbound row — outbound stays outbound and a draft is never
+	 * touched. The NOT EXISTS clause mirrors the live-rows dedup index on
+	 * (Message-ID, recipient, direction): if a live outbound sibling already
+	 * holds that key, promoting this row would violate it mid-ingest and wedge
+	 * the folder cursor on a permanent retry, so the promotion quietly stands
+	 * down instead — the sibling already tells the reader the mail was sent.
+	 */
 	private function markDirectionOutbound(int $messageId): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			"UPDATE iem_inbound_email_messages SET iem_direction = 'outbound'
-			 WHERE iem_inbound_email_message_id = ?");
+			"UPDATE iem_inbound_email_messages m SET iem_direction = 'outbound'
+			 WHERE m.iem_inbound_email_message_id = ?
+			   AND m.iem_direction = 'inbound'
+			   AND NOT EXISTS (
+			       SELECT 1 FROM iem_inbound_email_messages o
+			        WHERE o.iem_message_id_header = m.iem_message_id_header
+			          AND o.iem_recipient = m.iem_recipient
+			          AND o.iem_direction = 'outbound'
+			          AND o.iem_delete_time IS NULL
+			          AND m.iem_delete_time IS NULL)");
 		$stmt->execute(array($messageId));
+	}
+
+	/**
+	 * True when the message is addressed to the source mailbox itself (To or Cc
+	 * carries the feed's own address). A self-send lives in the Inbox as well as
+	 * Sent — in the source mailbox and here — so the Sent-folder pass must not
+	 * promote it to outbound and hide it from the Inbox view. Fails toward
+	 * "not self-addressed": an unreadable envelope keeps the ordinary promotion.
+	 */
+	private function envelopeAddressedToSelf($envelope): bool {
+		$own = strtolower(trim((string)$this->account->get('iia_username')));
+		if ($own === '' || strpos($own, '@') === false) {
+			return false;
+		}
+		foreach (array('to', 'cc') as $field) {
+			try {
+				$list = $envelope->$field ?? null;
+				if ($list === null) {
+					continue;
+				}
+				if (is_iterable($list)) {
+					foreach ($list as $addr) {
+						$bare = is_object($addr) ? (string)($addr->bare_address ?? '') : (string)$addr;
+						if (strtolower(trim($bare)) === $own) {
+							return true;
+						}
+					}
+					continue;
+				}
+				if (stripos((string)$list, $own) !== false) {
+					return true;
+				}
+			} catch (Throwable $e) {
+				continue;
+			}
+		}
+		return false;
 	}
 
 	/**
