@@ -20,7 +20,7 @@
  *
  * Self-cleaning: every fixture File is permanently deleted in finally.
  *
- * @version 1.1.0
+ * @version 1.3.0
  */
 
 if (php_sapi_name() !== 'cli') {
@@ -223,6 +223,134 @@ try {
 	check($pub_after->is_private_bool() === true, 'pub-del: blob flipped private once no public referrer remains');
 	check(!is_file($fast_dir . '/' . $pub_stored), 'pub-del: bytes left the fast-serve dir');
 	check(is_file($restricted_dir . '/' . $pub_stored), 'pub-del: bytes moved to the restricted dir');
+
+	// =============================================================
+	section('a refused insert leaves no blob nothing points at');
+	// The fresh blob is inserted already counting the reference the file row is
+	// about to hold. If that row is refused -- two uploads racing for one name,
+	// where the partial unique index refuses the loser, which callers turn into
+	// a polite 'name taken' -- the count has to come back down. A blob left at
+	// refcount 1 with nothing referencing it is never reclaimed: the bytes sit
+	// on disk forever, keep counting against the owner's quota, and cannot be
+	// reached by anybody. Observed live: 46 such blobs, 22 MB, on the soak rig.
+	$clash_owner = 1;
+	$clash_title = 'clash_' . bin2hex(random_bytes(6)) . '.txt';
+	// Everything below is judged against rows this section makes. A database
+	// that already carries leaked blobs from before the fix is a fact about its
+	// history, not a regression in this change, and asserting over the whole
+	// table would make the test report that history forever.
+	$blob_watermark = (int)DbConnector::get_instance()->get_db_link()
+		->query('SELECT COALESCE(MAX(fbb_file_blob_id), 0) FROM fbb_file_blobs')->fetchColumn();
+	$drive_restrictions = array('fil_source' => File::SOURCE_DRIVE, 'fil_private' => true);
+	$first = $track(File::createFromBytes(
+		'clash-a-' . bin2hex(random_bytes(8)), $clash_title, 'text/plain', $clash_owner, $drive_restrictions));
+	check($first && $first->key, 'refused-insert: the first drive file of that name is created');
+
+	$dblink = DbConnector::get_instance()->get_db_link();
+	$max_blob_before = (int)$dblink->query('SELECT COALESCE(MAX(fbb_file_blob_id), 0) FROM fbb_file_blobs')->fetchColumn();
+	$blobs_before = (int)$dblink->query('SELECT COUNT(*) FROM fbb_file_blobs')->fetchColumn();
+
+	// Different bytes, so this mints a fresh blob rather than deduping onto the
+	// first one -- the leak is about a blob with no other referrer to fall back on.
+	$refused = false;
+	try {
+		File::createFromBytes(
+			'clash-b-' . bin2hex(random_bytes(8)), $clash_title, 'text/plain', $clash_owner, $drive_restrictions);
+	} catch (Exception $e) {
+		$refused = (strpos($e->getMessage(), '23505') !== false);
+	}
+	check($refused, 'refused-insert: a second drive file of the same name is refused by the unique index');
+
+	$q = $dblink->prepare('SELECT fbb_file_blob_id, fbb_reference_count, fbb_stored_name, fbb_is_private
+	                         FROM fbb_file_blobs WHERE fbb_file_blob_id > ?');
+	$q->execute(array($max_blob_before));
+	$stranded = $q->fetchAll(PDO::FETCH_ASSOC);
+	check(count($stranded) === 0,
+		'refused-insert: no blob row survives the refused insert'
+		. (count($stranded) ? ' (stranded: ' . json_encode($stranded) . ')' : ''));
+
+	$blobs_after = (int)$dblink->query('SELECT COUNT(*) FROM fbb_file_blobs')->fetchColumn();
+	check($blobs_after === $blobs_before, 'refused-insert: the blob count is unchanged');
+
+	foreach ($stranded as $row) {
+		$leaked = new FileBlob((int)$row['fbb_file_blob_id'], true);
+		check(!$leaked->key || blob_original_path($leaked) === null,
+			'refused-insert: no physical bytes left behind');
+	}
+
+	// The invariant the leak violates, stated directly: no live blob may exist
+	// that nothing references. Scoped to this section's own rows.
+	$oq = $dblink->prepare(
+		'SELECT COUNT(*) FROM fbb_file_blobs b
+		  WHERE fbb_reference_count > 0
+		    AND fbb_file_blob_id > ?
+		    AND NOT EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)
+		    AND NOT EXISTS (SELECT 1 FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)');
+	$oq->execute(array($blob_watermark));
+	$orphans = (int)$oq->fetchColumn();
+	check($orphans === 0, "refused-insert: no blob this section made is referenced by nothing (found $orphans)");
+
+	// =============================================================
+	section('a version save reads the head it is demoting, not a caller stale copy');
+	// The demotion used to take the head from whatever the CALLER had loaded.
+	// Two uploads finishing at once therefore both saw the same head, both filed
+	// a version row against it, and both repointed the file -- so the content
+	// that won the first race was left referenced by nothing: stored on disk,
+	// still counted against the owner, reachable by nobody. That is the shape of
+	// the loss seen on the soak rig (run 203, blob 30948).
+	//
+	// Reproduced without threads: hold a File object across another writer's
+	// save, then hand that stale object to a save of its own.
+	$stale_title = 'stale_' . bin2hex(random_bytes(6)) . '.txt';
+	$drive_only = array('fil_source' => File::SOURCE_DRIVE, 'fil_private' => true);
+	$sf = $track(File::createFromBytes('stale-h-' . bin2hex(random_bytes(8)), $stale_title, 'text/plain', 1, $drive_only));
+	check($sf && $sf->key, 'stale-head: the contended file exists');
+
+	$stale_watermark = (int)DbConnector::get_instance()->get_db_link()
+		->query('SELECT COALESCE(MAX(fbb_file_blob_id), 0) FROM fbb_file_blobs')->fetchColumn();
+
+	// The caller's copy, read now and used later -- the other writer moves the
+	// head out from under it in between.
+	$stale_copy = new File((int)$sf->key, true);
+
+	// A blob straight from the ingest path: refcount 1, held by nobody -- exactly
+	// what an upload has in hand when it calls save_new_content. Using a donor
+	// FILE instead would leave a second referrer and hide the whole defect.
+	$mint_blob = function ($tag) {
+		$tmp = tempnam(sys_get_temp_dir(), 'blobconc_');
+		file_put_contents($tmp, $tag . '-' . bin2hex(random_bytes(12)));
+		return FileBlob::createFromPath($tmp, 'text/plain', true);
+	};
+	$blob_x = $mint_blob('stale-x');
+	$blob_y = $mint_blob('stale-y');
+	check((int)$blob_x->get('fbb_reference_count') === 1 && (int)$blob_y->get('fbb_reference_count') === 1,
+		'stale-head: each incoming blob arrives counting one reference and held by nobody');
+
+	// Writer one: a save through a freshly loaded object. The head becomes X.
+	$fresh_copy = new File((int)$sf->key, true);
+	FileVersion::save_new_content($fresh_copy, $blob_x, 1);
+	$mid = new File((int)$sf->key, true);
+	check((int)$mid->get('fil_fbb_file_blob_id') === (int)$blob_x->key, 'stale-head: the first save moved the head to X');
+
+	// Writer two: the same save, driven from the copy loaded before writer one.
+	FileVersion::save_new_content($stale_copy, $blob_y, 1);
+	$after = new File((int)$sf->key, true);
+	check((int)$after->get('fil_fbb_file_blob_id') === (int)$blob_y->key, 'stale-head: the second save moved the head to Y');
+
+	// X must not have been stranded. Either a version row still holds it (when
+	// versions are retained) or it was released and reclaimed (at depth 0) --
+	// what must never happen is a live blob nothing points at.
+	$sq = DbConnector::get_instance()->get_db_link()->prepare(
+		'SELECT fbb_file_blob_id, fbb_reference_count FROM fbb_file_blobs b
+		  WHERE fbb_reference_count > 0
+		    AND fbb_file_blob_id > ?
+		    AND NOT EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)
+		    AND NOT EXISTS (SELECT 1 FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)');
+	$sq->execute(array($stale_watermark));
+	$stale_orphans = $sq->fetchAll(PDO::FETCH_ASSOC);
+	check(count($stale_orphans) === 0,
+		'stale-head: the overtaken content is not left referenced by nothing'
+		. (count($stale_orphans) ? ' (stranded: ' . json_encode($stale_orphans) . ')' : ''));
 
 } finally {
 	foreach ($made as $f) {

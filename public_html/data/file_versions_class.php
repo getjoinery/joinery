@@ -62,11 +62,21 @@ class FileVersion extends SystemBase {
 	 * counts the new head reference). Then prune to the owner's retained depth.
 	 */
 	public static function save_new_content($file, $new_blob, $user_id) {
-		$head_blob_id = (int)$file->get('fil_fbb_file_blob_id');
-		$head_size = self::_blob_size($head_blob_id);
-
 		DbConnector::BeginTransaction();
 		try {
+			// Hold the file row for the whole demotion, and read the head from
+			// inside that hold rather than from whatever the caller loaded
+			// earlier. Two uploads finishing at once otherwise both see the same
+			// head, both file a version row against it, and both repoint the
+			// file -- and the loser's bytes are left with nothing referencing
+			// them: stored, counted against the owner, reachable by nobody. The
+			// version number has the same race in miniature, since MAX + 1 read
+			// outside a lock hands the same number to both and the unique index
+			// then refuses one of them.
+			self::_lock_file((int)$file->key);
+			$head_blob_id = self::_head_blob_id((int)$file->key);
+			$head_size = self::_blob_size($head_blob_id);
+
 			$v = new self(NULL);
 			$v->set('fvr_fil_file_id', $file->key);
 			$v->set('fvr_fbb_file_blob_id', $head_blob_id);
@@ -78,8 +88,15 @@ class FileVersion extends SystemBase {
 			// The version now holds the head blob's reference; the file adopts the
 			// new blob (which already counts this reference). No retain/release: the
 			// reference is transferred, so the blob refcounts stay correct.
-			$file->set('fil_fbb_file_blob_id', (int)$new_blob->key);
-			$file->save();
+			//
+			// Written as a targeted update rather than a full-row save: the
+			// caller's copy of this file was read before the lock was held, so
+			// saving all of its columns back would undo whatever the writer we
+			// just waited for had changed.
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$q = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
+			$q->execute(array((int)$new_blob->key, (int)$file->key));
+			$file->set('fil_fbb_file_blob_id', (int)$new_blob->key, false);
 
 			DbConnector::Commit();
 		} catch (Exception $e) {
@@ -91,18 +108,44 @@ class FileVersion extends SystemBase {
 	}
 
 	/**
+	 * Hold this file's row for the rest of the caller's transaction, so version
+	 * work against it is serialized. Locking the parent row (never the version
+	 * rows) keeps the order the same for every writer, which is what stops two
+	 * of them deadlocking against each other.
+	 */
+	private static function _lock_file($file_id) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare('SELECT fil_file_id FROM fil_files WHERE fil_file_id = ? FOR UPDATE');
+		$q->execute(array((int)$file_id));
+		$q->fetchColumn();
+	}
+
+	/** The file's current head blob, read fresh rather than from a caller's copy. */
+	private static function _head_blob_id($file_id) {
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$q = $dblink->prepare('SELECT fil_fbb_file_blob_id FROM fil_files WHERE fil_file_id = ?');
+		$q->execute(array((int)$file_id));
+		return (int)$q->fetchColumn();
+	}
+
+	/**
 	 * Restore $version's content as the file's head. The current head is demoted
 	 * to a fresh version; the restored blob is promoted to head and the restored
 	 * version row is consumed.
 	 */
 	public static function restore_version($file, $version, $user_id) {
 		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-		$head_blob_id = (int)$file->get('fil_fbb_file_blob_id');
-		$head_size = self::_blob_size($head_blob_id);
 		$restored_blob_id = (int)$version->get('fvr_fbb_file_blob_id');
 
 		DbConnector::BeginTransaction();
 		try {
+			// Same hold as save_new_content, and the head is read inside it for
+			// the same reason: a restore racing an upload would otherwise demote
+			// a head that is no longer there and strand the one that is.
+			self::_lock_file((int)$file->key);
+			$head_blob_id = self::_head_blob_id((int)$file->key);
+			$head_size = self::_blob_size($head_blob_id);
+
 			// Demote the current head to a new version (takes over head's reference).
 			$nv = new self(NULL);
 			$nv->set('fvr_fil_file_id', $file->key);
@@ -116,8 +159,10 @@ class FileVersion extends SystemBase {
 			// then the consumed version row releases its own — net-neutral, but it
 			// keeps the blob alive across the row deletion.
 			FileBlob::retain($restored_blob_id);
-			$file->set('fil_fbb_file_blob_id', $restored_blob_id);
-			$file->save();
+			$dblink = DbConnector::get_instance()->get_db_link();
+			$rq = $dblink->prepare('UPDATE fil_files SET fil_fbb_file_blob_id = ? WHERE fil_file_id = ?');
+			$rq->execute(array($restored_blob_id, (int)$file->key));
+			$file->set('fil_fbb_file_blob_id', $restored_blob_id, false);
 			FileBlob::release($restored_blob_id);
 			self::_delete_row((int)$version->key);
 

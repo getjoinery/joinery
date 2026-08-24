@@ -44,9 +44,25 @@ harness_defer(function () use (&$made_files) {
 $dblink = DbConnector::get_instance()->get_db_link();
 $grp_id = $dblink->query("SELECT sbt_grp_group_id FROM sbt_subscription_tiers WHERE (sbt_features->>'drive_versioning_depth')::int > 0 AND sbt_delete_time IS NULL LIMIT 1")->fetchColumn();
 if (!$grp_id) {
+	// No deployment is obliged to ship a tier that keeps versions, and skipping
+	// left this whole suite dark on any that does not -- including dev, where
+	// the version code is actually edited. The suite provisions the condition it
+	// needs instead, and takes it away again on the way out.
 	section('Setup');
-	harness_skip('a tier with drive_versioning_depth > 0 exists', 'configure a test tier to run the versions suite');
-	harness_finish();
+	$suffix = bin2hex(random_bytes(4));
+	$gq = $dblink->prepare("INSERT INTO grp_groups (grp_name, grp_category) VALUES (?, ?) RETURNING grp_group_id");
+	$gq->execute(array('drive-versions-test-' . $suffix, 'subscription'));
+	$grp_id = (int)$gq->fetchColumn();
+	harness_register_row('grp_groups', 'grp_group_id', $grp_id);
+
+	$tq = $dblink->prepare(
+		"INSERT INTO sbt_subscription_tiers
+		   (sbt_grp_group_id, sbt_tier_level, sbt_name, sbt_display_name, sbt_features, sbt_is_active)
+		 VALUES (?, ?, ?, ?, ?::jsonb, TRUE) RETURNING sbt_subscription_tier_id");
+	$tq->execute(array($grp_id, 900, 'drive-versions-test-' . $suffix, 'Drive Versions Test',
+		json_encode(array('drive_versioning_depth' => 3))));
+	harness_register_row('sbt_subscription_tiers', 'sbt_subscription_tier_id', (int)$tq->fetchColumn());
+	check($grp_id > 0, 'provisioned a tier that keeps versions, since this deployment ships none');
 }
 
 $user = make_user('driveversions');
@@ -141,5 +157,45 @@ check(version_count($file->key) === $depth, 'version count is capped at the dept
 // The head + exactly $depth versions should be all that bills against usage.
 $blob_refs = (int)$dblink->query("SELECT COUNT(*) FROM fvr_file_versions WHERE fvr_fil_file_id=" . (int)$file->key)->fetchColumn();
 check($blob_refs === $depth, 'exactly ' . $depth . ' version rows remain');
+
+// ---------------------------------------------------------------------------
+section('a demotion reads the head it is demoting, not a caller stale copy');
+
+// Two uploads finishing at once both used to read the head from whatever the
+// CALLER had loaded, so both filed a version row against the SAME blob and the
+// second silently overwrote the head the first had just installed -- leaving
+// that content referenced by nothing. On the soak rig, which keeps versions,
+// this left 1,432 files holding one blob in two version rows.
+$race = File::createFromBytes('race-' . bin2hex(random_bytes(6)), 'race.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $race->key;
+$race_head = (int)$race->get('fil_fbb_file_blob_id');
+
+// The copy a slower writer is still holding while a faster one commits.
+$stale = new File((int)$race->key, true);
+
+$blob_x = make_blob('race-x-' . bin2hex(random_bytes(10)));
+$blob_y = make_blob('race-y-' . bin2hex(random_bytes(10)));
+
+FileVersion::save_new_content(new File((int)$race->key, true), $blob_x, $user->key);
+check(head_blob($race->key) === (int)$blob_x->key, 'race: the first save installed X as the head');
+
+FileVersion::save_new_content($stale, $blob_y, $user->key);
+check(head_blob($race->key) === (int)$blob_y->key, 'race: the second save installed Y as the head');
+
+$dupq = $dblink->prepare(
+	"SELECT COUNT(*) FROM (
+	    SELECT fvr_fbb_file_blob_id FROM fvr_file_versions
+	     WHERE fvr_fil_file_id = ?
+	     GROUP BY fvr_fbb_file_blob_id HAVING COUNT(*) > 1) d");
+$dupq->execute(array((int)$race->key));
+check((int)$dupq->fetchColumn() === 0, 'race: no blob was demoted twice');
+
+$holdq = $dblink->prepare('SELECT COUNT(*) FROM fvr_file_versions WHERE fvr_fil_file_id = ? AND fvr_fbb_file_blob_id = ?');
+$holdq->execute(array((int)$race->key, (int)$blob_x->key));
+check((int)$holdq->fetchColumn() === 1, 'race: the head the second save overtook is held by a version row');
+
+$holdq->execute(array((int)$race->key, $race_head));
+check((int)$holdq->fetchColumn() === 1, 'race: and so is the head the first save overtook');
 
 harness_finish();

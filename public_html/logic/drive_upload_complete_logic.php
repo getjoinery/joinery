@@ -253,7 +253,17 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				try {
 					$info = SealedFileContainer::sealStream($part, $sealed_tmp, $fk);
 					$blob = FileBlob::createFromPath($sealed_tmp, 'application/octet-stream', true);
-					FileVersion::save_new_content($target_file, $blob, $user_id);
+					// The blob is inserted already holding one reference, on the
+					// promise that the row about to be made will hold it. If that
+					// row never appears the promise has to be taken back: bytes
+					// with a reference nothing holds are never reclaimed, keep
+					// counting against the owner's quota, and cannot be reached.
+					try {
+						FileVersion::save_new_content($target_file, $blob, $user_id);
+					} catch (Exception $e) {
+						FileBlob::release($blob->key);
+						throw $e;
+					}
 					$fresh_target = DriveHelper::load_file($target_file->key);
 					if ($fresh_target) {
 						$fresh_target->set('fil_plain_size_bytes', (int)$info['plain_size']);
@@ -271,7 +281,15 @@ function drive_upload_complete_logic(array $input): LogicResult {
 				return LogicResult::render(array('ok' => true, 'file' => DriveHelper::file_export($fresh)));
 			}
 			$blob = FileBlob::createFromPath($part, $mime, true);
-			FileVersion::save_new_content($target_file, $blob, $user_id);
+			// See the sealed branch above: the fresh blob already counts the
+			// reference the version row is about to hold, so a failure here has
+			// to give it back or the bytes are pinned and unreachable for good.
+			try {
+				FileVersion::save_new_content($target_file, $blob, $user_id);
+			} catch (Exception $e) {
+				FileBlob::release($blob->key);
+				throw $e;
+			}
 			// For an encrypted file the head metadata (and thumbnail) follow the
 			// new content; the file key and content id are stable across versions
 			// (enforced above: fresh wrapped keys are refused and the uploader

@@ -45,7 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.10.0
+ * @version 1.10.1
  * @changelog 1.10.0 - SOURCE_MESSENGER_ATTACHMENT: photos and files sent in a
  *   conversation, gated on that conversation rather than owned privately.
  */
@@ -410,17 +410,36 @@ public static function get_by_name($name, $search_deleted = false) {
 			@rmdir($stage_dir);
 		}
 
-		$file = new File(NULL);
-		$file->set('fil_name', $name);
-		$file->set('fil_title', substr((string)$display_name, 0, 255));
-		$file->set('fil_type', $blob->get('fbb_mime_type'));
-		$file->set('fil_usr_user_id', $owner_id);
-		$file->set('fil_fbb_file_blob_id', $blob->key);
-		foreach ($restrictions as $col => $val) {
-			$file->set($col, $val);
+		// The blob arrives already counting one reference, on the promise that
+		// the row below will hold it. Every way out from here has to keep or
+		// return that reference: the insert can fail for an ordinary reason --
+		// two uploads racing for one name, where the partial unique index
+		// refuses the loser -- and a caller that reads it as a polite name
+		// clash would otherwise leave bytes nothing points at, which are never
+		// reclaimed, keep counting against the owner's quota, and cannot be
+		// reached again by anyone.
+		try {
+			$file = new File(NULL);
+			$file->set('fil_name', $name);
+			$file->set('fil_title', substr((string)$display_name, 0, 255));
+			$file->set('fil_type', $blob->get('fbb_mime_type'));
+			$file->set('fil_usr_user_id', $owner_id);
+			$file->set('fil_fbb_file_blob_id', $blob->key);
+			foreach ($restrictions as $col => $val) {
+				$file->set($col, $val);
+			}
+			$file->save();
+			$file->load();
+		} catch (Exception $e) {
+			FileBlob::release($blob->key);
+			throw $e;
 		}
-		$file->save();
-		$file->load();
+		if (!$file->key) {
+			// A save that reported nothing rather than throwing still leaves no
+			// row to hold the reference. Give it back, and hand the caller the
+			// same keyless File it has always got here.
+			FileBlob::release($blob->key);
+		}
 		return $file;
 	}
 
@@ -480,18 +499,36 @@ public static function get_by_name($name, $search_deleted = false) {
 		if (!$blob->key || !FileBlob::retain($blob->key)) {
 			return false;
 		}
-		$name = self::_mint_unique_name($display_name);
-		$file = new File(NULL);
-		$file->set('fil_name', $name);
-		$file->set('fil_title', substr((string)($display_name !== '' ? $display_name : 'file'), 0, 255));
-		$file->set('fil_type', $blob->get('fbb_mime_type') ?: $mime);
-		$file->set('fil_usr_user_id', (int)$owner_id);
-		$file->set('fil_fbb_file_blob_id', (int)$blob->key);
-		foreach ($restrictions as $col => $val) {
-			$file->set($col, $val);
+		// The reference is taken before the row that will hold it exists, so every
+		// way out of here from this point has to give it back. The insert can fail
+		// for an ordinary reason -- two uploads racing for one name, where the
+		// partial unique index refuses the loser -- and a caller that turns that
+		// into a polite 'name taken' would otherwise leave the count one too high
+		// forever. Bytes with a reference nothing holds are never reclaimed, keep
+		// counting against the owner's quota, and cannot be reached by anyone.
+		try {
+			$name = self::_mint_unique_name($display_name);
+			$file = new File(NULL);
+			$file->set('fil_name', $name);
+			$file->set('fil_title', substr((string)($display_name !== '' ? $display_name : 'file'), 0, 255));
+			$file->set('fil_type', $blob->get('fbb_mime_type') ?: $mime);
+			$file->set('fil_usr_user_id', (int)$owner_id);
+			$file->set('fil_fbb_file_blob_id', (int)$blob->key);
+			foreach ($restrictions as $col => $val) {
+				$file->set($col, $val);
+			}
+			$file->save();
+			$file->load();
+		} catch (Exception $e) {
+			FileBlob::release($blob->key);
+			throw $e;
 		}
-		$file->save();
-		$file->load();
+		if (!$file->key) {
+			// A save that reported nothing rather than throwing still leaves no row
+			// to hold the reference.
+			FileBlob::release($blob->key);
+			return false;
+		}
 		return $file;
 	}
 
