@@ -20,10 +20,16 @@
  * configuration on Settings; the operator fleet console hangs off the Server
  * Manager dashboard — so there is no Relay tab.
  *
+ * Deliverability reports have no tab for the same reason: the sender
+ * inventory (admin_mailbox_reports) is a diagnostic reached from the Setup
+ * tab's "Deliverability reports" row, the new-sender notification email, and
+ * the report_filed lines on Logs — not a place anyone works daily. The page
+ * highlights Setup, the way the per-object editors highlight Accounts.
+ *
  * (A future declarative-tabs core enhancement — specs/declarative_admin_tabs.md
  * — would replace this helper with adminMenu children; kept self-contained for now.)
  *
- * @version 2.2
+ * @version 2.3
  */
 
 if (!function_exists('mailbox_admin_tabs')) {

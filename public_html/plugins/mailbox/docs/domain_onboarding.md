@@ -69,11 +69,14 @@ the same records from the table on this page and the Setup tab's per-check fixes
 — that is a supported path, not a degraded one, and the rest of this document is
 written for it.
 
-**`rua` must be an address that receives.** A report address on a domain you do
-not control needs that domain's authorization record, so the practical choice is
-one on the domain itself. A domain with catch-all storage or a `postmaster@`
-alias satisfies this; without one, the reports are discarded and the policy is
-unmonitored.
+**`rua` points at the domain itself, and the platform reads the reports.** A
+report address on a domain you do not control needs that domain's authorization
+record, so the address is one on the domain — `postmaster@` or `dmarc@` both
+read well. The reports never land in an inbox: ingest detects them by content
+(any address on the domain works, even one with no alias), parses them, and
+turns them into the per-domain sender inventory in the mailbox admin's reports
+view. The Setup tab's "Deliverability reports" row shows they are arriving —
+the only proof the `rua` address is right — and links to that view.
 
 ## Order of operations
 
@@ -151,5 +154,8 @@ look like real mail configuration.
 - Trigger one of the site's own messages and read the same headers: DKIM `d=`
   equal to `mail.<domain>`, `dmarc=pass`, and a reply landing in the hosted
   mailbox.
-- Aggregate reports begin arriving at the `rua` address within a day or two,
-  and are the only source that shows senders you forgot about.
+- Aggregate reports begin arriving within a day or two — the Setup tab's
+  "Deliverability reports" row turns green and links to the reports view,
+  which starts listing sources. They are the only source that shows senders
+  you forgot about, and a new unaligned sender emails the domain owner once on
+  first sighting.

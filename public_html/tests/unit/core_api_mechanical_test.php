@@ -248,6 +248,7 @@ $permitted = array(
 	'includes/setup_steps/mail_send.php'                      => 'receiving-domain row reconciled from the stored From address on a wizard view — the Direct records cannot be listed without it',
 	'includes/VaultAudit.php'                                 => 'vault window opened/closed, observed on whatever request noticed',
 	'logic/oauth_callback_logic.php'                          => 'OAuth provider redirect — persisting the grant IS the request',
+	'plugins/mailbox/includes/InboundEmailRouter.php'         => 'deferred report filing at unlock — lazy processing only the owner\'s in-window secret makes possible',
 	'plugins/mailbox/includes/InboundEmailSetupCheck.php'     => 'relay status folded into the row on a setup view',
 	'plugins/mailbox/includes/relay_admin.php'                => 'relay/shard reconciliation from node facts',
 	'plugins/server_manager/includes/JobResultProcessor.php'  => 'job results processed lazily on first view',

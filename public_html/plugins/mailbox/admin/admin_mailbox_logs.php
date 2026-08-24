@@ -2,7 +2,7 @@
 /**
  * Inbound Email - Logs
  *
- * @version 1.2
+ * @version 1.3
  */
 
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
@@ -71,7 +71,7 @@ echo '<div class="row g-2 align-items-center">';
 echo '<div class="col-auto"><label class="col-form-label">Status:</label></div>';
 echo '<div class="col-auto"><select name="status" class="form-select form-select-sm">';
 echo '<option value="">All</option>';
-$statuses = array('forwarded', 'stored', 'rejected', 'discarded', 'rate_limited', 'store_capped', 'bounce_forwarded', 'error');
+$statuses = array('forwarded', 'stored', 'report_filed', 'rejected', 'discarded', 'rate_limited', 'store_capped', 'bounce_forwarded', 'error');
 foreach ($statuses as $s) {
 	$sel = ($filter_status === $s) ? ' selected' : '';
 	echo '<option value="' . $s . '"' . $sel . '>' . $s . '</option>';
@@ -103,7 +103,7 @@ $page->tableheader($headers, $table_options, $pager);
 foreach ($logs as $log) {
 	$status = $log->get('iel_status');
 	$status_class = 'bg-secondary';
-	if ($status === 'forwarded' || $status === 'bounce_forwarded' || $status === 'stored') $status_class = 'bg-success';
+	if ($status === 'forwarded' || $status === 'bounce_forwarded' || $status === 'stored' || $status === 'report_filed') $status_class = 'bg-success';
 	elseif ($status === 'rejected' || $status === 'error') $status_class = 'bg-danger';
 	elseif ($status === 'rate_limited' || $status === 'store_capped') $status_class = 'bg-warning text-dark';
 

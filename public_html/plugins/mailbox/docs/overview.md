@@ -3202,6 +3202,59 @@ through an outage and rebuilds the corpus after a wipe rather than stranding cor
 (rspamd's classifier needs roughly 200 messages of each class before it contributes, so
 early corrections have little visible effect.)
 
+## Deliverability reports
+
+Mail providers send machine-generated reports about a domain's mail — DMARC
+aggregate XML (who sent as the domain and whether it aligned), TLS-RPT JSON
+(where TLS to the domain failed), and ARF feedback-loop complaints (a recipient
+marked the domain's mail as spam). They arrive as ordinary email because the
+domain's published policy asked for them. `DeliverabilityReportIngest`
+(specs/deliverability_report_ingest.md) detects them during ingest and files
+them instead of delivering them.
+
+**Detection is by content, never by address.** Two of three signals must match
+— the RFC 7489 attachment filename shape, the `Report Domain: … Submitter: …`
+subject shape, and the payload structure itself — so a misaddressed report is
+still caught and an ordinary message carrying a zip is never touched. ARF is
+recognised by its `multipart/report; report-type=feedback-report` content
+type. Detection runs at every moment the pipeline holds plaintext: receive
+time (`InboundEmailRouter::processEmail`, before the alias branch, and the
+relay pull path in `RelaySpoolConsumer`), and deferred parse at unlock
+(`parsePendingMessage`) for Fortress relay mail — sealed domains get the same
+inventory as everyone else because extraction happens while content is in
+hand, never against stored sealed rows.
+
+**A recognised report is filed, not delivered.** No mailbox message is
+created (or, on the deferred path, the pending row is removed), so message
+counts, unread badges and quotas keep describing human mail. What persists is
+derived data: one `dvr_deliverability_reports` row per report and one
+`dvs_deliverability_report_sources` row per source line — IP, count,
+disposition, SPF/DKIM alignment verdicts, identity domains. Source rows never
+expire; they are the domain's long-term answer to "who has sent as us?". A
+parsed report's raw is discarded (the rows carry everything it said); a report
+that fails to parse keeps its raw in the report row for diagnosis, and a kind
+with no parser is recorded and counted rather than dropped. Every filing is a
+`report_filed` row in the transaction log.
+
+**Report content is untrusted input.** Payloads are size-capped before and
+during decompression (zip and gzip both stream against a ceiling), XML with a
+DOCTYPE is refused outright and external entities are never resolved, and a
+report naming a domain this platform does not host is discarded without
+granting it anything. A failure anywhere files or falls back to ordinary
+delivery — it never aborts ingest of the carrying message.
+
+**Surfaces.** The reports view (`admin_mailbox_reports`) is the sender
+inventory — sources over a chosen window, unaligned senders first, plus the
+report list with parse status. It has no tab of its own (the same reasoning as
+the relay: a diagnostic, not a daily workspace) — it is reached from the Setup
+tab's "Deliverability reports" row, which sits beside the DMARC row and shows
+reports actually arriving (the only proof the published `rua` address is
+right), from the new-sender notification email, and via the `report_filed`
+lines on the Logs tab. The first time a report names an unaligned source never
+seen for the domain, the domain owner gets one email — the source is then
+known and updates the inventory silently, with one escalation notice if its
+volume later jumps sharply.
+
 ## Trash and retention
 
 Deleting mail from the reader is a **soft delete**: `MailboxService::softDelete()`

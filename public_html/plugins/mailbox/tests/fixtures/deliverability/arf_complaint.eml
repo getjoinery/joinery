@@ -1,0 +1,45 @@
+Return-Path: <feedback@bigmail.example>
+Received: from feedback.bigmail.example (feedback.bigmail.example [192.0.2.200])
+	by mail.reports.example with ESMTPS id abc123
+	for <postmaster@reports.example>; Sun, 24 Aug 2026 09:00:00 +0000 (UTC)
+From: Feedback Loop <feedback@bigmail.example>
+To: <postmaster@reports.example>
+Subject: FW: Abuse report
+Date: Sun, 24 Aug 2026 09:00:00 +0000
+Message-ID: <arf-fixture-1@bigmail.example>
+MIME-Version: 1.0
+Content-Type: multipart/report; report-type=feedback-report;
+	boundary="arf_boundary_1"
+
+--arf_boundary_1
+Content-Type: text/plain; charset="US-ASCII"
+Content-Transfer-Encoding: 7bit
+
+This is an email abuse report for an email message received from
+IP 198.51.100.30 on Sun, 24 Aug 2026 08:58:11 +0000.
+
+--arf_boundary_1
+Content-Type: message/feedback-report
+
+Feedback-Type: abuse
+User-Agent: BigMailFBL/2.0
+Version: 1
+Original-Mail-From: <news@reports.example>
+Original-Rcpt-To: <someone@bigmail.example>
+Arrival-Date: Sun, 24 Aug 2026 08:58:11 +0000
+Source-IP: 198.51.100.30
+Reported-Domain: reports.example
+Authentication-Results: mx.bigmail.example; spf=pass smtp.mailfrom=reports.example
+
+--arf_boundary_1
+Content-Type: message/rfc822
+
+From: news@reports.example
+To: someone@bigmail.example
+Subject: Weekly newsletter
+Date: Sun, 24 Aug 2026 08:58:00 +0000
+Message-ID: <newsletter-1@reports.example>
+
+The newsletter body.
+
+--arf_boundary_1--

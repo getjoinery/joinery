@@ -25,6 +25,9 @@
  * the user TO the relay end state, so mid-cutover guidance already names the
  * relay. Topology is deployment-level; security level is per-domain.
  *
+ * @version 1.48 - the "Deliverability reports" row sits beside the DMARC row
+ *   (specs/deliverability_report_ingest.md § Surfaces): reports actually
+ *   arriving are the only proof the published rua address is right
  * @version 1.47 - sendingDnsPlan() carries the Joinery Direct pair too (self-
  *                 gating), so the wizard's one credential pass publishes them
  * @version 1.46 - sendingDnsPlan(): the outbound-only record slice (SPF, DKIM,
@@ -1761,6 +1764,14 @@ class InboundEmailSetupCheck {
 						$domain . ' has no DMARC record.',
 						'DMARC is optional but recommended once SPF and DKIM pass.',
 						$this->dnsFix('TXT', '_dmarc.' . $domain, 'v=DMARC1; p=none; rua=mailto:postmaster@' . $domain));
+
+				// Aggregate reports arriving (specs/deliverability_report_ingest.md
+				// § Surfaces). A DMARC record whose rua address is wrong looks
+				// identical to a correct one in DNS; reports actually showing up
+				// is the only proof it works, so the proof sits beside the record.
+				if ($model && $model->key && $hasDmarc) {
+					$out[] = $this->deliverabilityReportsResult($domain, $model);
+				}
 			}
 		}
 
@@ -2977,6 +2988,51 @@ class InboundEmailSetupCheck {
 	 * Four states, because they have four different fixes — and one of them is
 	 * not merely unfinished but actively breaking mail.
 	 */
+	/**
+	 * The "aggregate reports arriving" row (specs/deliverability_report_ingest.md
+	 * § Surfaces). A DMARC record is a request for reports; the only proof the
+	 * request works — that the rua address is right and the mail is landing —
+	 * is reports showing up. Reports arriving is a PASS with the count and the
+	 * most recent; a published record with none yet is INFO, because providers
+	 * take a day or more to start and a wrong rua looks exactly the same.
+	 */
+	private function deliverabilityReportsResult($domain, $model) {
+		$count = 0;
+		$latest = null;
+		try {
+			$reports = new MultiDeliverabilityReport(array('domain_id' => intval($model->key)),
+				array('dvr_create_time' => 'DESC'));
+			foreach ($reports as $r) {
+				$count++;
+				if ($latest === null) { $latest = $r; }
+			}
+		} catch (\Throwable $e) {
+			return $this->r('domain.deliverability_reports', $domain, 'domain', 'Deliverability reports',
+				self::OPTIONAL, self::UNKNOWN, 'Could not read the report inventory: ' . $e->getMessage());
+		}
+
+		if ($count > 0) {
+			$last_seen = $latest->get_local('dvr_create_time', 'M j, Y') ?: 'unknown';
+			return $this->r('domain.deliverability_reports', $domain, 'domain', 'Deliverability reports',
+				self::OPTIONAL, self::PASS,
+				$count . ' report' . ($count == 1 ? '' : 's') . ' received; most recent '
+				. ($latest->get('dvr_org_name') ?: 'unknown reporter') . ' on ' . $last_seen . '.',
+				'Mail providers are reporting on mail sent as ' . $domain . '. The full sender inventory '
+				. '— every source sending as this domain and whether it aligned — is in the reports view.',
+				array('text' => 'Review the sender inventory.',
+					'link' => array('url' => '/plugins/mailbox/admin/admin_mailbox_reports?domain_id=' . intval($model->key),
+						'label' => 'Open Reports')));
+		}
+
+		return $this->r('domain.deliverability_reports', $domain, 'domain', 'Deliverability reports',
+			self::OPTIONAL, self::INFO,
+			'No provider reports have arrived for ' . $domain . ' yet.',
+			'The DMARC record asks providers to mail daily reports about everything sending as this domain. '
+			. 'They usually begin within a day or two of publishing the record. If this stays empty for a '
+			. 'week, the likely cause is the rua address in the DMARC record pointing somewhere that does '
+			. 'not reach this platform — reports arriving is the only proof it is right.');
+	}
+
 	private function sendProtectionResult($domain, $model) {
 		$label = 'Send protection';
 		$signing = (bool)$model->is_protected_identity();
