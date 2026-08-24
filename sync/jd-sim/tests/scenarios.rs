@@ -537,6 +537,37 @@ fn a_file_that_lost_a_naming_race_still_converges() {
 }
 
 #[test]
+fn a_folder_whose_directory_cannot_be_read_still_settles() {
+    // `create_local_folder` refuses to record a folder synced until it has SEEN
+    // the directory, which put `read_dir` on the path of every folder the engine
+    // materialises. This holds that new dependency to the obvious bar: a
+    // transient refusal costs a retry and nothing more.
+    //
+    // Honest about what this does and does not show. It does NOT distinguish the
+    // guard being present -- without it `read_dir` is never called here and the
+    // injected fault simply lands on the scan instead, so the scenario passes
+    // either way. What it pins is the property the guard now leans on, which is
+    // worth a regression test precisely because something now depends on it.
+    let world = World::new(3141, &["laptop"]);
+    let device = world.device("laptop");
+
+    let folder = world.server.seed_folder(None, "Papers");
+    world
+        .server
+        .seed_file(Some(folder), "notes.txt", b"under the folder");
+    device
+        .fs
+        .fail_next(FsOp::ReadDir, Some("Papers"), FailureKind::Io, 3);
+
+    assert!(
+        world.settle().is_some(),
+        "a refused read_dir should cost a retry, not the device's ability to settle"
+    );
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+}
+
+#[test]
 fn forgetting_a_folder_takes_what_was_under_it() {
     use jd_core::model::EntityId;
 

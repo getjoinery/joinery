@@ -116,6 +116,7 @@ pub struct World {
     /// nothing proves nothing unless the disk really did move under the
     /// engine, so the count is readable rather than merely hoped for.
     swaps_seen: std::sync::Arc<std::sync::Mutex<usize>>,
+    folder_renames_seen: std::sync::Arc<std::sync::Mutex<usize>>,
     /// How many times a device was power-cycled in this world.
     ///
     /// Counted so a sweep arm that kills can prove it killed. A knob that
@@ -183,6 +184,7 @@ impl World {
             landing_saves: Default::default(),
             landing_seen: Default::default(),
             swaps_seen: Default::default(),
+            folder_renames_seen: Default::default(),
             power_cycles: Default::default(),
         }
     }
@@ -358,6 +360,58 @@ impl World {
     /// on top of them they vanish during the pass and the check says so. The
     /// content they replaced IS ledgered, because destroying that was the
     /// user's own doing.
+    /// Move a folder's name on the SERVER in the instant a device is creating
+    /// that folder on its disk.
+    ///
+    /// The soak rig does this constantly and the simulator never has: one
+    /// machine renames a folder while another is still materialising it, so the
+    /// name the second one is building arrives already superseded. Run 209 ended
+    /// with two folders recorded `synced` under the server's exact name with no
+    /// directory on disk, and every server-side file beneath them unreachable,
+    /// while convergence passed and both devices reported themselves quiet.
+    ///
+    /// The rename goes through the ordinary `drive_rename` action, so the server
+    /// answers exactly as it would for any other client.
+    pub fn a_folder_is_renamed_while_a_device_creates_it(&mut self, one_in: u64, budget: u64) {
+        let seed = self.rng.next_u64() ^ 0xf01d_5eed;
+        let seen = self.folder_renames_seen.clone();
+        for (i, device) in self.devices.iter().enumerate() {
+            let server = self.server.clone();
+            let seen = seen.clone();
+            let rng = std::sync::Arc::new(std::sync::Mutex::new(SimRng::new(
+                seed ^ (i as u64).wrapping_mul(0x9e37_79b9),
+            )));
+            let mut round: u64 = 0;
+            device.fs.while_creating_a_dir(move |target| {
+                if round >= budget {
+                    return;
+                }
+                let mut rng = rng.lock().unwrap();
+                if one_in > 1 && rng.below(one_in) != 0 {
+                    return;
+                }
+                let Ok(rel) = target.strip_prefix(std::path::Path::new("/sync")) else {
+                    return;
+                };
+                let rel = rel.to_string_lossy().to_string();
+                // The folder this disk is building, as the server currently
+                // names it. Absent means the server has already moved on, which
+                // is its own interesting state and not one to force.
+                let Some(id) = server.folder_id_at(&rel) else {
+                    return;
+                };
+                round += 1;
+                let leaf = rel.rsplit('/').next().unwrap_or("folder").to_string();
+                let renamed = format!("{leaf} ({round})");
+                let _ = server.action(
+                    "drive_rename",
+                    &serde_json::json!({ "folder_id": id, "name": renamed }),
+                );
+                *seen.lock().unwrap() += 1;
+            });
+        }
+    }
+
     pub fn user_saves_while_downloads_land(&mut self, one_in: u64, budget: u64) {
         let destroyed = self.destroyed_by_the_user.clone();
         let landing = self.landing_saves.clone();
@@ -419,6 +473,12 @@ impl World {
     /// actually performed.
     pub fn swaps_made_during_uploads(&self) -> usize {
         *self.swaps_seen.lock().unwrap()
+    }
+
+    /// How many folders `a_folder_is_renamed_while_a_device_creates_it`
+    /// actually moved. A dial that never fired makes every green meaningless.
+    pub fn folder_renames_during_creation(&self) -> usize {
+        *self.folder_renames_seen.lock().unwrap()
     }
 
     /// One pass on one device, with custody checked around it.

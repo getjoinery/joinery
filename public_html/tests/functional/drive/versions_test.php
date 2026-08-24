@@ -198,4 +198,127 @@ check((int)$holdq->fetchColumn() === 1, 'race: the head the second save overtook
 $holdq->execute(array((int)$race->key, $race_head));
 check((int)$holdq->fetchColumn() === 1, 'race: and so is the head the first save overtook');
 
+// ---------------------------------------------------------------------------
+section('concurrent demotions of one file, for real');
+
+// The section above reproduces the race single-threaded, which proves the head
+// is read fresh but not that the row is actually held. This races real
+// processes: N workers each ingest their own blob and demote the same file at
+// the same instant. Without the hold they interleave between reading the head
+// and repointing the file, and two of them demote the same blob while the head
+// one of them installed is left referenced by nothing.
+if (!function_exists('proc_open')) {
+	harness_skip('proc_open disabled -- cannot spawn concurrent workers');
+} else {
+	$hot = File::createFromBytes('hot-' . bin2hex(random_bytes(6)), 'hot.txt', 'text/plain', $user->key,
+		array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+	$made_files[] = $hot->key;
+	$first_head = (int)$hot->get('fil_fbb_file_blob_id');
+
+	$worker_src = <<<'WORKER'
+<?php
+$root = '__ROOT__';
+require_once($root . '/includes/PathHelper.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+require_once(PathHelper::getIncludePath('data/file_versions_class.php'));
+
+$file_id = (int)($argv[1] ?? 0);
+$user_id = (int)($argv[2] ?? 0);
+$start   = (float)($argv[3] ?? 0);
+$tag     = (string)($argv[4] ?? 'x');
+
+// Ingested BEFORE the barrier so the race is over the demotion, not over
+// hashing bytes. This is the blob an upload would arrive holding.
+$tmp = tempnam(sys_get_temp_dir(), 'hotblob_');
+file_put_contents($tmp, 'hot-' . $tag . '-' . str_repeat($tag, 64));
+$blob = FileBlob::createFromPath($tmp, 'text/plain', true);
+
+// Each worker holds its own copy of the file, read before the race -- exactly
+// the stale copy a real request would be carrying.
+$file = new File($file_id, TRUE);
+
+while (microtime(true) < $start) { /* spin */ }
+
+try {
+	FileVersion::save_new_content($file, $blob, $user_id);
+	fwrite(STDOUT, "RESULT:OK:" . (int)$blob->key . "
+");
+} catch (\Throwable $e) {
+	fwrite(STDOUT, "RESULT:FAIL:" . (int)$blob->key . ":" . $e->getMessage() . "
+");
+}
+WORKER;
+	$worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $worker_src);
+	$worker_path = tempnam(sys_get_temp_dir(), 'dvc_') . '.php';
+	file_put_contents($worker_path, $worker_src);
+	@chmod($worker_path, 0666);
+	harness_defer(function () use ($worker_path) { @unlink($worker_path); });
+
+	$N = 6;
+	$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+	$env = $_ENV;
+	$env['PATH'] = getenv('PATH');
+	$start_at = microtime(true) + 2.0;
+	$procs = array(); $pipes = array(); $out = array();
+	for ($i = 0; $i < $N; $i++) {
+		$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($worker_path)
+			. ' ' . (int)$hot->key . ' ' . (int)$user->key
+			. ' ' . sprintf('%.6f', $start_at) . ' ' . chr(97 + $i);
+		$procs[$i] = proc_open($cmd, $descriptors, $pipes[$i], null, $env);
+	}
+	$blob_ids = array(); $ok_blobs = array(); $failed = array();
+	for ($i = 0; $i < $N; $i++) {
+		if (!is_resource($procs[$i])) { continue; }
+		$out[$i] = stream_get_contents($pipes[$i][1]);
+		fclose($pipes[$i][1]); fclose($pipes[$i][2]);
+		proc_close($procs[$i]);
+		if (preg_match('/RESULT:(OK|FAIL):(\d+):?(.*)/', (string)$out[$i], $m)) {
+			$blob_ids[] = (int)$m[2];
+			if ($m[1] === 'OK') { $ok_blobs[] = (int)$m[2]; }
+			else { $failed[] = substr(trim($m[3]), 0, 70); }
+		}
+	}
+	check(count($blob_ids) === $N, "race: all $N workers reported (" . count($blob_ids) . ')');
+	// A refused demotion is a legitimate outcome under contention -- the caller
+	// retries. What must never happen is silent corruption of the bookkeeping.
+	echo '  (workers: ' . count($ok_blobs) . ' saved, ' . count($failed) . ' refused'
+		. (count($failed) ? ': ' . implode(' | ', array_unique($failed)) : '') . ")\n";
+
+	// Whatever order they landed in, the bookkeeping must be consistent: no blob
+	// demoted twice, and every blob that was ever the head is either the head now
+	// or held by exactly one version row.
+	$dq = $dblink->prepare(
+		"SELECT COUNT(*) FROM (
+		    SELECT fvr_fbb_file_blob_id FROM fvr_file_versions
+		     WHERE fvr_fil_file_id = ?
+		     GROUP BY fvr_fbb_file_blob_id HAVING COUNT(*) > 1) d");
+	$dq->execute(array((int)$hot->key));
+	check((int)$dq->fetchColumn() === 0, 'race: no blob was demoted twice under real contention');
+
+	// Not 'every blob is still a version' -- prune legitimately deletes past the
+	// retained depth, and a refused worker's blob is the CALLER's to release.
+	// The invariant that holds regardless: none of these blobs may end up live
+	// with nothing referencing it, which is the shape a lost demotion leaves.
+	$stranded = array();
+	foreach (array_merge(array($first_head), $blob_ids) as $bid) {
+		$sq = $dblink->prepare(
+			'SELECT COUNT(*) FROM fbb_file_blobs b
+			  WHERE b.fbb_file_blob_id = ? AND b.fbb_reference_count > 0
+			    AND NOT EXISTS (SELECT 1 FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)
+			    AND NOT EXISTS (SELECT 1 FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)');
+		$sq->execute(array($bid));
+		if ((int)$sq->fetchColumn() > 0) { $stranded[] = $bid; }
+	}
+	// A blob whose worker was REFUSED never reached save_new_content's bookkeeping,
+	// so it is the caller's to release and not this invariant's business.
+	$stranded = array_values(array_diff($stranded, array_diff($blob_ids, $ok_blobs)));
+	check(count($stranded) === 0, 'race: no blob that was demoted is left referenced by nothing'
+		. (count($stranded) ? ' (stranded: ' . implode(',', $stranded) . ')' : ''));
+}
+
 harness_finish();
