@@ -3902,6 +3902,14 @@ preserves the Message-ID reconciles the filed copy to the locally-stored sent ro
 while a provider that rewrites it on send (Gmail) stores no local row — the message
 appears on the next Sent ingest (one poll-interval later).
 
+A message filed in the source Sent folder reads as **sent mail** (`iem_direction =
+'outbound'`) whichever folder stored it first: when the `\All` coverage pass wins the
+race and stores it as an ordinary row, the Sent pass's dedup promotes that same row.
+A **self-addressed** message is the exception — it stays inbound and shows in the
+Inbox, exactly as the source mailbox files it. The promotion only ever lifts an
+inbound row (outbound and draft rows are never touched) and stands down when a live
+outbound row already holds the same `(Message-ID, recipient)` dedup key.
+
 ## Provisioning a mailbox in one call
 
 `plugins/mailbox/includes/provisioning.php` exposes the headless provisioning
