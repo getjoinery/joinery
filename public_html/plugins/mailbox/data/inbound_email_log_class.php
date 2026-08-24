@@ -3,7 +3,7 @@
  * InboundEmailLog - Records all inbound email transactions.
  * Also used for rate limiting by counting recent entries.
  *
- * @version 1.5
+ * @version 1.6
  */
 
 require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
@@ -41,6 +41,11 @@ class InboundEmailLog extends SystemBase {
 	// (specs/implemented/inbound_email_filters.md). The matched filter ids and the
 	// actions taken are recorded in iel_destinations.
 	const STATUS_FILTERED = 'filtered';
+	// The message was a machine-generated deliverability report (DMARC aggregate,
+	// TLS-RPT, ARF) and was consumed by DeliverabilityReportIngest instead of
+	// being delivered (specs/deliverability_report_ingest.md § D3). The kind,
+	// reporter and outcome are recorded in iel_destinations.
+	const STATUS_REPORT_FILED = 'report_filed';
 
 	protected static $foreign_key_actions = [
 		'iel_iea_inbound_email_alias_id'  => ['action' => 'null'],

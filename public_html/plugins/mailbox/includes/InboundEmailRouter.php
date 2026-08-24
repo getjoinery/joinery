@@ -90,6 +90,13 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.37
+ * @changelog 1.37 - deliverability reports (DMARC aggregate, TLS-RPT, ARF) are
+ *   detected and filed during ingest instead of delivered
+ *   (specs/deliverability_report_ingest.md): processEmail intercepts before
+ *   the alias branch, and parsePendingMessage intercepts at unlock — the
+ *   Fortress relay path's first plaintext moment — removing the pending row
+ *   once the report's derived rows are written
  * @version 1.36
  * @changelog 1.36 - every raw MIME parse goes through MimeParse (a message
  *   quoting its own boundary mid-line hangs Horde's parser; observed pinning
@@ -249,6 +256,15 @@ class InboundEmailRouter {
 		// scanner verdict on the message => signal 'none'. OR'd into the verdict by
 		// classifySpam(); the score is recorded for transparency only.
 		$content_spam = $this->resolveContentSpam($raw_email, $provider_spam);
+
+		// Deliverability report? (specs/deliverability_report_ingest.md) Runs
+		// BEFORE the alias branch so a report to an address with no alias — a
+		// misaddressed rua, or a domain that rejects unmatched mail — is still
+		// caught (D1). A recognised report is filed as source rows, never
+		// delivered (D3); anything not recognised falls through untouched.
+		if (DeliverabilityReportIngest::intercept($this, $raw_email, $parsed, $domain, $envelope_recipient) !== null) {
+			return 0;
+		}
 
 		// Look up alias
 		$alias = $this->lookupAlias($local_part, $domain);
@@ -727,6 +743,35 @@ class InboundEmailRouter {
 		$raw = (new VaultCrypto())->openHeldDeliveryBlob($sealed_raw, $secret_key);
 
 		$parsed = $this->parseEmail($raw);
+
+		// Deliverability report? (specs/deliverability_report_ingest.md § D2)
+		// This is the second plaintext moment — a Fortress relay message's
+		// content first exists here, at unlock — so the same detector that
+		// receive-time ingest runs must run too, or protected domains would
+		// silently get no sender inventory. A recognised report is filed as
+		// derived rows and its pending message row removed: no content columns
+		// exist yet, so there is nothing else to clean up.
+		$domain_row = null;
+		try {
+			$domain_row = new InboundEmailDomain(intval($msg->get('iem_ied_inbound_email_domain_id')), TRUE);
+		} catch (\Throwable $e) { /* no domain row — skip detection, parse as mail */ }
+		if ($domain_row !== null) {
+			// server_initiated_write: the drain runs on mailbox page views —
+			// lazy processing a scheduled task could never do, because only
+			// the owner's in-window secret opens the blob.
+			$filed = SystemBase::server_initiated_write(function () use ($raw, $parsed, $domain_row, $msg) {
+				if (DeliverabilityReportIngest::intercept(
+						$this, $raw, $parsed, $domain_row, (string)$msg->get('iem_recipient')) === null) {
+					return false;
+				}
+				$msg->permanent_delete();
+				return true;
+			});
+			if ($filed) {
+				return true;
+			}
+		}
+
 		$bodies = $this->extractBodies($raw, $parsed);
 		$subject = substr($this->decodeMimeHeader($parsed['subject'] ?? ''), 0, 4000);
 		$sender  = $this->senderDisplayString($parsed);

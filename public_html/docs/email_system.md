@@ -841,6 +841,15 @@ $spf = DnsAuthChecker::checkSPF('example.com');   // ['status'=>'pass|warn|fail'
 $all = DnsAuthChecker::quickCheck('example.com'); // ['spf'=>…, 'dkim'=>…, 'dmarc'=>…]
 ```
 
+> **The record's feedback loop.** A published DMARC (or TLS-RPT) policy makes
+> every large provider mail back reports about this deployment's sending — who
+> sent as the domain, what aligned, where TLS failed. Every deployment that
+> sends is the subject of that stream somewhere. When the domain's `rua`
+> points at a domain the mailbox plugin hosts, those reports are detected at
+> ingest and land as the per-domain sender inventory in the mailbox admin's
+> reports view (`dvs_deliverability_report_sources`) — see
+> [Mailbox Plugin › Deliverability reports](../plugins/mailbox/docs/overview.md#deliverability-reports).
+
 Its lookups go through `DnsResolver` (the platform's single raw-DNS
 chokepoint — see [Validation › DNS Lookups](/docs/validation.md#dns-lookups-dnsresolver)),
 so a resolver failure is handled cleanly and the checks are unit-testable via

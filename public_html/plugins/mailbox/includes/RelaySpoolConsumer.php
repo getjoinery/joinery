@@ -28,6 +28,11 @@
  * own spool subdirectory and the ack is the tenant shell's joinery-ack verb —
  * ids only, no paths, no root.
  *
+ * @version 1.10 - the transport-key store path runs the deliverability report
+ *   detector before storeMessage (specs/deliverability_report_ingest.md): the
+ *   relay pull reaches storeMessage without passing processEmail, so this is
+ *   its plaintext moment — a recognised report is filed and the spool entry
+ *   acked, never stored as mail
  * @version 1.9 - a .direct needs no .meta sidecar (the container is
  *   self-describing and the sidecar's fields are never read), and a .seal is
  *   dedup-checked before its sidecar is required — both so an entry whose
@@ -341,6 +346,15 @@ class RelaySpoolConsumer {
 		// Transport: open now with the ambient secret and run the store ingest.
 		$raw = (new SealedBox())->openDek($sealed_raw, $this->transportSecret());
 		$parsed = $this->router->parseEmail($raw);
+
+		// Deliverability report? (specs/deliverability_report_ingest.md) The
+		// relay pull path reaches storeMessage without passing processEmail,
+		// so the detector runs here — the same plaintext moment. A recognised
+		// report is filed, never stored as mail; ack the spool entry.
+		if (DeliverabilityReportIngest::intercept($this->router, $raw, $parsed, $domain, $recipient) !== null) {
+			return 'stored';
+		}
+
 		$auth = $this->router->authFromRelayMeta($meta, $this->relayAuthservId());
 		try {
 			$result = $this->router->storeMessage($raw, $parsed, $alias, $domain, $recipient, $auth);
