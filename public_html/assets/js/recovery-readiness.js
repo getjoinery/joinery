@@ -10,16 +10,24 @@
  *
  * Generation: the same primitives make the keypair in the first place, so
  * setting up backup recovery needs no shell. The private half is shown once,
- * copied or downloaded by the operator, and never sent anywhere. The page
- * deliberately does NOT use its in-memory copy to satisfy the ceremony above —
- * the ceremony's job is proving the copy that was SAVED works, and auto-proving
- * would pass just as happily for someone who closed the tab without saving.
+ * copied or downloaded by the operator, and never sent anywhere. Setup is one
+ * screen: the operator pastes the key back from wherever they saved it, and
+ * one button saves the public half (backup_recovery_save) and proves the
+ * pasted copy against the challenge the server sealed to what it actually
+ * stored (backup_recovery_prove). The page deliberately does NOT use its
+ * in-memory copy for that proof — the ceremony's job is proving the copy that
+ * was SAVED works, and auto-proving would pass just as happily for someone who
+ * closed the tab without saving.
  *
  * Client vault checks: for client-custody vaults the recovery code must never
  * reach the server, so the dry run happens here too — derive the KEK, attempt
  * the unwrap against the user's own wrapping rows, report pass/fail. Nothing
  * is consumed and nothing secret is transmitted.
  *
+ * @version 1.2.1 - a failed generation probe reveals the no-WebCrypto line
+ *                  instead of staying silent (the by-hand fold is gone)
+ * @version 1.2.0 - one-screen setup: paste-back match + save/prove via the
+ *                  backup_recovery_save / backup_recovery_prove API actions
  * @version 1.1.0 - keypair generation in the page (generateKeypair/attachGenerator)
  *                  and self-attachment from window.rrPanel
  * @version 1.0.0
@@ -204,7 +212,8 @@ window.recoveryReadiness = (function () {
 	}
 
 	/**
-	 * Wire the generate-a-recovery-key controls on the setup panel.
+	 * Wire the one-screen recovery setup: generate, save the key somewhere
+	 * real, paste it back, one button saves and verifies.
 	 *
 	 * The Generate button is hidden in the markup and revealed only once a
 	 * throwaway keypair has actually been made here — support for X25519 in
@@ -212,23 +221,27 @@ window.recoveryReadiness = (function () {
 	 * would be worse than not offering it, on the one page whose job is making
 	 * sure recovery works.
 	 *
-	 * After generating, Save is disabled until the operator confirms they saved
-	 * the key. It is the last moment the key exists: nothing on the server has
-	 * it, and regenerating is free right up until the public half is saved.
+	 * The paste-back IS the save confirmation: it must match the generated key
+	 * before anything is sent, and the possession proof is then computed from
+	 * the PASTED copy against a challenge the server seals to what it stored —
+	 * so a key that never made it into the password manager, or a public half
+	 * corrupted anywhere between this page and the settings table, both fail
+	 * here instead of at disaster time.
 	 */
 	function attachGenerator(c) {
 		var button = document.getElementById(c.buttonId);
 		var box = document.getElementById(c.boxId);
 		var result = document.getElementById(c.resultId);
 		var privateOut = document.getElementById(c.privateOutId);
-		var publicField = document.getElementById(c.publicFieldId);
 		var status = document.getElementById(c.statusId);
-		var submit = document.getElementById(c.submitId);
-		var confirmWrap = document.getElementById(c.confirmWrapId);
-		var confirmBox = document.getElementById(c.confirmBoxId);
+		var paste = document.getElementById(c.pasteId);
+		var save = document.getElementById(c.saveId);
+		var saveStatus = document.getElementById(c.saveStatusId);
 		var copyButton = document.getElementById(c.copyButtonId);
 		var download = document.getElementById(c.downloadId);
-		if (!button || !box || !result || !privateOut || !publicField) return;
+		if (!button || !box || !result || !privateOut || !paste || !save) return;
+
+		var pair = null;
 
 		function say(message, ok) {
 			if (!status) return;
@@ -236,33 +249,33 @@ window.recoveryReadiness = (function () {
 			status.className = ok ? 'text-success small' : 'text-danger small';
 		}
 
+		function saySave(message, ok) {
+			if (!saveStatus) return;
+			saveStatus.textContent = message;
+			saveStatus.className = ok ? 'text-success small' : 'text-danger small';
+		}
+
 		// Probe before offering. A key made and thrown away here proves the
 		// whole path works, including the PKCS#8 export shape.
 		generateKeypair().then(function () {
 			box.hidden = false;
 		}).catch(function () {
-			/* no generation on this browser — the pasted-key path and the CLI
-			   disclosure below are still there, so say nothing. */
+			// No generation on this browser: say so, plainly — this is the one
+			// setup path, so silence would leave a heading over nothing.
+			var note = document.getElementById(c.noCryptoId);
+			if (note) note.hidden = false;
 		});
 
 		button.addEventListener('click', function () {
 			button.disabled = true;
-			generateKeypair().then(function (pair) {
+			generateKeypair().then(function (p) {
+				pair = p;
 				privateOut.value = pair.privateKeyB64;
-				publicField.value = pair.publicKeyB64;
 				result.hidden = false;
 
 				if (download) {
 					var blob = new Blob([pair.privateKeyB64 + '\n'], { type: 'text/plain' });
 					download.href = URL.createObjectURL(blob);
-				}
-				if (confirmWrap && confirmBox && submit) {
-					confirmWrap.hidden = false;
-					confirmBox.checked = false;
-					submit.disabled = true;
-					confirmBox.addEventListener('change', function () {
-						submit.disabled = !confirmBox.checked;
-					});
 				}
 				button.textContent = 'Key generated';
 				say('', true);
@@ -271,6 +284,33 @@ window.recoveryReadiness = (function () {
 			}).catch(function (err) {
 				button.disabled = false;
 				say(err.message || String(err), false);
+			});
+		});
+
+		save.addEventListener('click', function () {
+			var pasted = paste.value.trim();
+			if (!pair) { saySave('Generate a key first.', false); return; }
+			if (!pasted) { saySave('Paste the key from your password manager first.', false); return; }
+			if (pasted !== pair.privateKeyB64) {
+				saySave('That is not the key above — paste the copy your password manager holds.', false);
+				return;
+			}
+
+			save.disabled = true;
+			saySave('Saving…', true);
+			joineryApi.post('backup_recovery_save', { public_key: pair.publicKeyB64 }).then(function (r) {
+				// Prove with the pasted copy against what the server STORED.
+				return openChallenge(r.challenge, pasted, r.public_key, r.info);
+			}).then(function (proof) {
+				return joineryApi.post('backup_recovery_prove', { proof: proof });
+			}).then(function () {
+				paste.value = '';
+				privateOut.value = '';
+				saySave('Verified.', true);
+				window.location.reload();
+			}).catch(function (err) {
+				save.disabled = false;
+				saySave(err.message || String(err), false);
 			});
 		});
 

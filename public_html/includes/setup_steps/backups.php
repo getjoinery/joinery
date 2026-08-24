@@ -1,15 +1,17 @@
 <?php
 /**
  * Setup wizard step: Backups (specs/setup_wizard.md § Step 8).
- * The backups page's own pieces on one screen: target form (save_target /
- * test_target), the RecoveryKeySetupPanel embedded whole, nightly task
- * activation, and Run one now. All POSTs go to /setup and are forwarded to
- * admin_backups_logic. Included by views/setup.php with $page, $settings in scope.
+ * A signup-and-costs list of the three providers (shown until a target
+ * exists), then two sections: the target form (save_target / test_target)
+ * and the RecoveryKeySetupPanel embedded whole. Nightly activation has no section —
+ * it happens by itself when the target and the proven key both exist
+ * (BackupNightly::maybe_activate), which the step's intro copy promises. All
+ * POSTs go to /setup and are forwarded to admin_backups_logic. Included by
+ * views/setup.php with $page, $settings in scope.
  *
- * @version 1.0
+ * @version 2.2
  */
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
-require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 $setup_bk_targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
@@ -21,12 +23,19 @@ foreach ($setup_bk_targets as $setup_bk_row) {
 	}
 }
 $setup_bk_recovery = BackupRecoveryKey::setup_state();
-$setup_bk_tasks = new MultiScheduledTask(array('task_class' => 'BackupRun', 'active' => true, 'deleted' => false));
-$setup_bk_task_active = $setup_bk_tasks->count_all() > 0;
-$setup_bk_ready = ($setup_bk_target !== null)
-	&& (int)$settings->get_setting('backup_target_id') > 0
-	&& $setup_bk_recovery['is_ready'];
 ?>
+
+<?php if ($setup_bk_target === null) { ?>
+	<p class="mb-1">You need a bucket at one of these services — all three work the same here:</p>
+	<ul class="small">
+		<li><a href="https://www.backblaze.com/sign-up/cloud-storage" target="_blank" rel="noopener">Backblaze B2</a>
+			(recommended) — the first 10&nbsp;GB are free, then about $0.006 per GB per month.</li>
+		<li><a href="https://portal.aws.amazon.com/billing/signup" target="_blank" rel="noopener">Amazon S3</a>
+			— about $0.023 per GB per month, with 5&nbsp;GB free for the first year.</li>
+		<li><a href="https://login.linode.com/signup" target="_blank" rel="noopener">Linode Object Storage</a>
+			— a flat $5 per month for the first 250&nbsp;GB, then $0.02 per GB.</li>
+	</ul>
+<?php } ?>
 
 	<div class="jy-fieldset">
 		<h4>1 &middot; Where backups go</h4>
@@ -53,12 +62,17 @@ $setup_bk_ready = ($setup_bk_target !== null)
 	echo $setup_bk_form->dropinput('bkt_provider', 'Provider', array(
 		'options' => array('b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'),
 		'value' => 'b2',
+		// B2 needs neither: its endpoint is detected at save time.
+		'visibility_rules' => array(
+			'b2'      => array('show' => array(), 'hide' => array('region', 'endpoint')),
+			'default' => array('show' => array('region', 'endpoint'), 'hide' => array()),
+		),
 	));
 	echo $setup_bk_form->textinput('bkt_bucket', 'Bucket name', array('required' => true));
 	echo $setup_bk_form->textinput('access_key', 'Access key ID', array('required' => true, 'autocomplete' => 'off'));
 	echo $setup_bk_form->passwordinput('secret_key', 'Secret key', array('required' => true, 'autocomplete' => 'new-password'));
-	echo $setup_bk_form->textinput('region', 'Region', array('helptext' => 'Leave blank for Backblaze B2.'));
-	echo $setup_bk_form->textinput('endpoint', 'Endpoint hostname', array('helptext' => 'Leave blank for Backblaze B2 — it is detected when the target is saved.'));
+	echo $setup_bk_form->textinput('region', 'Region', array('helptext' => 'e.g. us-east-1'));
+	echo $setup_bk_form->textinput('endpoint', 'Endpoint hostname', array('helptext' => 'e.g. s3.us-east-1.amazonaws.com or us-east-1.linodeobjects.com'));
 	echo $setup_bk_form->submitbutton('btn_save_target', 'Save and test', array('class' => 'btn btn-primary'));
 	$setup_bk_form->end_form();
 } ?>
@@ -72,22 +86,3 @@ RecoveryKeySetupPanel::render($page, array('state' => $setup_bk_recovery));
 ?>
 	</div>
 
-	<div class="jy-fieldset jy-mt-3">
-		<h4>3 &middot; Run it nightly</h4>
-<?php if ($setup_bk_task_active) { ?>
-		<p><span class="badge badge-success">On</span> The Backup task runs nightly.</p>
-<?php if ($setup_bk_ready) { ?>
-		<form method="POST" action="/setup">
-			<input type="hidden" name="action" value="run_backup">
-			<input type="hidden" name="step" value="backups">
-			<button type="submit" class="btn btn-secondary">Run one now</button>
-		</form>
-<?php } ?>
-<?php } else { ?>
-		<form method="POST" action="/setup">
-			<input type="hidden" name="action" value="backup_task_activate">
-			<input type="hidden" name="step" value="backups">
-			<button type="submit" class="btn btn-primary">Back up nightly</button>
-		</form>
-<?php } ?>
-	</div>

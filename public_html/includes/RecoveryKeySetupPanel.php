@@ -8,59 +8,49 @@
  * a second copy of the box cannot grow a different explanation, a different
  * button, or — the one that matters — a weaker gate.
  *
- * The keypair is made in the browser: nothing here needs a shell, and the
- * private half never touches the server or the network. What the page cannot
- * do is finish the job for the operator. It holds the private key in memory at
- * the moment it is generated and could silently satisfy the possession
- * ceremony with it, and that would answer the wrong question. The ceremony
- * exists to prove that the copy the operator *saved* works; proving it with the
- * in-memory copy would pass for someone who closed the tab without saving
- * anything, and every backup afterwards would be sealed to a key that exists
- * nowhere. So the key is generated here, and pasted back in the next state.
+ * The default path is one screen: the keypair is made in the browser (the
+ * private half never touches the server or the network), the operator puts it
+ * in their password manager, and then pastes it back to prove the saved copy
+ * works. One button saves and verifies: the page calls backup_recovery_save,
+ * opens the challenge the server sealed to what it actually STORED, and
+ * records the proof with backup_recovery_prove. Pasting the key back from
+ * storage is the confirmation — proving it with the copy still on screen would
+ * pass for someone who closed the tab without saving anything, and every
+ * backup afterwards would be sealed to a key that exists nowhere.
  *
- * The public key field itself is never drawn here — it is a declared setting,
- * so it comes from SettingsFieldRenderer, and its label, type and help live in
- * settings.json.
+ * The unproven state remains as the fallback screen: a session that died
+ * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.1 - the by-hand fold is gone: generate-in-browser is the one
+ *                setup path, with a plain line for a browser that cannot
+ * @version 2.0 - one-screen setup: paste-back replaces the confirm checkbox and
+ *                the separate verify visit; the public key is never shown on the
+ *                generate path (it rides the API call)
  * @version 1.0
  */
 
 require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
-require_once(PathHelper::getIncludePath('includes/SettingsFieldRenderer.php'));
 
 class RecoveryKeySetupPanel {
-
-	/** POST action values the default (core Backups) save path answers to. */
-	const DEFAULT_ACTIONS = array(
-		'save'   => 'save_recovery_key',
-		'verify' => 'verify_recovery_key',
-		'clear'  => 'clear_recovery_key',
-	);
 
 	/**
 	 * Render the outstanding step for the current state.
 	 *
 	 * @param object $page    Anything with getFormWriter() — AdminPage or PublicPage.
 	 * @param array  $options {
-	 *   @type array  $state        Pre-read setup_state(), when the page already has it.
-	 *   @type array  $actions      Override the save/verify/clear POST action values.
-	 *   @type string $form_prefix  Prefix for form names, when a page hosts two panels.
-	 *   @type string $extra_fields HTML emitted inside every form (a plugin's own CSRF field).
+	 *   @type array $state  Pre-read setup_state(), when the page already has it.
 	 * }
 	 */
 	public static function render($page, array $options = array()): void {
-		$state   = $options['state'] ?? BackupRecoveryKey::setup_state();
-		$actions = ($options['actions'] ?? array()) + self::DEFAULT_ACTIONS;
-		$prefix  = $options['form_prefix'] ?? 'recovery';
-		$extra   = $options['extra_fields'] ?? '';
+		$state = $options['state'] ?? BackupRecoveryKey::setup_state();
 
 		switch ($state['state']) {
 			case 'unconfigured':
 			case 'invalid':
-				self::renderSetup($page, $state, $actions, $prefix, $extra);
+				self::renderSetup($page, $state);
 				return;
 			case 'unproven':
-				self::renderProve($page, $state, $actions, $prefix, $extra);
+				self::renderProve($page, $state);
 				return;
 			default:
 				self::renderReady($state);
@@ -68,15 +58,15 @@ class RecoveryKeySetupPanel {
 	}
 
 	/**
-	 * Nothing usable is configured: make a keypair and save the public half.
+	 * Nothing usable is configured: make a keypair, save the private half, and
+	 * paste it back to prove the saved copy works — all on this screen.
 	 */
-	private static function renderSetup($page, array $state, array $actions, string $prefix, string $extra): void {
+	private static function renderSetup($page, array $state): void {
 		if ($state['state'] === 'invalid') {
 			echo '<div class="alert alert-danger">' . htmlspecialchars($state['error']) . '</div>';
 		}
 
-		echo '<p>Backups are encrypted, and one recovery key opens them. Generate it here, keep it in your '
-		   . 'password manager, and every backup this site makes from now on can be opened with it.</p>';
+		echo '<p>Backups are encrypted, and this one key opens them.</p>';
 
 		// Generation happens in the page. The button starts hidden and the
 		// script reveals it once it has confirmed this browser can actually do
@@ -84,14 +74,13 @@ class RecoveryKeySetupPanel {
 		// was never offered, on the page whose whole job is recovery.
 		echo '<div id="rk-gen-box" hidden>';
 		echo '<button type="button" id="rk-generate" class="btn btn-primary">Generate a recovery key</button>';
-		echo '<p class="text-muted small mt-2 mb-0">Made in this browser. The private half is never sent '
-		   . 'anywhere — not to this site, not to Joinery.</p>';
+		echo '<p class="text-muted small mt-2 mb-0">Made in this browser. It is never sent anywhere '
+		   . '— not to this site, not to Joinery.</p>';
 		echo '</div>';
 
 		echo '<div id="rk-gen-result" hidden>';
 		echo '<div class="alert alert-warning mt-2"><strong>Save this now — it is shown once.</strong> '
-		   . 'This is the only copy. Nobody can reissue it, and without it the backups this site makes '
-		   . 'cannot be opened.</div>';
+		   . 'This is the only copy; without it these backups cannot be opened.</div>';
 		echo '<label for="rk-generated-private" class="form-label"><strong>Your recovery key</strong></label>';
 		echo '<textarea id="rk-generated-private" class="form-control" rows="2" readonly '
 		   . 'spellcheck="false" autocomplete="off"></textarea>';
@@ -101,59 +90,38 @@ class RecoveryKeySetupPanel {
 		   . 'Download recovery.key</a>';
 		echo ' <span id="rk-gen-status" class="small"></span>';
 		echo '</div>';
-		echo '<p class="text-muted small mt-2 mb-0">Paste it into your password manager. The download is for '
-		   . 'an offline copy — delete it from this machine once it is somewhere safe.</p>';
-		echo '</div>';
 
+		// The possession ceremony, inline. The script refuses a paste that does
+		// not match the key above, then proves the pasted copy against the
+		// challenge the server seals to what it stored.
 		echo '<hr class="mt-3">';
-
-		$fw = $page->getFormWriter($prefix . '_key_form');
-		$fw->begin_form();
-		echo $extra;
-		$fw->hiddeninput('action', '', array('value' => $actions['save']));
-
-		// Declared setting: the renderer owns the field. The page contributes
-		// only the fact that this box cannot be submitted empty.
-		SettingsFieldRenderer::renderGroup($fw, 'backups', array(
-			'source' => 'core',
-			'only'   => array(BackupRecoveryKey::PUBLIC_KEY_SETTING),
-			'field_options' => array(
-				BackupRecoveryKey::PUBLIC_KEY_SETTING => array('required' => true),
-			),
-		));
-
-		// The confirmation gate, revealed only after a key is generated here. A
-		// pasted key came from somewhere the operator already keeps it, so there
-		// is nothing to confirm; a generated one exists only on this screen.
-		echo '<div id="rk-confirm-wrap" hidden>';
-		$fw->checkboxinput('rk_saved_confirm', 'I have saved the recovery key somewhere I can get it back', array(
-			'checked'  => false,
-			'helptext' => 'Checked from memory does not count — put it where it will still be when this server is gone.',
-		));
+		echo '<label for="rk-paste-back" class="form-label"><strong>Now paste it back</strong></label>';
+		echo '<p class="text-muted small mb-1">From your password manager — that is the copy that has to '
+		   . 'work in a disaster.</p>';
+		echo '<input type="password" id="rk-paste-back" class="form-control" autocomplete="off" spellcheck="false">';
+		echo '<div class="mt-2">';
+		echo '<button type="button" id="rk-save" class="btn btn-primary">Save and verify</button>';
+		echo ' <span id="rk-save-status" class="small"></span>';
+		echo '</div>';
 		echo '</div>';
 
-		$fw->submitbutton('btn_save_recovery', 'Save public key', array('id' => 'rk-save'));
-		$fw->end_form();
-
-		echo '<details class="mt-3"><summary class="small">Or generate it at the command line</summary>';
-		echo '<pre class="border rounded p-2 small">php ' . htmlspecialchars(PathHelper::getSiteRoot())
-		   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key</pre>';
-		echo '<p class="small text-muted mb-0">Prints the public key to paste above and writes the private half '
-		   . 'to that path. Move it into your password manager and delete the file.</p>';
-		echo '</details>';
+		// Revealed by the script only when the probe fails, so a browser that
+		// cannot make the key says so instead of showing a heading over nothing.
+		echo '<p id="rk-no-crypto" class="text-muted small" hidden>This browser cannot generate the key '
+		   . '— open this page in a current browser (Chrome, Firefox, Safari, Edge).</p>';
 
 		self::emitScript(array('generator' => array(
-			'buttonId'      => 'rk-generate',
-			'boxId'         => 'rk-gen-box',
-			'resultId'      => 'rk-gen-result',
-			'privateOutId'  => 'rk-generated-private',
-			'publicFieldId' => BackupRecoveryKey::PUBLIC_KEY_SETTING,
-			'copyButtonId'  => 'rk-copy',
-			'downloadId'    => 'rk-download',
-			'statusId'      => 'rk-gen-status',
-			'confirmWrapId' => 'rk-confirm-wrap',
-			'confirmBoxId'  => 'rk_saved_confirm',
-			'submitId'      => 'rk-save',
+			'buttonId'     => 'rk-generate',
+			'boxId'        => 'rk-gen-box',
+			'resultId'     => 'rk-gen-result',
+			'privateOutId' => 'rk-generated-private',
+			'copyButtonId' => 'rk-copy',
+			'downloadId'   => 'rk-download',
+			'statusId'     => 'rk-gen-status',
+			'pasteId'      => 'rk-paste-back',
+			'saveId'       => 'rk-save',
+			'saveStatusId' => 'rk-save-status',
+			'noCryptoId'   => 'rk-no-crypto',
 		)));
 	}
 
@@ -161,30 +129,37 @@ class RecoveryKeySetupPanel {
 	 * A key is saved but unproven: open the challenge with the copy that was
 	 * saved. Nothing is sealed to the key until this succeeds.
 	 */
-	private static function renderProve($page, array $state, array $actions, string $prefix, string $extra): void {
-		echo '<p>Key ' . htmlspecialchars($state['fingerprint']) . '… is saved but unverified. '
-		   . 'Nothing is sealed to it yet: a key that was mistyped — or generated and never saved — would seal '
-		   . 'happily and produce backups nobody could ever open. Paste the copy you saved to prove it works.</p>';
+	private static function renderProve($page, array $state): void {
+		echo '<p>Key ' . htmlspecialchars($state['fingerprint']) . '… is saved but not yet verified. '
+		   . 'Nothing is sealed to it until it is: a mistyped key would seal happily and produce backups '
+		   . 'nobody could ever open.</p>';
 
 		echo '<label for="rk-privkey" class="form-label"><strong>Paste your recovery key</strong></label>';
 		echo '<p class="text-muted small mb-1">It is used in your browser and never sent anywhere.</p>';
 		echo '<input type="password" id="rk-privkey" class="form-control" autocomplete="off" spellcheck="false">';
-		echo '<button type="button" id="rk-open" class="btn btn-primary btn-sm mt-2">Open the challenge</button>';
+		echo '<button type="button" id="rk-open" class="btn btn-primary btn-sm mt-2">Verify</button>';
 		echo '<div id="rk-status" class="small mt-2"></div>';
 
-		$fw = $page->getFormWriter($prefix . '_proof_form');
+		// The ceremony's form: the script fills the recovered proof and submits.
+		$fw = $page->getFormWriter('recovery_proof_form');
 		$fw->begin_form();
-		echo $extra;
-		$fw->hiddeninput('action', '', array('value' => $actions['verify']));
-		$fw->textinput('recovery_proof', 'Result', array('autocomplete' => 'off', 'id' => 'rk-proof'));
-		$fw->submitbutton('btn_verify_recovery', 'Verify');
+		$fw->hiddeninput('action', '', array('value' => 'verify_recovery_key'));
+		$fw->hiddeninput('recovery_proof', '', array('value' => '', 'id' => 'rk-proof'));
 		$fw->end_form();
 
-		echo '<details class="mt-2"><summary class="small">Or open it at the command line</summary>';
-		echo '<pre class="border rounded p-2 small">echo \''
+		echo '<details class="mt-2"><summary class="small">Or verify at the command line</summary>';
+		echo '<pre class="border rounded p-2 small mt-2">echo \''
 		   . htmlspecialchars(BackupRecoveryKey::possession_challenge())
 		   . '\' | php ' . htmlspecialchars(PathHelper::getSiteRoot())
-		   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal --private ~/recovery.key</pre></details>';
+		   . '/maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal --private ~/recovery.key</pre>';
+		$fw3 = $page->getFormWriter('recovery_cli_proof_form');
+		$fw3->begin_form();
+		$fw3->hiddeninput('action', '', array('value' => 'verify_recovery_key', 'id' => 'rk-cli-action'));
+		$fw3->textinput('recovery_proof', 'The sentence it prints',
+			array('autocomplete' => 'off', 'id' => 'rk-cli-proof'));
+		$fw3->submitbutton('btn_verify_recovery', 'Verify');
+		$fw3->end_form();
+		echo '</details>';
 
 		self::emitScript(array('ceremony' => array(
 			'keyInputId' => 'rk-privkey',
@@ -196,10 +171,9 @@ class RecoveryKeySetupPanel {
 			'infoPrefix' => BackupRecoveryKey::BROWSER_INFO,
 		)));
 
-		$fw2 = $page->getFormWriter($prefix . '_clear_form');
+		$fw2 = $page->getFormWriter('recovery_clear_form');
 		$fw2->begin_form();
-		echo $extra;
-		$fw2->hiddeninput('action', '', array('value' => $actions['clear']));
+		$fw2->hiddeninput('action', '', array('value' => 'clear_recovery_key'));
 		$fw2->submitbutton('btn_clear_recovery', 'Use a different key',
 			array('class' => 'btn btn-sm btn-outline-secondary mt-2'));
 		$fw2->end_form();

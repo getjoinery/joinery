@@ -272,28 +272,43 @@ Setup happens on the Backups page and needs no shell. The panel is rendered by
 (`unconfigured` / `invalid` / `unproven` / `ready`), so every surface that
 offers the setup offers the same one.
 
+The default path is one screen:
+
 1. **Generate.** The page mints an X25519 keypair with WebCrypto
    (`recoveryReadiness.generateKeypair()`). The private half is shown once, with
-   copy and download, and is never sent anywhere.
-2. **Save the public half.** It fills the declared `backup_recovery_public_key`
-   setting — drawn by `SettingsFieldRenderer`, never by the page — and the save
-   button stays disabled until the operator confirms they saved the private key.
-3. **Prove possession.** Paste the private key back. It is used in the browser
-   (X25519 → HKDF-SHA256 → AES-256-GCM) to open a challenge the server sealed;
-   only the recovered sentence is posted, and the server re-checks it.
+   copy and download, and is never sent anywhere. The public half never appears
+   on screen at all — it rides the API call in step 2.
+2. **Paste it back, one button.** The operator pastes the private key back from
+   wherever they saved it; the page refuses a paste that does not match the
+   generated key, then one button drives two API actions: `backup_recovery_save`
+   stores the public half (unproven) and returns a challenge sealed to what was
+   actually **stored** — re-read from the settings table, not echoed from the
+   input — and the browser opens it with the pasted key (X25519 → HKDF-SHA256 →
+   AES-256-GCM) and posts the recovered sentence to `backup_recovery_prove`.
 
-The page holds the private key in memory at step 1 and **must not** use it to
-satisfy step 3. The ceremony's job is proving that the copy the operator *saved*
-works: auto-proving would pass just as happily for someone who closed the tab
-without saving, and every backup afterwards would be sealed to a key that exists
-nowhere. That is also why the proof is load-bearing in general — sealing to a
-public key always appears to succeed, so a mistyped key produces backups that
-all report themselves encrypted and recoverable while every one is permanently
-unopenable. Until the proof is recorded, encrypted backups refuse to run.
+The paste-back is the save confirmation, and the proof **must** come from the
+pasted copy, never the in-memory one. The ceremony's job is proving that the
+copy the operator *saved* works: auto-proving would pass just as happily for
+someone who closed the tab without saving, and every backup afterwards would be
+sealed to a key that exists nowhere. That is also why the proof is load-bearing
+in general — sealing to a public key always appears to succeed, so a mistyped
+key produces backups that all report themselves encrypted and recoverable while
+every one is permanently unopenable. Until the proof is recorded, encrypted
+backups refuse to run.
 
-Both steps have a command-line equivalent for a browser without WebCrypto
-X25519, and `escrow_keypair.php` remains the disaster-recovery tool — it runs on
-any machine with PHP and libsodium, with no platform around it:
+Generate-in-browser is the one setup path (a browser that cannot do X25519 is
+told so plainly). A session that dies between save and proof lands on the
+`unproven` state, which runs the same challenge ceremony with the saved private
+key — in the browser, or via `escrow_keypair.php unseal`. A key generated at
+the shell can still be installed by POSTing `save_recovery_key` (the
+`admin_backups` handler), which stores it unproven into the same state.
+
+Once a proven key and a scheduled target both exist, the nightly `BackupRun`
+task switches itself on (`BackupNightly::maybe_activate`, called from the
+setup-completing requests) — nightly backups are not a decision of their own.
+
+`escrow_keypair.php` is the disaster-recovery tool — it runs on any machine
+with PHP and libsodium, with no platform around it:
 
 ```
 php maintenance_scripts/sysadmin_tools/escrow_keypair.php generate --private-out ~/recovery.key
@@ -302,7 +317,10 @@ php maintenance_scripts/sysadmin_tools/escrow_keypair.php unseal   --private ~/r
 
 The encoding is one contract across all of them: both halves are the raw 32
 bytes, base64, one line. `tests/backups/recovery_key_encoding_test.php` holds it
-by running the shipped generator and checking libsodium agrees.
+by running the shipped generator and checking libsodium agrees;
+`tests/backups/recovery_one_screen_flow_test.php` holds the save → challenge →
+prove sequence, and `tests/backups/backup_nightly_test.php` the activation
+rules.
 
 Replacing a proven key is a rotation, not an edit: backups already made carry
 keys sealed to the old public key. Pasting over a proven value is refused.

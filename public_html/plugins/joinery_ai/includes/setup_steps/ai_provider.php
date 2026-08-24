@@ -7,7 +7,11 @@
  * actually reach for.
  * Included by views/setup.php with $page, $settings, $next_key in scope.
  *
- * @version 1.2
+ * @version 1.3
+ * @changelog 1.3 - the choice radio and provider select are FormWriter fields
+ *                  driving visibility_rules, and the declared settings render
+ *                  through SettingsFieldRenderer; the hand-rolled markup and
+ *                  toggle script are gone
  * @changelog 1.2 - Test button extracted to the shared test_connection_button.php partial (also mounted on Plugin Settings)
  */
 
@@ -37,38 +41,62 @@ $setup_ai_form->hiddeninput('step', '', array('value' => 'ai_provider'));
 $setup_ai_form->hiddeninput('step_key', '', array('value' => 'ai_provider'));
 ?>
 	<fieldset class="jy-fieldset">
-		<label class="jy-check"><input type="radio" name="ai_choice" value="local" <?php echo $setup_ai_choice === 'local' ? 'checked' : ''; ?>> <strong>My own machine</strong> — an OpenAI-compatible server you run (Ollama, LM Studio, …)</label>
-		<div id="setup-ai-local" class="d-none" style="margin-left:24px">
 <?php
-echo $setup_ai_form->textinput('joinery_ai_local_base_url', 'Server URL', array(
-	'value' => $setup_ai_local_url !== '' ? $setup_ai_local_url : 'http://localhost:11434/v1',
+// The radio and the provider select are page furniture, not settings — they
+// only decide which declared fields are visible.
+echo $setup_ai_form->radioinput('ai_choice', '', array(
+	'options' => array(
+		'local' => 'My own machine',
+		'cloud' => 'Cloud provider',
+	),
+	'descriptions' => array(
+		'local' => 'An OpenAI-compatible server you run (Ollama, LM Studio, …)',
+		'cloud' => 'Bring an API key',
+	),
+	'value' => $setup_ai_choice,
+	'visibility_rules' => array(
+		'local' => array('show' => array('setup-ai-local'), 'hide' => array('setup-ai-cloud')),
+		'cloud' => array('show' => array('setup-ai-cloud'), 'hide' => array('setup-ai-local')),
+	),
 ));
-echo $setup_ai_form->textinput('joinery_ai_local_model', 'Model id', array(
-	'value' => $setup_ai_local_model,
-	'helptext' => 'As your server names it, e.g. llama3.1:8b. Comma-separate to offer several; the first is the default.',
+?>
+		<div id="setup-ai-local" style="margin-left:24px;<?php echo $setup_ai_choice === 'local' ? '' : 'display:none'; ?>"><?php // jy-allow-style: initial visibility is server-computed ?>
+<?php
+SettingsFieldRenderer::renderGroup($setup_ai_form, 'provider', array(
+	'source' => 'joinery_ai',
+	'only' => array('joinery_ai_local_base_url', 'joinery_ai_local_model'),
+	'values' => array(
+		'joinery_ai_local_base_url' => $setup_ai_local_url !== '' ? $setup_ai_local_url : 'http://localhost:11434/v1',
+	),
 ));
 ?>
 		</div>
 
-		<label class="jy-check"><input type="radio" name="ai_choice" value="cloud" <?php echo $setup_ai_choice === 'cloud' ? 'checked' : ''; ?>> <strong>Cloud provider</strong> — bring an API key</label>
-		<div id="setup-ai-cloud" class="d-none" style="margin-left:24px">
-			<label for="setup-ai-cloud-which">Provider</label>
-			<select id="setup-ai-cloud-which" class="jy-w-full">
-				<option value="anthropic" <?php echo $setup_ai_provider === 'anthropic' ? 'selected' : ''; ?>>Anthropic</option>
-				<option value="fireworks" <?php echo $setup_ai_provider === 'fireworks' ? 'selected' : ''; ?>>Fireworks (no-train, private)</option>
-			</select>
-			<div data-ai-cloud="anthropic">
-<?php echo $setup_ai_form->passwordinput('joinery_ai_anthropic_api_key', 'Anthropic API key', array(
-	'autocomplete' => 'off',
-	'helptext' => $setup_ai_has_anthropic ? 'A key is saved — leave blank to keep it.' : '',
-)); ?>
-			</div>
-			<div data-ai-cloud="fireworks">
-<?php echo $setup_ai_form->passwordinput('joinery_ai_fireworks_api_key', 'Fireworks API key', array(
-	'autocomplete' => 'off',
-	'helptext' => $setup_ai_has_fireworks ? 'A key is saved — leave blank to keep it.' : '',
-)); ?>
-			</div>
+		<div id="setup-ai-cloud" style="margin-left:24px;<?php echo $setup_ai_choice === 'cloud' ? '' : 'display:none'; ?>"><?php // jy-allow-style: initial visibility is server-computed ?>
+<?php
+echo $setup_ai_form->dropinput('ai_cloud_provider', 'Provider', array(
+	'options' => array(
+		'anthropic' => 'Anthropic (not recommended)',
+		'fireworks' => 'Fireworks (they guarantee your data stays private)',
+	),
+	'value' => $setup_ai_provider,
+	// A stored key grows a clear__ checkbox beside it; toggle both together.
+	'visibility_rules' => array(
+		'anthropic' => array(
+			'show' => array('joinery_ai_anthropic_api_key', 'clear__joinery_ai_anthropic_api_key'),
+			'hide' => array('joinery_ai_fireworks_api_key', 'clear__joinery_ai_fireworks_api_key'),
+		),
+		'fireworks' => array(
+			'show' => array('joinery_ai_fireworks_api_key', 'clear__joinery_ai_fireworks_api_key'),
+			'hide' => array('joinery_ai_anthropic_api_key', 'clear__joinery_ai_anthropic_api_key'),
+		),
+	),
+));
+SettingsFieldRenderer::renderGroup($setup_ai_form, 'keys', array(
+	'source' => 'joinery_ai',
+	'only' => array('joinery_ai_anthropic_api_key', 'joinery_ai_fireworks_api_key'),
+));
+?>
 		</div>
 	</fieldset>
 	<div class="jy-mt-2">
@@ -87,21 +115,3 @@ $setup_ai_form->end_form();
 		<input type="hidden" name="step_key" value="ai_provider">
 		<button type="submit" class="btn btn-secondary">Not now — everything works without it</button>
 	</form>
-
-	<script>
-	(function () {
-		var cloudWhich = document.getElementById('setup-ai-cloud-which');
-		function sync() {
-			var choice = document.querySelector('input[name="ai_choice"]:checked');
-			var isLocal = choice && choice.value === 'local';
-			document.getElementById('setup-ai-local').classList.toggle('d-none', !isLocal);
-			document.getElementById('setup-ai-cloud').classList.toggle('d-none', isLocal);
-			document.querySelectorAll('[data-ai-cloud]').forEach(function (div) {
-				div.classList.toggle('d-none', isLocal || div.getAttribute('data-ai-cloud') !== cloudWhich.value);
-			});
-		}
-		document.querySelectorAll('input[name="ai_choice"]').forEach(function (r) { r.addEventListener('change', sync); });
-		cloudWhich.addEventListener('change', sync);
-		sync();
-	})();
-	</script>

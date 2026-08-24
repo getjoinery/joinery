@@ -6,6 +6,14 @@
  * step mounts an existing ceremony or panel; this logic owns only the shell:
  * step resolution, dismissal, "not now" decisions, and the welcome save.
  *
+ * @version 2.3
+ * @changelog 2.3 - backup_task_activate and the run_backup / save_recovery_key
+ *   forwarding are gone with the wizard's section 3 and by-hand fold; the
+ *   backups step posts only target actions and the unproven-state forms.
+ * @version 2.2
+ * @changelog 2.2 - Nightly backups turn themselves on (BackupNightly) when the
+ *   target and the proven key both exist; backup_task_activate remains only as
+ *   the fallback switch.
  * @version 2.1
  * @changelog 2.1 - mail_send_move refuses a lived-in domain
  *   (DnsRelocation::foreignUse) — the same rule that hides the offer on the
@@ -144,67 +152,30 @@ function setup_logic(array $input): LogicResult {
 	}
 
 	// Backups: the wizard submits the backups page's own actions — including
-	// the RecoveryKeySetupPanel's — and this forwards them whole. The logic
-	// enforces permission 10 itself; return_to bounces its redirect back here.
-	$backup_actions = array('save_target', 'test_target', 'run_backup',
-		'save_recovery_key', 'verify_recovery_key', 'clear_recovery_key');
+	// the RecoveryKeySetupPanel's unproven-state forms — and this forwards
+	// them whole. The logic enforces permission 10 itself; return_to bounces
+	// its redirect back here.
+	$backup_actions = array('save_target', 'test_target',
+		'verify_recovery_key', 'clear_recovery_key');
 	if (in_array($action, $backup_actions, true)) {
 		require_once(PathHelper::getIncludePath('adm/logic/admin_backups_logic.php'));
 		$result = admin_backups_logic(array_merge($input, array('return_to' => '/setup')));
-		if ($action === 'save_target' && (int)$settings->get_setting('backup_target_id') === 0) {
-			// One-go: a first target becomes the scheduled target immediately,
-			// instead of leaving a second choice for later.
-			require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
-			$targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_id' => 'DESC'), 1);
-			$targets->load();
-			foreach ($targets as $target) {
-				require_once(PathHelper::getIncludePath('data/settings_class.php'));
-				Setting::put('backup_target_id', (string)(int)$target->key);
-				break;
+		if ($action === 'save_target') {
+			if ((int)$settings->get_setting('backup_target_id') === 0) {
+				// One-go: a first target becomes the scheduled target immediately,
+				// instead of leaving a second choice for later.
+				$targets = new MultiBackupTarget(array('deleted' => false, 'enabled' => true), array('bkt_id' => 'DESC'), 1);
+				foreach ($targets as $target) {
+					Setting::put('backup_target_id', (string)(int)$target->key);
+					break;
+				}
 			}
+			// The target may have been the last missing half (key already
+			// proven) — nightly runs need no button of their own.
+			BackupNightly::maybe_activate();
 		}
 		SetupSteps::invalidateSessionCache();
 		return $result;
-	}
-
-	// "Back up nightly": activate the BackupRun task with its declared
-	// defaults, and give the archive path slug a sensible default so the
-	// first run doesn't stall on a blank.
-	if ($action === 'backup_task_activate' && $permission >= 10) {
-		require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
-		require_once(PathHelper::getIncludePath('includes/ScheduledTaskRegistry.php'));
-		$existing = new MultiScheduledTask(array('task_class' => 'BackupRun', 'deleted' => false));
-		$existing->load();
-		$task = null;
-		foreach ($existing as $row) {
-			$task = $row;
-			break;
-		}
-		if ($task !== null) {
-			$task->set('sct_is_active', true);
-			$task->save();
-		} else {
-			$discovered = ScheduledTaskRegistry::discover();
-			$json = $discovered['BackupRun']['json'] ?? array();
-			$task = new ScheduledTask(NULL);
-			$task->set('sct_name', $json['name'] ?? 'Backup');
-			$task->set('sct_task_class', 'BackupRun');
-			$task->set('sct_is_active', true);
-			$task->set('sct_frequency', $json['default_frequency'] ?? 'daily');
-			if (isset($json['default_time'])) {
-				$task->set('sct_schedule_time', $json['default_time']);
-			}
-			$task->save();
-		}
-		if (trim((string)$settings->get_setting('backup_path_slug')) === '') {
-			require_once(PathHelper::getIncludePath('data/settings_class.php'));
-			$slug = preg_replace('/[^A-Za-z0-9_-]/', '', basename(PathHelper::getSiteRoot()));
-			if ($slug !== '') {
-				Setting::put('backup_path_slug', $slug);
-			}
-		}
-		SetupSteps::invalidateSessionCache();
-		return LogicResult::redirect('/setup?step=backups');
 	}
 
 	// Generic declared-settings save for steps that declare their own
