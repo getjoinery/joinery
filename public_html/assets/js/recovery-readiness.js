@@ -300,6 +300,12 @@ window.recoveryReadiness = (function () {
 
 			save.disabled = true;
 			saySave('Saving…', true);
+			// From here the stored key is being replaced: a cancel link promising
+			// to keep the current key would lie, so it goes away for good.
+			if (c.cancelId) {
+				var cancel = document.getElementById(c.cancelId);
+				if (cancel) cancel.hidden = true;
+			}
 			joineryApi.post('backup_recovery_save', { public_key: pair.publicKeyB64, rotate: c.rotate ? 1 : 0 }).then(function (r) {
 				// Prove with the pasted copy against what the server STORED.
 				return openChallenge(r.challenge, pasted, r.public_key, r.info);

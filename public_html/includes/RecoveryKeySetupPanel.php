@@ -132,6 +132,7 @@ class RecoveryKeySetupPanel {
 			'saveStatusId' => 'rk-save-status',
 			'noCryptoId'   => 'rk-no-crypto',
 			'rotate'       => $rotate,
+			'cancelId'     => $rotate ? 'rk-keep-current' : null,
 		)));
 	}
 
@@ -152,7 +153,11 @@ class RecoveryKeySetupPanel {
 		   . 'then on seals to it, starting with a fresh chain on the next run.';
 		echo '</div>';
 		self::renderSetup($page, $state, true);
-		echo '<p class="mt-2 mb-0"><a class="small" href="' . htmlspecialchars(strtok($_SERVER['REQUEST_URI'] ?? '', '?'))
+		// True only until Save and verify is clicked — the script hides this the
+		// moment the save starts, because from then on the old key is replaced
+		// and the honest exit is finishing (or redoing) the ceremony.
+		echo '<p class="mt-2 mb-0" id="rk-keep-current"><a class="small" href="'
+		   . htmlspecialchars(strtok($_SERVER['REQUEST_URI'] ?? '', '?'))
 		   . '">Keep the current key</a></p>';
 	}
 
