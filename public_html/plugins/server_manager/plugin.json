@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.18.4",
+  "version": "1.19.1",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -76,6 +76,12 @@
           "title": "Specifications",
           "url": "/admin/server_manager/specs",
           "order": 7
+        },
+        {
+          "slug": "server-manager-domains",
+          "title": "Domains",
+          "url": "/admin/server_manager/domains",
+          "order": 9
         }
       ]
     }
@@ -85,7 +91,8 @@
     "provisioning": "Customer provisioning",
     "monitoring": "Monitoring",
     "publishing": "Publishing",
-    "backups": "Backups"
+    "backups": "Backups",
+    "domains": "Domain registration"
   },
   "settings": [
     {
@@ -250,7 +257,7 @@
         "chain": "Incremental chains",
         "full": "A full backup every time"
       },
-      "helptext": "Incremental chains send only what changed after the first run \u2014 measured at 193 MB then 37 kB \u2014 which across a fleet is most of the bandwidth. A full every time makes each restore point self-contained at much greater cost."
+      "helptext": "Incremental chains send only what changed after the first run — measured at 193 MB then 37 kB — which across a fleet is most of the bandwidth. A full every time makes each restore point self-contained at much greater cost."
     },
     {
       "name": "server_manager_fleet_backup_keep",
@@ -275,6 +282,52 @@
       "label": "Backups running at once across the fleet",
       "type": "number",
       "helptext": "A ceiling on simultaneous fleet backups. Nodes over the limit wait for the next tick rather than queueing."
+    },
+    {
+      "name": "server_manager_namecheap_api_user",
+      "default": "",
+      "group": "domains",
+      "label": "Namecheap API user",
+      "type": "text",
+      "helptext": "The Namecheap account username the API calls are made as."
+    },
+    {
+      "name": "server_manager_namecheap_api_key",
+      "default": "",
+      "secret": true,
+      "group": "domains",
+      "label": "Namecheap API key",
+      "helptext": "Set this on the Provisioning Setup page, which seals it at rest."
+    },
+    {
+      "name": "server_manager_namecheap_client_ip",
+      "default": "",
+      "group": "domains",
+      "label": "Allowlisted client IP",
+      "type": "text",
+      "helptext": "The control plane's egress IP, allowlisted in the Namecheap API panel."
+    },
+    {
+      "name": "server_manager_namecheap_sandbox",
+      "default": "",
+      "group": "domains",
+      "label": "Use Namecheap sandbox",
+      "type": "checkbox",
+      "helptext": "Point registrar calls at Namecheap's sandbox. Names bought there are not real."
+    },
+    {
+      "name": "server_manager_domain_tlds",
+      "default": "com net org",
+      "group": "domains",
+      "label": "Offered TLDs",
+      "type": "text",
+      "helptext": "Space-separated. A domain outside these endings is refused at checkout."
+    },
+    {
+      "name": "server_manager_domain_orphan_swept_id",
+      "default": "0",
+      "managed": true,
+      "helptext": "High-water mark over order items already checked for a paid domain year that produced no registration. Written by ManagedDomainWatch so each such order is reported once."
     }
   ]
 }

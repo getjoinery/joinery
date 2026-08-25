@@ -1,7 +1,11 @@
 # Managed Domain Registration — One-Click Domain at Checkout
 
-**Status:** Spec (unbuilt). Build-ready: written for an executor; file paths,
-signatures, and schemas below were verified against the codebase 2026-08-24.
+**Status:** Built and reviewed 2026-08-25. The build followed this spec;
+where it deliberately went beyond or beside it, **As built — deviations from
+this spec** (near the end) is the record. The live Namecheap items under
+**Namecheap verification items** remain open — nothing has run against the
+real registrar. File paths, signatures, and schemas below were verified
+against the codebase 2026-08-24.
 **Depends on:** the automated hosting provisioning pipeline
 (`specs/implemented/automated_hosting_provisioning.md`,
 `specs/automated_hosting_provisioning_setup.md`) and customer-cloud
@@ -824,6 +828,89 @@ Namecheap-specific facts to confirm live (sandbox first), not design choices:
   box is deferred as a later sovereignty enhancement.
 - **D2 — Take-ownership UX. RESOLVED: guided three-step push flow** —
   push-only, first surfaced at six months, never during setup.
+
+## As built (2026-08-25) — deviations from this spec
+
+Everything decided above was built as written: buyer-as-registrant from day
+one, push-only graduation, six months of silence, no renewal backstop, the
+companion-line pricing model and its scope statement, the seam, the state
+machines, node-authoritative mail DNS. The deviations fall into three groups.
+
+### Hardening the spec did not contain (post-build review findings)
+
+The spec's cart design was correct at add-to-cart time but never considered
+the cart's own **Edit/Remove buttons** afterward. Every cart line carries
+both, which opened three doors: remove the domain line and the hosting line's
+answers still register the domain for free; hand-craft an edit POST against
+the domain line's `'user'`-priced version and reprice the year; remove the
+hosting line and the paid domain line delivers nothing. Closed by:
+
+- **Payment guard before purchase** — `ProvisionManagedDomains::
+  unpaid_reason()`, called before `register()`: the order must hold a *paid*
+  domain-year line worth at least the quote, and each paid line backs at most
+  one registration (`claimed_registrations()`, which fails closed when the
+  count cannot be read). Anything else parks `failed` with an operator alert.
+- **Orphan sweep** — `ManagedDomainWatch::sweep_unclaimed_domain_lines()`:
+  per-order arithmetic (paid domain-year lines vs `rdm_` rows on the order —
+  per-order, not per-line, so a two-domain cart cannot hide its second
+  orphan) alerts the operator once per order that paid for a registration
+  that never reached the queue. Once-only via a high-water mark over
+  `odi_order_item_id` in the managed setting
+  `server_manager_domain_orphan_swept_id`, with a 15-minute settle window; a
+  **failed alert stops the sweep at that order** so the mark never advances
+  past an unreported one. The arithmetic assumes an order's lines are paid in
+  one charge (noted in the query comment; partial payment would break it).
+- **Edit-cart companion sync** — `product_logic`'s edit-item path recomputes
+  the companion lines from the *old* form data, removes the exact matches,
+  and adds fresh ones; without it, editing the domain in the cart kept
+  charging for the previous name at the previous price.
+- **Duplicate-domain race alert** — two buyers validating the same name means
+  the second `post_purchase()` hits the `rdm_domain` unique constraint; the
+  catch now alerts the operator instead of only logging, since that buyer has
+  already paid.
+- **Config gate loads the product** —
+  `ManagedDomainRequirement::domainProductSellable()` requires the configured
+  product to load with an active version, not merely a nonzero setting; the
+  Provisioning and Domains pages distinguish "selected but unusable" from
+  "not selected".
+
+### Design improvements over the spec's letter
+
+- `normalizeRegistrantPhone()` lives **on the seam interface**, not inside
+  NamecheapRegistrar, so checkout validation and the registration call can
+  never disagree about what a valid phone is. A number without an explicit
+  country code is refused, never guessed.
+- The domain-name regex, name normalization, and TLD gates live on
+  `DomainRegistrarRegistry`, shared by the checkout field, the availability
+  action, and the pipeline — one definition instead of three copies.
+- `md_country` is a dropdown fed from `cco_country_codes`, not free text.
+- The bootstrap step publishes `AAAA` for an IPv6 box.
+- `ProvisioningSetup` gained the general `readSecret()`/`writeSecret()` pair
+  (the `readApiSecret()` pattern, parameterized).
+
+### Forced by the platform or missing from the schema above
+
+- Two columns the schema block above lacks, both deliberate:
+  `rdm_expiry_checked_time` (the weekly expiry-refresh throttle —
+  `rdm_update_time` cannot serve because every save bumps it) and
+  `rdm_prompt_pushed_time` (the once-only guard on the six-month prompt).
+- The managed node-banner settings carry **no `label`/`group`** — the JSON
+  sketches above include them, but `declared_settings_test` enforces that
+  managed settings never render on a settings form.
+- The `ProvisioningSetup::TASK_CLASSES` fix flagged in the gotchas was
+  applied: it now names `ServerManagerAdvanceProvisioning` +
+  `SendQueuedEmails` only.
+
+### Known accepted limits
+
+- A subscription hosting line plus the one-time domain line makes **PayPal
+  unavailable** at payment (`is_paypal_available()` — platform rule,
+  documented in the server_manager overview).
+- `ManagedDomainWatch` iterates `active` rows only; a push requested before a
+  row reaches `active` is not watched until activation — harmless at real
+  timescales.
+- The two new views carry inline `<style>` blocks against the styling policy
+  (advisory-level; left as-is).
 
 ## Out of scope
 

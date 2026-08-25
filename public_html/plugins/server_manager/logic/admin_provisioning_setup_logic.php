@@ -6,7 +6,7 @@
  * POST actions delegate to ProvisioningSetup and redirect back with a
  * session message; GET renders the live status of every checklist item.
  *
- * @version 1.0
+ * @version 1.1 - the domain-registrar credentials card
  */
 
 require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
@@ -63,6 +63,23 @@ function admin_provisioning_setup_logic(array $input): LogicResult {
 				if ($ssh_key_path !== '' && !file_exists($ssh_key_path . '.pub')) {
 					$message .= ' Warning: ' . $ssh_key_path . '.pub not found — it is required on created instances.';
 				}
+			} elseif ($action === 'save_domains') {
+				ProvisioningSetup::writeSetting('server_manager_namecheap_api_user',
+					trim($input['ncp_api_user'] ?? ''));
+				ProvisioningSetup::writeSetting('server_manager_namecheap_client_ip',
+					trim($input['ncp_client_ip'] ?? ''));
+				ProvisioningSetup::writeSetting('server_manager_namecheap_sandbox',
+					!empty($input['ncp_sandbox']) ? '1' : '');
+				ProvisioningSetup::writeSetting('server_manager_domain_tlds',
+					trim($input['domain_tlds'] ?? '') ?: 'com net org');
+				// A blank key field means "leave the stored key alone" — the
+				// field never shows the key, so blank cannot mean "erase it"
+				// without erasing it every time the rest of the card is saved.
+				$key = trim($input['ncp_api_key'] ?? '');
+				if ($key !== '') {
+					ProvisioningSetup::writeSecret('server_manager_namecheap_api_key', $key);
+				}
+				$message = 'Domain registrar settings saved.';
 			} else {
 				$error = 'Unknown action.';
 			}

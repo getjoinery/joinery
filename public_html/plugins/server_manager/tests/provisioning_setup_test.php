@@ -21,6 +21,7 @@
  *
  * Run: php plugins/server_manager/tests/provisioning_setup_test.php
  *
+ * @version 1.3 - the resume check follows TASK_CLASSES instead of naming a phase class
  * @version 1.2
  */
 
@@ -197,12 +198,16 @@ $t2 = ProvisioningSetup::activateTasks();
 check(count(array_filter($t2['results'], fn($r) => $r === 'already active')) === count(ProvisioningSetup::TASK_CLASSES),
 	'second run reports already active');
 
-// Pause one and confirm resume.
-$rows = new MultiScheduledTask(array('task_class' => 'PollHostingOrders', 'deleted' => false));
+// Pause one and confirm resume. The class is taken from TASK_CLASSES rather
+// than named here: the pipeline's phases are not tasks, and a hardcoded name
+// would go stale the next time that list changes.
+$paused_class = (string)array_key_first(ProvisioningSetup::TASK_CLASSES);
+$rows = new MultiScheduledTask(array('task_class' => $paused_class, 'deleted' => false));
 $rows->load();
 foreach ($rows as $row) { $row->set('sct_is_active', FALSE); $row->save(); break; }
 $t3 = ProvisioningSetup::activateTasks();
-check($t3['results']['PollHostingOrders'] === 'resumed', 'paused task is resumed');
+check($t3['results'][$paused_class] === 'resumed', 'paused task is resumed',
+	'paused: ' . $paused_class);
 
 // ---------------------------------------------------------------------------
 section('ensureSshKey');

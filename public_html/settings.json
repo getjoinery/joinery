@@ -2535,6 +2535,30 @@
       "options_include": "includes/CoreSettingOptions.php",
       "empty_option": true,
       "helptext": "All site mail is sent as this account address. To send as a hosted alias, or to relay forwarded mail with the original sender intact, use SMTP, Mailgun or SES instead."
+    },
+    {
+      "name": "managed_domain_name",
+      "default": "",
+      "managed": true,
+      "helptext": "The domain this deployment's operator registered on the owner's behalf. Written by the control plane; empty on every other deployment."
+    },
+    {
+      "name": "managed_domain_expiry_time",
+      "default": "",
+      "managed": true,
+      "helptext": "When that registration runs out. The take-ownership notice counts down to it."
+    },
+    {
+      "name": "managed_domain_state",
+      "default": "",
+      "managed": true,
+      "helptext": "Where the domain's management currently sits: operator_managed, push_requested, push_sent or self_custody. Empty means say nothing at all."
+    },
+    {
+      "name": "managed_domain_manage_url",
+      "default": "",
+      "managed": true,
+      "helptext": "Where the notice sends the owner to move the domain into their own registrar account."
     }
   ]
 }

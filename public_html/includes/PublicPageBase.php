@@ -1030,6 +1030,23 @@ abstract class PublicPageBase {
 				. '});</script>';
 		}
 
+		// Managed-domain take-ownership notice: a deployment whose domain was
+		// registered for it at checkout has to move that domain into its
+		// owner's registrar account before it expires, or the name lapses and
+		// takes the site and its email with it. Shown to the people who run
+		// the site (permission 5+) and never to its visitors — a customer's
+		// readers have no business seeing their host's renewal chore. Injected
+		// the same way the admin chip is, so one call site serves every theme.
+		if ($session->get_permission() >= 5 && !$session->is_app_session()
+				&& ManagedDomainNotice::applies() && !$this->on_admin_path()) {
+			$notice = ManagedDomainNotice::render();
+			if ($notice !== '') {
+				echo '<script>document.addEventListener("DOMContentLoaded", function() {'
+					. 'document.body.insertAdjacentHTML("afterbegin", ' . json_encode($notice) . ');'
+					. '});</script>';
+			}
+		}
+
 		// NOTE: Do not default $options['title'] / $options['meta_description'] here.
 		// global_includes_top() runs the full precedence chain (override → options →
 		// inferred → site setting). Pre-populating $options would short-circuit inference.
@@ -1764,6 +1781,17 @@ abstract class PublicPageBase {
 		$setting = $settings->get_setting('show_admin_bar', false, true);
 		// Default to enabled if setting doesn't exist
 		return ($setting === null || $setting === '' || $setting);
+	}
+
+	/**
+	 * Is this request an admin page? Admin pages render their notices from
+	 * AdminPage::admin_header() directly, so anything injected here would show
+	 * up twice on them.
+	 */
+	protected function on_admin_path() {
+		$path = $this->request_path();
+		return str_starts_with($path, '/admin')
+			|| (bool)preg_match('#^/plugins/[^/]+/admin(/|$)#', $path);
 	}
 
 	/**

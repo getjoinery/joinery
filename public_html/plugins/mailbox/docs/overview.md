@@ -690,7 +690,9 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 │                    InboundEmailSetupCheck (guided-setup verification engine),
 │                    MailboxSpamPolicy (derived spam posture), SRSRewriter
 ├── utils/         — Postfix pipe script (inbound_email_handler.php),
-│                    spam_policy.php (spam posture readout for shell sessions)
+│                    spam_policy.php (spam posture readout for shell sessions),
+│                    managed_domain_prepare.php (make a domain mail-ready and
+│                    print its DNS plan, for a control plane over SSH)
 ├── provisioning/  — Host setup: install_email.sh, provision_spam_scanner.sh,
 │                    render_pgsql_map.php
 ├── admin/         — Admin pages (setup, aliases, alias edit, domains, logs)
@@ -3983,6 +3985,31 @@ create — they never edit an existing alias's destinations or mode. Callers own
 authorization (every current caller sits behind `check_permission(5)` or
 higher). The setup wizard's one-go apply (`wizard_provision` in
 `admin_mailbox_setup_logic`) is the primary consumer.
+
+### Preparing a domain for a control plane
+
+`plugins/mailbox/utils/managed_domain_prepare.php <domain>` is the CLI form of
+the same idea, run **on this box** by a control plane that just registered a
+domain on the owner's behalf
+([Server Manager § Managed Domain Registration](../../server_manager/docs/overview.md)).
+It calls `mailbox_provision_domain()`, makes sure a DKIM signing key exists
+(`provision_dkim.sh`, which never regenerates an existing key), and prints one
+JSON line:
+
+```json
+{"ok":true,"dkim_ready":true,"records":[{"type","name","value","priority","note"}]}
+```
+
+The records come from `InboundEmailSetupCheck::dnsPlan()` — the same desired
+state the Setup tab prescribes. That is the point of running it here rather
+than computing the records remotely: this box is what knows its receive
+topology, its SPF shape, its signing key and whether it speaks Joinery Direct,
+and a record set computed anywhere else would be plausible and wrong. The
+control plane publishes what it gets; `dkim_ready: false` means the set is
+usable but unfinished, so it publishes and comes back for the signing key.
+
+Removals are omitted — a freshly registered domain has nothing to take away,
+and an instruction about somebody else's record is not a new domain's business.
 
 ## Importing an existing archive
 
