@@ -22,7 +22,11 @@
  * (specs/in_window_deferred_work.md), so a Fortress backlog drains anywhere the
  * owner is on the site with an open window, not only on a mailbox view.
  *
- * @version 1.11
+ * @version 1.12
+ * @changelog 1.12 - registers the mailbox_fts_fold deferred-work consumer
+ *   (specs/mailbox_search_incremental_fold.md): a search-index backlog too
+ *   large for a search request's bounded fold slice drains in-window in the
+ *   background.
  * @changelog 1.11 - the mail_receive wizard step is gone: the core Email step
  *   provisions the mailbox and publishes the receiving DNS itself, so the
  *   plugin registers only mail_import.
@@ -323,6 +327,26 @@ VaultDeferredWork::register(
 	},
 	function (int $user_id, string $secret_key, float $deadline): int {
 		return PromotedRowRepair::drainForUser($user_id, $secret_key, PromotedRowRepair::DEFAULT_MAX, $deadline);
+	}
+);
+
+// The sealed search index folds new mail in-window (MailboxIndex,
+// specs/mailbox_search_incremental_fold.md). The search request itself folds
+// only a bounded slice, so a large backlog — a bulk import, a long-offline
+// owner — catches up here instead of ambushing every search. hasBacklog() is
+// false until a first search creates the bookkeeping row: an owner who never
+// searches never pays for index building. After parsing and row repair on
+// purpose (the index reads parsed, settled rows), before the cosmetic
+// inline-image backfill.
+VaultDeferredWork::register(
+	'mailbox_fts_fold',
+	function (int $user_id): bool {
+		return MailboxIndex::hasBacklog($user_id);
+	},
+	function (int $user_id, string $secret_key, float $deadline): int {
+		$index = new MailboxIndex();
+		$status = $index->fold($user_id, $secret_key, $deadline);
+		return intval($status['folded']);
 	}
 );
 

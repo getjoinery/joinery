@@ -9,11 +9,15 @@
  * without ever touching disk in cleartext. imi_sealed_key is the DEK that blob
  * is sealed under, regenerated on every fold (the blob is fully disposable —
  * losing it only costs a rebuild from the sealed message rows, never data).
- * imi_fts_high_water is the last message id already folded in.
+ * imi_fts_high_water is the last message id already folded into the working
+ * copy; imi_blob_high_water is the mark the persisted blob covers, which can
+ * lag it (folding checkpoints the mark per batch, persisting per chunk) — a
+ * restore resets the live mark to the blob's so the two stay consistent.
  *
  * Never excluded from backup — losing this row only costs a search-index
  * rebuild, not content (the ground truth is always the sealed message rows).
  *
+ * @version 1.2 - imi_blob_high_water: what the persisted blob covers
  * @version 1.1
  */
 
@@ -54,6 +58,10 @@ class InboundMailboxSearchIndex extends SystemBase {
 		'imi_refold_ids'       => array('type'=>'text', 'is_nullable'=>true),   // JSON int array
 		'imi_fil_file_id'      => array('type'=>'int8', 'is_nullable'=>true),
 		'imi_sealed_key'       => array('type'=>'text', 'is_nullable'=>true),
+		// The mark the persisted blob covers. Null before any recorded persist —
+		// a legacy blob was only ever written after a complete fold, when it and
+		// imi_fts_high_water agreed by construction.
+		'imi_blob_high_water'  => array('type'=>'int8', 'is_nullable'=>true),
 		'imi_created_time'     => array('type'=>'timestamp(6)', 'default'=>'now()'),
 		'imi_updated_time'     => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 	);

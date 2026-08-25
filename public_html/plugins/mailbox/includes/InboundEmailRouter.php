@@ -90,6 +90,11 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.39
+ * @changelog 1.39 - parsePendingMessage enqueues a search-index refold when it
+ *   clears the pending state (specs/mailbox_search_incremental_fold.md): the
+ *   index folds a pending row as a no-op, so the parsed content was never
+ *   entering the index at all.
  * @version 1.38
  * @changelog 1.38 - push ingest retains the RFC822 header block in
  *   iem_raw_headers (specs/mailbox_show_original_coverage.md) — captured by
@@ -835,6 +840,14 @@ class InboundEmailRouter {
 			'iem_spam_verdict'     => $spam_verdict,
 			'iem_spam_score'       => $content_spam['score'],
 		));
+
+		// The search index folds a pending row as a no-op (its content fields
+		// did not exist); now they do, so the entry is owed a rebuild — the
+		// refold queue is how content that appears behind the high-water mark
+		// gets in. Best-effort by enqueueRefold's own contract.
+		if (!empty($alias_id)) {
+			MailboxIndex::enqueueRefold(intval($alias_id), intval($msg->key));
+		}
 
 		// Reload the row so the filter run sees the fully-parsed, sealed state (never
 		// the stale pre-parse object, which would also re-save it). Filters match on

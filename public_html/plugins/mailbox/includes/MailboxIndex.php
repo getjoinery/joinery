@@ -13,13 +13,24 @@
  *   - ensureOpen()  restores the /dev/shm working copy from its sealed blob
  *                    (a private File), or rebuild()s from scratch if there is
  *                    none / it fails to open.
- *   - fold()        folds every message newer than the high-water mark into
- *                    the open working copy, then immediately re-seals and
- *                    persists it (seal-after-fold) — never waits for window
- *                    close, so a crash never loses folded work. A fold that
- *                    changed nothing persists nothing: the already-persisted
- *                    blob is exactly current, so repeated searches over
- *                    unchanged mail never rewrite a multi-megabyte file.
+ *   - fold()        folds messages newer than the high-water mark into the
+ *                    open working copy — batched, checkpointed, and bounded by
+ *                    an optional deadline, under a per-user flock so only one
+ *                    fold runs at a time. Every id is delete-then-insert, so
+ *                    re-folding is harmless; the mark advances per completed
+ *                    batch, so an interrupted fold resumes where it stopped
+ *                    instead of restarting. A large backlog (a bulk import, a
+ *                    long-offline owner) is folded across many bounded calls —
+ *                    the search request folds one slice and the deferred-work
+ *                    drain (bootstrap.php, 'mailbox_fts_fold') folds the rest
+ *                    in-window. Persisting is seal-after-fold but throttled:
+ *                    always when the fold completes or processed refolds, and
+ *                    every PERSIST_MIN_ADVANCE messages mid-backlog, so a
+ *                    window close costs at most one chunk of re-folding. A
+ *                    fold that changed nothing persists nothing: the
+ *                    already-persisted blob is exactly current, so repeated
+ *                    searches over unchanged mail never rewrite a
+ *                    multi-megabyte file.
  *   - search()       queries the already-open working copy; the caller (
  *                    MailboxService::listThreads()) calls fold() first so a
  *                    search always sees the latest mail.
@@ -54,8 +65,18 @@
  *
  * Pruning follows the row's existence, not a flag. enqueueRefold() queues an id
  * whose content changed or whose row is about to go; the refold pass deletes the
- * FTS row and re-inserts only if the message still exists.
+ * FTS row and re-inserts only if the message still exists. A pending-parse row
+ * folds as a no-op (its content fields do not exist yet) and enters the index
+ * via that same queue when parsePendingMessage() clears the pending state.
  *
+ * The persisted blob records the mark it covers (imi_blob_high_water), and a
+ * restore resets the live mark to it — a blob can lag the mark (checkpointed
+ * folding), and restoring one under a newer mark would otherwise open a silent
+ * coverage gap.
+ *
+ * @version 1.7 - batched checkpointed folding with a deadline and a per-user
+ *                fold lock; blob coverage recording; pending-parse rows fold
+ *                as no-ops (refolded after parse)
  * @version 1.6
  */
 
@@ -73,6 +94,22 @@ class MailboxIndex {
 
 	const SHM_DIR = '/dev/shm';
 
+	/** Messages per checkpoint: the high-water mark advances after each fully
+	 *  successful batch, so an interrupted fold resumes instead of restarting. */
+	const FOLD_BATCH = 200;
+
+	/** How far the working copy may run ahead of the persisted blob before a
+	 *  mid-backlog fold re-persists. A window close wipes the working copy and
+	 *  the next restore resumes from the blob's mark, so this bounds the
+	 *  re-folding a close can cost — against sealing a multi-hundred-megabyte
+	 *  blob on every bounded slice of a long catch-up. */
+	const PERSIST_MIN_ADVANCE = 5000;
+
+	/** SQLite busy handler wait. The fold lock makes contention abnormal; this
+	 *  is the second belt so an overlap degrades to a wait, never to a
+	 *  silently lost write. */
+	const BUSY_TIMEOUT_MS = 5000;
+
 	/** The /dev/shm working-copy path for a user's index. */
 	public function shmPath(int $user_id): string {
 		return self::SHM_DIR . '/mailfts_' . $user_id . '.sqlite';
@@ -84,7 +121,7 @@ class MailboxIndex {
 	 * when there is none (first search) or it fails to open (corrupt/missing
 	 * — the disposable-cache contract).
 	 */
-	public function ensureOpen(int $user_id, string $secret_key): void {
+	public function ensureOpen(int $user_id, string $secret_key, ?float $deadline = null): void {
 		$path = $this->shmPath($user_id);
 		if (file_exists($path) && $this->tryOpenDb($path) !== null) {
 			return;
@@ -92,24 +129,62 @@ class MailboxIndex {
 		if ($this->restoreFromBlob($user_id, $secret_key)) {
 			return;
 		}
-		$this->rebuild($user_id, $secret_key);
+		$this->rebuild($user_id, $secret_key, $deadline);
 	}
 
 	/**
-	 * Fold every message newer than the high-water mark into the open working
-	 * copy, then seal-after-fold: persist immediately while the key is in
-	 * hand, never waiting for window close.
+	 * Fold messages newer than the high-water mark into the open working copy,
+	 * then seal-after-fold: persist while the key is in hand, never waiting
+	 * for window close.
+	 *
+	 * $deadline is a microtime(true) value checked between messages (the
+	 * VaultDeferredWork consumer contract); null runs to completion. One fold
+	 * per user at a time: a caller finding the fold lock held touches nothing
+	 * and reports the backlog — the holder is making the progress.
+	 *
+	 * @return array{complete: bool, folded: int, remaining: int, total: int}
+	 *         complete is computed from the data (no rows above the mark, no
+	 *         queued refolds), so a fold cut short by the deadline, a lost
+	 *         lock race, or an aborted write all report the truth.
 	 */
-	public function fold(int $user_id, string $secret_key): void {
-		$this->ensureOpen($user_id, $secret_key);
-		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
-		$changed = $this->foldSince($user_id, intval($bookkeeping->get('imi_fts_high_water')));
-		// Persist only when the fold wrote something, or when no persisted blob
-		// exists yet (first index; after purgePersisted(); a persist that failed
-		// best-effort last time). When nothing was folded the persisted blob is
-		// exactly current, so skipping the write loses nothing.
-		if ($changed || intval($bookkeeping->get('imi_fil_file_id')) <= 0) {
-			$this->persist($user_id, $secret_key);
+	public function fold(int $user_id, string $secret_key, ?float $deadline = null): array {
+		$lock = $this->acquireFoldLock($user_id);
+		if ($lock === null) {
+			return $this->foldStatus($user_id, 0);
+		}
+		try {
+			$this->ensureOpen($user_id, $secret_key, $deadline);
+			$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+			$r = $this->foldSince($user_id, intval($bookkeeping->get('imi_fts_high_water')), $deadline);
+
+			// Persist when the fold completed or processed refolds, when the
+			// working copy has run PERSIST_MIN_ADVANCE past the blob, or when no
+			// blob exists yet (first index; after purgePersisted(); a persist
+			// that failed best-effort last time). When nothing was folded the
+			// persisted blob is exactly current, so skipping the write loses
+			// nothing.
+			$fresh = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+			$no_blob = intval($fresh->get('imi_fil_file_id')) <= 0;
+			$blob_mark = $fresh->get('imi_blob_high_water');
+			$advance = ($blob_mark === null || $blob_mark === '')
+				? PHP_INT_MAX   // legacy blob with unrecorded coverage — record it now
+				: intval($fresh->get('imi_fts_high_water')) - intval($blob_mark);
+			$persist_ok = true;
+			if ($no_blob || ($r['written']
+					&& ($r['complete'] || $r['refolded'] > 0 || $advance >= self::PERSIST_MIN_ADVANCE))) {
+				$persist_ok = $this->persist($user_id, $secret_key);
+			}
+
+			// Refolds leave the queue only once their result is safe against a
+			// window close: the persisted blob now carries them, or there is no
+			// blob to restore a stale entry from. Left queued, they simply run
+			// again next fold — delete-then-insert makes that harmless.
+			if (count($r['refold_done']) && $persist_ok) {
+				$this->checkpointQueue($user_id, $r['refold_done']);
+			}
+			return $this->foldStatus($user_id, $r['folded']);
+		} finally {
+			$this->releaseFoldLock($lock);
 		}
 	}
 
@@ -137,22 +212,30 @@ class MailboxIndex {
 		return $ids;
 	}
 
-	/** Full rebuild from the sealed message rows: fresh FTS5 table, high-water reset to 0. */
-	public function rebuild(int $user_id, string $secret_key): void {
+	/**
+	 * Full rebuild from the sealed message rows: fresh FTS5 table, high-water
+	 * reset to 0. The refold queue is cleared with it — a queued refold marks a
+	 * stale FTS entry, and a fresh table has none; every queued id is above the
+	 * reset mark and folds like any other row. A deadline may leave the rebuild
+	 * partial; the checkpointed mark makes any later fold() continue it.
+	 */
+	public function rebuild(int $user_id, string $secret_key, ?float $deadline = null): void {
 		$path = $this->shmPath($user_id);
 		@unlink($path);
 		if (!is_dir(self::SHM_DIR)) {
 			throw new MailboxIndexException('MailboxIndex: ' . self::SHM_DIR . ' is not available.');
 		}
 		$db = new SQLite3($path);
+		$db->busyTimeout(self::BUSY_TIMEOUT_MS);
 		$db->exec('CREATE VIRTUAL TABLE mailfts USING fts5(message_id UNINDEXED, content)');
 		$db->close();
 
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$bookkeeping->set('imi_fts_high_water', 0);
+		$bookkeeping->set('imi_refold_ids', null);
 		$bookkeeping->save();
 
-		$this->foldSince($user_id, 0);
+		$this->foldSince($user_id, 0, $deadline);
 		$this->persist($user_id, $secret_key);
 	}
 
@@ -185,6 +268,7 @@ class MailboxIndex {
 		}
 		$bookkeeping->set('imi_fil_file_id', null);
 		$bookkeeping->set('imi_sealed_key', null);
+		$bookkeeping->set('imi_blob_high_water', null);
 		$bookkeeping->set('imi_fts_high_water', 0);
 		$bookkeeping->save();
 	}
@@ -235,6 +319,7 @@ class MailboxIndex {
 	private function tryOpenDb(string $path): ?SQLite3 {
 		try {
 			$db = new SQLite3($path, SQLITE3_OPEN_READWRITE);
+			$db->busyTimeout(self::BUSY_TIMEOUT_MS);
 			$check = $db->querySingle("SELECT name FROM sqlite_master WHERE type='table' AND name='mailfts'");
 			if ($check !== 'mailfts') {
 				$db->close();
@@ -282,7 +367,23 @@ class MailboxIndex {
 			error_log('MailboxIndex: restoreFromBlob failed for user ' . $user_id . ' (rebuilding): ' . $e->getMessage());
 			return false;
 		}
-		return $this->tryOpenDb($this->shmPath($user_id)) !== null;
+		if ($this->tryOpenDb($this->shmPath($user_id)) === null) {
+			return false;
+		}
+
+		// The blob can lag the mark (folding checkpoints the mark per batch,
+		// persisting per chunk), so the mark must follow the copy just restored
+		// or the gap between blob-time and mark-time would never be folded. A
+		// legacy blob (coverage never recorded) was persisted only after a
+		// complete fold, when blob and mark agreed — the mark stands.
+		$blob_mark = $bookkeeping->get('imi_blob_high_water');
+		if ($blob_mark !== null && $blob_mark !== ''
+				&& intval($blob_mark) !== intval($bookkeeping->get('imi_fts_high_water'))) {
+			$fresh = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+			$fresh->set('imi_fts_high_water', intval($blob_mark));
+			$fresh->save();
+		}
+		return true;
 	}
 
 	/**
@@ -295,13 +396,19 @@ class MailboxIndex {
 	 * reconstructible from the sealed message rows. A failure to write the
 	 * shortcut (storage misconfigured, disk full, quota) costs one slower
 	 * unlock later; it must never take down the search that triggered it.
+	 *
+	 * @return bool false only on that swallowed failure — fold() keeps
+	 *              processed refolds queued until a persist has carried them,
+	 *              so a restore of the old blob cannot revive a stale entry.
 	 */
-	private function persist(int $user_id, string $secret_key): void {
+	private function persist(int $user_id, string $secret_key): bool {
 		try {
 			$this->persistOrThrow($user_id, $secret_key);
+			return true;
 		} catch (Throwable $e) {
 			error_log('MailboxIndex: persist failed for user ' . $user_id
 				. ' (index still searchable, next unlock rebuilds): ' . $e->getMessage());
+			return false;
 		}
 	}
 
@@ -342,6 +449,10 @@ class MailboxIndex {
 
 		$bookkeeping->set('imi_fil_file_id', intval($file->key));
 		$bookkeeping->set('imi_sealed_key', $sealed_key);
+		// What the sealed file covers. The fold checkpointed the mark before
+		// this ran (and holds the fold lock), so the working copy just sealed
+		// contains everything at or below it.
+		$bookkeeping->set('imi_blob_high_water', intval($bookkeeping->get('imi_fts_high_water')));
 		$bookkeeping->save();
 
 		if ($old_fil_id > 0 && $old_fil_id !== intval($file->key)) {
@@ -353,28 +464,43 @@ class MailboxIndex {
 	}
 
 	/**
-	 * Fold every message newer than $since_id belonging to $user_id's
-	 * single-owner mailboxes into the (already-open) /dev/shm working copy,
-	 * advancing the high-water mark as it goes. Reads content the same way a
-	 * viewer would (InboundEmailMessage::get(), routed through the sealed-field
-	 * hook), so it works identically for sealed and never-sealed rows.
+	 * Fold messages newer than $since_id belonging to $user_id's single-owner
+	 * mailboxes into the (already-open) /dev/shm working copy, checkpointing
+	 * the high-water mark after each FOLD_BATCH-sized batch. Reads content the
+	 * same way a viewer would (InboundEmailMessage::get(), routed through the
+	 * sealed-field hook), so it works identically for sealed and never-sealed
+	 * rows.
 	 *
-	 * @return bool whether anything was written — a new row folded or a refold
-	 *              entry processed. fold() persists only when this is true.
+	 * Every id is delete-then-insert, so folding the same id twice is
+	 * harmless — which is what lets the mark checkpoint mid-backlog and a cut
+	 * fold resume. A write that FAILS stops the pass with the mark at the last
+	 * contiguous success: the mark never advances past a message that is not
+	 * actually in the index.
+	 *
+	 * $deadline (microtime(true) value) is checked between messages; null runs
+	 * to completion. Refolds run first — their FTS entries are stale right now,
+	 * new rows merely absent.
+	 *
+	 * @return array{written: bool, complete: bool, folded: int, refolded: int,
+	 *               refold_done: array}  refold_done stays queued in
+	 *               bookkeeping until fold() confirms a persist carried it —
+	 *               see fold().
 	 */
-	private function foldSince(int $user_id, int $since_id): bool {
+	private function foldSince(int $user_id, int $since_id, ?float $deadline = null): array {
+		$r = array('written' => false, 'complete' => true, 'folded' => 0, 'refolded' => 0,
+			'refold_done' => array());
 		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
 		if (!count($alias_ids)) {
-			return false;
+			return $r;
 		}
 		$db = DbConnector::get_instance()->get_db_link();
 		$in = implode(',', array_map('intval', $alias_ids));
 
-		// Bookkeeping (loaded once): the high-water mark plus the refold queue —
-		// message ids at-or-below the mark that changed after folding. A draft
-		// morphs IN PLACE into its Sent row keeping its id (Fix 6), so it is never
-		// revisited by the `id > since` main pass; the queue drives an explicit
-		// delete-and-reinsert for exactly those ids.
+		// The refold queue: message ids at-or-below the mark that changed after
+		// folding. A draft morphs IN PLACE into its Sent row keeping its id
+		// (Fix 6), and a pending-parse row gains its content after the mark
+		// passed it — neither is ever revisited by the `id > since` main pass;
+		// the queue drives an explicit delete-and-reinsert for exactly those ids.
 		$bookkeeping = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
 		$refold = json_decode((string)$bookkeeping->get('imi_refold_ids'), true);
 		$refold = is_array($refold) ? array_values(array_unique(array_map('intval', $refold))) : array();
@@ -393,7 +519,7 @@ class MailboxIndex {
 		$ids = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
 
 		if (!count($ids) && !count($refold)) {
-			return false; // nothing to fold and nothing queued — the early-out
+			return $r; // nothing to fold and nothing queued — the early-out
 		}
 
 		// Which refold ids are still indexable (the row exists, non-draft, in the
@@ -411,54 +537,209 @@ class MailboxIndex {
 			$rstmt->execute();
 			$refold_valid = array_flip(array_map('intval', $rstmt->fetchAll(PDO::FETCH_COLUMN)));
 		}
-		$refold_set = array_flip($refold);
 
 		$shm = new SQLite3($this->shmPath($user_id));
+		$shm->busyTimeout(self::BUSY_TIMEOUT_MS);
 		$insert = $shm->prepare('INSERT INTO mailfts (message_id, content) VALUES (:id, :content)');
 		$delete = $shm->prepare('DELETE FROM mailfts WHERE message_id = :id');
 
-		// Refold pass: drop any stale FTS row for the queued id, then re-insert it
-		// when still indexable (the morphed Sent row's body now enters the index).
-		foreach ($refold as $id) {
+		// Drop the id's FTS row (rows, in a copy damaged by a pre-checkpoint
+		// build), then re-insert when it has indexable content. False on a
+		// failed SQLite write — the caller stops rather than skips, because a
+		// skipped id behind an advancing mark would be silently unsearchable.
+		$fold_one = function (int $id, bool $reinsert) use ($insert, $delete): bool {
 			$delete->bindValue(':id', $id, SQLITE3_INTEGER);
-			$delete->execute();
+			$ok = $delete->execute() !== false;
 			$delete->reset();
-			if (!isset($refold_valid[$id])) {
-				continue;
+			if (!$ok || !$reinsert) {
+				return $ok;
 			}
 			$content = $this->rowContent($id);
 			if ($content === null) {
-				continue;
+				return true; // row gone, sealed away, or pending parse — nothing to index
 			}
 			$insert->bindValue(':id', $id, SQLITE3_INTEGER);
 			$insert->bindValue(':content', $content, SQLITE3_TEXT);
-			$insert->execute();
+			$ok = $insert->execute() !== false;
 			$insert->reset();
+			return $ok;
+		};
+
+		// Refold pass: stale entries first.
+		foreach ($refold as $id) {
+			if ($deadline !== null && microtime(true) >= $deadline) {
+				$r['complete'] = false;
+				break;
+			}
+			if (!$fold_one($id, isset($refold_valid[$id]))) {
+				error_log('MailboxIndex: fold stopped for user ' . $user_id
+					. ' — SQLite write failed on refold id ' . $id);
+				$r['complete'] = false;
+				break;
+			}
+			$r['refold_done'][] = $id;
+			$r['written'] = true;
+			$r['refolded']++;
+			$r['folded']++;
 		}
 
-		// Main pass: the new rows since the mark, skipping any already handled above.
-		$last_id = $since_id;
-		foreach ($ids as $id) {
-			$last_id = $id;
-			if (isset($refold_set[$id])) {
-				continue; // already delete-and-reinserted in the refold pass
+		// Main pass: the new rows since the mark, skipping any refolded moments
+		// ago. The mark checkpoints only on whole batches — every id at or
+		// below it made it into the working copy.
+		if ($r['complete']) {
+			$refolded_now = array_flip($r['refold_done']);
+			$last_ok = $since_id;
+			$n = 0;
+			foreach ($ids as $id) {
+				if ($deadline !== null && microtime(true) >= $deadline) {
+					$r['complete'] = false;
+					break;
+				}
+				if (!isset($refolded_now[$id])) {
+					if (!$fold_one($id, true)) {
+						error_log('MailboxIndex: fold stopped for user ' . $user_id
+							. ' — SQLite write failed on message id ' . $id);
+						$r['complete'] = false;
+						break;
+					}
+					$r['written'] = true;
+					$r['folded']++;
+				}
+				$last_ok = $id;
+				if (++$n % self::FOLD_BATCH === 0) {
+					$this->checkpointMark($user_id, $last_ok);
+				}
 			}
-			$content = $this->rowContent($id);
-			if ($content === null) {
-				continue;
-			}
-			$insert->bindValue(':id', $id, SQLITE3_INTEGER);
-			$insert->bindValue(':content', $content, SQLITE3_TEXT);
-			$insert->execute();
-			$insert->reset();
+			$this->checkpointMark($user_id, $last_ok);
 		}
 		$shm->close();
+		return $r;
+	}
 
-		// One bookkeeping save: advance the watermark and clear the refold queue.
-		$bookkeeping->set('imi_fts_high_water', $last_id);
-		$bookkeeping->set('imi_refold_ids', null);
-		$bookkeeping->save();
-		return true;
+	/**
+	 * Advance the high-water mark. Fresh-loads the row and writes only the
+	 * mark, so a concurrent enqueueRefold() save is not clobbered; never moves
+	 * it backwards (only restoreFromBlob may, deliberately, when the restored
+	 * copy covers less than the mark claimed).
+	 */
+	private function checkpointMark(int $user_id, int $mark): void {
+		$bk = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		if ($mark > intval($bk->get('imi_fts_high_water'))) {
+			$bk->set('imi_fts_high_water', $mark);
+			$bk->save();
+		}
+	}
+
+	/**
+	 * Remove processed ids from the stored refold queue, preserving whatever
+	 * was enqueued while the fold ran.
+	 */
+	private function checkpointQueue(int $user_id, array $processed_ids): void {
+		$bk = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		$stored = json_decode((string)$bk->get('imi_refold_ids'), true);
+		$stored = is_array($stored) ? array_map('intval', $stored) : array();
+		$remaining = array_values(array_diff($stored, array_map('intval', $processed_ids)));
+		$bk->set('imi_refold_ids', count($remaining) ? json_encode($remaining) : null);
+		$bk->save();
+	}
+
+	/**
+	 * Is there fold work owed for this user? Cheap, indexed, no decrypt — it
+	 * runs on every vault heartbeat via the 'mailbox_fts_fold' deferred-work
+	 * consumer (bootstrap.php). False when no bookkeeping row exists: the row
+	 * is created by the first search, so an owner who never searches never
+	 * pays for index building.
+	 */
+	public static function hasBacklog(int $user_id): bool {
+		if ($user_id <= 0) {
+			return false;
+		}
+		$multi = new MultiInboundMailboxSearchIndex(array('user_id' => $user_id));
+		$multi->load();
+		if (!$multi->count()) {
+			return false;
+		}
+		$bk = $multi->get(0);
+		$refold = json_decode((string)$bk->get('imi_refold_ids'), true);
+		if (is_array($refold) && count($refold)) {
+			return true;
+		}
+		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+		if (!count($alias_ids)) {
+			return false;
+		}
+		$in = implode(',', array_map('intval', $alias_ids));
+		$stmt = DbConnector::get_instance()->get_db_link()->prepare(
+			"SELECT 1 FROM iem_inbound_email_messages
+			 WHERE iem_iea_inbound_email_alias_id IN ($in)
+			 AND iem_inbound_email_message_id > ?
+			 AND iem_direction IS DISTINCT FROM 'draft'
+			 LIMIT 1");
+		$stmt->execute(array(intval($bk->get('imi_fts_high_water'))));
+		return (bool)$stmt->fetchColumn();
+	}
+
+	/**
+	 * The fold() return value, computed from the data rather than from what
+	 * this call happened to do: complete means no rows above the mark and no
+	 * queued refolds, however the fold ended (deadline, lost lock race,
+	 * aborted write, or clean finish).
+	 */
+	private function foldStatus(int $user_id, int $folded): array {
+		$total = 0;
+		$remaining = 0;
+		$refolds = 0;
+		$bk = InboundMailboxSearchIndex::loadOrCreateForUser($user_id);
+		$refold = json_decode((string)$bk->get('imi_refold_ids'), true);
+		$refolds = is_array($refold) ? count($refold) : 0;
+		$alias_ids = InboundEmailMailboxGrant::alias_ids_for_user($user_id);
+		if (count($alias_ids)) {
+			$in = implode(',', array_map('intval', $alias_ids));
+			$db = DbConnector::get_instance()->get_db_link();
+			$stmt = $db->prepare(
+				"SELECT count(*),
+						count(*) FILTER (WHERE iem_inbound_email_message_id > ?)
+				 FROM iem_inbound_email_messages
+				 WHERE iem_iea_inbound_email_alias_id IN ($in)
+				 AND iem_direction IS DISTINCT FROM 'draft'");
+			$stmt->execute(array(intval($bk->get('imi_fts_high_water'))));
+			$row = $stmt->fetch(PDO::FETCH_NUM);
+			$total = intval($row[0]);
+			$remaining = intval($row[1]);
+		}
+		return array(
+			'complete'  => ($remaining === 0 && $refolds === 0),
+			'folded'    => $folded,
+			'remaining' => $remaining,
+			'total'     => $total,
+		);
+	}
+
+	/**
+	 * The per-user fold lock: one fold at a time, non-blocking. The lock FILE
+	 * is never unlinked — deleting a file another process holds an flock on
+	 * would hand the next opener a fresh inode and break the mutual exclusion.
+	 * It is zero bytes and rides along in /dev/shm.
+	 */
+	private function acquireFoldLock(int $user_id) {
+		$path = self::SHM_DIR . '/mailfts_' . $user_id . '.lock';
+		$fh = @fopen($path, 'c');
+		if ($fh === false) {
+			return null;
+		}
+		@chmod($path, 0666); // web and CLI both fold (search request / drain / tests)
+		if (!flock($fh, LOCK_EX | LOCK_NB)) {
+			fclose($fh);
+			return null;
+		}
+		return $fh;
+	}
+
+	private function releaseFoldLock($fh): void {
+		if (is_resource($fh)) {
+			flock($fh, LOCK_UN);
+			fclose($fh);
+		}
 	}
 
 	/**
@@ -476,6 +757,12 @@ class MailboxIndex {
 	private function rowContent(int $id): ?string {
 		$msg = new InboundEmailMessage($id, TRUE);
 		if (!$msg->key) {
+			return null;
+		}
+		if ($msg->get('iem_pending_parse')) {
+			// The content fields do not exist yet — only the sealed raw blob
+			// does. parsePendingMessage() enqueues a refold when they appear,
+			// so skipping here never strands the message outside the index.
 			return null;
 		}
 		try {

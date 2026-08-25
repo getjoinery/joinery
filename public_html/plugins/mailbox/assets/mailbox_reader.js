@@ -934,6 +934,18 @@
 				row.appendChild(sbtn);
 				listEl.insertBefore(row, listEl.firstChild);
 			}
+			if (data.search_indexing) {
+				// The index does not cover the whole mailbox yet (it catches up in
+				// the background while the vault is open) — without this, mail the
+				// index has not reached would read as mail that does not exist.
+				var left = data.search_indexing.remaining || 0;
+				var irow = el('li', 'mbx-indexing-banner');
+				irow.appendChild(el('span', 'mbx-indexing-text',
+					'Still indexing this mailbox for search ('
+					+ left.toLocaleString() + ' message' + (left === 1 ? '' : 's')
+					+ ' to go) — results may be incomplete.'));
+				listEl.insertBefore(irow, listEl.firstChild);
+			}
 			if (!listEl.children.length) {
 				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.' : 'No conversations.'));
 			}
