@@ -33,7 +33,7 @@
  * DKIM key and whether it speaks Joinery Direct. A control plane that guessed
  * would publish a plausible record set the box does not actually match.
  *
- * @version 1.0
+ * @version 1.1 - send_failure_alert() is a protected seam, so tests intercept the mail edge
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
@@ -697,7 +697,17 @@ class ProvisionManagedDomains {
 	private function fail_and_alert($row, string $reason): void {
 		$row->fail($reason);
 		$this->errors[] = $row->get('rdm_domain') . ': FAILED — ' . $reason;
+		$this->send_failure_alert($row, $reason);
+	}
 
+	/**
+	 * The operator email for a parked row. Protected as this class's fourth
+	 * outside edge (registrar, DNS, SSH, mail): a test double must be able to
+	 * intercept it — this class's suite once sent sixty real alerts through
+	 * dev's live Postfix because it could not — and asserting the alert's
+	 * content is stronger than letting it fire.
+	 */
+	protected function send_failure_alert($row, string $reason): void {
 		$to = $this->resolve_alert_recipient();
 		if ($to === '') {
 			error_log('ProvisionManagedDomains: no alert recipient for ' . $row->get('rdm_domain'));

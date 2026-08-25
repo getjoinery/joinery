@@ -401,9 +401,27 @@ email_debug_mode = "1"  // Enable debug logging to debug_email_logs table
 
 **Test Mode:**
 ```php
-email_test_mode = "1"         // Redirect all emails to test address
-email_test_redirect = "test@example.com"
+email_test_mode = "1"              // Redirect every send to the trap address
+email_test_recipient = "trap@example.com"
 ```
+
+Every message — To, Cc and Bcc alike — is delivered only to
+`email_test_recipient`, with the original recipients folded into the subject
+(`[for a@b, c@d +3 more] …`) and the full list in the debug log. The rewrite
+happens in `EmailSender::send()` above the Joinery Direct branch, so a
+redirect can never leak through the instance-to-instance fast lane, and in
+`sendBatch()`, where one trap send stands in for the whole list. With test
+mode on and no recipient configured, sends are suppressed and logged
+(service name `test-mode`) rather than falling back to the real recipient.
+
+The send path runs for real end to end — transport, provider, delivery — so
+this is the safety switch for a staging clone of a production site, and it is
+what the test harness sets in-memory (`tests/lib/harness.php`, trap
+`joineryemailtests@dev.getjoinery.com`) so that operator-addressed alert mail
+from a suite lands in an inspectable local mailbox instead of a person's
+inbox. Transport rerouting alone is not enough for that: a box running a real
+Postfix delivers "local SMTP" to the internet, and alert mail addresses real
+operators rather than fixture accounts.
 
 **Dry Run:**
 ```php

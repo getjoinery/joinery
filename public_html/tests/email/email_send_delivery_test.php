@@ -29,6 +29,10 @@ if (php_sapi_name() !== 'cli') { echo "This test must be run from the command li
 
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
+// This suite IS about real delivery to the address it names — the one thing
+// the harness's recipient redirect exists to prevent — so it takes the
+// documented escape and turns the redirect off for this process.
+harness_set_setting_mem('email_test_mode', '0');
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('includes/EmailServiceProvider.php'));

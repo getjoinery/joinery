@@ -654,7 +654,8 @@
       "options": {
         "1": "Yes",
         "0": "No"
-      }
+      },
+      "helptext": "Every outgoing message — To, Cc and Bcc — is delivered only to the address below, with the original recipients named in the subject line. The send path runs for real; no real person is written to. With no address configured, sends are suppressed and logged rather than delivered. The safety switch for a staging or test copy of a site."
     },
     {
       "name": "email_test_send_last_success",

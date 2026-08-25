@@ -341,6 +341,31 @@ class EmailSender {
             return true;
         }
 
+        // Test mode: every message is delivered to the one configured trap
+        // address instead of its real recipients. This is what makes a staging
+        // clone — or a test run — safe to let send: the send path runs for
+        // real, end to end, but nothing reaches a real person's inbox. It sits
+        // above the Joinery Direct branch deliberately: Direct delivers
+        // straight into the REAL recipient's instance, which is exactly the
+        // thing a redirect exists to prevent.
+        $trap = self::testModeTrap();
+        if ($trap !== null) {
+            if ($trap === '') {
+                // Redirect-on with nowhere to redirect to: suppressing is the
+                // safe direction — a fallback to the real recipient would be
+                // the one behavior the operator switched this on to stop.
+                $this->logEmailDebug('Test mode is on but email_test_recipient is empty — '
+                    . 'suppressed send to '
+                    . implode(', ', array_column($message->getRecipients() ?: array(), 'email'))
+                    . ' — subject: ' . $message->getSubject(), 'test-mode');
+                return true;
+            }
+            $originals = $message->redirectAllRecipientsTo($trap);
+            $message->subject(self::testModeSubject($originals, (string)$message->getSubject()));
+            $this->logEmailDebug('Test mode: redirected to ' . $trap . ' (was '
+                . implode(', ', $originals) . ') — subject: ' . $message->getSubject(), 'test-mode');
+        }
+
         // Joinery Direct, before any transport is chosen: when both ends are
         // Joinery instances and the recipient has already affirmed this sender,
         // the message goes straight there over a signed, sealed channel and
@@ -527,6 +552,25 @@ class EmailSender {
             throw new Exception('Refusing to batch-send from a protected identity domain.');
         }
 
+        // Test mode covers batches too — one send to the trap stands in for
+        // the whole list, with the size and first addresses named in the
+        // subject so the trap mailbox still says what would have gone out.
+        $trap = self::testModeTrap();
+        if ($trap !== null) {
+            if ($trap === '') {
+                $this->logEmailDebug('Test mode is on but email_test_recipient is empty — '
+                    . 'suppressed batch of ' . count($recipients) . ' — subject: '
+                    . $message->getSubject(), 'test-mode');
+                return ['success' => true, 'failed_recipients' => []];
+            }
+            $originals = array_values(array_map('strval', $recipients));
+            $recipients = [$trap];
+            $message->redirectAllRecipientsTo($trap);
+            $message->subject(self::testModeSubject($originals, (string)$message->getSubject()));
+            $this->logEmailDebug('Test mode: batch of ' . count($originals) . ' redirected to '
+                . $trap, 'test-mode');
+        }
+
         $settings = Globalvars::get_instance();
         $service = self::activeServiceKey();
         $fallback = trim((string)$settings->get_setting('email_fallback_service'));
@@ -603,6 +647,26 @@ class EmailSender {
     }
 
     // ── Internal ────────────────────────────────────────────────────────
+
+    /**
+     * The test-mode trap address: null when test mode is off, the configured
+     * address when on, '' when on but unconfigured (callers suppress).
+     */
+    private static function testModeTrap(): ?string {
+        $settings = Globalvars::get_instance();
+        if ((string)$settings->get_setting('email_test_mode') !== '1') {
+            return null;
+        }
+        return trim((string)$settings->get_setting('email_test_recipient'));
+    }
+
+    /** "[for a@b, c@d +3 more] Original subject" — the trap mailbox stays legible. */
+    private static function testModeSubject(array $originals, string $subject): string {
+        $shown = array_slice($originals, 0, 2);
+        $extra = count($originals) - count($shown);
+        return '[for ' . implode(', ', $shown)
+            . ($extra > 0 ? ' +' . $extra . ' more' : '') . '] ' . $subject;
+    }
 
     /**
      * Send with a specific provider by key.
