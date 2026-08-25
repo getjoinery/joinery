@@ -344,6 +344,24 @@ rules.
 Replacing a proven key is a rotation, not an edit: backups already made carry
 keys sealed to the old public key. Pasting over a proven value is refused.
 
+### Rotating the key
+
+Rotation is offered where the key lives: the Backups page's Recovery key
+section, **Actions → Rotate key**. It walks the same generate-and-verify
+ceremony as setup — new keypair made in the browser, private half into the
+password manager, pasted back to prove the stored copy — with the save marked
+as a deliberate rotation. Three properties make it safe:
+
+- **Old backups keep opening.** Each chain's data key was sealed at chain
+  start; rotation never touches it. Keep the old private key until every chain
+  sealed to it has been retired.
+- **Nothing seals to the new key until it is proven.** An interrupted rotation
+  leaves the key unproven, and backups refuse to run — loudly — until the
+  ceremony is finished (or run again with a fresh key).
+- **The next run starts a fresh chain.** A chain cannot change recipients
+  mid-life, so the runner ends the current chain when the recovery recipient no
+  longer matches (`recovery_rotated`) and the new chain seals to the new key.
+
 Standing re-verification lives on **Recovery Readiness**, so "did I really save
 it?" has an answer on demand rather than only at setup time.
 

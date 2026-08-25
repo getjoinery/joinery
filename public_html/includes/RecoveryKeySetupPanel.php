@@ -21,6 +21,9 @@
  * The unproven state remains as the fallback screen: a session that died
  * between save and proof lands there and finishes the same ceremony.
  *
+ * @version 2.2 - the proven state carries an Actions menu, and Rotate key walks the
+ *                same generate-and-verify ceremony with the save marked as a rotation;
+ *                the next backup run then starts a fresh chain sealed to the new key
  * @version 2.1 - the by-hand fold is gone: generate-in-browser is the one
  *                setup path, with a plain line for a browser that cannot
  * @version 2.0 - one-screen setup: paste-back replaces the confirm checkbox and
@@ -53,6 +56,10 @@ class RecoveryKeySetupPanel {
 				self::renderProve($page, $state);
 				return;
 			default:
+				if (!empty($_GET['rotate_recovery'])) {
+					self::renderRotate($page, $state);
+					return;
+				}
 				self::renderReady($state);
 		}
 	}
@@ -61,12 +68,14 @@ class RecoveryKeySetupPanel {
 	 * Nothing usable is configured: make a keypair, save the private half, and
 	 * paste it back to prove the saved copy works — all on this screen.
 	 */
-	private static function renderSetup($page, array $state): void {
-		if ($state['state'] === 'invalid') {
+	private static function renderSetup($page, array $state, bool $rotate = false): void {
+		if (!$rotate && $state['state'] === 'invalid') {
 			echo '<div class="alert alert-danger">' . htmlspecialchars($state['error']) . '</div>';
 		}
 
-		echo '<p>Backups are encrypted, and this one key opens them.</p>';
+		if (!$rotate) {
+			echo '<p>Backups are encrypted, and this one key opens them.</p>';
+		}
 
 		// Generation happens in the page. The button starts hidden and the
 		// script reveals it once it has confirmed this browser can actually do
@@ -122,7 +131,29 @@ class RecoveryKeySetupPanel {
 			'saveId'       => 'rk-save',
 			'saveStatusId' => 'rk-save-status',
 			'noCryptoId'   => 'rk-no-crypto',
+			'rotate'       => $rotate,
 		)));
+	}
+
+	/**
+	 * Deliberate rotation of a proven key: the same generate-and-verify ceremony,
+	 * entered from the Actions menu, with the save marked as a rotation so
+	 * set_public_key() accepts it. What makes rotation safe to offer this way:
+	 * the old chains stay openable with the old private key (each chain's data
+	 * key was sealed at chain start and never changes), nothing seals to the new
+	 * key until it is proven, and the next run starts a fresh chain
+	 * (BackupChain::should_start_new, recovery_rotated).
+	 */
+	private static function renderRotate($page, array $state): void {
+		echo '<div class="alert alert-warning">';
+		echo '<strong>Rotating the recovery key.</strong> Backups already made stay openable only with the '
+		   . 'current key (' . htmlspecialchars($state['fingerprint']) . '…) — keep that private key until '
+		   . 'every chain sealed to it has been retired. Once the new key is verified, every backup from '
+		   . 'then on seals to it, starting with a fresh chain on the next run.';
+		echo '</div>';
+		self::renderSetup($page, $state, true);
+		echo '<p class="mt-2 mb-0"><a class="small" href="' . htmlspecialchars(strtok($_SERVER['REQUEST_URI'] ?? '', '?'))
+		   . '">Keep the current key</a></p>';
 	}
 
 	/**
@@ -179,12 +210,22 @@ class RecoveryKeySetupPanel {
 		$fw2->end_form();
 	}
 
-	/** Proven — say so, and say where to re-check it. */
+	/** Proven — say so, with the deliberate actions in a menu. */
 	private static function renderReady(array $state): void {
+		echo '<div class="d-flex align-items-start justify-content-between">';
+		echo '<div>';
 		echo '<p class="mb-1"><strong>Verified.</strong> Key ' . htmlspecialchars($state['fingerprint'])
 		   . '… opens every backup this site makes.</p>';
 		echo '<p class="text-muted small mb-0">Re-check it any time from '
 		   . '<a href="/admin/admin_recovery_readiness">Recovery Readiness</a>.</p>';
+		echo '</div>';
+		echo '<div class="dropdown">';
+		echo '<button class="btn btn-soft-default btn-sm dropdown-toggle" type="button" data-toggle="dropdown" '
+		   . 'aria-haspopup="true" aria-expanded="false">Actions</button>';
+		echo '<div class="dropdown-menu dropdown-menu-end py-0">';
+		echo '<a href="?rotate_recovery=1" class="dropdown-item">Rotate key&hellip;</a>';
+		echo '<a href="/admin/admin_recovery_readiness" class="dropdown-item">Verify it again</a>';
+		echo '</div></div></div>';
 	}
 
 	/**

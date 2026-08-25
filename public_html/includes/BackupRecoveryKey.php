@@ -268,7 +268,8 @@ class BackupRecoveryKey {
 			throw new BackupRecoveryKeyException(
 				'A verified recovery key is already in use and backups are sealed to it. Replacing it is a key '
 				. 'rotation — backups already made stay openable only with the current private key — so it '
-				. 'cannot be done by pasting a new value here. Follow the rotation procedure in docs/backups.md.');
+				. 'cannot be done by pasting a new value here. Rotate it from the Backups page: '
+				. 'Recovery key, Actions, Rotate key.');
 		}
 
 		self::write_setting(self::PUBLIC_KEY_SETTING, $b64);

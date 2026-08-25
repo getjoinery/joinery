@@ -30,6 +30,9 @@
  *       db-0001.sql.gz.enc
  *       ...
  *
+ * @version 1.2 - should_start_new breaks the chain when the recovery recipient changed: a chain's
+ *                one data key is sealed at chain start, so after a key rotation an extended chain
+ *                would stay openable only by the rotated-away key
  * @version 1.1 - manifest writes are atomic (write-beside + rename)
  * @version 1.0
  */
@@ -124,11 +127,14 @@ class BackupChain {
 	 * Should this run start a NEW chain rather than extend the current one?
 	 *
 	 * Reasons, in the order they are checked:
-	 *   no_chain     nothing to extend
-	 *   snar_lost    the snapshot file is gone, so tar cannot produce a valid
-	 *                incremental — this is the safe degradation, not a failure
-	 *   age          the chain is older than the configured full interval
-	 *   length       too many incrementals depend on one full
+	 *   no_chain          nothing to extend
+	 *   snar_lost         the snapshot file is gone, so tar cannot produce a valid
+	 *                     incremental — this is the safe degradation, not a failure
+	 *   recovery_rotated  the chain's envelope is sealed to a recovery key that is
+	 *                     no longer this site's — extending it would keep filing
+	 *                     runs only the rotated-away key can open
+	 *   age               the chain is older than the configured full interval
+	 *   length            too many incrementals depend on one full
 	 *
 	 * Returns '' when the current chain should simply continue.
 	 *
@@ -137,12 +143,29 @@ class BackupChain {
 	 */
 	public static function should_start_new(?array $manifest = null, $snar_exists = false,
 	                                        $full_interval_days = 7, $max_incrementals = 30,
-	                                        $now_utc = null) {
+	                                        $now_utc = null, $current_recovery_fpr = null) {
 		if (!$manifest || empty($manifest['runs'])) {
 			return 'no_chain';
 		}
 		if (!$snar_exists) {
 			return 'snar_lost';
+		}
+
+		// A chain has ONE data key, sealed when the chain starts. Rotating the
+		// recovery key therefore cannot take effect inside a chain — only a new
+		// chain seals to the new key — so a recipient mismatch ends the chain
+		// here. The old chain stays openable with the old private key, which is
+		// why rotation instructions say to keep it until those chains retire.
+		if ($current_recovery_fpr !== null && $current_recovery_fpr !== '') {
+			$chain_fpr = '';
+			foreach (($manifest['envelope']['recipients'] ?? array()) as $r) {
+				if (($r['kind'] ?? '') === 'recovery') {
+					$chain_fpr = (string)($r['fingerprint'] ?? '');
+				}
+			}
+			if (!hash_equals((string)$current_recovery_fpr, $chain_fpr)) {
+				return 'recovery_rotated';
+			}
 		}
 
 		$now = strtotime(($now_utc ?: gmdate('Y-m-d H:i:s')) . ' UTC');

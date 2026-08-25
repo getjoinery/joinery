@@ -24,6 +24,8 @@
  * the unwrap against the user's own wrapping rows, report pass/fail. Nothing
  * is consumed and nothing secret is transmitted.
  *
+ * @version 1.3.0 - the save call carries the generator config's rotate flag, so the
+ *                  rotation screen replaces a proven key through the same ceremony
  * @version 1.2.1 - a failed generation probe reveals the no-WebCrypto line
  *                  instead of staying silent (the by-hand fold is gone)
  * @version 1.2.0 - one-screen setup: paste-back match + save/prove via the
@@ -298,7 +300,7 @@ window.recoveryReadiness = (function () {
 
 			save.disabled = true;
 			saySave('Saving…', true);
-			joineryApi.post('backup_recovery_save', { public_key: pair.publicKeyB64 }).then(function (r) {
+			joineryApi.post('backup_recovery_save', { public_key: pair.publicKeyB64, rotate: c.rotate ? 1 : 0 }).then(function (r) {
 				// Prove with the pasted copy against what the server STORED.
 				return openChallenge(r.challenge, pasted, r.public_key, r.info);
 			}).then(function (proof) {

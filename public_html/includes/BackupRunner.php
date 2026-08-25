@@ -31,6 +31,8 @@
  * it is handed cannot delete, and pruning that shelf belongs to the party that
  * owns it.
  *
+ * @version 1.6 - a rotated recovery key ends the current chain: the next run starts a fresh chain
+ *                sealed to the new key instead of extending one only the old key opens
  * @version 1.5 - a manager-profile run seals to THIS machine's own proven recovery key, read
  *                locally. A run carrying key material is refused, and a machine with no proven
  *                key of its own refuses to back up rather than sealing to a key it was handed
@@ -556,7 +558,11 @@ class BackupRunner {
 		list($chain_id, $manifest) = self::current_chain($plan);
 
 		$reason = BackupChain::should_start_new($manifest, is_file($snar) && filesize($snar) > 0,
-			$plan['full_days'], $plan['max_inc']);
+			$plan['full_days'], $plan['max_inc'], null, (string)$plan['recovery_fpr']);
+		if ($reason === 'recovery_rotated') {
+			error_log('BackupRunner: the recovery key changed since chain ' . $chain_id
+				. ' started; starting a new chain sealed to the current key.');
+		}
 
 		$data_key = null;
 		if ($reason === '') {

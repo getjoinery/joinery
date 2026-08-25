@@ -112,6 +112,31 @@ check($plan['recipients'][0]['kind'] === 'recovery'
 	&& $plan['recipients'][0]['pub'] === $pub_raw,
 	'the recovery recipient is the key this site holds');
 
+// ── Only a deliberate rotation replaces a proven key ────────────────────
+section('Replacing a proven key is refused unless marked as rotation');
+
+$pair_b = sodium_crypto_box_keypair();
+$pub_b  = sodium_crypto_box_publickey($pair_b);
+
+$message = '';
+try { BackupRecoveryKey::set_public_key(base64_encode($pub_b)); }
+catch (Throwable $e) { $message = $e->getMessage(); }
+check(strpos($message, 'rotation') !== false && strpos($message, 'Rotate key') !== false,
+	'pasting over a proven key is refused and names the rotation action', $message);
+check(BackupRecoveryKey::parse_public_key() === $pub_raw,
+	'the proven key is untouched by the refused attempt');
+
+BackupRecoveryKey::set_public_key(base64_encode($pub_b), true);
+check(BackupRecoveryKey::parse_public_key() === $pub_b,
+	'a rotation marked as such stores the new key');
+check(BackupRecoveryKey::setup_state()['state'] === 'unproven',
+	'and stores it UNPROVEN — nothing seals to the new key until the same ceremony proves it',
+	BackupRecoveryKey::setup_state()['state']);
+
+// Restore the proven original for the sections below.
+rof_put_setting('backup_recovery_public_key', base64_encode($pub_raw));
+rof_put_setting('backup_recovery_public_key_proven_fpr', hash('sha256', $pub_raw));
+
 // ── No proven key means no backup, for anybody ──────────────────────────
 section('A site with no proven key refuses to back up rather than downgrading');
 
