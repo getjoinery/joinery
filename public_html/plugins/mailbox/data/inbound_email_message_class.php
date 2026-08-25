@@ -103,6 +103,19 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.23
+ * @changelog 1.23 - openSealedAttachment() honors a redeemed serve grant
+ *   (includes/FileServeGrant.php) for both sealed shapes, so a cookie-less
+ *   signed fetch decrypts what its signature already authorizes
+ *   (specs/bugfix_sealed_inline_images.md). No grant → the owner's window,
+ *   exactly as before.
+ * @version 1.22
+ * @changelog 1.22 - iem_reseal_pending + a narrow decryptSealedFieldStatic()
+ *   override (specs/bugfix_promoted_sent_row_sealing.md): a Sent-folder
+ *   direction promotion leaves the inbound-written plaintext recipient on a now-
+ *   outbound sealed row. The override hands that one enumerated shape back as
+ *   the true value instead of tripping the corruption check; PromotedRowRepair
+ *   seals it under the row DEK at the owner's next unlocked visit.
  * @version 1.21
  * @changelog 1.21 - getRawMimePart() parses through MimeParse, so a message
  *   whose body quotes its own MIME boundary answers null instead of hanging
@@ -265,6 +278,16 @@ class InboundEmailMessage extends SystemBase {
 		'iem_pending_parse'       => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		'iem_relay_sealed_raw'    => array('type'=>'text', 'is_nullable'=>true),
 		'iem_relay_spool_id'      => array('type'=>'varchar(255)', 'is_nullable'=>true, 'unique'=>true),
+		// Sealing debt from a Sent-folder direction promotion (specs/bugfix_promoted_sent_row_sealing.md).
+		// An IMAP-stored row is sealed as INBOUND — recipient in the clear, which is
+		// correct there — and a later promotion to outbound makes that plaintext a
+		// sealed-contract violation the promoting cron process cannot pay (sealing
+		// under the row's existing DEK needs the owner's in-window secret). This flag
+		// marks the debt; PromotedRowRepair (a VaultDeferredWork consumer) pays it at
+		// the owner's next unlocked visit. The repair predicate ALSO matches rows
+		// where the flag was never set (a plaintext recipient on a sealed outbound
+		// row is the debt, flag or no flag), so pre-existing broken rows heal too.
+		'iem_reseal_pending'      => array('type'=>'bool', 'is_nullable'=>false, 'default'=>false),
 		// How this message reached the box, and whether it earned the
 		// verified-direct mark (docs/joinery_direct.md § The social signal).
 		//
@@ -651,6 +674,31 @@ class InboundEmailMessage extends SystemBase {
 	}
 
 	/**
+	 * Third: one enumerated exception to the plaintext-on-sealed-row tripwire
+	 * (specs/bugfix_promoted_sent_row_sealing.md). A Sent-folder direction
+	 * promotion (ImapIngestor::markDirectionOutbound) turns an inbound row —
+	 * whose iem_recipient is legitimately cleartext routing metadata — into an
+	 * outbound row, where the direction guard expects that column sealed. The
+	 * promoting cron process cannot seal it (no unlock window), so until
+	 * PromotedRowRepair pays the debt in-window, the stored plaintext IS the
+	 * true recipient: hand it back rather than throwing.
+	 *
+	 * Deliberately narrow — iem_recipient only, outbound only. A draft, any
+	 * other column, or any other shape of plaintext under a sealed flag still
+	 * trips the parent's corruption check, which is the tripwire's whole job.
+	 */
+	public static function decryptSealedFieldStatic($field, $ciphertext, array $row) {
+		if ($field === 'iem_recipient'
+				&& ($row['iem_direction'] ?? '') === 'outbound'
+				&& is_string($ciphertext) && $ciphertext !== ''
+				&& strpos($ciphertext, 'v1.aead.') !== 0
+				&& static::rowArrayIsSealed($row)) {
+			return $ciphertext;
+		}
+		return parent::decryptSealedFieldStatic($field, $ciphertext, $row);
+	}
+
+	/**
 	 * Open one attachment's stored bytes for a message — the one
 	 * implementation the File decrypt hook (plugins/mailbox/includes/
 	 * bootstrap.php), the download endpoints (includes/attachment_retrieval.php)
@@ -679,14 +727,19 @@ class InboundEmailMessage extends SystemBase {
 	public static function openSealedAttachment(InboundEmailMessage $msg, InboundMessageAttachment $att, string $bytes,
 			?File $file = null): string {
 		// Self-sealed File first: it carries its own key, so nothing about the
-		// message is consulted.
+		// message is consulted. A redeemed serve grant (includes/
+		// FileServeGrant.php) supplies the key on a cookie-less signed fetch;
+		// otherwise the owner's window, as always.
 		$fil_id = intval($att->get('ima_fil_file_id'));
 		if ($fil_id > 0) {
 			if ($file === null || intval($file->key) !== $fil_id) {
 				$file = new File($fil_id, TRUE);
 			}
 			if ($file->key && $file->get('fil_content_sealed')) {
-				$fk = DriveSealed::fileKey($file); // throws VaultLockedException when closed
+				$fk = FileServeGrant::activeKey($fil_id, FileServeGrant::SHAPE_FILE_KEY);
+				if ($fk === null) {
+					$fk = DriveSealed::fileKey($file); // throws VaultLockedException when closed
+				}
 				return SealedFileContainer::openBytes($bytes, $fk);
 			}
 		}
@@ -694,14 +747,26 @@ class InboundEmailMessage extends SystemBase {
 		if (!$att->get('ima_is_sealed')) {
 			return $bytes; // stored plaintext - nothing to open
 		}
+		$message_id = intval($msg->key);
+		$ad = self::attachmentAd($message_id, (string)$att->get('ima_mime_part'));
+		if ($fil_id > 0) {
+			// Message-DEK shape under a grant: the DEK was unwrapped at mint
+			// time, in-window; the AD is rebuilt from the manifest row exactly
+			// as the vault path below rebuilds it.
+			$dek = FileServeGrant::activeKey($fil_id, FileServeGrant::SHAPE_MESSAGE_DEK);
+			if ($dek !== null) {
+				require_once(PathHelper::getIncludePath('includes/VaultCrypto.php'));
+				$crypto = new VaultCrypto();
+				return $crypto->openField($bytes, $dek, $ad);
+			}
+		}
 		$owner_id = self::sealedOwnerUserId($msg->get('iem_sealed_owner_user_id'), $msg->get('iem_iea_inbound_email_alias_id'));
 		if ($owner_id === null || !$msg->get('iem_sealed_key')) {
 			require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
 			throw new VaultLockedException();
 		}
-		$message_id = intval($msg->key);
 		$crypto = self::openMessageDekCrypto($owner_id, (string)$msg->get('iem_sealed_key'));
-		return $crypto['crypto']->openField($bytes, $crypto['dek'], self::attachmentAd($message_id, (string)$att->get('ima_mime_part')));
+		return $crypto['crypto']->openField($bytes, $crypto['dek'], $ad);
 	}
 
 	/**

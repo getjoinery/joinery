@@ -35,6 +35,24 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * @version 1.16
+ * @changelog 1.16 - inline images are adopted into Files at ingest
+ *   (specs/bugfix_sealed_inline_images.md): the network half fetches each
+ *   inline image part's bytes (5 MB cap) beside the body fetches, and the
+ *   stored half adopts them via AttachmentByteCustody::adoptBytes — sealed iff
+ *   the message is, to the owner it records. Reference-backed inline parts
+ *   could never render in the reader (resolveInlineImages rewrites only
+ *   file-backed rows).
+ * @version 1.15
+ * @changelog 1.15 - composed-copy dedup on every folder pass (specs/
+ *   bugfix_promoted_sent_row_sealing.md): a sealed outbound row's recipient is
+ *   ciphertext, so the (Message-ID, recipient, direction) unique key could never
+ *   dedup a provider-filed copy of a locally-composed send — the All Mail pass
+ *   stored a duplicate, and the Sent pass's unordered LIMIT 1 then promoted it.
+ *   Every pass now dedups by Message-ID alone against the alias's outbound/draft
+ *   rows first, the §9 lookup is ordered composer-copy-first, and a promotion of
+ *   a sealed row records the recipient sealing debt (iem_reseal_pending) for
+ *   PromotedRowRepair to pay in-window.
  * @version 1.14
  * @changelog 1.14 - a Sent-folder message already stored by another pass is
  *   promoted to outbound on the dedup paths, not only when stored fresh: Gmail's
@@ -116,6 +134,13 @@ class ImapIngestor {
 	/** Generous text-body ceiling. Bodies over this are truncated-and-marked,
 	 *  never dropped — the full part is still fetchable on demand like any part. */
 	const TEXT_BODY_CEILING = 2097152; // 2 MB
+
+	/** Per-part ceiling for fetching an inline image's bytes at ingest
+	 *  (specs/bugfix_sealed_inline_images.md). An inline part is body content —
+	 *  the reader renders it inside the HTML — so it is adopted into a File
+	 *  while the connection is open; anything bigger stays a reference like any
+	 *  other attachment. */
+	const INLINE_ADOPT_MAX_BYTES = 5242880; // 5 MB
 
 	/** evl_event value for the run record. */
 	const RUN_EVENT = 'mailbox_imap_ingest';
@@ -1072,6 +1097,14 @@ class ImapIngestor {
 		$plain = $bodyPlainId !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyPlainId) : '';
 		$html  = $bodyHtmlId  !== null ? $this->fetchTextPart($client, $folderName, $uid, $structure, $bodyHtmlId)  : '';
 
+		// …except inline images, which ARE body content: the HTML references
+		// them by cid: and the reader can only render what is file-backed
+		// (specs/bugfix_sealed_inline_images.md). Their bytes are fetched here —
+		// network I/O beside the body fetches, outside the transaction below —
+		// and adopted into Files by the stored half. Best-effort: a failed fetch
+		// leaves the part reference-backed, exactly as it was.
+		$inlineBytes = $this->fetchInlineImageParts($client, $folderName, $uid, $structure, $attachParts);
+
 		// Generous ceiling: truncate-and-mark rather than skip.
 		if (strlen($plain) + strlen($html) > self::TEXT_BODY_CEILING) {
 			$marker = "\n\n[Message body truncated — exceeded the inbound IMAP text-body ceiling. "
@@ -1107,7 +1140,7 @@ class ImapIngestor {
 		try {
 			$outcome = $this->ingestOneStored($folder, $uid, $data, $router,
 				$alias, $domain, $recipient, $serverUidValidity, $recordMembership,
-				$attachParts, $plain, $html, $headers);
+				$attachParts, $plain, $html, $headers, $inlineBytes);
 			if ($owns_tx) {
 				$db->commit();
 			}
@@ -1133,7 +1166,8 @@ class ImapIngestor {
 	 */
 	private function ingestOneStored(InboundImapFolder $folder, $uid, $data, InboundEmailRouter $router,
 			$alias, $domain, $recipient, $serverUidValidity, bool $recordMembership,
-			array $attachParts, string $plain, string $html, array $headers): array {
+			array $attachParts, string $plain, string $html, array $headers,
+			array $inlineBytes = array()): array {
 
 		$folderName = (string)$folder->get('iif_name');
 		$envelope = $data->getEnvelope();
@@ -1153,13 +1187,40 @@ class ImapIngestor {
 			'imap_folder' => $folderName,
 		);
 
+		// Composed-copy dedup (specs/bugfix_promoted_sent_row_sealing.md): a
+		// message this platform composed already exists as an outbound (or
+		// mid-send draft) row, and on a sealed mailbox that row's iem_recipient
+		// is ciphertext — the (Message-ID, recipient, direction) unique key can
+		// structurally never fire against it. So EVERY folder pass dedups by
+		// Message-ID alone against the alias's composed rows before storing —
+		// not just the Sent-role pass: Gmail's All Mail coverage pass meets the
+		// sent message first and used to store its own copy. On a hit: adopt the
+		// locator and this folder's membership onto the composer's copy; no new
+		// row, no promotion needed (the copy is already outbound).
+		//
+		// A self-addressed send is exempt outside the Sent folder: its Inbox /
+		// All Mail appearance is the DELIVERED copy and belongs in the Inbox as
+		// its own inbound row, exactly as it does in the source mailbox.
+		$sentRole = (string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT;
+		if ($sentRole || !$this->envelopeAddressedToSelf($envelope)) {
+			$composedId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id, true);
+			if ($composedId > 0) {
+				$this->adoptLocatorIfMissing($composedId, intval($uid), intval($serverUidValidity), $folderName);
+				if ($recordMembership) {
+					$this->recordFolderMembership($folder, $composedId, intval($uid), intval($serverUidValidity));
+				}
+				return array('dedup' => true, 'message_id' => $composedId);
+			}
+		}
+
 		// §9 Sent dedup: a message in the Sent folder may be one Joinery already
 		// stored as a local outbound row (or a provider-filed copy of it). Its
 		// recipient differs from the alias, so the (Message-ID, recipient) unique
 		// key won't fire — dedup by Message-ID alone against the alias's rows. On a
 		// hit, adopt the locator (so attachments stay fetchable) and attach Sent
-		// membership; no new row.
-		if ((string)$folder->get('iif_role') === InboundImapFolder::ROLE_SENT) {
+		// membership; no new row. (Composed rows were consumed above, so a hit
+		// here is an inbound row — the coverage pass's copy — and gets promoted.)
+		if ($sentRole) {
 			$existingId = $this->aliasMessageIdByMessageId($alias, (string)$envelope->message_id);
 			if ($existingId > 0) {
 				$this->adoptLocatorIfMissing($existingId, intval($uid), intval($serverUidValidity), $folderName);
@@ -1194,6 +1255,11 @@ class ImapIngestor {
 			// transaction that is now a guarantee rather than an assumption — a
 			// half-stored message never commits (D1).
 			$this->writeManifest($messageId, $attachParts);
+			// Inline images fetched by the network half become file-backed rows
+			// now, so the reader's cid: rewrite can serve them
+			// (specs/bugfix_sealed_inline_images.md). Sealing needs only the
+			// owner's PUBLIC key, so this works exactly the same under cron.
+			$this->adoptInlineParts($messageId, $inlineBytes, $router);
 			// A brand-new Sent-folder message is mail the user sent — mark it outbound
 			// so the reader renders it as a sent message (native-client or Gmail
 			// no-local-row path, §9). Self-addressed mail stays inbound (see above).
@@ -1284,16 +1350,29 @@ class ImapIngestor {
 	}
 
 	/** §9: any row in this alias's mailbox with the given Message-ID (any direction/recipient), or 0. */
-	private function aliasMessageIdByMessageId(InboundEmailAlias $alias, string $messageIdHeader): int {
+	private function aliasMessageIdByMessageId(InboundEmailAlias $alias, string $messageIdHeader,
+			bool $composedOnly = false): int {
 		$messageIdHeader = trim($messageIdHeader);
 		if ($messageIdHeader === '' || !$alias->key) {
 			return 0;
 		}
+		// Composer's copy first, deterministically. The old unordered LIMIT 1
+		// could bind the Sent pass's locator + promotion to whichever sibling the
+		// planner returned — in practice a coverage-pass duplicate rather than
+		// the local outbound row (specs/bugfix_promoted_sent_row_sealing.md).
+		// $composedOnly restricts the hit to outbound/draft rows: the directions
+		// where iem_recipient is sealed ciphertext, so the (Message-ID,
+		// recipient, direction) unique key structurally cannot dedup and this
+		// Message-ID-only lookup is the only one that can.
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			'SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
+			"SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages
 			 WHERE iem_iea_inbound_email_alias_id = ? AND iem_message_id_header = ?
-			   AND iem_delete_time IS NULL LIMIT 1');
+			   AND iem_delete_time IS NULL"
+			. ($composedOnly ? " AND iem_direction IN ('outbound', 'draft')" : '')
+			. " ORDER BY CASE iem_direction WHEN 'outbound' THEN 0 WHEN 'draft' THEN 1 ELSE 2 END,
+			   iem_inbound_email_message_id ASC
+			 LIMIT 1");
 		$stmt->execute(array(intval($alias->key), substr($messageIdHeader, 0, 255)));
 		$id = $stmt->fetchColumn();
 		return $id ? intval($id) : 0;
@@ -1326,11 +1405,20 @@ class ImapIngestor {
 	 * holds that key, promoting this row would violate it mid-ingest and wedge
 	 * the folder cursor on a permanent retry, so the promotion quietly stands
 	 * down instead — the sibling already tells the reader the mail was sent.
+	 *
+	 * On a SEALED row the promotion creates a debt: iem_recipient was written in
+	 * the clear when the row was inbound (routing metadata there), but on an
+	 * outbound row the direction guard expects it sealed — and this runs from
+	 * cron, which holds no unlock window and cannot seal under the row's
+	 * existing DEK. iem_reseal_pending marks the debt for PromotedRowRepair to
+	 * pay at the owner's next unlocked visit
+	 * (specs/bugfix_promoted_sent_row_sealing.md).
 	 */
 	private function markDirectionOutbound(int $messageId): void {
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
-			"UPDATE iem_inbound_email_messages m SET iem_direction = 'outbound'
+			"UPDATE iem_inbound_email_messages m SET iem_direction = 'outbound',
+			        iem_reseal_pending = m.iem_content_sealed
 			 WHERE m.iem_inbound_email_message_id = ?
 			   AND m.iem_direction = 'inbound'
 			   AND NOT EXISTS (
@@ -1421,11 +1509,126 @@ class ImapIngestor {
 	}
 
 	/** Persist one ima_ row per non-text part (metadata only, no bytes). */
+	/** The one inline predicate, shared by the manifest write and the ingest-time
+	 *  inline-image fetch so the two can never disagree about which rows the
+	 *  adopted bytes belong to. */
+	private static function partIsInline($part): bool {
+		$cid = $part->getContentId();
+		$disp = $part->getDisposition();
+		return ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+	}
+
+	/**
+	 * Fetch the decoded bytes of every inline image part, keyed by MIME id
+	 * (specs/bugfix_sealed_inline_images.md). Network half only — runs beside
+	 * the body fetches, never inside the store transaction. Best-effort
+	 * throughout: any part that fails, exceeds the ceiling, or is not an image
+	 * is simply absent from the result and stays reference-backed.
+	 */
+	private function fetchInlineImageParts($client, string $folder, int $uid, $structure, array $attachParts): array {
+		$out = array();
+		foreach ($attachParts as $part) {
+			try {
+				if (!self::partIsInline($part)) {
+					continue;
+				}
+				if (strtolower((string)$part->getPrimaryType()) !== 'image') {
+					continue;
+				}
+				// The declared size is the transfer-encoded one — a cheap first
+				// gate; the decoded bytes are re-checked below.
+				if (intval($part->getBytes()) > self::INLINE_ADOPT_MAX_BYTES) {
+					continue;
+				}
+				$mimeId = (string)$part->getMimeId();
+				if ($mimeId === '') {
+					continue;
+				}
+				$fq = new Horde_Imap_Client_Fetch_Query();
+				$fq->bodyPart($mimeId, array('decode' => true, 'peek' => true));
+				$res = $client->fetch($folder, $fq, array('ids' => new Horde_Imap_Client_Ids(array($uid))));
+				$data = $res[$uid] ?? null;
+				if ($data === null) {
+					continue;
+				}
+				$content = $data->getBodyPart($mimeId);
+				if (!$data->getBodyPartDecode($mimeId)) {
+					// Decode via a CLONE: mutating the shared structure part would
+					// change what writeManifest() records for it.
+					$p = clone $part;
+					$p->setContents($content);
+					$content = $p->getContents();
+				}
+				$content = (string)$content;
+				if ($content !== '' && strlen($content) <= self::INLINE_ADOPT_MAX_BYTES) {
+					$out[$mimeId] = $content;
+				}
+			} catch (Throwable $e) {
+				error_log('ImapIngestor: inline image fetch failed for uid ' . intval($uid)
+					. ' part ' . (string)$part->getMimeId() . ': ' . $e->getMessage());
+			}
+		}
+		return $out;
+	}
+
+	/**
+	 * Turn a freshly-manifested message's inline image rows into file-backed
+	 * rows from the bytes the network half fetched. Stored half — runs inside
+	 * the ingest transaction, right after writeManifest(). Failures log and
+	 * leave the row reference-backed; the message itself is never at stake.
+	 */
+	private function adoptInlineParts(int $messageId, array $inlineBytes, InboundEmailRouter $router): void {
+		if ($messageId <= 0 || !count($inlineBytes)) {
+			return;
+		}
+		try {
+			// Fresh from the row: storeExtracted sealed the message AFTER the
+			// insert, so an in-hand model instance may predate the seal columns.
+			$msg = new InboundEmailMessage($messageId, TRUE);
+			if (!$msg->key) {
+				return;
+			}
+			// Seal iff the MESSAGE is sealed, to the owner the message records —
+			// the same rule the custody sweep applies (AttachmentByteCustody).
+			$sealed = (bool)$msg->get('iem_content_sealed');
+			if ($sealed) {
+				$owner_id = InboundEmailMessage::sealedOwnerFor($msg);
+				if ($owner_id === null || $owner_id <= 0) {
+					error_log('ImapIngestor: message ' . $messageId . ' is sealed but names no owner; '
+						. 'its inline images stay reference-backed rather than being stored in the clear.');
+					return;
+				}
+			} else {
+				$alias_id = $msg->get('iem_iea_inbound_email_alias_id');
+				$alias = $alias_id ? new InboundEmailAlias(intval($alias_id), TRUE) : null;
+				$owner_id = $router->attachmentOwnerId($alias);
+			}
+
+			$rows = new MultiInboundMessageAttachment(
+				array('message_id' => $messageId, 'file_backed' => false));
+			foreach ($rows as $att) {
+				$mimeId = (string)$att->get('ima_mime_part');
+				if (!isset($inlineBytes[$mimeId]) || !$att->get('ima_is_inline')) {
+					continue;
+				}
+				try {
+					AttachmentByteCustody::adoptBytes($att, $inlineBytes[$mimeId], $sealed, intval($owner_id));
+				} catch (Throwable $e) {
+					error_log('ImapIngestor: could not adopt inline image part ' . $mimeId
+						. ' on message ' . $messageId . ': ' . $e->getMessage());
+				}
+			}
+		} catch (Throwable $e) {
+			error_log('ImapIngestor: inline image adoption failed for message ' . $messageId
+				. ': ' . $e->getMessage());
+		}
+	}
+
 	private function writeManifest($messageId, array $parts): void {
 		foreach ($parts as $part) {
 			$cid = $part->getContentId();
 			$disp = $part->getDisposition();
-			$isInline = ($disp === 'inline') || ($cid !== null && $cid !== '' && $disp !== 'attachment');
+			$isInline = self::partIsInline($part);
 			InboundMessageAttachment::CreateEntry(array(
 				'ima_iem_inbound_email_message_id' => intval($messageId),
 				'ima_filename'     => $part->getName() ? substr($part->getName(), 0, 500) : null,

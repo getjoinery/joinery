@@ -30,7 +30,9 @@
  * file-backed the moment any path turns up the real bytes — an archive import
  * of the same message adopts them, whichever order the two happened in.
  *
- * @version 1.3
+ * @version 1.4
+ * @changelog 1.4 - ima_adopt_attempt_time, the inline-image backfill's
+ *   retry-with-backoff stamp (specs/bugfix_sealed_inline_images.md).
  * @changelog 1.3 - the adoption upgrade rewrites a few columns on a live row
  *   via SystemBase::updateColumns(), never a full save of a stale object.
  */
@@ -69,6 +71,13 @@ class InboundMessageAttachment extends SystemBase {
 		// columns are sealed. Every reader of the File bytes consults this flag
 		// via InboundEmailMessage::openSealedAttachment().
 		'ima_is_sealed'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+		// Last time the inline-image backfill tried to turn this reference row
+		// file-backed (specs/bugfix_sealed_inline_images.md). NULL = never tried.
+		// The backfill retries a stamped row only after a day, so a part whose
+		// source copy is gone costs one fetch attempt per day, not one per
+		// heartbeat drain. Success needs no clearing — a file-backed row leaves
+		// the backfill's predicate entirely.
+		'ima_adopt_attempt_time' => array('type'=>'timestamp(6)', 'is_nullable'=>true),
 		'ima_create_time'   => array('type'=>'timestamp(6)', 'default'=>'now()'),
 	);
 

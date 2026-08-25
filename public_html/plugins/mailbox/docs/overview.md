@@ -959,6 +959,24 @@ outbound (Sent) copy and the recipient's inbound copy. Messages with no
 Message-ID header are always inserted (NULLs are distinct in Postgres
 unique constraints).
 
+The recipient half of that key is meaningful only where `iem_recipient` holds
+the plain routing address — inbound rows. On a sealed mailbox a composed row's
+recipient is ciphertext (see [Sealed Vault](../../../docs/sealed_vault.md)),
+so the constraint cannot recognize a provider-filed copy of a locally-composed
+send. Every IMAP store path therefore dedups by Message-ID alone against the
+alias's outbound/draft rows before storing (`ImapIngestor::storeMessage`): on
+a hit the composer's copy adopts the IMAP locator and the folder membership,
+and no new row is stored. A self-addressed send is exempt outside the
+Sent-role folder — its Inbox/All Mail appearance is the delivered copy and
+stores as its own inbound row. Where a Sent-folder sighting promotes an
+already-stored inbound row to outbound on a sealed mailbox, the row's
+plaintext recipient becomes a sealing debt (`iem_reseal_pending`), paid
+in-window by the `mailbox_promoted_reseal` deferred-work consumer
+(`PromotedRowRepair`), which also retires an outbound duplicate of a
+composer's copy when one exists: the composer's copy adopts the locator, the
+duplicate is stripped of its remote binding (so the trash push can never
+relocate the provider's copy) and soft-deleted.
+
 ## Attachment & message storage
 
 A stored push message is a **lean record**: the database holds the small, searchable
@@ -979,6 +997,16 @@ file-backed rows, `ima_fil_file_id` pointing at its `File`. Dispatch everywhere 
 | `ima_fil_file_id` set | a private `File` (push mail, lean record) | read the `File` |
 | no `ima_fil_file_id`, driver `remote` | the IMAP source | fetch the part on demand (`ImapIngestor::fetchPart`) |
 | no `ima_fil_file_id`, stored raw | inside the raw (legacy / fallback row) | `getRawMimePart($section)` |
+
+**Inline images are body content and are always file-backed.** The reader's
+cid: rewrite (`MailboxService::resolveInlineImages()`) serves only file-backed
+rows, so the IMAP ingest fetches each inline image part's bytes (5 MB cap)
+beside the body fetches and adopts them at store time
+(`AttachmentByteCustody::adoptBytes()`, sealed iff the message is). Inline
+image rows that are still reference-backed are turned file-backed by the
+`mailbox_inline_backfill` deferred-work consumer (`InlineImageBackfill`) — from
+the IMAP source for `remote` rows, from the stored raw (in-window when sealed)
+otherwise, retried at most daily per part (`ima_adopt_attempt_time`).
 
 **Local bytes win.** A reference is what the platform has when it does not have
 the bytes, so any path that turns up the message's raw bytes for a
