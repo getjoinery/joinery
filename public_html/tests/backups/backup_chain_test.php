@@ -70,6 +70,25 @@ check(BackupChain::should_start_new($fresh, true, 7, 30, '2026-08-08 00:00:01') 
 check(BackupChain::should_start_new($fresh, true, 0, 30, '2030-01-01 00:00:00') === '',
 	'an interval of 0 means never roll on age');
 
+// A chain has one data key, sealed at chain start — a rotated recovery key can
+// only take effect in a NEW chain, so a recipient mismatch ends the current one.
+$sealed = $fresh;
+$sealed['envelope'] = array('recipients' => array(
+	array('kind' => 'recovery', 'fingerprint' => str_repeat('0', 64)),
+	array('kind' => 'site',     'fingerprint' => str_repeat('1', 64)),
+));
+check(BackupChain::should_start_new($sealed, true, 7, 30, '2026-08-03 00:00:00', str_repeat('0', 64)) === '',
+	'a chain sealed to the current recovery key continues');
+check(BackupChain::should_start_new($sealed, true, 7, 30, '2026-08-03 00:00:00', str_repeat('f', 64)) === 'recovery_rotated',
+	'a rotated recovery key ends the chain',
+	var_export(BackupChain::should_start_new($sealed, true, 7, 30, '2026-08-03 00:00:00', str_repeat('f', 64)), true));
+check(BackupChain::should_start_new($sealed, true, 7, 30, '2026-08-03 00:00:00', null) === '',
+	'no fingerprint passed means the recipient rule is not applied');
+check(BackupChain::should_start_new($fresh, true, 7, 30, '2026-08-03 00:00:00', str_repeat('f', 64)) === 'recovery_rotated',
+	'a manifest recording no recovery recipient does not match any current key');
+check(BackupChain::should_start_new($sealed, false, 7, 30, '2026-08-03 00:00:00', str_repeat('f', 64)) === 'snar_lost',
+	'a lost snapshot still outranks the recipient rule (the reason names the first cause)');
+
 $long = $fresh;
 for ($i = 1; $i <= 31; $i++) {
 	$long = BackupChain::add_run($long, $i, 1, array(

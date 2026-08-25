@@ -13,6 +13,12 @@
  * the browser opening it with the private half proves the whole path, storage
  * included. backup_recovery_prove records the result.
  *
+ * rotate=1 replaces a PROVEN key — the deliberate rotation the panel's Actions
+ * menu offers. Without it, saving over a proven key is refused (the accidental
+ * overwrite that refusal exists for). Rotation clears the proof, so nothing
+ * seals to the new key until the same ceremony proves it.
+ *
+ * @version 1.1.0 - rotate param: the panel's rotation action replaces a proven key deliberately
  * @version 1.0.0
  */
 
@@ -25,7 +31,7 @@ function backup_recovery_save_logic(array $input): LogicResult {
 	}
 
 	try {
-		BackupRecoveryKey::set_public_key((string)($input['public_key'] ?? ''));
+		BackupRecoveryKey::set_public_key((string)($input['public_key'] ?? ''), !empty($input['rotate']));
 		return LogicResult::render(array(
 			'challenge'  => BackupRecoveryKey::browser_challenge(),
 			'public_key' => base64_encode(BackupRecoveryKey::parse_public_key()),
@@ -43,6 +49,7 @@ function backup_recovery_save_logic_descriptor(): array {
 		'requires_session' => true,
 		'input'       => [
 			'public_key' => ['type' => 'string', 'required' => true, 'label' => 'Recovery public key (base64)'],
+			'rotate'     => ['type' => 'boolean', 'required' => false, 'label' => 'Replace a proven key (deliberate rotation)'],
 		],
 	];
 }
