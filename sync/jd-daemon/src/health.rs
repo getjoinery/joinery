@@ -206,7 +206,12 @@ fn unsettled(entries: &BTreeMap<String, usize>) -> usize {
         .filter(|(state, _)| {
             !matches!(
                 state.as_str(),
-                "synced" | "out_of_scope" | "unsyncable" | "pending_key"
+                // Every state here is one the engine has deliberately stopped
+                // acting on. `unreadable` is the newest: bytes proven not to
+                // open, which no amount of waiting improves. The user still
+                // hears about it — it raises an issue, and an issue outranks
+                // Working — but it is not work in progress.
+                "synced" | "out_of_scope" | "unsyncable" | "pending_key" | "unreadable"
             )
         })
         .map(|(_, n)| *n)

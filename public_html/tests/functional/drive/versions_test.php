@@ -32,6 +32,34 @@ function head_blob($file_id) {
 	return (int)$f->get('fil_fbb_file_blob_id');
 }
 
+/**
+ * A blob's declared reference count next to the rows that actually reference it.
+ *
+ * The whole point of the count is to answer "may these bytes go?", and only two
+ * kinds of row ever hold one: the head on fil_files, and a version row. So the
+ * count is either exactly the number of those rows or it is wrong, and wrong in
+ * either direction costs something real -- too high and the bytes are pinned for
+ * good, still charged to the owner and reachable by nobody; too low and they are
+ * deleted out from under a row that still points at them.
+ */
+function blob_ledger($blob_id) {
+	$dblink = DbConnector::get_instance()->get_db_link();
+	$q = $dblink->prepare(
+		'SELECT b.fbb_reference_count,
+		        (SELECT COUNT(*) FROM fil_files f WHERE f.fil_fbb_file_blob_id = b.fbb_file_blob_id)
+		      + (SELECT COUNT(*) FROM fvr_file_versions v WHERE v.fvr_fbb_file_blob_id = b.fbb_file_blob_id)
+		   FROM fbb_file_blobs b WHERE b.fbb_file_blob_id = ?');
+	$q->execute(array((int)$blob_id));
+	$r = $q->fetch(PDO::FETCH_NUM);
+	return $r ? array('count' => (int)$r[0], 'referrers' => (int)$r[1]) : null;
+}
+function check_ledger($blob_id, $what) {
+	$l = blob_ledger($blob_id);
+	if ($l === null) { check(true, "$what: blob $blob_id is gone (nothing referenced it)"); return; }
+	check($l['count'] === $l['referrers'],
+		"$what: blob $blob_id counted " . $l['count'] . ', referenced by ' . $l['referrers']);
+}
+
 $made_files = array();
 harness_defer(function () use (&$made_files) {
 	foreach ($made_files as $fid) {
@@ -320,5 +348,91 @@ WORKER;
 	check(count($stranded) === 0, 'race: no blob that was demoted is left referenced by nothing'
 		. (count($stranded) ? ' (stranded: ' . implode(',', $stranded) . ')' : ''));
 }
+
+// ---------------------------------------------------------------------------
+section('a blob is counted exactly once for every row that references it');
+
+// Saving content the file ALREADY has is the case worth walking. Every ingest
+// path dedups, so the "new" blob handed to save_new_content can be the very blob
+// the file is already pointing at -- and then the two halves of its bookkeeping,
+// "the version takes over the head's reference" and "the new head arrives with
+// its own", are talking about one reference, not two.
+$lfile = File::createFromBytes('same-' . bin2hex(random_bytes(6)), 'same.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $lfile->key;
+$lb = (int)$lfile->get('fil_fbb_file_blob_id');
+check_ledger($lb, 'a fresh file');
+
+$same_bytes = 'identical-' . bin2hex(random_bytes(10));
+$lfile2 = File::createFromBytes($same_bytes, 'twin.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $lfile2->key;
+$shared = (int)$lfile2->get('fil_fbb_file_blob_id');
+check_ledger($shared, 'a second file on its own blob');
+
+// Now save those same bytes as a new version of the first file. Whether this
+// dedups onto $shared or mints a fresh blob, the ledger has to add up.
+$dup = make_blob($same_bytes);
+FileVersion::save_new_content($lfile, $dup, $user->key);
+check_ledger((int)$dup->key, 'after saving content another file already holds');
+check_ledger($lb, 'the demoted head');
+
+// And the sharpest one: save the file the very bytes it is already holding.
+$echo_bytes = 'echo-' . bin2hex(random_bytes(10));
+$efile = File::createFromBytes($echo_bytes, 'echo.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $efile->key;
+$eb = (int)$efile->get('fil_fbb_file_blob_id');
+$again = make_blob($echo_bytes);
+FileVersion::save_new_content($efile, $again, $user->key);
+check_ledger($eb, 'after saving a file the bytes it already had');
+check_ledger((int)$again->key, 'and the blob that came back from the ingest');
+
+// A restore puts a past version back at the head and consumes its row.
+$rfile = File::createFromBytes('r1-' . bin2hex(random_bytes(6)), 'restore.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$made_files[] = $rfile->key;
+$rb1 = (int)$rfile->get('fil_fbb_file_blob_id');
+$rb2 = make_blob('r2-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content($rfile, $rb2, $user->key);
+$vm = new MultiFileVersion(array('file_id' => $rfile->key));
+$oldest = null;
+foreach ($vm as $v) { $oldest = $v; }
+if ($oldest) {
+	FileVersion::restore_version(new File((int)$rfile->key, true), $oldest, $user->key);
+	check_ledger($rb1, 'after restoring an earlier version');
+	check_ledger((int)$rb2->key, 'and the head it displaced');
+} else {
+	check(false, 'a version row to restore should exist');
+}
+
+// ---------------------------------------------------------------------------
+section('a delete lets go of the head the file has, not the one it was loaded with');
+
+// permanent_delete reads the head from whatever the caller loaded, and a file
+// object can be minutes old by the time somebody deletes it. If a new version
+// landed in between, that in-memory head is the blob a VERSION row now holds --
+// so the delete releases a reference belonging to a row it is not deleting, and
+// never releases the head it is. One blob goes down twice, the other never goes
+// down at all: pinned bytes nobody can reach, and counted bytes something still
+// points at.
+//
+// Written with a stale copy rather than real threads because staleness is the
+// whole defect -- the race only decides how likely it is.
+$sfile = File::createFromBytes('stale-' . bin2hex(random_bytes(6)), 'stale.txt', 'text/plain', $user->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$sfile_id = (int)$sfile->key;
+$old_head = (int)$sfile->get('fil_fbb_file_blob_id');
+
+$stale_copy = new File($sfile_id, true);          // holds $old_head
+
+$new_head = make_blob('newhead-' . bin2hex(random_bytes(20)));
+FileVersion::save_new_content(new File($sfile_id, true), $new_head, $user->key);
+check(head_blob($sfile_id) === (int)$new_head->key, 'the head advanced while the copy was held');
+
+$stale_copy->permanent_delete();
+
+check_ledger($old_head, 'the blob the stale copy was pointing at');
+check_ledger((int)$new_head->key, 'the blob that was actually the head');
 
 harness_finish();

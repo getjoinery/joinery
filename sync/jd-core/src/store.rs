@@ -24,6 +24,7 @@
 //! it describes would mean syncing it, which means two devices overwriting each
 //! other's idea of the truth.
 
+use std::collections::HashSet;
 use std::path::Path;
 
 use rusqlite::{params, Connection, OptionalExtension};
@@ -32,6 +33,22 @@ use crate::model::{ContentId, EntityId, EntityType, Entry, LocalStatus, Placemen
 
 /// Bumped when the schema changes in a way an older engine could misread.
 pub const SCHEMA_VERSION: i64 = 4;
+
+/// What makes a written-off note apply *right now*, as one SQL predicate over
+/// `entries e` joined to `unreadable u`.
+///
+/// Defined once because two places ask it and they must never drift: the pass
+/// loop, which decides whether to stop planning work, and the status histogram,
+/// which decides what the device tells the user it is doing. If those two
+/// disagree the engine goes quiet while the tray keeps reporting the file as
+/// still on its way — the same disease the note exists to cure, measured with a
+/// different instrument.
+///
+/// `IS` rather than `=` for the key: it is null-safe in SQLite, and a plaintext
+/// file has no wrapped key at all.
+const STILL_WRITTEN_OFF: &str = "u.sha256 = e.remote_content_sha256 \
+     AND u.size = e.remote_size \
+     AND u.wrapped_file_key IS e.wrapped_file_key";
 
 #[derive(Debug, thiserror::Error)]
 pub enum StoreError {
@@ -202,6 +219,34 @@ impl Store {
                 -- `cached_hash`.
                 cached_at_ns INTEGER,
                 PRIMARY KEY (file_id, size, mtime_ns)
+            );
+
+            -- Server bytes this device has already proven it cannot turn into
+            -- the file: ciphertext that arrived exactly as the server said it
+            -- would and still failed its authentication tag.
+            --
+            -- Kept beside the agreement rather than in it. An entry's status
+            -- says how the file is materialized here, and every status that
+            -- means "parked" is recomputed each pass from names and keys — so a
+            -- reason grounded in bytes would be erased by the next pass and the
+            -- download planned all over again. This is not a state to hold; it
+            -- is a note about one specific artifact that did not work.
+            --
+            -- Both of the things that could make it work again are recorded, so
+            -- the note stops applying by itself the moment either changes: the
+            -- content (the server was given better bytes) and the wrapped key
+            -- (a correct grant arrived to replace a stale one). No expiry, no
+            -- lifting logic, nothing to forget to clear. The wrapped key is
+            -- already stored in `entries` in this same file, so naming it here
+            -- puts nothing new on disk.
+            CREATE TABLE IF NOT EXISTS unreadable (
+                entity_type      TEXT NOT NULL,
+                server_id        INTEGER NOT NULL,
+                sha256           TEXT NOT NULL,
+                size             INTEGER NOT NULL,
+                wrapped_file_key TEXT,
+                noticed_at       INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (entity_type, server_id)
             );
 
             CREATE TABLE IF NOT EXISTS issues (
@@ -595,6 +640,10 @@ impl Store {
                     params![t, id.server_id],
                 )?;
                 self.conn.execute(
+                    "DELETE FROM unreadable WHERE entity_type = ?1 AND server_id = ?2",
+                    params![t, id.server_id],
+                )?;
+                self.conn.execute(
                     "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
                     params![t, id.server_id],
                 )?;
@@ -614,6 +663,10 @@ impl Store {
     }
 
     pub fn delete_entry(&self, id: EntityId) -> StoreResult<()> {
+        // The note about unreadable bytes goes with it. A server id is reused by
+        // nobody, but a row for an entity that no longer exists is a row that
+        // never gets looked at again and never gets removed either.
+        self.clear_unreadable(id)?;
         self.conn.execute(
             "DELETE FROM entries WHERE entity_type = ?1 AND server_id = ?2",
             params![id.entity_type.to_string(), id.server_id],
@@ -747,9 +800,21 @@ impl Store {
     /// shows work in flight forever, which is the same as showing nothing at
     /// all, because a user learns to ignore it.
     pub fn status_counts(&self) -> StoreResult<Vec<(String, usize)>> {
-        let mut stmt = self
-            .conn
-            .prepare("SELECT local_status, COUNT(*) FROM entries GROUP BY local_status")?;
+        // A written-off entry is reported as what it actually is, not as the
+        // download it is no longer waiting for. Left in the `pending_download`
+        // bucket it would read to every shell -- and to the soak rig's
+        // convergence oracle -- as a device still working on something it has
+        // deliberately stopped touching.
+        let sql = format!(
+            "SELECT CASE WHEN u.server_id IS NOT NULL AND {STILL_WRITTEN_OFF}
+                         THEN 'unreadable' ELSE e.local_status END AS bucket,
+                    COUNT(*)
+               FROM entries e
+               LEFT JOIN unreadable u
+                      ON u.entity_type = e.entity_type AND u.server_id = e.server_id
+              GROUP BY bucket"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
         let rows = stmt.query_map([], |r| {
             Ok((r.get::<_, String>(0)?, r.get::<_, i64>(1)? as usize))
         })?;
@@ -1067,6 +1132,74 @@ impl Store {
     /// changed detail is a changed situation and does get through. A dismissed
     /// issue is not matched: if the user waved it away and it happened again,
     /// they should hear about it again.
+    /// Remember that these exact server bytes, under this exact key, could not
+    /// be opened here.
+    ///
+    /// One row per entity: a later failure replaces an earlier one rather than
+    /// piling up, because only the current content can be the thing standing in
+    /// the way.
+    pub fn mark_unreadable(
+        &self,
+        entity: EntityId,
+        content: &ContentId,
+        wrapped_file_key: Option<&str>,
+        now: i64,
+    ) -> StoreResult<()> {
+        self.conn.execute(
+            "INSERT INTO unreadable (entity_type, server_id, sha256, size, wrapped_file_key, noticed_at)
+             VALUES (?1,?2,?3,?4,?5,?6)
+             ON CONFLICT(entity_type, server_id) DO UPDATE SET
+                sha256 = excluded.sha256,
+                size = excluded.size,
+                wrapped_file_key = excluded.wrapped_file_key,
+                noticed_at = excluded.noticed_at",
+            params![
+                entity.entity_type.to_string(),
+                entity.server_id,
+                content.sha256,
+                content.size as i64,
+                wrapped_file_key,
+                now
+            ],
+        )?;
+        Ok(())
+    }
+
+    /// Everything written off **as of now**: an entry whose note was taken
+    /// against the content it still has, under the key it still holds.
+    ///
+    /// Read once per pass and compared in memory, the same way open ops are, so
+    /// deciding about a thousand entries stays one query rather than a thousand.
+    pub fn written_off_now(&self) -> StoreResult<HashSet<EntityId>> {
+        let sql = format!(
+            "SELECT e.entity_type, e.server_id
+               FROM entries e
+               JOIN unreadable u ON u.entity_type = e.entity_type AND u.server_id = e.server_id
+              WHERE {STILL_WRITTEN_OFF}"
+        );
+        let mut stmt = self.conn.prepare(&sql)?;
+        let rows = stmt.query_map([], |r| {
+            Ok(EntityId {
+                entity_type: parse_entity_type(&r.get::<_, String>(0)?),
+                server_id: r.get(1)?,
+            })
+        })?;
+        let mut out = HashSet::new();
+        for row in rows {
+            out.insert(row?);
+        }
+        Ok(out)
+    }
+
+    /// Drop the note, for when the file is forgotten entirely.
+    pub fn clear_unreadable(&self, entity: EntityId) -> StoreResult<()> {
+        self.conn.execute(
+            "DELETE FROM unreadable WHERE entity_type = ?1 AND server_id = ?2",
+            params![entity.entity_type.to_string(), entity.server_id],
+        )?;
+        Ok(())
+    }
+
     pub fn raise_issue(
         &self,
         entity: Option<EntityId>,

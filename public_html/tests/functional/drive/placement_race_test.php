@@ -32,7 +32,7 @@
  * A build without the placement lock leaves a live file under a trashed folder
  * and fails the invariant below.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 if (php_sapi_name() !== 'cli') { echo "This test must be run from the command line.\n"; exit(1); }
@@ -386,5 +386,190 @@ check(($rDead->data['reason'] ?? '') === 'file_trashed', 'a new version of a tra
 $fv = new File($file_v, true);
 check($fv->key && $fv->get('fil_delete_time') !== null && $fv->get('fil_delete_time') !== '',
 	'and the file is still in the trash, holding no new bytes');
+
+// ---------------------------------------------------------------------------
+section('the dedup short-circuit is held against the trash like every other placement');
+
+// `drive_upload_init` answers immediately when the server already holds bytes
+// with this hash: it creates the file there and then, and never reaches
+// `drive_upload_complete`. That made it the one placement verb the lock was not
+// fitted to, and its window is just as real -- the destination is read at the
+// top, then the dedup lookup and the sibling-name check run before the row
+// lands.
+//
+// Soak run 229 found it. Folder 51153 was trashed at 11:12:21.471366 and its
+// children swept at .479, .485 and .492; this file was created at .490591,
+// between the second sweep and the third, and stayed live under a folder
+// nothing lists. Device-a raised `store_inconsistent`, waited for a parent it
+// would never be told about, and failed convergence for the rest of the run.
+
+$init_worker_src = <<<'IWORKER'
+<?php
+$root = '__ROOT__';
+require_once($root . '/includes/PathHelper.php');
+require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+require_once(PathHelper::getIncludePath('includes/SessionControl.php'));
+require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
+require_once(PathHelper::getIncludePath('includes/LogicResult.php'));
+require_once(PathHelper::getIncludePath('includes/DriveHelper.php'));
+require_once(PathHelper::getIncludePath('data/users_class.php'));
+require_once(PathHelper::getIncludePath('data/files_class.php'));
+require_once(PathHelper::getIncludePath('data/folders_class.php'));
+require_once(PathHelper::getIncludePath('data/file_uploads_class.php'));
+require_once(PathHelper::getIncludePath('data/file_changes_class.php'));
+require_once(PathHelper::getIncludePath('data/drive_usage_class.php'));
+require_once(PathHelper::getIncludePath('data/subscription_tiers_class.php'));
+require_once(PathHelper::getIncludePath('logic/drive_upload_init_logic.php'));
+
+$user_id   = (int)($argv[1] ?? 0);
+$folder_id = (int)($argv[2] ?? 0);
+$sha256    = (string)($argv[3] ?? '');
+$size      = (int)($argv[4] ?? 0);
+$name      = (string)($argv[5] ?? 'deduped.bin');
+
+SessionControl::get_instance()->set_api_user($user_id);
+try {
+	$r = drive_upload_init_logic(array(
+		'name'       => $name,
+		'folder_id'  => $folder_id,
+		'size_bytes' => $size,
+		'sha256'     => $sha256,
+	));
+} catch (Throwable $e) {
+	echo "RESULT:THREW:" . get_class($e) . ':' . $e->getMessage() . "\n";
+	exit(0);
+}
+if ($r->error !== null) {
+	echo "RESULT:REFUSED:" . ($r->data['reason'] ?? '-') . ':' . (int)($r->data['folder_id'] ?? 0) . ':' . $r->error . "\n";
+} elseif (!empty($r->data['deduped'])) {
+	echo "RESULT:CREATED:" . (int)($r->data['file']['id'] ?? 0) . "\n";
+} else {
+	echo "RESULT:NODEDUP:" . (string)($r->data['upload_token'] ?? '-') . "\n";
+}
+IWORKER;
+
+$init_worker_src = str_replace('__ROOT__', PathHelper::getRootDir(), $init_worker_src);
+$init_worker_path = tempnam(sys_get_temp_dir(), 'dpi_') . '.php';
+file_put_contents($init_worker_path, $init_worker_src);
+@chmod($init_worker_path, 0666);
+harness_defer(function () use ($init_worker_path) { @unlink($init_worker_path); });
+
+// Bytes the server already holds, so the second attempt takes the short-circuit
+// rather than staging an upload.
+$dedup_body = random_bytes(7000);
+$dedup_sha  = hash('sha256', $dedup_body);
+
+$rSeedF = drive_folder_create_logic(array('name' => 'Dedup Source ' . bin2hex(random_bytes(3))));
+$seed_folder = (int)($rSeedF->data['folder']['id'] ?? 0);
+if ($seed_folder) { $made_folders[] = $seed_folder; }
+
+$seed_token = race_staged_upload('dedup-seed.bin', $seed_folder, $dedup_body);
+$outSeed = '';
+if ($seed_token) {
+	$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+	$env = $_ENV; $env['PATH'] = getenv('PATH');
+	$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($worker_path)
+		. ' ' . $owner_id . ' ' . escapeshellarg((string)$seed_token);
+	$proc = proc_open($cmd, $descriptors, $pipes, null, $env);
+	if (is_resource($proc)) {
+		$outSeed = stream_get_contents($pipes[1]);
+		fclose($pipes[1]); fclose($pipes[2]); proc_close($proc);
+	}
+}
+check(preg_match('/RESULT:CREATED:(\d+)/', $outSeed, $mSeed) === 1,
+	'the server holds a blob for these bytes', trim($outSeed));
+if (!empty($mSeed[1])) { $made_files[] = (int)$mSeed[1]; }
+
+$rF4 = drive_folder_create_logic(array('name' => 'Dedup Target ' . bin2hex(random_bytes(3))));
+$folder4 = (int)($rF4->data['folder']['id'] ?? 0);
+if ($folder4) { $made_folders[] = $folder4; }
+
+check(race_unreachable_count($owner_id) === 0, 'no live file sits under a trashed folder before the dedup race');
+
+// The window, made deterministic: this process holds the destination's
+// placement lock, so a worker that asks for it is provably past the top check
+// and stopped at the write. A build without the guard never asks -- it creates
+// the file on the spot -- which is exactly what the checks below separate.
+$dblink->prepare("SELECT pg_advisory_lock(?, ?)")->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+
+$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+$env = $_ENV; $env['PATH'] = getenv('PATH');
+$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($init_worker_path)
+	. ' ' . $owner_id . ' ' . $folder4 . ' ' . escapeshellarg($dedup_sha)
+	. ' ' . strlen($dedup_body) . ' ' . escapeshellarg('deduped-in-flight.bin');
+$procD = proc_open($cmd, $descriptors, $pipesD, null, $env);
+
+$arrivedD = false;
+if (is_resource($procD)) {
+	$waitingD = $dblink->prepare(
+		"SELECT count(*) FROM pg_locks
+		  WHERE locktype = 'advisory' AND classid = ? AND objid = ? AND NOT granted");
+	$deadlineD = microtime(true) + 30.0;
+	while (microtime(true) < $deadlineD) {
+		$waitingD->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+		if ((int)$waitingD->fetchColumn() > 0) { $arrivedD = true; break; }
+		usleep(20000);
+	}
+}
+
+// Trashed while the worker is held. The cascade takes this same lock, and an
+// advisory lock is re-entrant within one session, so it runs straight through
+// on this connection and leaves the original hold in place.
+drive_trash_logic(array('entity_type' => 'folder', 'entity_id' => $folder4));
+$dblink->prepare("SELECT pg_advisory_unlock(?, ?)")->execute(array(DriveHelper::PLACEMENT_LOCK_CLASS, $folder4));
+
+$outD = '';
+if (is_resource($procD)) {
+	$outD = stream_get_contents($pipesD[1]);
+	fclose($pipesD[1]);
+	$errD = stream_get_contents($pipesD[2]);
+	fclose($pipesD[2]);
+	proc_close($procD);
+	if (trim($errD) !== '' && strpos($outD, 'RESULT:') === false) {
+		$outD .= ' | stderr: ' . trim(substr($errD, 0, 300));
+	}
+}
+if (preg_match('/RESULT:CREATED:(\d+)/', $outD, $mD)) { $made_files[] = (int)$mD[1]; }
+
+check($arrivedD, 'the dedup short-circuit asked for the destination lock before writing',
+	'no waiter appeared on the placement lock, so the write was never held: ' . trim($outD));
+
+check(strpos($outD, 'RESULT:REFUSED:parent_trashed:' . $folder4 . ':') !== false,
+	'and it refuses as parent_trashed once the destination has gone to the trash',
+	trim($outD));
+
+// Kept as the statement of what all this is for, but it is NOT the check that
+// bites: without the guard the worker finishes before the trash is even asked
+// for, so its file lands in a folder that is still live and the cascade sweeps
+// it like any other child. The two checks above are the ones that fail -- a
+// build with no lock never appears as a waiter, and answers CREATED where this
+// one answers parent_trashed.
+$strandedD = race_unreachable_count($owner_id);
+check($strandedD === 0,
+	'the dedup short-circuit did not land a live file under the trashed folder',
+	'live files under a trashed folder: ' . $strandedD . ' | worker said: ' . trim($outD));
+
+// ---------------------------------------------------------------------------
+section('the dedup short-circuit into a folder nobody trashed still lands');
+
+$rF5 = drive_folder_create_logic(array('name' => 'Dedup Control ' . bin2hex(random_bytes(3))));
+$folder5 = (int)($rF5->data['folder']['id'] ?? 0);
+if ($folder5) { $made_folders[] = $folder5; }
+
+$descriptors = array(1 => array('pipe', 'w'), 2 => array('pipe', 'w'));
+$env = $_ENV; $env['PATH'] = getenv('PATH');
+$cmd = escapeshellarg(PHP_BINARY) . ' ' . escapeshellarg($init_worker_path)
+	. ' ' . $owner_id . ' ' . $folder5 . ' ' . escapeshellarg($dedup_sha)
+	. ' ' . strlen($dedup_body) . ' ' . escapeshellarg('deduped-normally.bin');
+$procC = proc_open($cmd, $descriptors, $pipesC, null, $env);
+$outC = '';
+if (is_resource($procC)) {
+	$outC = stream_get_contents($pipesC[1]);
+	fclose($pipesC[1]); fclose($pipesC[2]); proc_close($procC);
+}
+check(preg_match('/RESULT:CREATED:(\d+)/', $outC, $mC) === 1,
+	'the short-circuit still creates the file when the destination stays live', trim($outC));
+if (!empty($mC[1])) { $made_files[] = (int)$mC[1]; }
 
 harness_finish();

@@ -294,6 +294,7 @@ pub fn run_pass(
     // would queue a second operation doing the same job, once per pass, for as
     // long as the first one kept failing.
     let busy = env.store.entities_with_open_ops()?;
+    let written_off = env.store.written_off_now()?;
 
     for entry in all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || busy.contains(&entry.id) {
@@ -315,6 +316,21 @@ pub fn run_pass(
         // through, so a file that goes away while its key is outstanding does
         // not sit here forever.
         if entry.status == LocalStatus::PendingKey && !entry.remote_deleted {
+            continue;
+        }
+        // Bytes this device has already proven it cannot open: they arrived
+        // exactly as the server described them and still failed their
+        // authentication tag, so fetching the same bytes with the same key can
+        // only fail the same way. Planning the download again is how a device
+        // stays busy for ever over one damaged file, reporting nothing but
+        // "decryption failed" and never going quiet.
+        //
+        // Nothing here is permanent. The note names the content and the key it
+        // was proven against, so better bytes or a corrected grant lift it with
+        // no lifting logic to run. A remote delete still gets through, exactly
+        // as it does for the two skips above, so a file thrown away while it
+        // was unreadable is still cleaned up.
+        if !entry.remote_deleted && written_off.contains(&entry.id) {
             continue;
         }
 
