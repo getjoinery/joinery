@@ -735,6 +735,15 @@ struct Arrived {
     plain: ContentId,
 }
 
+/// A download that did not survive its own container.
+struct Damaged {
+    why: String,
+    /// What actually arrived, measured the way the *server* measures it. This is
+    /// the arbiter: compared against what the server said it was sending, it
+    /// says whether the bytes were spoiled in transit or handed over spoiled.
+    cipher: ContentId,
+}
+
 impl<'a> Arrival<'a> {
     fn plain(spool: &'a mut dyn Write) -> Arrival<'a> {
         Arrival {
@@ -771,23 +780,36 @@ impl<'a> Arrival<'a> {
     }
 
     /// Close the container and report both identities.
-    fn finish(self) -> Result<Arrived, String> {
+    ///
+    /// A failure reports what arrived as well as what went wrong. Without it the
+    /// caller cannot tell a transfer that was damaged on the way from bytes that
+    /// were already wrong when the server handed them over, and those two need
+    /// opposite answers: one is worth another go, the other never will be.
+    fn finish(self) -> Result<Arrived, Damaged> {
+        let cipher = ContentId {
+            sha256: hex(&self.cipher_hasher.finalize()),
+            size: self.cipher_written,
+        };
         if let Some(fault) = self.fault {
-            return Err(fault);
+            return Err(Damaged { why: fault, cipher });
         }
-        let cipher_sha = hex(&self.cipher_hasher.finalize());
         let landing = match self.sink {
             ArrivalSink::Plain(landing) => landing,
             // Errors here are the ones only the end can see: a container that
             // stopped mid-block, or no chunks at all where an empty file would
             // still have one.
-            ArrivalSink::Encrypted(dec) => dec.finish().map_err(|e| e.to_string())?.0,
+            ArrivalSink::Encrypted(dec) => match dec.finish() {
+                Ok(l) => l.0,
+                Err(e) => {
+                    return Err(Damaged {
+                        why: e.to_string(),
+                        cipher,
+                    })
+                }
+            },
         };
         Ok(Arrived {
-            cipher: ContentId {
-                sha256: cipher_sha,
-                size: self.cipher_written,
-            },
+            cipher,
             plain: ContentId {
                 sha256: hex(&landing.hasher.finalize()),
                 size: landing.written,
@@ -800,13 +822,26 @@ impl<'a> Write for Arrival<'a> {
     fn write(&mut self, buf: &[u8]) -> std::io::Result<usize> {
         self.cipher_hasher.update(buf);
         self.cipher_written += buf.len() as u64;
+        if self.fault.is_some() {
+            // The container is already broken and nothing more will be kept.
+            // The rest of the stream is still taken in, purely to finish
+            // measuring what the server actually sent: a partial hash cannot be
+            // compared with what was advertised, and that comparison is the only
+            // thing that separates bytes spoiled on the way here from bytes that
+            // were spoiled before they left. Give that up and the choice is
+            // between retrying something hopeless for ever and abandoning a file
+            // that one more attempt would have fetched perfectly.
+            return Ok(buf.len());
+        }
         match &mut self.sink {
             ArrivalSink::Plain(landing) => landing.write_all(buf)?,
             ArrivalSink::Encrypted(dec) => {
                 if let Err(e) = dec.push(buf) {
-                    let text = e.to_string();
-                    self.fault = Some(text.clone());
-                    return Err(std::io::Error::other(text));
+                    // Recorded, not returned. Handed back as an io error this
+                    // reads to the caller as a transfer that broke — the one
+                    // thing it is not — and gets retried on that footing for
+                    // ever. `finish` reports it as what it is.
+                    self.fault = Some(e.to_string());
                 }
             }
         }
@@ -871,6 +906,15 @@ impl std::io::Seek for Source<'_> {
 /// arrived and settled and is not going to move. Free has to mean free on both
 /// sides — a disk this rescue can land on, and a name the server has not
 /// already given away.
+/// Is this path completely empty — no file AND no directory?
+///
+/// `fingerprint` alone cannot answer it: it returns `None` for a directory
+/// exactly as it does for an empty spot, so "no file here" has been read as
+/// "nothing here" at more than one place that then wrote into an occupied path.
+fn nothing_at(env: &ExecEnv, path: &std::path::Path) -> Result<bool, ExecError> {
+    Ok(env.vfs.fingerprint(path)?.is_none() && env.vfs.read_dir(path).is_err())
+}
+
 fn free_conflict_path(
     env: &ExecEnv,
     beside: &std::path::Path,
@@ -885,7 +929,16 @@ fn free_conflict_path(
             continue;
         }
         let candidate = beside.with_file_name(&candidate_name);
-        if env.vfs.fingerprint(&candidate)?.is_none() {
+        // Free means NOTHING is there, not "no file is there". `fingerprint`
+        // answers `None` for a directory exactly as it does for an empty spot,
+        // so a conflict name already held by a folder read as available and the
+        // suffix never advanced past it. For a file the search works and the rig
+        // shows the proof -- `slot-1 (conflicted copy ...) 3.dat` -- while a
+        // second folder conflict at one name on one day picked the same name
+        // every time, and `rename` onto a non-empty directory is `ENOTEMPTY` on
+        // every real filesystem. The operation failed, was retried, and got the
+        // same answer for as long as it kept asking.
+        if nothing_at(env, &candidate)? {
             return Ok(candidate);
         }
     }
@@ -1111,15 +1164,36 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 
     let arrived = match landing.finish() {
         Ok(a) => a,
-        Err(why) => {
-            // Ciphertext that did not authenticate. Never committed, and worth
-            // saying out loud rather than retrying quietly forever: bytes that
-            // fail their tag are either corrupt in storage or altered in
-            // transit, and both are things a person should hear about.
+        Err(damaged) => {
+            // Ciphertext that did not authenticate. Never committed either way;
+            // what is left is to work out whether another attempt could do any
+            // better, and the bytes themselves answer that.
             spool.discard();
-            env.store
-                .raise_issue(Some(op.entity), "ciphertext", &why, (env.now_ms)() as i64)?;
-            return Ok(OpOutcome::Retry(why));
+            if damaged.cipher.size != want_size || damaged.cipher.sha256 != want_sha {
+                // Not what the server set out to send. Something between there
+                // and here spoiled it, which is an ordinary transfer failure and
+                // is treated as one: no issue raised, because the next attempt
+                // very likely succeeds and nobody needs to hear about a retry.
+                let got = damaged.cipher.size;
+                return Ok(OpOutcome::Retry(format!(
+                    "what arrived does not match what was asked for ({got} of {want_size} bytes)"
+                )));
+            }
+            // Byte for byte what the server meant to hand over, and it still
+            // will not open. Fetching it again gets the same bytes and opens
+            // them with the same key, so retrying is not patience — it is a
+            // device that never goes quiet, reporting only "decryption failed"
+            // for as long as it runs.
+            //
+            // Written off against this content and this key, so the moment
+            // either changes the file is picked back up on its own.
+            env.store.mark_unreadable(
+                op.entity,
+                &damaged.cipher,
+                entry.wrapped_file_key.as_deref(),
+                (env.now_ms)() as i64,
+            )?;
+            return Ok(OpOutcome::Withdrawn(damaged.why));
         }
     };
 
@@ -2457,6 +2531,32 @@ fn move_remote(
 /// wins — and the file is still sitting wherever this computer's user put it.
 /// Looking only at the agreed path finds nothing, and the move then fails every
 /// round forever, because nothing about that situation changes on its own.
+/// Is this kind of thing standing at that path?
+///
+/// `fingerprint` answers only for a regular FILE: handed a directory it returns
+/// `None`, which is indistinguishable from "there is nothing here". So every
+/// question of the form "is it there?" asked about something that might be a
+/// folder has to be asked by kind, or it gets a confident no about a directory
+/// that is plainly on disk -- and the caller then acts on a lie.
+///
+/// Two of those lies lived in `move_local`. Choosing between a planned and an
+/// agreed starting point tested both candidates with `fingerprint`, so for a
+/// folder both tests were dead and the planned path was always taken, blindly,
+/// which is the thing that choice exists to avoid. And the replay guard below
+/// -- already at the destination, so the move landed and only the answer was
+/// lost -- was dead for the same reason, which turned a repeated folder move
+/// into an error that no amount of retrying could ever clear.
+fn is_at(
+    env: &ExecEnv,
+    kind: EntityType,
+    path: &std::path::Path,
+) -> Result<bool, ExecError> {
+    Ok(match kind {
+        EntityType::File => env.vfs.fingerprint(path)?.is_some(),
+        EntityType::Folder => env.vfs.read_dir(path).is_ok(),
+    })
+}
+
 fn move_local(
     env: &ExecEnv,
     op: &Op,
@@ -2479,8 +2579,8 @@ fn move_local(
     let planned_at = planned.as_ref().and_then(Placed::path).cloned();
     let agreed_at = agreed.path().cloned();
     let from = match (planned_at, agreed_at) {
-        (Some(p), _) if env.vfs.fingerprint(&p)?.is_some() => p,
-        (_, Some(a)) if env.vfs.fingerprint(&a)?.is_some() => a,
+        (Some(p), _) if is_at(env, op.entity.entity_type, &p)? => p,
+        (_, Some(a)) if is_at(env, op.entity.entity_type, &a)? => a,
         (Some(p), _) => p,
         (_, Some(a)) => a,
         // Neither candidate can be placed, so say which condition stopped us.
@@ -2549,7 +2649,21 @@ fn move_local(
         Placed::At(p) => p,
         Placed::Not(why) => return Ok(why.outcome()),
     };
-    if from != dest {
+    // Has this already happened, with only the answer lost? Ask before touching
+    // anything. `make_room` is about to treat whatever stands at the destination
+    // as an impostor and move it aside, and for a folder it has no way to
+    // recognise its own arrival -- for a file it compares the content hash and
+    // steps back, but a directory has no hash to compare. So a replayed folder
+    // move made a conflict copy of the folder out of the folder itself, and left
+    // the real one wearing the copy's name.
+    //
+    // Source gone AND the destination occupied is the replay's signature. While
+    // the source is still on disk this cannot fire, so an unrelated rival
+    // holding the destination name is still moved aside exactly as before.
+    let landed = from != dest
+        && !is_at(env, entry.id.entity_type, &from)?
+        && is_at(env, entry.id.entity_type, &dest)?;
+    if from != dest && !landed {
         // A rename lands on top of whatever is at the destination. If that is
         // something nobody has uploaded, this is the moment it would disappear.
         let moving = env
@@ -2566,7 +2680,7 @@ fn move_local(
             Ok(()) => {}
             // Already at the destination — a repeat of a move that landed
             // before the answer got back. The wanted state holds either way.
-            Err(jd_vfs::VfsError::NotFound(_)) if env.vfs.fingerprint(&dest)?.is_some() => {}
+            Err(jd_vfs::VfsError::NotFound(_)) if is_at(env, entry.id.entity_type, &dest)? => {}
             Err(e) => return Err(e.into()),
         }
     }
@@ -2581,6 +2695,37 @@ fn move_local(
     // that plans the next move.
     entry.synced_placement = Some(to);
     entry.synced_fingerprint = env.vfs.fingerprint(&dest)?;
+
+    // An agreement was just recorded, so say what that means for the entry's
+    // status too. Leaving it behind is not cosmetic: an entry still claiming to
+    // be waiting for bytes agrees with the server about everything there is to
+    // agree about, so both deltas come back empty, the pass skips it, and
+    // nothing ever looks at it again -- while every health count reads it as
+    // work in flight and the client never reports itself up to date.
+    //
+    // Soak run 228 failed convergence on five of its six cycles over two
+    // folders in exactly this state, sitting correctly on both devices, one
+    // completed `move_local` apiece and nothing queued.
+    //
+    // Only from `pending_download`, and only on evidence. `pending_upload` is
+    // owed work and still is; `unsyncable`, `pending_key` and `out_of_scope`
+    // are verdicts this operation has no standing to overturn. The evidence
+    // differs by kind: a directory at the destination IS the whole of a folder,
+    // which is the same thing `create_local_folder` demands before it records
+    // agreement, while a file is only here if its bytes were agreed -- without
+    // that a download is genuinely still owed and the status is telling the
+    // truth.
+    if entry.status == LocalStatus::PendingDownload {
+        let materialized = match entry.id.entity_type {
+            EntityType::Folder => is_at(env, EntityType::Folder, &dest)?,
+            EntityType::File => {
+                entry.synced_content.is_some() && entry.synced_fingerprint.is_some()
+            }
+        };
+        if materialized {
+            entry.status = LocalStatus::Synced;
+        }
+    }
     env.store.put_entry(&entry)?;
     Ok(OpOutcome::Done)
 }
@@ -2667,7 +2812,14 @@ fn rescue_unsynced(
                 // something that did not happen. The conflict name is the
                 // fallback that keeps the rescue from overwriting anything.
                 let plain = into.join(&child.name);
-                let to = if env.vfs.fingerprint(&plain)?.is_none() {
+                // Anything at all standing there, including a DIRECTORY of the
+                // same name -- `into` is a real folder in the user's tree and
+                // can hold either. Asked with `fingerprint` alone, a directory
+                // read as an empty spot and the rescue renamed a file onto it,
+                // which no filesystem allows: the error travelled up out of
+                // `trash_local` and the operation was retried against a
+                // directory that was never going to move.
+                let to = if nothing_at(env, &plain)? {
                     plain
                 } else {
                     free_conflict_path(env, &plain, &child.name, &[])?
@@ -2768,9 +2920,30 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
 }
 
 fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
+    // A folder goes with everything under it, here as everywhere else.
+    // `all_entries` walks DOWN from the root, so an entry whose parent has been
+    // dropped is never visited, never decided about and never cleared -- and no
+    // issue is raised, because nothing can see it to complain. `trash_local`
+    // and `forget` are already written this way; this verb was not, and it is
+    // the one the user reaches by deleting a folder on their own computer.
+    //
+    // Folders only. `children_of` matches on parent id alone, with nothing to
+    // say the parent is a folder, and a file's server id can coincide with a
+    // folder's -- so handing it a file id would sweep away an unrelated
+    // folder's contents.
+    let forget_here = |env: &ExecEnv| -> Result<(), ExecError> {
+        if op.entity.entity_type == EntityType::Folder {
+            env.store.delete_subtree(op.entity)?;
+        } else {
+            env.store.delete_entry(op.entity)?;
+        }
+        Ok(())
+    };
     if op.entity.is_provisional() {
-        // It never reached the server. Forgetting it locally is the whole job.
-        env.store.delete_entry(op.entity)?;
+        // It never reached the server. Forgetting it locally is the whole job --
+        // and a provisional folder can perfectly well have provisional children
+        // beneath it, which have nowhere to belong once it goes.
+        forget_here(env)?;
         return Ok(OpOutcome::Done);
     }
     let body = json!({
@@ -2786,7 +2959,9 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         Err(ProtoError::Api { status: 404, .. }) => {}
         Err(e) => return Err(e.into()),
     }
-    env.store.delete_entry(op.entity)?;
+    // The server took the folder, and its own cascade takes what was inside it,
+    // so there is nothing under here left to agree about.
+    forget_here(env)?;
     Ok(OpOutcome::Done)
 }
 

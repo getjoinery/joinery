@@ -406,6 +406,37 @@ impl MockServer {
         self.state.lock().unwrap().blobs.get(sha256).cloned()
     }
 
+    /// Spoil what the server is holding for a file, and have it declare the
+    /// spoiled bytes as if they were always the right ones.
+    ///
+    /// This is the shape a hash check cannot catch and a retry cannot fix: the
+    /// bytes come down exactly as advertised and still fail their
+    /// authentication tag. It stands in for the real ways that happens —
+    /// storage that rotted and was re-hashed, or a client that uploaded
+    /// ciphertext it had already corrupted — and for a wrapped key that opens
+    /// but is the wrong one, which fails identically from the client's side.
+    ///
+    /// Deliberately silent: no change is recorded, because a server that knew
+    /// something had happened would have said so. To the client nothing has
+    /// changed except that the file no longer opens.
+    pub fn rot_ciphertext(&self, file_id: i64, replacement: &[u8]) {
+        let sha = sha256_hex(replacement);
+        let mut st = self.state.lock().unwrap();
+        st.blobs.insert(sha.clone(), replacement.to_vec());
+        let Some(f) = st.files.get_mut(&file_id) else {
+            panic!("rot_ciphertext: no file {file_id}");
+        };
+        let was = f.sha256.clone();
+        f.sha256 = sha.clone();
+        f.size = replacement.len() as u64;
+        for v in st.versions.iter_mut().filter(|v| v.file_id == file_id) {
+            if v.sha256 == was {
+                v.sha256 = sha.clone();
+                v.size = replacement.len() as u64;
+            }
+        }
+    }
+
     pub fn latest_change_id(&self) -> i64 {
         self.state.lock().unwrap().next_change_id
     }

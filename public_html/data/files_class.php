@@ -45,7 +45,7 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.10.1
+ * @version 1.10.2
  * @changelog 1.10.0 - SOURCE_MESSENGER_ATTACHMENT: photos and files sent in a
  *   conversation, gated on that conversation rather than owned privately.
  */
@@ -1722,13 +1722,34 @@ public static function get_by_name($name, $search_deleted = false) {
 		// Let go of the physical bytes: the blob decrements its reference count
 		// and, at zero, deletes the original + every variant (local or cloud) and
 		// its own row. A blob still referenced by another file is untouched.
-		$blob_id = $this->get('fil_fbb_file_blob_id');
-		if ($blob_id) {
-			require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
-			FileBlob::release((int)$blob_id);
+		//
+		// The head is read from the ROW, under the same lock version work takes,
+		// and never from this copy of the file. A File object can be minutes old
+		// by the time somebody deletes it, and a version saved in the meantime
+		// moves the head: the blob this copy remembers is then the one a VERSION
+		// row holds. Releasing that reference lets go of something this delete is
+		// not deleting -- and the cascade below releases it again when it removes
+		// that version row, so the bytes can be reclaimed out from under any other
+		// file that deduped onto them -- while the head the file actually has is
+		// never released at all, leaving bytes pinned for good, still counted
+		// against the owner's quota and reachable by nobody. Both drifts, from one
+		// stale read.
+		require_once(PathHelper::getIncludePath('data/file_blobs_class.php'));
+		$own_tx = !$dblink->inTransaction();
+		if ($own_tx) { $dblink->beginTransaction(); }
+		try {
+			$hq = $dblink->prepare('SELECT fil_fbb_file_blob_id FROM fil_files WHERE fil_file_id = ? FOR UPDATE');
+			$hq->execute([$this->key]);
+			$blob_id = (int)$hq->fetchColumn();
+			if ($blob_id) {
+				FileBlob::release($blob_id);
+			}
+			parent::permanent_delete($debug);
+			if ($own_tx) { $dblink->commit(); }
+		} catch (Exception $e) {
+			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
+			throw $e;
 		}
-
-		parent::permanent_delete($debug);
 		return true;
 	}
 

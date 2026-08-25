@@ -212,7 +212,27 @@ function drive_upload_init_logic(array $input): LogicResult {
 					$restrictions['fil_content_modified_time'] = $modified_time;
 				}
 				try {
-					$file = File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+					// The trashed-destination check above is a fast fail, made
+					// before the dedup lookup. It is not the guarantee: finding
+					// the candidate blob and checking the sibling name both run
+					// between there and here, and a folder trashed inside that
+					// window would leave this file live and unreachable
+					// underneath it -- nothing lists it, no client can place it,
+					// and a client that has been told about it waits forever for
+					// a parent it will never hear of. place_into re-asks with the
+					// destination held, so the cascade either sweeps this row or
+					// never starts.
+					//
+					// This is the one placement verb the guard was not fitted to
+					// when it landed, because the dedup short-circuit creates its
+					// file here and never reaches drive_upload_complete. Soak run
+					// 229 found it: folder trashed at 11:12:21.471366, this file
+					// created at .490591, live under it for good.
+					$file = DriveHelper::place_into($folder_id, function () use ($cand, $name, $mime, $owner_id, $restrictions) {
+						return File::createFromExistingBlob($cand, $name, $mime, $owner_id, $restrictions);
+					});
+				} catch (DriveDestinationTrashedException $e) {
+					return LogicResult::error('That folder is in the trash.', array('reason' => 'parent_trashed', 'folder_id' => (int)$folder_id));
 				} catch (Exception $e) {
 					// The check above is a fast path: two uploads can both pass it and
 					// both reach the insert, where the partial unique index refuses the

@@ -3669,3 +3669,514 @@ fn a_kill_while_the_network_is_down_does_not_freeze_the_files_it_interrupted() {
 
 /// The bytes in the test above that exist on exactly one disk until they sync.
 const ONLY_ON_THE_LAPTOP: &[u8] = b"written just before the machine died";
+
+#[test]
+fn a_folder_the_server_moved_stops_saying_it_is_waiting_for_bytes() {
+    use jd_core::model::{EntityId, Entry, LocalStatus};
+
+    // A folder is on this disk, at the name and parent both sides agree on, and
+    // the entry for it still says `pending_download`. Nothing is owed and
+    // nothing is queued, so no pass ever looks at it again -- both deltas are
+    // empty and the entry is skipped -- while every health count reads it as
+    // work in flight. The tree is perfect and the client never reports itself
+    // up to date again.
+    //
+    // Soak run 228 failed convergence on five of its six cycles this way, over
+    // two folders that were sitting correctly on both devices the whole time.
+    // Their entire operation history was one `move_local` each.
+    //
+    // The precursor is a folder held out of sync and then released with no
+    // agreement recorded -- `apply_naming` parks it in `pending_download`, which
+    // is right, because at that moment nothing is agreed. What is not right is
+    // that the local move which follows records the agreement and leaves the
+    // status behind.
+    let world = World::new(2281, &["laptop"]);
+    let device = world.device("laptop");
+
+    let old_home = world.server.seed_folder(None, "Projects (37)");
+    let new_home = world.server.seed_folder(None, "Projects (23)");
+    let moved = world.server.seed_folder(Some(old_home), "Sub 4");
+    world.server.seed_file(Some(moved), "doc-1.txt", b"inside");
+    assert!(world.settle().is_some());
+    assert!(
+        disk_tree(device).contains_key("Projects (37)/Sub 4/doc-1.txt"),
+        "the premise: the folder is on this disk"
+    );
+
+    // Released from a hold with nothing agreed about it yet.
+    let held = device
+        .store
+        .get_entry(EntityId::folder(moved))
+        .unwrap()
+        .expect("the seeded folder should have reached the device");
+    device
+        .store
+        .put_entry(&Entry {
+            status: LocalStatus::PendingDownload,
+            synced_placement: None,
+            ..held
+        })
+        .unwrap();
+
+    // Somebody else moves it. This is what turns the stale status into a
+    // permanent one: the move is applied locally, the agreement is written, and
+    // from then on the two sides agree about everything there is to agree about.
+    world
+        .server
+        .action(
+            "drive_move",
+            &serde_json::json!({
+                "entity_type": "folder",
+                "entity_id": moved,
+                "parent_id": new_home,
+            }),
+        )
+        .expect("the move should be accepted");
+
+    world.settle();
+
+    let after = device
+        .store
+        .get_entry(EntityId::folder(moved))
+        .unwrap()
+        .expect("the folder should still be tracked");
+    assert!(
+        disk_tree(device).contains_key("Projects (23)/Sub 4/doc-1.txt"),
+        "the move should have been applied here: {:?}",
+        disk_tree(device).keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        after.status,
+        LocalStatus::Synced,
+        "the directory is on this disk at the placement both sides agree on, so \
+         nothing is waiting for bytes -- and nothing will ever look at this \
+         entry again to correct it"
+    );
+    assert_converged(&world);
+}
+
+#[test]
+fn a_folder_move_that_already_landed_is_not_retried_forever() {
+    use jd_core::model::EntityId;
+
+    // The answer to a move can be lost after the move itself has happened: the
+    // directory is already at the destination and the operation runs again. For
+    // a FILE that is handled -- `rename` says NotFound, the guard asks whether
+    // the thing is at the destination already, finds it, and calls the wanted
+    // state reached. For a FOLDER that guard was dead, because it asked with
+    // `fingerprint`, which answers `None` for a directory whether or not one is
+    // there. So the rename error travelled on, the operation was retried, and
+    // every retry got the same answer -- while the entity, having an open op,
+    // was never re-planned either.
+    //
+    // Nothing about waiting fixes it and nothing shows it: no loss, no error the
+    // user sees, just a device that never reports itself up to date again.
+    let world = World::new(2321, &["laptop"]);
+    let device = world.device("laptop");
+
+    let archive = world.server.seed_folder(None, "Archive");
+    let docs = world.server.seed_folder(None, "Docs");
+    world.server.seed_file(Some(docs), "note.txt", b"something");
+    assert!(world.settle().is_some());
+    assert!(
+        disk_tree(device).contains_key("Docs/note.txt"),
+        "the premise: the folder is on this disk at the top level"
+    );
+
+    // Somebody else moves it, and this device applies that move normally.
+    world
+        .server
+        .action(
+            "drive_move",
+            &serde_json::json!({
+                "entity_type": "folder",
+                "entity_id": docs,
+                "parent_id": archive,
+            }),
+        )
+        .expect("the move should be accepted");
+    assert!(world.settle().is_some());
+    assert!(
+        disk_tree(device).contains_key("Archive/Docs/note.txt"),
+        "the move landed here: {:?}",
+        disk_tree(device).keys().collect::<Vec<_>>()
+    );
+
+    // Now the same operation runs a second time -- which is what a lost answer
+    // leaves behind, and what recovery does with every op a kill left in
+    // flight. Nothing about the world has changed; the work is simply asked
+    // for again.
+    device
+        .store
+        .queue_op(
+            "move_local",
+            EntityId::folder(docs),
+            &serde_json::json!({
+                "parent": archive,
+                "name": "Docs",
+                "from": { "parent": null, "name": "Docs" },
+            })
+            .to_string(),
+            "the-move-that-already-landed",
+        )
+        .unwrap();
+
+    for _ in 0..6 {
+        world.pass(device);
+    }
+
+    let stuck: Vec<String> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.entity == EntityId::folder(docs))
+        .map(|op| format!("{} attempts={} last_error={:?}", op.kind, op.attempts, op.last_error))
+        .collect();
+    assert!(
+        stuck.is_empty(),
+        "the move had already landed, so it is done -- not parked on a retry \
+         that can never come good: {stuck:?}"
+    );
+    assert!(
+        disk_tree(device).contains_key("Archive/Docs/note.txt"),
+        "and the folder is where it was moved to: {:?}",
+        disk_tree(device).keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn a_second_folder_conflict_at_one_name_gets_its_own_name() {
+    use jd_core::model::EntityId;
+
+    // `free_conflict_path` walks suffixes until it finds a name nothing holds,
+    // and it asked with `fingerprint` -- which answers `None` for a directory
+    // just as it does for an empty spot. So a conflict name already held by a
+    // FOLDER read as available and the search never advanced past it. For files
+    // it works, and the rig shows the proof in its own issues
+    // (`slot-1 (conflicted copy ...) 3.dat`); for folders the second conflict at
+    // one name on one day chose the name the first one is living under, and
+    // renaming onto a non-empty directory is refused by every filesystem this
+    // runs on. The operation failed and was retried against a name that was
+    // never going to free itself.
+    let world = World::new(2411, &["laptop"]);
+    let device = world.device("laptop");
+
+    let docs = world.server.seed_folder(None, "Docs");
+    world.server.seed_file(Some(docs), "f1.txt", b"the first folder's file");
+    let two = world.server.seed_folder(None, "Two");
+    world.server.seed_file(Some(two), "f2.txt", b"the second folder's file");
+    let three = world.server.seed_folder(None, "Three");
+    world.server.seed_file(Some(three), "f3.txt", b"the third folder's file");
+    assert!(world.settle().is_some());
+
+    // One folder is moved onto another's name. Whatever is there is moved aside
+    // under a conflict name, keeping everything underneath it.
+    let onto_docs = |id: i64, key: &str| {
+        device
+            .store
+            .queue_op(
+                "move_local",
+                EntityId::folder(id),
+                &serde_json::json!({ "parent": null, "name": "Docs" }).to_string(),
+                key,
+            )
+            .unwrap();
+        world.pass(device);
+    };
+
+    onto_docs(two, "two-onto-docs");
+    let after_first: Vec<String> = disk_tree(device).keys().cloned().collect();
+    assert!(
+        after_first.iter().any(|p| p.contains("conflicted copy") && p.ends_with("f1.txt")),
+        "the first conflict keeps the displaced folder's file: {after_first:?}"
+    );
+
+    // And now a second one, at the same name on the same day — so the first
+    // conflict name is taken, by a directory that is not empty.
+    onto_docs(three, "three-onto-docs");
+
+    for _ in 0..4 {
+        world.pass(device);
+    }
+
+    let stuck: Vec<String> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.attempts > 0)
+        .map(|op| format!("{} attempts={} last_error={:?}", op.kind, op.attempts, op.last_error))
+        .collect();
+    assert!(
+        stuck.is_empty(),
+        "nothing may be parked on a retry that cannot come good: {stuck:?}"
+    );
+
+    // The point of moving things aside rather than over them: all three files
+    // are still here, whatever names their folders ended up wearing.
+    let tree = disk_tree(device);
+    for wanted in ["f1.txt", "f2.txt", "f3.txt"] {
+        assert!(
+            tree.keys().any(|p| p.ends_with(wanted)),
+            "{wanted} was displaced out of existence: {:?}",
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn a_rescued_file_whose_name_is_held_by_a_folder_still_lands() {
+    use jd_core::model::EntityId;
+
+    // Trashing a folder takes everything under it, so anything inside that the
+    // server has never seen is moved out beside it first — that file is the
+    // user's only copy. The rescue prefers the file's own name and falls back to
+    // a conflict name when something is already there, and it asked with
+    // `fingerprint`. A DIRECTORY of that name answers `None`, exactly as an
+    // empty spot does, so the rescue renamed a file onto a directory. No
+    // filesystem allows that: the error travelled up out of `trash_local` and
+    // the operation was retried against a directory that was never going to
+    // move on its own.
+    //
+    // `into` is a real folder in the user's tree, so a directory sharing a name
+    // with a rescued file is an ordinary thing to meet, not a contrivance.
+    let world = World::new(2511, &["laptop"]);
+    let device = world.device("laptop");
+
+    let doomed = world.server.seed_folder(None, "Doomed");
+    world.server.seed_file(Some(doomed), "kept.txt", b"already on the server");
+    assert!(world.settle().is_some());
+
+    // A directory beside the folder, wearing the name the rescue will want.
+    device.fs.user_mkdir("notes");
+    device.fs.user_write("notes/inside.txt", b"something already under that name");
+
+    // And the file the rescue exists for: written here, never uploaded.
+    device.fs.user_write("Doomed/notes", b"the only copy of this");
+
+    // The folder goes to the trash on the server, so this device trashes its own
+    // copy — rescuing what the server has never seen on the way.
+    assert!(world.server.forget_folder(doomed));
+    device
+        .store
+        .queue_op("trash_local", EntityId::folder(doomed), "{}", "trash-the-doomed-folder")
+        .unwrap();
+
+    for _ in 0..6 {
+        world.pass(device);
+    }
+
+    let stuck: Vec<String> = device
+        .store
+        .queued_ops()
+        .unwrap()
+        .into_iter()
+        .filter(|op| op.attempts > 0)
+        .map(|op| format!("{} attempts={} last_error={:?}", op.kind, op.attempts, op.last_error))
+        .collect();
+    assert!(
+        stuck.is_empty(),
+        "nothing may be parked on a retry that cannot come good: {stuck:?}"
+    );
+
+    // Both survive: the rescued file under some name, and what was already
+    // living under the name it wanted.
+    let tree = disk_tree(device);
+    assert!(
+        tree.keys().any(|p| p == "notes/inside.txt"),
+        "the directory that held the name kept its contents: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    let only_copy = jd_sim::sha256_hex(b"the only copy of this");
+    assert!(
+        tree.values().any(|hash| hash.as_deref() == Some(only_copy.as_str())),
+        "the only copy of the rescued file is still here: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+}
+
+#[test]
+fn telling_the_server_to_trash_a_folder_forgets_what_was_under_it_too() {
+    use jd_core::model::EntityId;
+
+    // `trash_remote` tells the server a folder is gone and then drops the local
+    // record -- and it dropped the folder alone. `all_entries` builds its list
+    // by walking DOWN from the root, so every entry still naming that folder as
+    // its parent is never visited, never decided about and never cleared, and
+    // no issue is raised because nothing can see them to complain.
+    //
+    // An ordinary delete does NOT reach this: the user removing a directory
+    // removes everything in it, the scan sees each child gone, and each gets a
+    // trash of its own that tidies its own record. What reaches it is a folder
+    // whose children are records rather than files -- entries this device has
+    // heard of but never materialized. They have no local delta to notice and
+    // no remote change to answer, so nothing plans anything for them, and the
+    // folder's own operation is the only one that runs.
+    //
+    // The op is given here directly for that reason: the planner cannot be made
+    // to reach the folder and miss the children on demand, and it is the single
+    // operation that does the damage. `trash_local` and `forget` were already
+    // written to take the subtree.
+    let world = World::new(2611, &["laptop"]);
+    let device = world.device("laptop");
+
+    let folder = world.server.seed_folder(None, "Project");
+    for name in ["a.txt", "b.txt", "c.txt"] {
+        world.server.seed_file(Some(folder), name, b"on the server");
+    }
+    let nested = world.server.seed_folder(Some(folder), "Inner");
+    world.server.seed_file(Some(nested), "d.txt", b"further down");
+    assert!(world.settle().is_some());
+
+    let before = device.store.every_entry().unwrap().len();
+    assert!(before >= 6, "the folder and its contents should have arrived: {before}");
+
+    device
+        .store
+        .queue_op(
+            "trash_remote",
+            EntityId::folder(folder),
+            "{}",
+            "trash-the-folder-remotely",
+        )
+        .unwrap();
+    world.pass(device);
+
+    // Asked NOW, before another pass can run. `sweep_stranded_entries` runs at
+    // the TOP of a pass and would tidy these away on the next one -- by
+    // answering with a full index walk of the whole tree, and saying the store
+    // is inconsistent while it does. That recovery is what hides this, and it
+    // is not free: it is the difference between an ordinary folder delete and
+    // one that re-reads the entire index.
+    assert_no_entry_is_stranded(&world);
+}
+
+/// Ciphertext that will never open is given up on, not fetched for ever.
+///
+/// A tag failure is not a transfer that went badly — it is bytes that do not
+/// authenticate under the key this device holds. Ask the same server for the
+/// same bytes and open them with the same key and the answer cannot be
+/// different, so a retry is not patience: it is a device that stays busy for
+/// the rest of its life over one damaged file, never goes quiet, and reports
+/// nothing but "decryption failed" while it does it.
+///
+/// Two properties, and the second is what stops the cure being worse than the
+/// disease: the device settles, AND it comes straight back when the file is
+/// fixed. A give-up nothing can lift is just a quieter way to lose a file.
+#[test]
+fn ciphertext_that_will_never_open_is_given_up_on_rather_than_fetched_for_ever() {
+    let vault = SimVault::new(9_311);
+    let mut world = World::new(9_311, &["desktop", "laptop"]);
+    world.give_vault("desktop", &vault);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    assert!(world.settle().is_some(), "the vault folder should settle");
+
+    // Uploaded by the desktop alone. The laptop is deliberately left out of this
+    // stretch so that it has never held the file and has to fetch it — a device
+    // that already has the bytes would never find out they had been spoiled.
+    let body = b"the only copy, and the server is about to spoil it";
+    world
+        .device("desktop")
+        .fs
+        .user_write("Private/plan.md", body);
+    for _ in 0..400 {
+        if world.pass(world.device("desktop")).quiet() {
+            break;
+        }
+    }
+    let file = world
+        .server
+        .vault_files()
+        .into_iter()
+        .find(|f| f.folder_path == "Private")
+        .expect("the desktop should have uploaded the file");
+
+    // The server is now holding something that is not the ciphertext it was
+    // given, and advertising it as though it were. Nothing announces this: no
+    // change is recorded, because a server that knew would have said so.
+    world
+        .server
+        .rot_ciphertext(file.id, b"not ciphertext, and no key opens it");
+
+    // The bite. Before the give-up existed the laptop planned this download
+    // afresh every round, for ever, and `settle` never returned.
+    assert!(
+        world.settle().is_some(),
+        "the laptop should stop rather than fetch doomed bytes for ever"
+    );
+
+    let laptop = disk_tree(world.device("laptop"));
+    assert_eq!(
+        laptop.get("Private/plan.md").cloned().flatten(),
+        None,
+        "nothing that failed its tag may reach the disk, found: {laptop:?}"
+    );
+    assert_eq!(
+        disk_tree(world.device("desktop"))
+            .get("Private/plan.md")
+            .cloned()
+            .flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the desktop's own good copy is not collateral"
+    );
+    let told = world
+        .device("laptop")
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "withdrawn")
+        .count();
+    assert_eq!(
+        told, 1,
+        "giving up is exactly the case a person has to hear about, and hear once"
+    );
+
+    // And it must stop SAYING it is working on the file. The engine going quiet
+    // is only half of it: the status histogram is what every shell and the soak
+    // rig's convergence oracle read, and an entry left sitting in
+    // `pending_download` reports a device still fetching something it has
+    // deliberately stopped touching.
+    let counts: std::collections::BTreeMap<String, usize> = world
+        .device("laptop")
+        .store
+        .status_counts()
+        .unwrap()
+        .into_iter()
+        .collect();
+    assert_eq!(
+        counts.get("pending_download").copied().unwrap_or(0),
+        0,
+        "nothing should still be reported as on its way: {counts:?}"
+    );
+    assert_eq!(
+        counts.get("unreadable").copied().unwrap_or(0),
+        1,
+        "the file should be reported as what it is: {counts:?}"
+    );
+
+    // And it lifts by itself. The desktop saves the file again, which is new
+    // content under the same key: the note was taken against bytes that no
+    // longer exist, so nothing has to clear it.
+    let repaired = b"saved again, and this time the bytes are good";
+    world
+        .device("desktop")
+        .fs
+        .user_write("Private/plan.md", repaired);
+    assert!(
+        world.settle().is_some(),
+        "a repaired file should settle like any other"
+    );
+    assert_eq!(
+        disk_tree(world.device("laptop"))
+            .get("Private/plan.md")
+            .cloned()
+            .flatten(),
+        Some(jd_sim::sha256_hex(repaired)),
+        "the laptop should pick the file back up once it can be opened"
+    );
+}

@@ -264,7 +264,11 @@ marked deleted, sweep the children it could see, and finish before the new row
 landed underneath it. `DriveHelper::place_into($folder_id, $write)` closes that
 window: it takes a Postgres advisory lock keyed on the destination, re-reads the
 folder, refuses with `DriveDestinationTrashedException` if it went to the trash,
-and only then runs the write. `soft_delete_folder_cascade()` takes the same lock
+and only then runs the write. Every verb that puts something into a folder goes
+through it, `drive_upload_init` included: when the server already holds bytes
+with the hash the client sent, that verb answers on the spot and creates the
+file itself rather than staging an upload, which makes it a placement like any
+other. `soft_delete_folder_cascade()` takes the same lock
 around marking a folder deleted and sweeping what is directly inside it. Two
 orderings remain and both are safe: the placement finishes first and the cascade
 sweeps what it made, or the cascade finishes first and the placement is refused.
