@@ -10,18 +10,19 @@
  * (MailboxViewer): the source is exactly as private as the message it belongs
  * to, and a NULL-alias (catch-all / unmatched) message stays superadmin-only.
  *
- * Not every message has a stored original. InboundEmailMessage::getRawMessage()
- * resolves the storage descriptor (inline / local / cloud), and a
- * reference-backed IMAP row ('remote') keeps no platform copy at all — only its
- * individual parts are fetched on demand. Those cases return
- * {available:false, reason:...} rather than an error, so the modal can say what
- * happened instead of failing.
+ * The original resolves through mailbox_resolve_original()
+ * (specs/mailbox_show_original_coverage.md): the stored raw where one exists, a
+ * live IMAP fetch for a reference-backed row, or — for a lean record that
+ * retained only its header block — a reconstruction (headers + decoded plain
+ * body), flagged `reconstructed: true` so the modal labels it. A message with
+ * none of those returns {available:false, reason:...} rather than an error, so
+ * the modal can say what happened instead of failing.
  *
- * On a protected mailbox the raw may itself be sealed; reading it needs an open
- * unlock window and a locked one returns {locked:true}, the same contract the
- * body and draft reads use.
+ * On a protected mailbox the stored raw / headers may themselves be sealed;
+ * reading those needs an open unlock window and a locked one returns
+ * {locked:true}, the same contract the body and draft reads use.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 function message_source_logic(array $input): LogicResult {
@@ -53,25 +54,23 @@ function message_source_logic(array $input): LogicResult {
 		return LogicResult::error('You do not have access to this mailbox.');
 	}
 
+	require_once(PathHelper::getIncludePath('plugins/mailbox/includes/message_export.php'));
 	try {
-		$raw = $message->getRawMessage();
-	} catch (VaultLockedException $e) {
-		return LogicResult::render(array('locked' => true));
+		$resolved = mailbox_resolve_original($message);
 	} catch (Throwable $e) {
 		error_log('mailbox/message_source: ' . $e->getMessage());
 		return LogicResult::error('The original could not be read.');
 	}
-
-	if ($raw === null || $raw === '') {
-		$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
+	if ($resolved['locked']) {
+		return LogicResult::render(array('locked' => true));
+	}
+	if (!$resolved['ok']) {
 		return LogicResult::render(array(
 			'available' => false,
-			'reason'    => $driver === 'remote'
-				? 'This message is read directly from its source mailbox over IMAP, '
-					. 'which keeps no copy of the original here.'
-				: 'No original was stored for this message.',
+			'reason'    => $resolved['reason'],
 		));
 	}
+	$raw = $resolved['raw'];
 
 	$size = strlen($raw);
 	$truncated = $size > $limit;
@@ -80,10 +79,13 @@ function message_source_logic(array $input): LogicResult {
 	}
 
 	return LogicResult::render(array(
-		'available'  => true,
-		'source'     => $raw,
-		'size_bytes' => $size,
-		'truncated'  => $truncated,
+		'available'     => true,
+		'source'        => $raw,
+		'size_bytes'    => $size,
+		'truncated'     => $truncated,
+		// A lean record's answer is headers + decoded plain body, not wire
+		// bytes — the modal labels it so nobody mistakes it for the original.
+		'reconstructed' => ($resolved['kind'] === 'reconstructed'),
 	));
 }
 

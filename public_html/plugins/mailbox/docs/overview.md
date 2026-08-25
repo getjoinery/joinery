@@ -985,7 +985,11 @@ attachment manifest — while every non-text MIME part (real attachments *and* i
 `cid:` images) is extracted at ingest into its own **private `File`**. The bytes live
 in exactly one place — the `File` — so nothing is stored twice, and each attachment
 inherits the `File` layer's bucket offload, small-VPS drain, and gated serving for free.
-On the happy path **no raw RFC822 is retained**.
+On the happy path **no raw RFC822 is retained** — except its **header block**,
+kept byte-for-byte in `iem_raw_headers` (capped at 64 KB, sealed like the body on
+a sealing mailbox): the wire truth (Received chain, `Content-Type`/charset, DKIM
+as sent) that no parsed column preserves, and what the reader's Show original
+renders for a lean record (`specs/mailbox_show_original_coverage.md`).
 
 **The manifest is the glue.** Each `ima_` row keeps the email-specific MIME metadata
 (filename, content-type, size, MIME section, encoding, content-id, inline flag) and, for
@@ -2708,20 +2712,38 @@ route of its own. The two exports live at `/profile/mailbox/original`
 (`logic/profile_original_logic.php` gates, `includes/message_export.php`
 renders); `format=print` picks the sheet, and the `.eml` download is the default.
 
-**Which messages have an original.** Show original and Download .eml both need a
-stored RFC822 original, so the reader leaves them out of the menu when the
-message has none (`has_original` on the thread payload) rather than offering two
-dead ends. Print always appears — it works from the parsed body. An IMAP-polled
-message (`iem_raw_storage_driver` = `remote`) is the case that has none: no
-platform copy is kept, only individual parts fetched on demand. Reaching either
-export by URL anyway gets an honest page saying so, never a broken file.
+**Where the original comes from.** The thread payload's `original_source` says
+what each message can answer with, and the menu follows it rather than offering
+dead ends (`specs/mailbox_show_original_coverage.md`):
+
+- **`stored`** — a whole RFC822 original is stored here (a raw-storage
+  fallback shape, or a legacy inline row). Both items show.
+- **`imap`** — a reference-backed message (`iem_raw_storage_driver` =
+  `remote`) whose source account is still connected: the true original is
+  fetched live from the source mailbox by its locator (Message-ID fallback if
+  UIDVALIDITY changed), passed through, and never persisted. Both items show;
+  a message since expunged at the source gets an honest message instead.
+- **`headers`** — a lean record: push ingest splits attachments into Files and
+  discards the raw, but retains the wire header block in `iem_raw_headers`
+  (sealed like the body on a sealing mailbox). Show original renders the
+  headers plus the decoded text body and labels it a reconstruction; there is
+  no `.eml`, because a downloaded file claiming to be the original must be
+  one. Rows stored before header retention have no header block and answer
+  `none`.
+- **`none`** — neither item; Print always appears — it works from the parsed
+  body.
+
+Reaching either export by URL anyway gets an honest page saying so, never a
+broken file.
 
 Two more limits worth knowing: Show original cuts off past **1 MB** and names the
 full size (a message with attachments is mostly base64, and the whole of one
-belongs in the download); and a sealed original on a protected mailbox needs an
-open unlock window, where a locked one answers `{locked:true}` and the modal
-offers the one-tap ceremony before asking again — the same contract as reading a
-sealed body.
+belongs in the download); and a sealed stored original or header block on a
+protected mailbox needs an open unlock window, where a locked one answers
+`{locked:true}` and the modal offers the one-tap ceremony before asking again —
+the same contract as reading a sealed body. The live IMAP answer needs no
+window: the seal protects the local copy at rest, and those bytes come straight
+from the source mailbox to a viewer already scope-checked for the message.
 
 **The print sheet is the one place received HTML is not sandboxed.** It cannot
 be: a browser prints only the visible slice of a scrollable frame, and the

@@ -103,6 +103,11 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
+ * @version 1.24
+ * @changelog 1.24 - iem_raw_headers: the RFC822 header block retained at push
+ *   ingest (specs/mailbox_show_original_coverage.md), a sealed optional field
+ *   on every direction, so Show original can answer a lean record with the
+ *   wire headers instead of nothing.
  * @version 1.23
  * @changelog 1.23 - openSealedAttachment() honors a redeemed serve grant
  *   (includes/FileServeGrant.php) for both sealed shapes, so a cookie-less
@@ -162,7 +167,7 @@ class InboundEmailMessage extends SystemBase {
 	// inbound row — the direction guard in decryptSealedField*() seals them only when
 	// iem_direction is 'outbound' or 'draft'. iem_draft_state (compose scratch JSON)
 	// is likewise sealed and only ever set on a draft row.
-	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan');
+	public static $sealed_fields = array('iem_sender', 'iem_subject', 'iem_body_plain', 'iem_body_html', 'iem_recipient', 'iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers');
 
 	// Sealing runs through this class's own sealAndPersistContent() /
 	// sealExistingRow() paths,
@@ -182,7 +187,7 @@ class InboundEmailMessage extends SystemBase {
 	 * same "the safe thing is the thing you have to remember" shape this file's
 	 * updateContentColumns() note describes.
 	 */
-	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan');
+	public static $optional_sealed_fields = array('iem_bcc', 'iem_draft_state', 'iem_ai_summary', 'iem_ai_scan', 'iem_raw_headers');
 
 	// AI surface (docs/example_class.php § AI): recipes may read mail through the
 	// query_model tool. On a protected domain a locked row is EXCLUDED from
@@ -244,6 +249,13 @@ class InboundEmailMessage extends SystemBase {
 		'iem_body_plain'          => array('type'=>'text'),
 		'iem_body_html'           => array('type'=>'text'),
 		'iem_raw_message'         => array('type'=>'text'), // legacy/'inline' only — new push writes leave this empty
+		// The RFC822 header block, retained at push ingest even though the lean
+		// record discards the raw (specs/mailbox_show_original_coverage.md): the
+		// wire truth (Received chain, charsets, DKIM as sent) that debugging
+		// needs and no parsed column preserves. Sealed content (a $sealed_fields
+		// member — headers name correspondents); absent on rows stored before
+		// the column existed and on composed rows, which have no wire original.
+		'iem_raw_headers'         => array('type'=>'text', 'is_nullable'=>true),
 		// Encryption at rest (specs/implemented/inbound_email_encryption_at_rest.md).
 		// iem_sealed_key is the per-message DEK, sealed to the owner's vault public key
 		// (null when never sealed). iem_key_generation matches the vault generation the
@@ -813,7 +825,7 @@ class InboundEmailMessage extends SystemBase {
 	public static function sealAndPersistContent(int $message_id, UserEncryptionVault $vault, string $sender,
 			string $recipient, string $subject, string $body_plain, string $body_html,
 			bool $seal_recipient = false, string $bcc = '', ?string $draft_state = null,
-			?string $reuse_dek = null): string {
+			?string $reuse_dek = null, ?string $raw_headers = null): string {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 		// The always-sealed content columns. iem_recipient/iem_bcc are added only
@@ -834,6 +846,12 @@ class InboundEmailMessage extends SystemBase {
 		}
 		if ($draft_state !== null) {
 			$columns['iem_draft_state'] = $draft_state;
+		}
+		// The retained wire header block (specs/mailbox_show_original_coverage.md).
+		// Present only on ingested push rows — composed rows have no wire original,
+		// so their callers pass nothing and the optional column stays empty.
+		if ($raw_headers !== null && $raw_headers !== '') {
+			$columns['iem_raw_headers'] = $raw_headers;
 		}
 
 		// SystemBase::sealColumns() mints or reuses the DEK, seals each value under

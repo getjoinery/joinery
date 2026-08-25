@@ -17,11 +17,109 @@
  * network fetch beyond images. The sanitizer and the policy are independent —
  * a miss in one is still not an execution.
  *
- * @version 1.0.0
+ * @version 1.1.0
+ * @changelog 1.1.0 - mailbox_resolve_original(): one resolver for "the
+ *   original of this message", shared by the source modal and the .eml
+ *   download (specs/mailbox_show_original_coverage.md) — stored raw, live
+ *   IMAP fetch for a reference-backed row, or a labeled header-block
+ *   reconstruction for a lean record.
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_message_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_message_attachment_class.php'));
+
+/**
+ * Resolve the original RFC822 source of one message, wherever it lives. Does
+ * NOT authorize — endpoints gate first (MailboxViewer scope), like everything
+ * in this file.
+ *
+ * Three answers, in order of fidelity:
+ *  - 'stored'        — a whole raw is stored (inline/local/cloud): the bytes
+ *                      exactly as they arrived.
+ *  - 'imap'          — a reference-backed ('remote') row: the true original is
+ *                      fetched live from the source mailbox by its locator
+ *                      (ImapIngestor::fetchFullRaw, Message-ID fallback for a
+ *                      changed UIDVALIDITY). Pass-through — never persisted;
+ *                      materialize-on-account-delete remains the only path
+ *                      that brings a remote message local.
+ *  - 'reconstructed' — a lean record with no raw but a retained header block
+ *                      (iem_raw_headers): the wire headers, a blank line, then
+ *                      the decoded plain body. Honest about what it is —
+ *                      callers must label it and must NOT serve it as a .eml.
+ *
+ * A sealed row's stored raw / headers / body decrypt in the owner's unlock
+ * window ('locked' => true when it is closed). The 'imap' answer needs no
+ * window: the seal protects the local copy at rest, and these bytes come live
+ * from the source mailbox to a viewer already scope-checked for the message.
+ *
+ * $ingestor is injectable for tests; when absent one is built from the row's
+ * account and closed before returning.
+ *
+ * @return array{ok:bool, raw:?string, kind:?string, reason:?string, locked:bool}
+ */
+function mailbox_resolve_original(InboundEmailMessage $message, ?ImapIngestor $ingestor = null): array {
+	require_once(PathHelper::getIncludePath('includes/VaultUnlock.php')); // declares VaultLockedException
+	$fail = function (string $reason, bool $locked = false) {
+		return array('ok' => false, 'raw' => null, 'kind' => null, 'reason' => $reason, 'locked' => $locked);
+	};
+
+	try {
+		$raw = $message->getRawMessage();
+	} catch (VaultLockedException $e) {
+		return $fail('Unlock your vault to read this message\'s original.', true);
+	}
+	if ($raw !== null && $raw !== '') {
+		return array('ok' => true, 'raw' => $raw, 'kind' => 'stored', 'reason' => null, 'locked' => false);
+	}
+
+	$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
+	if ($driver === 'remote') {
+		$account_id = intval($message->get('iem_iia_inbound_imap_account_id'));
+		if ($account_id <= 0) {
+			return $fail('The source mailbox for this message is no longer connected, so its original cannot be fetched.');
+		}
+		$owns_ingestor = ($ingestor === null);
+		if ($owns_ingestor) {
+			require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+			require_once(PathHelper::getIncludePath('plugins/mailbox/includes/ImapIngestor.php'));
+			$account = new InboundImapAccount($account_id, TRUE);
+			if (!$account->key) {
+				return $fail('The source mailbox for this message is no longer connected, so its original cannot be fetched.');
+			}
+			$ingestor = new ImapIngestor($account);
+		}
+		try {
+			$message_id_header = trim((string)$message->get('iem_message_id_header'));
+			$fetched = $ingestor->fetchFullRaw(
+				intval($message->get('iem_imap_uid')),
+				($message->get('iem_imap_uidvalidity') !== null && $message->get('iem_imap_uidvalidity') !== '')
+					? intval($message->get('iem_imap_uidvalidity')) : null,
+				(string)$message->get('iem_imap_folder'),
+				$message_id_header !== '' ? $message_id_header : null
+			);
+		} finally {
+			if ($owns_ingestor) {
+				$ingestor->close();
+			}
+		}
+		if (empty($fetched['ok']) || (string)($fetched['raw'] ?? '') === '') {
+			return $fail($fetched['message'] ?? 'Could not retrieve the original from the source mailbox.');
+		}
+		return array('ok' => true, 'raw' => (string)$fetched['raw'], 'kind' => 'imap', 'reason' => null, 'locked' => false);
+	}
+
+	try {
+		$headers = (string)$message->get('iem_raw_headers');
+		if ($headers !== '') {
+			$reconstructed = $headers . "\r\n\r\n" . (string)$message->get('iem_body_plain');
+			return array('ok' => true, 'raw' => $reconstructed, 'kind' => 'reconstructed', 'reason' => null, 'locked' => false);
+		}
+	} catch (VaultLockedException $e) {
+		return $fail('Unlock your vault to read this message\'s original.', true);
+	}
+
+	return $fail('No original was stored for this message.');
+}
 
 /**
  * Stream the stored original as a .eml download and exit(). message/rfc822 with
