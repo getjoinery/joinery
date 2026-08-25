@@ -7,7 +7,8 @@ require_once(__DIR__ . '/../../../includes/PathHelper.php');
  *
  * Two item families:
  *   - The backup recovery private key: the one secret that opens every backup
- *     from every node. Verified by the in-browser possession ceremony, standing
+ *     THIS site makes. Each site's backups seal to that site's own key, so this
+ *     one opens this site's and no other. Verified by the in-browser ceremony, standing
  *     rather than one-off, so "did I really save it?" has an answer on demand.
  *   - One attestation item per enabled backup target: after total server loss,
  *     the provider console login is the only non-circular way back to the
@@ -36,7 +37,7 @@ class RecoveryReadinessItems {
 		$item = array(
 			'key'      => 'backup_recovery_key',
 			'title'    => 'Backup recovery private key',
-			'protects' => 'Every encrypted backup from every node. Each backup carries its own key sealed to this one, so if the nodes are lost and this key is too, none of them can ever be opened.',
+			'protects' => 'Every encrypted backup this site makes. Each backup carries its own key sealed to this one, so if this site is lost and this key is too, none of its backups can ever be opened. Other nodes seal to their own keys, held by their own administrators — this key does not open theirs.',
 			'verify'   => 'ceremony',
 		);
 

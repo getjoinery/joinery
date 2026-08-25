@@ -6,26 +6,33 @@
  * needs: []
  */
 /**
- * Which recovery key each managed site holds for its OWN backups.
+ * Which nodes can be backed up at all.
  *
- * Reported, never written. That slot is the key for the site's own backups and
- * its custodian is whoever administers the site; a control plane writing into it
- * would hold the private half of a key the site believes is its own. Backups
- * this control plane takes need nothing in it — they carry their key with each
- * run — so an empty slot is a site taking no copies of its own, not a site left
- * unprotected.
+ * Every backup of a node seals to the recovery key that node holds and has
+ * proven, read there — the copies this control plane takes as much as the copies
+ * the node takes for itself. Nothing supplies a key from here: sealing to a
+ * public key always appears to succeed, so a key sent over the wire would let
+ * whoever sent it decide who can read a node's database and mail, with nothing
+ * anywhere looking wrong until a restore was attempted.
+ *
+ * The consequence this class reports, and this file pins: a node with no proven
+ * key of its own is an UN-BACKED-UP node, not a node exercising a preference.
  *
  * What is pinned here:
  *
- *   - the state each report maps to, including that somebody else's key reads as
- *     "different" rather than as something to correct;
+ *   - proof is the whole test — an unproven key is indistinguishable from a
+ *     mistyped one until the moment the answer can no longer be acted on;
+ *   - whose key it is is not compared against this control plane's: a node
+ *     holding a key this machine has never seen is the intended arrangement,
+ *     not a discrepancy to correct;
  *   - a node that hosts no Joinery site (a DNS box, a relay) is not applicable
  *     rather than outstanding, so it never shows up as a gap someone should
  *     chase;
  *   - a node nothing has looked at yet is "unknown", not "missing" — claiming
- *     absence from an absence of evidence would misreport a site that may
- *     already hold a key;
- *   - and that no code path exists to write the slot at all.
+ *     absence from an absence of evidence would misreport a node that may
+ *     already hold a key — and is still not dispatched to;
+ *   - every blocked state names where it is fixed, which is never here;
+ *   - and that no code path exists to write a node's key at all.
  *
  * Nothing here is saved: the nodes are in-memory model objects, so the whole
  * table can be exercised without standing up sites in each state.
@@ -61,21 +68,8 @@ function rkf_node(array $fields = array(), $recovery = null) {
 	return $node;
 }
 
-$ours   = RecoveryKeyFleet::manager_fingerprint();
-$theirs = str_repeat('b2', 32);
-
-if ($ours === '') {
-	// Without a proven key of its own the control plane has nothing to push, and
-	// the whole table collapses to "offer nothing" — which is itself the right
-	// answer, and the only one that can be checked here.
-	harness_skip('this control plane has no proven recovery key of its own',
-		'the eligibility table needs one to compare against');
-
-	$node = rkf_node([], ['unconfigured', '']);
-	check(!RecoveryKeyFleet::has_own_key(RecoveryKeyFleet::node_state($node)),
-		'a site with an empty slot holds no key of its own');
-	harness_finish();
-}
+$theirs = str_repeat('b2', 32);   // a key this control plane has never seen
+$ours   = str_repeat('c3', 32);   // one it happens to recognise
 
 // ── Not applicable ──────────────────────────────────────────────────────────
 section('Nodes that host no Joinery site are not a gap');
@@ -92,50 +86,61 @@ section('A node nothing has looked at is unknown, not missing');
 $state = RecoveryKeyFleet::node_state(rkf_node());
 check($state['state'] === 'unknown', 'no status check yet reads as unknown', $state['state']);
 check(!RecoveryKeyFleet::has_own_key($state),
-	'and nothing is claimed about it either way until a check has looked');
+	'and it is not dispatched to on the strength of a guess');
+check(strpos(RecoveryKeyFleet::blocker_summary($state), 'status check') !== false,
+	'the way out of unknown is naming the check that resolves it',
+	RecoveryKeyFleet::blocker_summary($state));
 
-// ── Empty slots ─────────────────────────────────────────────────────────────
-section('An empty slot is reported, never filled');
+// ── No key at all ───────────────────────────────────────────────────────────
+section('A node with no key takes no backups, from anyone');
 
-// The slot holds the key for the SITE's own backups, and its custodian is
-// whoever administers the site. Nothing here writes to it: doing so would make
-// this control plane the holder of the private half of a key the site believes
-// is its own. It is also not a coverage gap — backups taken from here carry
-// their own key.
 foreach (array('unconfigured', 'invalid') as $reported) {
 	$state = RecoveryKeyFleet::node_state(rkf_node([], array($reported, '')));
-	check($state['state'] === 'missing', "a node reporting '{$reported}' is missing a key", $state['state']);
-	check(!RecoveryKeyFleet::has_own_key($state), "and '{$reported}' holds no key of its own");
+	check($state['state'] === 'missing', "a node reporting '{$reported}' has no key", $state['state']);
+	check(!RecoveryKeyFleet::has_own_key($state), "and '{$reported}' cannot be backed up");
+	check(strpos($state['summary'], 'including the ones taken from here') !== false,
+		"the '{$reported}' summary says the control plane's own copies stop too", $state['summary']);
 }
+
+$state = RecoveryKeyFleet::node_state(rkf_node([], array('unconfigured', '')));
+check(strpos(RecoveryKeyFleet::blocker_summary($state), 'cannot supply one') !== false,
+	'and the fix is named as the node\'s, explicitly not this control plane\'s',
+	RecoveryKeyFleet::blocker_summary($state));
 
 check(!method_exists('JobCommandBuilder', 'build_push_recovery_key'),
-	'there is no way to build a job that writes a site\'s own recovery key');
+	'there is no way to build a job that writes a node\'s recovery key');
 
-// ── Ours ────────────────────────────────────────────────────────────────────
-section('A node already holding our key is left alone');
+// ── Unproven ────────────────────────────────────────────────────────────────
+section('An unproven key is not a usable one');
 
-$state = RecoveryKeyFleet::node_state(rkf_node([], array('proven', $ours)));
-check($state['state'] === 'has', 'our key, proven there: nothing outstanding', $state['state']);
-check(RecoveryKeyFleet::has_own_key($state), 'and it holds a key of its own');
-
-// Our key that never got proven on the node is not finished: the node's own
-// backups still refuse to run, so the push has something left to do.
-$state = RecoveryKeyFleet::node_state(rkf_node([], array('unproven', $ours)));
-check($state['state'] === 'missing', 'our key that is unproven there is still outstanding', $state['state']);
-check(!RecoveryKeyFleet::has_own_key($state),
-	'and an unproven key is not a usable one, so the site still takes no backups of its own');
-
-// ── Somebody else's ─────────────────────────────────────────────────────────
-section("A node holding somebody else's key is reported as such");
-
-foreach (array('proven', 'unproven') as $reported) {
-	$state = RecoveryKeyFleet::node_state(rkf_node([], array($reported, $theirs)));
-	check($state['state'] === 'different',
-		"a different key reported '{$reported}' is flagged as different", $state['state']);
-	check(RecoveryKeyFleet::has_own_key($state),
-		"and '{$reported}' counts as holding a key of its own");
-	check(strpos($state['summary'], 'Left alone') !== false,
-		'and the operator is told it was left alone rather than fixed', $state['summary']);
+// The dangerous state, not merely the unfinished one. A mistyped public key
+// seals exactly as happily as a real one and produces archives nobody can ever
+// open; the possession ceremony is the only thing that tells them apart, and it
+// has to happen on the node.
+foreach (array($ours, $theirs) as $fpr) {
+	$state = RecoveryKeyFleet::node_state(rkf_node([], array('unproven', $fpr)));
+	check($state['state'] === 'unproven', 'an unproven key reads as unproven', $state['state']);
+	check(!RecoveryKeyFleet::has_own_key($state), 'and the node still cannot be backed up');
+	check(strpos(RecoveryKeyFleet::blocker_summary($state), 'challenge') !== false,
+		'the fix named is the verification challenge, on the node',
+		RecoveryKeyFleet::blocker_summary($state));
 }
+
+// ── Proven ──────────────────────────────────────────────────────────────────
+section('A proven key is the whole test, whoever holds it');
+
+// Whose key it is is deliberately not compared. A node holding a key this
+// control plane has never seen is a node whose operator holds their own recovery
+// key — which is the point of the arrangement, not a discrepancy.
+foreach (array('the control plane recognises' => $ours, 'it has never seen' => $theirs) as $label => $fpr) {
+	$state = RecoveryKeyFleet::node_state(rkf_node([], array('proven', $fpr)));
+	check($state['state'] === 'proven', "a proven key {$label} reads as proven", $state['state']);
+	check(RecoveryKeyFleet::has_own_key($state), "and a node with a key {$label} can be backed up");
+	check($state['fingerprint'] === $fpr, 'the fingerprint reported is the node\'s own', $state['fingerprint']);
+	check(RecoveryKeyFleet::blocker_summary($state) === '', 'and nothing is outstanding');
+}
+
+check(!method_exists('RecoveryKeyFleet', 'manager_fingerprint'),
+	'this control plane\'s own key is not consulted at all — there is nothing to compare against');
 
 harness_finish();

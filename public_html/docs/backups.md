@@ -13,8 +13,9 @@ Configured at **Admin → System → Backups** (`/admin/admin_backups`).
 
 A site can be backed up by more than one party. It backs itself up, and a
 control plane managing it may take its own copies. Those are not two ways of
-doing one thing — they are two parties' backups, under two recovery keys, on two
-schedules, answerable to two people.
+doing one thing — they are two parties' backups, on two schedules, onto two
+shelves, answerable to two people. They open with the same key, because that key
+belongs to the machine and its administrator, not to whoever asked for the run.
 
 A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 
@@ -23,13 +24,29 @@ A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 | Configured by | the site's admin, on its Backups page | the control plane |
 | Triggered by | the `Backup` scheduled task | the control plane's `FleetBackupRun` |
 | Executed by | `BackupRunner` on the machine | `BackupRunner` on the machine |
-| Recovery key | the site's own `backup_recovery_public_key` | the control plane's, supplied per run |
+| Recovery key | the site's own `backup_recovery_public_key` | the site's own `backup_recovery_public_key` |
 | Bucket credentials | stored on the machine | supplied per run, never stored; write-only via the target's node credential |
 | Prunes the shelf | the site | the control plane |
 | Depends on | nothing | the control plane being alive at the scheduled moment |
 
 Both run the same engine, so chains, envelopes, deletion replay and history are
 written once and behave identically for both.
+
+**The recovery key is the one thing a control plane does not supply.** It says
+where a backup goes and hands over a write-only credential to put it there; what
+opens the archive is read on the machine, from that machine's own verified
+setting. A manager run that arrives carrying key material is refused, not
+ignored, and a machine with no verified key of its own refuses to back up at all
+rather than sealing to a key it was handed.
+
+The reason is that sealing cannot fail visibly. Encrypting to a public key
+succeeds whether or not anybody holds the private half, so a substituted key
+produces archives that report themselves encrypted, upload normally and show
+green on every dashboard — while only whoever substituted the key can read them,
+and only a restore attempt would ever reveal it. A key that arrives over a wire
+is therefore a key nobody on the receiving machine can verify, whatever sent it.
+The cost is accepted deliberately: opening a machine's backups needs that
+machine's recovery key, and no single key opens a fleet.
 
 **Neither profile owns the site's backups.** They are peers. A site admin who
 wants copies of their own as well as the control plane's just sets their profile
@@ -239,12 +256,14 @@ restored from a shell with the recovery key, as above.
 Every run mints its own random data key, encrypts the archive with it, and seals
 that key to two recipients:
 
-- **recovery** — the recovery public key of whoever's backup this is. For the
-  site profile that is the site's own setting; for the manager profile it is the
-  control plane's key, which travels with the run and is never stored on the
-  machine. The private half lives in a password manager and never touches a
+- **recovery** — the site's own `backup_recovery_public_key`, read from this
+  site's settings. Both profiles seal to it: a control plane's copies of this
+  site open with the same key the site's own copies do, held by the same
+  custodian. The private half lives in a password manager and never touches a
   server. A site holds only the public half, so the same key can be configured on
-  any number of sites and one private key opens every backup from all of them.
+  any number of sites and one private key opens every backup from all of them —
+  which is a choice each operator makes for their own sites, not something a
+  control plane can arrange from outside.
 - **site** — a keypair the site itself holds at `config/backup_site_key`. This is
   what lets a site restore itself unattended: pre-restore rollback snapshots and
   routine restores need no operator. It is disposable — lose it and the recovery
@@ -330,16 +349,22 @@ it?" has an answer on demand rather than only at setup time.
 
 ### Only this site ever sets this site's key
 
-`backup_recovery_public_key` is the key for the backups this site takes, and its
-custodian is whoever administers this site. Nothing writes it from outside — a
-control plane that wrote into it would hold the private half of a key the site
-believes is its own.
+`backup_recovery_public_key` is the key every backup of this site seals to,
+whoever took it, and its custodian is whoever administers this site. Nothing
+writes it from outside. Possession is proven here, against a challenge this site
+issued: `maintenance_scripts/sysadmin_tools/set_recovery_key.php` reports what
+this site holds and refuses to write it, and a management job that passes key
+material is refused by the tool it passes it to.
 
-An empty slot means this site takes no backups of its own. It does not mean the
-site is unprotected: a control plane managing it takes its own copies, sealed to
-its own key, which it carries with each run. Those are separate backups under
-separate custody, and either party can have them without the other — see
-[Server Manager](../plugins/server_manager/docs/overview.md#backups-across-the-fleet).
+**An empty slot means this site takes no backups, for anybody.** Not its own, and
+not a control plane's copies of it — there is no key those could be sealed to,
+and an unencrypted whole-site archive on somebody else's shelf is not a fallback.
+Set the key up at Admin → System → Backups: the page generates a keypair in the
+browser and runs the possession challenge in one pass, needing no control plane
+and no shell. A control plane managing this site can see that the slot is empty
+and say so on its dashboard — see
+[Server Manager](../plugins/server_manager/docs/overview.md#backups-across-the-fleet)
+— and that is the whole of what it can do about it.
 
 ## Uploads
 
@@ -425,13 +450,16 @@ recover from total loss of the machine.
 
 ## The node tool
 
-`maintenance_scripts/sysadmin_tools/backup_envelope.php` is deliberately
-standalone — no platform bootstrap — so it works during disaster recovery when
-the site will not boot.
+`maintenance_scripts/sysadmin_tools/backup_envelope.php` reads a backup's key
+back. `open`, `relabel` and `site-key` are deliberately standalone — no platform
+bootstrap — so they work during disaster recovery when the site will not boot,
+which is the moment that matters. `mint` runs only on a live site and does read
+its settings, because it must know which recovery key that site holds: nobody
+hands it one, and `--recovery-pub` is refused.
 
 | Command | What it does |
 |---|---|
-| `mint` | Mints a data key, seals it, writes the key file and the envelope |
+| `mint` | Mints a data key, seals it to this site's own verified recovery key, writes the key file and the envelope |
 | `open` | Recovers the data key from an envelope or manifest, given a recovery or site key |
 | `relabel` | Points an envelope at the archive it belongs to |
 | `site-key` | Prints this site's public key, minting the keypair if absent |

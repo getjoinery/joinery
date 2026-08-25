@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.5 - recoverability is read from the NODE's own verified recovery key, not this control
+ *                plane's: backups seal to the key the node holds, so a node without a verified one
+ *                is shown as unable to back up and the run button is not offered
  * @version 1.4 - incremental chains are listed and restorable (they are what the schedule actually
  *                produces); every restore asks which domain the site is to answer to; the Apache
  *                choice is gone, because the serving config is always regenerated for this machine
@@ -45,13 +48,15 @@
 	echo ' <a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="ms-2 small">Change</a>';
 	echo '</div>';
 
-	// Whether backups from this node can be recovered at all. Each backup seals
-	// its own key to the recovery key, so there is nothing per-node to chase —
-	// either recovery is set up, in which case every backup is openable, or it
-	// is not, in which case encrypted backups refuse to run.
+	// Whether backups of this node can be recovered at all — which is a question
+	// about the NODE, not about this control plane. Every backup seals to the
+	// recovery key the node holds and has proven, read on the node; nothing is
+	// supplied from here, so this control plane's own key has no bearing on
+	// whether this node can be backed up or by whom its archives can be opened.
 	require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
-	$recovery_setup = BackupRecoveryKey::setup_state();
-	$recovery_ready = $recovery_setup['is_ready'];
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+	$rk_node        = RecoveryKeyFleet::node_state($node);
+	$recovery_ready = ($rk_node['state'] === 'n/a') || RecoveryKeyFleet::has_own_key($rk_node);
 
 	// Encryption is forced for exactly the nodes whose archives leave the box —
 	// asked of the same function the job builder asks, so the form can never
@@ -62,33 +67,28 @@
 
 	// When backups are paused outright (below), that box says everything this
 	// status alert would — so it is not repeated here.
-	if ($target_id && $recovery_ready) {
+	if ($target_id && $recovery_ready && $rk_node['fingerprint'] !== '') {
 		echo '<div class="alert alert-success border mb-3 py-2">';
-		echo '<strong>Backups are recoverable.</strong> Every backup carries its own key sealed to recovery key '
-			. htmlspecialchars($recovery_setup['fingerprint']) . '&hellip;';
+		echo '<strong>Backups are recoverable.</strong> Every backup carries its own key sealed to this '
+			. 'node\'s verified recovery key '
+			. htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip; &mdash; '
+			. 'held by whoever administers the node, and the only key that opens these archives.';
 		echo '</div>';
 	}
 
-	// That covers backups this control plane runs. A backup the node runs on its
-	// own schedule reads the node's OWN recovery key, so it needs one of its own
-	// — which the control plane gives it, filling an empty slot and never
-	// overwriting one.
-	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
-	$rk_node = RecoveryKeyFleet::node_state($node);
+	// One key, one custodian, both kinds of backup. The node's own scheduled
+	// backups and the copies taken from here seal to the same thing: the key the
+	// node holds. So this line is not a footnote about the node's private
+	// arrangements — it is the coverage statement for everything on this tab.
 	if ($rk_node['state'] !== 'n/a') {
-		// Information, not a problem. This site having no key of its own does not
-		// mean it is unprotected — the backups taken from here carry their own —
-		// it means the site takes no copies of its own, which is its operator's
-		// call to make and not something to nag about from here.
-		echo '<div class="alert alert-light border mb-3 py-2">';
-		echo '<strong>This site\'s own backups:</strong> ' . htmlspecialchars($rk_node['summary']);
+		echo '<div class="alert alert-' . ($recovery_ready ? 'light' : 'warning') . ' border mb-3 py-2">';
+		echo '<strong>This node\'s recovery key:</strong> ' . htmlspecialchars($rk_node['summary']);
 		if ($rk_node['fingerprint'] !== '') {
 			echo ' (' . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip;)';
 		}
-		if (!RecoveryKeyFleet::has_own_key($rk_node)) {
-			echo '<div class="small text-muted mt-1">Its operator sets this up on the site\'s own Backups '
-			   . 'page. Backups taken from here are unaffected &mdash; they seal to this control plane\'s '
-			   . 'key, which travels with each run.</div>';
+		if (!$recovery_ready) {
+			echo '<div class="small mt-1">' . htmlspecialchars(RecoveryKeyFleet::blocker_summary($rk_node))
+			   . '</div>';
 		}
 		echo '</div>';
 	}
@@ -113,15 +113,18 @@
 		   . 'to start backing it up.';
 		echo '</div>';
 	} elseif (!$recovery_ready) {
-		// A backup nobody can decrypt is not a backup, so the run is refused
-		// server-side until recovery is set up. Don't offer a button that is
-		// going to be refused — explain instead.
+		// A backup nobody can decrypt is not a backup, so the run is refused —
+		// on the node, whatever this page believes, and again here when the job
+		// is built. Don't offer a button that is going to be refused; say what
+		// would change it, and say plainly that it cannot be changed from here.
 		echo '<div class="alert alert-warning mb-0">';
-		echo '<strong>Backups are paused until backup key recovery is set up.</strong> ';
+		echo '<strong>No backups of this node can run.</strong> ';
 		echo 'These backups leave the node, so they are encrypted &mdash; and an encrypted backup '
 		   . 'nobody can open is not a backup. ';
-		echo htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery_setup));
-		echo ' <a href="' . BackupRecoveryKey::SETUP_URL . '" class="alert-link">Set up backup key recovery</a>.';
+		echo htmlspecialchars(RecoveryKeyFleet::blocker_summary($rk_node));
+		echo '<div class="small mt-1">The node\'s own Backups page generates a key and runs the '
+		   . 'verification challenge in one pass, at <code>' . htmlspecialchars(BackupRecoveryKey::SETUP_URL)
+		   . '</code> on the node. Then run a status check here and this clears.</div>';
 		echo '</div>';
 	} else {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/FleetBackupPolicy.php'));
@@ -148,9 +151,10 @@
 		   . '<strong>' . htmlspecialchars($health['label']) . ':</strong> '
 		   . htmlspecialchars($health['detail']) . '</p>';
 
-		echo '<p class="text-muted">Encrypted on the node, sealed to recovery key '
-		   . htmlspecialchars(RecoveryKeyFleet::short($recovery_setup['fingerprint'])) . '&hellip; and to the '
-		   . 'node itself, then uploaded to ' . $target_name . '.</p>';
+		echo '<p class="text-muted">Encrypted on the node, sealed to the node\'s own verified recovery key '
+		   . htmlspecialchars(RecoveryKeyFleet::short($rk_node['fingerprint'])) . '&hellip; and to the '
+		   . 'node itself, then uploaded to ' . $target_name . '. No key is sent from here, so these '
+		   . 'archives open only with the private half held by the node\'s administrator.</p>';
 
 		$fw_run = $page->getFormWriter('backup_run_form');
 		$fw_run->begin_form();

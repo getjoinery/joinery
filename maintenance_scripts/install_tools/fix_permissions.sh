@@ -1,4 +1,9 @@
 #!/usr/bin/env bash
+#VERSION 2.8 - Pin config/agent_signing_key (the fleet trust root — whoever reads it can
+#              sign agent releases every node installs as root) to 600 user1:user1, and
+#              config/provisioning_key (the fleet SSH key) to 640 www-data:user1 (600
+#              would lock node_exec.php out — see the pin's comment).
+#              The sweep left both open; the signing key was found 640 group-www-data.
 #VERSION 2.7 - Guarantee cache/static_pages exists before the sweep, so page
 #              caching is on after every permissions run. It sits under a
 #              Docker named volume, is created at run time, and a root-run PHP
@@ -128,6 +133,32 @@ if [ -f "$BACKUP_KEY" ]; then
     echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
     chown www-data:www-data "$BACKUP_KEY"
     chmod 640 "$BACKUP_KEY"
+fi
+
+# The agent release signing key — the fleet trust root. Anyone who can read it
+# can sign agent updates that every node installs and runs as root, so the sweep
+# must never leave it readable beyond its owner. Publishing runs as user1 at the
+# CLI or as root via an agent job, so ownership goes back to user1 (the sweep's
+# chown -R made it www-data); the web stack never reads it (the health panel
+# only calls is_file). Exists only on the publishing box.
+SIGNING_KEY="$SITE_ROOT/config/agent_signing_key"
+if [ -f "$SIGNING_KEY" ]; then
+    echo "  Pinning key $SIGNING_KEY to 600 user1:user1..."
+    chown user1:user1 "$SIGNING_KEY"
+    chmod 600 "$SIGNING_KEY"
+fi
+
+# The fleet provisioning SSH key (mgn_ssh_key_path) — reaches every managed
+# node as root, so the sweep must not leave it world-readable. It stops at 640
+# www-data:user1 rather than 600 because two callers ssh with it: the agent as
+# root, and node_exec.php as the developer account. OpenSSH's strict-permissions
+# check only applies to key files the caller owns, so group-read on a
+# www-data-owned file is exactly what lets user1 use it at all.
+PROVISIONING_KEY="$SITE_ROOT/config/provisioning_key"
+if [ -f "$PROVISIONING_KEY" ]; then
+    echo "  Pinning key $PROVISIONING_KEY to 640 www-data:user1..."
+    chown www-data:user1 "$PROVISIONING_KEY"
+    chmod 640 "$PROVISIONING_KEY"
 fi
 
 # The install-time admin password, for whoever can already reach the server as

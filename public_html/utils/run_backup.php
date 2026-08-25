@@ -13,14 +13,18 @@
  *
  *   php utils/run_backup.php
  *
- * With --profile=manager it runs a control plane's backup of this site. Nothing
- * about that run is read from this site's settings: the bucket, the credentials
- * and the recovery public key arrive as JSON **on stdin** and leave with the
- * process.
+ * With --profile=manager it runs a control plane's backup of this site. Where the
+ * archive goes arrives with the run — the bucket and a write-only credential, as
+ * JSON **on stdin** — and leaves with the process.
  *
  *   php utils/run_backup.php --profile=manager <<'EOF'
- *   {"bucket":"...","credentials_b64":"...","recovery_public_key":"..."}
+ *   {"bucket":"...","credentials_b64":"..."}
  *   EOF
+ *
+ * What OPENS the archive is never supplied. Both profiles seal to this site's
+ * own proven recovery key, read from this site's settings, and a manager run
+ * that arrives carrying key material is refused rather than obeyed. A site with
+ * no proven key of its own takes no backups for anybody and says so.
  *
  * Stdin rather than an argument on purpose. Anything in argv is visible to every
  * user on the box for the life of the process, and one of these fields is a
@@ -29,6 +33,8 @@
  * Concurrency is handled by the runner itself: a run that finds another in
  * progress — either profile — reports itself skipped rather than racing it.
  *
+ * @version 1.2 - a manager-profile run no longer accepts a recovery key on stdin; encryption is
+ *                pinned to this site's own proven key and a supplied one is refused
  * @version 1.1 - --profile, manager-profile config read from stdin, and the machine-readable
  *                BACKUP_RESULT / BACKUP_TIME contract lines for a control plane parsing the output
  * @version 1.0

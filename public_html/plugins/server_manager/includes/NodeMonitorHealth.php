@@ -13,6 +13,9 @@
  * It also surfaces backup recovery problems (backup_recovery_problems), in the
  * same shape, so an unrecoverable-backup node is as visible as broken monitoring.
  *
+ * @version 1.9 - fleet_backup_health leads with whether the node holds a verified recovery key of
+ *                its own: backups seal to the node's key, read there, so a node without one will
+ *                never back up and says so on the first pass instead of ageing into "never"
  * @version 1.8 - is_name_resolution_failure(): a probe that died in the monitoring host's own
  *                resolver is a statement about us, not about the node, so callers can decline
  *                to conclude instead of reporting the whole fleet down
@@ -352,8 +355,22 @@ class NodeMonitorHealth {
 
 	/** Where one node's fleet backups stand. */
 	public static function fleet_backup_health($node, array $policy): array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+
 		$last    = $node->get('mgn_last_backup_time');
 		$outcome = (string)$node->get('mgn_last_backup_outcome');
+
+		// Asked first, and without a grace period. Every backup seals to the
+		// recovery key the NODE holds and has proven — nothing is supplied from
+		// here — so a node without one is not a node whose backups are late. It
+		// is a node whose backups will never run, and it should read that way
+		// from the first pass rather than as "never backed up" two days later,
+		// which invites someone to wait.
+		$rk = RecoveryKeyFleet::node_state($node);
+		if ($rk['state'] !== 'n/a' && !RecoveryKeyFleet::has_own_key($rk)) {
+			return self::result('backups', 'Cannot be backed up: no verified recovery key on the node',
+				RecoveryKeyFleet::blocker_summary($rk), $rk['state'] !== 'unknown');
+		}
 
 		if (!$last) {
 			// Never yet, which is normal for the first few hours of a node's life

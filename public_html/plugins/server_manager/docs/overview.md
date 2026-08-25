@@ -256,7 +256,7 @@ Health dot colors reflect actual server health, not check recency:
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
-| `backup_run` | This control plane's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket, a write-only credential and the recovery key supplied for that run and never stored there | No |
+| `backup_run` | This control plane's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
 | `run_command` | One ad-hoc command from the node detail Console tab (or `node_exec.php`). Bounded by a chosen timeout; the command itself is never inspected | Depends entirely on the command |
 | `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
@@ -745,10 +745,12 @@ Every backup run mints its own random encryption key. The archive is encrypted
 with it, and the key itself is sealed to two recipients and written beside the
 archive as a JSON envelope (`{archive}.keys.json`), which is uploaded with it:
 
-- **recovery** — the operator's recovery public key. The private half lives in a
-  password manager and never touches a server. Because a site holds only the
-  public half, the same public key can be configured on any number of sites, so
-  one private key opens every backup from the whole fleet.
+- **recovery** — the recovery public key **the node itself holds and has
+  verified**, read on the node. The private half lives in a password manager,
+  held by whoever administers that node, and never touches a server. An operator
+  who administers several sites may configure the same public key on all of them,
+  and then one private key opens all of theirs; that is their arrangement to
+  make, on each site, and not something this control plane can impose from here.
 - **site** — a keypair the node itself holds at `config/backup_site_key`. This is
   what lets a site restore itself with nobody present: pre-restore rollback
   snapshots and routine restores need no operator. It is disposable — lose it and
@@ -757,6 +759,15 @@ archive as a JSON envelope (`{archive}.keys.json`), which is uploaded with it:
 Nothing on a node is precious as a result. Losing a node, or its whole disk, costs
 no ability to read any backup it ever made, so there is no per-node key to track,
 seal, or reconcile.
+
+**No key is ever sent to a node.** Sealing to a public key always appears to
+succeed, so a key supplied over the wire would let whoever supplied it decide who
+can open a node's database and mail, with nothing on any machine looking wrong
+until a restore was attempted. Every backup job therefore carries no key
+material, and `backup_envelope.php mint` refuses one if a job passes it anyway.
+A node with no verified recovery key of its own is refused a backup, loudly, at
+build time and again on the node — never quietly downgraded to an unencrypted
+archive on somebody else's shelf.
 
 - The recovery keypair is generated with
   `maintenance_scripts/sysadmin_tools/escrow_keypair.php` (standalone PHP + sodium,
@@ -821,36 +832,45 @@ the panel. `BackupRecoveryKey::setup_state()` is the single source of truth for
 that state, so the panel, the node Backups tab, and the dashboard cannot
 disagree.
 
-Until setup is finished the platform does not offer backups it would refuse: a node
-with a cloud target shows the explanation in place of the Run Backup forms, and a
-local-only node has encryption switched off with a link to the panel. Creating an
-encrypting backup checks the recovery key when the job is built, so an unconfigured
-or unproven key fails while the operator is looking at the button rather than
-part-way through a backup.
+That panel covers this control plane's own site. Whether a **node** can be backed
+up is a question about the node's key, answered by `RecoveryKeyFleet::node_state()`
+from the last status check: a node whose key is missing, unverified or not yet
+checked shows the explanation in place of the Run Backup forms, and the job
+builder refuses to build a run for it, so an operator is told while looking at
+the button rather than part-way through a backup. `NodeMonitorHealth::fleet_backup_health()`
+leads with the same state, without a grace period — a node that cannot encrypt is
+not a node whose backups are late.
 
 ### Backups across the fleet
 
 This control plane takes its own backups of the nodes it manages. They are a
-separate party's copies of each site, under this control plane's recovery key, on
-this control plane's shelf — the `manager` profile described in
+separate party's copies of each site, on this control plane's shelf — the
+`manager` profile described in
 [Backups](../../../docs/backups.md#two-parties-two-profiles). A site's own
-backups are the `site` profile: its own key, its own schedule, its own business.
+backups are the `site` profile: its own schedule, its own business.
 
 Neither owns the other. A site that takes no copies of its own is still backed up
 from here; a site that takes plenty is still backed up from here. Nothing on
 either side needs the other to be absent.
 
-**The node does the work.** `backup_run` hands it the bucket, a credential and a
-recovery public key on stdin, and its own `BackupRunner` builds the archive,
-extends the chain, seals the envelope, uploads and sweeps its local copies.
-Routing archives through the control plane would drag every byte down and push it
-back up, and would put this machine in the path of every restore.
+**Both open with the node's key.** The two profiles differ in who schedules them,
+where the archive lands and who prunes it — not in who can read it. That belongs
+to the node's administrator in both cases, which is what makes a compromise of
+this control plane a metadata problem rather than a fleet-wide disclosure.
 
-**Nothing is left on the node.** The credential is substituted into the step by
-the agent at run time and never written to a job row or a node's database. The
-recovery key travels as a *public* key, which seals but cannot open. So a node
-holds no key to anyone's backups but its own, and a node that leaves this fleet
-takes nothing with it.
+**The node does the work.** `backup_run` hands it the bucket and a credential on
+stdin, and its own `BackupRunner` builds the archive, extends the chain, seals the
+envelope to the node's own verified recovery key, uploads and sweeps its local
+copies. Routing archives through the control plane would drag every byte down and
+push it back up, and would put this machine in the path of every restore.
+
+**Nothing is left on the node, and nothing is given to it.** The credential is
+substituted into the step by the agent at run time and never written to a job row
+or a node's database, and it leaves with the run. No encryption key goes the other
+way: a run that arrives carrying key material is refused rather than obeyed, so a
+control plane that had been tampered with cannot re-seal the fleet's next backups
+to a key of its choosing. A node holds no key to anyone's backups but its own, and
+a node that leaves this fleet takes nothing with it.
 
 #### The node may write to the shelf but never erase it
 
@@ -950,22 +970,28 @@ nothing written since raises **"Backups are not landing"**. The shelf is the
 one witness a compromised or misconfigured node cannot talk into its story —
 everything else in the health picture is the node reporting on itself.
 
-A site's own profile is shown alongside as information and never alarms. A node
-with fleet backups switched off produces nothing either — that was somebody's
-decision.
+A node with fleet backups switched off produces nothing either — that was
+somebody's decision.
 
-#### Which key each site holds for itself
+#### Which key each node holds, and whether it can be backed up
 
 `set_recovery_key.php --report` is asked during `check_status`, and the answer
-lands on `mgn_backup_recovery_fpr`. It prints one machine-readable line,
-`RECOVERY_KEY=written|proof_write|already|different|none|invalid`, and the fleet
-table reads the column rather than reaching out to every node on page load.
+lands on `mgn_backup_recovery_fpr` and `backup_recovery_state`. It prints one
+machine-readable line, `RECOVERY_KEY=already|none|invalid`, and the fleet table
+on the Targets page reads the columns rather than reaching out to every node on
+page load.
 
-It is **reported and never written**. That slot holds the key for the site's own
-backups; writing it from here would make this control plane the holder of the
-private half of a key the site believes is its own. There is no job type that can
-write it. A site whose operator wants a key of their own sets it up on that
-site's Backups page, with the possession ceremony that makes it trustworthy.
+That state decides whether the node can be backed up at all, by anyone — the
+Targets page lists it as fleet coverage, and `RecoveryKeyFleet::has_own_key()` is
+the one predicate every surface asks. Whose key it is is not compared against
+this control plane's: a node holding a key this machine has never seen is a node
+whose operator holds their own recovery key, which is the intended arrangement.
+
+It is **reported and never written**. There is no job type that can write it, and
+`set_recovery_key.php` refuses `--public` outright so a stale control plane finds
+out rather than succeeding. A node's key is set up on that node's own Backups
+page, with the possession ceremony that makes it trustworthy — the page generates
+a keypair in the browser and runs the challenge in one pass.
 
 ### Disaster recovery
 
