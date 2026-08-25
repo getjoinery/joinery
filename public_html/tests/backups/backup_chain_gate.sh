@@ -27,7 +27,6 @@ TOOLS="$ROOT/maintenance_scripts/sysadmin_tools"
 BACKUP="$TOOLS/backup_files.sh"
 RESTORE="$TOOLS/restore_chain.sh"
 ENVTOOL="$TOOLS/backup_envelope.php"
-KEYGEN="$TOOLS/escrow_keypair.php"
 
 passed=0; failed=0
 chk() {
@@ -42,9 +41,10 @@ W=$(mktemp -d /tmp/jy_chain_gate_XXXXXX)
 trap 'rm -rf "$W"' EXIT
 mkdir -p "$W/site" "$W/arts" "$W/out"
 
-# The chain data key, minted the way a real run mints it.
-php "$KEYGEN" generate --private-out "$W/recovery.key" > "$W/recovery.pub" 2>/dev/null
-php "$ENVTOOL" mint --recovery-pub "$(cat "$W/recovery.pub")" --artifact chain \
+# The chain data key, minted the way a real run mints it: the tool reads the
+# recovery key this site holds and has proven — nobody hands it one — and this
+# gate never needs to open the envelope, only to use the data key it wrote.
+php "$ENVTOOL" mint --artifact chain \
     --key-out "$W/chain.key" --sidecar-out "$W/arts/envelope.json" >/dev/null 2>&1
 chk "chain key minted" "$([ -s "$W/chain.key" ] && echo yes || echo no)" "yes"
 

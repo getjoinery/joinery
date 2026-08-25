@@ -31,6 +31,9 @@
  * it is handed cannot delete, and pruning that shelf belongs to the party that
  * owns it.
  *
+ * @version 1.5 - a manager-profile run seals to THIS machine's own proven recovery key, read
+ *                locally. A run carrying key material is refused, and a machine with no proven
+ *                key of its own refuses to back up rather than sealing to a key it was handed
  * @version 1.4 - a failed chain run also deletes its own artifacts and restores the
  *                pre-run manifest: the chain is being abandoned, so its half-made run
  *                must not strand gigabytes on disk until chain retention gets there,
@@ -298,20 +301,45 @@ class BackupRunner {
 	}
 
 	/**
-	 * A control plane's backup of this site, resolved entirely from what the run
-	 * was handed. Nothing here is read from this site's settings and nothing is
-	 * written to them: the bucket, the credentials and the recovery key arrive
-	 * with the run and leave with it.
+	 * A control plane's backup of this site: where it goes arrives with the run,
+	 * what opens it does not.
 	 *
-	 * The site's own recovery key is deliberately NOT consulted. A site that has
-	 * never set one up still gets backed up by its control plane, and a site that
-	 * has one never has it used for somebody else's copies.
+	 * The bucket and its credential are the control plane's to supply — they name
+	 * a shelf this machine has no other way to reach, and they leave with the
+	 * process. The recovery key is different in kind. Sealing to a public key
+	 * always appears to succeed: seal to an attacker's and every archive reports
+	 * itself encrypted while only the attacker can open it, with nothing on any
+	 * machine looking wrong. A key that arrives over a wire is therefore a key
+	 * this run cannot trust, whoever sent it.
+	 *
+	 * So encryption is pinned to THIS site's own proven recovery key, read here,
+	 * locally. A run carrying key material is refused outright rather than
+	 * quietly ignored — the refusal is how a stale control plane or a substituted
+	 * key becomes visible instead of becoming the new arrangement.
+	 *
+	 * A site with no proven key of its own cannot take an encrypted backup for
+	 * anybody, and says so. Never silently downgrade: an unencrypted copy of the
+	 * whole database on somebody else's shelf is the outcome that refusal exists
+	 * to prevent.
 	 */
 	private static function plan_manager(array $config) {
 		$m = isset($config['manager']) && is_array($config['manager']) ? $config['manager'] : array();
 
+		// Refused, not ignored. Reading past a supplied key would leave a control
+		// plane believing it chose who can open these archives.
+		foreach (array('recovery_public_key', 'recovery_private_key', 'recovery_fpr', 'recipients') as $forbidden) {
+			if (isset($m[$forbidden])) {
+				throw new BackupRunnerException(
+					'This run arrived carrying encryption key material (' . $forbidden . ') and was refused. '
+					. 'Backups on this machine seal only to the recovery key this machine holds and has '
+					. 'proven; nothing supplies one from outside. Treat a run that carries a key as a '
+					. 'control plane that is out of date, or as an attempt to substitute the key that '
+					. 'opens these backups.');
+			}
+		}
+
 		$missing = array();
-		foreach (array('bucket', 'credentials', 'recovery_public_key') as $required) {
+		foreach (array('bucket', 'credentials') as $required) {
 			if (empty($m[$required])) { $missing[] = $required; }
 		}
 		if ($missing) {
@@ -338,7 +366,19 @@ class BackupRunner {
 			'bkt_enabled'     => true,
 		), $credentials);
 
-		$recipients = BackupEnvelope::recipients_for_foreign_recovery($m['recovery_public_key']);
+		// The one place this run's encryption is decided, and it is a local read.
+		// BackupRecoveryKey::public_key() throws when the key is unset or has
+		// never been proven; the message is rewritten here because the operator
+		// reading it is a control plane's, and the fix is on this machine.
+		try {
+			$recipients = BackupEnvelope::recipients();
+		} catch (BackupRecoveryKeyException $e) {
+			throw new BackupRunnerException(
+				'This machine has no proven recovery key of its own, so no backup taken here can be '
+				. 'encrypted and none will run. Set one up at Admin -> System -> Backups on THIS site '
+				. '(' . BackupRecoveryKey::SETUP_URL . ') and open the verification challenge with it. '
+				. 'No control plane can supply this for you. (' . $e->getMessage() . ')');
+		}
 		$base = self::output_dir();
 
 		return array(
@@ -350,7 +390,7 @@ class BackupRunner {
 			'target'       => $target,
 			'encrypt'      => true,
 			'recipients'   => $recipients,
-			'recovery_fpr' => BackupRecoveryKey::fingerprint($recipients[0]['pub']),
+			'recovery_fpr' => BackupRecoveryKey::fingerprint(BackupRecoveryKey::public_key()),
 			'slug'         => self::validate_slug($m['slug'] ?? self::slug()),
 			'project'      => basename(PathHelper::getSiteRoot()),
 			'base_dir'     => $base,

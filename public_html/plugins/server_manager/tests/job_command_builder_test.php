@@ -54,6 +54,13 @@ function jcb_node(array $fields = array()) {
 	$node->set('mgn_host', '192.0.2.10');
 	$node->set('mgn_ssh_user', 'root');
 	$node->set('mgn_ssh_key_path', '/home/user1/.ssh/id_ed25519_claude');
+	// A node the last status check found holding a VERIFIED recovery key of its
+	// own. That is the ordinary state of a managed node and the precondition for
+	// every backup job, since backups seal to the node's key and nothing is
+	// supplied from here — so it belongs in the fixture rather than in each test
+	// that happens to build a backup.
+	$node->set('mgn_last_status_data', json_encode(array('backup_recovery_state' => 'proven')));
+	$node->set('mgn_backup_recovery_fpr', str_repeat('c3', 32));
 	foreach ($fields as $k => $v) {
 		$node->set($k, $v);
 	}
@@ -1229,8 +1236,11 @@ foreach (['build_backup_database', 'build_backup_project'] as $builder) {
 		$builder . ': minting runs the envelope tool', $mint_step);
 	check(($steps[$mint_at]['type'] ?? '') === 'ssh',
 		$builder . ': minting happens ON THE NODE, so no plaintext key crosses the wire');
-	check(strpos($mint_step, '--recovery-pub') !== false && strpos($mint_step, '--site-key') !== false,
-		$builder . ': seals to both the recovery key and the node site key', $mint_step);
+	check(strpos($mint_step, '--recovery-pub') === false,
+		$builder . ': is handed no recovery key — the node reads the one it holds and has proven',
+		$mint_step);
+	check(strpos($mint_step, '--site-key') !== false,
+		$builder . ': names the node site key, so the node can restore itself unattended', $mint_step);
 	check(strpos($mint_step, '/config/backup_site_key') !== false,
 		$builder . ': the site key is read from the node project config', $mint_step);
 
@@ -1347,9 +1357,10 @@ check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'
 section('Fleet backup run: config on stdin, nothing secret at rest');
 
 // The manager-profile backup job. The node runs its own engine; what the
-// builder contributes is the three things the node must not hold — the bucket,
-// the credential and the recovery key — and they travel on stdin, not argv,
-// because argv is world-readable on the box for the life of the process.
+// builder contributes is the two things the node has no other way to reach —
+// the bucket and the credential — and they travel on stdin, not argv, because
+// argv is world-readable on the box for the life of the process. What opens the
+// archive is not among them and never travels at all.
 $run_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/runnode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key));
@@ -1358,9 +1369,9 @@ $run_node = jcb_node(array(
 // up, fails at build time with a message the operator sees — not part-way
 // through a backup on the node.
 // Where a backup goes is the control plane's decision, not the node's: the
-// bucket, the credential and the recovery key all travel with the run. So a
-// node that names no target is only a problem when the choice is genuinely
-// ambiguous. With several shelves enabled, refuse and say so.
+// bucket and the credential travel with the run. So a node that names no target
+// is only a problem when the choice is genuinely ambiguous. With several shelves
+// enabled, refuse and say so.
 $enabled_now = 0;
 $enabled_before = new MultiBackupTarget(array('enabled' => true, 'deleted' => false));
 $enabled_before->load();
@@ -1498,11 +1509,18 @@ check(($run_config['credentials_b64'] ?? '') === $run_token,
 check(strpos($run_cmd, "'application_key'") === false && strpos($run_cmd, '"application_key"') === false,
 	'no credential data appears anywhere in the command');
 
-// The recovery key rides along per run as a PUBLIC key — never written into
-// the node's settings, so the node cannot start using it for its own runs.
-$run_pub = base64_decode((string)($run_config['recovery_public_key'] ?? ''), true);
-check($run_pub !== false && strlen($run_pub) === SODIUM_CRYPTO_BOX_PUBLICKEYBYTES,
-	'the recovery key travels in the config as a valid base64 box public key');
+// No encryption key travels, in any field. Sealing to a public key always
+// appears to succeed, so a control plane that could supply one could re-seal
+// every node's next backup — database and mail — to a key of its choosing, and
+// nothing would look wrong until a restore was attempted. The node reads the
+// key it holds and has proven; there is nothing here for a tampered plane to
+// substitute.
+foreach (array('recovery_public_key', 'recovery_fpr', 'recipients') as $forbidden) {
+	check(!array_key_exists($forbidden, $run_config),
+		"the config carries no {$forbidden} — no key material is supplied to a node");
+}
+check(strpos($run_cmd, 'recovery') === false,
+	'and the word does not appear anywhere in the command either', substr($run_cmd, 0, 300));
 
 // Policy fields reach the config; unrecognised values coerce to the closed set
 // rather than travelling to a node as text.
@@ -1520,6 +1538,52 @@ check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') =
 
 check(in_array('backup_run', ManagementJob::filterTypes(), true),
 	'backup_run is a filterable job type, so fleet runs are findable on the jobs pages');
+
+// ── A node with no verified key of its own cannot be backed up ─────────────
+// The node refuses these runs itself; that is the guard. Refusing at build time
+// as well is what puts the reason in front of an operator, and keeps the fleet
+// schedule from filling the job log with runs that were never going to work.
+// Never a quiet unencrypted fallback: an unencrypted whole site on somebody
+// else's shelf is the outcome the refusal exists to prevent.
+$rk_cases = array(
+	'a node holding no key'            => array('unconfigured', ''),
+	'a node holding an unreadable one' => array('invalid', ''),
+	'a node whose key is unverified'   => array('unproven', str_repeat('d4', 32)),
+	'a node nobody has checked yet'    => array('', ''),
+);
+foreach ($rk_cases as $label => $pair) {
+	list($rk_state, $rk_fpr) = $pair;
+	$rk_node = jcb_node(array(
+		'mgn_web_root' => '/var/www/html/nokey/public_html',
+		'mgn_bkt_backup_target_id' => $bkt->key,
+		'mgn_last_status_data' => ($rk_state === '') ? null : json_encode(array('backup_recovery_state' => $rk_state)),
+		'mgn_backup_recovery_fpr' => $rk_fpr));
+
+	$rk_refusal = '';
+	try { JobCommandBuilder::build_backup_run($rk_node); }
+	catch (Exception $e) { $rk_refusal = $e->getMessage(); }
+	check(strpos($rk_refusal, 'cannot be backed up') !== false,
+		"{$label} is refused a fleet backup at build time", $rk_refusal);
+	check(strpos($rk_refusal, 'control plane cannot supply') !== false
+		|| strpos($rk_refusal, 'administrator') !== false
+		|| strpos($rk_refusal, 'status check') !== false,
+		"and the refusal for {$label} says where it is fixed", $rk_refusal);
+
+	// The older per-op backup jobs mint an envelope on the node too, so they are
+	// the same vulnerability and get the same answer.
+	$rk_refusal = '';
+	try { JobCommandBuilder::build_backup_project($rk_node, array('encryption' => true)); }
+	catch (Exception $e) { $rk_refusal = $e->getMessage(); }
+	check(strpos($rk_refusal, 'cannot be backed up') !== false,
+		"{$label} is refused an encrypting backup_project too", $rk_refusal);
+}
+
+// And the envelope-minting step of a per-op backup passes no key either.
+$mint_cmds = jcb_cmds(JobCommandBuilder::build_backup_project($run_node, array('encryption' => true)));
+check(strpos($mint_cmds, '--recovery-pub') === false,
+	'backup_project mints its envelope without being handed a recovery key');
+check(strpos($mint_cmds, 'backup_envelope.php') !== false && strpos($mint_cmds, ' mint') !== false,
+	'it still mints one — on the node, from the key the node holds');
 
 // A target holding a node (write-only) credential hands nodes THAT key's
 // token; the main delete-capable credential then never travels to a node.

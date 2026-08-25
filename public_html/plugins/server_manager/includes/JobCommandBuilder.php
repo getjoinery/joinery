@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.31 - no builder supplies encryption key material to a node. Backup jobs seal to the
+ *                 recovery key the node holds and has proven, read there; a node without one is
+ *                 refused at build time with the reason, rather than backed up to a key from here
  * @version 1.30 - the Cloudflare routing probe documents its serving contract:
  *                 the node's /sm-ssl-probe.txt route is what makes the token fetchable
  * @version 1.29 - the publish-upgrade step cds to the running site's web root
@@ -697,9 +700,20 @@ class JobCommandBuilder {
 	 * control plane would drag whole archives down and push them back up for no
 	 * reason, and would put the control plane in the path of every restore.
 	 *
-	 * What the control plane contributes is the three things the node must not
-	 * hold: the bucket, the credential, and the recovery key to seal to. All
-	 * three arrive with the run and leave with it.
+	 * What the control plane contributes is the two things the node has no other
+	 * way to reach: the bucket and the credential. Both arrive with the run and
+	 * leave with it.
+	 *
+	 * What opens the archive is not among them. The node seals to the recovery
+	 * key it holds and has proven, read on the node, and refuses a run that
+	 * arrives carrying key material. Supplying one from here would be the
+	 * convenient arrangement — one key opening any node's backups — and is
+	 * exactly why it is not built: sealing to a public key always appears to
+	 * succeed, so a control plane that had been tampered with could re-seal
+	 * every node's next backup, databases and mail included, to a key of its
+	 * choosing, and nothing on any machine would look wrong until someone tried
+	 * to restore. The price is paid knowingly: recovering a node's backup needs
+	 * that node's recovery key, and no key here opens the fleet.
 	 *
 	 * The credential is a WRITE-ONLY one. The node can add objects to the shelf
 	 * and cannot remove any, so a compromised node cannot erase the fleet's
@@ -710,8 +724,9 @@ class JobCommandBuilder {
 	 * the life of the process and one of these fields is a credential.
 	 */
 	public static function build_backup_run($node, $params = []) {
-		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+
+		self::assert_node_can_be_backed_up($node);
 
 		$target = self::get_target($node);
 		if (!$target) {
@@ -739,18 +754,12 @@ class JobCommandBuilder {
 				. 'letters, numbers, hyphens and underscores.');
 		}
 
-		// Reading the recovery key here means a control plane that has not
-		// finished its own setup fails when the job is BUILT, with a message the
-		// operator sees, rather than part-way through a backup nobody could open.
-		$recovery_pub = base64_encode(BackupRecoveryKey::public_key());
-
 		$config = [
 			'target_name'               => (string)$target->get('bkt_name'),
 			'provider'                  => (string)$target->get('bkt_provider'),
 			'bucket'                    => (string)$target->get('bkt_bucket'),
 			'path_prefix'               => (string)($target->get('bkt_path_prefix') ?: 'joinery-backups'),
 			'credentials_b64'           => self::creds_token($target),
-			'recovery_public_key'       => $recovery_pub,
 			'slug'                      => $slug,
 			'type'                      => (($params['type'] ?? 'project') === 'database') ? 'database' : 'project',
 			'mode'                      => (($params['mode'] ?? 'chain') === 'full') ? 'full' : 'chain',
@@ -1696,31 +1705,30 @@ class JobCommandBuilder {
 	/**
 	 * Mint the encryption key for this backup, on the node.
 	 *
-	 * Every run gets its own random key, sealed to the operator's recovery key
-	 * and to the node's own site key, and written beside the archive as a JSON
-	 * envelope. Nothing precious is left on the node: the plaintext key exists
-	 * only as a 0600 file for the length of the run, and losing the node loses
-	 * no ability to read any backup it made.
+	 * Every run gets its own random key, sealed to the recovery key the node
+	 * holds and to the node's own site key, and written beside the archive as a
+	 * JSON envelope. Nothing precious is left on the node: the plaintext key
+	 * exists only as a 0600 file for the length of the run, and losing the node
+	 * loses no ability to read any backup it made.
 	 *
-	 * The recovery PUBLIC key travels in the step command, which is safe and is
-	 * the point — a public key seals but cannot open, so a job row that persists
-	 * forever holds nothing worth stealing. The sealing itself happens on the
-	 * node, so the plaintext key never crosses the wire in either direction.
-	 *
-	 * Reading the recovery key here means an unconfigured or unproven one fails
-	 * when the job is BUILT, with a message the operator sees immediately,
-	 * rather than part-way through a backup that then cannot be encrypted.
+	 * No key travels in the step command. The node reads the recovery key it
+	 * holds and has proven, which is the only key anyone here can be sure was
+	 * verified by someone holding its private half — a key sent from here would
+	 * seal just as happily whether or not anybody could ever open the result,
+	 * which is what makes a substituted one invisible. `backup_envelope.php mint`
+	 * refuses a supplied key outright, so a control plane still passing one is
+	 * told rather than obeyed.
 	 */
 	private static function step_mint_envelope($node, $scratch) {
-		require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+		// Asked here rather than in each caller: this is the step that needs a
+		// key, so every path that mints one is covered by construction.
+		self::assert_node_can_be_backed_up($node);
 
-		$recovery_pub = base64_encode(BackupRecoveryKey::public_key());
 		$scripts      = self::get_scripts_path($node);
 		$project_root = dirname(rtrim($node->get('mgn_web_root'), '/'));
 		$site_key     = $project_root . '/config/backup_site_key';
 
 		$cmd = 'php ' . escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php') . ' mint'
-			. ' --recovery-pub ' . escapeshellarg($recovery_pub)
 			. ' --artifact pending'
 			. ' --key-out ' . escapeshellarg(self::envelope_key_path($scratch))
 			. ' --sidecar-out ' . escapeshellarg(self::envelope_sidecar_path($scratch))
@@ -1730,21 +1738,42 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * There is deliberately no way to write a node's own recovery key from here.
+	 * There is deliberately no way to write a node's recovery key from here, and
+	 * no way to hand one to a job.
 	 *
-	 * That setting holds the key for the SITE's backups, and its custodian is
-	 * whoever administers the site. A control plane writing into it would make
-	 * itself the holder of the private half of a key the site believes is its
-	 * own — and would mean archives on that site's shelf open with a key its
-	 * operator does not have.
+	 * That key decides who can open every backup the node makes — the ones the
+	 * node takes for itself and the ones this control plane takes of it, which
+	 * are the same key now. Its custodian is whoever administers the node, and
+	 * possession is proven there, against a challenge that node issued. A control
+	 * plane that could write it, or could pass one with a run, would be a control
+	 * plane that could quietly become the only party able to read the fleet.
 	 *
-	 * Nothing here needs it. A backup this control plane takes carries its own
-	 * recovery public key with the run (see build_backup_run), so it works
-	 * against a node that has never heard of this control plane and leaves
-	 * nothing behind. `set_recovery_key.php --report` is still asked during
-	 * check_status, because which key a site holds is worth knowing; it is
-	 * reported and never written.
+	 * `set_recovery_key.php --report` is still asked during check_status, because
+	 * whether a node holds a proven key decides whether it can be backed up at
+	 * all — see assert_node_can_be_backed_up(). It reports and only reports.
 	 */
+
+	/**
+	 * Refuse to build a backup job for a node that cannot encrypt one.
+	 *
+	 * The node refuses these runs itself — that is the guard, and it holds
+	 * whatever a control plane believes. This is the second thing: failing at
+	 * BUILD time puts the reason in front of the operator immediately, and keeps
+	 * the fleet schedule from filling the job log with runs that were never going
+	 * to work. Never silently downgrade: the alternative to a refusal here is an
+	 * unencrypted copy of a whole site on somebody else's shelf.
+	 */
+	private static function assert_node_can_be_backed_up($node) {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+
+		$state = RecoveryKeyFleet::node_state($node);
+		if ($state['state'] === 'n/a' || RecoveryKeyFleet::has_own_key($state)) {
+			return;
+		}
+		throw new Exception(
+			"Node '" . $node->get('mgn_slug') . "' cannot be backed up. "
+			. RecoveryKeyFleet::blocker_summary($state));
+	}
 
 	/**
 	 * Point the envelope at the archive that was just written, and destroy the

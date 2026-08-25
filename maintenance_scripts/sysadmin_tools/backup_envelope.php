@@ -7,29 +7,39 @@
  * it, and the key itself is sealed to two recipients and stored beside the
  * archive as a JSON sidecar:
  *
- *   recovery - the operator's recovery public key. The private half lives in a
- *              password manager and opens every backup from every site given
- *              the same public key. Always sealed to; without it this tool
- *              refuses to mint.
+ *   recovery - THIS site's own recovery public key, read from this site's own
+ *              settings. The private half lives in a password manager and opens
+ *              every backup from every site given the same public key. Always
+ *              sealed to; a site with no proven key of its own refuses to mint.
  *   site     - a keypair the site holds (config/backup_site_key) so it can open
  *              its own backups unattended. Disposable: lose it and recovery
  *              still opens everything.
+ *
+ * Nobody hands this tool a recovery key. Sealing to a public key always appears
+ * to succeed, so a supplied key is a key nobody can verify: seal to a substituted
+ * one and every archive reports itself encrypted while only its author can open
+ * it. `mint` therefore reads the key from the site and refuses --recovery-pub.
  *
  * The plaintext data key exists only as a 0600 file for the length of the run.
  * It is never passed in argv (visible in ps) and never crosses a management job
  * row. Nothing on the node stays precious: losing the node loses no ability to
  * read any backup it made.
  *
- * Runs on any machine with PHP + libsodium and NO platform bootstrap, so it
- * works during disaster recovery when the site is gone. Validate with `php -l`
- * only — never the file validator (this is a CLI with a run-on-include body).
+ * `open`, `relabel` and `site-key` run on any machine with PHP + libsodium and NO
+ * platform bootstrap, so they work during disaster recovery when the site is
+ * gone — which is the moment that matters, and none of them needs to know whose
+ * key anything seals to. `mint` runs only on a live site, and bootstraps.
+ * Validate with `php -l` only — never the file validator (this is a CLI with a
+ * run-on-include body).
  *
  * Usage:
- *   mint:      php backup_envelope.php mint --recovery-pub B64 --artifact NAME \
+ *   mint:      php backup_envelope.php mint --artifact NAME \
  *                  --key-out PATH --sidecar-out PATH [--site-key PATH]
- *              Mints a data key, seals it, writes the key file (0600) and the
- *              sidecar (0640, so the account that restores can read it back).
- *              Prints nothing secret.
+ *              Mints a data key, seals it to the site's own proven recovery key,
+ *              writes the key file (0600) and the sidecar (0640, so the account
+ *              that restores can read it back). Prints nothing secret.
+ *              This is the one mode that reads the platform's settings, because
+ *              it is the one mode that must know whose key this site holds.
  *
  *   open:      php backup_envelope.php open --sidecar PATH [--private PATH] [--key-out PATH]
  *              Recovers the data key. --sidecar takes either a standalone
@@ -49,6 +59,8 @@
  * The envelope format written here is the same one includes/BackupEnvelope.php
  * reads; backup_envelope_cli_test.php holds both to that contract.
  *
+ * @version 1.2 - mint seals to the site's own proven recovery key, read on this machine, and
+ *                refuses --recovery-pub: no caller supplies the key that opens these archives
  * @version 1.1 - open accepts a chain manifest, not only a standalone sidecar.
  *                A chain produces no sidecar, so recovering its data key -- the
  *                documented restore path -- was impossible with this tool.
@@ -65,7 +77,7 @@ const BE_CIPHER  = 'aes-256-cbc-pbkdf2';
 
 function be_usage($stream = STDERR) {
     fwrite($stream, "Usage:\n");
-    fwrite($stream, "  php backup_envelope.php mint --recovery-pub B64 --artifact NAME --key-out PATH --sidecar-out PATH [--site-key PATH]\n");
+    fwrite($stream, "  php backup_envelope.php mint --artifact NAME --key-out PATH --sidecar-out PATH [--site-key PATH]\n");
     fwrite($stream, "  php backup_envelope.php open --sidecar PATH|MANIFEST [--private PATH] [--key-out PATH]\n");
     fwrite($stream, "  php backup_envelope.php relabel --sidecar PATH --artifact NAME [--out PATH]\n");
     fwrite($stream, "  php backup_envelope.php site-key --site-key PATH\n");
@@ -115,15 +127,6 @@ function be_write_private($path, $contents, $mode = 0600) {
         be_fail("could not write {$path}.");
     }
     @chmod($path, $mode);
-}
-
-/** Decode a base64 public key, or fail with a message that names the mistake. */
-function be_public_key($b64, $label) {
-    $raw = base64_decode(trim((string)$b64), true);
-    if ($raw === false || strlen($raw) !== SODIUM_CRYPTO_BOX_PUBLICKEYBYTES) {
-        be_fail("the {$label} public key is not a valid base64 box public key.");
-    }
-    return $raw;
 }
 
 /**
@@ -205,6 +208,45 @@ function be_identity($secret) {
     be_fail('that is not a recovery key. Expected the base64 secret key or keypair, not a file path.');
 }
 
+/**
+ * The recovery public key THIS site holds and has proven, as raw bytes.
+ *
+ * The only platform bootstrap in this tool, and it is here for a reason: whose
+ * key a backup seals to is a fact about this machine, and reading it anywhere
+ * else — argv, a job row, a control plane — makes it a fact somebody else can
+ * assert. BackupRecoveryKey::public_key() refuses an unset or unproven key, so
+ * a site that has not finished recovery setup mints nothing rather than sealing
+ * to a value nobody has ever opened a challenge with.
+ */
+function be_site_recovery_key() {
+    // The web root is conventionally public_html/ but is not required to be, and
+    // this tool has no configuration of its own to be told. One sibling holds
+    // includes/PathHelper.php; that one is the site.
+    $site_root = dirname(__DIR__, 2);
+    $bootstrap = $site_root . '/public_html/includes/PathHelper.php';
+    if (!is_file($bootstrap)) {
+        $found = glob($site_root . '/*/includes/PathHelper.php');
+        $bootstrap = (is_array($found) && count($found) === 1) ? $found[0] : '';
+    }
+    if ($bootstrap === '' || !is_file($bootstrap)) {
+        be_fail("no Joinery site was found beside this tool (looked under {$site_root}), so the "
+            . 'recovery key it holds cannot be read. mint runs on a live site; open and relabel are '
+            . 'the modes that work without one.');
+    }
+    require_once($bootstrap);
+    require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
+    require_once(PathHelper::getIncludePath('includes/DbConnector.php'));
+    require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
+
+    try {
+        return BackupRecoveryKey::public_key();
+    } catch (Throwable $e) {
+        be_fail('this site has no proven recovery key of its own, so no backup taken here can be '
+            . 'encrypted and none will run. Set one up at Admin -> System -> Backups on this site '
+            . 'and open the verification challenge with it. (' . $e->getMessage() . ')');
+    }
+}
+
 $mode = $argv[1] ?? '';
 
 // ---------------------------------------------------------------------- mint
@@ -214,7 +256,16 @@ if ($mode === 'mint') {
     $artifact    = be_require_opt($opts, 'artifact');
     $key_out     = be_require_opt($opts, 'key-out');
     $sidecar_out = be_require_opt($opts, 'sidecar-out');
-    $recovery    = be_public_key(be_require_opt($opts, 'recovery-pub'), 'recovery');
+
+    // Refused, not ignored. A caller passing a key believes it is choosing who
+    // can open these archives, and it is not — saying so is the whole point.
+    if (isset($opts['recovery-pub'])) {
+        be_fail('--recovery-pub is refused. This site seals its backups to the recovery key it '
+            . 'holds and has proven, read from its own settings; no caller supplies one. A job '
+            . 'still passing this flag comes from a control plane that is out of date.');
+    }
+
+    $recovery = be_site_recovery_key();
 
     $recipients = [['kind' => 'recovery', 'pub' => $recovery]];
 

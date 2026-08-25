@@ -244,17 +244,21 @@ if ($agent_online) {
 </div>
 <?php endif; ?>
 
-<?php // Backups this control plane takes are not landing. Its own runs, its own
-      // shelf, its own responsibility — which is why this is an alarm and a
-      // site's own backup arrangements are not. ?>
+<?php // Backups this control plane takes are not happening. Its own runs, its
+      // own shelf, its own responsibility — which is why this is an alarm.
+      // Two shapes land here and both belong: runs that fail or stop landing,
+      // and nodes that cannot be backed up at all because they hold no verified
+      // recovery key. The second is not fixable from here, and the line says so
+      // rather than reading as something an operator here forgot. ?>
 <?php if (!empty($fleet_backup_problems)): ?>
 <div class="alert alert-warning" role="alert">
-	<strong>Backups taken from here are not working.</strong>
+	<strong>Backups taken from here are not happening.</strong>
 	<ul class="mb-0 mt-2">
 		<?php foreach ($fleet_backup_problems as $p): ?>
 			<li>
 				<a href="<?php echo htmlspecialchars($p['link']); ?>" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
+				&mdash; <strong><?php echo htmlspecialchars($p['health']['label']); ?>.</strong>
+				<?php echo htmlspecialchars($p['health']['detail']); ?>
 			</li>
 		<?php endforeach; ?>
 	</ul>

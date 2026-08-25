@@ -23,6 +23,8 @@
  * ({archive}.keys.json), and inside the chain manifest for incremental chains.
  * Both use the recipient structure built here.
  *
+ * @version 1.1 - no recipient set can be built from a supplied key. Every run on this machine,
+ *                whoever triggered it, seals to the recovery key this machine holds and has proven
  * @version 1.0
  */
 
@@ -61,23 +63,6 @@ class BackupEnvelope {
 		return [
 			'data_key' => $data_key,
 			'envelope' => self::build($data_key, $artifact_name, $recipients ?? self::recipients()),
-		];
-	}
-
-	/**
-	 * The recipient set for a run sealed to a recovery key that is NOT this
-	 * site's own — a control plane backing this site up carries its key with the
-	 * run rather than storing it here, so the site never holds, and can never
-	 * drift into using, somebody else's key for its own backups.
-	 *
-	 * The site recipient is kept: unattended self-restore is exactly what it
-	 * exists for, and the archive is sitting on this machine anyway.
-	 */
-	public static function recipients_for_foreign_recovery($recovery_pub): array {
-		$pub = self::normalize_public_key($recovery_pub);
-		return [
-			['kind' => 'recovery', 'pub' => $pub],
-			['kind' => 'site',     'pub' => self::site_public_key()],
 		];
 	}
 

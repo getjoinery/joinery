@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.9 - a backup is refused for a node with no verified recovery key of its own, named as
+ *                such on the tab; the control plane's own key is no longer consulted, because no
+ *                key is supplied to a node
  * @version 1.8 - save_backup_policy action (fleet default / custom schedule / off), and backup_run
  *                takes mode and full-interval from the node's policy so a manual run extends the
  *                same family of restore points the schedule builds
@@ -221,16 +224,26 @@ class NodeDetailActions {
 
 			case 'backup_database': {
 				$params = ['encryption' => !empty($_POST['encryption'])];
-				self::ensure_backup_key_if_encrypting($node, $params);
-				$steps = JobCommandBuilder::build_backup_database($node, $params);
+				try {
+					self::ensure_node_can_encrypt($node, $params);
+					$steps = JobCommandBuilder::build_backup_database($node, $params);
+				} catch (Exception $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=backups';
+				}
 				$job = ManagementJob::createJob($node->key, 'backup_database', $steps, $params, $uid);
 				return self::jobUrl($job);
 			}
 
 			case 'backup_project': {
 				$params = ['encryption' => !empty($_POST['encryption'])];
-				self::ensure_backup_key_if_encrypting($node, $params);
-				$steps = JobCommandBuilder::build_backup_project($node, $params);
+				try {
+					self::ensure_node_can_encrypt($node, $params);
+					$steps = JobCommandBuilder::build_backup_project($node, $params);
+				} catch (Exception $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=backups';
+				}
 				$job = ManagementJob::createJob($node->key, 'backup_project', $steps, $params, $uid);
 				return self::jobUrl($job);
 			}
@@ -608,21 +621,27 @@ class NodeDetailActions {
 	}
 
 	/**
-	 * Refuse an encrypting backup while backup key recovery is unfinished, before
-	 * the job is created — an encrypted archive nobody can open is not a backup.
+	 * Refuse an encrypting backup for a node that has no verified recovery key of
+	 * its own, before the job is created — an encrypted archive nobody can open is
+	 * not a backup, and no key is supplied from here to make one openable.
 	 * Encryption is forced when the node has a cloud target, so that counts as
-	 * encrypting too. Throws (message shown on the tab) when recovery is not set
-	 * up and verified.
+	 * encrypting too.
 	 *
-	 * Checked here so an unconfigured or unproven recovery key is refused while
-	 * the operator is looking at the button, rather than part-way through a
-	 * backup that then has nothing it can seal its key to.
+	 * The refusal that matters happens on the node, which reads its own key and
+	 * fails the run. This one exists so the operator is told while looking at the
+	 * button, in words that name the node as the place to fix it.
 	 */
-	private static function ensure_backup_key_if_encrypting($node, $params): void {
+	private static function ensure_node_can_encrypt($node, $params): void {
 		$will_encrypt = !empty($params['encryption']) || JobCommandBuilder::get_target($node);
-		if ($will_encrypt) {
-			BackupRecoveryKey::public_key();
+		if (!$will_encrypt) {
+			return;
 		}
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
+		$state = RecoveryKeyFleet::node_state($node);
+		if ($state['state'] === 'n/a' || RecoveryKeyFleet::has_own_key($state)) {
+			return;
+		}
+		throw new Exception(RecoveryKeyFleet::blocker_summary($state));
 	}
 
 	/**

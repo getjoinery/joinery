@@ -1,27 +1,34 @@
 <?php
 /**
- * RecoveryKeyFleet — which recovery key each managed site holds for its OWN
- * backups.
+ * RecoveryKeyFleet — which recovery key each managed node holds, and therefore
+ * whether that node can be backed up at all.
  *
- * A site that backs itself up reads its own recovery key setting, so a site that
- * has never set one up runs no backups of its own. That is reported here and
- * nothing else: the slot's custodian is whoever administers the site, and a
- * control plane writing into it would hold the private half of a key the site
- * believes is its own.
+ * Every backup a node makes seals to the recovery key that node holds and has
+ * proven, read on the node. That is true of the copies this control plane takes
+ * as much as the copies the node takes for itself: nothing supplies a key from
+ * here, because sealing to a public key always appears to succeed, so a key sent
+ * over a wire would let whoever sent it decide who can open a node's database
+ * and mail with nothing anywhere looking wrong.
  *
- * It is also not a gap in coverage. A control plane's backups of a site are the
- * manager profile, which carries its recovery key with each run — so a site with
- * an empty slot is still backed up here, under this control plane's key, and the
- * empty slot means only that the site takes no copies of its own.
+ * The consequence this class exists to report: a node with no proven key of its
+ * own takes no backups, for anybody. It is not a shrug and not a preference —
+ * it is an un-backed-up node, and the fix is on the node, at its own Backups
+ * page, by whoever administers it. This control plane cannot do it from here and
+ * must not be able to.
+ *
+ * Whose key it is does not matter and is not compared. A node holding a key this
+ * control plane has never seen is a node whose operator holds their own recovery
+ * key — the intended arrangement, not a discrepancy.
  *
  * The answer comes from what the last status check recorded, not from reaching
  * out to every node when someone opens a page.
  *
+ * @version 2.0 - a node's own proven key is what every backup seals to, so this reports coverage
+ *                rather than key distribution: no comparison against the control plane's key, and
+ *                "no proven key" is an un-backed-up node rather than a note
  * @version 1.1 - reports only; the push is retired
  * @version 1.0
  */
-
-require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 class RecoveryKeyFleet {
 
@@ -29,17 +36,17 @@ class RecoveryKeyFleet {
 	 * Where one node stands.
 	 *
 	 * state:
-	 *   n/a       - hosts no Joinery site (a DNS box, a relay): nothing to set
+	 *   n/a       - hosts no Joinery site (a DNS box, a relay): nothing to back up
 	 *   unknown   - no status check has looked yet
 	 *   missing   - the slot is empty, or holds a value that is not a key
-	 *   has       - holding the control plane's key
-	 *   different - holding somebody else's key; left alone
+	 *   unproven  - a key is set but possession was never proven there
+	 *   proven    - a key is set and proven: this node can be backed up
 	 *
 	 * @return array{state:string, fingerprint:string, summary:string}
 	 */
 	public static function node_state($node): array {
 		if (!$node->get('mgn_web_root') || $node->get('mgn_skip_joinery_checks')) {
-			return self::result('n/a', '', 'Hosts no Joinery site, so it needs no recovery key.');
+			return self::result('n/a', '', 'Hosts no Joinery site, so there is nothing to back up.');
 		}
 
 		$status = json_decode((string)$node->get('mgn_last_status_data'), true);
@@ -52,41 +59,52 @@ class RecoveryKeyFleet {
 		}
 		if ($state === 'unconfigured' || $state === 'invalid' || $fpr === '') {
 			return self::result('missing', '',
-				'No recovery key, so its own scheduled backups cannot be encrypted and will not run.');
+				'No recovery key on the node, so nothing it backs up could be encrypted — '
+				. 'no backup of it runs, including the ones taken from here.');
 		}
-		if (self::manager_fingerprint() !== '' && hash_equals(self::manager_fingerprint(), $fpr)) {
-			return self::result($state === 'proven' ? 'has' : 'missing', $fpr,
-				$state === 'proven'
-					? 'Has the recovery key.'
-					: 'Has the recovery key but it is not verified there yet.');
+		if ($state === 'unproven') {
+			return self::result('unproven', $fpr,
+				'A recovery key is set on the node but possession of it was never proven there, so '
+				. 'backups still refuse to run — a mistyped key seals happily and opens never.');
 		}
-		return self::result('different', $fpr,
-			'Holding a different recovery key. Left alone — backups made here may open only with '
-			. 'the private half of that one.');
-	}
-
-	/** The control plane's own recovery key fingerprint, or '' if it has none. */
-	public static function manager_fingerprint(): string {
-		static $fpr = null;
-		if ($fpr === null) {
-			$report = BackupRecoveryKey::key_report();
-			$fpr = ($report['state'] === 'proven') ? $report['fingerprint'] : '';
-		}
-		return $fpr;
+		return self::result('proven', $fpr,
+			'Holds a verified recovery key of its own. Every backup of this node seals to it.');
 	}
 
 	/**
-	 * Whether this node's own backups are covered by a key SOMEBODY holds.
+	 * Whether this node can be backed up: it holds a key, and somebody has
+	 * demonstrated they hold the private half.
 	 *
-	 * Reported, never acted on. The key in that slot is for the site's own
-	 * backups and its custodian is whoever administers the site; a control plane
-	 * writing into it would hold the private half of a key the site believes is
-	 * its own. A site with no key of its own is exercising a choice, and it is
-	 * still covered by this control plane's backups either way — those carry
-	 * their key with each run.
+	 * Proof is the whole test. An unproven key is indistinguishable from a
+	 * mistyped one until a restore is attempted, which is the one moment the
+	 * answer cannot be acted on.
 	 */
 	public static function has_own_key(array $state): bool {
-		return $state['state'] === 'has' || $state['state'] === 'different';
+		return $state['state'] === 'proven';
+	}
+
+	/**
+	 * One line naming what is outstanding and where it is fixed, so the node
+	 * detail page, the fleet dashboard and the targets page say the same thing
+	 * rather than three near-misses.
+	 */
+	public static function blocker_summary(array $state): string {
+		switch ($state['state']) {
+			case 'missing':
+				return 'This node has no backup recovery key, so no backup of it can be encrypted and '
+					. 'none will run. Its administrator sets one up on the node\'s own Backups page — '
+					. 'this control plane cannot supply one, by design, because a key sent from here '
+					. 'would be a key this control plane could open every backup with.';
+			case 'unproven':
+				return 'This node has a backup recovery key that nobody has proven possession of, so '
+					. 'backups still refuse to run. Its administrator opens the verification challenge '
+					. 'on the node\'s own Backups page.';
+			case 'unknown':
+				return 'Whether this node holds a backup recovery key is not known yet. Run a status '
+					. 'check against it; until then no backup of it will be dispatched.';
+			default:
+				return '';
+		}
 	}
 
 	/** The short fingerprint every surface shows, matching the Backups page. */

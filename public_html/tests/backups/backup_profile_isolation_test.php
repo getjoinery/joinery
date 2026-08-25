@@ -9,9 +9,11 @@
  * Two parties backing up one site must not collide.
  *
  * A site backs itself up; a control plane managing it takes its own copies.
- * Those are two parties' backups under two recovery keys, and every place they
- * could touch — working directory, lock, tar snapshot, bucket path, envelope
- * recipient, local sweep — has to keep them apart. The failure modes here are
+ * Those are two parties' backups, and every place they could touch — working
+ * directory, lock, tar snapshot, bucket path, envelope recipient, local sweep —
+ * has to keep them apart. They are not kept apart by key: both seal to the key
+ * the machine holds, because a key supplied by whoever scheduled the run would
+ * make that party the one who can read it. The failure modes here are
  * all silent: a shared snapshot corrupts both chains while every run reports
  * success, a shared bucket path makes a listing unattributable, and a shared
  * sweep deletes the other party's only local copy.
@@ -25,6 +27,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
+require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
 
 // ── Naming and paths ────────────────────────────────────────────────────────
@@ -76,59 +79,47 @@ check(BackupProfile::path_segment(BackupProfile::SITE) !== BackupProfile::path_s
 	'the profiles file under different bucket segments');
 
 // ── Key separation ──────────────────────────────────────────────────────────
-section('A manager run seals to the manager key, not the site\'s');
+section('Both profiles seal to the machine\'s own key, and only that one');
 
-$site_recovery = sodium_crypto_box_keypair();
-$mgr_recovery  = sodium_crypto_box_keypair();
-$site_key      = sodium_crypto_box_keypair();
+$here_recovery  = sodium_crypto_box_keypair();   // this machine's own recovery key
+$other_recovery = sodium_crypto_box_keypair();   // a control plane's, or anyone else's
+$site_key       = sodium_crypto_box_keypair();   // this machine's disposable site key
 
 $data_key = base64_encode(random_bytes(32));
 
-// What a manager-profile run builds: the control plane's recovery key, plus the
-// node's own site key so the node can restore itself unattended.
-$manager_envelope = BackupEnvelope::build($data_key, 'files-0000.tar.gz.enc', array(
-	array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($mgr_recovery)),
+// What a run of EITHER profile builds: the recovery key this machine holds and
+// has proven, plus its own site key so it can restore itself unattended. The
+// profile decides where the archive goes and who prunes it, never who reads it.
+$envelope = BackupEnvelope::build($data_key, 'files-0000.tar.gz.enc', array(
+	array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($here_recovery)),
 	array('kind' => 'site',     'pub' => sodium_crypto_box_publickey($site_key)),
 ));
 
-check(BackupEnvelope::open($manager_envelope, sodium_crypto_box_secretkey($mgr_recovery)) === $data_key,
-	'the control plane\'s recovery key opens its own backup');
-check(BackupEnvelope::open($manager_envelope, sodium_crypto_box_secretkey($site_key)) === $data_key,
-	'and so does the node, unattended, with its own site key');
+check(BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($here_recovery)) === $data_key,
+	'this machine\'s own recovery key opens a backup taken here, whoever asked for it');
+check(BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($site_key)) === $data_key,
+	'and so does the machine itself, unattended, with its own site key');
 
-// The whole point of two keys: the site operator's recovery key is not a key to
-// the control plane's copies, and vice versa.
+// The property the whole arrangement exists for: whoever scheduled the run does
+// not thereby become able to read it.
 $opened = null;
-try { $opened = BackupEnvelope::open($manager_envelope, sodium_crypto_box_secretkey($site_recovery)); }
+try { $opened = BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($other_recovery)); }
 catch (Throwable $e) { $opened = false; }
 check($opened === false || $opened === null,
-	'the site operator\'s recovery key does NOT open the control plane\'s backup');
+	'a control plane\'s own recovery key does NOT open a backup taken on this machine');
 
-$site_envelope = BackupEnvelope::build($data_key, 'files-0000.tar.gz.enc', array(
-	array('kind' => 'recovery', 'pub' => sodium_crypto_box_publickey($site_recovery)),
-	array('kind' => 'site',     'pub' => sodium_crypto_box_publickey($site_key)),
-));
-$opened = null;
-try { $opened = BackupEnvelope::open($site_envelope, sodium_crypto_box_secretkey($mgr_recovery)); }
-catch (Throwable $e) { $opened = false; }
-check($opened === false || $opened === null,
-	'and the control plane\'s recovery key does NOT open the site\'s own backup');
+section('No recipient set can be built from a key that arrived from outside');
 
-section('A supplied recovery key is validated, not trusted');
-
-$threw = false;
-try { BackupEnvelope::recipients_for_foreign_recovery('not-a-key'); }
-catch (BackupEnvelopeException $e) { $threw = true; }
-check($threw, 'a malformed recovery key fails at build time');
-
-// Sealing to a well-formed key nobody holds the private half of always appears
-// to succeed, which is why the encoding is checked rather than assumed.
-$b64 = base64_encode(sodium_crypto_box_publickey($mgr_recovery));
-check(BackupEnvelope::normalize_public_key($b64) === sodium_crypto_box_publickey($mgr_recovery),
-	'a base64 recovery key is accepted and decoded');
-check(BackupEnvelope::normalize_public_key(sodium_crypto_box_publickey($mgr_recovery))
-	=== sodium_crypto_box_publickey($mgr_recovery),
-	'and raw bytes are accepted unchanged');
+// The removed capability, pinned. Sealing to a public key always appears to
+// succeed, so a "seal to the key I was handed" path is a silent full-exfiltration
+// vector: whoever handed the key becomes the only party that can read the
+// result, and nothing anywhere looks wrong. There must be no such path to call.
+check(!method_exists('BackupEnvelope', 'recipients_for_foreign_recovery'),
+	'BackupEnvelope offers no way to build recipients from a supplied recovery key');
+check(!method_exists('BackupRecoveryKey', 'push_decision'),
+	'and BackupRecoveryKey has no rule for accepting a key pushed from elsewhere');
+check(!method_exists('BackupRecoveryKey', 'accept_proven_fingerprint'),
+	'nor for accepting a possession proof established somewhere else');
 
 // ── Local sweep ─────────────────────────────────────────────────────────────
 section('Neither profile sweeps the other\'s local files');

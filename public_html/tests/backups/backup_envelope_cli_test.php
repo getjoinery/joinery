@@ -20,6 +20,7 @@ require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();
 
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
+require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 
 $cli = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/backup_envelope.php';
 if (!is_file($cli)) {
@@ -47,8 +48,12 @@ $site_file    = $work . '/config/backup_site_key';
 // ── CLI writes, core reads ──────────────────────────────────────────────────
 section('CLI mints, core opens');
 
+// No recovery key is passed. mint reads the one this site holds and has proven,
+// so what the envelope's recovery recipient is cannot be decided by the caller —
+// which is the property, not an inconvenience. The private half of that key is
+// in somebody's password manager, so this file checks the fingerprint rather
+// than opening with it, and opens with the site key it does control.
 $cmd = 'php ' . escapeshellarg($cli) . ' mint'
-	. ' --recovery-pub ' . escapeshellarg($rec_pub)
 	. ' --artifact ' . escapeshellarg('demo.tar.gz.enc')
 	. ' --key-out ' . escapeshellarg($key_file)
 	. ' --sidecar-out ' . escapeshellarg($sidecar_file)
@@ -69,8 +74,24 @@ check(strpos(implode("\n", $out), $minted_key) === false,
 $env = BackupEnvelope::read_sidecar($sidecar_file);
 check($env['cipher'] === BackupEnvelope::CIPHER, 'core accepts the CLI cipher name', (string)$env['cipher']);
 check($env['artifact'] === 'demo.tar.gz.enc', 'core reads the CLI artifact name');
-check(BackupEnvelope::open($env, $rec_sec) === $minted_key,
-	'core opens a CLI-minted envelope with the recovery key');
+$env_recovery = null;
+foreach ($env['recipients'] as $r) {
+	if (($r['kind'] ?? '') === 'recovery') { $env_recovery = $r; }
+}
+check($env_recovery !== null, 'the CLI-minted envelope has a recovery recipient');
+check(($env_recovery['fingerprint'] ?? '') === hash('sha256', BackupRecoveryKey::public_key()),
+	'and it is THIS site\'s own proven recovery key, not one the caller chose',
+	(string)($env_recovery['fingerprint'] ?? ''));
+
+$refuse = array();
+$refuse_rc = 0;
+exec('php ' . escapeshellarg($cli) . ' mint --recovery-pub ' . escapeshellarg($rec_pub)
+	. ' --artifact x --key-out ' . escapeshellarg($work . '/nope.key')
+	. ' --sidecar-out ' . escapeshellarg($work . '/nope.json') . ' 2>&1', $refuse, $refuse_rc);
+check($refuse_rc !== 0 && strpos(implode(' ', $refuse), 'refused') !== false,
+	'a caller that passes one is refused, not quietly ignored', implode(' | ', $refuse));
+check(!is_file($work . '/nope.key') && !is_file($work . '/nope.json'),
+	'and nothing is written when it refuses');
 
 $site_kp = base64_decode(trim((string)@file_get_contents($site_file)), true);
 check(BackupEnvelope::open($env, $site_kp) === $minted_key,
