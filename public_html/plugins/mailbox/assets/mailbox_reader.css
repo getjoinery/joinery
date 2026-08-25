@@ -771,6 +771,21 @@
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
 
+/* Search over an index still catching up on a backlog: informational, not an
+   error and not actionable — the fold continues in the background. */
+.mbx-indexing-banner {
+	display: flex;
+	align-items: center;
+	gap: 0.75rem;
+	padding: 0.625rem 0.875rem;
+	margin: 0.5rem 0;
+	background: #eff6ff;
+	border: 1px solid #bfdbfe;
+	border-radius: 8px;
+	font-size: var(--mbx-text-base);
+}
+.mbx-indexing-text { color: #1e40af; }
+
 /* A read that failed. Distinct from the empty state beside it: an empty
    mailbox is a fact about the mail, this is a fact about the request. */
 .mbx-load-error {

@@ -49,6 +49,14 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.29
+ * @changelog 1.29 - a sealed-mailbox search folds the index for at most
+ *   SEARCH_FOLD_BUDGET_SECONDS and searches what is indexed; an incomplete
+ *   index surfaces as search_indexing {remaining, total} in the response
+ *   (specs/mailbox_search_incremental_fold.md), and the deferred-work drain
+ *   finishes the backlog. A 100k-message import used to make every search
+ *   attempt refold the whole backlog inside one web request and die on
+ *   max_execution_time, with the high-water mark never advancing.
  * @version 1.28
  * @changelog 1.28 - thread payload says WHERE a message's original can come
  *   from (original_source: stored | imap | headers | none,
@@ -199,7 +207,19 @@ class MailboxService {
 	/** Set true whenever the most recent listThreads()/getThread() substituted a
 	 *  sealed placeholder (locked window or pending-parse row). Read via
 	 *  contentLocked() to raise the result's top-level `locked` flag. */
+	/** Wall-clock budget for the in-request index fold on a sealed-mailbox
+	 *  search. Small enough to clear any sane max_execution_time and proxy
+	 *  timeout with the query itself still to run; the deferred-work drain
+	 *  ('mailbox_fts_fold', plugins/mailbox/includes/bootstrap.php) is what
+	 *  actually catches a large backlog up. */
+	const SEARCH_FOLD_BUDGET_SECONDS = 5.0;
+
 	private $content_locked = false;
+
+	/** Set when a search ran against an index that does not yet cover the
+	 *  mailbox: {remaining, total}, emitted as search_indexing so the reader
+	 *  can say results may be incomplete. */
+	private $search_indexing = null;
 
 	public function __construct(MailboxViewer $viewer) {
 		$this->viewer = $viewer;
@@ -853,8 +873,20 @@ class MailboxService {
 					$search_locked = true;
 					$where[] = '1=0'; // no query is meaningful while locked
 				} else {
+					// Budgeted: fold a bounded slice of any backlog, then search
+					// what is indexed. A backlog too large for the slice (a bulk
+					// import, a long-offline owner) drains in the background via
+					// the 'mailbox_fts_fold' deferred-work consumer; until it
+					// catches up, the response says the index is still building.
 					$index = new MailboxIndex();
-					$index->fold($owner_id, $secret);
+					$fold = $index->fold($owner_id, $secret,
+						microtime(true) + self::SEARCH_FOLD_BUDGET_SECONDS);
+					if (empty($fold['complete'])) {
+						$this->search_indexing = array(
+							'remaining' => intval($fold['remaining']),
+							'total'     => intval($fold['total']),
+						);
+					}
 					$ids = $index->search($owner_id, $filters['q']);
 					$where[] = count($ids)
 						? 'iem_inbound_email_message_id IN (' . implode(',', array_map('intval', $ids)) . ')'
@@ -1022,6 +1054,12 @@ class MailboxService {
 			// The vault-holding mailbox being searched has no open window — the
 			// reader prompts to unlock rather than showing an empty result forever.
 			$result['search_locked'] = true;
+		}
+		if ($this->search_indexing !== null) {
+			// The search ran, but against an index that does not yet cover the
+			// mailbox — the reader says so instead of letting missing results
+			// read as missing mail.
+			$result['search_indexing'] = $this->search_indexing;
 		}
 		if ($this->content_locked) {
 			// At least one row rendered a sealed placeholder (locked window or a

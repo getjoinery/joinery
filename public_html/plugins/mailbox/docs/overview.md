@@ -1503,12 +1503,31 @@ ceremony, and window-close) — it registers the File decrypt hook and mail's
 `plugins/mailbox/includes/MailboxIndex.php` is a disposable, per-owner SQLite FTS5
 index — sender, subject, both bodies, and attachment *filenames* (never attachment
 contents) — held **only** in `/dev/shm` (RAM-backed, never touches disk in the clear)
-for the lifetime of the unlock window. A fold that changed anything immediately
-re-seals and persists the working copy as a private File (seal-after-fold; the sealed
-blob and its bookkeeping — high-water mark, sealed DEK — live in
-`imi_inbound_mailbox_search_index`), so a crash never loses folded work and a fresh
-unlock restores instantly instead of rebuilding; a fold that changed nothing persists
-nothing, so repeated searches over unchanged mail never rewrite the blob. Sealing and
+for the lifetime of the unlock window.
+
+Folding is batched, checkpointed, and bounded
+(`specs/mailbox_search_incremental_fold.md`): every id is delete-then-insert (so
+re-folding is harmless), the high-water mark advances per completed batch, and
+`fold()` takes an optional deadline plus a non-blocking per-user `flock`
+(`/dev/shm/mailfts_{uid}.lock`) so exactly one fold runs at a time — a second caller
+searches what is already indexed and reports the backlog instead of contending. The
+search request folds at most `MailboxService::SEARCH_FOLD_BUDGET_SECONDS`; a backlog
+beyond that (a bulk import, a long-offline owner) drains in-window through the
+`mailbox_fts_fold` deferred-work consumer, and until it catches up the response
+carries `search_indexing: {remaining, total}` and the reader shows a non-blocking
+"still indexing" banner. A failed SQLite write stops the pass with the mark at the
+last contiguous success — the mark never advances past a message that is not actually
+in the index.
+
+A fold that completed or processed refolds re-seals and persists the working copy as
+a private File (seal-after-fold; the sealed blob and its bookkeeping — high-water
+mark, blob coverage, sealed DEK — live in `imi_inbound_mailbox_search_index`); a fold
+mid-backlog persists every `PERSIST_MIN_ADVANCE` messages, so a window close costs at
+most one chunk of re-folding rather than a per-slice rewrite of a multi-hundred-
+megabyte blob. The blob records the mark it covers (`imi_blob_high_water`) and a
+restore resets the live mark to it, so a blob that lags the mark can never open a
+silent coverage gap. A fold that changed nothing persists nothing, so repeated
+searches over unchanged mail never rewrite the blob. Sealing and
 restoring stream path-to-path in the chunked `v1.stream.` secretstream format
 (`VaultCrypto::sealFieldFile`/`openFieldFile` over `SealedBox::sealStreamFile`/
 `openStreamFile`), so memory stays proportional to a chunk — never to the mailbox — at
@@ -1531,7 +1550,11 @@ filtering the fold, because the high-water mark advances past every row a pass *
 row the fold skipped is skipped permanently, and a rebuild runs the same query. Pruning
 follows the row's existence rather than a flag — `MailboxIndex::enqueueRefold()` queues
 an id whose row is about to go, and the refold pass re-inserts only if the message is
-still there.
+still there. The queue also carries content that appears *behind* the mark: a
+pending-parse row folds as a no-op (its content fields do not exist yet) and
+`parsePendingMessage()` enqueues its refold when the fields land. Processed refolds
+leave the queue only after a persist has carried them (or when no blob exists), so a
+restore of an older blob can never revive a stale entry.
 
 **Key rotation and window close.** Mail's `VaultUnlock::onReseal()` callback re-seals
 every message on the generation being drained (`iem_key_generation =
