@@ -4,7 +4,11 @@
  *
  * Two renderings of one message, chosen by `format`:
  *
- *   eml   (default) — the stored RFC822 original, streamed as a .eml download.
+ *   eml   (default) — the RFC822 original (stored, or fetched live from the
+ *                     source mailbox for a reference-backed row), streamed as a
+ *                     .eml download. A lean record's header-block
+ *                     reconstruction is refused here — a .eml must be the
+ *                     original — and offered in Show original instead.
  *   print           — a standalone print sheet: an addressed header block, the
  *                     message body, and its attachment names, styled for paper
  *                     and printed on load.
@@ -17,7 +21,7 @@
  * emits its bytes and exit()s, so anything that returns from here is a refusal
  * — a LogicResult the view turns into an honest message.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 
 function profile_original_logic(array $input): LogicResult {
@@ -54,26 +58,31 @@ function profile_original_logic(array $input): LogicResult {
 		if ($format === 'print') {
 			mailbox_print_message($message);   // emits and exits
 		}
-		$raw = $message->getRawMessage();
-	} catch (VaultLockedException $e) {
-		return _profile_original_error($session, $settings,
-			'This message is sealed. Unlock your vault in the mailbox, then try again.', $reader_url);
+		// Stored raw, or a live IMAP fetch for a reference-backed row
+		// (specs/mailbox_show_original_coverage.md). A reconstruction is
+		// refused below: a downloaded .eml claims to BE the original, and a
+		// headers-plus-decoded-body rebuild is not one.
+		$resolved = mailbox_resolve_original($message);
 	} catch (Throwable $e) {
 		error_log('profile_original (' . $format . ', message ' . $id . '): ' . $e->getMessage());
 		return _profile_original_error($session, $settings, 'The message could not be read.', $reader_url);
 	}
 
-	if ($raw === null || $raw === '') {
-		$driver = (string)$message->get('iem_raw_storage_driver') ?: 'inline';
+	if ($resolved['locked']) {
 		return _profile_original_error($session, $settings,
-			$driver === 'remote'
-				? 'This message is read directly from its source mailbox over IMAP, which keeps '
-					. 'no copy of the original here — there is no file to download.'
-				: 'No original was stored for this message, so there is no file to download.',
-			$reader_url);
+			'This message is sealed. Unlock your vault in the mailbox, then try again.', $reader_url);
+	}
+	if (!$resolved['ok']) {
+		return _profile_original_error($session, $settings,
+			$resolved['reason'] . ' There is no file to download.', $reader_url);
+	}
+	if ($resolved['kind'] === 'reconstructed') {
+		return _profile_original_error($session, $settings,
+			'The raw bytes of this message were not retained, so there is no original file to '
+			. 'download. Show original in the reader displays its stored headers.', $reader_url);
 	}
 
-	mailbox_stream_eml($message, $raw);   // emits and exits
+	mailbox_stream_eml($message, $resolved['raw']);   // emits and exits
 }
 
 function _profile_original_error($session, $settings, string $message, string $reader_url): LogicResult {

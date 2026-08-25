@@ -90,6 +90,12 @@
  * dedup return adopts from the raw in hand, storeDirectMessage's from the
  * delivered parts. See AttachmentByteCustody.
  *
+ * @version 1.38
+ * @changelog 1.38 - push ingest retains the RFC822 header block in
+ *   iem_raw_headers (specs/mailbox_show_original_coverage.md) — captured by
+ *   rawHeaderBlock() in storeMessage and parsePendingMessage, sealed with the
+ *   rest of the content on a sealing mailbox — so a lean record keeps the wire
+ *   headers the discarded raw used to carry
  * @version 1.37
  * @changelog 1.37 - deliverability reports (DMARC aggregate, TLS-RPT, ARF) are
  *   detected and filed during ingest instead of delivered
@@ -547,6 +553,11 @@ class InboundEmailRouter {
 		$seal_recipient = ($sealing && InboundEmailMessage::isComposedDirection($direction));
 		$recipient_value = substr((string)$envelope_recipient, 0, 500);
 
+		// The wire header block survives the lean record
+		// (specs/mailbox_show_original_coverage.md). Content like the body:
+		// plaintext rows store it at insert, sealing rows seal it below.
+		$raw_headers = $this->rawHeaderBlock($raw_email);
+
 		$row = [
 			'iem_ied_inbound_email_domain_id' => $domain->key,
 			'iem_iea_inbound_email_alias_id'  => $alias ? $alias->key : null,
@@ -555,6 +566,7 @@ class InboundEmailRouter {
 			'iem_subject'     => $sealing ? '' : $subject,
 			'iem_body_plain'  => $sealing ? '' : $bodies['plain'],
 			'iem_body_html'   => $sealing ? '' : $bodies['html'],
+			'iem_raw_headers' => $sealing ? null : $raw_headers,
 			'iem_raw_message' => '', // raw goes to the store after insert (see below)
 			'iem_message_id_header' => $message_id_header,
 			'iem_thread_key'  => $thread_key,
@@ -644,7 +656,8 @@ class InboundEmailRouter {
 			$dek = null;
 			if ($sealing) {
 				$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
-					$bodies['plain'], $bodies['html'], $seal_recipient ? $recipient_value : null);
+					$bodies['plain'], $bodies['html'], $seal_recipient ? $recipient_value : null,
+					$raw_headers);
 			}
 
 			// Row inserted (we now have the serial id): split attachments into
@@ -793,7 +806,10 @@ class InboundEmailRouter {
 
 		// Seal the content columns under a fresh DEK and UPDATE the row (the same
 		// helper receive-time ingest uses), then split attachments under that DEK.
-		$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject, $bodies['plain'], $bodies['html']);
+		// The header block rides along — this is the row's one plaintext moment,
+		// exactly like receive-time ingest (specs/mailbox_show_original_coverage.md).
+		$dek = $this->sealMessageContent(intval($msg->key), $vault, $sender, $subject,
+			$bodies['plain'], $bodies['html'], null, $this->rawHeaderBlock($raw));
 		$this->persistRawAndManifest(intval($msg->key), $raw, $alias, $dek);
 
 		// Content-spam classification now runs on the parsed plaintext, exactly as
@@ -1317,14 +1333,15 @@ class InboundEmailRouter {
 	 * Returns the per-message DEK (raw bytes) so the caller can also seal this
 	 * message's attachments under the SAME key.
 	 */
-	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html, ?string $recipient = null): string {
+	private function sealMessageContent(int $message_id, $vault, string $sender, string $subject, string $body_plain, string $body_html, ?string $recipient = null, ?string $raw_headers = null): string {
 		// On an INBOUND row iem_recipient is the receiving alias address — routing
 		// metadata, not content — so it stays cleartext exactly as storeMessage wrote
 		// it at insert. $recipient is non-null only for a COMPOSED row (imported Sent
 		// mail), where the address list is genuinely content and the read path expects
 		// ciphertext.
 		return InboundEmailMessage::sealAndPersistContent($message_id, $vault, $sender,
-			(string)$recipient, $subject, $body_plain, $body_html, $recipient !== null);
+			(string)$recipient, $subject, $body_plain, $body_html, $recipient !== null,
+			'', null, null, $raw_headers);
 	}
 
 	/**
@@ -1992,6 +2009,26 @@ class InboundEmailRouter {
 		$stmt = $db->prepare($sql);
 		$stmt->execute([$domain_id, InboundEmailLog::STATUS_STORE_CAPPED]);
 		return $stmt->fetchColumn() !== false;
+	}
+
+	/**
+	 * The RFC822 header block of a raw message, byte-for-byte as it arrived —
+	 * everything up to the first blank line, original line endings kept
+	 * (specs/mailbox_show_original_coverage.md). This is what iem_raw_headers
+	 * retains when the lean record discards the raw: the wire truth (Received
+	 * chain, Content-Type/charset, DKIM as sent) no parsed column preserves.
+	 *
+	 * Capped at 64 KB — real header blocks are a few KB, and past the cap the
+	 * value is a hostile message, not headers. A message with no blank line at
+	 * all is one giant header block; the cap covers that shape too.
+	 */
+	public function rawHeaderBlock(string $raw_email): string {
+		$pos = strpos($raw_email, "\r\n\r\n");
+		if ($pos === false) {
+			$pos = strpos($raw_email, "\n\n");
+		}
+		$block = ($pos === false) ? $raw_email : substr($raw_email, 0, $pos);
+		return substr($block, 0, 65536);
 	}
 
 	/**

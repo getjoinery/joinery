@@ -49,6 +49,12 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.28
+ * @changelog 1.28 - thread payload says WHERE a message's original can come
+ *   from (original_source: stored | imap | headers | none,
+ *   specs/mailbox_show_original_coverage.md) instead of a stored-only boolean,
+ *   so the reader can offer Show original for reference-backed rows (live
+ *   IMAP fetch) and header-retaining lean records (labeled reconstruction).
  * @version 1.27
  * @changelog 1.27 - sealed attachment and inline-image URLs carry a serve
  *   grant (includes/FileServeGrant.php, specs/bugfix_sealed_inline_images.md):
@@ -1187,7 +1193,8 @@ class MailboxService {
 					iem_sealed_owner_user_id, iem_pending_parse, iem_ai_danger_score, iem_ai_scan, iem_ai_scan_time,
 					iem_ai_summary, iem_transport, iem_direct_verified,
 					iem_raw_storage_driver, iem_raw_storage_key,
-					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw
+					(COALESCE(length(iem_raw_message), 0) > 0) AS iem_has_inline_raw,
+					(COALESCE(length(iem_raw_headers), 0) > 0) AS iem_has_raw_headers
 				FROM iem_inbound_email_messages
 				WHERE iem_inbound_email_message_id IN ($in)
 				ORDER BY iem_received_time ASC, iem_inbound_email_message_id ASC";
@@ -1253,11 +1260,14 @@ class MailboxService {
 				// native/API consumers. The web thread view does not render it — the
 				// full body is already on screen, so a summary of it is noise there.
 				'ai_summary'        => $decrypted['iem_ai_summary'],
-				// Whether a stored original exists to show or download. A mailbox
-				// polled over IMAP ('remote') keeps no platform copy — only its
-				// parts are fetched on demand — so the reader hides Show original
-				// and Download .eml rather than offering two dead ends.
-				'has_original'      => $this->hasStoredOriginal($r),
+				// Where "the original" of this message can come from — drives the
+				// reader's Show original / Download .eml items
+				// (specs/mailbox_show_original_coverage.md). 'stored' and 'imap'
+				// are the true RFC822 bytes (stored, or fetched live from the
+				// source mailbox); 'headers' is a lean record whose retained
+				// header block supports a labeled reconstruction (no .eml);
+				// 'none' hides both items rather than offering dead ends.
+				'original_source'   => $this->originalSource($r),
 				'attachments'       => $att_by_msg[$mid] ?? array(),
 			);
 		}
@@ -1281,6 +1291,29 @@ class MailboxService {
 			return trim((string)($row['iem_raw_storage_key'] ?? '')) !== '';
 		}
 		return (bool)$this->pgBool($row['iem_has_inline_raw'] ?? false);
+	}
+
+	/**
+	 * Where "the original" of this row can come from
+	 * (specs/mailbox_show_original_coverage.md) — the thread payload's
+	 * original_source. Mirrors mailbox_resolve_original()'s dispatch so the
+	 * menu never offers what the endpoint would refuse:
+	 *   'stored'  — a whole raw is stored here (hasStoredOriginal)
+	 *   'imap'    — reference-backed with its source account still connected;
+	 *               fetched live when asked for
+	 *   'headers' — a lean record that retained its wire header block; Show
+	 *               original renders a labeled reconstruction, no .eml
+	 *   'none'    — nothing to offer (rows from before header retention)
+	 */
+	private function originalSource(array $row): string {
+		if ($this->hasStoredOriginal($row)) {
+			return 'stored';
+		}
+		$driver = (string)($row['iem_raw_storage_driver'] ?? '') ?: 'inline';
+		if ($driver === 'remote') {
+			return intval($row['iem_iia_inbound_imap_account_id'] ?? 0) > 0 ? 'imap' : 'none';
+		}
+		return $this->pgBool($row['iem_has_raw_headers'] ?? false) ? 'headers' : 'none';
 	}
 
 	/**

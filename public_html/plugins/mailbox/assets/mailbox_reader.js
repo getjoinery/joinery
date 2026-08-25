@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.51
+ * No framework. @version 2.52
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -2061,10 +2061,13 @@
 	// Gmail-style per-message kebab (⋮) menu — the per-message actions that are
 	// not worth a button, kept out of the way until asked for.
 	//
-	// Show original and Download .eml both need a stored RFC822 original, which
-	// an IMAP-polled message does not have (has_original). They are left out
-	// entirely there rather than offered and then refused. Print works from the
-	// parsed body, so it is always available.
+	// Show original and Download .eml follow original_source (specs/
+	// mailbox_show_original_coverage.md): 'stored' and 'imap' answer with the
+	// true RFC822 bytes (stored, or fetched live from the source mailbox), so
+	// both items show; 'headers' is a lean record whose retained header block
+	// supports only a labeled reconstruction, so Show original shows without
+	// the .eml; 'none' hides both rather than offering dead ends. Print works
+	// from the parsed body, so it is always available.
 	function kebabMenu(m) {
 		var wrap = el('div', 'mbx-kebab-wrap');
 		var btn = el('button', 'mbx-kebab', '⋮');
@@ -2075,7 +2078,8 @@
 		var menu = el('div', 'mbx-kebab-menu');
 		menu.hidden = true;
 
-		if (m.has_original) {
+		var src = m.original_source || 'none';
+		if (src !== 'none') {
 			var original = el('button', 'mbx-kebab-item', 'Show original');
 			original.type = 'button';
 			original.addEventListener('click', function () {
@@ -2083,7 +2087,8 @@
 				openMessageSource(m);
 			});
 			menu.appendChild(original);
-
+		}
+		if (src === 'stored' || src === 'imap') {
 			var download = el('a', 'mbx-kebab-item', 'Download .eml');
 			download.href = CFG.exportUrlBase + '?message_id=' + encodeURIComponent(m.id);
 			download.addEventListener('click', function () { closeAllKebabs(); });
@@ -2459,15 +2464,17 @@
 		if (overlay && overlay.parentNode) overlay.parentNode.removeChild(overlay);
 	}
 
-	// "Show original" — the message exactly as it arrived on the wire (headers
-	// and all), read through mailbox/message_source. The endpoint scopes the read
+	// "Show original" — the message as it arrived on the wire (headers and
+	// all), read through mailbox/message_source. The endpoint scopes the read
 	// to the caller's own grants, so this is the same answer on the member mount
-	// and the admin one.
+	// and the admin one. The source may be stored here, fetched live from the
+	// message's source mailbox, or — for a lean record that kept only its
+	// header block — a reconstruction the endpoint flags and the note labels.
 	//
-	// Not every message HAS an original to show: a mailbox polled over IMAP keeps
-	// no copy here, and a huge one is cut short rather than poured into a modal.
-	// The endpoint says which happened and the modal repeats it, because "there
-	// is no stored original" and "we failed to read it" are different facts.
+	// A huge original is cut short rather than poured into a modal, and one may
+	// be unavailable after all (expunged at the source). The endpoint says which
+	// happened and the modal repeats it, because "there is no original" and "we
+	// failed to read it" are different facts.
 	function openMessageSource(m) {
 		var overlay = el('div', 'mbx-modal-overlay');
 		var modal = el('div', 'mbx-modal mbx-source-modal');
@@ -2533,11 +2540,16 @@
 				return;
 			}
 			pre.textContent = data.source;
-			note.textContent = data.truncated
-				? ('The message exactly as it arrived — showing the first '
-					+ fmtBytes(data.source.length) + ' of ' + fmtBytes(data.size_bytes) + '.')
-				: ('The message exactly as it arrived, headers and all — '
-					+ fmtBytes(data.size_bytes) + '.');
+			if (data.reconstructed) {
+				note.textContent = 'Original headers plus the decoded text body — '
+					+ 'the raw wire bytes were not retained.';
+			} else {
+				note.textContent = data.truncated
+					? ('The message exactly as it arrived — showing the first '
+						+ fmtBytes(data.source.length) + ' of ' + fmtBytes(data.size_bytes) + '.')
+					: ('The message exactly as it arrived, headers and all — '
+						+ fmtBytes(data.size_bytes) + '.');
+			}
 			pre.hidden = false;
 			copy.disabled = false;
 		}
