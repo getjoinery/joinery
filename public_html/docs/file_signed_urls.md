@@ -85,9 +85,33 @@ server-custody content still needs its owner's unlock window, and that window is
 bound to the browser session that opened it. A signed URL followed by a client
 carrying no session cookie therefore answers `423` for a sealed file however
 recently its owner unlocked — the signature says who may ask, the window says
-whether the server may answer. Native-app transport reaches sealed content
-through the web-session bridge (`docs/mobile_apps.md`), not through a bare signed
-URL.
+whether the server may answer. A bare signed URL reaches sealed content only
+when it carries a serve grant (below); everything else session-bound goes
+through the web-session bridge (`docs/mobile_apps.md`).
+
+### The serve grant
+
+Some legitimate fetches can never carry the window: the mailbox reader renders
+message HTML inside a `sandbox=""` iframe whose opaque origin sends no cookies
+(inline `cid:` images), and sessionless native clients download attachments
+over bare signed URLs. For those, the code minting the signed URL — which holds
+the owner's open window and has already scope-checked the content — extends the
+minting-is-authorization principle to decryption: it resolves the file's
+content key through that window and stashes it server-side under a random
+token (`includes/FileServeGrant.php`; APCu, the same store and custody class as
+the unlock windows — never the database, never the URL). The token rides the
+URL as `grant=`.
+
+At serve time the `/uploads` route redeems the token **only after the
+signature verifies** — a grant can never widen who may fetch, only whether
+sealed bytes decrypt. The redeemed key is consulted by the sealed serve paths
+(`DriveSealedStream::prepare()`, `InboundEmailMessage::openSealedAttachment()`)
+before they reach for the window. A grant is scoped to one file + one size
+key, lives exactly as long as the signed URL beside it, and is multi-use
+within that lifetime (a browser may fetch an `<img>` several times). Where no
+grant could be minted — the window was closed, or the caller minted none — the
+`423` behavior above is unchanged. Client-custody content has no
+server-resolvable key and can never gain a grant.
 
 Sealed content answers ranges according to which decrypt hook its source
 registered (see [Sealed Vault](sealed_vault.md#the-generic-consumer-hooks)):

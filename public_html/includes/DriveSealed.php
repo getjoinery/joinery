@@ -18,7 +18,11 @@
  * mail and chat use. The 'drive' scope is CLIENT custody and belongs to Fortress
  * folders, whose keys the server must never hold.
  *
- * @version 1.1.0
+ * @version 1.2.0
+ * @changelog 1.2.0 - DriveSealedStream::prepare() honors a redeemed serve
+ *   grant (includes/FileServeGrant.php), so a cookie-less signed fetch can
+ *   stream a sealed file (specs/bugfix_sealed_inline_images.md). No grant →
+ *   the vault window, exactly as before.
  */
 
 require_once(PathHelper::getIncludePath('includes/VaultUnlock.php'));
@@ -724,6 +728,15 @@ class DriveSealedStream implements FileStreamingDecryptor {
 	}
 
 	public function prepare(string $path): void {
+		// A redeemed serve grant (includes/FileServeGrant.php) carries this
+		// file's key from an in-window mint, which is what lets a cookie-less
+		// signed fetch stream a sealed file. No grant → the vault window, as
+		// always.
+		$granted = FileServeGrant::activeKey((int)$this->file->key, FileServeGrant::SHAPE_FILE_KEY);
+		if ($granted !== null) {
+			$this->fk = $granted;
+			return;
+		}
 		// Resolving the key here — before serve_from_path() writes a header — is
 		// what turns a closed vault into a clean 423 instead of a truncated body.
 		$this->fk = DriveSealed::fileKey($this->file);

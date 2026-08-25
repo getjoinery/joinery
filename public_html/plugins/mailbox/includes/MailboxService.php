@@ -49,6 +49,19 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.27
+ * @changelog 1.27 - sealed attachment and inline-image URLs carry a serve
+ *   grant (includes/FileServeGrant.php, specs/bugfix_sealed_inline_images.md):
+ *   the key is resolved through the caller's open window at mint time and
+ *   stashed server-side, so the cookie-less sandbox iframe and sessionless
+ *   native clients can decrypt what the signature already lets them fetch.
+ *   A closed window mints no grant and the URL serves 423 as before.
+ * @version 1.26
+ * @changelog 1.26 - a damaged column no longer raises content_locked
+ *   (specs/bugfix_promoted_sent_row_sealing.md): that flag is the reader's
+ *   "unlock your vault" prompt, and no unlock fixes a column that will not
+ *   open — it still renders the placeholder and logs, but only a genuinely
+ *   locked window or a pending-parse row raises the banner
  * @version 1.25
  * @changelog 1.25 - FULLTEXT_SQL left()-caps each column: an uncapped expression
  *   made any message past the 1 MiB tsvector limit unstorable at INSERT
@@ -1059,14 +1072,17 @@ class MailboxService {
 						$this->content_locked = true;
 					} catch (Throwable $e) {
 						// A column that will not open — a damaged blob, or one
-						// left plaintext under a sealed flag by an older write
+						// left plaintext under a sealed flag by a rogue write
 						// path. One bad row must not take down the whole thread
 						// list, so it renders as unreadable and says so in the
-						// log, naming the message and column.
+						// log, naming the message and column. content_locked
+						// stays down: that flag is the reader's "unlock your
+						// vault" prompt, and no unlock fixes a damaged column —
+						// raising it here made a write-path bug masquerade as a
+						// locked vault (specs/bugfix_promoted_sent_row_sealing.md).
 						error_log('MailboxService: could not read ' . $col . ' on message '
 							. $mid . ': ' . $e->getMessage());
 						$value = self::SEALED_PLACEHOLDER;
-						$this->content_locked = true;
 					}
 				}
 				$entry[$key] = (string)$value;
@@ -1301,16 +1317,18 @@ class MailboxService {
 					$this->content_locked = true;
 				} catch (Throwable $e) {
 					// A column that will not open — a damaged blob, or one left
-					// plaintext under a sealed flag by an older write path. The
+					// plaintext under a sealed flag by a rogue write path. The
 					// thread list already survives this per column
 					// (fetchAndDecryptContent); opening the conversation has to as
 					// well, or one bad column makes the whole thread unreadable
 					// while the row beside it renders fine. Renders as unreadable
 					// and says so in the log, naming the message and column.
+					// content_locked stays down: it drives the reader's "unlock
+					// your vault" banner, and no unlock fixes a damaged column
+					// (specs/bugfix_promoted_sent_row_sealing.md).
 					error_log('MailboxService: could not read ' . $col . ' on message '
 						. intval($row['iem_inbound_email_message_id'] ?? 0) . ': ' . $e->getMessage());
 					$value = self::SEALED_PLACEHOLDER;
-					$this->content_locked = true;
 				}
 			}
 			$out[$col] = (string)$value;
@@ -1459,7 +1477,8 @@ class MailboxService {
 		// getThread()'s manifest lists non-inline parts only; inline parts ride
 		// inside the body, rewritten by resolveInlineImages() above.
 		$in = implode(',', array_map('intval', $ids));
-		$sql = "SELECT ima_inbound_message_attachment_id, ima_fil_file_id
+		$sql = "SELECT ima_inbound_message_attachment_id, ima_fil_file_id, ima_is_sealed,
+					ima_iem_inbound_email_message_id
 				FROM ima_inbound_message_attachments
 				WHERE ima_iem_inbound_email_message_id IN ($in)
 					AND ima_is_inline = false AND ima_fil_file_id IS NOT NULL";
@@ -1471,8 +1490,13 @@ class MailboxService {
 			if (!$file->key || $file->get('fil_delete_time')) {
 				continue;
 			}
+			// Sealed attachments get the same decryption grant inline images do,
+			// which is what makes the URL work for a sessionless native client
+			// (specs/bugfix_sealed_inline_images.md).
 			$signed_by_att[intval($r['ima_inbound_message_attachment_id'])] =
-				$file->mintSignedUrl('original', $ttl_seconds, 'full');
+				$file->mintSignedUrl('original', $ttl_seconds, 'full')
+				. self::serveGrantParam($file, $r['ima_is_sealed'],
+					intval($r['ima_iem_inbound_email_message_id']), $ttl_seconds);
 		}
 
 		foreach ($messages as &$m) {
@@ -1524,7 +1548,7 @@ class MailboxService {
 		require_once(PathHelper::getIncludePath('data/files_class.php'));
 
 		$in = implode(',', array_map('intval', $ids));
-		$sql = "SELECT ima_iem_inbound_email_message_id, ima_content_id, ima_fil_file_id
+		$sql = "SELECT ima_iem_inbound_email_message_id, ima_content_id, ima_fil_file_id, ima_is_sealed
 					FROM ima_inbound_message_attachments
 					WHERE ima_iem_inbound_email_message_id IN ($in)
 						AND ima_is_inline = true AND ima_fil_file_id IS NOT NULL";
@@ -1540,8 +1564,13 @@ class MailboxService {
 			if (!$file->key || $file->get('fil_delete_time')) {
 				continue;
 			}
-			$cids_by_msg[intval($r['ima_iem_inbound_email_message_id'])][$cid] =
-				$file->mintSignedUrl('original', $ttl_seconds, 'full');
+			$url = $file->mintSignedUrl('original', $ttl_seconds, 'full');
+			// Sealed bytes need a decryption grant beside the signature: the
+			// reader's sandbox iframe sends no cookies, so the serve path can
+			// never see this caller's window (specs/bugfix_sealed_inline_images.md).
+			$url .= self::serveGrantParam($file, $r['ima_is_sealed'],
+				intval($r['ima_iem_inbound_email_message_id']), $ttl_seconds);
+			$cids_by_msg[intval($r['ima_iem_inbound_email_message_id'])][$cid] = $url;
 		}
 
 		foreach ($messages as &$m) {
@@ -1561,6 +1590,65 @@ class MailboxService {
 		}
 		unset($m);
 		return $messages;
+	}
+
+	/**
+	 * The '&grant=…' suffix for a signed URL to a SEALED attachment file, or ''
+	 * (a plaintext file, or no open window to resolve the key with).
+	 *
+	 * Minting is the authorization statement, extended to decryption
+	 * (specs/bugfix_sealed_inline_images.md): this runs only where signed URLs
+	 * are minted — on messages the caller already scope-checked, in a request
+	 * whose window just decrypted the bodies — and it resolves the content key
+	 * through that same window. The key goes into FileServeGrant's server-side
+	 * store; only the random token rides the URL. A closed window mints no
+	 * grant and the URL serves 423 exactly as before — the reader is showing
+	 * sealed placeholders in that state anyway.
+	 *
+	 * Two sealed shapes, same dispatch order as openSealedAttachment():
+	 * a self-sealed container File carries its own key; otherwise a sealed
+	 * manifest row's bytes open under the owning message's DEK.
+	 */
+	private static function serveGrantParam(File $file, $ima_is_sealed, int $message_id, int $ttl_seconds): string {
+		static $dek_cache = array();   // message id => DEK|false, per request
+
+		$shape = null;
+		$key = null;
+		if ($file->get('fil_content_sealed')) {
+			try {
+				$key = DriveSealed::fileKey($file);
+				$shape = FileServeGrant::SHAPE_FILE_KEY;
+			} catch (VaultLockedException $e) {
+				return '';
+			} catch (Throwable $e) {
+				error_log('MailboxService: could not resolve the sealed key for file '
+					. intval($file->key) . ': ' . $e->getMessage());
+				return '';
+			}
+		} elseif ($ima_is_sealed === true || $ima_is_sealed === 't' || $ima_is_sealed === '1' || $ima_is_sealed === 1) {
+			if (!array_key_exists($message_id, $dek_cache)) {
+				$dek_cache[$message_id] = false;
+				$msg = new InboundEmailMessage($message_id, TRUE);
+				$owner = $msg->key ? InboundEmailMessage::sealedOwnerFor($msg) : null;
+				$sealed_key = $msg->key ? (string)$msg->get('iem_sealed_key') : '';
+				if ($owner !== null && $sealed_key !== '') {
+					$dek = InboundEmailMessage::unwrapDekInWindow($owner, $sealed_key);
+					if ($dek !== null) {
+						$dek_cache[$message_id] = $dek;
+					}
+				}
+			}
+			if ($dek_cache[$message_id] === false) {
+				return '';
+			}
+			$key = $dek_cache[$message_id];
+			$shape = FileServeGrant::SHAPE_MESSAGE_DEK;
+		} else {
+			return ''; // plaintext bytes — the signature alone serves them
+		}
+
+		$token = FileServeGrant::mint(intval($file->key), 'original', $shape, $key, $ttl_seconds);
+		return $token !== null ? '&grant=' . $token : '';
 	}
 
 	/**

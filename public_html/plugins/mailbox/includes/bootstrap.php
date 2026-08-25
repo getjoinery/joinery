@@ -309,6 +309,39 @@ VaultDeferredWork::register(
 	}
 );
 
+// A Sent-folder direction promotion runs from cron and cannot seal the
+// now-outbound row's plaintext recipient under its existing DEK (no window
+// there); this consumer pays that debt — and retires the coverage-pass
+// duplicates the same defect created — at the owner's next unlocked visit
+// (specs/bugfix_promoted_sent_row_sealing.md). After mailbox_parse on purpose:
+// repair touches settled rows, parsing new mail comes first.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/PromotedRowRepair.php'));
+VaultDeferredWork::register(
+	'mailbox_promoted_reseal',
+	function (int $user_id): bool {
+		return PromotedRowRepair::hasWork($user_id);
+	},
+	function (int $user_id, string $secret_key, float $deadline): int {
+		return PromotedRowRepair::drainForUser($user_id, $secret_key, PromotedRowRepair::DEFAULT_MAX, $deadline);
+	}
+);
+
+// Inline images stored before ingest-time adoption existed are reference-backed
+// and can never render in the reader (specs/bugfix_sealed_inline_images.md);
+// this consumer turns them file-backed — from the IMAP source for 'remote'
+// rows, from the stored raw (in-window, when sealed) otherwise. Last of the
+// mailbox consumers: it is cosmetic catch-up next to parsing and repair.
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InlineImageBackfill.php'));
+VaultDeferredWork::register(
+	'mailbox_inline_backfill',
+	function (int $user_id): bool {
+		return InlineImageBackfill::hasWork($user_id);
+	},
+	function (int $user_id, string $secret_key, float $deadline): int {
+		return InlineImageBackfill::drainForUser($user_id, $secret_key, InlineImageBackfill::DEFAULT_MAX, $deadline);
+	}
+);
+
 // --- Joinery Direct consumer hooks (docs/joinery_direct.md) ---
 // The channel is core and kind-independent; who an address belongs to, whose
 // contacts authorize a delivery, and whose vault holds a domain's signing key

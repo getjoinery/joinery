@@ -18,6 +18,11 @@
  * a bonus on top of dedup, never a condition of it, and a total failure leaves
  * the dedup outcome exactly as it was.
  *
+ * @version 1.3
+ * @changelog 1.3 - adoptBytes(), the string-shaped third entry point
+ *   (specs/bugfix_sealed_inline_images.md): the IMAP ingest and the
+ *   inline-image backfill hold a fetched part as bytes, not a parsed MIME
+ *   part. Shares the File-first/row-second back half with adoptOnePart().
  * @version 1.2
  * @changelog 1.2 - manifestRowCount(), so a caller can ask whether a stored copy
  *   lists any attachments at all before paying to parse a MIME document.
@@ -198,14 +203,8 @@ class AttachmentByteCustody {
 			return false;
 		}
 
-		$tmp = tempnam(sys_get_temp_dir(), 'joinery-mail-adopt-');
-		if ($tmp === false) {
-			throw new RuntimeException('Could not create a temporary file for the attachment bytes.');
-		}
+		$tmp = self::newAdoptTemp($sealed);
 		try {
-			// Sealed plaintext stays owner-read-only on disk for its short life;
-			// a plaintext spool matches File::createFromBytes' permissions.
-			@chmod($tmp, $sealed ? 0600 : 0666);
 			$out = @fopen($tmp, 'wb');
 			if ($out === false) {
 				throw new RuntimeException('Could not open the temporary attachment file for writing.');
@@ -216,46 +215,86 @@ class AttachmentByteCustody {
 			if ($size === false || $size <= 0) {
 				return false;
 			}
-
-			// The manifest's identity columns were written from the source mailbox and
-			// are what the reader already shows, so they win over the in-hand copy's.
-			$name = (string)($att->get('ima_filename') ?: $part->getName() ?: 'attachment');
-			$type = (string)($att->get('ima_content_type') ?: $part->getType() ?: 'application/octet-stream');
-			$restrictions = array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT);
-
-			// Sealing runs with nobody signed in, and that is fine: it needs only
-			// the vault's PUBLIC key (docs/sealed_vault.md — a consumer seals a
-			// random per-item key to the public key and the content under that
-			// key). Only reading needs an unlock window. createFromUpload consumes
-			// the temp path; createSealedFile does not, so the finally sweeps
-			// whichever is left.
-			$file = $sealed
-				? DriveSealed::createSealedFile($tmp, $name, $type, $owner_id, $restrictions)
-				: File::createFromUpload($tmp, $name, $type, $owner_id, $restrictions);
-
-			try {
-				InboundMessageAttachment::updateColumns(intval($att->key), array(
-					'ima_fil_file_id' => intval($file->key),
-					// On a file-backed row this is the plain decoded size, which is what
-					// "size" means everywhere else; the old value came from the IMAP
-					// BODYSTRUCTURE and described the transfer-encoded part.
-					'ima_size_bytes'  => $size,
-					// ima_encoding is deliberately NOT touched. On a file-backed row it
-					// describes the SOURCE part's transfer encoding, not how the bytes
-					// are stored — which is what the MIME split writes too
-					// (InboundEmailRouter::extractAttachmentsToFiles). The IMAP ingest
-					// already wrote the same value from BODYSTRUCTURE, so leaving it
-					// alone is exactly what makes the different orders converge.
-					// ima_is_sealed stays false: the File carries its own sealed state.
-				));
-			} catch (\Throwable $e) {
-				try { $file->permanent_delete(); } catch (\Throwable $ignore) {}
-				throw $e;
-			}
-			return true;
+			return self::adoptFromTemp($att, $tmp, (int)$size, $sealed, $owner_id,
+				(string)($part->getName() ?: ''), (string)($part->getType() ?: ''));
 		} finally {
 			if (is_file($tmp)) { @unlink($tmp); }
 		}
+	}
+
+	/**
+	 * Store already-decoded bytes as the File behind a manifest row — the shape
+	 * for callers whose bytes arrive as a string (an IMAP part fetched at
+	 * ingest or by the inline-image backfill, specs/bugfix_sealed_inline_images.md).
+	 * Same contract as adoptOnePart(): File first, row second, and the row's
+	 * identity columns win over anything the caller says.
+	 */
+	public static function adoptBytes(InboundMessageAttachment $att, string $bytes, bool $sealed, int $owner_id): bool {
+		if ($bytes === '') {
+			return false;
+		}
+		$tmp = self::newAdoptTemp($sealed);
+		try {
+			if (@file_put_contents($tmp, $bytes) !== strlen($bytes)) {
+				throw new RuntimeException('Could not spool the attachment bytes to a temporary file.');
+			}
+			return self::adoptFromTemp($att, $tmp, strlen($bytes), $sealed, $owner_id, '', '');
+		} finally {
+			if (is_file($tmp)) { @unlink($tmp); }
+		}
+	}
+
+	/** A private temp path for plaintext-in-flight; owner-read-only when it will be sealed. */
+	private static function newAdoptTemp(bool $sealed): string {
+		$tmp = tempnam(sys_get_temp_dir(), 'joinery-mail-adopt-');
+		if ($tmp === false) {
+			throw new RuntimeException('Could not create a temporary file for the attachment bytes.');
+		}
+		// Sealed plaintext stays owner-read-only on disk for its short life;
+		// a plaintext spool matches File::createFromBytes' permissions.
+		@chmod($tmp, $sealed ? 0600 : 0666);
+		return $tmp;
+	}
+
+	/** The shared back half of adoption: create the File from the spooled temp, backfill the row. */
+	private static function adoptFromTemp(InboundMessageAttachment $att, string $tmp, int $size,
+			bool $sealed, int $owner_id, string $fallback_name, string $fallback_type): bool {
+		// The manifest's identity columns were written from the source mailbox and
+		// are what the reader already shows, so they win over the in-hand copy's.
+		$name = (string)($att->get('ima_filename') ?: $fallback_name ?: 'attachment');
+		$type = (string)($att->get('ima_content_type') ?: $fallback_type ?: 'application/octet-stream');
+		$restrictions = array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT);
+
+		// Sealing runs with nobody signed in, and that is fine: it needs only
+		// the vault's PUBLIC key (docs/sealed_vault.md — a consumer seals a
+		// random per-item key to the public key and the content under that
+		// key). Only reading needs an unlock window. createFromUpload consumes
+		// the temp path; createSealedFile does not, so the callers' finally
+		// sweeps whichever is left.
+		$file = $sealed
+			? DriveSealed::createSealedFile($tmp, $name, $type, $owner_id, $restrictions)
+			: File::createFromUpload($tmp, $name, $type, $owner_id, $restrictions);
+
+		try {
+			InboundMessageAttachment::updateColumns(intval($att->key), array(
+				'ima_fil_file_id' => intval($file->key),
+				// On a file-backed row this is the plain decoded size, which is what
+				// "size" means everywhere else; the old value came from the IMAP
+				// BODYSTRUCTURE and described the transfer-encoded part.
+				'ima_size_bytes'  => $size,
+				// ima_encoding is deliberately NOT touched. On a file-backed row it
+				// describes the SOURCE part's transfer encoding, not how the bytes
+				// are stored — which is what the MIME split writes too
+				// (InboundEmailRouter::extractAttachmentsToFiles). The IMAP ingest
+				// already wrote the same value from BODYSTRUCTURE, so leaving it
+				// alone is exactly what makes the different orders converge.
+				// ima_is_sealed stays false: the File carries its own sealed state.
+			));
+		} catch (\Throwable $e) {
+			try { $file->permanent_delete(); } catch (\Throwable $ignore) {}
+			throw $e;
+		}
+		return true;
 	}
 
 	/**

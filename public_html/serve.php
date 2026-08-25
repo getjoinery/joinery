@@ -1,6 +1,10 @@
 <?php
 // serve.php - Hybrid routing system with RouteHelper
 // Core dependencies (PathHelper, Globalvars, SessionControl) are loaded by RouteHelper after static route check
+// @version 1.7.0 — a signed /uploads request may carry a serve grant
+// (includes/FileServeGrant.php): redeemed only behind a verified signature, it
+// lets the sealed decrypt hooks run without a session — the reader's sandboxed
+// iframe and sessionless native clients (specs/bugfix_sealed_inline_images.md).
 // @version 1.6.0 — /sm-ssl-probe.txt serves the SSL routing probe token, so a
 // control plane's Cloudflare-branch provisioning can prove a domain routes here.
 // @version 1.5.0 — /profile/conversation(s) hand off to the messenger app when
@@ -349,6 +353,17 @@ $routes = [
             $signed_ok = false;
             if ($file_obj && isset($_GET['expires'], $_GET['sig'])) {
                 $signed_ok = $file_obj->verify_signed_request($size_key, $_GET['expires'], $_GET['sig']);
+            }
+
+            // Serve grant (includes/FileServeGrant.php): a sealed file's signed
+            // URL may carry a decryption grant minted in-window beside the
+            // signature, so a cookie-less fetch (the reader's sandboxed iframe,
+            // a sessionless native client) can decrypt what the signature
+            // already authorizes it to fetch. Redeemed ONLY behind a verified
+            // signature — a grant can never widen who may fetch, and a failed
+            // redeem just leaves the vault-window behavior (423) as it was.
+            if ($signed_ok && isset($_GET['grant'])) {
+                FileServeGrant::redeemAndActivate(intval($file_obj->key), $size_key, $_GET['grant']);
             }
 
             if ($file_obj && $file_obj->storage_driver() === 'cloud') {

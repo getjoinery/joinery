@@ -26,10 +26,19 @@
  *  - The promotion never demotes: an already-outbound row stays outbound.
  *  - The promotion stands down instead of colliding when a live outbound
  *    sibling already holds the (Message-ID, recipient, direction) dedup key.
+ *  - Composed-copy dedup (specs/bugfix_promoted_sent_row_sealing.md): a
+ *    coverage-pass (All Mail) sighting of a message the platform composed
+ *    dedups into the existing outbound row by Message-ID alone — the sealed
+ *    composer copy's ciphertext recipient makes the unique key blind, so this
+ *    lookup is the only dedup that can fire. The composer copy adopts the
+ *    locator; no duplicate row is stored.
+ *  - A self-addressed send is exempt from that dedup outside the Sent folder:
+ *    its Inbox/All Mail appearance is the delivered copy and stores as its
+ *    own inbound row.
  *
  * Run: php tests/run.php db --filter=imap_sent_direction
  *
- * @version 1.0
+ * @version 1.1
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -90,6 +99,8 @@ class ImapSentDirectionTest {
 		$this->testFreshSentStoresOutbound();
 		$this->testPromotionNeverDemotes();
 		$this->testPromotionStandsDownOnLiveOutboundSibling();
+		$this->testCoveragePassDedupsIntoComposerCopy();
+		$this->testSelfSendExemptFromCoverageDedup();
 		$this->tearDown();
 	}
 
@@ -246,6 +257,62 @@ class ImapSentDirectionTest {
 
 		check($this->direction($inbound['message_id']) === 'inbound',
 			'the promotion stands down rather than colliding with the live outbound sibling');
+	}
+
+	/** Insert a composer-shaped outbound row directly (the local compose path's product). */
+	private function insertComposerCopy(string $mid, string $recipient): int {
+		$stmt = $this->db->prepare("INSERT INTO iem_inbound_email_messages
+			(iem_ied_inbound_email_domain_id, iem_iea_inbound_email_alias_id, iem_sender, iem_recipient,
+			 iem_subject, iem_message_id_header, iem_direction, iem_received_time, iem_create_time)
+			VALUES (?, ?, ?, ?, 'composed', ?, 'outbound', now(), now())
+			RETURNING iem_inbound_email_message_id");
+		$stmt->execute(array($this->domain_id, intval($this->alias->key), self::SELF_ADDRESS,
+			$recipient, $mid));
+		return intval($stmt->fetchColumn());
+	}
+
+	private function testCoveragePassDedupsIntoComposerCopy() {
+		// The composer's copy exists first — on a sealed mailbox its recipient
+		// would be ciphertext, which is exactly why the (Message-ID, recipient,
+		// direction) unique key can never dedup the provider's copy against it.
+		$composer_id = $this->insertComposerCopy($this->mid('composed'), 'friend@example.org');
+
+		$env = new SentDirectionEnvelope(self::SELF_ADDRESS, array('friend@example.org'), $this->mid('composed'));
+		$res = $this->ingest($this->folder_all, $env);
+		check($res['dedup'] && $res['message_id'] === $composer_id,
+			'the All Mail pass dedups into the composer\'s outbound copy — no duplicate row');
+		check($this->direction($composer_id) === 'outbound', 'the composer copy stays outbound');
+
+		$stmt = $this->db->prepare('SELECT iem_iia_inbound_imap_account_id FROM iem_inbound_email_messages
+			WHERE iem_inbound_email_message_id = ?');
+		$stmt->execute(array($composer_id));
+		check(intval($stmt->fetchColumn()) === intval($this->account->key),
+			'the composer copy adopted the locator — its parts stay fetchable');
+
+		// The Sent pass lands on the same row, still no duplicate.
+		$res = $this->ingest($this->folder_sent, $env);
+		check($res['dedup'] && $res['message_id'] === $composer_id,
+			'the Sent pass dedups into the same composer copy');
+	}
+
+	private function testSelfSendExemptFromCoverageDedup() {
+		// A self-addressed send: the composer copy exists, but the All Mail /
+		// Inbox appearance is the DELIVERED copy and belongs in the Inbox as
+		// its own inbound row — exactly as the source mailbox shows it.
+		$composer_id = $this->insertComposerCopy($this->mid('selfcomposed'), self::SELF_ADDRESS);
+
+		$env = new SentDirectionEnvelope(self::SELF_ADDRESS, array(self::SELF_ADDRESS), $this->mid('selfcomposed'));
+		$res = $this->ingest($this->folder_all, $env);
+		check(!$res['dedup'] && $res['message_id'] > 0 && $res['message_id'] !== $composer_id,
+			'the coverage pass stores the delivered copy of a self-send as its own row');
+		check($this->direction($res['message_id']) === 'inbound', 'and it is inbound — it belongs in the Inbox');
+
+		// In the SENT folder the same message is the sent copy — that one dedups.
+		$sent = $this->ingest($this->folder_sent, $env);
+		check($sent['dedup'] && $sent['message_id'] === $composer_id,
+			'the Sent-folder sighting dedups into the composer copy');
+		check($this->direction($res['message_id']) === 'inbound',
+			'the delivered inbound copy is left alone — no promotion');
 	}
 }
 
