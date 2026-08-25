@@ -18,6 +18,8 @@
  *
  * Run: php plugins/mailbox/tests/readable_text_test.php
  *
+ * @version 1.1 - previewText() coverage: entity-laden and zero-width-padded
+ *                plain parts
  * @version 1.0
  */
 
@@ -114,5 +116,38 @@ $huge = '<body><p>Opening sentence.</p>' . str_repeat('<div>filler</div>', 40000
 $out = $readable($huge);
 check(strpos($out, 'Opening sentence.') === 0, 'oversized document still previews its opening',
 	substr($out, 0, 40));
+
+// ── Plain-part previews ──────────────────────────────────────────────────────
+section('previewText: a received plain part cleans like the HTML path');
+
+$preview = function ($text) { return MailboxHtmlSanitizer::previewText($text); };
+
+// The live defect: a sender's HTML-derived plain part carrying its preheader
+// padding as literal entity text — &zwnj; (zero-width non-joiner) and &#847;
+// (combining grapheme joiner) interleaved with spaces.
+$zwnj = 'Your gift is expiring ' . str_repeat('&zwnj; ', 40);
+check($preview($zwnj) === 'Your gift is expiring', 'literal &zwnj; padding stripped', $preview($zwnj));
+
+$cgj = 'GoodRx' . str_repeat('&#847; ', 40) . 'See for yourself.';
+check($preview($cgj) === 'GoodRx See for yourself.', 'numeric &#847; padding stripped', $preview($cgj));
+
+$only_padding = str_repeat('&zwnj;&nbsp;', 60);
+check($preview($only_padding) === '',
+	'a padding-only plain part cleans to empty (the caller then uses the HTML preview)');
+
+// Raw invisible characters (no entities) get the same treatment.
+$raw = "Words here\u{200C}\u{034F}\u{00A0}\u{FEFF} and more";
+check($preview($raw) === 'Words here and more', 'raw zero-width characters stripped', $preview($raw));
+
+// Ordinary entities decode into readable text rather than surviving as source.
+check($preview('Fish &amp; Chips &#8217;til late') === "Fish & Chips \u{2019}til late",
+	'common entities decode for the preview', $preview('Fish &amp; Chips &#8217;til late'));
+
+// Text that is not entity-laden passes through untouched.
+check($preview('A perfectly ordinary sentence.') === 'A perfectly ordinary sentence.',
+	'plain text passes through');
+check($preview('AT&T works — an invalid entity is left alone') === 'AT&T works — an invalid entity is left alone',
+	'a bare ampersand is not an entity and survives');
+check($preview('') === '' && $preview('   ') === '', 'empty and whitespace stay empty');
 
 harness_finish();

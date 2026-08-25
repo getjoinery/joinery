@@ -49,6 +49,12 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.30
+ * @changelog 1.30 - list snippets clean the plain part through
+ *   MailboxHtmlSanitizer::previewText(): received plain parts carry literal
+ *   entities and invisible preheader padding (&zwnj;, &#847;) that rendered
+ *   as garbage in the preview line; a padding-only plain part now falls
+ *   through to the HTML preview.
  * @version 1.29
  * @changelog 1.29 - a sealed-mailbox search folds the index for at most
  *   SEARCH_FOLD_BUDGET_SECONDS and searches what is indexed; an incomplete
@@ -1005,8 +1011,11 @@ class MailboxService {
 				'senders'      => implode(', ', $senders),
 				'sender'       => $latest['sender'],
 				// The HTML is passed whole — the preview extractor caps its own input,
-				// and a fixed prefix of a marketing email is all stylesheet.
-				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 400), $latest['body_html']),
+				// and a fixed prefix of a marketing email is all stylesheet. The plain
+				// prefix must clear a preheader padding run (commonly over a thousand
+				// characters of entities), or the cleaner sees only padding and a cut
+				// mid-entity leaves a fragment as the whole preview.
+				'snippet'      => $this->buildSnippet(mb_substr($latest['body_plain'], 0, 4000), $latest['body_html']),
 				// AI triage (specs/implemented/joinery_ai_email_triage.md): the latest
 				// message's one-line AI summary, empty if untriaged. The reader shows
 				// this in place of the snippet when present.
@@ -1147,13 +1156,17 @@ class MailboxService {
 
 	/**
 	 * One-line preview of the latest message for the list row. Prefers the plain
-	 * body; an HTML-only message is read through
+	 * body, cleaned through MailboxHtmlSanitizer::previewText() — a received
+	 * plain part is generated from the sender's HTML often enough to carry
+	 * literal entities and invisible preheader padding, and a part that was
+	 * NOTHING but padding cleans to '' so the HTML preview takes over instead
+	 * of an empty line. An HTML-only message is read through
 	 * MailboxHtmlSanitizer::toReadableText(), which parses rather than pattern-
 	 * matches so a sender's embedded stylesheet cannot surface as the preview.
 	 * Whitespace is collapsed and the result trimmed to a short, single line.
 	 */
 	private function buildSnippet(?string $plain, ?string $html): string {
-		$text = trim((string)$plain);
+		$text = MailboxHtmlSanitizer::previewText((string)$plain);
 		if ($text === '' && trim((string)$html) !== '') {
 			$text = MailboxHtmlSanitizer::toReadableText((string)$html);
 		}
