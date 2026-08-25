@@ -166,6 +166,7 @@ The UI is organized around a **dashboard + node detail** pattern. The dashboard 
 | `/admin/server_manager/targets` | **Backup Targets** -- CRUD for cloud storage targets (B2, S3, Linode) |
 | `/admin/server_manager/jobs` | **Jobs** -- global job history with filters by node, status, and type |
 | `/admin/server_manager/job_detail?job_id=N` | **Job Detail** -- single job output with live polling |
+| `/admin/server_manager/domains` | **Domains** -- managed domain registrations: hand-overs waiting for a registrar push, failures, and the full ledger |
 
 ### Node Detail Tabs
 
@@ -358,6 +359,11 @@ Both modes end the same way: `install_node` completes, the welcome email goes
 out with DNS instructions, and `ProvisionPendingSsl` turns HTTPS on once DNS
 resolves.
 
+A hosting product can also sell the buyer their **domain name** in the same
+click — see **Managed domain registration** below. That leg is orthogonal to
+compute mode: it attaches to shared-host and customer-cloud products alike,
+and when it is present the buyer never touches DNS at all.
+
 ### Activation — the Provisioning page
 
 **Server Manager → Provisioning** (`/admin/server_manager/provisioning_setup`)
@@ -367,10 +373,14 @@ automatable step is a one-click, idempotent action backed by
 (`provisioning@<host>`, permission 5, password recovery disabled) and machine
 key and write the API settings (with a loopback probe badge and key
 rotation), create the domain Question, save the email settings, activate the
-three scheduled tasks, and save the customer-cloud settings (SSH key path
+scheduled tasks (the provisioning umbrella, which runs order polling,
+customer cloud, SSL and the managed-domain phases in one pass, plus the
+core Send Queued Emails task that drains the welcome-email queue), the
+domain-registrar credentials, and the customer-cloud settings (SSH key path
 with key/.pub existence badges, referral URL, instance defaults). The page
-also shows what stays manual: attaching the question to hosting products,
-opting a shared host in, and registering the Linode OAuth app. When the store
+also shows what stays manual: attaching the question or the Managed domain
+requirement to hosting products, opting a shared host in, and registering the
+Linode OAuth app. When the store
 is a remote site rather than the control plane itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
@@ -434,6 +444,185 @@ core `oauth_linode_*` settings (Admin → System → OAuth Providers).
 The compute API surface is `CloudComputeProvider`
 (`includes/cloud_compute/`) with `LinodeComputeDriver` implementing it; a new
 provider is a new driver plus its OAuth provider class.
+
+## Managed Domain Registration
+
+A hosting buyer who does not already own a domain can buy one in the same
+click as the server. At checkout they type the name they want, see live
+availability and the one-year price, and fill a contact block prefilled from
+their account. One payment covers both. Behind it the pipeline registers the
+name, points it at their box, publishes their mail records and sets reverse
+DNS — so their website answers and `jane@theirdomain.com` works by the time
+the welcome email lands. No registrar dashboard, no DNS panel, no waiting on
+the buyer to paste a record somewhere.
+
+**The buyer legally owns the domain from the moment it is registered.** They
+are the WHOIS registrant on day one; the operator holds only management and
+billing, so that buying it could be one click. Those move to the buyer later
+(see *Graduation*). Ownership is never in question and never waits on a step.
+
+### Selling it
+
+Two things have to be set before a domain can be sold, and until both are the
+checkout field refuses the order rather than taking money for a name it cannot
+register:
+
+1. **Registrar credentials** — the *Domain registration* card on
+   **Server Manager → Provisioning**. Namecheap needs an API username, an API
+   key (sealed at rest), and the control plane's public IPv4 address
+   allowlisted in its API panel. Namecheap grants API access only to accounts
+   with 20+ domains, $50 in the balance, or $50 spent in the last two years.
+   A sandbox switch points every registrar call at Namecheap's sandbox for a
+   full rehearsal.
+2. **A domain-year product** — an ordinary store product, not publicly
+   listed, with one version whose price type is `user`. Select it in the
+   store's `store_domain_registration_product_id` setting. Its price comes
+   from the live registrar quote at checkout, so the buyer pays one year at
+   cost.
+
+Then attach **Managed domain** to the hosting product from *Info to collect
+before purchase* on the product edit page. `server_manager_domain_tlds`
+(default `com net org`) bounds what can be asked for.
+
+Both gates check the thing they name, not just the setting: a domain-year
+product that was deleted, or whose version was deactivated, reads as unusable
+and the checkout field refuses — because a silently skipped cart line would
+mean registering a domain nobody was charged for.
+
+One payment consequence worth knowing: a subscription hosting line plus a
+one-time domain line is a mixed cart, and PayPal cannot process one
+(`ShoppingCart::is_paypal_available()`). Deployments selling subscription
+hosting with managed domains take card payment through Stripe.
+
+### What the buyer's answer becomes
+
+`ManagedDomainRequirement` validates the submission against the registrar,
+live: the name has to be registrable, in an offered ending, available, and not
+premium, and the contact block has to be complete (including a phone number
+with an explicit country code — a bare number is refused rather than guessed
+at, because guessing puts a stranger's country code on a public WHOIS record).
+
+The quote it gets back drives two things. It becomes a **second cart line**
+against the domain-year product, priced through the existing
+`prv_price_type = 'user'` path — a line rather than a surcharge because a line
+carries its own recurrence, and a one-time fee folded into a subscription line
+would bill every cycle. And after payment, `post_purchase()` files an
+`rdm_registered_domains` row for the pipeline to work from. Nothing
+price-shaped is ever read from the POST.
+
+### Fulfillment
+
+`ProvisionManagedDomains` runs as a phase of the provisioning umbrella task
+and takes at most one step per row per tick:
+
+| Step | Guard |
+|---|---|
+| register the name with the buyer as registrant, WHOIS privacy on | `rdm_status` is `pending` |
+| publish apex + `www` A records at the box | `rdm_dns_bootstrap_time` |
+| ask the box for its mail records and publish them | `rdm_dns_mail_time` |
+| set the PTR to `mail.<domain>` | `rdm_ptr_time` |
+
+Each null timestamp is an outstanding step retried next tick; a stamped one is
+never redone. Registration is guarded by status rather than a timestamp
+because a stamp written after a charge is one crash away from a second charge
+— and when the registrar reports the name unavailable, the phase asks whether
+*we already hold it* before concluding someone else took it.
+
+The web records unblock certificate issuance, so `ProvisionPendingSsl`
+succeeds without the buyer doing anything. The mail records are **not**
+computed on the control plane: `plugins/mailbox/utils/managed_domain_prepare.php`
+runs on the box over SSH, makes the domain mail-ready, and prints the record
+set `InboundEmailSetupCheck::dnsPlan()` prescribes — the box is what knows its
+own topology, SPF shape, DKIM key and Joinery Direct state. A record set
+returned without DKIM is published anyway (MX and SPF are what make mail
+arrive) but the step stays open until the signing key is included.
+
+**Before anything is bought, the order is checked for the money.** The
+checkout answers and the payment are two separate objects, and the cart lets a
+buyer separate them: every cart line carries its own Edit and Remove, so the
+domain-year line can be deleted — or repriced through its own product page —
+while the hosting line carrying the answers is submitted unchanged. The intake
+reads the hosting line, so without a check the domain would be registered on
+the operator's card for free. The rule: the order must hold a paid
+domain-registration line worth at least the quote, and each such line backs at
+most one registration. Anything else parks the row with an alert. That turns
+every one of those doors into something an operator sees rather than a silent
+loss.
+
+Publishing always goes through `DnsReconciler` in additive mode, never a
+driver's raw call: Namecheap's `setHosts` replaces a zone's entire host list,
+and additive means the pipeline can create records a zone lacks but never
+overwrites something a person put there. A shared-host row stamps the PTR step
+immediately — one address serving many domains has no per-domain PTR to set.
+
+The mirror case has its own sweep, because there is nothing to run it from. A
+buyer who removes the *hosting* line from the cart and keeps the domain line
+pays for a domain year whose intake never fires — no row is written, so no
+queue could ever show it. `ManagedDomainWatch` therefore looks for the
+arithmetic signature directly: an order with more paid domain-year lines than
+registration rows. It reports each such order once (a high-water mark over
+order-item ids), and gives a fresh charge fifteen minutes to file its row
+before judging it.
+
+A terminal failure parks the row at `failed` and emails the provisioning alert
+address. It is never auto-retried: a name someone else took needs a
+conversation with the buyer, not another attempt.
+
+### Ownership and graduation
+
+Legal ownership is immediate and never moves. What moves is custody —
+`rdm_graduation_state`, running `operator_managed` → `push_requested` →
+`push_sent` → `self_custody`.
+
+While the domain sits in the operator's registrar account, its renewal bills
+the **operator**, and the platform never renews a buyer's domain and never
+fronts the cost. So the domain has to reach the buyer's own account before its
+first expiry. `ManagedDomainWatch` is what makes sure it does:
+
+- It sweeps for domain years that were paid for but never registered (above).
+- It refreshes the expiry from the registrar at most weekly.
+- At **expiry minus six months** it pushes a custody state to the buyer's box,
+  and `ManagedDomainNotice` starts rendering a take-ownership notice there —
+  calm at first, sharper at 30, 14, 7 and 1 days. That notice is the buyer's
+  first mention of graduation anywhere; nothing in the setup wizard or the
+  welcome email raises it. It is shown to permission-5+ users only, never to
+  the site's visitors.
+- Once a push is in flight it asks `inAccount()`. **False is the success
+  signal** — the domain has left the operator's account — and flips the row to
+  `self_custody`, updates the box, and emails the buyer a confirmation with
+  the auto-renew reminder.
+
+The buyer's side of it is `/profile/server_manager/domain`: create a free
+registrar account, tell us its name, then finish in their own dashboard. That
+middle step is the only part that happens here, and submitting it queues an
+operator task — Namecheap's Change Ownership push has no API. The push itself
+is free and immediate, and DNS records, WHOIS privacy and auto-renew settings
+all survive it.
+
+### The operator queue
+
+**Server Manager → Domains** (`/admin/server_manager/domains`) is ordered by
+what needs a person: hand-overs waiting for a dashboard push first, then
+terminal failures with a Retry button, then every domain as a ledger with its
+status, custody, expiry and per-step progress.
+
+### Node settings
+
+Four core settings, declared `managed` so the node's own settings page does not
+offer them and the control plane is their only author:
+`managed_domain_name`, `managed_domain_expiry_time`, `managed_domain_state`,
+`managed_domain_manage_url`. Empty `managed_domain_state` renders no notice,
+which is what every deployment that did not buy a domain this way has.
+
+### Adding a registrar
+
+`DomainRegistrarProvider` (`includes/domain_registrar/`) is the seam;
+`DomainRegistrarRegistry` discovers implementations by interface, so a second
+registrar is a class in that directory and nothing else. It covers
+availability and price, registration with a registrant contact, WHOIS privacy,
+expiry, a custody probe, and which DNS driver serves its zones. It has no
+renewal call and no DNS methods — the platform never renews, and records are
+published through the shared DNS stack by driver key.
 
 ## Backup Targets
 
@@ -986,6 +1175,25 @@ ride on the row (`cvp_docker_mode`, `cvp_install_mode`, `cvp_source_node_id`,
 (`cvp_cca_account_id`), instance (`cvp_instance_id`/`_ip`), and resulting
 node (`cvp_mgn_node_id`).
 
+### RegisteredDomain (`rdm_registered_domains`)
+
+One domain bought on a buyer's behalf. Two independent axes run along the row
+and must not be conflated: `rdm_status` is fulfillment (`pending` →
+`registered` → `active`, or `failed`), and `rdm_graduation_state` is custody
+(`operator_managed` → `push_requested` → `push_sent` → `self_custody`). Legal
+ownership belongs to neither — the buyer is the registrant from registration.
+
+- `rdm_domain` -- the name, lowercase and unique
+- `rdm_usr_user_id` -- the buyer; deletion is refused while a domain is theirs
+- `rdm_external_order_item_id` -- the order item both this and the compute leg
+  hang off, and the intake's idempotency key
+- `rdm_mgn_node_id` -- the box, resolved during fulfillment
+- `rdm_registrant_sealed` -- the WHOIS contact block, SecretBox-sealed
+- `rdm_dns_bootstrap_time` / `rdm_dns_mail_time` / `rdm_ptr_time` -- the
+  idempotency ledger: null means outstanding, stamped means never redone
+- `rdm_expiry_time`, `rdm_expiry_checked_time`, `rdm_prompt_pushed_time` --
+  the countdown, its weekly refresh, and whether the buyer has been told
+
 ### ManagementJob (`mjb_management_jobs`)
 
 Represents a queued, running, or completed operation. Key fields:
@@ -1191,6 +1399,14 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `data/management_job_class.php` | ManagementJob + MultiManagementJob |
 | `data/agent_heartbeat_class.php` | AgentHeartbeat + MultiAgentHeartbeat |
 | `data/backup_target_class.php` | BackupTarget + MultiBackupTarget |
+| `data/registered_domains_class.php` | RegisteredDomain + MultiRegisteredDomain |
+| `includes/domain_registrar/DomainRegistrarProvider.php` | The registrar seam + `DomainRegistrarException` (transient vs terminal) |
+| `includes/domain_registrar/DomainRegistrarRegistry.php` | Interface-based registrar discovery, plus the shared domain-name and TLD gates |
+| `includes/domain_registrar/NamecheapRegistrar.php` | Namecheap: availability, pricing, registration, WHOIS privacy, expiry, custody probe |
+| `includes/requirements/ManagedDomainRequirement.php` | The checkout field, its live quote, the companion cart line, and the intake |
+| `includes/provisioning/ProvisionManagedDomains.php` | Register → web DNS → mail DNS → PTR → active |
+| `includes/provisioning/ManagedDomainWatch.php` | Expiry refresh, the six-month prompt, custody detection, the node banner push |
+| `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the checkout field |
 | `includes/JobCommandBuilder.php` | Command generation for all job types; `ssh_prefix()` is public for use by other tools |
 | `node_exec.php` | **Dev/AI diagnostic CLI** — run any command on a managed node in one call; handles SSH + Docker transparently. Usage: `php node_exec.php` (list nodes), `php node_exec.php <slug> "<cmd>"` (run), or pipe stdin with `--stdin` for SQL queries. |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
@@ -1210,6 +1426,8 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `views/admin/targets.php` | Backup target CRUD |
 | `views/admin/jobs.php` | Global job history |
 | `views/admin/job_detail.php` | Single job output with live polling |
+| `views/admin/domains.php` | Managed domain queue -- pending pushes, failures, the full ledger |
+| `views/profile/domain.php` | The buyer's take-ownership flow (`/profile/server_manager/domain`) |
 | `views/admin/nodes_edit.php` | Redirect stub (-> node_detail or node_add) |
 | `views/admin/nodes.php` | Redirect stub (-> dashboard) |
 | `views/admin/backups.php` | Redirect stub (-> dashboard or node_detail) |

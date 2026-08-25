@@ -7,7 +7,7 @@
  * item shows its live state with a one-click action where the platform can
  * do the work itself.
  *
- * @version 1.1
+ * @version 1.2 - the domain-registration card
  */
 require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 require_once(PathHelper::getIncludePath('plugins/server_manager/logic/admin_provisioning_setup_logic.php'));
@@ -24,6 +24,7 @@ $tasks = $status['tasks'];
 $cloud = $status['cloud'];
 $shared = $status['shared_hosts'];
 $agent = $status['agent'];
+$domains = $status['domains'];
 
 function smps_badge(bool $ok, string $ok_label = 'OK', string $bad_label = 'Missing', string $bad_color = 'warning'): string {
 	return $ok
@@ -235,7 +236,76 @@ echo $fw_cloud->end_form();
 
 <hr>
 
-<h4>8. Products</h4>
+<h4>8. Domain registration</h4>
+<p>With this configured, a hosting product can also sell the buyer their domain name — they type
+the name they want at checkout, pay once, and the pipeline registers it with <strong>them</strong>
+as the legal owner, wires DNS to their box and turns on email. Leave it unset and buyers bring
+their own domain exactly as before.</p>
+<table class="table table-sm">
+	<tr>
+		<th style="width:260px">Registrar</th>
+		<td>
+			<?= smps_badge($domains['configured'], ($domains['label'] ?: 'Configured'), 'Not configured') ?>
+			<?php if ($domains['sandbox']): ?>
+				<span class="badge bg-warning">Sandbox</span> — names bought here are not real.
+			<?php endif; ?>
+		</td>
+	</tr>
+	<tr>
+		<th>API key</th>
+		<td>
+			<?= smps_badge($domains['key_present'], 'Stored', 'Not set') ?>
+			— sealed at rest. Namecheap grants API access only to accounts with 20+ domains,
+			$50 in the balance, or $50 spent in the last two years, and only from an allowlisted
+			address.
+		</td>
+	</tr>
+	<tr>
+		<th>Domain-year product</th>
+		<td>
+			<?= smps_badge($domains['product_ok'],
+				'Selected', $domains['product_id'] > 0 ? 'Selected but unusable' : 'Not selected') ?>
+			— create a product with one version priced <em>user</em> and choose it in the store's
+			Domain registration setting. A selected product that was later deleted, or whose
+			version was deactivated, reads as unusable: the checkout field refuses rather than
+			registering a domain nobody was charged for. The line's price is the live registrar quote, so the buyer
+			pays exactly one year at cost.
+		</td>
+	</tr>
+	<tr>
+		<th>Sellable</th>
+		<td>
+			<?= smps_badge($domains['sellable'], 'Yes', 'No', 'warning') ?>
+			— until both are set the checkout field refuses the order rather than selling a domain
+			it cannot register. Queue and history: <a href="/admin/server_manager/domains">Domains</a>.
+		</td>
+	</tr>
+</table>
+<?php
+$fw_domains = $page->getFormWriter('form_domains');
+echo $fw_domains->begin_form();
+echo '<input type="hidden" name="action" value="save_domains">';
+$fw_domains->textinput('ncp_api_user', 'Namecheap username', ['value' => $domains['api_user'],
+	'helptext' => 'The account the API calls are made as.']);
+$fw_domains->passwordinput('ncp_api_key', 'Namecheap API key', [
+	'helptext' => $domains['key_present']
+		? 'A key is stored. Leave blank to keep it; enter a new one to replace it.'
+		: 'From Profile, Tools, Namecheap API Access.']);
+$fw_domains->textinput('ncp_client_ip', 'Allowlisted IP', ['value' => $domains['client_ip'],
+	'helptext' => 'This server\'s public IPv4 address, added to the Whitelisted IPs list in the '
+		. 'Namecheap API panel. IPv6 is not accepted there.']);
+$fw_domains->textinput('domain_tlds', 'Offered endings', ['value' => $domains['tlds_raw'],
+	'helptext' => 'Space-separated, without the dot. A name outside these is refused at checkout.']);
+$fw_domains->checkboxinput('ncp_sandbox', 'Use the Namecheap sandbox',
+	['checked' => $domains['sandbox'],
+	 'helptext' => 'Point registrar calls at the sandbox for an end-to-end rehearsal.']);
+$fw_domains->submitbutton('btn_save_domains', 'Save domain registrar settings');
+echo $fw_domains->end_form();
+?>
+
+<hr>
+
+<h4>9. Products</h4>
 <p>Per hosting product (product edit page): for <strong>customer-cloud</strong>
 fulfillment pick <em>Customer cloud server</em> under Purchase grants — that is
 the entire setup (the domain question is asked automatically) — and put the
@@ -243,6 +313,10 @@ Connect link
 (<code><?= htmlspecialchars($api['is_self'] ? '' : rtrim($api['url'], '/')) ?>/profile/server_manager/connect_cloud</code>)
 in the after-purchase message. For <strong>shared-host</strong> products,
 attach the domain question as a requirement instead.</p>
+<p>To sell the buyer their domain in the same click, also tick
+<strong>Managed domain</strong> under <em>Info to collect before purchase</em>.
+It works with either fulfillment mode, and replaces the domain question for
+buyers who do not already own a name.</p>
 
 <?php
 $page->end_box();

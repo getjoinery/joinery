@@ -97,13 +97,85 @@ function product_logic(array $input): LogicResult {
 			return LogicResult::error($e->getMessage());
 		}
 
+		// A requirement may contribute companion lines priced from the buyer's
+		// own validated answers — a registered domain's one-year fee, say. The
+		// store never learns what those lines are for: the requirement returns
+		// a product id and the form data that prices it, and both are derived
+		// server-side.
+		$companion_lines = function ($form_data) use ($product) {
+			$lines = array();
+			foreach ($product->get_product_requirements() as $requirement) {
+				foreach ($requirement->extra_cart_lines($form_data, $product) as $line) {
+					$line_product_id = (int)($line['product_id'] ?? 0);
+					if ($line_product_id <= 0) {
+						continue;
+					}
+					$line_product = new Product($line_product_id, TRUE);
+					if (!$line_product->key) {
+						error_log('product_logic: ' . get_class($requirement) . ' asked for cart line '
+							. 'product #' . $line_product_id . ', which does not load — line skipped.');
+						continue;
+					}
+					$line_data = (array)($line['form_data'] ?? array());
+					if (empty($line_data['product_version'])) {
+						// A companion product has one version; the requirement
+						// names a product, not a SKU. Resolving it here is also
+						// what keeps a parent's version id from leaking onto a
+						// line it does not belong to.
+						$line_versions = $line_product->get_product_versions(TRUE);
+						if (!$line_versions || count($line_versions) === 0) {
+							error_log('product_logic: cart line product #' . $line_product_id
+								. ' has no active version — line skipped.');
+							continue;
+						}
+						$line_data['product_version'] = $line_versions->get(0)->key;
+					}
+					$lines[] = array('product' => $line_product, 'form_data' => $line_data);
+				}
+			}
+			return $lines;
+		};
+
 		try {
 			$cart = ShoppingCart::current();
 
 			// Check if we're updating an existing cart item
 			$edit_index = isset($input['edit_item_index']) ? intval($input['edit_item_index']) : null;
 			if ($edit_index !== null && $cart->get_item($edit_index) !== null) {
+				// The companion lines this item contributed were priced from the
+				// answers being replaced. Editing the parent without them would
+				// leave the cart charging for the buyer's previous answer — a
+				// different domain, at a different price — so the old ones come
+				// out before the new ones go in. They are found by matching the
+				// exact form data the requirement produced from the OLD answers,
+				// so another item's identical companion line is never touched.
+				// That matching is load-bearing on extra_cart_lines() being
+				// deterministic for identical form data — a requirement that
+				// varied its output for the same answers would strand its own
+				// old line here.
+				$stale = $companion_lines($cart->get_item($edit_index)[2]);
 				$cart->update_item($edit_index, $form_data);
+				foreach ($stale as $line) {
+					foreach ($cart->items as $key => $cart_item) {
+						if ((int)$cart_item[1]->key !== (int)$line['product']->key) {
+							continue;
+						}
+						$matches = true;
+						foreach ($line['form_data'] as $name => $value) {
+							if (!array_key_exists($name, $cart_item[2]) || $cart_item[2][$name] != $value) {
+								$matches = false;
+								break;
+							}
+						}
+						if ($matches) {
+							$cart->remove_item($key);
+							break;
+						}
+					}
+				}
+				foreach ($companion_lines($form_data) as $line) {
+					$cart->add_item($line['product'], $line['form_data']);
+				}
 			} else {
 				// New item — add to cart
 				if(!empty($input['user_price'])){
@@ -118,6 +190,9 @@ function product_logic(array $input): LogicResult {
 					}
 				}
 				$cart->add_item($product, $form_data);
+				foreach ($companion_lines($form_data) as $line) {
+					$cart->add_item($line['product'], $line['form_data']);
+				}
 			}
 		}
 		catch (ShoppingCartException $e) {

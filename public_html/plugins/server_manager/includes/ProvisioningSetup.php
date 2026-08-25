@@ -15,6 +15,8 @@
  * set up from here — the key must be minted on the store site and its values
  * entered in the settings fields.
  *
+ * @version 1.4 - the domain-registration leg's status and sealed credentials
+ * @version 1.3 - readSecret()/writeSecret() generalize the sealed-setting path
  * @version 1.2
  */
 
@@ -42,16 +44,21 @@ class ProvisioningSetup {
 	const SERVICE_KEY_PERMISSION = 3;
 	const DOMAIN_QUESTION_TEXT = 'What domain would you like to use for your site?';
 
-	/** Task class => display name, all default_frequency every_run. */
+	/**
+	 * Task class => display name, all default_frequency every_run.
+	 *
+	 * Order polling, customer cloud, SSL and the managed-domain leg are PHASES
+	 * of one umbrella task, not tasks of their own — they have no task files,
+	 * so naming them here would mint sct_ rows pointing at classes the runner
+	 * cannot load, and the activate button would seed a broken schedule.
+	 */
 	const TASK_CLASSES = array(
-		'PollHostingOrders'      => 'Poll Hosting Orders',
-		'ProvisionPendingSsl'    => 'Provision Pending SSL',
-		'ProvisionCustomerCloud' => 'Provision Customer Cloud',
+		'ServerManagerAdvanceProvisioning' => 'Advance Provisioning',
 		// Core task, but a hard pipeline requirement: the buyer's welcome
 		// email is queued into equ_queued_emails on the store site and only
 		// this task drains that queue. (Remote-store case: activate it on the
 		// store site.)
-		'SendQueuedEmails'       => 'Send Queued Emails',
+		'SendQueuedEmails'                 => 'Send Queued Emails',
 	);
 
 	/** TASK_CLASSES entries owned by core — no sct_plugin_name stamp. */
@@ -105,6 +112,23 @@ class ProvisioningSetup {
 	public static function readApiSecret(): string {
 		$settings = Globalvars::get_instance();
 		return self::decryptSecret((string)$settings->get_setting('server_manager_getjoinery_api_secret_key'));
+	}
+
+	/**
+	 * Read any SecretBox-sealed setting, decrypted for use.
+	 *
+	 * The general form of readApiSecret(): a value written by writeSecret()
+	 * comes back plaintext, and a legacy or zero-config plaintext value passes
+	 * through untouched, so a deployment with no secret_box_key still works.
+	 */
+	public static function readSecret(string $name): string {
+		$settings = Globalvars::get_instance();
+		return self::decryptSecret((string)$settings->get_setting($name, false, true));
+	}
+
+	/** Write a setting sealed at rest wherever a secret_box_key exists. */
+	public static function writeSecret(string $name, string $plaintext): void {
+		self::writeSetting($name, $plaintext === '' ? '' : self::encryptSecret($plaintext));
 	}
 
 	/**
@@ -400,6 +424,35 @@ class ProvisioningSetup {
 	}
 
 	/**
+	 * The domain-registration leg's configuration, for the setup page.
+	 *
+	 * The API key is reported as present-or-absent and never returned: this
+	 * array reaches a template, and a credential that reaches a template ends
+	 * up in a page source sooner or later.
+	 */
+	public static function domainStatus(): array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedDomainRequirement.php'));
+		$registrar = DomainRegistrarRegistry::firstConfigured();
+		$product_id = (int)self::readSetting('store_domain_registration_product_id');
+		// Sellable means the product LOADS and can price a line, not merely
+		// that the setting holds a number — a deleted product still would.
+		$product_ok = ManagedDomainRequirement::domainProductSellable();
+		return array(
+			'api_user'    => self::readSetting('server_manager_namecheap_api_user'),
+			'key_present' => trim(self::readSecret('server_manager_namecheap_api_key')) !== '',
+			'client_ip'   => self::readSetting('server_manager_namecheap_client_ip'),
+			'sandbox'     => self::readSetting('server_manager_namecheap_sandbox') !== '',
+			'tlds_raw'    => implode(' ', DomainRegistrarRegistry::offeredTlds()),
+			'configured'  => $registrar !== null,
+			'label'       => $registrar ? $registrar::getLabel() : '',
+			'product_id'  => $product_id,
+			'product_ok'  => $product_ok,
+			'sellable'    => $registrar !== null && $product_ok,
+		);
+	}
+
+	/**
 	 * Full pipeline status for the setup page: each checklist item with
 	 * enough detail to render a state badge and decide which action to
 	 * offer. Read-only; the probe only runs when credentials are present.
@@ -460,6 +513,7 @@ class ProvisioningSetup {
 			'shared_hosts' => array(
 				'enabled_count' => (int)$provisioning_hosts->count_all(),
 			),
+			'domains' => self::domainStatus(),
 			'cloud' => array(
 				'oauth_configured' => $oauth_configured,
 				'ssh_key_path' => $ssh_key_path,

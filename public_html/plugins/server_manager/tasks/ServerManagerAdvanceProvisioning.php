@@ -4,15 +4,17 @@
  *
  * The customer provisioning pipeline, start to finish, in one pass.
  *
- * The three phases are stages of one journey and have a real order:
+ * The phases are stages of one journey and have a real order:
  *
  *  1. Poll orders   ask getjoinery for newly paid hosting orders and start an
  *                   install job (or a customer-cloud provision row) for each.
  *  2. Customer cloud  work the customer-cloud provision state machine.
  *  3. SSL           provision certificates for hosts that are ready for them.
+ *  4. Domains       register managed domains, wire their DNS to the box, set PTR.
+ *  5. Domain watch  keep expiry current and move custody toward the buyer.
  *
  * Running them together means one place to look when a customer's site is
- * stuck, instead of three tasks where a stalled stage is invisible from the
+ * stuck, instead of separate tasks where a stalled stage is invisible from the
  * others. A phase that throws is caught and recorded; the later phases still
  * run, so a getjoinery API outage cannot stop SSL from being issued for a site
  * provisioned an hour ago.
@@ -21,7 +23,7 @@
  * provisioning, and its up/down alerting must not sit behind a provisioning
  * call that hangs.
  *
- * @version 1.0
+ * @version 1.1 - the managed-domain leg runs as two more phases
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -34,6 +36,8 @@ class ServerManagerAdvanceProvisioning implements ScheduledTaskInterface {
 			'Orders'         => array($base . 'PollHostingOrders.php', 'PollHostingOrders'),
 			'Customer cloud' => array($base . 'ProvisionCustomerCloud.php', 'ProvisionCustomerCloud'),
 			'SSL'            => array($base . 'ProvisionPendingSsl.php', 'ProvisionPendingSsl'),
+			'Domains'        => array($base . 'ProvisionManagedDomains.php', 'ProvisionManagedDomains'),
+			'Domain watch'   => array($base . 'ManagedDomainWatch.php', 'ManagedDomainWatch'),
 		);
 
 		$parts = array();

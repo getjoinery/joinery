@@ -8,7 +8,7 @@
  * Core classes are registered at the bottom of this file.
  * Plugin classes register themselves via AbstractProductRequirement::register().
  *
- * @version 2.0
+ * @version 2.1 - extra_cart_lines(): a requirement may contribute a server-priced companion line
  */
 abstract class AbstractProductRequirement {
 
@@ -159,6 +159,31 @@ abstract class AbstractProductRequirement {
 
     /** Return data for admin/report display. */
     public function get_display_data($order_detail, $user) { return []; }
+
+    /**
+     * Extra cart lines this requirement contributes, from the buyer's own
+     * validated answers. Called after validate_form() succeeds, with the
+     * merged form data process() produced.
+     *
+     * The scope is deliberately narrow: a requirement may add a companion
+     * product line whose price it derives SERVER-SIDE from those answers. It
+     * is not a way to discount or surcharge the product it is attached to,
+     * not a fees engine (every contributed line is a real product with a real
+     * version, visible in orders, reports and refunds), and never buyer-priced
+     * — the line's form data is constructed here, never taken from the POST.
+     *
+     * A separate line rather than a price fold-in because a line carries its
+     * own product version and therefore its own recurrence: a one-time charge
+     * folded into a subscription line would bill again every cycle.
+     *
+     * MUST be deterministic for identical form data: editing a cart item
+     * finds the lines it previously contributed by recomputing them from the
+     * old answers, so a requirement that varied its output for the same input
+     * would strand its own stale line in the cart.
+     *
+     * @return array of ['product_id' => int, 'form_data' => array]
+     */
+    public function extra_cart_lines($form_data, $product) { return []; }
 
     /** Does this requirement affect pricing? */
     public function affects_pricing(): bool { return false; }

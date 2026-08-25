@@ -50,9 +50,89 @@ reaches only the actions that opt in with `allow_guest`. See
 
 Settings keep their pre-extraction core names (`products_active`, `checkout_type`, `stripe_api_key`, ...) via the per-setting `legacy_core: true` flag in `plugin.json`. Declaring them there is also what puts them on **Admin → Settings → Plugin Settings**; the payment credentials additionally appear on the store's own Payment Settings tab, which wraps them with live connection tests.
 
-### Optional piggyback donation
+## How a cart line gets its price
 
-A buyer entering an amount in a `UserPriceRequirement` field ("User Chooses Price" on the product edit page) gets a second cart item: the site's donation product, identified by the `store_optional_donation_product_id` setting (the "Optional donation product" dropdown on the settings page). The donation product prices itself from the buyer's entered amount (`Product::is_optional_donation()`); it shows no fixed price in listings. Blank setting = feature off — entered amounts are logged and skipped, never charged. The donation product is never identified by a hardcoded product ID.
+A cart line is a **product version, a quantity, and the form data the buyer's
+submission produced**. Every price on the receipt comes out of that tuple, and
+this is the whole of it.
+
+### Price resolution
+
+`Product::get_price($version, $form_data)` answers in one of three ways:
+
+- **The version's own price** (`prv_version_price`) — the ordinary case. The
+  version also carries the recurrence: a `prv_price_type` of `day`, `week`,
+  `month` or `year` makes the line a subscription.
+- **A price carried in the line's form data** — a version with
+  `prv_price_type = 'user'` reads `user_price_override` from the form data
+  rather than from the version row. That is how a line can cost something the
+  product row could not know in advance.
+- **An amount the buyer typed** — the optional-donation product prices itself
+  from `user_price` (`Product::is_optional_donation()`) and shows no fixed
+  price in listings.
+
+Because the price lives in the form data, **coupon repricing is free of side
+effects**: `ShoppingCart::update_items_for_coupon()` re-calls `get_price()`
+with the persisted form data and derives the same number, with no lookup and
+no second call to anything external.
+
+### Requirement-contributed companion lines
+
+A product requirement may contribute **additional cart lines whose price it
+derives server-side, from the buyer's validated answers, at the moment the
+item is added to the cart**. `AbstractProductRequirement::extra_cart_lines(
+$form_data, $product)` returns `['product_id' => int, 'form_data' => array]`
+entries, and `product_logic` adds each one beside the parent line (resolving
+the companion product's active version when the requirement did not name one).
+
+Two examples of the same shape: a buyer who enters a donation amount gets the
+site's donation product as a second line; a buyer who asks for a managed
+domain gets a "Domain registration (1 year)" line priced at the live registrar
+quote their name came back with (see
+[Server Manager](../../server_manager/docs/overview.md)).
+
+The scope is deliberately narrow:
+
+- **Not a parent-price modifier.** A requirement cannot discount or surcharge
+  the product it is attached to.
+- **Not a fees engine.** Every contributed line is a real product with a real
+  version — visible in orders, reports and refunds like any other. The product
+  stays the platform's unit of sale.
+- **Not buyer-priceable.** The contributed line's form data is constructed by
+  the requirement, never taken from the POST.
+
+Editing a cart item replaces its companion lines rather than leaving them:
+`product_logic` recomputes them from the answers being replaced, removes those
+exact lines, and adds the new ones — otherwise the cart would go on charging
+for the buyer's previous answer. That makes determinism part of the contract:
+the same form data must always produce the same lines.
+
+The cart's own Edit and Remove still reach a companion line directly, so a
+buyer can delete or reprice one after it is added. Requirements whose line
+authorizes something expensive must therefore verify the ORDER, not the
+answers — the managed-domain pipeline refuses to register a name unless the
+order holds a paid domain-year line worth the quote.
+
+Why a line rather than a fold-in: a line carries its own product version and
+therefore its own recurrence. A one-time fee folded into a parent line that
+happens to be a subscription would be billed every cycle; as a separate
+non-recurring line, "one charge, once" is structurally true and the receipt
+shows exactly what each part cost.
+
+The optional-donation piggyback is wired directly in `product_logic` rather
+than through the hook: a buyer entering an amount in a `UserPriceRequirement`
+field ("User Chooses Price" on the product edit page) gets the site's donation
+product as a second line. The product is named by
+`store_optional_donation_product_id` (the "Optional donation product" dropdown
+on the settings page), never by a hardcoded ID; blank turns the feature off,
+and an entered amount is then logged and skipped rather than charged.
+
+### What pricing never does
+
+Ownership refuses a sale; it does not zero-price or discount (see below).
+Nothing derives a price from a value the buyer posted directly — a
+`user_price` a buyer types is the price *by design*, and every other number
+is derived server-side.
 
 ## Own-once products (ownership)
 

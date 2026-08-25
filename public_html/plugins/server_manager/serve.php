@@ -26,4 +26,12 @@ if (file_exists($smf_registry)) {
 	require_once($smf_registry);
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/fulfillment_providers/CustomerCloudFulfillment.php'));
 	FulfillmentRegistry::register(new CustomerCloudFulfillment());
+
+	// ---- Product requirement: managed domain registration. Attached per
+	// product (a pri_ row, picked from "Info to collect before purchase"),
+	// never injected by a fulfillment provider — an injected requirement never
+	// receives post_purchase(), and this type's whole intake IS post_purchase.
+	// A pri_ attachment also keeps the domain leg orthogonal to compute mode:
+	// shared-host products have no fulfillment provider at all.
+	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/requirements/ManagedDomainRequirement.php'));
 }

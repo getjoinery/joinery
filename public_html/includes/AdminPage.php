@@ -107,6 +107,11 @@ class AdminPage extends PublicPage {
 		// clear_clearable_messages() then removes them — shown once, then gone.
 		echo $this->renderFlashMessages();
 
+		// A deployment whose domain was registered for it at checkout has one
+		// thing its owner must eventually do: move the domain into their own
+		// registrar account before it expires. Silent everywhere else.
+		echo ManagedDomainNotice::render();
+
 		return true;
 	}
 

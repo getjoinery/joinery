@@ -187,6 +187,29 @@ seeded and readable like any other setting, never appears on a form, and is
 refused by the writer however the request arrives. Schema versions, cron
 heartbeats, one-shot markers and keys minted on first use all belong here.
 
+The managed-domain settings are the same idea across two machines. A
+deployment whose domain was registered for its owner at checkout carries
+`managed_domain_name`, `managed_domain_expiry_time`, `managed_domain_state`
+and `managed_domain_manage_url`, written over SSH by the control plane that
+sold the domain and read by `ManagedDomainNotice` to decide whether — and how
+urgently — to show the owner that the domain's renewal is about to become
+theirs. Empty `managed_domain_state` renders nothing, which is what every
+deployment that did not buy a domain this way has. Declaring them `managed`
+is what keeps a local admin from editing a value only the control plane can
+know. See [Server Manager § Managed Domain Registration](../plugins/server_manager/docs/overview.md).
+
+### Registrar credentials
+
+The domain-registration leg's credentials
+(`server_manager_namecheap_api_user`, `_api_key`, `_client_ip`, `_sandbox`,
+and `server_manager_domain_tlds`) are declared by the server_manager plugin
+but entered on **Server Manager → Provisioning**, not on the settings page —
+the card there seals the API key at rest through `ProvisioningSetup::
+writeSecret()` and shows the account-eligibility and IP-allowlist constraints
+beside the field they apply to. `secret: true` on a declaration marks a value
+as one not to display; it does not encrypt it, which is why the credential
+has a writer that does.
+
 ### Missing settings
 
 `Globalvars::get_setting('name')` for a row that does not exist:
