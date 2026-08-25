@@ -22,15 +22,19 @@
  * stripped, links rendered as "text <url>" — so a degraded client (or the FTS
  * indexer, mobile app, snippet builder) always has a faithful plaintext copy.
  *
- * The other two entry points read RECEIVED mail, which is arbitrary and hostile
+ * The other entry points read RECEIVED mail, which is arbitrary and hostile
  * and is normally kept behind a sandboxed iframe rather than sanitized at all.
  * toReadableText() reduces it to the words a person would read (list previews);
- * sanitizeForPrint() keeps its structure — tables, alignment, inline styles —
- * for the one surface that has to render received mail inside a document of
- * ours, the print sheet.
+ * previewText() does the same for a received PLAIN part, which bulk senders
+ * generate from their HTML and so arrives carrying literal entities and
+ * invisible preheader padding; sanitizeForPrint() keeps received structure —
+ * tables, alignment, inline styles — for the one surface that has to render
+ * received mail inside a document of ours, the print sheet.
  *
  * Uses ext-dom (DOMDocument), always present in this deployment; no new dependency.
  *
+ * @version 1.3 - previewText(): entity-decode + invisible-character collapse
+ *                for plain-part previews
  * @version 1.2
  */
 
@@ -157,6 +161,28 @@ class MailboxHtmlSanitizer {
 		$text = '';
 		self::collectReadableText($body, $text);
 		return self::collapseReadable($text);
+	}
+
+	/**
+	 * Clean a received PLAIN-TEXT part for a one-line preview. Bulk senders
+	 * generate the plain part from their HTML often enough that it arrives
+	 * carrying the HTML's residue as literal text: entities (&zwnj;, &#847;,
+	 * &nbsp;) and the invisible characters a preheader is padded with. Decode
+	 * the entities, then run the same invisible-character collapse the HTML
+	 * preview path uses — what remains is words a person would read, or ''
+	 * when the part was nothing but padding (the caller then falls back to the
+	 * HTML preview).
+	 *
+	 * Preview-only on purpose: the stored body is the faithful copy, and a
+	 * plain part that legitimately discusses entities ("use &nbsp; here")
+	 * should keep them everywhere except this one glanceable line.
+	 */
+	public static function previewText(string $text): string {
+		$text = trim($text);
+		if ($text === '') {
+			return '';
+		}
+		return self::collapseReadable(html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8'));
 	}
 
 	/**
