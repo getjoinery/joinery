@@ -167,9 +167,20 @@ function harness_boot(array $overrides = array()) {
 	// delivers to the internet. Set in memory for this process only, so nothing
 	// about the site's real configuration changes.
 	//
-	// A test that is ABOUT a provider overrides this after boot — the two that do
-	// (inbound_forwarding_relay, setup_topology) already call
-	// harness_set_setting_mem() themselves, which is exactly the intended escape.
+	// The transport guard alone proved insufficient: dev's local Postfix is a
+	// REAL mail server (this box is the live mail test machine) and relays to
+	// the internet, and alert-type mail addresses real operators rather than
+	// harnesstest_ fixtures — sixty operator alerts reached a real inbox
+	// through "local" SMTP on 2026-08-25. So recipients are guarded too:
+	// email_test_mode redirects every send to the joineryemailtests store
+	// alias, where suites can inspect it in iem_inbound_email_messages and
+	// nothing reaches a person. The original recipients ride the subject line.
+	//
+	// A test that is ABOUT a provider or about real delivery overrides these
+	// after boot — harness_set_setting_mem() is exactly the intended escape
+	// (inbound_forwarding_relay and setup_topology already use it for the
+	// transport; a suite asserting delivery to a specific address sets
+	// email_test_mode '0' the same way).
 	//
 	// SCOPE, stated plainly: this is THIS PROCESS ONLY. A suite that drives the
 	// web server (needs=dev-web — the functional API tests) makes its requests
@@ -180,6 +191,8 @@ function harness_boot(array $overrides = array()) {
 	if (($h['meta']['env'] ?? '') !== 'prod-verify') {
 		harness_set_setting_mem('email_service', 'smtp');
 		harness_set_setting_mem('email_fallback_service', 'smtp');
+		harness_set_setting_mem('email_test_mode', '1');
+		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@dev.getjoinery.com');
 	}
 
 	register_shutdown_function('harness_shutdown_report');

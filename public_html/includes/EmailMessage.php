@@ -121,6 +121,33 @@ class EmailMessage {
         return $this;
     }
 
+    /**
+     * Replace every recipient — To, Cc and Bcc — with one address.
+     *
+     * The test-mode redirect (email_test_mode): the message must reach only
+     * the trap, so Cc and Bcc are cleared rather than kept, and the original
+     * To list is returned so the caller can name it in the subject and the
+     * debug log. Original Cc/Bcc are folded into that list too — a redirect
+     * that reported only the To line would hide who else was written to.
+     *
+     * @return string[] every address the message was going to reach
+     */
+    public function redirectAllRecipientsTo($email) {
+        $originals = array();
+        foreach (array($this->recipients, $this->ccRecipients, $this->bccRecipients) as $list) {
+            foreach ($list as $r) {
+                $address = trim((string)$r['email']);
+                if ($address !== '') {
+                    $originals[] = $address;
+                }
+            }
+        }
+        $this->recipients = [['email' => $email, 'name' => null]];
+        $this->ccRecipients = [];
+        $this->bccRecipients = [];
+        return array_values(array_unique($originals));
+    }
+
     public function cc($email, $name = null) {
         $this->ccRecipients[] = ['email' => $email, 'name' => $name];
         return $this;

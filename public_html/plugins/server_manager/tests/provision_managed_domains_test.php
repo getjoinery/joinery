@@ -121,6 +121,13 @@ class PmdPhase extends ProvisionManagedDomains {
 		$this->ssh_commands[] = $remote_command;
 		return array('ok' => true, 'code' => 0, 'output' => 'DOMAIN_BANNER_PUSHED');
 	}
+	// The mail edge, intercepted like the other three. Before this override
+	// existed, every parked row in this suite emailed a REAL operator through
+	// dev's live Postfix — about sixty across one day's runs.
+	protected function send_failure_alert($row, string $reason): void {
+		$this->alerts[] = array('domain' => (string)$row->get('rdm_domain'), 'reason' => $reason);
+	}
+	public $alerts = array();
 }
 
 /** A DnsProvider that is never actually called (the reconciler is faked). */
@@ -296,6 +303,11 @@ check(pmd_tick($phase, $taken) === 1, 'the tick resolves the row');
 check($taken->get('rdm_status') === RegisteredDomain::STATUS_FAILED, 'it fails terminally');
 check($registrar->register_calls === 0, 'without ever attempting the purchase');
 check(trim((string)$taken->get('rdm_error')) !== '', 'the reason is recorded for the queue page');
+check(count($phase->alerts) === 1
+		&& $phase->alerts[0]['domain'] === 'pmd-taken-' . $suffix . '.com'
+		&& stripos($phase->alerts[0]['reason'], 'no longer available') !== false,
+	'exactly one operator alert, naming the domain and the reason',
+	'alerts: ' . var_export($phase->alerts, true));
 
 section('"Unavailable" from a registrar that already holds it is not a second purchase');
 
@@ -437,6 +449,9 @@ check(pmd_tick($phase, $blank) === 1, 'the tick resolves it');
 check($blank->get('rdm_status') === RegisteredDomain::STATUS_FAILED,
 	'a domain with no owner of record is never registered');
 check($registrar->register_calls === 0, 'the registrar is not called at all');
+check(count($phase->alerts) === 1 && stripos($phase->alerts[0]['reason'], 'registrant') !== false,
+	'the operator alert names the missing registrant block',
+	'alerts: ' . var_export($phase->alerts, true));
 
 // ---------------------------------------------------------------------------
 section('A domain the order did not pay for is never registered');
