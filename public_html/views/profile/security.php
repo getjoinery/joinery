@@ -301,7 +301,14 @@
                     options.headers = Object.assign({ 'Content-Type': 'application/json', 'X-Joinery-Csrf': csrf }, options.headers || {});
                     return fetch(url, options).then(async function (res) {
                         var json = await res.json();
-                        if (!res.ok) throw new Error(json.error || 'Request failed.');
+                        if (!res.ok) {
+                            // A server refusal carries its one precise reason;
+                            // the flag lets failure surfaces show it alone
+                            // instead of guessing at browser-prompt causes.
+                            var err = new Error(json.error || 'Request failed.');
+                            err.fromServer = true;
+                            throw err;
+                        }
                         // Sensitive action needs a fresh second-factor step-up (a 2xx
                         // render carrying the flag, not an error): confirm identity, then
                         // return here to retry (specs/mailbox_security_levels.md § 5.5).
@@ -500,19 +507,27 @@
                     return (result.data && result.data.label) || 'Passkey';
                 }
 
-                // The browser reports every assertion failure as the same opaque
-                // error — a refusal and a cancel are indistinguishable, by design.
-                // So name the live possibilities without asserting which one it is,
-                // and say which passkey was expected, since tapping the wrong
-                // authenticator now fails here rather than silently activating it.
+                // A server refusal (no unlock window, no PRF output, step-up
+                // needed) states its one reason — show that reason alone. Only
+                // the browser prompt itself is opaque: it reports refusal,
+                // cancel, wrong authenticator and a PIN-less key identically,
+                // by design, so only that path names the live possibilities —
+                // and says which passkey was expected, since tapping the wrong
+                // authenticator fails here rather than silently activating it.
                 function activationFailureMessage(passkey, err) {
-                    return 'Could not activate "' + (passkey.pkc_label || 'this passkey') + '" for your vault. '
-                        + 'Either a different passkey answered the prompt, or this security key has no PIN set, '
-                        + 'or it cannot unlock a vault at all. '
-                        + (err && err.message ? '(' + err.message + ') ' : '')
-                        + <?php echo (int)SessionControl::get_instance()->get_permission() >= 10
-                            ? "'Test the authenticator one variable at a time at /admin/admin_passkey_lab.'"
-                            : "''"; ?>;
+                    var label = passkey.pkc_label || 'this passkey';
+                    var labHint = <?php echo (int)SessionControl::get_instance()->get_permission() >= 10
+                        ? "' Test the authenticator one variable at a time at /admin/admin_passkey_lab.'"
+                        : "''"; ?>;
+                    if (err && err.fromServer) {
+                        return 'Could not activate "' + label + '" for your vault: ' + err.message + labHint;
+                    }
+                    return 'Could not activate "' + label + '" for your vault — the browser reported '
+                        + 'a failed prompt without saying why (it never does). Make sure you answer the '
+                        + 'prompt with "' + label + '" itself, not another passkey; a security key also '
+                        + 'needs a PIN set. If you cancelled, just try again.'
+                        + (err && err.message ? ' (' + err.message + ')' : '')
+                        + labHint;
                 }
 
                 async function activateForVault(passkey) {

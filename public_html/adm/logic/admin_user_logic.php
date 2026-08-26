@@ -80,6 +80,78 @@ function admin_user_logic(array $input): LogicResult {
 			return LogicResult::redirect('/admin/admin_user?usr_user_id='.$user->key);
 		}
 
+		// ---- Administrative second-factor reset (specs/admin_second_factor_management.md) ----
+		// A superadmin's recovery lever for a user who lost a factor. Every one
+		// of these is an action_button POST: the sanctioned tokenless
+		// single-button form, gated by a fresh step-up rather than a token.
+		else if(in_array($input['action'] ?? '', array('admin_remove_passkey', 'admin_disable_totp', 'admin_revoke_trusted_devices'), TRUE)){
+			$gate = admin_user_second_factor_gate($session, $user);
+			if ($gate) {
+				return $gate;
+			}
+			$acting = new User($session->get_user_id(), TRUE);
+			$back = '/admin/admin_user?usr_user_id=' . $user->key;
+
+			if($input['action'] == 'admin_remove_passkey'){
+				$credential_id = (int)($input['pkc_passkey_credential_id'] ?? 0);
+
+				// The vault's unlocker floor vetoes a revocation that would
+				// strand an encrypted vault, and cleans up the dead wrapping
+				// afterwards. The floor is absolute even here.
+				VaultUnlock::registerRevocationHooks();
+				try {
+					$service = new PasskeyService();
+					$service->adminRevoke($credential_id, $user, $acting);
+				}
+				catch (PasskeyRevocationVetoException $e) {
+					error_log('[ADMIN_2FA_RESET] action=admin_remove_passkey admin=' . (int)$acting->key
+						. ' target=' . (int)$user->key . ' credential=' . $credential_id . ' result=vetoed');
+					admin_user_second_factor_say($session,
+						$e->getMessage() . ' This would permanently strand the user\'s encrypted data. There is no override.',
+						FALSE);
+					return LogicResult::redirect($back);
+				}
+				catch (Exception $e) {
+					error_log('[ADMIN_2FA_RESET] action=admin_remove_passkey admin=' . (int)$acting->key
+						. ' target=' . (int)$user->key . ' credential=' . $credential_id . ' result=error');
+					admin_user_second_factor_say($session, $e->getMessage(), FALSE);
+					return LogicResult::redirect($back);
+				}
+
+				// A credential event ends every unlock window this user holds
+				// anywhere, and every trusted-device grant with it.
+				VaultUnlock::lockAll($user->key);
+				$user->rotate_second_factor_hmac_key();
+				admin_user_second_factor_alert($user, 'A site administrator removed a passkey from your account.');
+				admin_user_second_factor_say($session, 'Passkey removed.', TRUE);
+				return LogicResult::redirect($back);
+			}
+			else if($input['action'] == 'admin_disable_totp'){
+				if(!$user->has_totp_enabled()){
+					admin_user_second_factor_say($session, 'This user does not have an authenticator app enabled.', FALSE);
+					return LogicResult::redirect($back);
+				}
+				// No confirmation code is asked for - the user lost it, which is
+				// the point. The acting admin's step-up stands in its place.
+				$user->disable_totp();
+				VaultUnlock::lockAll($user->key);
+				error_log('[ADMIN_2FA_RESET] action=admin_disable_totp admin=' . (int)$acting->key
+					. ' target=' . (int)$user->key . ' credential=- result=done');
+				admin_user_second_factor_alert($user, 'A site administrator disabled two-factor authentication on your account.');
+				admin_user_second_factor_say($session, 'Two-factor authentication disabled.', TRUE);
+				return LogicResult::redirect($back);
+			}
+			else {
+				// admin_revoke_trusted_devices - factors untouched, so no lockAll.
+				$user->rotate_second_factor_hmac_key();
+				error_log('[ADMIN_2FA_RESET] action=admin_revoke_trusted_devices admin=' . (int)$acting->key
+					. ' target=' . (int)$user->key . ' credential=- result=done');
+				admin_user_second_factor_alert($user, 'A site administrator signed out your trusted devices.');
+				admin_user_second_factor_say($session, 'Trusted devices signed out.', TRUE);
+				return LogicResult::redirect($back);
+			}
+		}
+
 		// Plugin-contributed panels (orders, subscriptions, events) own their POST
 		// actions — dispatch through the registry before falling through.
 		require_once(PathHelper::getIncludePath('includes/AdminUserPanelRegistry.php'));
@@ -228,6 +300,13 @@ function admin_user_logic(array $input): LogicResult {
 		0);
 	$num_sent_emails = $sent_emails_count->count_all();
 
+	// ---- Security posture card (superadmin only) ----
+	// specs/admin_second_factor_management.md § step 5. Left unset for anyone
+	// below permission 10, and the view renders nothing.
+	if (($_SESSION['permission'] ?? 0) == 10) {
+		$page_vars['security'] = admin_user_security_facts($user, $session);
+	}
+
 	// Prepare all data for view
 	$page_vars['user'] = $user;
 	$page_vars['show_all'] = $show_all;
@@ -250,5 +329,144 @@ function admin_user_logic(array $input): LogicResult {
 
 	// Return data for rendering
 	return LogicResult::render($page_vars);
+}
+
+/**
+ * Everything the Security card renders: the account's enrolled factors and the
+ * posture facts that decide how loudly a removal must be confirmed
+ * (specs/admin_second_factor_management.md § step 5).
+ */
+function admin_user_security_facts($user, $session) {
+	$facts = array(
+		'totp_enabled'          => $user->has_totp_enabled(),
+		'totp_enabled_time'     => $user->get_local('usr_totp_enabled_time'),
+		'backup_code_count'     => 0,
+		'passkeys'              => array(),
+		'is_self'               => (int)$session->get_user_id() === (int)$user->key,
+		'fortress'              => false,
+		'vault_count'           => 0,
+		'unused_recovery_codes' => 0,
+	);
+
+	$codes = json_decode((string)($user->get('usr_totp_backup_codes') ?? '[]'), true);
+	$facts['backup_code_count'] = is_array($codes) ? count($codes) : 0;
+
+	$service = new PasskeyService();
+	foreach ($service->listCredentials($user) as $passkey) {
+		$facts['passkeys'][] = array(
+			'id'               => (int)$passkey->key,
+			'label'            => (string)$passkey->get('pkc_label'),
+			'created'          => $passkey->get_local('pkc_created_time', 'M j, Y'),
+			'last_used'        => $passkey->get_local('pkc_last_used_time', 'M j, Y'),
+			'vault_capability' => $passkey->vault_capability(),
+		);
+	}
+
+	// The mailbox plugin owns the Fortress level and may be inactive - same
+	// availability guard SessionControl::must_enroll_2fa_for_fortress() uses.
+	$domain_class = PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php');
+	if (is_file($domain_class)) {
+		require_once($domain_class);
+		if (class_exists('InboundEmailDomain')) {
+			try {
+				$facts['fortress'] =
+					InboundEmailDomain::maxSecurityLevelForUser((int)$user->key) === 'fortress';
+			} catch (\Throwable $e) {
+				$facts['fortress'] = false;
+			}
+		}
+	}
+
+	// Vault posture, counted the way the unlocker floor counts it: unused
+	// recovery wrappings across every scope's vault the user holds.
+	try {
+		$vaults = new MultiUserEncryptionVault(array('user_id' => (int)$user->key));
+		$facts['vault_count'] = $vaults->count();
+		foreach ($vaults as $vault) {
+			$wrappings = new MultiUserEncryptionWrapping(array('vault_id' => (int)$vault->key));
+			foreach ($wrappings as $wrapping) {
+				if ($wrapping->get('uew_unlocker_type') === UserEncryptionWrapping::TYPE_RECOVERY
+						&& !$wrapping->get('uew_is_used')) {
+					$facts['unused_recovery_codes']++;
+				}
+			}
+		}
+	} catch (\Throwable $e) {
+		$facts['vault_count'] = 0;
+		$facts['unused_recovery_codes'] = 0;
+	}
+
+	return $facts;
+}
+
+/**
+ * The shared guard on every administrative second-factor action
+ * (specs/admin_second_factor_management.md § step 4). Returns a LogicResult to
+ * bubble up when the action must not proceed, or NULL to continue.
+ *
+ * The own-factor refusal is not redundant with the step-up:
+ * require_recent_second_factor() is a deliberate no-op for an account with no
+ * second factor, so without it an admin who enrolled nothing could strip
+ * everyone else's factors with a stolen session cookie alone.
+ */
+function admin_user_second_factor_gate($session, $user) {
+	$session->check_permission(10);
+
+	$back = '/admin/admin_user?usr_user_id=' . $user->key;
+
+	$acting = new User($session->get_user_id(), TRUE);
+	if (!$session->user_has_second_factor($acting)) {
+		admin_user_second_factor_say($session,
+			'Enroll a second factor on your own account before resetting anyone else\'s.', FALSE);
+		return LogicResult::redirect($back);
+	}
+
+	$stepup = $session->require_recent_second_factor($back);
+	if ($stepup) {
+		return $stepup;
+	}
+
+	if ($user->get('usr_delete_time')) {
+		admin_user_second_factor_say($session,
+			'This user is deleted. Undelete the account before changing its sign-in factors.', FALSE);
+		return LogicResult::redirect($back);
+	}
+
+	return NULL;
+}
+
+/** Save a success/error message scoped to the admin user page. */
+function admin_user_second_factor_say($session, $message, $ok) {
+	$session->save_message(new DisplayMessage(
+		$message,
+		$ok ? 'Success' : 'Error',
+		'/\/admin\/admin_user/',
+		$ok ? DisplayMessage::MESSAGE_ANNOUNCEMENT : DisplayMessage::MESSAGE_ERROR,
+		DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+	));
+}
+
+/**
+ * Tell the account holder what was done to their sign-in factors. Sent
+ * unconditionally and best-effort: in the compromised-admin scenario this
+ * email is the victim's only signal, so a delivery failure is logged and never
+ * blocks the action.
+ */
+function admin_user_second_factor_alert($user, $what_happened) {
+	try {
+		$to = trim((string)$user->get('usr_email'));
+		if ($to === '') {
+			return;
+		}
+		$settings = Globalvars::get_instance();
+		EmailSender::quickSend(
+			$to,
+			trim((string)$settings->get_setting('site_name') . ' security alert'),
+			$what_happened . ' If you did not request this, contact us and change your password immediately.'
+		);
+	}
+	catch (\Throwable $e) {
+		error_log('admin_user_second_factor_alert: alert email failed for user ' . $user->key . ': ' . $e->getMessage());
+	}
 }
 ?>

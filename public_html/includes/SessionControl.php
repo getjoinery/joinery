@@ -1571,6 +1571,21 @@ class SessionControl{
 				}
 			}
 
+			// Vault re-enrollment gate: a vault holder left with zero second
+			// factors by an administrative reset is blocked until one is
+			// enrolled. Ordered after the Fortress gate so a user subject to
+			// both sees the stricter message. Same surface + exemptions.
+			if ($this->must_enroll_2fa_for_vault()) {
+				$current_path = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH);
+				if ($current_path !== '/profile/security' && $current_path !== '/setup'
+						&& $current_path !== '/logout'
+						&& strpos((string)$current_path, '/api/v1/') !== 0) {
+					$msgtxt = urlencode('An administrator reset your two-factor sign-in. Your encrypted vault requires a second factor - add a passkey or an authenticator app to continue.');
+					header('Location: /profile/security?msgtext=' . $msgtxt);
+					exit();
+				}
+			}
+
 			if(!isset($_SESSION['permission']) || $_SESSION['permission'] < $level){
 				header("HTTP/1.1 401 Unauthorized");
 				throw new SystemAuthenticationError(
@@ -1631,6 +1646,45 @@ class SessionControl{
 	}
 
 	/**
+	 * A vault holder with zero second factors is a state unreachable through
+	 * self-service (the possession-factor invariant refuses both removal
+	 * orders) - it exists only after an administrative factor reset. Gate
+	 * navigation until a factor is enrolled, mirroring
+	 * must_enroll_2fa_for_fortress(): vault existence is session-cached, the
+	 * factor check stays live so enrolling clears the gate immediately.
+	 *
+	 * The Fortress gate demands an INDEPENDENT factor; this one demands any
+	 * factor at all. The difference is intentional - this gate exists to undo
+	 * a zero-factor state, not to raise the account's posture.
+	 */
+	function must_enroll_2fa_for_vault() {
+		if (!isset($_SESSION['usr_user_id'])) {
+			return false;
+		}
+		// The cache records WHOSE answer it is. One session can hold more than
+		// one user over its life - an admin using "log in as user", or a second
+		// sign-in without a logout - and a cached yes carried across that switch
+		// would gate a factorless user who owns no vault at all.
+		$uid = (int)$_SESSION['usr_user_id'];
+		if (!isset($_SESSION['has_encryption_vault'])
+				|| ($_SESSION['has_encryption_vault_uid'] ?? null) !== $uid) {
+			$_SESSION['has_encryption_vault'] = false;
+			$_SESSION['has_encryption_vault_uid'] = $uid;
+			try {
+				$vaults = new MultiUserEncryptionVault(array('user_id' => $uid));
+				$_SESSION['has_encryption_vault'] = $vaults->count() > 0;
+			} catch (\Throwable $e) {
+				$_SESSION['has_encryption_vault'] = false;
+			}
+		}
+		if (!$_SESSION['has_encryption_vault']) {
+			return false;
+		}
+		$user = new User($_SESSION['usr_user_id'], true);
+		return !$this->user_has_second_factor($user);
+	}
+
+	/**
 	 * Check if the current user must change their password
 	 * @return bool True if password change is required
 	 */
@@ -1677,6 +1731,16 @@ class SessionControl{
 
 		// Regenerate session ID to prevent session fixation attacks
 		session_regenerate_id(true);
+
+		// Cached per-user posture must not survive an identity switch: one
+		// session holds more than one user over its life ("log in as user", a
+		// second sign-in without a logout), and a stale answer here gates the
+		// arriving user on the departing user's Fortress level, vault or
+		// password flag.
+		unset($_SESSION['max_security_level'],
+			$_SESSION['has_encryption_vault'],
+			$_SESSION['has_encryption_vault_uid'],
+			$_SESSION['force_password_change']);
 
 		$_SESSION['loggedin'] = TRUE;
 		$_SESSION['usr_user_id'] = $user->key;

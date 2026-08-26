@@ -32,6 +32,7 @@ $groups = $page_vars['groups'];
 $num_groups = $page_vars['num_groups'];
 $num_received_emails = $page_vars['num_received_emails'];
 $num_sent_emails = $page_vars['num_sent_emails'];
+$security = isset($page_vars['security']) ? $page_vars['security'] : null;
 
 // Orders, subscriptions and event registrations are rendered by plugin-owned
 // panels (AdminUserPanelRegistry) further down.
@@ -236,6 +237,116 @@ array(
 				<?php echo $groups_pager->record_count_info(count($groups), array('show_all_url' => $show_all_url)); ?>
 			</div>
 		</div>
+
+		<!-- Security Card (superadmin only) -->
+		<?php if($security !== null): ?>
+		<?php
+			$live_passkeys = count($security['passkeys']);
+			// A removal that would leave a vault holder with no possession
+			// factor at all is confirmed by typed phrase, not by an OK button.
+			$last_factor_passkey = $security['vault_count'] > 0 && !$security['totp_enabled'] && $live_passkeys === 1;
+			$last_factor_totp    = $security['vault_count'] > 0 && $live_passkeys === 0;
+			$zero_factor_message = 'This user\'s vault will be protected by memorized secrets only until they '
+				. 'enroll a new factor. They will be required to enroll one at their next sign-in.';
+		?>
+		<div class="card mt-3">
+			<div class="card-header bg-body-tertiary">
+				<h6 class="mb-0"><span class="fas fa-shield-alt me-2"></span>Sign-in Security</h6>
+			</div>
+			<div class="card-body">
+				<div class="fs-10 text-600 mb-3">
+					<?php if($security['fortress']): ?>
+						<p class="mb-1">This user holds a Fortress domain: an independent second factor is mandatory. Removing factors locks them to the enrollment page until they enroll a replacement.</p>
+					<?php endif; ?>
+					<?php if($security['vault_count'] > 0): ?>
+						<p class="mb-1">This user has an encrypted vault; <?php echo (int)$security['unused_recovery_codes']; ?> unused recovery code<?php echo $security['unused_recovery_codes'] == 1 ? '' : 's'; ?> remain<?php echo $security['unused_recovery_codes'] == 1 ? 's' : ''; ?>. Removing the last unlocker is refused outright - that would destroy their encrypted data.</p>
+					<?php endif; ?>
+					<?php if(!$security['fortress'] && $security['vault_count'] == 0): ?>
+						<p class="mb-1">No feature on this account requires a second factor.</p>
+					<?php endif; ?>
+				</div>
+
+				<div class="table-responsive">
+					<table class="table mb-0">
+						<tbody>
+							<tr>
+								<td>
+									<strong>Authenticator app</strong>
+									<div class="fs-10 text-600">
+										<?php if($security['totp_enabled']): ?>
+											Enabled <?php echo $security['totp_enabled_time'] ? htmlspecialchars($security['totp_enabled_time']) : ''; ?>
+											&middot; <?php echo (int)$security['backup_code_count']; ?> backup code<?php echo $security['backup_code_count'] == 1 ? '' : 's'; ?>
+										<?php else: ?>
+											Not enabled
+										<?php endif; ?>
+									</div>
+								</td>
+								<td class="text-end">
+									<?php if($security['totp_enabled']): ?>
+										<?php echo AdminPage::action_button('Disable', '/admin/admin_user', array_merge(
+											array(
+												'hidden'  => array('action' => 'admin_disable_totp', 'usr_user_id' => $user->key),
+												'confirm' => $last_factor_totp ? $zero_factor_message : 'Disable this user\'s authenticator app? Their trusted devices are signed out too.',
+											),
+											$last_factor_totp ? array('confirm_typed' => 'RESET') : array()
+										)); ?>
+									<?php endif; ?>
+								</td>
+							</tr>
+							<?php foreach($security['passkeys'] as $passkey): ?>
+							<tr>
+								<td>
+									<strong><?php echo htmlspecialchars($passkey['label'] !== '' ? $passkey['label'] : 'Unnamed passkey'); ?></strong>
+									<div class="fs-10 text-600">
+										Added <?php echo htmlspecialchars($passkey['created'] ?: 'unknown'); ?>
+										&middot; Last used <?php echo htmlspecialchars($passkey['last_used'] ?: 'never'); ?>
+										&middot; Vault: <?php echo htmlspecialchars($passkey['vault_capability']); ?>
+									</div>
+								</td>
+								<td class="text-end">
+									<?php echo AdminPage::action_button('Remove', '/admin/admin_user', array_merge(
+										array(
+											'hidden'  => array(
+												'action' => 'admin_remove_passkey',
+												'pkc_passkey_credential_id' => $passkey['id'],
+												'usr_user_id' => $user->key,
+											),
+											'confirm' => $last_factor_passkey ? $zero_factor_message : 'Remove this passkey from the user\'s account?',
+										),
+										$last_factor_passkey ? array('confirm_typed' => 'RESET') : array()
+									)); ?>
+								</td>
+							</tr>
+							<?php endforeach; ?>
+							<?php if($live_passkeys === 0): ?>
+							<tr>
+								<td colspan="2"><strong>Passkeys</strong><div class="fs-10 text-600">None enrolled</div></td>
+							</tr>
+							<?php endif; ?>
+							<tr>
+								<td>
+									<strong>Trusted devices</strong>
+									<div class="fs-10 text-600">Browsers allowed to skip the second factor at sign-in.</div>
+								</td>
+								<td class="text-end">
+									<?php echo AdminPage::action_button('Sign out trusted devices', '/admin/admin_user', array(
+										'hidden'  => array('action' => 'admin_revoke_trusted_devices', 'usr_user_id' => $user->key),
+										'confirm' => 'Sign out every trusted device on this account? Their enrolled factors are untouched.',
+									)); ?>
+								</td>
+							</tr>
+						</tbody>
+					</table>
+				</div>
+
+				<?php if($security['is_self']): ?>
+					<div class="fs-10 mt-3">
+						<a href="/profile/security">Add a passkey or set up an authenticator app on your own account.</a>
+					</div>
+				<?php endif; ?>
+			</div>
+		</div>
+		<?php endif; ?>
 	</div>
 
 	<!-- RIGHT COLUMN: Subscription Status -->

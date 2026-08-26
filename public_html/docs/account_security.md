@@ -94,6 +94,74 @@ pattern the admin-2FA requirement uses) — exempting only that page and
 immediately. The posture lookup is cached per session and dropped when the
 acting user changes a domain's level.
 
+## Vault re-enrollment after an administrative reset
+
+An account that holds an encrypted vault but has no second factor at all is
+blocked from every page until one is enrolled
+(`SessionControl::must_enroll_2fa_for_vault()`), redirected to
+`/profile/security` with the same surface and exemptions as the Fortress gate —
+that page, `/setup`, `/logout`, and every `/api/v1/` request, the last being what
+lets the enrollment ceremonies on that page actually run. Vault existence is
+cached per session and per user; the factor check is a live read, so enrolling
+clears the gate on the next page load rather than the next sign-in. The gate is
+ordered after the Fortress gate, so a user subject to both is shown the stricter
+Fortress message.
+
+Where the Fortress gate demands a factor *independent* of any single passkey,
+this one accepts any factor at all. The difference is deliberate: this gate
+exists to undo a zero-factor state, not to raise the account's posture.
+
+## Administrative factor reset
+
+A superadmin can strip sign-in factors from another account on the admin user
+page (`/admin/admin_user?usr_user_id=N`), in the Sign-in Security card. It is a
+recovery lever, not an administration surface: the phone is gone, the security
+key is gone, and the account is otherwise unreachable.
+
+Three actions, each a single-button POST confirmed in a modal:
+
+| Action | Effect |
+|---|---|
+| Remove a passkey | Soft-deletes the credential through `PasskeyService::adminRevoke()`, cleans up its vault wrapping, ends every unlock window the user holds, and rotates the device-trust HMAC key |
+| Disable the authenticator app | `User::disable_totp()` — clears the secret, the enabled time, the backup codes and the replay counter, rotates the device-trust key, and ends every unlock window. No current code is asked for; the user no longer has one, which is the point |
+| Sign out trusted devices | Rotates the device-trust HMAC key alone. Enrolled factors and unlock windows are untouched |
+
+**The acting admin must clear three gates.** Permission 10; a second factor
+enrolled on their *own* account; and a fresh step-up confirmation. The
+own-factor requirement is not redundant with the step-up:
+`require_recent_second_factor()` deliberately stands aside for an account with
+no factor, so without it an admin who enrolled nothing could reset everyone
+else's factors holding only a stolen session cookie. A deleted target is
+refused.
+
+**The vault stranding floor is absolute here.** Removing a passkey that is a
+vault's last unlocker, with fewer than three unused recovery codes remaining, is
+refused on this path exactly as it is on the user's own — the message says so,
+and nothing was changed when it appears. There is no override, because the data
+behind that vault cannot be recreated.
+
+**The possession-factor invariant is warned, not refused.** Removing a vault
+holder's final factor is allowed, behind a typed-phrase confirmation
+(`RESET`) that says what it costs: the vault is protected by memorized secrets
+alone until the user enrolls a replacement, and they are required to enroll one
+before reaching anything else. The exposure closes at their next page load
+through the vault re-enrollment gate above, and a recovery-code unlock still
+demands a step-up that only a newly enrolled factor can satisfy.
+
+**Every action emails the account holder** — naming what was removed, and
+telling them to change their password if they did not request it. It is sent
+unconditionally and best-effort: a delivery failure is logged and never blocks
+the action, because in the compromised-admin case this message is the victim's
+only signal. Each action also writes an `[ADMIN_2FA_RESET]` log line carrying the
+action, the acting admin, the target, the credential, and whether it completed
+or was refused.
+
+**There is no administrative enrollment.** An admin can take a factor away and
+never add one. Enrolling stays self-only through `/profile/security`, where the
+first passkey costs the account password and every later one costs a fresh
+step-up. When a superadmin views their own user page, the card links there
+instead of offering anything.
+
 ## Second factor at sign-in
 
 Whether a second factor is asked at password sign-in is the account's **2FA
@@ -437,6 +505,10 @@ core dependency on any one plugin.
 | Turn off the authenticator app | Session + a current TOTP/backup code; refused for a vault holder with no live passkey; ends all windows; trusted devices re-earn |
 | Test the authenticator app | Session only (`/profile/test-authenticator`, reached from the Actions menu on the Security page). Accepts a 6-digit code, never a backup code; a match consumes the time step exactly as a sign-in does, so a tested code cannot be replayed |
 | Forget trusted devices | Session; rotates the device-trust HMAC key so every skip-second-factor cookie dies — no session ends, factor methods untouched |
+| Remove another user's passkey | Permission 10 + a factor on the acting admin's own account + recent step-up; refused if it breaks the unlocker floor; the last-factor case is allowed behind a typed confirmation; ends the target's windows, trusted devices re-earn, target is emailed |
+| Disable another user's authenticator app | Permission 10 + a factor on the acting admin's own account + recent step-up; no code from the target; ends their windows, trusted devices re-earn, target is emailed |
+| Sign out another user's trusted devices | Permission 10 + a factor on the acting admin's own account + recent step-up; factors and windows untouched, target is emailed |
+| Enroll a factor for another user | Never — enrollment is self-only |
 | Link a sync device | Session + recent step-up; the browser mints the device's credential, so an unattended unlocked browser must not be enough |
 | Unlink a sync device | Session; revokes the device's session key in the same step |
 | Rotate the vault key | Live PRF assertion from an enrolled passkey |
