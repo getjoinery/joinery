@@ -228,7 +228,22 @@ anomaly has a timeline.
 5. **Issues honesty.** Every entry not `synced`/`out_of_scope` has a
    corresponding surfaced issue with a reason; the tray-state reduction
    matches reality.
-6. **Leak watch.** Daemon RSS, fd count, spool-dir residue, ops-table depth,
+6. **The settle holds.** Convergence is a photograph, and the verifier then
+   spends minutes walking two disks and a server index before it says
+   anything. Every device that reported itself settled is asked again once
+   the audit is done, and one that has found work in between was never
+   settled — nobody is touching the fleet, the actors are stopped, the
+   partitions are lifted, and the audit only reads. Devices that never
+   converged are skipped: assertion 1 already has those, and saying it twice
+   buries the run whose single fault is a settle that did not hold. Run 247
+   is the case: green at the poll, and by the time the trees were walked
+   device-a held four files in `pending_upload` with an empty queue, a
+   withdrawn folder move it had given up on, and a thirteen-file subtree the
+   server had never been sent. Assertion 2 did report it — as twenty
+   disagreeing paths, which reads as a data problem and takes a day to trace
+   back to one refusal. Asking the device gets the same failure in one line,
+   in its own words.
+7. **Leak watch.** Daemon RSS, fd count, spool-dir residue, ops-table depth,
    and store size are recorded per settle; monotonic growth across a day
    flags a leak before it becomes an outage.
 

@@ -244,6 +244,7 @@ fn a_campaign_storms_settles_and_leaves_a_full_timeline_behind() {
         "no-loss",
         "no-ciphertext",
         "issues-honest",
+        "settle-holds",
         "leak-watch",
     ] {
         assert!(
