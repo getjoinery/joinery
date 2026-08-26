@@ -38,15 +38,64 @@ function passkey_register_verify_logic(array $input): LogicResult {
 
 	try {
 		$service = new PasskeyService();
-		$passkey = $service->verifyRegistration(json_encode($credential), $label);
+		[$passkey, $prf_output_b64url] = $service->verifyRegistration(json_encode($credential), $label);
 	} catch (Exception $e) {
 		return LogicResult::error($e->getMessage());
 	}
 
+	// The authenticator evaluated the vault context during creation, so the
+	// credential can be activated without the separate ceremony. Best-effort:
+	// the same guards as vault_add_passkey_verify, and any refusal leaves an
+	// ordinary not-yet-activated passkey behind — never a failed enrollment.
+	$vault_activated = false;
+	if ($prf_output_b64url !== null) {
+		$vault_activated = _passkey_register_try_vault_activation($user, $passkey, $prf_output_b64url);
+	}
+
 	return LogicResult::render([
 		'passkey' => $passkey->export_for_api(),
+		'vault_activated' => $vault_activated,
 		'became_second_factor' => !$had_second_factor && $session->user_has_second_factor($user),
 	]);
+}
+
+/**
+ * Wrap the open vault's secret under the creation-time PRF output. Mirrors
+ * vault_add_passkey_verify's guards (open window, no duplicate wrapping, one
+ * live key generation); returns whether a wrapping was created. FALSE is a
+ * normal outcome, not an error - the passkey stays enrolled and the Activate
+ * action remains available.
+ */
+function _passkey_register_try_vault_activation($user, $passkey, string $prf_output_b64url): bool {
+	try {
+		$vault = UserEncryptionVault::loadForUser((int)$user->key);
+		if (!$vault) {
+			return false;
+		}
+		$secret_key = VaultUnlock::secretKey((int)$user->key, UserEncryptionVault::SCOPE_USER);
+		if ($secret_key === null) {
+			return false;
+		}
+		$existing = new MultiUserEncryptionWrapping([
+			'vault_id' => $vault->key, 'unlocker_type' => UserEncryptionWrapping::TYPE_PASSKEY, 'credential_id' => $passkey->key,
+		]);
+		if ($existing->count_all() > 0) {
+			return true;
+		}
+		if (count(UserEncryptionWrapping::liveGenerations((int)$vault->key)) > 1) {
+			return false;
+		}
+		$prf_output = ParagonIE\ConstantTime\Base64UrlSafe::decodeNoPadding($prf_output_b64url);
+		UserEncryptionWrapping::createWrapped(
+			$vault->key, UserEncryptionWrapping::TYPE_PASSKEY, $secret_key, $prf_output,
+			$passkey->key, $passkey->get('pkc_label'), (int)$vault->get('uev_key_generation')
+		);
+		return true;
+	} catch (\Throwable $e) {
+		error_log('passkey_register: creation-time vault activation failed for user '
+			. $user->key . ' credential ' . $passkey->key . ': ' . $e->getMessage());
+		return false;
+	}
 }
 
 function passkey_register_verify_logic_descriptor() {

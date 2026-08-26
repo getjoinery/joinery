@@ -262,6 +262,18 @@ nothing and is what makes `pkc_prf_capable = false` mean one thing forever: were
 the request caller-controlled, "did not report PRF" and "was never asked" would be
 the same stored value.
 
+**Creation-time vault activation.** When the enroller holds a user-scope vault
+and its unlock window is open at options time, registration also carries the
+`vault-kek` context as a PRF **eval input**. An authenticator that evaluates at
+creation returns the derived secret inside the same ceremony;
+`passkey_register_verify` then wraps the open vault's key under it (the same
+guards as `vault_add_passkey_verify`) and reports `vault_activated: true` — the
+credential is born a vault unlocker, with no second prompt. Authenticators that
+only enable PRF at creation ignore the inputs, and the separate activation
+ceremony remains the path; a failed or refused wrap is never a failed
+enrollment. The eval input is offered only with an open window, so an
+enrollment by a session thief still mints a sign-in-only credential.
+
 ## JS helper
 
 `assets/js/passkeys.js` defines `window.JoineryPasskeys`, a vanilla wrapper around

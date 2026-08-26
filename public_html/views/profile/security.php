@@ -637,11 +637,18 @@
                         }
 
                         // Vault-active by default: when a vault exists and is
-                        // unlocked, chain straight into activation so the new
-                        // passkey can unlock it too — one more touch, of the
-                        // new passkey. Skipped/failed just leaves the badge on
+                        // unlocked, the new passkey should unlock it too. Best
+                        // case the server already did it — the authenticator
+                        // evaluated the vault secret during the creation
+                        // ceremony itself (vault_activated) and there is
+                        // nothing to prompt for. Otherwise chain into the
+                        // activation ceremony — one more touch, of the new
+                        // passkey. Skipped/failed just leaves the badge on
                         // "Not activated" with the action in its menu.
-                        if (vaultStatus && vaultStatus.unlocked) {
+                        // (The reload above already painted the Vault active
+                        // badge in the activated case; there is nothing to do.)
+                        if (!(regResult.data && regResult.data.vault_activated)
+                                && vaultStatus && vaultStatus.unlocked) {
                             showFlowHint('One more touch — use the NEW passkey again to let it unlock your vault.');
                             try {
                                 await runVaultActivation(newId);

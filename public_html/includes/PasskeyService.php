@@ -21,7 +21,11 @@
  * for the same reason. RP ID/origin come from the site's own domain
  * (LibraryFunctions::get_absolute_url()) - no separate setting.
  *
- * @version 1.8
+ * @version 1.9
+ * @changelog 1.9 - Registration evaluates the vault PRF context in the same
+ *   creation ceremony when the enroller's unlock window is open, so a capable
+ *   authenticator's credential can be vault-activated with no second prompt;
+ *   verifyRegistration() returns [Passkey, ?prf_output_b64url].
  * @changelog 1.8 - The vendor autoloader loads at file scope: the counter
  *   checker implements a vendor interface at declaration time, so a lean
  *   request (the pre-auth 2FA passkey actions) fataled before the
@@ -176,8 +180,22 @@ class PasskeyService {
 		// credProps reports whether a discoverable (resident) credential was
 		// actually created. A CTAP1 fallback cannot make one, so that answer is
 		// half the evidence behind Passkey::vault_capability().
+		//
+		// When the enroller's own vault window is open, the PRF request also
+		// carries the vault context as an eval input: an authenticator that
+		// evaluates at creation returns the derived secret in this same
+		// ceremony, and the credential can be activated for the vault without
+		// a second prompt. Authenticators that only *enable* PRF at creation
+		// ignore the inputs, and the separate activation ceremony remains the
+		// path. Offering the input is gated exactly like vault_add_passkey:
+		// no open window, no eval — an enrollment by a session thief still
+		// mints a sign-in-only credential.
+		$prf_extension = PseudoRandomFunctionInputExtensionBuilder::create();
+		if ($this->_vaultEvalEligible($user)) {
+			$prf_extension = $prf_extension->withInputs($this->_prfSalt('vault-kek'));
+		}
 		$extensions = AuthenticationExtensions::create([
-			PseudoRandomFunctionInputExtensionBuilder::create()->build(),
+			$prf_extension->build(),
 			CredentialPropertiesInputExtension::enable(),
 		]);
 
@@ -198,7 +216,17 @@ class PasskeyService {
 		return json_decode($this->serializer->serialize($options, 'json'), true);
 	}
 
-	public function verifyRegistration(string $client_response_json, string $label): Passkey {
+	/**
+	 * Returns [Passkey $passkey, ?string $prf_output_b64url]. The PRF output is
+	 * non-null only when registration offered the vault eval input (open unlock
+	 * window at options time) and the authenticator evaluated it at creation —
+	 * the caller may use it to activate the credential for the vault in the
+	 * same ceremony. Like every clientExtensionResults value it is
+	 * browser-assembled and unsigned; that is the same trust model as
+	 * verifyDerivation(), and wrapping with it grants nothing the enrolling
+	 * session (open window, recent step-up) could not already do.
+	 */
+	public function verifyRegistration(string $client_response_json, string $label): array {
 		$session = SessionControl::get_instance();
 		$user_id = $session->get_user_id();
 		if (!$user_id) {
@@ -213,6 +241,15 @@ class PasskeyService {
 			throw new PasskeyException('Invalid passkey response.');
 		}
 		$prf_reported = !empty($data['clientExtensionResults']['prf']['enabled']);
+
+		// An evaluated result at creation is stronger evidence than the
+		// enabled flag, and the caller can activate the credential with it.
+		$prf_output_b64url = null;
+		$creation_result = $data['clientExtensionResults']['prf']['results']['first'] ?? null;
+		if (is_string($creation_result) && $creation_result !== '') {
+			$prf_output_b64url = $creation_result;
+			$prf_reported = true;
+		}
 
 		// The other two capability signals, both absent-tolerant: a client that
 		// reports neither yields nulls, which leave the credential `unknown`
@@ -265,7 +302,21 @@ class PasskeyService {
 		} catch (Exception $e) {
 			throw new PasskeyException('This passkey could not be saved. It may already be registered.');
 		}
-		return $passkey;
+		return [$passkey, $prf_output_b64url];
+	}
+
+	/** Whether registration should carry the vault eval input: the enroller
+	 *  holds a user-scope vault and its unlock window is open right now. */
+	private function _vaultEvalEligible(User $user): bool {
+		try {
+			$vault = UserEncryptionVault::loadForUser((int)$user->key);
+			if (!$vault) {
+				return false;
+			}
+			return VaultUnlock::secretKey((int)$user->key, UserEncryptionVault::SCOPE_USER) !== null;
+		} catch (\Throwable $e) {
+			return false;
+		}
 	}
 
 	// ========================================================================
