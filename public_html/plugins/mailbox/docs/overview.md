@@ -1544,8 +1544,11 @@ ciphertext.
 
 The index covers **every stored message** in the owner's mailboxes — trashed ones
 included, drafts excepted — and the **read scope decides what a search returns**: hits
-are intersected with the caller's scope, so an Inbox search never surfaces trashed mail
-and a Trash search finds it. One rule, in one place. Coverage cannot be narrowed by
+are intersected with the caller's scope, so a mailbox search never surfaces trashed
+mail and a Trash search finds it. One rule, in one place. The Inbox tab is not a
+search scope: a query typed there covers All Mail — archived and sent included — and
+the response carries `search_scope: 'all_mail'` so the reader labels the widening;
+explicit scopes (Trash, Spam, Drafts, a label) bound their own searches. Coverage cannot be narrowed by
 filtering the fold, because the high-water mark advances past every row a pass *saw*: a
 row the fold skipped is skipped permanently, and a rebuild runs the same query. Pruning
 follows the row's existence rather than a flag — `MailboxIndex::enqueueRefold()` queues
@@ -3563,6 +3566,14 @@ uses; a delete soft-deletes the stored copy last, so a forwarded copy still went
 (non-archived, non-spam, non-deleted); an **All Mail** rail entry shows everything,
 archived included. The open-thread toolbar offers **Archive** in the Inbox and **Move
 to Inbox** in All Mail — the manual counterpart to the filter's archive action.
+
+**Sent.** A **Sent** rail entry lists every conversation carrying an outbound row —
+like Spam and Trash it reads a column (`iem_direction`), not folder membership, so it
+works for local and IMAP mailboxes alike. Row-level filter, thread-level effect: the
+thread's list row is its latest sent message and opening it shows the full history.
+Trash still wins (a discarded sent message is in Trash and nowhere else), a search in
+Sent is bounded to sent mail (an explicit scope), and spam reporting is not offered
+there — a verdict on the member's own outbound mail means nothing.
 
 **Apply to existing.** A filter saved with *Also apply to matching existing mail*
 sets a pending flag drained by the `ApplyInboundEmailFilters` scheduled task, which

@@ -771,6 +771,15 @@
 }
 .mbx-unlock-btn:disabled { opacity: 0.6; cursor: default; }
 
+/* A search from the Inbox tab covers All Mail — one quiet line above the
+   results explains hits from outside the Inbox. */
+.mbx-search-scope-note {
+	padding: 0.375rem 0.875rem;
+	margin: 0.25rem 0;
+	color: var(--mbx-text-muted, #6b7280);
+	font-size: var(--mbx-text-sm);
+}
+
 /* Search over an index still catching up on a backlog: informational, not an
    error and not actionable — the fold continues in the background. */
 .mbx-indexing-banner {

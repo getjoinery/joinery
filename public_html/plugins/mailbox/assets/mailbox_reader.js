@@ -32,6 +32,7 @@
 		folderId: null,       // null = folder-unfiltered (the mailbox's "All Mail")
 		inboxView: true,      // the Inbox view (non-archived); the default landing view
 		spamView: false,      // the Spam pseudo-folder (judged-spam, hidden from inbox)
+		sentView: false,      // the Sent pseudo-folder (threads carrying an outbound row)
 		trashView: false,     // the Trash pseudo-folder (discarded mail, awaiting purge)
 		trashRetentionDays: 0, // the purge window the server reported for the Trash view
 		mailboxLabel: '',     // the active mailbox label, for composing folder titles
@@ -358,6 +359,10 @@
 		// Inbox (non-archived) is the default; All Mail shows everything, archived
 		// included. Tracked IMAP folders and the Spam view follow.
 		ul.appendChild(folderItem('inbox', 'Inbox'));
+		// Sent reads the direction column, so like Spam and Trash it is always
+		// present — a conversation the member started is findable by where it
+		// came from, not only by scrolling All Mail.
+		ul.appendChild(folderItem('sent', 'Sent'));
 		// Drafts sits inside the mailbox it composes from: every draft is bound to a
 		// From mailbox at save time, so it always has exactly one place to live. A
 		// pseudo-box (unmatched) has no From identity and so gets no Drafts folder.
@@ -395,6 +400,7 @@
 	function highlightFolder() {
 		var cur = state.draftsView ? 'drafts'
 			: state.spamView ? 'spam'
+			: state.sentView ? 'sent'
 			: state.trashView ? 'trash'
 			: state.inboxView ? 'inbox'
 			: (state.folderId == null ? '' : String(state.folderId));
@@ -408,6 +414,7 @@
 		state.draftsView = false;
 		state.inboxView = false;
 		state.spamView = false;
+		state.sentView = false;
 		state.trashView = false;
 		if (folderId === 'inbox') {
 			state.inboxView = true;
@@ -419,6 +426,9 @@
 			state.folderId = null;
 		} else if (folderId === 'spam') {
 			state.spamView = true;
+			state.folderId = null;
+		} else if (folderId === 'sent') {
+			state.sentView = true;
 			state.folderId = null;
 		} else if (folderId === 'trash') {
 			state.trashView = true;
@@ -460,6 +470,7 @@
 		state.folderId = null;            // reset to the folder-unfiltered view
 		state.inboxView = true;           // default to the Inbox (non-archived) view
 		state.spamView = false;
+		state.sentView = false;
 		state.trashView = false;
 		state.mailboxLabel = label || 'All mail';
 		setListContext(state.mailboxLabel);
@@ -687,9 +698,13 @@
 				: toolBtn('archive', 'Archive', false, function () { bulkAction('archive'); }));
 		}
 
-		bar.appendChild(state.spamView
-			? toolBtn('notspam', 'Not spam', false, function () { bulkAction('mark_not_spam'); })
-			: toolBtn('spam', 'Report spam', false, function () { bulkAction('mark_spam'); }));
+		// No spam reporting in the Sent view — the selection is the member's own
+		// outbound mail, and a verdict on it means nothing.
+		if (!state.sentView) {
+			bar.appendChild(state.spamView
+				? toolBtn('notspam', 'Not spam', false, function () { bulkAction('mark_not_spam'); })
+				: toolBtn('spam', 'Report spam', false, function () { bulkAction('mark_spam'); }));
+		}
 
 		bar.appendChild(toolBtn('trash', 'Delete', true, function () {
 			bulkAction('delete');
@@ -866,6 +881,7 @@
 		if (state.search) { p.set('q', state.search); }
 		if (state.trashView) { p.set('trash', '1'); }
 		else if (state.spamView) { p.set('spam', '1'); }
+		else if (state.sentView) { p.set('sent', '1'); }
 		else if (state.folderId != null) { p.set('folder_id', String(state.folderId)); }
 		else if (state.inboxView) { p.set('inbox', '1'); }
 		p.set('page', String(state.page));
@@ -934,6 +950,13 @@
 				row.appendChild(sbtn);
 				listEl.insertBefore(row, listEl.firstChild);
 			}
+			if (data.search_scope === 'all_mail') {
+				// The Inbox tab is open but the search covered All Mail (archived
+				// and sent included) — say so, or a hit outside the Inbox looks
+				// like it leaked in from nowhere.
+				listEl.insertBefore(el('li', 'mbx-search-scope-note',
+					'Searching all mail, including archived and sent.'), listEl.firstChild);
+			}
 			if (data.search_indexing) {
 				// The index does not cover the whole mailbox yet (it catches up in
 				// the background while the vault is open) — without this, mail the
@@ -947,7 +970,8 @@
 				listEl.insertBefore(irow, listEl.firstChild);
 			}
 			if (!listEl.children.length) {
-				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.' : 'No conversations.'));
+				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.'
+					: state.sentView ? 'No sent mail.' : 'No conversations.'));
 			}
 			// The retention line sits above whatever the list holds, empty included —
 			// an empty Trash is exactly when someone wonders where it all went.
@@ -1038,7 +1062,8 @@
 		if (!listEl.querySelector('.mbx-thread-item')) {
 			if (state.hasMore) { refreshThreads(); }
 			else if (!listEl.querySelector('.mbx-loading')) {
-				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.' : 'No conversations.'));
+				listEl.appendChild(emptyRow(state.trashView ? 'Trash is empty.'
+					: state.sentView ? 'No sent mail.' : 'No conversations.'));
 			}
 		}
 		syncSelectionUI();

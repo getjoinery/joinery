@@ -20,6 +20,10 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.4 - Sent view (outbound-carrying threads listed, inbound-only and
+ *                trashed excluded)
+ * @version 1.3 - search-from-Inbox covers All Mail (archived + sent found,
+ *                search_scope label, plain list still hides them)
  * @version 1.2
  */
 
@@ -302,6 +306,20 @@ class MailboxReaderTest {
 		$all_keys = $this->threadKeys($svc->listThreads(null, array(), 1, 50));
 		$this->ok(in_array('<sentonly@x>', $all_keys, true), 'the sent-only thread lives in All Mail');
 
+		// The Sent view: every conversation carrying an outbound row — the
+		// sent-only thread AND the answered one — and nothing purely inbound.
+		section('the Sent view shows what the member sent');
+		$sent_keys = $this->threadKeys($svc->listThreads(null, array('sent' => true), 1, 50));
+		$this->ok(in_array('<sentonly@x>', $sent_keys, true), 'the sent-only thread is in Sent');
+		$this->ok(in_array('<answered@x>', $sent_keys, true), 'the answered thread is in Sent too');
+		$this->ok(!in_array('<t1@x>', $sent_keys, true), 'a purely inbound thread is not');
+
+		// A discarded sent message is in Trash and nowhere else.
+		$this->db->prepare('UPDATE iem_inbound_email_messages SET iem_delete_time = now()
+			WHERE iem_inbound_email_message_id = ?')->execute([$sent_only]);
+		$sent_keys2 = $this->threadKeys($svc->listThreads(null, array('sent' => true), 1, 50));
+		$this->ok(!in_array('<sentonly@x>', $sent_keys2, true), 'a trashed sent thread leaves the Sent view');
+
 		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?, ?)')
 			->execute([$sent_only, $replied_out, $replied_in]);
 	}
@@ -351,6 +369,33 @@ class MailboxReaderTest {
 
 		$res3 = $svc->listThreads(null, array('unread_only' => true), 1, 50);
 		$this->ok(in_array('<t1@x>', $this->threadKeys($res3), true), 'unread_only includes T1');
+
+		// A search from the Inbox tab covers All Mail: an archived match and a
+		// sent match both return even with inbox=1, and the response labels the
+		// widening. The plain inbox LIST still hides them.
+		section('search covers All Mail from the Inbox tab');
+		$archived = $this->insertMsg($this->beth_alias, '<arch-frontier@x>', 'archived frontier report', true, false, 20);
+		$this->db->prepare('UPDATE iem_inbound_email_messages SET iem_is_archived = true
+			WHERE iem_inbound_email_message_id = ?')->execute([$archived]);
+		$sent = $this->insertMsg($this->beth_alias, '<sent-frontier@x>', 'sent frontier note', true, false, 30);
+		$this->db->prepare("UPDATE iem_inbound_email_messages SET iem_direction = 'outbound'
+			WHERE iem_inbound_email_message_id = ?")->execute([$sent]);
+
+		$inbox_list = $this->threadKeys($svc->listThreads(null, array('inbox' => true), 1, 50));
+		$this->ok(!in_array('<arch-frontier@x>', $inbox_list, true) && !in_array('<sent-frontier@x>', $inbox_list, true),
+			'the plain Inbox list still hides archived and sent threads');
+
+		$found = $svc->listThreads(null, array('inbox' => true, 'q' => 'frontier'), 1, 50);
+		$fkeys = $this->threadKeys($found);
+		$this->ok(in_array('<arch-frontier@x>', $fkeys, true), 'an Inbox-tab search finds the archived match');
+		$this->ok(in_array('<sent-frontier@x>', $fkeys, true), 'and the sent match');
+		$this->ok(($found['search_scope'] ?? '') === 'all_mail', 'the response labels the widened scope');
+
+		$unwidened = $svc->listThreads(null, array('q' => 'frontier'), 1, 50);
+		$this->ok(!isset($unwidened['search_scope']), 'an All Mail search carries no scope label (nothing widened)');
+
+		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?)')
+			->execute([$archived, $sent]);
 	}
 
 	// ---- bulk selection (thread_keys[]) ----
