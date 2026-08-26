@@ -4256,3 +4256,387 @@ fn a_refusal_the_client_cannot_read_does_not_end_in_a_quiet_disagreement() {
     }
 }
 
+
+/// The rig's shape, in miniature: a folder renamed onto a name a sibling is
+/// still using, refused in prose the client cannot classify.
+///
+/// The refusal is withdrawn -- dropped, an issue raised, the entry left saying
+/// what it said before -- and the device has to get out of it anyway once the
+/// sibling moves off the name. It does, because the folder-move detection
+/// re-derives the rename from the disk every pass rather than from the
+/// operation it lost. That is the property worth holding: withdrawing an
+/// operation must not be the same as forgetting the work.
+#[test]
+fn a_rename_refused_onto_a_siblings_name_is_re_derived_once_the_name_frees_up() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4471, &["laptop"]);
+    let laptop = world.device("laptop");
+    let fs = &laptop.fs;
+
+    fs.user_mkdir("Sub 1");
+    fs.user_write("Sub 1/doc-1.txt", b"in the one that moves");
+    fs.user_mkdir("Sub 2");
+    fs.user_write("Sub 2/doc-2.txt", b"in the one already wearing the name");
+    assert!(world.settle().is_some(), "the tree settles before the rename");
+    let sub1 = folder_id_named(&world, "Sub 1").expect("Sub 1 reached the server");
+
+    // On the disk the two never collide: the user moved Sub 2 out of the way
+    // first. The server hears about the second rename first, and refuses it.
+    fs.user_rename("Sub 2", "Sub 3");
+    fs.user_rename("Sub 1", "Sub 2");
+    laptop
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::folder(sub1),
+            &serde_json::json!({ "parent": null, "name": "Sub 2" }).to_string(),
+            "sub1-onto-sub2",
+        )
+        .unwrap();
+
+    world.server.refuses_without_saying_why(true);
+    let first = world.pass(laptop);
+    assert_eq!(
+        first.exec.withdrawn, 1,
+        "the refusal has to actually be met, or this scenario proves nothing"
+    );
+    let withdrawn = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "withdrawn")
+        .count();
+    assert_eq!(withdrawn, 1, "and it has to be said out loud");
+
+    // Still unreadable from here on. Recovery has to come from the disk, not
+    // from the server explaining itself.
+    assert!(
+        world.settle().is_some(),
+        "the fleet must reach a fixed point after a refusal it could not read"
+    );
+    assert_converged(&world);
+    assert_records_agree_with_the_server(&world);
+    assert_no_entry_is_stranded(&world);
+
+    let tree = disk_tree(laptop);
+    for wanted in ["Sub 2/doc-1.txt", "Sub 3/doc-2.txt"] {
+        assert!(
+            tree.contains_key(wanted),
+            "{wanted} did not survive a refusal the client could not read: {:?}",
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
+/// Dragging a file into a vault converts it, rather than asking for a move the
+/// server can never make.
+///
+/// The server holds no key, so it cannot turn plaintext into ciphertext: it
+/// refuses the move outright and names the way across -- upload the bytes
+/// afresh at the destination and trash what was at the source. Asked for the
+/// move anyway, the client is refused every pass, drops the operation every
+/// pass, and derives the identical move from the same disk on the next one. The
+/// device never goes quiet, its queue is always empty, and one issue raised the
+/// first time round is all anybody ever sees. Two one-key soak seeds spent
+/// whole campaigns there.
+#[test]
+fn a_file_dragged_into_a_vault_is_converted_rather_than_moved() {
+    let vault = SimVault::new(9_208);
+    let mut world = World::new(9_208, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"a memo that starts in the open and ends up private";
+    world.device("laptop").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file should go up first");
+    assert!(
+        world.server.tree().contains_key("memo.txt"),
+        "the server should be holding it in the clear to begin with: {:?}",
+        world.server.tree()
+    );
+
+    world
+        .device("laptop")
+        .fs
+        .user_rename("memo.txt", "Private/memo.txt");
+    committed.note("Private/memo.txt", body);
+
+    assert!(
+        world.settle().is_some(),
+        "the fleet must settle after a file crosses into the vault"
+    );
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+
+    // The file is where the user put it...
+    let disk = disk_tree(world.device("laptop"));
+    assert_eq!(
+        disk.get("Private/memo.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the file left the disk: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    // ...and nothing the server can still list holds it in the clear. The old
+    // copy is in the trash rather than gone, which is what the server's own
+    // instruction amounts to -- the way across is to upload afresh and trash
+    // the source, and emptying the trash stays the user's decision.
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.ends_with("memo.txt")),
+        "the real name is still live on the server: {names:?}"
+    );
+    // What IS live is one encrypted row, and it really holds the memo.
+    let encrypted = world.server.vault_files();
+    let found: Vec<String> = encrypted
+        .iter()
+        .filter_map(|f| jd_sim::scenario::what_the_vault_really_holds(&world, f))
+        .map(|(name, _cid)| name)
+        .collect();
+    assert!(
+        found.iter().any(|n| n == "memo.txt"),
+        "the memo did not arrive in the vault: {found:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The same drag on a device with no key waits, visibly, and trashes nothing.
+///
+/// A device that cannot encrypt cannot do the conversion either, and it must
+/// not throw away the server's copy on the strength of one it is unable to
+/// replace. `PendingKey` is the bargain the upload and download sides already
+/// make: the file stays where the user put it, the entry says what it is
+/// waiting for, and the device goes quiet.
+#[test]
+fn a_file_dragged_into_a_vault_with_no_key_here_waits_instead_of_trashing_it() {
+    let vault = SimVault::new(9_209);
+    let mut world = World::new(9_209, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"a memo the guest cannot make private";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file should go up first");
+
+    // The guest has no vault folder of its own, so the user makes one of that
+    // name and drags the file in -- which is exactly what the engine has to
+    // survive, because nothing stops them.
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+
+    assert!(
+        world.settle().is_some(),
+        "a device that cannot do the conversion still has to go quiet"
+    );
+
+    // The server's copy is untouched: still there, still readable, still named.
+    assert!(
+        world.server.tree().contains_key("memo.txt"),
+        "the guest trashed a file it had no way to replace: {:?}",
+        world.server.tree()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A plaintext folder dragged into the vault is converted, contents and all.
+///
+/// Not merely a stuck move. Until it is converted the user is looking at a
+/// folder they believe is private while the server holds every file in it in
+/// the clear, live, at the old path -- and the move that would fix it is
+/// refused every pass and derived again from the same disk on the next one, so
+/// nothing ever does.
+#[test]
+fn a_folder_dragged_into_a_vault_takes_its_files_in_with_it() {
+    let vault = SimVault::new(9_211);
+    let mut world = World::new(9_211, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"plaintext for now";
+    let laptop = world.device("laptop");
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/memo.txt", body);
+    committed.note("Work/memo.txt", body);
+    assert!(world.settle().is_some(), "it should go up in the clear first");
+    assert!(
+        world.server.tree().contains_key("Work/memo.txt"),
+        "the server should be holding it in the clear to begin with: {:?}",
+        world.server.tree()
+    );
+
+    laptop.fs.user_rename("Work", "Private/Work");
+    committed.note("Private/Work/memo.txt", body);
+
+    assert!(
+        world.settle().is_some(),
+        "the fleet must settle after a folder crosses into the vault"
+    );
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+
+    // Nothing the server can still list holds the folder or its file in the
+    // clear. The old copies are in the trash rather than gone, which is what
+    // trashing the source amounts to.
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.ends_with("memo.txt")),
+        "the real name is still live on the server: {names:?}"
+    );
+    let found: Vec<String> = world
+        .server
+        .vault_files()
+        .iter()
+        .filter_map(|f| jd_sim::scenario::what_the_vault_really_holds(&world, f))
+        .map(|(name, _cid)| name)
+        .collect();
+    assert!(
+        found.iter().any(|n| n == "memo.txt"),
+        "the file did not arrive in the vault: {found:?}"
+    );
+    assert_eq!(
+        disk_tree(laptop).get("Private/Work/memo.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(body)),
+        "the file left the disk"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A vault folder dragged OUT is never published in the clear.
+///
+/// The mirror of the scenario above, and deliberately not the mirror of its
+/// answer. Converting on the way in makes a true picture of what the user did;
+/// converting on the way out would publish a vault's contents on the strength
+/// of a drag. The platform's own answer is to change the folder's protection
+/// level first and move it afterwards, which is not a verb this client has.
+///
+/// So the folder is left where the user dragged it, the server keeps its
+/// encrypted copy exactly where it was, and the device says so once and goes
+/// quiet -- rather than asking for the same refused move on every pass for as
+/// long as it runs.
+#[test]
+fn a_vault_folder_dragged_out_is_not_published_in_the_clear() {
+    let vault = SimVault::new(9_210);
+    let mut world = World::new(9_210, &["laptop"]);
+    world.give_vault("laptop", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    let private = world.server.seed_encrypted_folder(None, "Private");
+    let sub = world.server.seed_encrypted_folder(Some(private), "Sub");
+    let body = b"inside a vault subfolder";
+    world
+        .server
+        .seed_vault_file(Some(sub), "memo.txt", body, &vault.public_key_b64);
+    assert!(world.settle().is_some(), "it should arrive first");
+
+    let laptop = world.device("laptop");
+    laptop.fs.user_rename("Private/Sub", "Sub");
+    assert!(
+        world.settle().is_some(),
+        "a move this client cannot make must still leave the device quiet"
+    );
+
+    let names = world.server.tree();
+    assert!(
+        !names.keys().any(|p| p.ends_with("memo.txt")),
+        "a vault file was published under its real name: {names:?}"
+    );
+    assert!(
+        world.server.blob(&jd_sim::sha256_hex(body)).is_none(),
+        "the plaintext bytes of a vault file reached the server"
+    );
+    assert!(
+        names.keys().any(|p| p.starts_with("Private/Sub")),
+        "the vault folder left the vault on the server: {names:?}"
+    );
+    // And the user is told, rather than left with a folder that quietly does
+    // nothing.
+    let withdrawn: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "withdrawn")
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(
+        withdrawn.len(),
+        1,
+        "the refusal has to be surfaced exactly once: {withdrawn:?}"
+    );
+    assert!(
+        withdrawn[0].contains("change its protection level"),
+        "and it has to say what the user can do about it: {withdrawn:?}"
+    );
+}
+
+
+/// A move whose every ordinary order is refused, by a server that will not say
+/// why, still gets out through the last resort.
+///
+/// `move_remote` knows three ways to carry a file that changes both its folder
+/// and its name: rename then reparent, reparent then rename, and — when the
+/// name is occupied at both ends — step aside into a scratch name first. The
+/// second and third are reachable only from a refusal the client can read as
+/// being about the name. Read strictly, a server answering in prose alone skips
+/// all of them, the operation is dropped with the record untouched, and the next
+/// pass derives the identical move from the same disk. For ever, with an empty
+/// queue and one issue nobody can act on.
+///
+/// Both names are occupied deliberately: the file's own name is taken in the
+/// folder it is going to, and the name it wants is taken in the folder it is
+/// leaving. That is the case that needs all three.
+#[test]
+fn a_move_refused_at_both_ends_by_a_silent_server_still_finds_its_way() {
+    let world = World::new(4472, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    let alpha = world.server.seed_folder(None, "Alpha");
+    let beta = world.server.seed_folder(None, "Beta");
+    world.server.seed_file(Some(alpha), "report.txt", b"the one that travels");
+    // The name it wants, already used where it is leaving from...
+    world.server.seed_file(Some(alpha), "summary.txt", b"holds the target name");
+    // ...and its own name, already used where it is going.
+    world.server.seed_file(Some(beta), "report.txt", b"holds the source name");
+    assert!(world.settle().is_some(), "the tree settles before the move");
+
+    // On the disk nothing collides: Beta has no summary.txt.
+    laptop
+        .fs
+        .user_rename("Alpha/report.txt", "Beta/summary.txt");
+
+    world.server.refuses_without_saying_why(true);
+    assert!(
+        world.settle().is_some(),
+        "a device must not be left asking for the same refused move for ever"
+    );
+    world.server.refuses_without_saying_why(false);
+
+    assert_converged(&world);
+    assert_records_agree_with_the_server(&world);
+    assert_no_entry_is_stranded(&world);
+
+    let tree = disk_tree(laptop);
+    assert_eq!(
+        tree.get("Beta/summary.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(b"the one that travels")),
+        "the travelling file did not arrive: {:?}",
+        tree.keys().collect::<Vec<_>>()
+    );
+    for held in ["Alpha/summary.txt", "Beta/report.txt"] {
+        assert!(
+            tree.contains_key(held),
+            "{held} was displaced by a move that should have gone around it: {:?}",
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
+}

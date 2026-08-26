@@ -342,9 +342,29 @@ would discard whatever this one did not know about. Moving a file *within* a
 vault is an ordinary `drive_move` on ids: nothing re-encrypts. A vault folder's
 own name is plaintext on the server and renames normally.
 
-Not yet built: encrypted thumbnails, and converting a file across the
-plaintext/vault boundary by moving it (the server refuses an in-place crossing;
-the client has to re-upload and trash the source).
+**Crossing the boundary is not a move.** The server holds no key, so it cannot
+turn plaintext into ciphertext or back again, and it refuses an in-place
+crossing with `reason: protection_boundary`. A file the user drags across is
+converted instead: the source is trashed, its record forgotten, and the next
+scan finds the bytes at their new path as an ordinary local creation and uploads
+them with the destination folder's protection. A plaintext folder dragged into a
+vault is converted the same way, contents and all — until it is, the user is
+looking at a folder they believe is private while the server holds every file in
+it in the clear at the old path.
+
+A vault folder dragged *out* is not converted: that would publish its contents
+in the clear on the strength of a drag. The client leaves the server's copy
+encrypted where it is, and raises an issue naming the folder and asking for its
+protection level to be changed first. The two sides then disagree about where
+that folder lives until the user acts — deliberately, and visibly, rather than
+by a conversion nobody asked for. A device holding no vault key converts
+nothing in either direction — the entry waits in `pending_key` rather than
+trashing a copy it has no way to replace.
+
+The old copy goes to the trash rather than away, which is what trashing the
+source means; emptying it stays the user's decision.
+
+Not yet built: encrypted thumbnails.
 
 ### The vault key
 

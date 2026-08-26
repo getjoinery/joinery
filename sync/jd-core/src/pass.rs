@@ -380,6 +380,80 @@ pub fn run_pass(
             // locally is worked out separately.
             None => folder_delta(&entry, &folders),
         };
+        // A move that arrives exactly where the agreement already puts it is not
+        // a move.
+        //
+        // The scan works in paths and the agreement works in placements, and the
+        // two come apart when a FOLDER has been displaced: every file inside it
+        // is at a new path while its parent and name -- which is all a placement
+        // is -- have not changed at all. Read as a move it becomes a request to
+        // the server to put the file exactly where the server already has it:
+        // accepted, applied, and derived again from the same disk on the next
+        // pass, for as long as the folder stays where it is. One file, one
+        // round-trip, every pass, and a device that is never quiet.
+        let local = match local {
+            Delta::Moved { ref to } if entry.synced_placement.as_ref() == Some(to) => Delta::None,
+            Delta::MovedAndEdited { ref to, ref content }
+                if entry.synced_placement.as_ref() == Some(to) =>
+            {
+                Delta::Edited {
+                    content: content.clone(),
+                }
+            }
+            other => other,
+        };
+        // A move that carries something across the edge of a vault.
+        //
+        // The server holds no key, so it cannot turn plaintext into ciphertext
+        // or back again: a file cannot change protection level by being moved,
+        // and the move is refused outright whichever way it is going. The way
+        // across is the one the server names -- upload the bytes afresh at the
+        // destination, and trash what was at the source.
+        //
+        // Planned as a move it is an operation that cannot succeed, refused
+        // every time, dropped every time, and re-derived from the same disk on
+        // the very next pass: the device never quiet, the queue always empty,
+        // one issue raised the first time round and nothing after it. Seeds
+        // 78350 and 78495 each spent a whole campaign there.
+        if let Some(crossing) = crossing_a_vault_edge(env, &entry, &local)? {
+            if crossing == Crossing::OutOfReach {
+                // A vault folder on its way out. Say so, once, and do not plan
+                // the move: the server refuses it, and asking again next pass
+                // and every pass after that is the loop this whole branch
+                // exists to end. Nothing is undone -- the folder stays where
+                // the user dragged it, and the server keeps its encrypted copy
+                // exactly where it was.
+                env.store.raise_issue(
+                    Some(entry.id),
+                    "withdrawn",
+                    "this folder is protected and cannot be moved out of the vault from here; \
+                     change its protection level first, then move it",
+                    (env.now_ms)() as i64,
+                )?;
+                continue;
+            }
+            if env.vault.is_none() {
+                // No key here, so this device cannot do the re-upload either --
+                // and it must not trash the server's copy on the strength of a
+                // conversion it cannot perform. The same bargain the creation
+                // path makes: the file stays where the user put it, the entry
+                // waits visibly, and `apply_naming` releases it by itself the
+                // moment a key arrives.
+                if entry.status != LocalStatus::PendingKey {
+                    let mut waiting = entry.clone();
+                    waiting.status = LocalStatus::PendingKey;
+                    env.store.put_entry(&waiting)?;
+                }
+                continue;
+            }
+            // Trash the source and forget it. `trash_remote` never touches the
+            // local file, so the next scan finds the bytes at their new path as
+            // a local creation and uploads them with the destination's
+            // protection -- which is the conversion, done by the one part of
+            // the engine that already knows how to do it.
+            env.store.queue_op("trash_remote", entry.id, "{}", &key_for())?;
+            continue;
+        }
         // Measured from the agreement, using the freshest remote state we hold.
         // For an entity the feed did not mention this pass that is what we
         // recorded last time — which still reports an unfinished change, and is
@@ -1221,6 +1295,66 @@ fn known_local(env: &ExecEnv) -> Result<Vec<KnownLocal>, ExecError> {
 // ---------------------------------------------------------------------------
 // Tree arithmetic
 // ---------------------------------------------------------------------------
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum Crossing {
+    /// Re-upload at the destination and trash the source. The conversion.
+    Convert,
+    /// Refused by the server and not something this client can do instead.
+    OutOfReach,
+}
+
+/// Would this local move carry the entry across the edge of a vault, and if so
+/// what can be done about it?
+///
+/// Only a move counts. A local edit, a delete or a creation all stay where they
+/// are, and a creation is decided by the path it appeared at rather than by any
+/// journey. Compared against the entry's OWN protection rather than the
+/// agreement's parent, because that is what the server compares against when it
+/// refuses.
+///
+/// **A folder only on the way IN.** Dragging a plaintext folder into a vault is
+/// not merely a stuck move: until it is converted the user is looking at a
+/// folder they believe is private while the server holds every file in it in the
+/// clear, live, at the old path. Converting is the only thing that makes the
+/// picture true.
+///
+/// Out of a vault is the mirror image and is NOT done here. It would publish a
+/// vault's contents in the clear on the strength of a drag, and the platform's
+/// own answer is to change the folder's protection level first and move it
+/// afterwards -- a verb this client does not have. Such a move is still refused
+/// by the server and still says so as a `withdrawn` issue naming the folder;
+/// what it does not yet get is an end to re-deriving it.
+///
+/// **Only when the destination's protection is actually known.** The drive root
+/// is plaintext and says so; a folder is only an answer if this store holds it.
+/// An unresolved parent reads as plaintext, and reading one as plaintext here
+/// would trash the server's copy of a vault file that never left the vault.
+fn crossing_a_vault_edge(
+    env: &ExecEnv,
+    entry: &Entry,
+    local: &Delta,
+) -> Result<Option<Crossing>, ExecError> {
+    let to = match local {
+        Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
+        _ => return Ok(None),
+    };
+    let destination = match to.parent {
+        None => false,
+        Some(id) => match env.store.get_entry(EntityId::folder(id))? {
+            Some(folder) => folder.is_encrypted,
+            None => return Ok(None),
+        },
+    };
+    if destination == entry.is_encrypted {
+        return Ok(None);
+    }
+    if entry.id.entity_type == EntityType::File || destination {
+        Ok(Some(Crossing::Convert))
+    } else {
+        Ok(Some(Crossing::OutOfReach))
+    }
+}
 
 /// Does this folder hold encrypted content? `None` is the drive root, which is
 /// never itself a vault.

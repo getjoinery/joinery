@@ -2144,6 +2144,20 @@ fn create_remote_folder(
                 attempt += 1;
                 wanted = (env.conflict_name)(&placement.name, attempt);
             }
+            // A refusal that would not say why. It may be the name; nothing
+            // here can tell. Stepping aside is the one answer that costs
+            // nothing when it is right and one call when it is wrong -- and
+            // read strictly this arm does not exist, so a server answering in
+            // prose alone leaves the folder uncreated and the same create
+            // planned again on every pass.
+            //
+            // Capped hard, and far below the marked cap. A refusal that really
+            // is about something else would otherwise mint a thousand conflict
+            // names against a server that was never going to take any of them.
+            Err(e) if e.refused_without_saying_why() && attempt < 2 => {
+                attempt += 1;
+                wanted = (env.conflict_name)(&placement.name, attempt);
+            }
             Err(e) => return Err(e.into()),
         }
     };
@@ -2486,11 +2500,23 @@ fn move_remote(
         // destination the file is actually going to sits free. Stepping aside
         // into a scratch name first costs one extra call and always works, so it
         // is the last resort rather than the rule.
+        //
+        // Gated on `may_be_about_the_name` rather than `name_taken`, so a
+        // server that refuses in prose alone still reaches all three orders.
+        // Read strictly, a refusal with no marker skips every branch here and
+        // falls out to the caller, which drops the operation and leaves the
+        // record exactly as it was -- and the next pass derives the identical
+        // move from the same disk, for ever. Sweep seed 90664 is that, and the
+        // soak rig ran into the same thing against a real core whose
+        // folder-rename branches sent no marker. Each order below is verified
+        // by the server taking or refusing its own call, so trying them on a
+        // refusal that was about something else costs three calls and ends in
+        // the same place.
         (true, true) => match rename() {
             Ok(()) => reparent()?,
-            Err(ExecError::Proto(p)) if p.name_taken() => match reparent() {
+            Err(ExecError::Proto(p)) if p.may_be_about_the_name() => match reparent() {
                 Ok(()) => rename()?,
-                Err(ExecError::Proto(p)) if p.name_taken() => {
+                Err(ExecError::Proto(p)) if p.may_be_about_the_name() => {
                     park()?;
                     reparent()?;
                     rename()?;

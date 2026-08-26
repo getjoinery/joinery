@@ -810,6 +810,78 @@ pub fn check_issues_honest(statuses: &BTreeMap<String, Option<Status>>) -> Verdi
 }
 
 // ---------------------------------------------------------------------------
+// 5b — the settle holds
+// ---------------------------------------------------------------------------
+
+/// Did the quiet last as long as the audit took to look at it?
+///
+/// Convergence is a photograph. It is taken, and then the verifier spends
+/// minutes walking two disks and a server index before it says anything — and a
+/// device that grew work in that window was never settled, it was between
+/// attempts. Nobody is touching the fleet: the actors are stopped, the
+/// partitions are lifted, and the audit only reads. So there is no honest
+/// reason for a device to have anything to do.
+///
+/// This is the check that names run 247. A device there declared itself green,
+/// and by the time the tree walk reached it, it was holding four files in
+/// `pending_upload` with an empty queue and a folder move it had given up on —
+/// a subtree the server had never been sent. The audit did report it, but as a
+/// list of twenty paths that disagreed, which reads as a data problem and takes
+/// a day to trace back to one refusal. Asking the device instead gets the same
+/// failure in one line, in its own words, at the moment it happened.
+///
+/// Only devices that WERE settled are asked. One that never converged has
+/// already been reported by the convergence verdict, and saying it twice buries
+/// the run that has exactly one thing wrong with it.
+pub fn check_settle_holds(
+    at_convergence: &BTreeMap<String, Option<Status>>,
+    after_the_audit: &BTreeMap<String, Option<Status>>,
+) -> Verdict {
+    let mut problems = Vec::new();
+    let mut held = 0usize;
+    for (device, before) in at_convergence {
+        let Some(before) = before else { continue };
+        if !before.is_settled() {
+            continue;
+        }
+        match after_the_audit.get(device) {
+            Some(Some(now)) if now.is_settled() => held += 1,
+            Some(Some(now)) => problems.push(format!(
+                "{device} converged and then found work with nobody touching it: {} \
+                 queued op(s), {} ({})",
+                now.pending_ops,
+                now.indicator,
+                describe_in_flight(now),
+            )),
+            _ => problems.push(format!(
+                "{device} converged and then stopped answering, so its quiet cannot be believed"
+            )),
+        }
+    }
+    if problems.is_empty() {
+        Verdict::pass(
+            "settle-holds",
+            format!("{held} device(s) still settled when the audit finished"),
+        )
+    } else {
+        Verdict::fail("settle-holds", problems.join("; "))
+    }
+}
+
+fn describe_in_flight(status: &Status) -> String {
+    let states = status.in_flight_by_state();
+    if states.is_empty() {
+        "nothing it will name".to_string()
+    } else {
+        states
+            .iter()
+            .map(|(k, v)| format!("{k}={v}"))
+            .collect::<Vec<_>>()
+            .join(" ")
+    }
+}
+
+// ---------------------------------------------------------------------------
 // 6 — leak watch
 // ---------------------------------------------------------------------------
 
@@ -1187,6 +1259,15 @@ pub fn settle(
     verdicts.push(check_no_ciphertext(&server_tree, &trees, &statuses));
     verdicts.push(check_issues_honest(&statuses));
 
+    // Asked last, so the window it covers is the whole audit and not a slice of
+    // it. Everything above only reads.
+    let after_the_audit: BTreeMap<String, Option<Status>> = fleet
+        .devices
+        .iter()
+        .map(|d| (d.name.clone(), control::status(&d.control_file())))
+        .collect();
+    verdicts.push(check_settle_holds(&statuses, &after_the_audit));
+
     let samples: Vec<Sample> = fleet
         .devices
         .iter()
@@ -1253,6 +1334,85 @@ mod tests {
         // Built through the same reader the rig uses, so a change to the
         // daemon's snapshot shape breaks these tests rather than sliding past.
         Status::from_json(&json)
+    }
+
+    /// `status()` above always reports an empty queue; this one can hold work.
+    fn busy_status(pending_ops: u64, entries: serde_json::Value) -> Status {
+        let json = json!({
+            "indicator": "attention", "summary": "", "tracked": 0, "settled": 0,
+            "pending_ops": pending_ops, "waiting_for_keys": 0, "cursor": 0,
+            "entries": entries, "issues": [],
+        });
+        Status::from_json(&json)
+    }
+
+    fn fleet_of(pairs: Vec<(&str, Option<Status>)>) -> BTreeMap<String, Option<Status>> {
+        pairs
+            .into_iter()
+            .map(|(n, s)| (n.to_string(), s))
+            .collect()
+    }
+
+    #[test]
+    fn a_device_that_grows_work_while_the_audit_runs_did_not_settle() {
+        // Run 247: green at the poll, and by the time the trees were walked it
+        // was holding four files it had no operation for.
+        let converged = fleet_of(vec![(
+            "device-a",
+            Some(status("attention", json!({"synced": 577}), json!([]))),
+        )]);
+        let after = fleet_of(vec![(
+            "device-a",
+            Some(busy_status(0, json!({"synced": 577, "pending_upload": 4}))),
+        )]);
+        let verdict = check_settle_holds(&converged, &after);
+        assert!(
+            !verdict.ok,
+            "a device that grew four pending uploads after converging was called settled"
+        );
+        assert!(
+            verdict.detail.contains("pending_upload=4"),
+            "the failure has to say what it grew: {}",
+            verdict.detail
+        );
+    }
+
+    #[test]
+    fn a_device_that_stays_quiet_holds_the_settle() {
+        let quiet = || {
+            fleet_of(vec![(
+                "device-a",
+                Some(status("attention", json!({"synced": 577}), json!([]))),
+            )])
+        };
+        assert!(check_settle_holds(&quiet(), &quiet()).ok);
+    }
+
+    #[test]
+    fn a_device_that_never_converged_is_not_reported_twice() {
+        // The convergence verdict already has this one. Saying it again here
+        // buries the run whose single fault is a settle that did not hold.
+        let never = fleet_of(vec![(
+            "device-a",
+            Some(busy_status(3, json!({"synced": 1, "pending_upload": 2}))),
+        )]);
+        let still_busy = fleet_of(vec![(
+            "device-a",
+            Some(busy_status(9, json!({"synced": 1, "pending_upload": 8}))),
+        )]);
+        assert!(check_settle_holds(&never, &still_busy).ok);
+    }
+
+    #[test]
+    fn a_device_that_goes_silent_after_converging_is_not_believed() {
+        let converged = fleet_of(vec![(
+            "device-a",
+            Some(status("green", json!({"synced": 4}), json!([]))),
+        )]);
+        let gone = fleet_of(vec![("device-a", None)]);
+        let verdict = check_settle_holds(&converged, &gone);
+        assert!(!verdict.ok, "{}", verdict.detail);
+        assert!(verdict.detail.contains("stopped answering"), "{}", verdict.detail);
     }
 
     #[test]

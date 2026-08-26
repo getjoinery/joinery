@@ -1177,6 +1177,79 @@ fn scratch_long_hostile_sweep() {
     no_seed_failed(arms);
 }
 
+/// Seeds nothing has ever run, on the combinations that have historically paid.
+///
+/// Every named sweep above is a regression suite now: its range has been swept
+/// and everything it found has been fixed, so it is green by construction and
+/// can only tell you that something has broken since. Finding something NEW
+/// needs seeds nothing has touched, and this range (90000+) is that.
+///
+/// The arms are chosen from where the estate's findings actually came from
+/// rather than for symmetry: long AND hostile, which is the shape the soak rig
+/// runs and the shape a short arm never reaches; vaults, where the two sides
+/// speak different hash languages; one key among several devices; and kills,
+/// because re-running an op is where every other dimension meets.
+#[test]
+#[ignore]
+fn scratch_fresh_hunt_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep("hunt-longhostile-2dev", 90000..90400, 80, &["laptop", "desktop"], true));
+    arms.push(sweep("hunt-longhostile-3dev", 90400..90700, 90, &["a", "b", "c"], true));
+    arms.push(sweep_vault("hunt-vault-longhostile", 91000..91300, 80, &["laptop", "desktop"], true));
+    arms.push(sweep_vault_one_key("hunt-onekey-longhostile", 91300..91600, 80, &["holder", "guest"], true));
+    arms.push(sweep_vault_one_key("hunt-onekey-3dev", 91600..91900, 40, &["holder", "b", "c"], true));
+    arms.push(sweep_killing("hunt-kill-vault", 92000..92300, 40, &["laptop", "desktop"], true, Vault::Shared));
+    arms.push(sweep_killing_on(
+        "hunt-kill-vault-platform",
+        92300..92600,
+        40,
+        &[("holder", Platform::MacOs), ("guest", Platform::Windows)],
+        true,
+        Vault::OneKeyHolder,
+    ));
+    arms.push(sweep_on(
+        "hunt-platform-longhostile",
+        93000..93300,
+        80,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
+/// Fresh seeds, all hostile, so the marker-less refusal dial actually fires.
+///
+/// [`MockServer::refuses_without_saying_why`] only comes on for a chaos seed,
+/// and then only one in four — so a sweep whose arms are mostly clean barely
+/// exercises it. Every arm here is hostile, over ranges nothing has run, which
+/// is the only combination that puts a client in front of a refusal it cannot
+/// classify often enough to matter. `NOPLAIN=1` takes the dial back out, to
+/// tell a seed the dial CAUSED from one it merely coincided with.
+#[test]
+#[ignore]
+fn scratch_marker_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep("marker-2dev", 80000..81000, 40, &["laptop", "desktop"], true));
+    arms.push(sweep("marker-3dev", 81000..81800, 40, &["a", "b", "c"], true));
+    arms.push(sweep("marker-long-2dev", 82000..82300, 80, &["laptop", "desktop"], true));
+    arms.push(sweep_on(
+        "marker-mac-pc",
+        83000..83600,
+        40,
+        &[("mac", Platform::MacOs), ("pc", Platform::Windows)],
+        true,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 /// Everything the other sweeps do, inside a vault.
 ///
 /// Encryption has only ever been tested by stories somebody wrote down, and

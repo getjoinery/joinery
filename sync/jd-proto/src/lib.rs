@@ -78,6 +78,43 @@ impl ProtoError {
         }
     }
 
+    /// A refusal that carries no machine-readable reason at all.
+    ///
+    /// Every refusal this client can act on says which one it is in `data`,
+    /// and an older or misconfigured server that answers in prose alone leaves
+    /// the client unable to tell a name clash from a validation failure. That
+    /// is not hypothetical: the soak rig ran for weeks against a core whose
+    /// folder-rename branches sent the message and not the marker, and a device
+    /// that met one asked for the same refused move on every pass for the rest
+    /// of the campaign.
+    ///
+    /// 422 only. It is what the platform answers for a refused action, and
+    /// widening it would swallow the statuses that already mean something on
+    /// their own — 404, 409, 423, 429 and the 5xx family are all classified by
+    /// status and need no marker.
+    pub fn refused_without_saying_why(&self) -> bool {
+        match self {
+            ProtoError::Api {
+                status: 422, data, ..
+            } => data.get("reason").is_none(),
+            _ => false,
+        }
+    }
+
+    /// Might this refusal be about the name — including one that would not say?
+    ///
+    /// The recoveries for a taken name (step aside under a conflict name; park,
+    /// reparent and rename) are gated on knowing that is what happened, so a
+    /// refusal with no marker makes every one of them unreachable and the
+    /// operation is dropped instead. Each of those recoveries is verified by
+    /// the server accepting or refusing its own next call, so ATTEMPTING one on
+    /// a refusal that turns out to be about something else costs a bounded
+    /// handful of calls and ends where it would have ended anyway. Not
+    /// attempting one costs the device forever.
+    pub fn may_be_about_the_name(&self) -> bool {
+        self.name_taken() || self.refused_without_saying_why()
+    }
+
     /// Whether the server refused this because the key on it has already been
     /// used for a different request.
     ///
