@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.14 - enable_agent: switch a node's agent on remotely and, on request, have it ask to
+ *                 join this plane. Approval is untouched — the fingerprint check is the security
  * @version 1.13 - unpair_agent converges on AgentChannelEndpoint::forgetAgent(), the same forgetting
  *                 the node-initiated leave endpoint performs
  * @version 1.12 - set_agent_channel removed: a connected agent is routed to unconditionally
@@ -74,6 +76,7 @@ class NodeDetailActions {
 		'retry_install'            => 'overview',
 		'provision_ssl'            => 'overview',
 		'run_plugin_installers'    => 'overview',
+		'enable_agent'             => 'api_keys',
 		'set_reverse_dns'          => 'overview',
 		'run_command'              => 'console',
 		'save_api_credential'      => 'api_keys',
@@ -428,6 +431,20 @@ class NodeDetailActions {
 			case 'run_plugin_installers': {
 				$steps = JobCommandBuilder::build_run_plugin_installers($node);
 				$job = ManagementJob::createJob($node->key, 'run_plugin_installers', $steps, [], $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'enable_agent': {
+				// Asking to join is opt-in on the form, because turning the
+				// agent on and pointing it at this plane are two decisions —
+				// the first is about the node running its own maintenance, the
+				// second about who else may give it work.
+				$job_params = [];
+				if (!empty($_POST['request_pairing'])) {
+					$job_params['plane_url'] = rtrim(LibraryFunctions::get_absolute_url(''), '/');
+				}
+				$steps = JobCommandBuilder::build_enable_agent($node, $job_params);
+				$job = ManagementJob::createJob($node->key, 'enable_agent', $steps, $job_params, $uid);
 				return self::jobUrl($job);
 			}
 

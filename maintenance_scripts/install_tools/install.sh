@@ -259,6 +259,8 @@
 #   --admin-email=EMAIL    Address for the site's admin account (default admin@example.com)
 #   --activate THEME       Set active theme after installation
 #   --with-test-site       Create companion test site (bare-metal only)
+#   --enable-agent         Run the Joinery agent on this site (the binary is
+#                          installed either way; this starts it). Off by default.
 #   --no-ssl               Skip automatic SSL certificate setup
 #   --themes               Download themes/plugins from distribution server
 #   --upgrade-server=URL   Override default distribution server
@@ -2713,6 +2715,7 @@ do_site_create() {
     local PORT=""
     local ACTIVATE_THEME=""
     local WITH_TEST_SITE=false
+    local ENABLE_AGENT=false
     local NO_SSL=false
     local THEMES=""
     local CLONE_FROM=""
@@ -2752,6 +2755,15 @@ do_site_create() {
                 ;;
             --with-test-site)
                 WITH_TEST_SITE=true
+                shift
+                ;;
+            --enable-agent)
+                # The agent binary lands on every install; this switches it ON.
+                # Off is the default because an install should not start a root
+                # service nobody asked for — but a site provisioned BY a
+                # management node is exactly the case where it was asked for,
+                # so that path passes this.
+                ENABLE_AGENT=true
                 shift
                 ;;
             --no-ssl)
@@ -2825,6 +2837,7 @@ do_site_create() {
                 echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
                 echo "  --activate THEME       Set active theme after installation"
                 echo "  --with-test-site       Create companion test site (bare-metal only)"
+                echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
                 echo "  --no-ssl               Skip automatic SSL certificate setup"
                 echo ""
                 echo "Clone Options:"
@@ -3977,8 +3990,22 @@ do_site_baremetal() {
         exit 1
     fi
 
-    # Run active plugins' declared host installers (idempotent; matters when
-    # cloning from a site with active plugins that need host services)
+    # --enable-agent, before the installers run: the agent installer reads the
+    # setting, so writing it after would leave the binary installed and stopped
+    # until some later root moment. Setting::put refuses an undeclared name, so
+    # a typo here fails loudly instead of storing a row nothing reads.
+    if [ "$ENABLE_AGENT" = true ]; then
+        print_step "Enabling the Joinery agent for this site..."
+        if php "/var/www/html/${SITENAME}/public_html/utils/agent_control.php" --on; then
+            print_success "Agent enabled — it starts with the host installers below"
+        else
+            print_warning "Could not enable the agent; the site is installed and it can be turned on from Admin → System → Management Node"
+        fi
+    fi
+
+    # Run core and active plugins' declared host installers (idempotent; the
+    # agent installer is the core one, and matters when cloning from a site with
+    # active plugins that need host services)
     bash "$SCRIPT_DIR/_plugin_installers_start.sh" "$SITENAME" || true
 
     # Create test site if requested
@@ -4174,6 +4201,7 @@ show_help() {
     echo "  --admin-email=EMAIL    Address for the admin account (default admin@example.com)"
     echo "  --activate THEME       Activate specified theme after installation"
     echo "  --with-test-site       Also create a test site (bare-metal only)"
+    echo "  --enable-agent         Run the Joinery agent (installed either way; off by default)"
     echo "  --no-ssl               Skip automatic SSL certificate setup"
     echo "  --docker               Force Docker mode"
     echo "  --bare-metal           Force bare-metal mode"

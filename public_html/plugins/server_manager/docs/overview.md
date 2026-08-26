@@ -39,7 +39,24 @@ Bundling is the first thing a publish does, before the VERSION file, the archive
 
 The last line of a publish names the agent version the release carries. `plugins/server_manager/tests/agent_bundle_drift_test.php` asserts the same invariant on its own, so a bundle that falls behind its source is caught by the safe test tier rather than by the next release.
 
-**First install** is handled by the plugin's `host_installer` (`provisioning/install_agent.sh`), which runs at every root moment — site install, code upgrade, container start, and the node-detail **Run Plugin Installers** action. It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
+**First install** is handled by the core installer `maintenance_scripts/install_tools/install_agent.sh`, which runs at every root moment — site install, code upgrade, container start, and the node-detail **Run Plugin Installers** action. It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
+
+The installer is core rather than a plugin's, and runs on every Joinery instance: the agent does a machine's own backups, upgrades and health checks, and only a control plane has `server_manager` turned on. The artifact stays in this plugin's tree because this plugin builds and signs it, and it reaches every node regardless — the plugin is `included_in_publish` and `receives_upgrades`, both independent of whether it is active there.
+
+**The binary lands on every deployment.** Installing is not running: the artifact is converged at each root moment regardless of the switch, so a machine that is switched on later starts a service that is already there rather than fetching, decompressing and verifying one at that moment.
+
+**Whether it runs is one setting, `agent_enabled`,** which ships off and is read fresh at each root moment: on starts the agent and sets up its supervision, off stops it and takes the supervision away — the cron keepalive included, or stopping would last a minute. The agent's identity survives an off, so turning it back on resumes the same pairing. A database the installer cannot reach leaves the machine untouched rather than being read as off.
+
+Three ways to set it, all writing the same setting:
+
+- the machine's own **Admin → System → Management Node** page, which also says what is still needed for it to take effect
+- `php utils/agent_control.php --on` (also `--off`, `--join=URL`, `--leave`, `--status`) on the machine
+- from a control plane, the node detail **Agent Channel** panel's *Turn on the agent over SSH*, which switches it on, runs the installer, and has the node ask to join — the fleet path, available only while SSH is, and retired with it at the Phase 3 cutover
+- `install.sh --enable-agent` at install time. A site this management node provisions passes it automatically, so a node it builds comes up running its agent — the one case where whether the machine should run one is already answered
+
+None of those enroll anything. A join is a request; approving it here after comparing key fingerprints is what binds a node, unchanged.
+
+A web request has no root, so flipping the setting does not itself start the agent — the next container start or upgrade does, or `sudo bash {site root}/maintenance_scripts/install_tools/install_agent.sh {sitename}` does it immediately. The Management Node page says so, and prints that command when the switch is on and no binary has reached the machine yet.
 
 **Every later version change is handled by the agent itself.** Between jobs, the agent compares its own version with the bundled manifest. When they differ, it decompresses the artifact, checks the sha256, verifies the Ed25519 signature against the public key embedded in its binary, keeps the current binary as `.bak`, renames the new one into place, and exits cleanly for its supervisor to restart. The signature check is the security boundary: the site tree is writable by the web user while the agent runs as root, so the agent never installs anything the publisher did not sign. An artifact that fails verification is refused, logged under a `=== Self-update ===` header, and not retried until the manifest changes.
 

@@ -7,6 +7,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.2 - The agent's own on/off switch, above everything else: none of the rest of this
+ *                page means anything on a machine that is not running one
  * @version 1.1 - Disconnect: the node ends the connection from its own side (either side can);
  *                the agent says one signed goodbye, deletes its key, and serves only local work
  * @version 1.0
@@ -17,13 +19,17 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $page_vars = process_logic(admin_management_node_logic(array_merge($_GET, $_POST)));
 
-$session       = $page_vars['session'];
-$request       = $page_vars['request'];
-$state         = $page_vars['state'];
-$leave_request = $page_vars['leave_request'];
-$error         = $page_vars['error'];
-$requested     = $page_vars['requested'];
-$cancelled     = $page_vars['cancelled'];
+$session         = $page_vars['session'];
+$request         = $page_vars['request'];
+$state           = $page_vars['state'];
+$leave_request   = $page_vars['leave_request'];
+$agent_enabled   = $page_vars['agent_enabled'];
+$agent_installed = $page_vars['agent_installed'];
+$agent_switched  = $page_vars['agent_switched'];
+$installer_hint  = $page_vars['installer_hint'];
+$error           = $page_vars['error'];
+$requested       = $page_vars['requested'];
+$cancelled       = $page_vars['cancelled'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -46,9 +52,45 @@ $status      = is_array($state) ? (string)($state['status'] ?? '') : '';
 $fingerprint = is_array($state) ? (string)($state['fingerprint'] ?? '') : '';
 $fpr_display = $fingerprint !== '' ? trim(chunk_split($fingerprint, 4, ' ')) : '';
 
-echo '<p class="text-muted" style="max-width:46rem;">A management node runs backups, upgrades, and health checks for this site from one dashboard. '
-   . 'Connecting shares no password or key: this machine\'s agent introduces itself with a key it generates and keeps, '
+echo '<p class="text-muted" style="max-width:46rem;">The Joinery agent is a service on this machine that carries out backups, upgrades, '
+   . 'and health checks here, with the access those jobs need. It works on its own; connecting it to a management node lets an '
+   . 'administrator run those same jobs for this site from one dashboard alongside their other sites. '
+   . 'Connecting shares no password or key: the agent introduces itself with a key it generates and keeps, '
    . 'and an administrator over there approves the introduction after checking that the key fingerprints on both screens match.</p>';
+
+if ($agent_switched === 'on') {
+	echo '<div class="alert alert-info" role="alert">The agent is switched on for this machine.</div>';
+} elseif ($agent_switched === 'off') {
+	echo '<div class="alert alert-info" role="alert">The agent is switched off. It stops at the next container start, upgrade, or installer run; the agent itself stays installed.</div>';
+}
+
+// The agent comes first: with it off, everything below describes work this
+// machine has no way to carry out.
+if (!$agent_enabled) {
+	echo '<div class="alert alert-secondary" role="alert">'
+	   . '<strong>This machine is not running the agent.</strong> Nothing on this page takes effect until it is — '
+	   . 'a management node has nothing here to give work to, and local backups and upgrades are whatever you run by hand.'
+	   . '</div>';
+	echo '<form method="POST" action="/admin/admin_management_node">'
+	   . '<input type="hidden" name="action" value="enable_agent">'
+	   . '<button type="submit" class="btn btn-primary">Turn on the agent</button>'
+	   . '</form>';
+	echo '<p class="text-muted" style="max-width:46rem;margin-top:12px;">'
+	   . ($agent_installed
+		? 'The agent is already installed here; turning it on starts it at the next container start, upgrade, or installer run.'
+		: 'Turning it on installs and starts the agent at the next container start, upgrade, or installer run.')
+	   . ' It connects this machine to nothing by itself — that is a separate step, here, once the agent is running.</p>';
+	$page->admin_footer();
+	return;
+}
+
+if (!$agent_installed) {
+	echo '<div class="alert alert-warning" role="alert">'
+	   . '<strong>Switched on, not installed yet.</strong> The agent is installed by a script that runs as root, which a web page cannot do. '
+	   . 'It lands by itself at the next container start or code upgrade. To do it now, run this on the machine:'
+	   . '<div class="mt-2"><code>' . htmlspecialchars($installer_hint) . '</code></div>'
+	   . '</div>';
+}
 
 if ($status === 'connected') {
 	echo '<div class="alert alert-success" role="alert">';
@@ -131,5 +173,21 @@ if ($status === 'connected') {
 	$formwriter->submitbutton('btn_connect', 'Connect', array('class' => 'btn btn-primary'));
 	$formwriter->end_form();
 }
+
+// Turning the agent off is a bigger act than disconnecting — it ends local
+// backups and upgrades too — so it sits at the foot of the page rather than
+// beside the connection controls, and says what a connected machine loses.
+$off_warning = $status === 'connected'
+	? 'Turn off the agent? This machine will stop carrying out its own backups and upgrades, and the management node will see it stop responding — disconnect first if you want a clean ending there.'
+	: 'Turn off the agent? This machine will stop carrying out its own backups and upgrades.';
+
+echo '<hr style="margin-top:32px;">';
+echo '<p class="text-muted" style="max-width:46rem;">The agent is running on this machine. Turning it off stops it and leaves it stopped; '
+   . 'the agent and anything it has been told stay in place, so turning it back on resumes where this left off.</p>';
+echo '<form method="POST" action="/admin/admin_management_node" '
+   . 'onsubmit="return confirm(\'' . htmlspecialchars($off_warning, ENT_QUOTES) . '\');">'
+   . '<input type="hidden" name="action" value="disable_agent">'
+   . '<button type="submit" class="btn btn-outline-secondary">Turn off the agent</button>'
+   . '</form>';
 
 $page->admin_footer();

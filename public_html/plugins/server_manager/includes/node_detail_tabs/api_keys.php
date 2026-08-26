@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.4 - turn the agent on for a node from here, over the SSH this plane already has:
+ *                the node is administered from both ends and the fleet should not need a visit each
  * @version 1.3 - the routing checkbox is gone: connected = routed (hard cutover, owner-set)
  * @version 1.2 - enrollment is a node-initiated join (Phase 1.5, A6): pending requests with
  *                fingerprint-comparison approval replace the pairing token UI
@@ -110,6 +112,25 @@
 			   . '<em>Admin &rarr; System &rarr; Management Node</em> and enter this management node\'s URL: '
 			   . '<code>' . htmlspecialchars(rtrim(LibraryFunctions::get_absolute_url(), '/')) . '</code>. '
 			   . 'The node asks to join — no secret is copied — and its request appears here for approval.</div>';
+
+			// Doing that from here, over the SSH access this plane already has,
+			// for an operator who administers both ends and does not want to
+			// visit every node's own page. It gets the node as far as asking;
+			// approval below is unchanged, because the fingerprint comparison
+			// is the whole security of the introduction.
+			if ($session->get_permission() >= 10 && $node->get('mgn_ssh_key_path')) {
+				echo '<form method="post" action="' . $base_url . '" id="enable_agent_form" class="mb-3">'
+				   . '<input type="hidden" name="action" value="enable_agent">'
+				   . '<input type="hidden" name="request_pairing" value="1">'
+				   . SmAdminCsrf::field()
+				   . '<button type="button" class="btn btn-sm btn-outline-primary" onclick="JoineryModal.confirm('
+				   . htmlspecialchars(json_encode('Turn on the agent on ' . $node->get('mgn_name')
+					. ' and have it ask to join this management node? It still has to be approved here, '
+					. 'after checking the key fingerprint it reports.'), ENT_QUOTES)
+				   . ', function(){ document.getElementById(\'enable_agent_form\').submit(); })">Turn on the agent over SSH</button>'
+				   . ' <span class="text-muted small ms-1">Switches the agent on for that node, installs it, and has it ask to join.</span>'
+				   . '</form>';
+			}
 		}
 		foreach ($join_requests as $jr) {
 			$fpr = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));

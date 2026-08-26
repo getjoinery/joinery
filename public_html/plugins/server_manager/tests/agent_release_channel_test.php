@@ -226,7 +226,7 @@ section('install_agent.sh installs forward only, never backward');
 //
 // The decision is executed here rather than pattern-matched: extract the real
 // comparison out of the shipped script and run it.
-$installer_sh = PathHelper::getIncludePath('plugins/server_manager/provisioning/install_agent.sh');
+$installer_sh = dirname(PathHelper::getIncludePath('')) . '/maintenance_scripts/install_tools/install_agent.sh';
 $installer_src = is_file($installer_sh) ? file_get_contents($installer_sh) : '';
 check($installer_src !== '', 'install_agent.sh is readable', $installer_sh);
 
@@ -274,14 +274,29 @@ if ($cmp_fn !== '') {
 // Keeping the binary must not mean skipping supervision: the env file and the
 // keepalive are what a container recreation loses, and converging them is the
 // reason to run this script on a node that is already up to date.
-if (preg_match('/! version_is_older "\$CURRENT" "\$DIST_VERSION"; then\n(.*?)\n    exit 0/s', $installer_src, $m)) {
-	check(strpos($m[1], 'ensure_supervision') !== false,
-		'the keep path still converges supervision',
-		'env file and cron keepalive are exactly what a container swap drops');
-	check(strpos($m[1], 'start_agent') !== false,
-		'and starts the agent if it is not running');
-} else {
-	check(false, 'the keep branch is findable');
-}
+//
+// This is now structural rather than a property of the keep branch. Deciding
+// the binary and deciding whether the agent runs are separate passes, and the
+// second runs whatever the first concluded — so there is no path that keeps a
+// binary and skips its supervision, and none that installs one and leaves it
+// unsupervised either. Asserted as ordering: supervision and start come after
+// the binary pass and outside it.
+$binary_pass_at  = strpos($installer_src, 'converge_binary || true');
+$supervision_at  = strpos($installer_src, "\nensure_supervision\n");
+$start_at        = strpos($installer_src, "\nstart_agent\n");
+
+check($binary_pass_at !== false, 'the binary pass runs on its own');
+check($supervision_at !== false && $supervision_at > $binary_pass_at,
+	'supervision converges after it, for a kept binary as much as a fresh one',
+	'env file and cron keepalive are exactly what a container swap drops');
+check($start_at !== false && $start_at > $binary_pass_at,
+	'and the agent is started from there, not from the install branch');
+
+// The env file specifically: written on every run, before the switch is even
+// consulted, because a machine that is switched on later needs it already there.
+$env_at    = strpos($installer_src, "\nwrite_env_file\n");
+$switch_at = strpos($installer_src, 'if [ "$AGENT_ENABLED" != "1" ]');
+check($env_at !== false && $switch_at !== false && $env_at < $switch_at,
+	'the env file is written whether or not the agent runs here');
 
 harness_finish();

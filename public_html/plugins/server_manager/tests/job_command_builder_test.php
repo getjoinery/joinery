@@ -522,6 +522,51 @@ $threw = false;
 try { JobCommandBuilder::build_run_plugin_installers($rootless); } catch (Exception $e) { $threw = true; }
 check($threw, 'a node without mgn_web_root is refused at build time');
 
+section('Turning a node\'s agent on from here');
+
+// The fleet path: switch the agent on over the SSH this plane already has,
+// rather than visiting every node's own admin page. Two steps, in this order —
+// the switch is a setting, and the installer is the root moment that acts on
+// it. Reversing them would install nothing and report success.
+$enable = jcb_node(array(
+	'mgn_ssh_user' => 'user1',
+	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
+$steps = JobCommandBuilder::build_enable_agent($enable);
+check(count($steps) === 2, 'two steps: record the switch, then act on it', 'steps: ' . count($steps));
+check(strpos($steps[0]['cmd'], 'utils/agent_control.php --on') !== false,
+	'the first step switches the agent on through the node\'s own CLI', $steps[0]['cmd']);
+check(strpos($steps[0]['cmd'], '--join') === false,
+	'with no plane_url the node is not asked to join anything', $steps[0]['cmd']);
+check(strpos($steps[1]['cmd'], '_plugin_installers_start.sh') !== false,
+	'the second step is the root moment that installs it', $steps[1]['cmd']);
+
+// Asking to join is the same call plus a URL. It is a request, not an
+// enrollment: approval here after a fingerprint comparison is untouched.
+$steps = JobCommandBuilder::build_enable_agent($enable, array('plane_url' => 'https://manage.example.com'));
+check(preg_match("#--join='https://manage\\.example\\.com'#", $steps[0]['cmd']) === 1,
+	'the management node URL is passed as a quoted argument', $steps[0]['cmd']);
+
+// A URL is a value from a settings row, so it goes through the same discipline
+// every other builder input does — and a bare host is all a join needs, so a
+// path, a query, or a shell payload is refused rather than escaped and sent.
+foreach (array(
+	'https://evil.example.com/;rm -rf /',
+	'https://evil.example.com/path',
+	'https://evil.example.com?x=1',
+	'$(id).example.com',
+	'ftp://example.com',
+) as $bad_url) {
+	$threw = false;
+	try { JobCommandBuilder::build_enable_agent($enable, array('plane_url' => $bad_url)); }
+	catch (Exception $e) { $threw = true; }
+	check($threw, 'refused as a management node URL: ' . $bad_url);
+}
+
+$threw = false;
+try { JobCommandBuilder::build_enable_agent(jcb_node(array('mgn_web_root' => ''))); }
+catch (Exception $e) { $threw = true; }
+check($threw, 'a node without mgn_web_root cannot be given an agent');
+
 section('From-backup clone: extract depth and restore verification');
 
 // backup_project.sh writes archives two levels deep —
