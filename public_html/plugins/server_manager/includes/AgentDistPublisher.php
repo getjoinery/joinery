@@ -25,6 +25,9 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 1.5 - go build runs with -buildvcs=false: the version is already stamped via ldflags,
+ *                and VCS stamping made the build fail whenever the publish ran as a user other
+ *                than the agent repo's owner (git "dubious ownership" exits 128)
  * @version 1.4 - publish() returns a status result (built/skipped/carried/failed) so the
  *                pipeline can refuse a release whose agent rebuild failed
  * @version 1.4 - the signing key needs no recovery record of its own: it sits in config/, which the
@@ -324,7 +327,7 @@ class AgentDistPublisher {
 
 		$ldflags = sprintf('-X main.version=%s -X main.updatePubKeyB64=%s', $version, $public_b64);
 		$cmd = sprintf(
-			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -trimpath -ldflags %s -o %s . 2>&1',
+			'cd %s && env HOME=%s GOCACHE=%s GOMODCACHE=%s CGO_ENABLED=0 GOOS=linux GOARCH=%s %s build -buildvcs=false -trimpath -ldflags %s -o %s . 2>&1',
 			escapeshellarg($src),
 			escapeshellarg($cache_root),
 			escapeshellarg($cache_root . '/gocache'),
