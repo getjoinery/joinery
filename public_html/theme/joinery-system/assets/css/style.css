@@ -103,6 +103,10 @@
 /* ===== Reset ===== */
 *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 html { scroll-behavior: smooth; font-size: 18px; -webkit-text-size-adjust: 100%; }
+/* Every size below is rem-based, so the phone bump scales the whole admin. */
+@media (max-width: 767px) {
+    html { font-size: 20px; }
+}
 body {
     font-family: var(--font-sans);
     font-size: 0.875rem;
