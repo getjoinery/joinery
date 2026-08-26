@@ -49,6 +49,16 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.32
+ * @changelog 1.32 - Sent view (filters[sent]): a pseudo-folder like Spam,
+ *   listing conversations that carry an outbound row. Row-level filter,
+ *   thread-level effect; Trash still wins; a Sent search stays bounded to
+ *   sent mail (an explicit scope, not the default tab).
+ * @version 1.31
+ * @changelog 1.31 - a search is never narrowed by the Inbox tab: the query
+ *   covers All Mail (archived and sent included) and the response carries
+ *   search_scope so the reader labels it. Explicit scopes (Trash, Spam,
+ *   Drafts, labels) still bound their own searches.
  * @version 1.30
  * @changelog 1.30 - list snippets clean the plain part through
  *   MailboxHtmlSanitizer::previewText(): received plain parts carry literal
@@ -840,7 +850,29 @@ class MailboxService {
 		// the reply row is what puts the thread in the Inbox. Row-level filter,
 		// thread-level effect: a thread with any qualifying inbound row still
 		// lists, with its full history in the thread view.
-		if (!$trash && !empty($filters['inbox'])) {
+		//
+		// Sent view: conversations carrying a message the member sent. A
+		// pseudo-folder like Spam — it reads a column (the direction), not
+		// folder membership, so it works for local and IMAP mailboxes alike.
+		// Row-level filter, thread-level effect: the thread lists with its
+		// latest SENT message as the row, and opening it shows the full
+		// history. Trash still wins (a discarded sent message is in Trash and
+		// nowhere else), and drafts are already outside every read scope.
+		$sent = !$trash && !$drafts && !empty($filters['sent']);
+		if ($sent) {
+			$where[] = "iem_direction = 'outbound'";
+		}
+
+		// A SEARCH is never narrowed by this default tab: the Inbox flag shapes
+		// the list, but a query from the Inbox covers All Mail — archived and
+		// sent included — because a search that silently drops matches over
+		// which tab happened to be open reads as broken, not as scoped (an
+		// imported Gmail archive made 96% of hits vanish this way). Explicit
+		// scopes — Trash, Spam, Drafts, a label — still bound their own
+		// searches; the response says the widening happened (search_scope) so
+		// the reader can label it.
+		$searching = !empty($filters['q']);
+		if (!$trash && !$sent && !empty($filters['inbox']) && !$searching) {
 			$where[] = "iem_is_archived IS NOT TRUE";
 			$where[] = "iem_direction IS DISTINCT FROM 'outbound'";
 		}
@@ -1069,6 +1101,12 @@ class MailboxService {
 			// mailbox — the reader says so instead of letting missing results
 			// read as missing mail.
 			$result['search_indexing'] = $this->search_indexing;
+		}
+		if ($searching && !$trash && !$sent && !empty($filters['inbox'])) {
+			// The Inbox tab was open but the search covered All Mail (see the
+			// scope block above) — the reader shows a one-line note so results
+			// beyond the Inbox are explained, not surprising.
+			$result['search_scope'] = 'all_mail';
 		}
 		if ($this->content_locked) {
 			// At least one row rendered a sealed placeholder (locked window or a
