@@ -233,7 +233,7 @@
 					. 'This site is running exactly what upstream delivered, so it republishes what it '
 					. 'received rather than minting a number for a tree it did not write. Upgrade this site '
 					. 'first if you meant to serve newer code. Nothing has been written.');
-				exit;
+				exit(1);
 			}
 		}
 
@@ -247,7 +247,7 @@
 
 		if ($existing->count() > 0) {
 			publish_output("Version {$version_major}.{$version_minor}.{$version_patch} already exists. Please use a different version number.");
-			exit;
+			exit(1);
 		}
 
 		// Use form-provided version consistently for both archive and SQL filenames
@@ -261,7 +261,7 @@
 		$current_version = LibraryFunctions::get_joinery_version();
 		if ($current_version !== '' && version_compare($version, $current_version, '<')) {
 			publish_output("Refusing to publish {$version} — VERSION file is already at {$current_version}. Publish a higher version or update the VERSION file first.");
-			exit;
+			exit(1);
 		}
 
 		// =====================================================
@@ -293,7 +293,7 @@
 			publish_output("\nRefusing to publish {$version} — LICENSE.md is missing or empty.");
 			publish_output("Looked in: " . implode(', ', $license_candidates));
 			publish_output("Every archive carries the license text. Nothing has been written.");
-			exit;
+			exit(1);
 		}
 		publish_output("License present at {$license_source}");
 
@@ -359,7 +359,7 @@
 				publish_output("Put the plugin directory in public_html/plugins/ here and publish again; it does");
 				publish_output("not need to be installed or activated on this site, only present.");
 				publish_output("Nothing has been written.");
-				exit;
+				exit(1);
 			}
 		}
 
@@ -383,7 +383,7 @@
 				. " but this box has agent source at v" . ($agent_bundle['source_version'] ?: '?')
 				. ", and the rebuild failed. Publishing now would ship an agent known to be stale.");
 			publish_output("Fix the agent build and publish again. Nothing has been written.");
-			exit;
+			exit(1);
 		}
 
 		// Write the new version to public_html/VERSION so it ships in the tarball and
@@ -391,7 +391,7 @@
 		$version_file = PathHelper::getIncludePath('VERSION');
 		if (file_put_contents($version_file, $version . "\n") === false) {
 			publish_output("ERROR: Could not write version to $version_file (permissions?).");
-			exit;
+			exit(1);
 		}
 		publish_output("Wrote version $version to $version_file");
 
@@ -408,14 +408,16 @@
 		exec($create_sql_cmd, $output, $exit_code);
 
 		if ($exit_code !== 0) {
-			die("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output) . "\n");
+			publish_output("ERROR: Failed to generate install SQL file:\n" . implode("\n", $output));
+			exit(1);
 		}
 
 		// The generated file is in uploads with version number
 		$sql_source = $full_site_dir . '/uploads/joinery-install-' . $version . '.sql.gz';
 
 		if (!file_exists($sql_source)) {
-			die("ERROR: Generated SQL file not found at $sql_source\n");
+			publish_output("ERROR: Generated SQL file not found at $sql_source");
+			exit(1);
 		}
 
 		publish_output("Generated install SQL file version $version (compressed)");
@@ -426,7 +428,7 @@
 		if(!is_writable($file_output_folder)){
 			publish_output($file_output_folder . ' must be writable.  Aborting upgrade.');
 			publish_output('It is owned by '.posix_getpwuid(fileowner($file_output_folder))['name'].' and has permissions '.substr(sprintf('%o', fileperms($file_output_folder)), -3));
-			exit;
+			exit(1);
 		}
 
 		// Check that required directories and files exist
@@ -438,12 +440,14 @@
 
 		foreach ($required_dirs as $dir) {
 			if (!is_dir($dir)) {
-				die("ERROR: Required directory $dir not found. Cannot create archive.\n");
+				publish_output("ERROR: Required directory $dir not found. Cannot create archive.");
+				exit(1);
 			}
 		}
 
 		if (!file_exists($sql_source)) {
-			die("ERROR: Required file $sql_source not found. Cannot create archive.\n");
+			publish_output("ERROR: Required file $sql_source not found. Cannot create archive.");
+			exit(1);
 		}
 
 		publish_output("All required directories and files present");
@@ -467,7 +471,8 @@
 		// Create temporary directory for core archive staging
 		$core_temp_dir = sys_get_temp_dir() . '/joinery_core_' . uniqid();
 		if (!mkdir($core_temp_dir, 0755, true)) {
-			die("ERROR: Failed to create core temp directory<br>");
+			publish_output("ERROR: Failed to create core temp directory");
+			exit(1);
 		}
 
 		// Create directory structure
@@ -532,13 +537,13 @@
 		// the repo root, where GitHub and license scanners look for it.
 		if (!copy($license_source, $core_temp_dir . '/public_html/LICENSE.md')) {
 			publish_output("ERROR: Failed to copy LICENSE.md into the core archive.");
-			exit;
+			exit(1);
 		}
 
 		if ($business_source !== '') {
 			if (!copy($business_source, $core_temp_dir . '/public_html/LICENSE-BUSINESS.md')) {
 				publish_output("ERROR: Failed to copy LICENSE-BUSINESS.md into the core archive.");
-				exit;
+				exit(1);
 			}
 			publish_output("Business license present at {$business_source}");
 		}
@@ -575,7 +580,8 @@
 		exec('rm -rf ' . escapeshellarg($core_temp_dir));
 
 		if (!file_exists($core_output_location) || filesize($core_output_location) == 0) {
-			die("ERROR: Failed to create core archive<br>");
+			publish_output("ERROR: Failed to create core archive");
+			exit(1);
 		}
 
 		$core_size_mb = round(filesize($core_output_location) / 1048576, 2);
@@ -720,14 +726,21 @@
 				escapeshellarg($theme_base_dir),
 				escapeshellarg($theme_name)
 			);
+			$output = [];
 			exec($tar_cmd, $output, $exit_code);
 
-			if (file_exists($theme_archive)) {
-				$theme_size_kb = round(filesize($theme_archive) / 1024, 1);
-				publish_output("- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)");
-			} else {
-				publish_output("- ERROR: Failed to create archive for {$theme_name}");
+			if ($exit_code !== 0 || !file_exists($theme_archive) || filesize($theme_archive) == 0) {
+				// A partial file must not sit in static_files under the current
+				// version's name — a node would download it as genuine.
+				@unlink($theme_archive);
+				publish_output("ERROR: Failed to create archive for {$theme_name}: " . implode(' | ', array_slice($output, -3)));
+				publish_output("A release must carry every archive it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
+				$upgrade->permanent_delete();
+				exit(1);
 			}
+
+			$theme_size_kb = round(filesize($theme_archive) / 1024, 1);
+			publish_output("- {$theme_name}-{$theme_version}.tar.gz ({$theme_size_kb} KB)");
 		}
 
 		// =====================================================
@@ -807,14 +820,21 @@
 				escapeshellarg($plugin_base_dir),
 				escapeshellarg($plugin_name)
 			);
+			$output = [];
 			exec($tar_cmd, $output, $exit_code);
 
-			if (file_exists($plugin_archive)) {
-				$plugin_size_kb = round(filesize($plugin_archive) / 1024, 1);
-				publish_output("- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)");
-			} else {
-				publish_output("- ERROR: Failed to create archive for {$plugin_name}");
+			if ($exit_code !== 0 || !file_exists($plugin_archive) || filesize($plugin_archive) == 0) {
+				// A partial file must not sit in static_files under the current
+				// version's name — a node would download it as genuine.
+				@unlink($plugin_archive);
+				publish_output("ERROR: Failed to create archive for {$plugin_name}: " . implode(' | ', array_slice($output, -3)));
+				publish_output("A release must carry every archive it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
+				$upgrade->permanent_delete();
+				exit(1);
 			}
+
+			$plugin_size_kb = round(filesize($plugin_archive) / 1024, 1);
+			publish_output("- {$plugin_name}-{$plugin_version}.tar.gz ({$plugin_size_kb} KB)");
 		}
 
 		// Persist the accumulated component snapshot onto this release row. Done
