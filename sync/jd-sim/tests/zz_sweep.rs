@@ -198,19 +198,39 @@ fn sweep_world(
         // of themselves and the custody check cannot see them -- written and
         // built over inside one pass, they are in neither of its snapshots --
         // so they are demanded back by hash below.
-        world.user_saves_while_downloads_land(1, (steps / 4).max(2) as u64);
+        if std::env::var("NOLAND").is_err() {
+            world.user_saves_while_downloads_land(1, (steps / 4).max(2) as u64);
+        }
         // The third way a user moves the disk under a pass, and the one the
         // soak rig does constantly: not writing bytes at all, just exchanging
         // two names. A swap hands each file the other one's inode and the other
         // one's mtime, so it reaches the engine as a rename cycle rather than
         // an edit, with every fingerprint it cached now pointing at the wrong
         // content.
-        world.user_rearranges_names_during_uploads(1, (steps / 4).max(2) as u64);
+        // NOSWAP=1 turns just this dial off, to test whether a swap CAUSED a
+        // wedge rather than merely coinciding with one.
+        if std::env::var("NOSWAP").is_err() {
+            world.user_rearranges_names_during_uploads(1, (steps / 4).max(2) as u64);
+        }
         // One machine renaming a folder while another is still building it. The
         // rig does this constantly -- its folder names accumulate suffixes all
         // run -- and until now the simulator never had: every sweep materialised
         // folders whose names stood still while it worked.
-        world.a_folder_is_renamed_while_a_device_creates_it(1, (steps / 4).max(2) as u64);
+        if std::env::var("NOFOLDER").is_err() {
+            world.a_folder_is_renamed_while_a_device_creates_it(1, (steps / 4).max(2) as u64);
+        }
+        // Some of these worlds are served by a box whose refusals say only what
+        // went wrong in English, with no marker naming the KIND of refusal.
+        // Every refusal the mock sends carries one and so does every refusal the
+        // current platform sends, which quietly made "the client can always tell
+        // a refused name from a refusal it can do nothing about" an assumption
+        // no seed could break. It is not true of a server a version behind, of
+        // one endpoint that was missed, or of any refusal invented after this
+        // client shipped -- and the soak rig runs against exactly such a box.
+        // NOPLAIN=1 turns just this dial off.
+        if std::env::var("NOPLAIN").is_err() && seed % 4 == 0 {
+            world.server.refuses_without_saying_why(true);
+        }
         // And a real disk hands a deleted file's inode straight back to the
         // next file that wants one. Until now every sweep ran on a world where
         // an inode, once used, was never seen again -- which quietly excused
@@ -1840,4 +1860,54 @@ fn scratch_kill_platform_sweep() {
     ));
     let _ = std::panic::take_hook();
     no_seed_failed(arms);
+}
+
+/// Scratch: one seed from the one-key-holder arms, faithfully.
+///
+/// `scratch_one` cannot stand in for these — it names three devices a/b/c and
+/// asks `platform_spec` what they run on, while the one-key arms name them
+/// holder/b/c and put every one on Linux. Device names and platforms both feed
+/// the workload, so the wrong ones reproduce a different world and the seed
+/// looks innocent.
+#[test]
+#[ignore]
+fn scratch_onekey_one() {
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let steps: usize = std::env::var("STEPS").unwrap_or("30".into()).parse().unwrap();
+    let n: usize = std::env::var("DEVS").unwrap_or("3".into()).parse().unwrap();
+    let chaos: bool = std::env::var("CHAOS").unwrap_or("1".into()) == "1";
+    let names: Vec<&str> = if n == 3 {
+        vec!["holder", "b", "c"]
+    } else {
+        vec!["holder", "guest"]
+    };
+    let refs: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
+    let _ = workload_core(seed, steps, &refs, chaos, Vault::OneKeyHolder, false);
+}
+
+/// Scratch: trace one seed from the one-key-holder arms.
+///
+/// Same world as `scratch_onekey_one` — holder/b/c, all Linux — so the seed
+/// reproduces. `OPS=1` prints each device's plan per round.
+#[test]
+#[ignore]
+fn scratch_onekey_trace() {
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let steps: usize = std::env::var("STEPS").unwrap_or("30".into()).parse().unwrap();
+    let n: usize = std::env::var("DEVS").unwrap_or("3".into()).parse().unwrap();
+    let chaos: bool = std::env::var("CHAOS").unwrap_or("1".into()) == "1";
+    let names: Vec<&str> = if n == 3 { vec!["holder", "b", "c"] } else { vec!["holder", "guest"] };
+    let refs: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
+    let vault = Vault::OneKeyHolder;
+    let world = sweep_world(seed, &refs, steps, chaos, vault);
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault, false);
+    for round in 0..8 {
+        for d in &world.devices {
+            world.clock.advance_secs(20 * 60);
+            let out = world.pass(d);
+            if std::env::var("OPS").is_ok() {
+                println!("  ROUND {round} {} plan={:?} exec={:?}", d.name, out.round.plan, out.exec);
+            }
+        }
+    }
 }

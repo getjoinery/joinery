@@ -508,6 +508,36 @@ pub fn unaccounted(records: &[Record], recoverable: &Recoverable) -> BTreeSet<St
         .collect()
 }
 
+/// Where a claim would be standing on a disk, in the comparison form the device
+/// trees are keyed by.
+///
+/// A claim's path is relative to the persona's workspace, and which workspace
+/// that is depends on the persona: `sqlite-app` and `browser` get one per device
+/// (two programs writing one database is a corrupt file, not a sync bug), and
+/// everyone else shares. `orchestrate::run` decides that, and this has to agree
+/// with it — disagree and every claim looks dead, which would turn the guard
+/// below into a switch that quietly disables half the oracle.
+fn standing_key(claim: &journal::Committed, personality: &Personality) -> String {
+    let device = claim.actor.split('/').next().unwrap_or_default();
+    let workspace = if claim.persona == "sqlite-app" || claim.persona == "browser" {
+        format!("{device}-{}", claim.persona)
+    } else {
+        format!("Shared-{}", claim.persona)
+    };
+    tree::key_for(&format!("{workspace}/{}", claim.path), personality)
+}
+
+/// Every path a file is standing at, across the whole fleet, keyed for
+/// comparison. Directories are left out: a claim is about a file.
+pub fn standing_paths(trees: &BTreeMap<String, LocalTree>) -> BTreeSet<String> {
+    trees
+        .values()
+        .flat_map(|t| t.entries.iter())
+        .filter(|(_, e)| !e.is_dir)
+        .map(|(key, _)| key.clone())
+        .collect()
+}
+
 /// For every content an actor committed, is it still findable?
 ///
 /// Two questions, not one. The **last** committed content of every live path is
@@ -519,18 +549,52 @@ pub fn check_no_loss(
     records: &[Record],
     recoverable: &Recoverable,
     previously_on_server: &BTreeSet<String>,
+    standing: &BTreeSet<String>,
+    personality: &Personality,
 ) -> (Verdict, Losses) {
     let latest = journal::last_committed(records);
     let mut lost_live: Vec<String> = Vec::new();
+    let mut at_dead_paths: Vec<String> = Vec::new();
     for (path, claim) in &latest {
-        if recoverable.find(&claim.sha256).is_none() {
-            lost_live.push(format!(
-                "{path} (last written by {} at {}, sha {})",
-                claim.actor,
-                claim.ts_ms,
-                &claim.sha256[..std::cmp::min(12, claim.sha256.len())]
-            ));
+        if recoverable.find(&claim.sha256).is_some() {
+            continue;
         }
+        // Is anything actually standing where this claim says it is?
+        //
+        // A claim is keyed by its path STRING, and a claim's ancestry can be
+        // renamed by either device at any moment. `last_committed` re-keys a
+        // claim through one rename per actor, and the rig's folder names
+        // accumulate suffixes all run — so a claim whose ancestry was renamed
+        // twice keeps a key that names a path nothing is at, while the physical
+        // file went on being overwritten under its new name. That is not a loss.
+        // It is this oracle failing to follow the file.
+        //
+        // Runs 218, 255 and 265 were each reported as data loss and each cost a
+        // session; all three claimed a path that appears ZERO times in the
+        // frozen trees, while the same physical file was overwritten seconds
+        // later at the renamed path. Sweeping aliases was tried twice to fix the
+        // re-keying itself and made the oracle measurably worse (see
+        // `journal::Aliases`), because a claim models one path and two diverging
+        // devices genuinely disagree about where a file is.
+        //
+        // So the rule is the check's own definition, enforced: `lost_live` is
+        // the last committed content of every LIVE path, and a path nothing is
+        // at is not one. Dropped rather than reported — and COUNTED, because a
+        // silently narrowed oracle is how "no-loss green" comes to mean less
+        // than it reads as.
+        //
+        // The stronger half is untouched by this. Any content the server was
+        // observed to take is still owed back whatever happened to its path.
+        if !standing.contains(&standing_key(claim, personality)) {
+            at_dead_paths.push(path.clone());
+            continue;
+        }
+        lost_live.push(format!(
+            "{path} (last written by {} at {}, sha {})",
+            claim.actor,
+            claim.ts_ms,
+            &claim.sha256[..std::cmp::min(12, claim.sha256.len())]
+        ));
     }
 
     // The stronger half, and it is deliberately narrower than "every content an
@@ -553,6 +617,24 @@ pub fn check_no_loss(
         .map(|sha| sha[..std::cmp::min(12, sha.len())].to_string())
         .collect();
 
+    // Never silent. A claim this oracle could not follow is a hole in it, and a
+    // run that stops saying how many there were is a run that has stopped
+    // knowing how much "no-loss green" is worth.
+    let stale = if at_dead_paths.is_empty() {
+        String::new()
+    } else {
+        format!(
+            "; {} unaccounted claim(s) named a path nothing is at and were not judged: {}",
+            at_dead_paths.len(),
+            at_dead_paths
+                .iter()
+                .take(5)
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(", ")
+        )
+    };
+
     if lost_live.is_empty() && lost_history.is_empty() {
         // The historical half is vacuous on a campaign's first settle: there is
         // no earlier observation of the server to hold it to. Said out loud for
@@ -570,13 +652,16 @@ pub fn check_no_loss(
         return (
             Verdict::pass(
                 "no-loss",
-                format!("{} live paths findable; {history}", latest.len()),
+                format!("{} live paths findable; {history}{}", latest.len(), stale),
             ),
             Losses::default(),
         );
     }
 
     let mut detail = Vec::new();
+    if !at_dead_paths.is_empty() {
+        detail.push(stale.trim_start_matches("; ").to_string());
+    }
     if !lost_live.is_empty() {
         detail.push(format!(
             "{} committed file(s) are nowhere: {}",
@@ -1070,7 +1155,13 @@ pub fn settle(
             )),
         }
     }
-    let (mut no_loss, losses) = check_no_loss(records, &recoverable, previously_on_server);
+    let (mut no_loss, losses) = check_no_loss(
+        records,
+        &recoverable,
+        previously_on_server,
+        &standing_paths(&trees),
+        personality,
+    );
     if let Some(why) = blind {
         // Only when it would otherwise announce losses. A settle that found
         // everything found it, and the fact that some other file's history was
@@ -1143,6 +1234,16 @@ mod tests {
         }
     }
 
+    /// The paths in `commit`'s workspace that something is standing at, in the
+    /// form `check_no_loss` looks them up by. Everything these tests write about
+    /// is a file the user still has, unless a test says otherwise.
+    fn standing(paths: &[&str]) -> BTreeSet<String> {
+        paths
+            .iter()
+            .map(|p| tree::key_for(&format!("Shared-office/{p}"), &Personality::linux()))
+            .collect()
+    }
+
     fn status(indicator: &str, entries: serde_json::Value, issues: serde_json::Value) -> Status {
         let json = json!({
             "indicator": indicator, "summary": "", "tracked": 0, "settled": 0,
@@ -1158,7 +1259,7 @@ mod tests {
     fn a_content_still_on_a_device_is_not_lost() {
         let records = vec![commit("a.txt", "aa", "write")];
         let (verdict, _losses) =
-            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
+            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux());
         assert!(verdict.ok, "{}", verdict.detail);
     }
 
@@ -1168,7 +1269,7 @@ mod tests {
         // not reached a second device yet.
         let records = vec![commit("a.txt", "aa", "write")];
         assert!(
-            check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new())
+            check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux())
                 .0
                 .ok
         );
@@ -1180,7 +1281,7 @@ mod tests {
         // is recoverable from.
         let records = vec![commit("a.txt", "aa", "write")];
         assert!(
-            check_no_loss(&records, &recoverable(&[], &[], &["aa"]), &BTreeSet::new())
+            check_no_loss(&records, &recoverable(&[], &[], &["aa"]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux())
                 .0
                 .ok
         );
@@ -1192,7 +1293,13 @@ mod tests {
         // file, who wrote it and when, or nobody can investigate it.
         let records = vec![commit("Projects/Report.docx", "abcdef0123456789", "write")];
         let (verdict, _losses) =
-            check_no_loss(&records, &recoverable(&[], &[], &[]), &BTreeSet::new());
+            check_no_loss(
+            &records,
+            &recoverable(&[], &[], &[]),
+            &BTreeSet::new(),
+            &standing(&["Projects/Report.docx"]),
+            &Personality::linux(),
+        );
         assert!(!verdict.ok);
         assert!(
             verdict.detail.contains("Projects/Report.docx"),
@@ -1217,7 +1324,14 @@ mod tests {
         ];
         let taken: BTreeSet<String> = ["first".to_string()].into_iter().collect();
 
-        let (gone, _losses) = check_no_loss(&records, &recoverable(&["second"], &[], &[]), &taken);
+        let live = standing(&["a.txt"]);
+        let (gone, _losses) = check_no_loss(
+            &records,
+            &recoverable(&["second"], &[], &[]),
+            &taken,
+            &live,
+            &Personality::linux(),
+        );
         assert!(!gone.ok);
         assert!(
             gone.detail.contains("disappeared from it"),
@@ -1226,7 +1340,13 @@ mod tests {
         );
 
         let (still_there, _l2) =
-            check_no_loss(&records, &recoverable(&["second"], &["first"], &[]), &taken);
+            check_no_loss(
+            &records,
+            &recoverable(&["second"], &["first"], &[]),
+            &taken,
+            &live,
+            &Personality::linux(),
+        );
         assert!(still_there.ok, "{}", still_there.detail);
     }
 
@@ -1236,7 +1356,7 @@ mod tests {
         // that ran and found nothing wrong. On a first settle no check ran.
         let records = vec![commit("a.txt", "aa", "write")];
         let (verdict, _losses) =
-            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new());
+            check_no_loss(&records, &recoverable(&["aa"], &[], &[]), &BTreeSet::new(), &standing(&["a.txt"]), &Personality::linux());
         assert!(verdict.ok);
         assert!(
             verdict.detail.contains("no earlier settle"),
@@ -1261,8 +1381,55 @@ mod tests {
             &records,
             &recoverable(&["second"], &[], &[]),
             &BTreeSet::new(),
+            &standing(&["a.txt"]),
+            &Personality::linux(),
         );
         assert!(verdict.ok, "{}", verdict.detail);
+    }
+
+    #[test]
+    fn a_claim_at_a_path_nothing_is_at_is_counted_rather_than_reported_as_lost() {
+        // The oracle's own blind spot, made harmless and made visible. A claim
+        // is keyed by its path STRING, and the rig renames folders all run, so a
+        // claim whose ancestry was renamed twice keeps a key naming a path
+        // nothing is at while the physical file goes on being overwritten under
+        // its new name. Runs 218, 255 and 265 were all reported as data loss on
+        // exactly this, and in all three the claimed path appeared zero times in
+        // the frozen trees.
+        //
+        // Not reported, because `lost_live` is about LIVE paths and this is not
+        // one. Counted, because an oracle that quietly stops judging things is
+        // worth less than one that says how much it could not judge.
+        let records = vec![commit("Projects/Sub 9/doc.txt", "abcdef0123456789", "write")];
+        let (verdict, losses) = check_no_loss(
+            &records,
+            &recoverable(&[], &[], &[]),
+            &BTreeSet::new(),
+            &standing(&["Projects/Sub 9 (15)/doc.txt"]),
+            &Personality::linux(),
+        );
+        assert!(
+            verdict.ok,
+            "a claim naming a path nothing is at is not a loss: {}",
+            verdict.detail
+        );
+        assert!(losses.live.is_empty(), "{:?}", losses.live);
+        assert!(
+            verdict.detail.contains("1 unaccounted claim(s) named a path nothing is at"),
+            "the run has to say how much the oracle could not judge: {}",
+            verdict.detail
+        );
+
+        // And the guard must not be a way to switch the check off: the same
+        // claim, at a path something IS standing at, still fails.
+        let (still_fails, _l) = check_no_loss(
+            &records,
+            &recoverable(&[], &[], &[]),
+            &BTreeSet::new(),
+            &standing(&["Projects/Sub 9/doc.txt"]),
+            &Personality::linux(),
+        );
+        assert!(!still_fails.ok, "{}", still_fails.detail);
     }
 
     #[test]
@@ -1284,8 +1451,13 @@ mod tests {
         ];
         // The content still has to be findable historically, but no live path
         // claims it.
-        let (verdict, _losses) =
-            check_no_loss(&records, &recoverable(&[], &["aa"], &[]), &BTreeSet::new());
+        let (verdict, _losses) = check_no_loss(
+            &records,
+            &recoverable(&[], &["aa"], &[]),
+            &BTreeSet::new(),
+            &BTreeSet::new(),
+            &Personality::linux(),
+        );
         assert!(verdict.ok, "{}", verdict.detail);
     }
 
@@ -1710,4 +1882,78 @@ mod tests {
         );
     }
 
+}
+
+#[cfg(test)]
+mod frozen {
+    //! Replaying a frozen campaign's journal against its frozen trees.
+    //!
+    //! The oracle's failures are all about paths, and a path is only wrong
+    //! relative to a real tree — so the only honest way to measure a change to
+    //! it is against evidence a real campaign left behind. Point it at a
+    //! `/root/run<N>-*` directory pulled off the rig:
+    //!
+    //! ```text
+    //! FROZEN=/path/to/run255-loss cargo test -p jd-soak frozen -- --ignored --nocapture
+    //! ```
+    //!
+    //! It wants `journal/` and a `trees.txt` beside it (`tar tzf trees.tar.gz >
+    //! trees.txt`). Prints what would be judged, what would be reported and what
+    //! names a path nothing is at.
+    use super::*;
+
+    #[test]
+    #[ignore] // needs frozen evidence; run it by name with FROZEN set
+    fn replay_a_frozen_campaign() {
+        let Ok(dir) = std::env::var("FROZEN") else {
+            eprintln!("set FROZEN=/path/to/run<N>-loss");
+            return;
+        };
+        let dir = Path::new(&dir);
+        let records = journal::read_dir(&dir.join("journal")).expect("journal");
+        let listing = std::fs::read_to_string(dir.join("trees.txt")).expect("trees.txt");
+        let personality = Personality::linux();
+
+        // `device-a/root/Shared-messy-human/x` is the same place a claim calls
+        // `Shared-messy-human/x`; the device prefix is the tar's, not the tree's.
+        let standing: BTreeSet<String> = listing
+            .lines()
+            .filter(|l| !l.ends_with('/'))
+            .filter_map(|l| l.split_once("/root/").map(|(_, rest)| rest))
+            .map(|rest| tree::key_for(rest, &personality))
+            .collect();
+
+        let latest = journal::last_committed(&records);
+        let mut dead = 0usize;
+        let mut live = 0usize;
+        for claim in latest.values() {
+            if standing.contains(&standing_key(claim, &personality)) {
+                live += 1;
+            } else {
+                dead += 1;
+            }
+        }
+        eprintln!(
+            "FROZEN {}: {} records, {} claims — {live} at a live path, {dead} at a path nothing is at",
+            dir.display(),
+            records.len(),
+            latest.len()
+        );
+        // The one the run actually failed on. Naming it is the whole point: a
+        // bulk count says nothing about whether the guard catches the claim that
+        // cost the session.
+        if let Ok(claimed) = std::env::var("CLAIM") {
+            match latest.get(&claimed) {
+                None => eprintln!("CLAIM {claimed}: no such claim"),
+                Some(c) => {
+                    let key = standing_key(c, &personality);
+                    eprintln!(
+                        "CLAIM {claimed}: sha {} — key {key} is {}",
+                        &c.sha256[..12],
+                        if standing.contains(&key) { "LIVE (still judged)" } else { "DEAD (dropped)" }
+                    );
+                }
+            }
+        }
+    }
 }

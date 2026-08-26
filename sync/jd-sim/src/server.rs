@@ -202,6 +202,16 @@ pub struct MockServer {
     /// interleaving, and the client has a whole branch for it that nothing
     /// could exercise. The soak rig found what lived in that branch.
     during_upload: Arc<Mutex<Option<Box<dyn FnMut() + Send>>>>,
+    /// Refuse in English only: every refusal leaves without the machine-readable
+    /// marker that says WHY.
+    ///
+    /// Every refusal here carries one, and every refusal the current platform
+    /// sends carries one — which quietly made "the client can always tell what
+    /// kind of refusal this is" an assumption no scenario could break. It is not
+    /// true of a server a version behind, of one endpoint that was missed, or of
+    /// any refusal invented after this client shipped. The soak rig found the
+    /// consequence on a box whose folder rename refused without the marker.
+    plain_refusals: Arc<Mutex<bool>>,
 }
 
 impl std::fmt::Debug for MockServer {
@@ -343,6 +353,7 @@ impl MockServer {
             })),
             clock,
             during_upload: Arc::new(Mutex::new(None)),
+            plain_refusals: Arc::new(Mutex::new(false)),
         }
     }
 
@@ -356,6 +367,12 @@ impl MockServer {
     /// uploaded.
     pub fn while_completing_an_upload(&self, f: impl FnMut() + Send + 'static) {
         *self.during_upload.lock().unwrap() = Some(Box::new(f));
+    }
+
+    /// Answer every refusal from here on in prose alone, with no marker saying
+    /// what kind of refusal it is. See [`MockServer::plain_refusals`].
+    pub fn refuses_without_saying_why(&self, on: bool) {
+        *self.plain_refusals.lock().unwrap() = on;
     }
 
     /// Register a user's Drive vault public key.
@@ -843,6 +860,17 @@ impl MockServer {
 
     /// `POST /action/{name}`.
     pub fn action(&self, name: &str, body: &Value) -> ServerResult {
+        let out = self.dispatch(name, body);
+        match out {
+            Err(mut refusal) if *self.plain_refusals.lock().unwrap() => {
+                refusal.data = Value::Null;
+                Err(refusal)
+            }
+            other => other,
+        }
+    }
+
+    fn dispatch(&self, name: &str, body: &Value) -> ServerResult {
         match name {
             "drive_changes" => self.drive_changes(body),
             "drive_stat" => self.drive_stat(body),
