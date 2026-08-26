@@ -11,6 +11,7 @@
 
 use jd_sim::scenario::{
     assert_converged, assert_invariants, assert_no_entry_is_stranded, assert_nothing_lost,
+    assert_records_agree_with_the_server,
     disk_tree, Committed, World,
 };
 use jd_sim::{FailureKind, FsOp, NetFaults, SimRng, SimVault};
@@ -4180,3 +4181,78 @@ fn ciphertext_that_will_never_open_is_given_up_on_rather_than_fetched_for_ever()
         "the laptop should pick the file back up once it can be opened"
     );
 }
+
+#[test]
+fn a_refusal_the_client_cannot_read_does_not_end_in_a_quiet_disagreement() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4471, &["laptop"]);
+    let laptop = world.device("laptop");
+    let fs = &laptop.fs;
+
+    fs.user_mkdir("Sub 10");
+    fs.user_write("Sub 10/doc-1.txt", b"the file that moves with it");
+    assert!(world.settle().is_some(), "the tree settles before the rename");
+    let sub10 = folder_id_named(&world, "Sub 10").expect("the folder reached the server");
+
+    // The user renames the folder, and the rename is decided while nothing on
+    // the server holds the new name.
+    fs.user_rename("Sub 10", "Sub 20");
+    laptop
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::folder(sub10),
+            &serde_json::json!({ "parent": null, "name": "Sub 20" }).to_string(),
+            "sub10-rename",
+        )
+        .unwrap();
+    // By the time it runs, a folder this device has never met is using that
+    // name. Nothing in its store can see the occupant, so the refusal is the
+    // only way it could find out -- which is the whole reason the refusal
+    // carries a marker saying what kind of refusal it is.
+    let unseen = world.server.seed_folder(None, "Sub 20");
+    world.server.seed_file(Some(unseen), "doc-2.txt", b"the other one");
+
+    world.server.refuses_without_saying_why(true);
+    world.pass(laptop);
+    world.server.refuses_without_saying_why(false);
+
+    // Unreadable, so the operation is withdrawn rather than re-planned: dropped,
+    // an issue raised, and the entry left saying exactly what it said before.
+    // That is the state the rig reached, and everything after this is about
+    // whether the device can still get out of it.
+    let withdrawn: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "withdrawn")
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(
+        withdrawn.len(),
+        1,
+        "the refusal has to actually be met, or this scenario proves nothing: {withdrawn:?}"
+    );
+
+    assert!(
+        world.settle().is_some(),
+        "the fleet must reach a fixed point after a refusal it could not read"
+    );
+    assert_converged(&world);
+    assert_records_agree_with_the_server(&world);
+    assert_no_entry_is_stranded(&world);
+
+    // Both folders' files survive, under whatever names the two ended up
+    // wearing.
+    let tree = disk_tree(laptop);
+    for wanted in ["doc-1.txt", "doc-2.txt"] {
+        assert!(
+            tree.keys().any(|p| p.ends_with(wanted)),
+            "{wanted} was lost to a refusal the client could not read: {:?}",
+            tree.keys().collect::<Vec<_>>()
+        );
+    }
+}
+
