@@ -4,7 +4,7 @@ The Server Manager plugin provides a web UI for managing remote Joinery producti
 
 The system has two components:
 - **PHP plugin** (`plugins/server_manager/`) -- admin UI, job creation, command generation
-- **Go agent** (`/home/user1/joinery-agent/`) -- generic step executor that polls the job queue and runs commands via SSH
+- **Go agent** (`/home/user1/joinery-agent/`) -- runs a control plane's own job queue, and on a managed node takes work from its plane over the [agent channel](#the-agent-channel)
 
 ## Quick Start
 
@@ -237,11 +237,66 @@ Health dot colors reflect actual server health, not check recency:
 - **Green**: All metrics healthy
 - **Gray**: Never checked or no data
 
+## The agent channel
+
+A node's agent polls its control plane over an outbound HTTPS connection, takes one job at a time, and posts the result back. Nothing has to reach in: a node behind NAT or Cloudflare works the same as one with a public address, and the poll itself is how the plane knows the node is alive.
+
+**A job names an operation; it never carries a command.** The payload is `{primitive, params}` — a name the agent looks up in a vocabulary compiled into its own binary, plus parameters validated against the bounds that primitive declares. A name the agent does not have, a parameter it did not declare, or an operation class the node does not accept is **refused on the node**, with the reason recorded and reported back, whatever the plane asked for.
+
+Primitives are grouped into three classes, and a node's acceptance policy is set per class:
+
+| Class | What it covers | Accepted unattended |
+|---|---|---|
+| `observe` | Collectors, status, listing | Yes |
+| `operate` | Restarts, disk, certs, upgrades, backup runs | Yes |
+| `destructive` | Restores, decommission | **No, anywhere** |
+
+There is no class for running an arbitrary command. The agent's own test suite enforces that structurally: the vocabulary lives in its own package, exactly one file in it may start a process, and that file refuses to execute anything it cannot verify against the signed release manifest.
+
+The policy lives at `/etc/joinery-agent/policy.json`, root-owned, outside the web tree. A missing file means the shipped fleet-wide policy above. A file that is not root-owned, or is writable by group or other, is refused outright and the node accepts nothing until a human fixes it — trusting a file the web user could have written would defeat the only thing the file is for.
+
+### Pairing
+
+Node Detail → **API Keys** → Agent Channel → *Issue pairing token*. The token is shown once, is good for an hour, and can be used once. On the node, add the two lines it gives you to `/etc/joinery-agent/joinery-agent.env` and restart the agent:
+
+```
+JOINERY_PLANE_URL=https://your-control-plane.example
+JOINERY_PAIRING_TOKEN=<the token>
+```
+
+The agent generates an Ed25519 keypair, keeps the private half at `/etc/joinery-agent/node_identity.json` (mode 0600, root-owned), and hands the plane the public half. **The plane stores only that public half**, so there is no credential on the control plane that could act as the node — which is the point of the whole arrangement. The agent removes the spent token from the env file once pairing succeeds.
+
+While a pairing token is outstanding it is the one thing on the plane that could pair as that node, which is why it is single-use, short-lived, and why the resulting pairing is stamped where you can see it: the tab shows the pairing time, the agent version, and the last poll.
+
+### Cutting a node over
+
+Pairing alone changes no routing. The **Route this node's work to its agent** checkbox on the same tab is the per-node cutover: with it off, a paired node keeps polling (so its liveness stays visible) and its work keeps going over the API and SSH. With it on, any operation that has a primitive implementation runs on the node's own agent, and everything else routes as before.
+
+Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
+
+**Upgrade the control plane's own agent before cutting any node over.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
+
+### Reading refusals
+
+A refused job is a terminal failure like any other, and reads as one everywhere a job status is shown — the message says `Refused by the node:` and then the node's own reason. The outcome the node actually reported is also recorded on its own (`mjb_agent_outcome`: `completed`, `failed` or `refused`), so a refusal can be **counted** rather than found by matching the text of an error message. `ManagementJob::refusalCountForNode()` is that count, windowed.
+
+This matters more as the vocabulary grows. A node refusing work is a node whose plane is asking for something it should not be, or whose policy has been tightened without the plane noticing — either way it is the number, not the prose, that an alert reads.
+
+A job this plane gives up on after repeated lost claims records **no** node outcome. The node never reported one, and inventing a verdict for it would make the refusal count untrustworthy in exactly the situation where it is being consulted.
+
+### When a claim does not come back
+
+An agent claims a job and then reports. If it never reports — it crashed, the box rebooted, the network went — the job would otherwise sit in `running` holding that node's concurrency lock. A claim older than 15 minutes is returned to the queue with a note in the job output saying so, on every poll and on every scheduled uptime pass. After three such claims the job fails instead, naming the node: a job that kills three agents will not succeed on the fourth.
+
+### Endpoints
+
+`POST /api/v1/agent/pair`, `/claim`, `/result`. Claim and result are signed with the node's key; the plane verifies against the public half it holds, and selects jobs by the identity the **signature** proves, never by anything in the request body. Requests are schema-validated, size-capped, and refused for a clock more than five minutes from the plane's. These are a separate route family from `/api/v1/management/*`, which runs the other way — the plane calling in to a node's web tier — and stays status-only.
+
 ## Job Types
 
 | Job Type | Description | Destructive |
 |----------|-------------|-------------|
-| `check_status` | SSH-probe disk, memory, uptime, PostgreSQL, version; subsumes the old `test_connection` since its first step is the SSH handshake | No |
+| `check_status` | Disk, memory, load, uptime, PostgreSQL, version and database list. On a cut-over node this is the `check_status` **observe primitive**, which collects all of it without running a command; otherwise the management API or an SSH probe | No |
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `list_backups` | List backup files on local server and cloud target | No |

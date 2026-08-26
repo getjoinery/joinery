@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.10 - agent channel actions: pair_agent (one-time token, shown once), unpair_agent,
+ *                 and set_agent_channel (the per-node cutover flag)
  * @version 1.9 - a backup is refused for a node with no verified recovery key of its own, named as
  *                such on the tab; the control plane's own key is no longer consulted, because no
  *                key is supplied to a node
@@ -69,6 +71,9 @@ class NodeDetailActions {
 		'set_reverse_dns'          => 'overview',
 		'run_command'              => 'console',
 		'save_api_credential'      => 'api_keys',
+		'pair_agent'               => 'api_keys',
+		'unpair_agent'             => 'api_keys',
+		'set_agent_channel'        => 'api_keys',
 		'clear_api_credential'     => 'api_keys',
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
@@ -120,8 +125,8 @@ class NodeDetailActions {
 		switch ($action) {
 
 			case 'check_status': {
-				$steps = JobCommandBuilder::build_check_status($node);
-				$job = ManagementJob::createJob($node->key, 'check_status', $steps, null, $uid);
+				$built = JobCommandBuilder::build_check_status($node);
+				$job = ManagementJob::createFromBuild($node->key, 'check_status', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -470,6 +475,74 @@ class NodeDetailActions {
 				$node->save();
 				$session->save_message(new DisplayMessage(
 					'API credential cleared. Jobs will now route via SSH.', 'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=api_keys';
+			}
+
+			// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
+
+			case 'pair_agent': {
+				// Issuing a pairing token is superadmin-only. For its TTL the
+				// token is the one plane-held credential in this channel:
+				// whoever reads it can pair AS this node before the real node
+				// does. It is single-use, short-lived and unguessable, and the
+				// resulting pairing is stamped visibly below — so a pairing
+				// nobody expected is seen rather than silent.
+				if ($session->get_permission() < 10) {
+					self::fail($session, $page_regex, 'Pairing a node agent is superadmin-only.');
+					return $base_url . '&tab=api_keys';
+				}
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
+				$token = AgentChannelEndpoint::issuePairingToken($node);
+
+				// Shown once, here, and never stored in plaintext anywhere.
+				$session->save_message(new DisplayMessage(
+					'Pairing token issued. It is valid for one hour and can be used once — '
+					. 'this is the only time it is shown. On the node, add these two lines to '
+					. '/etc/joinery-agent/joinery-agent.env and restart the agent:'
+					. "\n\nJOINERY_PLANE_URL=" . rtrim(LibraryFunctions::get_absolute_url(), '/')
+					. "\nJOINERY_PAIRING_TOKEN=" . $token,
+					'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=api_keys';
+			}
+
+			case 'unpair_agent': {
+				// Forgetting the node's public key ends the channel from this
+				// side. The node keeps its private key and will simply be told
+				// it has not paired; re-pairing needs a fresh token.
+				$node->set('mgn_agent_public_key', null);
+				$node->set('mgn_agent_paired_time', null);
+				$node->set('mgn_agent_pair_token_hash', null);
+				$node->set('mgn_agent_pair_token_expires', null);
+				$node->set('mgn_agent_channel_enabled', false);
+				$node->save();
+				$session->save_message(new DisplayMessage(
+					'Agent unpaired. This node\'s work routes over the API and SSH again.',
+					'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=api_keys';
+			}
+
+			case 'set_agent_channel': {
+				// The per-node cutover flag (§6, Phase 3). Off until this
+				// node's agent has been proven on the channel.
+				$on = !empty($_POST['agent_channel_enabled']);
+				if ($on && empty($node->get('mgn_agent_public_key'))) {
+					self::fail($session, $page_regex,
+						'This node has no paired agent yet, so there is nothing to route work to.');
+					return $base_url . '&tab=api_keys';
+				}
+				$node->set('mgn_agent_channel_enabled', $on);
+				$node->save();
+				$session->save_message(new DisplayMessage(
+					$on
+						? 'Agent channel on. Operations that have crossed to a primitive now run on the node\'s own agent.'
+						: 'Agent channel off. This node\'s work routes over the API and SSH.',
+					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
 				return $base_url . '&tab=api_keys';

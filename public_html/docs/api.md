@@ -165,6 +165,8 @@ There is one auth story with **three credentials**: two key types, distinguished
 | Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
 | Management API | Allowed (with superadmin owner) | **Never** | **Never** |
 
+There is a fourth credential that is not a key at all and does not appear in that table: the **agent channel**. `/api/v1/agent/*` is how a managed node's Go agent takes work from its control plane, and it authenticates with an Ed25519 signature over a canonical message rather than a shared secret — the plane stores only the node's public key, so it holds nothing that could act as the node. It is dispatched before key authentication, has its own rate-limit bucket (`api_agent_rate_limit_requests`), and exists only where the `server_manager` plugin is active. See [Server Manager § The agent channel](../plugins/server_manager/docs/overview.md#the-agent-channel).
+
 A password change revokes **all** of the user's session keys (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
 
 ### Browser sessions (page JavaScript)

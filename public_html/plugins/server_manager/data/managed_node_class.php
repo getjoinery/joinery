@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.6 - agent channel: node-generated public key (a verifier, never a credential), one-time
+ *                pairing token hash + expiry, paired/last-poll stamps, per-node cutover flag
  * @version 1.5 - mgn_backup_shelf_checked_time / mgn_backup_shelf_newest_time: the bucket's own
  *                testimony about the fleet-backup shelf, so a node claiming success while nothing
  *                lands is catchable
@@ -120,6 +122,40 @@ class ManagedNode extends SystemBase {
 		// dot / heartbeat machinery; these columns carry the WireGuard peering the
 		// main box dials out to. mgn_is_relay marks the node a relay (no Joinery app
 		// runs on it, so the Joinery-app health checks are skipped for it).
+		// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
+		//
+		// The node's agent polls this plane outbound over HTTPS and takes
+		// primitive jobs. What is stored here is a VERIFIER and nothing else:
+		// mgn_agent_public_key is the public half of a keypair the node
+		// generated and kept, so this plane holds nothing that could
+		// authenticate AS the node. Compromising this plane yields no
+		// credential to steal — which is the whole point of the migration.
+		'mgn_agent_public_key'    => array('type'=>'varchar(64)'),
+
+		// The one-time pairing token, stored as a sha256 hex digest, cleared
+		// the moment it is spent. This is the one plane-held credential in the
+		// channel: for the length of its TTL, whoever reads it can pair AS this
+		// node before the real node does. Bounded by being single-use,
+		// short-lived and unguessable — and by mgn_agent_paired_time being
+		// shown in the UI, so a pairing nobody expected is seen rather than
+		// silent. Stated plainly because the promise boundary (§3.7) is only
+		// worth anything if its remaining cells are written down.
+		'mgn_agent_pair_token_hash'    => array('type'=>'varchar(64)'),
+		'mgn_agent_pair_token_expires' => array('type'=>'timestamp(6)'),
+		'mgn_agent_paired_time'        => array('type'=>'timestamp(6)'),
+
+		// Liveness, centrally visible. The agent's own heartbeat row lives in
+		// each site's OWN database and stays there; a poll against this plane
+		// is the only liveness signal this plane can see for itself, so the
+		// last poll IS the heartbeat (§3.1).
+		'mgn_agent_last_poll'     => array('type'=>'timestamp(6)'),
+		'mgn_agent_version'       => array('type'=>'varchar(20)'),
+
+		// Per-node cutover flag (§6, Phase 3). Off until this node's agent has
+		// been proven on the channel; while off, operations route to api/ssh
+		// exactly as before.
+		'mgn_agent_channel_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
+
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_wg_public_key'       => array('type'=>'varchar(255)'),
 		'mgn_wg_endpoint'         => array('type'=>'varchar(255)'),

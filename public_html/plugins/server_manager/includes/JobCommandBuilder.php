@@ -54,6 +54,9 @@
  * @version 1.15 - retention rm rides the heredoc redirect line (a chain after the terminator is
  *                 swallowed into the uploader's stdin); credentials are placeholder-only (no inline
  *                 fallback); Cloudflare SSL requires a routing probe; one container-port allocator
+ * @version 1.15 - the primitive transport joins api/ssh in transports_for(): build_<op>_primitive,
+ *                 has_agent_channel()/has_primitive() gating on pairing + the per-node cutover flag,
+ *                 and check_status as the first crossed operation
  * @version 1.14 - fingerprint step hashes the key VALUE (matches escrow) + quote-robust for the agent
  * @version 1.13 - P-18: allocate + record + pass the container published port to install.sh (mgn_port no longer diverges)
  * @version 1.12 - is_cloudflare_domain made public (ProvisionPendingSsl P-6 dispatch)
@@ -85,10 +88,18 @@ class JobCommandBuilder {
 
 	/**
 	 * Which transports does this operation have an implementation for?
-	 * Looks for build_<op>_api and build_<op>_ssh methods.
+	 * Looks for build_<op>_primitive, build_<op>_api and build_<op>_ssh methods.
+	 *
+	 * Order is preference order. The primitive transport comes first because it
+	 * is the one where the node decides what it will run
+	 * (specs/agent_on_node_architecture.md §3.1); api and ssh remain until each
+	 * operation has crossed and each node's cutover flag is on.
 	 */
 	public static function transports_for($operation) {
 		$transports = [];
+		if (method_exists(static::class, "build_{$operation}_primitive")) {
+			$transports[] = 'primitive';
+		}
 		if (method_exists(static::class, "build_{$operation}_api")) {
 			$transports[] = 'api';
 		}
@@ -99,12 +110,35 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Has this node's agent paired with this plane and been cut over?
+	 *
+	 * Both halves matter. Paired means the plane holds the node's verifier;
+	 * cut over means an operator has decided this node's work should route to
+	 * its agent. A paired node with the flag off keeps polling (which is what
+	 * keeps its liveness visible) and keeps taking its work over api/ssh.
+	 */
+	public static function has_agent_channel($node) {
+		return !empty($node->get('mgn_agent_public_key'))
+			&& !empty($node->get('mgn_agent_channel_enabled'));
+	}
+
+	/**
+	 * Routing decision at job-build time: should this (node, operation) pair
+	 * run as a primitive job on the node's own agent?
+	 */
+	public static function has_primitive($node, $operation) {
+		return self::has_agent_channel($node)
+			&& method_exists(static::class, "build_{$operation}_primitive");
+	}
+
+	/**
 	 * Optimistic: do we have at least one viable (transport, credentials) pair for this
 	 * node + operation? Uses has_api_creds (config check, no probe) so the UI isn't
 	 * gray-out-flickering on a transient endpoint hiccup.
 	 */
 	public static function can_run($node, $operation) {
 		$op_transports = self::transports_for($operation);
+		if (in_array('primitive', $op_transports) && self::has_agent_channel($node)) return true;
 		if (in_array('api', $op_transports) && self::has_api_creds($node)) return true;
 		if (in_array('ssh', $op_transports) && self::has_ssh($node)) return true;
 		return false;
@@ -120,6 +154,11 @@ class JobCommandBuilder {
 			return "Operation '{$operation}' has no implementation on the control plane.";
 		}
 		$parts = [];
+		if (in_array('primitive', $op_transports) && !self::has_agent_channel($node)) {
+			$parts[] = empty($node->get('mgn_agent_public_key'))
+				? 'no agent has paired with this plane'
+				: 'the agent channel is not switched on for this node';
+		}
 		if (in_array('api', $op_transports) && !self::has_api_creds($node)) {
 			$parts[] = 'no API credentials are configured';
 		}
@@ -469,6 +508,9 @@ class JobCommandBuilder {
 	 * SSH steps that have always been the default.
 	 */
 	public static function build_check_status($node) {
+		if (self::has_primitive($node, 'check_status')) {
+			return self::build_check_status_primitive($node);
+		}
 		if (self::has_api($node, 'check_status')) {
 			return self::build_check_status_api($node);
 		}
@@ -486,6 +528,22 @@ class JobCommandBuilder {
 	 * is parsed by JobResultProcessor::process_check_status into the same
 	 * mgn_last_status_data shape the SSH path produces.
 	 */
+	/**
+	 * Primitive path: {primitive: check_status, params: {}} — a NAME the node
+	 * looks up in its own compiled-in vocabulary, not an instruction this plane
+	 * composed. The node collects disk, memory, load, uptime and its own
+	 * database facts without running a command at all, and returns the same key
+	 * set the management API's stats endpoint returns, so the two transports
+	 * leave mgn_last_status_data identical and JobResultProcessor needs to know
+	 * nothing about which one ran.
+	 *
+	 * Returned as an envelope rather than a step list; ManagementJob::
+	 * createPrimitiveJob is what stores it.
+	 */
+	public static function build_check_status_primitive($node) {
+		return ['primitive' => 'check_status', 'params' => []];
+	}
+
 	public static function build_check_status_api($node) {
 		return [
 			['type' => 'api', 'label' => 'Fetch node stats', 'method' => 'GET', 'endpoint' => 'stats', 'timeout' => 30],
