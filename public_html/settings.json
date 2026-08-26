@@ -2359,6 +2359,18 @@
       }
     },
     {
+      "name": "agent_join_request",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff from the Management Node admin page to this machine's root agent: {url, requested_time}. The web tier writes it when the admin asks to connect to a management node; the agent consumes it, performs the node-initiated join (no secret — the agent generates its own keypair), and clears it. Never holds a credential."
+    },
+    {
+      "name": "agent_join_state",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON status the root agent writes back while joining a management node: {status, url, fingerprint, node_id, node_slug, error, updated_time}. The Management Node admin page renders it — including the key fingerprint the operator compares against the management node's approval screen."
+    },
+    {
       "name": "api_upload_rate_limit_requests",
       "default": "10000",
       "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",

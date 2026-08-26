@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.2 - enrollment is a node-initiated join (Phase 1.5, A6): pending requests with
+ *                fingerprint-comparison approval replace the pairing token UI
  * @version 1.1 - agent channel: pairing, the per-node cutover flag, and what the plane actually holds
  */
 
@@ -66,50 +68,82 @@
 	}
 	$page->end_box();
 
-	// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
+	// ── The agent channel (specs/agent_on_node_architecture.md §3.1, Phase 1.5) ──
 	$agent_paired      = (bool)$node->get('mgn_agent_public_key');
 	$agent_channel_on  = (bool)$node->get('mgn_agent_channel_enabled');
 	$agent_last_poll   = $node->get_local('mgn_agent_last_poll');
 	$agent_paired_time = $node->get_local('mgn_agent_paired_time');
-	$pair_pending      = (bool)$node->get('mgn_agent_pair_token_hash');
 
 	$page->begin_box(['title' => 'Agent Channel']);
-	echo '<p class="text-muted small mb-3">The node\'s own agent polls this control plane over an outbound HTTPS connection and takes work from it. '
-	   . 'What it will run is compiled into the agent — a job names an operation, never a command — and the node refuses anything outside that list, whatever this plane asks for. '
-	   . 'This plane holds only the public half of a key the node generated and kept, so there is no credential here that could act on the node.</p>';
+	echo '<p class="text-muted small mb-3">The node\'s own agent polls this management node over an outbound HTTPS connection and takes work from it. '
+	   . 'What it will run is compiled into the agent — a job names an operation, never a command — and the node refuses anything outside that list, whatever this management node asks for. '
+	   . 'This management node holds only the public half of a key the node generated and kept, so there is no credential here that could act on the node.</p>';
 
 	if ($agent_paired) {
-		echo '<div class="mb-2"><span class="badge bg-success">Paired</span>';
+		echo '<div class="mb-2"><span class="badge bg-success">Connected</span>';
 		if ($agent_paired_time) {
 			echo ' <span class="text-muted small ms-2">since ' . htmlspecialchars($agent_paired_time) . '</span>';
 		}
 		if ($node->get('mgn_agent_version')) {
 			echo ' <span class="text-muted small ms-2">agent ' . htmlspecialchars($node->get('mgn_agent_version')) . '</span>';
 		}
+		$stored_key = base64_decode((string)$node->get('mgn_agent_public_key'), true);
+		if ($stored_key !== false) {
+			echo ' <span class="text-muted small ms-2">key '
+			   . htmlspecialchars(AgentJoinRequest::display_fingerprint(AgentJoinRequest::fingerprint($stored_key)))
+			   . '</span>';
+		}
 		echo '</div>';
 		echo '<div class="mb-2 text-muted small">Last poll: '
-		   . ($agent_last_poll ? htmlspecialchars($agent_last_poll) : 'never — the agent has not reached this plane since pairing')
-		   . '. A poll is how this plane sees the node is alive; nothing has to reach in.</div>';
-	} elseif ($pair_pending) {
-		echo '<div class="mb-2"><span class="badge bg-warning text-dark">Pairing token outstanding</span>'
-		   . ' <span class="text-muted small ms-2">Issued and not yet used. It expires on its own; issuing another replaces it.</span></div>';
+		   . ($agent_last_poll ? htmlspecialchars($agent_last_poll) : 'never — the agent has not reached this management node since it was connected')
+		   . '. A poll is how this management node sees the node is alive; nothing has to reach in.</div>';
 	} else {
-		echo '<div class="mb-2"><span class="badge bg-secondary">Not paired</span> <span class="text-muted small ms-2">This node\'s work routes over the API and SSH.</span></div>';
-	}
+		echo '<div class="mb-2"><span class="badge bg-secondary">Not connected</span> <span class="text-muted small ms-2">This node\'s work routes over the API and SSH.</span></div>';
 
-	if ($session->get_permission() >= 10) {
-		$fw_pair = $page->getFormWriter('agent_pair_form');
-		$fw_pair->begin_form();
-		$fw_pair->hiddeninput('action', '', ['value' => 'pair_agent']);
-		$fw_pair->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-		$fw_pair->submitbutton('btn_pair_agent',
-			$agent_paired ? 'Issue a new pairing token' : 'Issue pairing token',
-			['class' => 'btn btn-sm btn-primary']);
-		$fw_pair->end_form();
-		echo '<p class="text-muted small mt-2">The token is shown once, is good for one hour, and can be used once. '
-		   . 'While it is outstanding it is the only thing on this plane that could pair as this node, which is why it is short-lived and why the pairing above is stamped where you can see it.</p>';
-	} else {
-		echo '<p class="text-muted small">Issuing a pairing token is superadmin-only.</p>';
+		// Enrollment starts ON THE NODE and shares no secret (A6): the node's
+		// admin enters this management node's URL, the node's root agent
+		// generates a keypair and asks to join, and the request appears here.
+		$join_requests = class_exists('AgentJoinRequest') ? AgentJoinRequest::pending() : [];
+		if (empty($join_requests)) {
+			echo '<div class="alert alert-info small mb-2">'
+			   . '<strong>To connect this node\'s agent:</strong> on the node, open '
+			   . '<em>Admin &rarr; System &rarr; Management Node</em> and enter this management node\'s URL: '
+			   . '<code>' . htmlspecialchars(rtrim(LibraryFunctions::get_absolute_url(), '/')) . '</code>. '
+			   . 'The node asks to join — no secret is copied — and its request appears here for approval.</div>';
+		}
+		foreach ($join_requests as $jr) {
+			$fpr = AgentJoinRequest::display_fingerprint((string)$jr->get('ajr_fingerprint'));
+			echo '<div class="alert alert-warning mb-2">';
+			echo '<div><strong>Join request</strong> from <strong>' . htmlspecialchars($jr->get('ajr_claimed_name')) . '</strong>'
+			   . ' <span class="text-muted small">(' . htmlspecialchars((string)$jr->get('ajr_source_ip'))
+			   . ', ' . htmlspecialchars($jr->get_local('ajr_create_time')) . ')</span></div>';
+			echo '<div class="my-2">Key fingerprint: <code style="font-size:1.1em;">' . htmlspecialchars($fpr) . '</code></div>';
+			echo '<div class="small mb-2">Approve <strong>only</strong> if this exactly matches the fingerprint shown on the node\'s own '
+			   . 'Management Node page. The name and address above are claims anyone could make; the fingerprint is the identity.</div>';
+			if ($session->get_permission() >= 10) {
+				$jr_id = (int)$jr->key;
+				echo '<form method="post" action="' . $base_url . '" id="approve_join_' . $jr_id . '" style="display:inline;margin-right:6px;">'
+				   . '<input type="hidden" name="action" value="approve_join">'
+				   . '<input type="hidden" name="ajr_id" value="' . $jr_id . '">'
+				   . SmAdminCsrf::field()
+				   . '<button type="button" class="btn btn-sm btn-primary" onclick="JoineryModal.confirm('
+				   . htmlspecialchars(json_encode('Connect this agent as ' . $node->get('mgn_name')
+					. '? Confirm the fingerprint ' . $fpr . ' matches the node\'s own page first.'), ENT_QUOTES)
+				   . ', function(){ document.getElementById(\'approve_join_' . $jr_id . '\').submit(); })">Approve</button>'
+				   . '</form>';
+				echo '<form method="post" action="' . $base_url . '" id="reject_join_' . $jr_id . '" style="display:inline;">'
+				   . '<input type="hidden" name="action" value="reject_join">'
+				   . '<input type="hidden" name="ajr_id" value="' . $jr_id . '">'
+				   . SmAdminCsrf::field()
+				   . '<button type="button" class="btn btn-sm btn-outline-danger" onclick="JoineryModal.confirm('
+				   . htmlspecialchars(json_encode('Reject this join request?'), ENT_QUOTES)
+				   . ', function(){ document.getElementById(\'reject_join_' . $jr_id . '\').submit(); })">Reject</button>'
+				   . '</form>';
+			} else {
+				echo '<div class="text-muted small">Approving a join request is superadmin-only.</div>';
+			}
+			echo '</div>';
+		}
 	}
 
 	if ($agent_paired) {
@@ -125,7 +159,7 @@
 		echo '<p class="text-muted small">Off until the agent has been proven here. Operations that have not crossed yet keep using the API and SSH either way.</p>';
 
 		echo '<button type="button" class="btn btn-sm btn-outline-danger" '
-		   . 'onclick="JoineryModal.confirm(\'Forget this node\\\'s agent key? Its work goes back to the API and SSH, and re-pairing needs a new token.\', function(){ document.getElementById(\'agent_unpair_form\').submit(); })">Unpair</button>';
+		   . 'onclick="JoineryModal.confirm(\'Forget this node\\\'s agent key? Its work goes back to the API and SSH, and reconnecting starts over from the node\\\'s Management Node page.\', function(){ document.getElementById(\'agent_unpair_form\').submit(); })">Disconnect</button>';
 
 		$fw_unpair = $page->getFormWriter('agent_unpair_form');
 		$fw_unpair->begin_form();

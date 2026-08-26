@@ -9,6 +9,7 @@
  * includes/, not views/, so a partial is never reachable as a standalone URL
  * that would bypass this file's node loading and check_permission(10).
  *
+ * @version 2.3 - drop the local flash-message block; admin_header already renders them (they showed twice)
  * @version 2.2 - Console tab (ad-hoc command on the node, per-node opt-in)
  * @version 2.1
  */
@@ -108,27 +109,8 @@ echo '<script>var smNodeName = '
 	. json_encode($node->get('mgn_name'), JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_QUOT | JSON_HEX_AMP)
 	. ';</script>' . "\n";
 
-// Display messages
-$display_messages = $session->get_messages('/admin/server_manager');
-if (!empty($display_messages)) {
-	foreach ($display_messages as $msg) {
-		$alert_class = 'alert-info';
-		if ($msg->display_type == DisplayMessage::MESSAGE_ERROR) {
-			$alert_class = 'alert-danger';
-		} elseif ($msg->display_type == DisplayMessage::MESSAGE_ANNOUNCEMENT) {
-			$alert_class = 'alert-success';
-		}
-		echo '<div class="alert ' . $alert_class . '" role="alert">';
-		if ($msg->message_title) {
-			echo '<strong>' . htmlspecialchars($msg->message_title) . ':</strong> ';
-		}
-		echo htmlspecialchars($msg->message);
-		echo '<button type="button" class="alert-close" aria-label="Close">&times;</button></div>';
-	}
-	// Rendered above, so these are spent; the footer drops them.
-	$session->mark_shown($display_messages);
-	$session->clear_clearable_messages();
-}
+// Flash messages are rendered by admin_header (AdminPage::renderFlashMessages)
+// — rendering them here as well showed every one twice.
 
 // ── Tab navigation ──
 ?>

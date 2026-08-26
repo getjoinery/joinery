@@ -29,6 +29,9 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.1 - enrollment is the node-initiated join (Phase 1.5, A6): the fingerprint contract
+ *                is pinned against the agent's join_test.go, approval-binds-the-key is exercised,
+ *                and the pairing-token checks are gone with the token
  * @version 1.0
  */
 
@@ -51,6 +54,7 @@ function agent_channel_node($slug) {
 }
 
 $made_nodes = [];
+$made_join_requests = [];
 
 // Anything a previous crashed run left behind. A test that cannot clean up
 // after its own failure eventually stops being runnable.
@@ -58,42 +62,79 @@ foreach ($db->query("SELECT mgn_id FROM mgn_managed_nodes WHERE mgn_slug LIKE 'a
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$stale_id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$stale_id]);
 }
+$db->exec("DELETE FROM ajr_agent_join_requests WHERE ajr_claimed_name LIKE 'agtest-%'");
 
 $node = agent_channel_node('agtest-' . substr(bin2hex(random_bytes(4)), 0, 8));
 $made_nodes[] = $node->key;
 
 // ---------------------------------------------------------------------------
-section('The plane stores a verifier, not a credential');
+section('Enrollment shares no secret (Phase 1.5, A6)');
 
-$token = AgentChannelEndpoint::issuePairingToken($node);
-$node->load();
+// THE FINGERPRINT CONTRACT, pinned. The agent computes the same value in
+// Fingerprint() and its suite pins this exact vector (join_test.go) — the two
+// panels showing the same fingerprint for the same key is the entire security
+// of the join, so a drift on either side must fail a suite before it strands
+// an enrollment at mismatched fingerprints.
+// Vector: the 32 bytes 0x00..0x1f → first 16 hex chars of their SHA-256.
+$vector = '';
+for ($i = 0; $i < 32; $i++) { $vector .= chr($i); }
+check(AgentJoinRequest::fingerprint($vector) === '630dcd2966c43366',
+	'The fingerprint contract is pinned identically to the agent (fix a drift, never the pin)',
+	AgentJoinRequest::fingerprint($vector));
+check(AgentJoinRequest::display_fingerprint('630dcd2966c43366') === '630d cd29 66c4 3366',
+	'The display grouping is 4x4 — what a human actually compares');
 
-check(strlen($token) >= 40, 'A pairing token is long enough to be unguessable',
-	'length ' . strlen($token));
-check($node->get('mgn_agent_pair_token_hash') === hash('sha256', $token),
-	'Only the token DIGEST is stored');
+// There is deliberately no column anywhere for a private key or a token: the
+// join carries a public key, and approval binds it. Nothing stored on this
+// side could enroll anyone.
+check(!array_key_exists('mgn_agent_private_key', ManagedNode::$field_specifications),
+	'There is no column on a node for an agent PRIVATE key — this side cannot hold one');
+check(!array_key_exists('mgn_agent_pair_token_hash', ManagedNode::$field_specifications),
+	'There is no pairing-token column — enrollment has no plane-held credential at all');
 
-$stored = json_encode($node->export_as_array());
-check(strpos($stored, $token) === false,
-	'The token plaintext appears nowhere on the stored node row');
-check(!empty($node->get('mgn_agent_pair_token_expires')),
-	'A pairing token carries an expiry — the window it is a plane-held credential for is bounded');
-
-// Pairing stores the node's PUBLIC half. There is deliberately no column for a
-// private key, so there is nothing here an attacker could act with.
 $keypair = sodium_crypto_sign_keypair();
 $public  = sodium_crypto_sign_publickey($keypair);
 $secret  = sodium_crypto_sign_secretkey($keypair);
-$node->set('mgn_agent_public_key', base64_encode($public));
-$node->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
-$node->set('mgn_agent_pair_token_hash', null);
-$node->save();
-$node->load();
 
-check(!array_key_exists('mgn_agent_private_key', ManagedNode::$field_specifications),
-	'There is no column on a node for an agent PRIVATE key — the plane cannot hold one');
-check(empty($node->get('mgn_agent_pair_token_hash')),
-	'Pairing burns the token — one use, and the window closes with it');
+// The join request row: what the endpoint stores while a human decides.
+$jr = new AgentJoinRequest();
+$jr->set('ajr_claimed_name', 'agtest-joiner');
+$jr->set('ajr_public_key', base64_encode($public));
+$jr->set('ajr_fingerprint', AgentJoinRequest::fingerprint($public));
+$jr->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+$jr->save();
+$made_join_requests[] = $jr->key;
+
+check(AgentJoinRequest::find_by_public_key(base64_encode($public)) !== null,
+	'A join request is found by its public key — the one thing only the asking agent plausibly knows in full');
+check($jr->is_expired() === false, 'A fresh request is not expired');
+
+$stale = new AgentJoinRequest($jr->key, TRUE);
+$stale->set('ajr_create_time', gmdate('Y-m-d H:i:s', time() - AgentJoinRequest::TTL_SECONDS - 60));
+$stale->save();
+$stale->load();
+check($stale->is_expired() === true,
+	'A request outlives nobody: past the TTL it is expired, not approvable');
+$stale->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
+$stale->save();
+
+// Approval IS enrollment: the binding writes the public key onto the node and
+// stamps when. This is the exact moment the trust decision lands.
+AgentChannelEndpoint::approveJoin($jr, $node);
+$node->load();
+$jr->load();
+
+check($node->get('mgn_agent_public_key') === base64_encode($public),
+	'Approval binds the requesting key to the node');
+check(!empty($node->get('mgn_agent_paired_time')),
+	'Approval stamps when — an enrollment nobody expected is seen rather than silent');
+check($jr->get('ajr_status') === AgentJoinRequest::STATUS_APPROVED
+	&& (int)$jr->get('ajr_mgn_node_id') === (int)$node->key,
+	'The request records which node adopted it');
+
+$stored = json_encode($node->export_as_array());
+check(strpos($stored, base64_encode(sodium_crypto_sign_secretkey($keypair))) === false,
+	'The private half appears nowhere on the stored node row');
 
 // ---------------------------------------------------------------------------
 section('The canonical signed message matches the agent byte for byte');
@@ -384,7 +425,12 @@ foreach ($made_nodes as $id) {
 	$db->prepare('DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ?')->execute([$id]);
 	$db->prepare('DELETE FROM mgn_managed_nodes WHERE mgn_id = ?')->execute([$id]);
 }
+foreach ($made_join_requests as $id) {
+	$db->prepare('DELETE FROM ajr_agent_join_requests WHERE ajr_id = ?')->execute([$id]);
+}
 $left = (int)$db->query('SELECT count(*) FROM mgn_managed_nodes WHERE mgn_slug LIKE \'agtest-%\'')->fetchColumn();
 check($left === 0, 'Every node this test created is gone', $left . ' left');
+$left_jr = (int)$db->query('SELECT count(*) FROM ajr_agent_join_requests WHERE ajr_claimed_name LIKE \'agtest-%\'')->fetchColumn();
+check($left_jr === 0, 'Every join request this test created is gone', $left_jr . ' left');
 
 harness_finish();

@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.7 - pairing-token columns removed: enrollment is a node-initiated join with no shared
+ *                secret (Phase 1.5, A6); pending requests live in ajr_agent_join_requests
  * @version 1.6 - agent channel: node-generated public key (a verifier, never a credential), one-time
  *                pairing token hash + expiry, paired/last-poll stamps, per-node cutover flag
  * @version 1.5 - mgn_backup_shelf_checked_time / mgn_backup_shelf_newest_time: the bucket's own
@@ -132,16 +134,11 @@ class ManagedNode extends SystemBase {
 		// credential to steal — which is the whole point of the migration.
 		'mgn_agent_public_key'    => array('type'=>'varchar(64)'),
 
-		// The one-time pairing token, stored as a sha256 hex digest, cleared
-		// the moment it is spent. This is the one plane-held credential in the
-		// channel: for the length of its TTL, whoever reads it can pair AS this
-		// node before the real node does. Bounded by being single-use,
-		// short-lived and unguessable — and by mgn_agent_paired_time being
-		// shown in the UI, so a pairing nobody expected is seen rather than
-		// silent. Stated plainly because the promise boundary (§3.7) is only
-		// worth anything if its remaining cells are written down.
-		'mgn_agent_pair_token_hash'    => array('type'=>'varchar(64)'),
-		'mgn_agent_pair_token_expires' => array('type'=>'timestamp(6)'),
+		// Enrollment shares no secret (Phase 1.5, A6): the node initiates a
+		// join carrying only its public key, and a human approves it after
+		// comparing fingerprints. The pending requests live in
+		// ajr_agent_join_requests; the moment of approval is what sets the
+		// key above and the time below.
 		'mgn_agent_paired_time'        => array('type'=>'timestamp(6)'),
 
 		// Liveness, centrally visible. The agent's own heartbeat row lives in

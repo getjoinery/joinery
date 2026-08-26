@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.11 - enrollment is a node-initiated join (Phase 1.5, A6): approve_join/reject_join
+ *                 replace pair_agent; approval after a human fingerprint comparison IS the binding
  * @version 1.10 - agent channel actions: pair_agent (one-time token, shown once), unpair_agent,
  *                 and set_agent_channel (the per-node cutover flag)
  * @version 1.9 - a backup is refused for a node with no verified recovery key of its own, named as
@@ -71,7 +73,8 @@ class NodeDetailActions {
 		'set_reverse_dns'          => 'overview',
 		'run_command'              => 'console',
 		'save_api_credential'      => 'api_keys',
-		'pair_agent'               => 'api_keys',
+		'approve_join'             => 'api_keys',
+		'reject_join'              => 'api_keys',
 		'unpair_agent'             => 'api_keys',
 		'set_agent_channel'        => 'api_keys',
 		'clear_api_credential'     => 'api_keys',
@@ -482,27 +485,55 @@ class NodeDetailActions {
 
 			// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
 
-			case 'pair_agent': {
-				// Issuing a pairing token is superadmin-only. For its TTL the
-				// token is the one plane-held credential in this channel:
-				// whoever reads it can pair AS this node before the real node
-				// does. It is single-use, short-lived and unguessable, and the
-				// resulting pairing is stamped visibly below — so a pairing
-				// nobody expected is seen rather than silent.
+			case 'approve_join': {
+				// Approval IS enrollment (Phase 1.5, A6): no secret was ever
+				// shared, so the human comparing the fingerprint against the
+				// node's own panel is the entire trust decision. Superadmin-only,
+				// and the binding is stamped visibly below so an approval nobody
+				// expected is seen rather than silent.
 				if ($session->get_permission() < 10) {
-					self::fail($session, $page_regex, 'Pairing a node agent is superadmin-only.');
+					self::fail($session, $page_regex, 'Approving an agent join request is superadmin-only.');
+					return $base_url . '&tab=api_keys';
+				}
+				$request = self::load_join_request((int)($_POST['ajr_id'] ?? 0), $session, $page_regex);
+				if (!$request) {
+					return $base_url . '&tab=api_keys';
+				}
+				if ($request->is_expired()) {
+					self::fail($session, $page_regex,
+						'That join request has expired. Send it again from the node\'s Management Node page.');
+					return $base_url . '&tab=api_keys';
+				}
+				if ($node->get('mgn_agent_public_key')) {
+					self::fail($session, $page_regex,
+						'This node already has a connected agent. Disconnect it first if you mean to replace it.');
 					return $base_url . '&tab=api_keys';
 				}
 				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentChannelEndpoint.php'));
-				$token = AgentChannelEndpoint::issuePairingToken($node);
-
-				// Shown once, here, and never stored in plaintext anywhere.
+				AgentChannelEndpoint::approveJoin($request, $node);
 				$session->save_message(new DisplayMessage(
-					'Pairing token issued. It is valid for one hour and can be used once — '
-					. 'this is the only time it is shown. On the node, add these two lines to '
-					. '/etc/joinery-agent/joinery-agent.env and restart the agent:'
-					. "\n\nJOINERY_PLANE_URL=" . rtrim(LibraryFunctions::get_absolute_url(), '/')
-					. "\nJOINERY_PAIRING_TOKEN=" . $token,
+					'Agent connected. ' . $request->get('ajr_claimed_name') . ' (key '
+					. AgentJoinRequest::display_fingerprint($request->get('ajr_fingerprint'))
+					. ') is now this node\'s agent; it will pick the approval up on its next check.',
+					'Success', $page_regex,
+					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
+				));
+				return $base_url . '&tab=api_keys';
+			}
+
+			case 'reject_join': {
+				if ($session->get_permission() < 10) {
+					self::fail($session, $page_regex, 'Rejecting an agent join request is superadmin-only.');
+					return $base_url . '&tab=api_keys';
+				}
+				$request = self::load_join_request((int)($_POST['ajr_id'] ?? 0), $session, $page_regex);
+				if (!$request) {
+					return $base_url . '&tab=api_keys';
+				}
+				$request->set('ajr_status', AgentJoinRequest::STATUS_REJECTED);
+				$request->save();
+				$session->save_message(new DisplayMessage(
+					'Join request rejected. The node will be told on its next check and can send a fresh request.',
 					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
@@ -512,15 +543,14 @@ class NodeDetailActions {
 			case 'unpair_agent': {
 				// Forgetting the node's public key ends the channel from this
 				// side. The node keeps its private key and will simply be told
-				// it has not paired; re-pairing needs a fresh token.
+				// it has not joined; reconnecting starts over from the node's
+				// Management Node page.
 				$node->set('mgn_agent_public_key', null);
 				$node->set('mgn_agent_paired_time', null);
-				$node->set('mgn_agent_pair_token_hash', null);
-				$node->set('mgn_agent_pair_token_expires', null);
 				$node->set('mgn_agent_channel_enabled', false);
 				$node->save();
 				$session->save_message(new DisplayMessage(
-					'Agent unpaired. This node\'s work routes over the API and SSH again.',
+					'Agent disconnected. This node\'s work routes over the API and SSH again.',
 					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
@@ -745,5 +775,25 @@ class NodeDetailActions {
 
 	private static function jobUrl($job): string {
 		return '/admin/server_manager/job_detail?job_id=' . $job->key;
+	}
+
+	/** Load a live, still-pending join request, or fail with a message and return null. */
+	private static function load_join_request(int $ajr_id, $session, $page_regex) {
+		if ($ajr_id <= 0) {
+			self::fail($session, $page_regex, 'No join request was named.');
+			return null;
+		}
+		try {
+			$request = new AgentJoinRequest($ajr_id, TRUE);
+		} catch (Exception $e) {
+			self::fail($session, $page_regex, 'That join request no longer exists.');
+			return null;
+		}
+		if ($request->get('ajr_delete_time')
+			|| $request->get('ajr_status') !== AgentJoinRequest::STATUS_PENDING) {
+			self::fail($session, $page_regex, 'That join request has already been decided.');
+			return null;
+		}
+		return $request;
 	}
 }

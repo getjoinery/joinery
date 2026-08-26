@@ -6,11 +6,17 @@
  * job at a time, and posts the result back (specs/agent_on_node_architecture.md
  * §3.1, component D).
  *
- * Three endpoints, all POST, all under /api/v1/agent/:
- *   pair    one-time enrollment; the node hands over the PUBLIC half of a
- *           keypair it generated and kept
- *   claim   signed; returns at most one job addressed to the signing node
- *   result  signed; the terminal report for one job
+ * Four endpoints, all POST, all under /api/v1/agent/:
+ *   join         node-initiated enrollment (Phase 1.5, decision A6): the node
+ *                hands over the PUBLIC half of a keypair it generated and
+ *                kept, plus a claimed name. NO secret exists in this exchange
+ *                — a human approves the request after comparing the key
+ *                fingerprint shown here against the node's own panel.
+ *   join_status  the node asking where its request stands (keyed by its own
+ *                public key — unauthenticated, because until approval there
+ *                is no identity to authenticate)
+ *   claim        signed; returns at most one job addressed to the signing node
+ *   result       signed; the terminal report for one job
  *
  * These deliberately do NOT live under /api/v1/management/*. That family runs
  * the other way — this plane calling in to a node's web tier — and §3.5.4 pins
@@ -25,6 +31,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.2 - enrollment is a node-initiated join with no shared secret (Phase 1.5, A6):
+ *                join + join_status replace pair, and the pairing-token machinery is deleted
  * @version 1.1 - the node's outcome is recorded verbatim in mjb_agent_outcome, so a refusal is
  *                countable without matching error-message text
  * @version 1.0
@@ -61,9 +69,6 @@ class AgentChannelEndpoint {
 	/** Suggested poll cadence. The agent clamps it to its own compiled range. */
 	const SUGGESTED_POLL_INTERVAL = 15;
 
-	/** Pairing tokens are short-lived on purpose — see the honesty note below. */
-	const PAIRING_TOKEN_TTL_SECONDS = 3600;
-
 	/**
 	 * Dispatch a /api/v1/agent/* request. Always exits.
 	 */
@@ -76,15 +81,18 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['pair', 'claim', 'result'], true)) {
+		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result'], true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
 		$body = self::read_body();
 
 		switch ($endpoint) {
-			case 'pair':
-				self::handle_pair($body);
+			case 'join':
+				self::handle_join($body);
+				break;
+			case 'join_status':
+				self::handle_join_status($body);
 				break;
 			case 'claim':
 				self::handle_claim($body);
@@ -238,36 +246,26 @@ class AgentChannelEndpoint {
 	}
 
 	// ==================================================================
-	// Pairing
+	// Enrollment: node-initiated join (Phase 1.5, decision A6)
 	// ==================================================================
 
 	/**
-	 * Mint a one-time pairing token for a node. Returns the plaintext, which is
-	 * the only time it exists on this plane — only its digest is stored.
+	 * Take in a join request. Unauthenticated by nature — the whole point is
+	 * that no credential exists yet — so everything here is attacker-supplied
+	 * and nothing here grants anything: a pending row only becomes an identity
+	 * when a superadmin approves it after comparing fingerprints across the
+	 * two panels. The endpoint is bounded three ways: the agent-channel rate
+	 * bucket, the request TTL, and a hard ceiling on simultaneously pending
+	 * rows.
 	 *
-	 * THE HONEST CELL IN THE PROMISE BOUNDARY: for the length of its TTL this
-	 * token IS a plane-held credential, and whoever reads it can pair AS this
-	 * node before the real node does. It is bounded by being single-use,
-	 * short-lived and unguessable, and by the pairing being loudly visible
-	 * afterwards — mgn_agent_paired_time is shown on the node page, so a
-	 * pairing nobody expected is seen rather than silent. It is not bounded by
-	 * anything else, and that is written down here rather than rounded off.
+	 * Repeating a request with the same public key is idempotent — the agent
+	 * retries while it waits, and each retry finds its own row.
 	 */
-	public static function issuePairingToken($node) {
-		$token = rtrim(strtr(base64_encode(random_bytes(32)), '+/', '-_'), '=');
-		$node->set('mgn_agent_pair_token_hash', hash('sha256', $token));
-		$node->set('mgn_agent_pair_token_expires',
-			gmdate('Y-m-d H:i:s', time() + self::PAIRING_TOKEN_TTL_SECONDS));
-		$node->save();
-		return $token;
-	}
-
-	private static function handle_pair($body) {
+	private static function handle_join($body) {
 		$in = self::validate($body, [
-			'pairing_token'    => ['type' => 'string', 'required' => true, 'max' => 128],
+			'claimed_name'     => ['type' => 'string', 'required' => true, 'max' => 255],
 			'agent_public_key' => ['type' => 'string', 'required' => true, 'max' => 64],
 			'agent_version'    => ['type' => 'string', 'max' => 20],
-			'hostname'         => ['type' => 'string', 'max' => 255],
 		]);
 
 		$public_key = base64_decode($in['agent_public_key'], true);
@@ -275,48 +273,97 @@ class AgentChannelEndpoint {
 			api_error('The agent public key is not a valid Ed25519 public key.', 'ValidationError', 400);
 		}
 
-		$digest = hash('sha256', $in['pairing_token']);
-		$db = DbConnector::get_instance()->get_db_link();
-		$q = $db->prepare(
-			"SELECT mgn_id, mgn_agent_pair_token_hash FROM mgn_managed_nodes
-			 WHERE mgn_agent_pair_token_hash = ? AND mgn_delete_time IS NULL LIMIT 1"
-		);
-		$q->execute([$digest]);
-		$row = $q->fetch(PDO::FETCH_ASSOC);
-
-		// The index lookup above found the row; hash_equals is what ACCEPTS it.
-		// Comparing a secret-derived value with === (or leaving SQL's compare as
-		// the only check) is the habit worth not having, even where a 256-bit
-		// random token makes a timing oracle impractical.
-		if (!$row || !hash_equals((string)$row['mgn_agent_pair_token_hash'], $digest)) {
-			api_error('That pairing token is not valid. Issue a new one from the node page.',
-				'AuthenticationError', 401);
+		$existing = AgentJoinRequest::find_by_public_key($in['agent_public_key']);
+		if ($existing) {
+			if ($existing->get('ajr_status') === AgentJoinRequest::STATUS_PENDING && $existing->is_expired()) {
+				// A retry renews its own expired request — same key, same row,
+				// fresh clock. The human never sees two rows for one node.
+				$existing->set('ajr_create_time', gmdate('Y-m-d H:i:s'));
+				$existing->set('ajr_claimed_name', $in['claimed_name']);
+				$existing->save();
+			}
+			api_success(self::join_status_payload($existing), '', 200);
 		}
 
-		$node = new ManagedNode($row['mgn_id'], TRUE);
-
-		$expires = $node->get('mgn_agent_pair_token_expires');
-		if (!$expires || $expires < gmdate('Y-m-d H:i:s')) {
-			api_error('That pairing token has expired. Issue a new one from the node page.',
-				'AuthenticationError', 401);
+		if (AgentJoinRequest::pending_count() >= AgentJoinRequest::MAX_PENDING) {
+			api_error('This management node already has the maximum number of join requests waiting. '
+				. 'Approve or reject some before sending another.', 'ActionError', 429);
 		}
 
-		$node->set('mgn_agent_public_key', $in['agent_public_key']);
+		$request = new AgentJoinRequest();
+		$request->set('ajr_claimed_name', $in['claimed_name']);
+		$request->set('ajr_public_key', $in['agent_public_key']);
+		$request->set('ajr_fingerprint', AgentJoinRequest::fingerprint($public_key));
+		$request->set('ajr_source_ip', substr((string)($_SERVER['REMOTE_ADDR'] ?? ''), 0, 64));
+		$request->set('ajr_agent_version', (string)($in['agent_version'] ?? ''));
+		$request->set('ajr_status', AgentJoinRequest::STATUS_PENDING);
+		$request->save();
+
+		api_success(self::join_status_payload($request), '', 200);
+	}
+
+	/**
+	 * Where does my request stand? Keyed by the requesting agent's own public
+	 * key — the one thing only it plausibly knows in full, and a value that
+	 * grants nothing. The answer is deliberately small: a status, and on
+	 * approval the node identity the agent needs to start polling.
+	 */
+	private static function handle_join_status($body) {
+		$in = self::validate($body, [
+			'agent_public_key' => ['type' => 'string', 'required' => true, 'max' => 64],
+		]);
+
+		$request = AgentJoinRequest::find_by_public_key($in['agent_public_key']);
+		if (!$request) {
+			api_success(['status' => 'unknown'], '', 200);
+		}
+		api_success(self::join_status_payload($request), '', 200);
+	}
+
+	/** The join/join_status response body for one request row. */
+	private static function join_status_payload($request) {
+		$status = (string)$request->get('ajr_status');
+		if ($status === AgentJoinRequest::STATUS_PENDING && $request->is_expired()) {
+			$status = 'expired';
+		}
+		$payload = [
+			'status'      => $status,
+			'fingerprint' => (string)$request->get('ajr_fingerprint'),
+		];
+		if ($status === AgentJoinRequest::STATUS_APPROVED) {
+			$node_id = (int)$request->get('ajr_mgn_node_id');
+			$payload['node_id']       = $node_id;
+			$payload['node_slug']     = '';
+			$payload['poll_interval'] = self::SUGGESTED_POLL_INTERVAL;
+			if ($node_id > 0) {
+				try {
+					$node = new ManagedNode($node_id, TRUE);
+					$payload['node_slug'] = (string)$node->get('mgn_slug');
+				} catch (Exception $e) {
+					// The node row went away after approval; the id still stands.
+				}
+			}
+		}
+		return $payload;
+	}
+
+	/**
+	 * Bind an approved request's public key to a node. Called by the node
+	 * detail action after the human has compared fingerprints — this is the
+	 * moment enrollment actually happens.
+	 */
+	public static function approveJoin($request, $node) {
+		$node->set('mgn_agent_public_key', (string)$request->get('ajr_public_key'));
 		$node->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
-		$node->set('mgn_agent_last_poll', gmdate('Y-m-d H:i:s'));
-		if (!empty($in['agent_version'])) {
-			$node->set('mgn_agent_version', $in['agent_version']);
+		$node->set('mgn_agent_last_poll', null);
+		if ($request->get('ajr_agent_version')) {
+			$node->set('mgn_agent_version', (string)$request->get('ajr_agent_version'));
 		}
-		// Burn the token. One use, and the window closes with it.
-		$node->set('mgn_agent_pair_token_hash', null);
-		$node->set('mgn_agent_pair_token_expires', null);
 		$node->save();
 
-		api_success([
-			'node_id'       => (int)$node->key,
-			'node_slug'     => (string)$node->get('mgn_slug'),
-			'poll_interval' => self::SUGGESTED_POLL_INTERVAL,
-		], 'Paired', 200);
+		$request->set('ajr_status', AgentJoinRequest::STATUS_APPROVED);
+		$request->set('ajr_mgn_node_id', (int)$node->key);
+		$request->save();
 	}
 
 	// ==================================================================
