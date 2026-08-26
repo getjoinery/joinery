@@ -6,7 +6,7 @@
  * job at a time, and posts the result back (specs/agent_on_node_architecture.md
  * §3.1, component D).
  *
- * Four endpoints, all POST, all under /api/v1/agent/:
+ * Five endpoints, all POST, all under /api/v1/agent/:
  *   join         node-initiated enrollment (Phase 1.5, decision A6): the node
  *                hands over the PUBLIC half of a keypair it generated and
  *                kept, plus a claimed name. NO secret exists in this exchange
@@ -17,6 +17,8 @@
  *                is no identity to authenticate)
  *   claim        signed; returns at most one job addressed to the signing node
  *   result       signed; the terminal report for one job
+ *   leave        signed; the node ending the pairing from its own side — the
+ *                same forgetting the plane-side Disconnect performs
  *
  * These deliberately do NOT live under /api/v1/management/*. That family runs
  * the other way — this plane calling in to a node's web tier — and §3.5.4 pins
@@ -31,6 +33,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.4 - leave endpoint: the node ends the pairing from its own side (either side can
+ *                disconnect); forgetAgent() is the one place both endings converge
  * @version 1.3 - a connected agent claims jobs unconditionally: the per-node routing flag is gone
  *                (hard cutover, owner-set) — approving the join is the routing decision
  * @version 1.2 - enrollment is a node-initiated join with no shared secret (Phase 1.5, A6):
@@ -83,7 +87,7 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result'], true)) {
+		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave'], true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
@@ -101,6 +105,9 @@ class AgentChannelEndpoint {
 				break;
 			case 'result':
 				self::handle_result($body);
+				break;
+			case 'leave':
+				self::handle_leave($body);
 				break;
 		}
 		exit;
@@ -643,6 +650,42 @@ class AgentChannelEndpoint {
 		$job->save();
 
 		api_success(['recorded' => true], '', 200);
+	}
+
+	// ==================================================================
+	// Leave
+	// ==================================================================
+
+	/**
+	 * The node ending the pairing from its own side. Signed — only the key
+	 * holder can say goodbye, or anyone could disconnect anyone — and the
+	 * effect is exactly what the plane-side Disconnect does. Leaving is
+	 * unilateral: an agent that cannot reach this endpoint deletes its
+	 * identity anyway, and this plane just sees it go silent until someone
+	 * disconnects the node here too.
+	 */
+	private static function handle_leave($body) {
+		$node = self::authenticate_node('/api/v1/agent/leave', self::body_hash());
+
+		$in = self::validate($body, ['node_id' => ['type' => 'int', 'required' => true]]);
+		if ((int)$in['node_id'] !== (int)$node->key) {
+			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
+		}
+
+		self::forgetAgent($node);
+		api_success(['left' => true], '', 200);
+	}
+
+	/**
+	 * Forget a node's agent: the pairing ends and the node's work routes over
+	 * the API and SSH again. The one place both endings converge — the
+	 * plane-side Disconnect action and the node-initiated leave do exactly
+	 * this, so they cannot drift apart.
+	 */
+	public static function forgetAgent($node) {
+		$node->set('mgn_agent_public_key', null);
+		$node->set('mgn_agent_paired_time', null);
+		$node->save();
 	}
 
 	/** Load a job that is genuinely this node's, genuinely a primitive job, and genuinely running. */

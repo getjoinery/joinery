@@ -12,6 +12,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.1 - disconnect action: the node ends the connection from its own side by recording a
+ *                leave request the agent honours (one signed goodbye, then it deletes its identity)
  * @version 1.0
  */
 function admin_management_node_logic(array $input): LogicResult {
@@ -47,16 +49,35 @@ function admin_management_node_logic(array $input): LogicResult {
 		return LogicResult::redirect('/admin/admin_management_node?cancelled=1');
 	}
 
+	// Ending the connection is the same credential-free handoff as starting
+	// it: the web tier records only that the admin asked. The agent finishes
+	// any job it is running, sends one signed goodbye so the management node
+	// forgets this machine's key immediately, then deletes its own identity —
+	// and does all of that whether or not the management node is reachable.
+	if (isset($input['action']) && $input['action'] === 'disconnect') {
+		Setting::put('agent_leave_request', json_encode([
+			'requested_time' => gmdate('Y-m-d H:i:s'),
+		]));
+		return LogicResult::redirect('/admin/admin_management_node');
+	}
+
+	if (isset($input['action']) && $input['action'] === 'cancel_disconnect') {
+		Setting::put('agent_leave_request', '');
+		return LogicResult::redirect('/admin/admin_management_node');
+	}
+
 	$request = json_decode((string)$settings->get_setting('agent_join_request'), true);
 	$state   = json_decode((string)$settings->get_setting('agent_join_state'), true);
+	$leave   = json_decode((string)$settings->get_setting('agent_leave_request'), true);
 
 	return LogicResult::render([
-		'session'   => $session,
-		'request'   => is_array($request) ? $request : null,
-		'state'     => is_array($state) ? $state : null,
-		'error'     => isset($input['error']) ? (string)$input['error'] : '',
-		'requested' => !empty($input['requested']),
-		'cancelled' => !empty($input['cancelled']),
+		'session'       => $session,
+		'request'       => is_array($request) ? $request : null,
+		'state'         => is_array($state) ? $state : null,
+		'leave_request' => is_array($leave) ? $leave : null,
+		'error'         => isset($input['error']) ? (string)$input['error'] : '',
+		'requested'     => !empty($input['requested']),
+		'cancelled'     => !empty($input['cancelled']),
 	]);
 }
 

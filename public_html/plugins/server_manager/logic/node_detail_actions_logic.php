@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.13 - unpair_agent converges on AgentChannelEndpoint::forgetAgent(), the same forgetting
+ *                 the node-initiated leave endpoint performs
  * @version 1.12 - set_agent_channel removed: a connected agent is routed to unconditionally
  *                 (hard cutover, owner-set); approving the join is the routing decision
  * @version 1.11 - enrollment is a node-initiated join (Phase 1.5, A6): approve_join/reject_join
@@ -546,9 +548,7 @@ class NodeDetailActions {
 				// side. The node keeps its private key and will simply be told
 				// it has not joined; reconnecting starts over from the node's
 				// Management Node page.
-				$node->set('mgn_agent_public_key', null);
-				$node->set('mgn_agent_paired_time', null);
-				$node->save();
+				AgentChannelEndpoint::forgetAgent($node);
 				$session->save_message(new DisplayMessage(
 					'Agent disconnected. This node\'s work routes over the API and SSH again.',
 					'Success', $page_regex,
