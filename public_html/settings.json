@@ -2371,6 +2371,12 @@
       "helptext": "JSON status the root agent writes back while joining a management node: {status, url, fingerprint, node_id, node_slug, error, updated_time}. The Management Node admin page renders it — including the key fingerprint the operator compares against the management node's approval screen."
     },
     {
+      "name": "agent_leave_request",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff from the Management Node admin page to this machine's root agent: {requested_time}. The web tier writes it when the admin asks to disconnect from the management node; the agent sends one best-effort signed goodbye (so the management node forgets this machine's key), deletes its identity, and clears it. Never holds a credential."
+    },
+    {
       "name": "api_upload_rate_limit_requests",
       "default": "10000",
       "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",

@@ -29,6 +29,8 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.3 - either side can end the pairing: forgetAgent() is the one convergence point for
+ *                the plane-side Disconnect and the node-initiated leave
  * @version 1.2 - connected = routed: the per-node cutover flag is gone (hard cutover, owner-set)
  * @version 1.1 - enrollment is the node-initiated join (Phase 1.5, A6): the fingerprint contract
  *                is pinned against the agent's join_test.go, approval-binds-the-key is exercised,
@@ -176,6 +178,29 @@ $unpaired->set('mgn_agent_public_key', null);
 $unpaired->save();
 check(JobCommandBuilder::has_agent_channel($unpaired) === false,
 	'No bound key, no channel: an unconnected node routes over api/ssh');
+
+// ---------------------------------------------------------------------------
+section('Either side can end the pairing');
+
+// forgetAgent() is the one place both endings converge: the plane-side
+// Disconnect action and the node-initiated leave endpoint (signed — only the
+// key holder can say goodbye) do exactly this, so they cannot drift apart.
+// The node's power to leave never depends on this plane's cooperation: its
+// agent deletes its identity whether or not the goodbye arrives.
+$leaver = agent_channel_node('agtest-leaver-' . substr(bin2hex(random_bytes(4)), 0, 8));
+$made_nodes[] = $leaver->key;
+$leaver->set('mgn_agent_public_key', base64_encode($public));
+$leaver->set('mgn_agent_paired_time', gmdate('Y-m-d H:i:s'));
+$leaver->save();
+check(JobCommandBuilder::has_agent_channel($leaver) === true,
+	'A node with a bound key routes to its agent');
+
+AgentChannelEndpoint::forgetAgent($leaver);
+$leaver->load();
+check(empty($leaver->get('mgn_agent_public_key')) && empty($leaver->get('mgn_agent_paired_time')),
+	'Forgetting erases the verifier and the pairing stamp');
+check(JobCommandBuilder::has_agent_channel($leaver) === false,
+	'A forgotten agent routes over api/ssh again — ending is symmetric, whichever side ends it');
 
 // ---------------------------------------------------------------------------
 section('Primitive jobs are stored as an envelope, and are readable as one');

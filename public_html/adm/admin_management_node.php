@@ -7,6 +7,8 @@
  * a person approves the request on the management node after comparing the
  * key fingerprint both screens show (Phase 1.5, decision A6).
  *
+ * @version 1.1 - Disconnect: the node ends the connection from its own side (either side can);
+ *                the agent says one signed goodbye, deletes its key, and serves only local work
  * @version 1.0
  */
 
@@ -15,12 +17,13 @@ require_once(PathHelper::getIncludePath('includes/AdminPage.php'));
 
 $page_vars = process_logic(admin_management_node_logic(array_merge($_GET, $_POST)));
 
-$session   = $page_vars['session'];
-$request   = $page_vars['request'];
-$state     = $page_vars['state'];
-$error     = $page_vars['error'];
-$requested = $page_vars['requested'];
-$cancelled = $page_vars['cancelled'];
+$session       = $page_vars['session'];
+$request       = $page_vars['request'];
+$state         = $page_vars['state'];
+$leave_request = $page_vars['leave_request'];
+$error         = $page_vars['error'];
+$requested     = $page_vars['requested'];
+$cancelled     = $page_vars['cancelled'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -58,9 +61,28 @@ if ($status === 'connected') {
 	if ($fpr_display !== '') {
 		echo '<div class="mt-2">This machine\'s key fingerprint: <code>' . htmlspecialchars($fpr_display) . '</code></div>';
 	}
-	echo '<div class="mt-2 small text-muted">To end the connection, disconnect this node on the management node\'s side — '
-	   . 'it forgets this machine\'s key and the agent goes back to serving only local work.</div>';
 	echo '</div>';
+
+	if ($leave_request !== null) {
+		echo '<div class="alert alert-warning" role="alert">'
+		   . '<strong>Disconnecting.</strong> Waiting for this machine\'s agent to act on it — it checks every few seconds, '
+		   . 'finishes any job it is running, tells the management node to forget this machine\'s key, and deletes its own copy. '
+		   . 'If this message does not change shortly, the agent is not running on this machine.</div>';
+		echo '<form method="POST" action="/admin/admin_management_node" style="margin-top:8px;">'
+		   . '<input type="hidden" name="action" value="cancel_disconnect">'
+		   . '<button type="submit" class="btn btn-secondary">Cancel the disconnect</button>'
+		   . '</form>';
+	} else {
+		echo '<p class="text-muted" style="max-width:46rem;">Either side can end the connection: the management node can '
+		   . 'disconnect this machine from its dashboard, and this machine can leave on its own below — no cooperation from '
+		   . 'the other side required. The agent tells the management node to forget this machine\'s key, deletes its own '
+		   . 'copy, and goes back to serving only local work.</p>';
+		echo '<form method="POST" action="/admin/admin_management_node" '
+		   . 'onsubmit="return confirm(\'Disconnect from this management node? It stops managing this site, and reconnecting starts a fresh introduction.\');">'
+		   . '<input type="hidden" name="action" value="disconnect">'
+		   . '<button type="submit" class="btn btn-outline-danger">Disconnect</button>'
+		   . '</form>';
+	}
 
 } elseif ($request !== null) {
 	// A request is on the table. What we show depends on how far the agent got.

@@ -265,11 +265,13 @@ On the management node, the request appears on the node's Detail → **API Keys*
 
 Requests are rate-limited, expire after an hour (the agent renews its own while it waits), and are capped in number. A rejected request retires its keypair — the agent introduces itself with a fresh key on the next ask.
 
-The web tier's only involvement on the node is a handoff through two managed settings: `agent_join_request` (the URL the admin asked for) and `agent_join_state` (the agent's progress, which the page renders). Neither ever holds a credential.
+The web tier's only involvement on the node is a handoff through three managed settings: `agent_join_request` (the URL the admin asked for), `agent_join_state` (the agent's progress, which the page renders), and `agent_leave_request` (the admin asked to disconnect). None ever holds a credential.
 
 ### Routing
 
 A connected agent is routed to — approving the join is the routing decision, and there is no further switch. Any operation with a primitive implementation runs on the node's own agent; everything else routes over the API and SSH. Disconnecting the agent is what returns all of a node's work to API/SSH.
+
+Either side can end the pairing, and neither needs the other's cooperation. This plane's Disconnect button forgets the node's key. The node's own Management Node page has a Disconnect too: its agent finishes any running job, sends one signed goodbye to `/api/v1/agent/leave` (so this plane forgets the key immediately), deletes its identity, and returns to serving only local work — and it leaves even when the goodbye cannot be delivered, in which case this plane just sees the agent go silent until someone disconnects the node here as well. Both endings run through `AgentChannelEndpoint::forgetAgent()`, so they cannot drift apart.
 
 Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
