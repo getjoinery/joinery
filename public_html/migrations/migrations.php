@@ -1315,3 +1315,14 @@
 	$migration['migration_sql'] = "UPDATE amu_admin_menus SET amu_setting_activate = 'debug' WHERE amu_slug = 'test-database'";
 	$migration['migration_file'] = NULL;
 	$migrations[] = $migration;
+
+	// The agent's on/off switch defaults to off, which is right for a fleet
+	// that has never run one and wrong for the machines already running one —
+	// the installer stops the agent wherever the setting is off. Seeded from
+	// the evidence on the machine: an installed binary means on.
+	$migration = array();
+	$migration['database_version'] = '175';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'enable_agent_where_already_installed.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

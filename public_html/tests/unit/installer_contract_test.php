@@ -976,6 +976,99 @@ foreach ([
 }
 
 
+section('The agent reaches every node, not only control planes');
+
+// The agent is core: it does a machine's own backups, upgrades and health
+// checks, and is how that machine is managed at all once SSH goes. It shipped
+// as the server_manager plugin's host_installer, and the runner only runs
+// ACTIVE plugins' installers — server_manager is active on control planes and
+// nowhere else, so the agent reached two machines out of twelve and the spec
+// read "the rollout cost is configuration, not deployment" while no managed
+// node had a binary at all (surveyed 2026-08-26).
+$core_installer = $site_root . '/maintenance_scripts/install_tools/install_agent.sh';
+$agent_src      = is_file($core_installer) ? file_get_contents($core_installer) : '';
+check($agent_src !== '', 'the agent installer is a core install tool', $core_installer);
+
+$runner_src = is_file($plugin_start) ? file_get_contents($plugin_start) : '';
+check(strpos($runner_src, 'install_agent.sh') !== false,
+    'the root-moment runner runs it');
+
+// Ordering is the whole fix. The runner exits early when a site has no active
+// plugins, so a core installer placed after that lookup would be skipped on
+// exactly the machines this was meant to reach.
+$core_at    = strpos($runner_src, 'CORE_INSTALLERS=');
+$plugins_at = strpos($runner_src, 'ACTIVE_PLUGINS=');
+check($core_at !== false && $plugins_at !== false && $core_at < $plugins_at,
+    'core installers run before any plugin lookup can exit early');
+check(preg_match('/bash "\$\{CORE_PATH\}" "\$\{SITENAME\}"/', $runner_src) === 1,
+    'the core installer is told which site it is installing for');
+
+// And it must not also be a plugin installer, or a control plane runs it twice.
+$sm_manifest = json_decode(file_get_contents(
+    PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true);
+check(is_array($sm_manifest), 'server_manager plugin.json parses');
+check(!isset($sm_manifest['host_installer']),
+    'server_manager no longer declares the agent installer as its own',
+    'a control plane would run it twice: once as core, once as the plugin');
+
+// What the agent does on a given machine is one setting. An installer that
+// ignored it would turn a root service on everywhere at the next upgrade.
+check(strpos($agent_src, 'agent_enabled') !== false,
+    'the installer reads the agent_enabled setting');
+
+// The binary lands on every deployment; the setting decides only whether it
+// runs. Ordering carries that: converge the artifact first, then apply the
+// switch. Gating the install on the switch instead would mean a machine
+// switched on later has to fetch, decompress and verify an artifact at that
+// moment — and gets nothing at all if the tree it is running never shipped one.
+$converge_at = strpos($agent_src, 'converge_binary || true');
+$switch_at   = strpos($agent_src, 'if [ "$AGENT_ENABLED" != "1" ]');
+check($converge_at !== false && $switch_at !== false && $converge_at < $switch_at,
+    'the binary is installed before the switch is consulted, so off still means installed');
+
+// install.sh --enable-agent is how a site provisioned by a management node
+// comes up running. It has to write the setting BEFORE the host installers run,
+// or the agent is installed and left stopped until some later root moment.
+$enable_at    = strpos($install_src, '"$ENABLE_AGENT" = true');
+$installers_at = strpos($install_src, '_plugin_installers_start.sh" "$SITENAME"');
+check(strpos($install_src, '--enable-agent)') !== false,
+    'install.sh accepts --enable-agent');
+check($enable_at !== false && $installers_at !== false && $enable_at < $installers_at,
+    'and applies it before the host installers run');
+
+// Off has to mean stopped AND unsupervised. The cron keepalive restarts the
+// agent within a minute, so stopping without removing it reads to an operator
+// as the switch not working.
+check(preg_match('/stop_and_disable_agent\(\)[^}]*rm -f "\$CRON_FILE"/s', $agent_src) === 1,
+    'switching off removes the cron keepalive, not just the process');
+check(preg_match('/stop_and_disable_agent\(\)[^}]*systemctl disable/s', $agent_src) === 1,
+    'and disables the systemd unit where there is one');
+
+// Both sides read the same setting; both must read it the same way. Executed,
+// not pattern-matched: the shell's own case block against the PHP function.
+require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
+$switch_block = '';
+if (preg_match('/AGENT_ENABLED="\$\(printf.*?\nesac/s', $agent_src, $m)) {
+    $switch_block = $m[0];
+}
+check($switch_block !== '', 'the shell\'s reading of the switch is findable');
+
+$shell_reads_on = function (string $value) use ($switch_block): bool {
+    $script = 'AGENT_ENABLED="$1"' . "\n" . $switch_block . "\n" . 'echo "$AGENT_ENABLED"';
+    $path = tempnam(sys_get_temp_dir(), 'agentsw');
+    file_put_contents($path, $script);
+    $out = shell_exec('bash ' . escapeshellarg($path) . ' ' . escapeshellarg($value));
+    unlink($path);
+    return trim((string)$out) === '1';
+};
+
+foreach (['1', 'true', 'TRUE', 'True', 'yes', 'on', ' on ', '0', '', 'no', 'off', 'o n', 'nonsense'] as $value) {
+    check($shell_reads_on($value) === admin_management_node_agent_switch_on($value),
+        'the installer and the admin page agree on ' . var_export($value, true),
+        'shell: ' . var_export($shell_reads_on($value), true)
+            . ', php: ' . var_export(admin_management_node_agent_switch_on($value), true));
+}
+
 section('The database password never becomes a command line');
 
 // argv is readable by every account on the box through ps, for as long as the

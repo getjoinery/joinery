@@ -1,8 +1,16 @@
 #!/usr/bin/env bash
 #
-# _plugin_installers_start.sh - run every active plugin's host installer.
+# _plugin_installers_start.sh - run the platform's host installers: core's
+# first, then every active plugin's.
 #
-# Version: 1.1 - Also installs declared PHP extensions when running as root.
+# Version: 1.2 - Runs core's own host installers before the plugin loop. The
+#                joinery-agent is the first of them: it belongs on every
+#                Joinery instance, so gating it on a plugin being active meant
+#                it never reached a managed node at all — only control planes,
+#                where server_manager happens to be turned on. What the agent
+#                does on a given machine is decided by the agent_enabled
+#                setting, which the installer reads (specs/agent_on_node_architecture.md).
+#                1.1 - Also installs declared PHP extensions when running as root.
 #                A plugin uploaded/installed AFTER the site image was built can
 #                declare requires.extensions the image never resolved; without
 #                this step its only install moment would be the next code
@@ -82,6 +90,27 @@ if [[ -f "${RESOLVER}" ]] && [[ "$(id -u)" == "0" ]] && command -v php >/dev/nul
         fi
     done < <(php "${RESOLVER}" --apt 2>/dev/null || true)
 fi
+
+# --- Core host installers ----------------------------------------------------
+# Core's own installers run before any plugin's, and unconditionally: nothing
+# about them is a plugin's business. Each is idempotent and decides for itself
+# whether it applies here, the same contract plugin installers work under.
+CORE_INSTALLERS="install_agent.sh"
+
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+for CORE_INSTALLER in ${CORE_INSTALLERS}; do
+    CORE_PATH="${SCRIPT_DIR}/${CORE_INSTALLER}"
+    if [[ ! -f "${CORE_PATH}" ]]; then
+        echo "core installers: ${CORE_INSTALLER} missing - skipping" >&2
+        continue
+    fi
+    echo "core installers: running ${CORE_INSTALLER}"
+    if bash "${CORE_PATH}" "${SITENAME}"; then
+        echo "core installers: ${CORE_INSTALLER}: ok"
+    else
+        echo "core installers: WARNING - ${CORE_INSTALLER} failed" >&2
+    fi
+done
 
 # The database is the only persistent signal of which plugins are active:
 # after a rebuild /etc carries base defaults, but the database (on the config

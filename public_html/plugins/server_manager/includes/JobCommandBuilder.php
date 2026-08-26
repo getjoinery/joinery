@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.33 - build_enable_agent: turn a node's agent on and optionally have it ask to join,
+ *                 over SSH. Exists only while SSH does — Phase 3 takes both
  * @version 1.32 - a connected agent IS the cutover: has_agent_channel() asks only whether the
  *                 node's key is bound (the per-node routing flag is gone — hard cutover, owner-set)
  * @version 1.31 - no builder supplies encryption key material to a node. Backup jobs seal to the
@@ -1548,6 +1550,68 @@ class JobCommandBuilder {
 		];
 	}
 
+	/**
+	 * Turn the agent on for a node, and optionally have it ask to join this
+	 * management node — the fleet path, so an operator does not visit every
+	 * node's own admin page to enable something they administer already.
+	 *
+	 * Both halves are the node's own decisions, recorded in the node's own
+	 * settings by the node's own CLI. Nothing here reaches past what SSH to
+	 * that machine already permits, which is precisely why this action exists
+	 * only while SSH does: at the Phase 3 cutover it goes with it, and a node's
+	 * own Management Node page becomes the only way in.
+	 *
+	 * What it deliberately does NOT do is enroll anything. A join is a request;
+	 * an administrator on this plane still approves it after comparing the key
+	 * fingerprint the node reports against the one the request carries. Doing
+	 * that comparison for a fleet is the operator's job, not this job's.
+	 *
+	 * @param array $params plane_url (omit to enable without asking to join)
+	 */
+	public static function build_enable_agent($node, $params = []) {
+		if (!self::has_ssh($node)) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be given an agent: no SSH credentials configured.");
+		}
+		$web_root = rtrim($node->get('mgn_web_root'), '/');
+		if (!$web_root || dirname($web_root) === '/' || dirname($web_root) === '.') {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be given an agent: mgn_web_root is not set.");
+		}
+
+		$plane_url = trim((string)($params['plane_url'] ?? ''));
+		$switch    = '--on';
+		if ($plane_url !== '') {
+			// The same rule the node's own page and CLI apply, from the same
+			// function: what counts as a management node address is one
+			// decision, and a second copy here would be the one that drifts.
+			require_once(PathHelper::getIncludePath('adm/logic/admin_management_node_logic.php'));
+			$refusal = admin_management_node_url_refusal($plane_url);
+			if ($refusal !== null) {
+				throw new Exception('That is not a usable management node URL to join: ' . $refusal);
+			}
+			$switch .= ' --join=' . escapeshellarg(rtrim($plane_url, '/'));
+		}
+
+		$site_dir     = dirname($web_root);
+		$sitename_esc = escapeshellarg(basename($site_dir));
+		$runner       = $site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
+		$sudo         = self::sudo_prefix($node);
+		$creds        = self::get_db_credentials_script($node);
+
+		return [
+			['type' => 'ssh', 'label' => 'Switch the agent on for this node',
+			 'cmd' => "cd {$web_root} && php utils/agent_control.php {$switch}",
+			 'timeout' => 120],
+			// The switch is a setting; this is the root moment that acts on it.
+			// Same runner as Run Plugin Installers — the agent installer is a
+			// core one, so it runs here whether or not any plugin is active.
+			['type' => 'ssh', 'label' => 'Install and start the agent',
+			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
+			 'timeout' => 900],
+		];
+	}
+
 	/** Timeouts the node console offers, in seconds. The console's runaway guard
 	 *  is the step timeout, so the set is closed — a hand-posted value outside it
 	 *  is refused rather than clamped. */
@@ -2793,7 +2857,12 @@ class JobCommandBuilder {
 		} else {
 			$pass_arg = ' --password-file=/root/.joinery_postgres_password';
 		}
-		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl";
+		// A site this management node is installing comes up running its agent.
+		// That is the one case where "should this machine run an agent?" is
+		// already answered — someone asked this plane to build and manage it —
+		// and it saves a root moment per node during the fleet rollout. It still
+		// enrolls nothing: joining is a request the operator approves here.
+		$install_cmd = "cd {$remote_tools_dir} && sudo ./install.sh -y -q site{$mode_flag} {$sitename_esc}{$pass_arg} {$domain_esc}{$port_arg} --no-ssl --enable-agent";
 		$steps[] = ['type' => 'ssh', 'label' => 'Create the site',
 			'on_host' => true, 'cmd' => $install_cmd, 'timeout' => 3600];
 

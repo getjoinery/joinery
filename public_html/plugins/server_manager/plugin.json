@@ -1,6 +1,6 @@
 {
   "name": "Server Manager",
-  "version": "1.19.5",
+  "version": "1.19.7",
   "description": "Remote server management for Joinery instances",
   "author": "Joinery",
   "license": "Joinery-Commercial",
@@ -8,7 +8,6 @@
   "requires_entitlement": true,
   "receives_upgrades": true,
   "included_in_publish": true,
-  "host_installer": "provisioning/install_agent.sh",
   "recoveryReadiness": [
     {
       "call": "RecoveryReadinessItems::items"

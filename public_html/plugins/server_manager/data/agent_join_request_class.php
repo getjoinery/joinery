@@ -13,6 +13,8 @@
  * key fingerprint and tells the operator to compare it against what the node's
  * own panel shows.
  *
+ * @version 1.1 - ajr_mgn_node_id deletion action declared: a deleted node clears the pointer and
+ *                keeps the introduction record; undeclared it registered as prevent
  * @version 1.0
  */
 
@@ -32,6 +34,18 @@ class AgentJoinRequest extends SystemBase {
 	const STATUS_PENDING  = 'pending';
 	const STATUS_APPROVED = 'approved';
 	const STATUS_REJECTED = 'rejected';
+
+	/**
+	 * Deleting the node an approved request was bound to clears the pointer and
+	 * keeps the row. The request is the record of an introduction that happened
+	 * — who asked, from where, with which key, and that a person approved it —
+	 * and that record outliving the node is the point of keeping it. Undeclared,
+	 * this registered as 'prevent' and a node with a join request in its history
+	 * could not be deleted at all.
+	 */
+	public static $foreign_key_actions = array(
+		'ajr_mgn_node_id' => array('action' => 'null'),
+	);
 
 	public static $field_specifications = array(
 		'ajr_id'            => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),

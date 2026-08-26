@@ -12,6 +12,8 @@ require_once(__DIR__ . '/../../includes/PathHelper.php');
  * agent_join_state, which this page renders. No credential ever exists in the
  * web tier, and nothing this page stores could enroll anyone.
  *
+ * @version 1.2 - the agent's own on/off switch (agent_enabled) lives here too: nothing on this page
+ *                can happen on a machine that runs no agent, so it is the first thing decided
  * @version 1.1 - disconnect action: the node ends the connection from its own side by recording a
  *                leave request the agent honours (one signed goodbye, then it deletes its identity)
  * @version 1.0
@@ -26,6 +28,20 @@ function admin_management_node_logic(array $input): LogicResult {
 	$session->set_return();
 
 	$settings = Globalvars::get_instance();
+
+	// Whether this machine runs an agent at all. Recorded here; acted on by the
+	// installer at the next root moment, because a web request has no root and
+	// cannot install a service. The page says so rather than implying the
+	// switch took effect the moment it was flipped.
+	if (isset($input['action']) && $input['action'] === 'enable_agent') {
+		Setting::put('agent_enabled', '1');
+		return LogicResult::redirect('/admin/admin_management_node?agent=on');
+	}
+
+	if (isset($input['action']) && $input['action'] === 'disable_agent') {
+		Setting::put('agent_enabled', '');
+		return LogicResult::redirect('/admin/admin_management_node?agent=off');
+	}
 
 	if (isset($input['action']) && $input['action'] === 'connect') {
 		$url = trim((string)($input['management_node_url'] ?? ''));
@@ -71,14 +87,61 @@ function admin_management_node_logic(array $input): LogicResult {
 	$leave   = json_decode((string)$settings->get_setting('agent_leave_request'), true);
 
 	return LogicResult::render([
-		'session'       => $session,
-		'request'       => is_array($request) ? $request : null,
-		'state'         => is_array($state) ? $state : null,
-		'leave_request' => is_array($leave) ? $leave : null,
-		'error'         => isset($input['error']) ? (string)$input['error'] : '',
-		'requested'     => !empty($input['requested']),
-		'cancelled'     => !empty($input['cancelled']),
+		'session'         => $session,
+		'request'         => is_array($request) ? $request : null,
+		'state'           => is_array($state) ? $state : null,
+		'leave_request'   => is_array($leave) ? $leave : null,
+		'agent_enabled'   => admin_management_node_agent_enabled($settings),
+		'agent_installed' => file_exists(ADMIN_MANAGEMENT_NODE_AGENT_BINARY),
+		'installer_hint'  => admin_management_node_installer_hint(),
+		'error'           => isset($input['error']) ? (string)$input['error'] : '',
+		'requested'       => !empty($input['requested']),
+		'cancelled'       => !empty($input['cancelled']),
+		'agent_switched'  => isset($input['agent']) ? (string)$input['agent'] : '',
 	]);
+}
+
+/**
+ * Where the agent lands on every platform that runs one. The page reports
+ * whether the switch has actually been acted on, and this file is the only
+ * thing that knows the path.
+ */
+define('ADMIN_MANAGEMENT_NODE_AGENT_BINARY', '/usr/local/bin/joinery-agent');
+
+/**
+ * Is the agent switched on for this machine?
+ */
+function admin_management_node_agent_enabled($settings): bool {
+	return admin_management_node_agent_switch_on((string)$settings->get_setting('agent_enabled'));
+}
+
+/**
+ * Does a stored agent_enabled value mean on? Split from the reader above so a
+ * caller holding the raw string — the CLI, which writes and then reports, and
+ * cannot use a settings instance cached before its own write — asks the same
+ * question the page does.
+ *
+ * The accepted spellings match install_agent.sh's, so a value written by
+ * either side is read the same by both.
+ */
+function admin_management_node_agent_switch_on(string $value): bool {
+	return in_array(strtolower(trim($value)), ['1', 'true', 'yes', 'on'], true);
+}
+
+/**
+ * The command that installs the agent on this machine, for an admin who does
+ * not want to wait for the next container start or upgrade to reach it.
+ *
+ * A web request cannot run it — that is the whole reason the installer is a
+ * root-moment script — so the page prints it rather than offering a button
+ * that could not work.
+ */
+function admin_management_node_installer_hint(): string {
+	$public_html = rtrim(PathHelper::getIncludePath(''), '/');
+	$site_root   = dirname($public_html);
+	$sitename    = basename($site_root);
+
+	return 'sudo bash ' . $site_root . '/maintenance_scripts/install_tools/install_agent.sh ' . $sitename;
 }
 
 /**

@@ -2359,6 +2359,12 @@
       }
     },
     {
+      "name": "agent_enabled",
+      "default": "",
+      "managed": true,
+      "helptext": "Whether this machine runs the Joinery agent — the root service that performs backups, upgrades and health checks locally, and the only way a management node can be given work to do here. Set from the Management Node admin page, which is where the consequences can be explained; a bare checkbox would flip a setting and appear to do nothing until the next root moment. The agent binary is installed on every deployment regardless; this setting decides only whether it RUNS. The installer reads it at container start, site install and code upgrade: on starts the agent and sets up its supervision, off stops it and takes the supervision away. install.sh --enable-agent sets it at install time, which is how a node provisioned by a management node comes up running. Turning it on does not connect this machine to anything — that is a separate, deliberate act on the same page."
+    },
+    {
       "name": "agent_join_request",
       "default": "",
       "managed": true,
