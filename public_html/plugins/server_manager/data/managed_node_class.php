@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.8 - mgn_agent_channel_enabled removed: a connected agent is routed to
+ *                unconditionally (hard cutover, owner-set)
  * @version 1.7 - pairing-token columns removed: enrollment is a node-initiated join with no shared
  *                secret (Phase 1.5, A6); pending requests live in ajr_agent_join_requests
  * @version 1.6 - agent channel: node-generated public key (a verifier, never a credential), one-time
@@ -147,11 +149,6 @@ class ManagedNode extends SystemBase {
 		// last poll IS the heartbeat (§3.1).
 		'mgn_agent_last_poll'     => array('type'=>'timestamp(6)'),
 		'mgn_agent_version'       => array('type'=>'varchar(20)'),
-
-		// Per-node cutover flag (§6, Phase 3). Off until this node's agent has
-		// been proven on the channel; while off, operations route to api/ssh
-		// exactly as before.
-		'mgn_agent_channel_enabled' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_wg_public_key'       => array('type'=>'varchar(255)'),

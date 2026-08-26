@@ -31,6 +31,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.3 - a connected agent claims jobs unconditionally: the per-node routing flag is gone
+ *                (hard cutover, owner-set) — approving the join is the routing decision
  * @version 1.2 - enrollment is a node-initiated join with no shared secret (Phase 1.5, A6):
  *                join + join_status replace pair, and the pairing-token machinery is deleted
  * @version 1.1 - the node's outcome is recorded verbatim in mjb_agent_outcome, so a refusal is
@@ -465,14 +467,6 @@ class AgentChannelEndpoint {
 		// that crashed heals the moment it comes back. The fleet-wide sweep on
 		// the scheduled pass is what covers an agent that never returns.
 		ManagementJob::requeueStaleClaims((int)$node->key);
-
-		if (!$node->get('mgn_agent_channel_enabled')) {
-			// Not an error: the node is paired and healthy, its cutover flag is
-			// simply off, so its work still routes over api/ssh. Answering
-			// "nothing for you" keeps the poll (and therefore the liveness
-			// signal) working through the whole rollout.
-			api_success(['job' => null], '', 200);
-		}
 
 		$job = self::claim_next_job_for((int)$node->key);
 		if (!$job) {

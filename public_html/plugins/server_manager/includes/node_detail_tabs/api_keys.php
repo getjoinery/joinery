@@ -9,6 +9,7 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.3 - the routing checkbox is gone: connected = routed (hard cutover, owner-set)
  * @version 1.2 - enrollment is a node-initiated join (Phase 1.5, A6): pending requests with
  *                fingerprint-comparison approval replace the pairing token UI
  * @version 1.1 - agent channel: pairing, the per-node cutover flag, and what the plane actually holds
@@ -70,7 +71,6 @@
 
 	// ── The agent channel (specs/agent_on_node_architecture.md §3.1, Phase 1.5) ──
 	$agent_paired      = (bool)$node->get('mgn_agent_public_key');
-	$agent_channel_on  = (bool)$node->get('mgn_agent_channel_enabled');
 	$agent_last_poll   = $node->get_local('mgn_agent_last_poll');
 	$agent_paired_time = $node->get_local('mgn_agent_paired_time');
 
@@ -147,16 +147,7 @@
 	}
 
 	if ($agent_paired) {
-		$fw_channel = $page->getFormWriter('agent_channel_form');
-		$fw_channel->begin_form();
-		$fw_channel->hiddeninput('action', '', ['value' => 'set_agent_channel']);
-		$fw_channel->hiddeninput(SmAdminCsrf::FIELD, '', ['value' => SmAdminCsrf::token()]);
-		$fw_channel->checkboxinput('agent_channel_enabled',
-			'Route this node\'s work to its agent where an operation has crossed',
-			['checked' => $agent_channel_on]);
-		$fw_channel->submitbutton('btn_agent_channel', 'Save', ['class' => 'btn btn-sm btn-primary']);
-		$fw_channel->end_form();
-		echo '<p class="text-muted small">Off until the agent has been proven here. Operations that have not crossed yet keep using the API and SSH either way.</p>';
+		echo '<p class="text-muted small">Everything the agent can do runs through it; operations it cannot do yet use the API and SSH.</p>';
 
 		echo '<button type="button" class="btn btn-sm btn-outline-danger" '
 		   . 'onclick="JoineryModal.confirm(\'Forget this node\\\'s agent key? Its work goes back to the API and SSH, and reconnecting starts over from the node\\\'s Management Node page.\', function(){ document.getElementById(\'agent_unpair_form\').submit(); })">Disconnect</button>';
