@@ -229,7 +229,11 @@ be able to quietly enroll their own key:
 - **Additional passkeys**: require a recent step-up with an existing passkey.
 - **Vault unlockers** (another passkey wrapping, regenerated recovery codes,
   a bypass phrase): require an open unlock window, and code regeneration and
-  bypass-phrase changes additionally require a recent step-up.
+  bypass-phrase changes additionally require a recent step-up. When the window
+  is open at enrollment, a capable authenticator activates for the vault
+  inside the creation ceremony itself ([Passkeys § Creation-time vault
+  activation](passkeys.md)) — the same open-window requirement, one prompt
+  instead of two.
 
 **The `/setup` wizard mounts these same ceremonies.** The first-login setup
 wizard's sign-in and encryption-key steps drive the identical API actions
