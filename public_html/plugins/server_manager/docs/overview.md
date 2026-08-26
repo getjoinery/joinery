@@ -255,22 +255,21 @@ There is no class for running an arbitrary command. The agent's own test suite e
 
 The policy lives at `/etc/joinery-agent/policy.json`, root-owned, outside the web tree. A missing file means the shipped fleet-wide policy above. A file that is not root-owned, or is writable by group or other, is refused outright and the node accepts nothing until a human fixes it — trusting a file the web user could have written would defeat the only thing the file is for.
 
-### Pairing
+### Connecting a node (the join)
 
-Node Detail → **API Keys** → Agent Channel → *Issue pairing token*. The token is shown once, is good for an hour, and can be used once. On the node, add the two lines it gives you to `/etc/joinery-agent/joinery-agent.env` and restart the agent:
+Enrollment is node-initiated and **shares no secret**. On the node, Admin → System → **Management Node**: the site's admin enters the management node's URL — just an address. The node's root agent generates an Ed25519 keypair, keeps the private half at `/etc/joinery-agent/node_identity.json` (mode 0600, root-owned), and sends a join request carrying only the public half and a claimed name. The node's page then shows the key's short fingerprint and waits.
 
-```
-JOINERY_PLANE_URL=https://your-control-plane.example
-JOINERY_PAIRING_TOKEN=<the token>
-```
+On the management node, the request appears on the node's Detail → **API Keys** tab: claimed name, source address, and the same fingerprint. Approving is superadmin-only and should happen **only if the fingerprint matches the node's own page exactly** — the name and address are claims anyone could make; the fingerprint comparison is the entire security of the introduction. Approval binds the public key to the node record; the agent picks it up on its next check and both panels flip to Connected.
 
-The agent generates an Ed25519 keypair, keeps the private half at `/etc/joinery-agent/node_identity.json` (mode 0600, root-owned), and hands the plane the public half. **The plane stores only that public half**, so there is no credential on the control plane that could act as the node — which is the point of the whole arrangement. The agent removes the spent token from the env file once pairing succeeds.
+**The management node stores only the public half**, so there is no credential on it that could act as the node — and enrollment adds nothing to steal: no token, no code, nothing copied by a human. A wrong approval is visible (the tab stamps the connection time, agent version, and last poll) and severable with the Disconnect button, which forgets the key and drops the node back to API/SSH routing.
 
-While a pairing token is outstanding it is the one thing on the plane that could pair as that node, which is why it is single-use, short-lived, and why the resulting pairing is stamped where you can see it: the tab shows the pairing time, the agent version, and the last poll.
+Requests are rate-limited, expire after an hour (the agent renews its own while it waits), and are capped in number. A rejected request retires its keypair — the agent introduces itself with a fresh key on the next ask.
+
+The web tier's only involvement on the node is a handoff through two managed settings: `agent_join_request` (the URL the admin asked for) and `agent_join_state` (the agent's progress, which the page renders). Neither ever holds a credential.
 
 ### Cutting a node over
 
-Pairing alone changes no routing. The **Route this node's work to its agent** checkbox on the same tab is the per-node cutover: with it off, a paired node keeps polling (so its liveness stays visible) and its work keeps going over the API and SSH. With it on, any operation that has a primitive implementation runs on the node's own agent, and everything else routes as before.
+Connecting alone changes no routing. The **Route this node's work to its agent** checkbox on the same tab is the per-node cutover: with it off, a connected node keeps polling (so its liveness stays visible) and its work keeps going over the API and SSH. With it on, any operation that has a primitive implementation runs on the node's own agent, and everything else routes as before.
 
 Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
@@ -290,7 +289,7 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 ### Endpoints
 
-`POST /api/v1/agent/pair`, `/claim`, `/result`. Claim and result are signed with the node's key; the plane verifies against the public half it holds, and selects jobs by the identity the **signature** proves, never by anything in the request body. Requests are schema-validated, size-capped, and refused for a clock more than five minutes from the plane's. These are a separate route family from `/api/v1/management/*`, which runs the other way — the plane calling in to a node's web tier — and stays status-only.
+`POST /api/v1/agent/join`, `/join_status`, `/claim`, `/result`. Join and join_status are unauthenticated by nature — until approval there is no identity to authenticate — and grant nothing; they are rate-limited, validated, and bounded in number. Claim and result are signed with the node's key; the plane verifies against the public half it holds, and selects jobs by the identity the **signature** proves, never by anything in the request body. Requests are schema-validated, size-capped, and refused for a clock more than five minutes from the plane's. These are a separate route family from `/api/v1/management/*`, which runs the other way — the plane calling in to a node's web tier — and stays status-only.
 
 ## Job Types
 

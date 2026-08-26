@@ -306,6 +306,14 @@
             "parent": "system"
         },
         {
+            "slug": "system-management-node",
+            "title": "Management Node",
+            "url": "admin_management_node",
+            "order": 7,
+            "permission": 10,
+            "parent": "system"
+        },
+        {
             "slug": "pages-list",
             "title": "Pages list",
             "url": "admin_pages",

@@ -9,6 +9,10 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.7 - the Actions item leads to the API Keys tab: either the pending join requests to
+ *                review, or the connect instructions (enrollment starts on the node — Phase 1.5)
+ * @version 1.6 - Actions menu offers agent pairing (superadmin, unpaired nodes) — posts the existing
+ *                pair_agent action and lands on the API Keys tab where the one-time token is shown
  * @version 1.5 - DNS publish box above the Reverse DNS panel
  * @version 1.4 - Permanently Delete Entry: when offsite backups still exist for the slug, the menu item
  *                shows a "removal not allowed" alert up front instead of the type-to-confirm box
@@ -142,6 +146,15 @@
 			<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=overview&edit=1#connectionSettings">Edit Connection Settings</a></li>
 			<?php if (JobCommandBuilder::has_ssh($node) && $node->get('mgn_web_root')): ?>
 				<li><a class="dropdown-item" href="#" onclick="JoineryModal.confirm('Run every active plugin\'s host installer on this node (root, idempotent)? Needed after activating a plugin that configures system services, e.g. the mail stack.', function(){ document.getElementById('run_plugin_installers_form').submit(); }); return false;">Run Plugin Installers</a></li>
+			<?php endif; ?>
+			<?php if ($session->get_permission() >= 10 && !$node->get('mgn_agent_public_key')):
+				$overview_pending_joins = class_exists('AgentJoinRequest') ? count(AgentJoinRequest::pending()) : 0; ?>
+				<li><a class="dropdown-item" href="<?php echo $base_url; ?>&tab=api_keys"><?php
+					echo $overview_pending_joins > 0
+						? 'Review agent join request' . ($overview_pending_joins > 1 ? 's' : '')
+							. ' (' . (int)$overview_pending_joins . ')&hellip;'
+						: 'Connect ' . htmlspecialchars($node->get('mgn_name')) . '\'s agent&hellip;';
+				?></a></li>
 			<?php endif; ?>
 			<li><hr class="dropdown-divider"></li>
 			<?php if (!$is_removed): ?>
