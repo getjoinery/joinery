@@ -5,6 +5,8 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.32 - a connected agent IS the cutover: has_agent_channel() asks only whether the
+ *                 node's key is bound (the per-node routing flag is gone — hard cutover, owner-set)
  * @version 1.31 - no builder supplies encryption key material to a node. Backup jobs seal to the
  *                 recovery key the node holds and has proven, read there; a node without one is
  *                 refused at build time with the reason, rather than backed up to a key from here
@@ -110,16 +112,14 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Has this node's agent paired with this plane and been cut over?
-	 *
-	 * Both halves matter. Paired means the plane holds the node's verifier;
-	 * cut over means an operator has decided this node's work should route to
-	 * its agent. A paired node with the flag off keeps polling (which is what
-	 * keeps its liveness visible) and keeps taking its work over api/ssh.
+	 * Has this node's agent joined this plane? Connected IS the cutover:
+	 * approving the join is the operator's routing decision, and every
+	 * operation with a primitive travels the channel from that moment.
+	 * Operations without one keep using api/ssh — transports_for() decides
+	 * per operation, not per node.
 	 */
 	public static function has_agent_channel($node) {
-		return !empty($node->get('mgn_agent_public_key'))
-			&& !empty($node->get('mgn_agent_channel_enabled'));
+		return !empty($node->get('mgn_agent_public_key'));
 	}
 
 	/**

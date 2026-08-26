@@ -29,6 +29,7 @@
  *
  * Run: php plugins/server_manager/tests/agent_channel_test.php
  *
+ * @version 1.2 - connected = routed: the per-node cutover flag is gone (hard cutover, owner-set)
  * @version 1.1 - enrollment is the node-initiated join (Phase 1.5, A6): the fingerprint contract
  *                is pinned against the agent's join_test.go, approval-binds-the-key is exercised,
  *                and the pairing-token checks are gone with the token
@@ -166,20 +167,15 @@ check(in_array('primitive', $transports, true), 'check_status has a primitive tr
 check($transports[0] === 'primitive',
 	'The primitive transport is preferred over api and ssh', implode(',', $transports));
 
-check(JobCommandBuilder::has_agent_channel($node) === false,
-	'A paired node with its cutover flag off does NOT route to the agent');
-$node->set('mgn_agent_channel_enabled', true);
-$node->save();
-$node->load();
 check(JobCommandBuilder::has_agent_channel($node) === true,
-	'Paired AND cut over routes to the agent');
+	'A connected agent IS the cutover: its node routes to it with no further switch');
 
 $unpaired = agent_channel_node('agtest-unpaired-' . substr(bin2hex(random_bytes(4)), 0, 8));
 $made_nodes[] = $unpaired->key;
-$unpaired->set('mgn_agent_channel_enabled', true);
+$unpaired->set('mgn_agent_public_key', null);
 $unpaired->save();
 check(JobCommandBuilder::has_agent_channel($unpaired) === false,
-	'The flag alone, with no paired agent, routes nowhere');
+	'No bound key, no channel: an unconnected node routes over api/ssh');
 
 // ---------------------------------------------------------------------------
 section('Primitive jobs are stored as an envelope, and are readable as one');

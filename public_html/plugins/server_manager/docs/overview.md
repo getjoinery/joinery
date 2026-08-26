@@ -267,13 +267,13 @@ Requests are rate-limited, expire after an hour (the agent renews its own while 
 
 The web tier's only involvement on the node is a handoff through two managed settings: `agent_join_request` (the URL the admin asked for) and `agent_join_state` (the agent's progress, which the page renders). Neither ever holds a credential.
 
-### Cutting a node over
+### Routing
 
-Connecting alone changes no routing. The **Route this node's work to its agent** checkbox on the same tab is the per-node cutover: with it off, a connected node keeps polling (so its liveness stays visible) and its work keeps going over the API and SSH. With it on, any operation that has a primitive implementation runs on the node's own agent, and everything else routes as before.
+A connected agent is routed to — approving the join is the routing decision, and there is no further switch. Any operation with a primitive implementation runs on the node's own agent; everything else routes over the API and SSH. Disconnecting the agent is what returns all of a node's work to API/SSH.
 
 Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
-**Upgrade the control plane's own agent before cutting any node over.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
+**Upgrade the control plane's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
 
 ### Reading refusals
 

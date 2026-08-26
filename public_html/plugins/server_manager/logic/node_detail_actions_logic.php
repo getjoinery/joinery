@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.12 - set_agent_channel removed: a connected agent is routed to unconditionally
+ *                 (hard cutover, owner-set); approving the join is the routing decision
  * @version 1.11 - enrollment is a node-initiated join (Phase 1.5, A6): approve_join/reject_join
  *                 replace pair_agent; approval after a human fingerprint comparison IS the binding
  * @version 1.10 - agent channel actions: pair_agent (one-time token, shown once), unpair_agent,
@@ -76,7 +78,6 @@ class NodeDetailActions {
 		'approve_join'             => 'api_keys',
 		'reject_join'              => 'api_keys',
 		'unpair_agent'             => 'api_keys',
-		'set_agent_channel'        => 'api_keys',
 		'clear_api_credential'     => 'api_keys',
 		'save_node'                => 'overview',
 		'delete_node'              => 'overview',
@@ -547,31 +548,9 @@ class NodeDetailActions {
 				// Management Node page.
 				$node->set('mgn_agent_public_key', null);
 				$node->set('mgn_agent_paired_time', null);
-				$node->set('mgn_agent_channel_enabled', false);
 				$node->save();
 				$session->save_message(new DisplayMessage(
 					'Agent disconnected. This node\'s work routes over the API and SSH again.',
-					'Success', $page_regex,
-					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
-				));
-				return $base_url . '&tab=api_keys';
-			}
-
-			case 'set_agent_channel': {
-				// The per-node cutover flag (§6, Phase 3). Off until this
-				// node's agent has been proven on the channel.
-				$on = !empty($_POST['agent_channel_enabled']);
-				if ($on && empty($node->get('mgn_agent_public_key'))) {
-					self::fail($session, $page_regex,
-						'This node has no paired agent yet, so there is nothing to route work to.');
-					return $base_url . '&tab=api_keys';
-				}
-				$node->set('mgn_agent_channel_enabled', $on);
-				$node->save();
-				$session->save_message(new DisplayMessage(
-					$on
-						? 'Agent channel on. Operations that have crossed to a primitive now run on the node\'s own agent.'
-						: 'Agent channel off. This node\'s work routes over the API and SSH.',
 					'Success', $page_regex,
 					DisplayMessage::MESSAGE_ANNOUNCEMENT, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE
 				));
