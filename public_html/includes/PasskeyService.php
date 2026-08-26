@@ -609,7 +609,7 @@ class PasskeyService {
 		$passkey = $this->_loadOwnedPasskey($credential_id, $actor);
 
 		foreach (self::$pre_revoke_callbacks as $callback) {
-			call_user_func($callback, (int)$actor->key, $credential_id);
+			call_user_func($callback, (int)$actor->key, $credential_id, []);
 		}
 
 		$passkey->soft_delete();
@@ -617,6 +617,31 @@ class PasskeyService {
 		foreach (self::$post_revoke_callbacks as $callback) {
 			call_user_func($callback, (int)$actor->key, $credential_id);
 		}
+	}
+
+	/**
+	 * Superadmin-initiated revocation of another user's credential. Runs the
+	 * same pre/post-revoke registries as revoke(); pre-revoke callbacks receive
+	 * ['admin_reset' => true] so policy vetoes that a forced reset may
+	 * knowingly accept (the possession-factor invariant) can distinguish
+	 * themselves from vetoes that are absolute (the stranding floor).
+	 * $acting_admin is logged, never authorized here - the caller gates.
+	 */
+	public function adminRevoke(int $credential_id, User $target, User $acting_admin): void {
+		$passkey = $this->_loadOwnedPasskey($credential_id, $target);
+
+		foreach (self::$pre_revoke_callbacks as $callback) {
+			call_user_func($callback, (int)$target->key, $credential_id, ['admin_reset' => true]);
+		}
+
+		$passkey->soft_delete();
+
+		foreach (self::$post_revoke_callbacks as $callback) {
+			call_user_func($callback, (int)$target->key, $credential_id);
+		}
+
+		error_log('[ADMIN_2FA_RESET] action=admin_remove_passkey admin=' . (int)$acting_admin->key
+			. ' target=' . (int)$target->key . ' credential=' . $credential_id . ' result=done');
 	}
 
 	public function rename(int $credential_id, User $actor, string $label): void {
@@ -631,9 +656,17 @@ class PasskeyService {
 
 	/**
 	 * Registers a veto callback consulted (in registration order) before every
-	 * revoke(). A callback throws PasskeyRevocationVetoException to block the
-	 * revocation; the message surfaces to the user. Used when the platform
-	 * signal bus cannot veto synchronously (it can't - see docs/signals.md).
+	 * revoke() and adminRevoke(). A callback throws
+	 * PasskeyRevocationVetoException to block the revocation; the message
+	 * surfaces to the user. Used when the platform signal bus cannot veto
+	 * synchronously (it can't - see docs/signals.md).
+	 *
+	 * Signature: function (int $user_id, int $credential_id, array $context).
+	 * $context is empty for a self-service revoke() and ['admin_reset' => true]
+	 * for adminRevoke(), letting a callback distinguish a veto that a forced
+	 * administrative reset may knowingly accept from one that is absolute. A
+	 * two-parameter callback keeps working - PHP passes the extra argument to a
+	 * user-defined callable without complaint.
 	 */
 	public static function onPreRevoke(callable $callback): void {
 		self::$pre_revoke_callbacks[] = $callback;

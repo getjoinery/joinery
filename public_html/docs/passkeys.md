@@ -202,7 +202,7 @@ Before soft-deleting a credential, `PasskeyService::revoke()` consults a registr
 of veto callbacks in registration order:
 
 ```php
-PasskeyService::onPreRevoke(function (int $user_id, int $credential_id) {
+PasskeyService::onPreRevoke(function (int $user_id, int $credential_id, array $context) {
     // throw PasskeyRevocationVetoException('reason') to block the revocation
 });
 ```
@@ -214,6 +214,35 @@ platform signal bus (`SignalBus::dispatch()`) because the bus catches and logs
 subscriber exceptions rather than propagating them — it cannot veto synchronously.
 A consumer (e.g. the mail unlock floor) subscribes at bootstrap and vetoes when
 deleting its wrapping for that credential would strand its protected key.
+
+`$context` says who ordered the revocation. It is empty for `revoke()`, the
+self-service path where the account holder removes their own credential, and
+`['admin_reset' => true]` for `adminRevoke()`. A two-parameter callback is still
+valid — PHP passes the extra argument to a user-defined callable without
+complaint — so a consumer that draws no distinction ignores it.
+
+### Administrative revocation
+
+`PasskeyService::adminRevoke(int $credential_id, User $target, User $acting_admin)`
+removes a credential from someone else's account: the superadmin's recovery
+lever for a user who lost the authenticator holding it. The credential is
+loaded as owned by `$target`, both registries run exactly as they do for
+`revoke()`, and one `[ADMIN_2FA_RESET]` line names the acting admin. Authority
+is the caller's to establish — the service logs `$acting_admin`, it does not
+check them. The admin user page is where that gating lives; see
+[Account Security](account_security.md#administrative-factor-reset).
+
+The two vetoes the vault registers answer `$context` differently, and the
+difference is the whole point of passing it:
+
+- **The unlocker floor ignores it.** Stripping the last unlocker from an
+  encrypted vault destroys data that cannot be recreated, so it is refused on
+  every path, with no override and no force flag.
+- **The possession-factor invariant honors it.** Refusing to leave a vault
+  holder without a possession factor is a posture rule, and kept strictly it
+  deadlocks the very user an administrative reset exists to rescue. An admin may
+  accept it knowingly, because the vault re-enrollment gate forces a replacement
+  factor at that user's next page load.
 
 ## API surface
 

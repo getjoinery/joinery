@@ -719,8 +719,8 @@ class VaultUnlock {
 		}
 		$registered = true;
 		require_once(PathHelper::getIncludePath('includes/PasskeyService.php'));
-		PasskeyService::onPreRevoke(function (int $user_id, int $credential_id) {
-			VaultUnlock::assertRevocationSafe($user_id, $credential_id);
+		PasskeyService::onPreRevoke(function (int $user_id, int $credential_id, array $context = []) {
+			VaultUnlock::assertRevocationSafe($user_id, $credential_id, $context);
 		});
 		PasskeyService::onPostRevoke(function (int $user_id, int $credential_id) {
 			VaultUnlock::cleanupRevokedCredential($user_id, $credential_id);
@@ -732,8 +732,16 @@ class VaultUnlock {
 	 * a vault unless at least 3 unused recovery codes remain. Throws
 	 * PasskeyRevocationVetoException (defined in PasskeyService.php) to block
 	 * the revocation; the message surfaces to the user verbatim.
+	 *
+	 * $context carries ['admin_reset' => true] on the superadmin factor-reset
+	 * path (PasskeyService::adminRevoke()). The floor above ignores it - a
+	 * stranded client-custody vault is unrecoverable data loss and no
+	 * authority overrides it. The possession-factor invariant below honors it:
+	 * an administrator may knowingly remove a user's last factor, because the
+	 * vault re-enrollment gate in SessionControl forces a replacement at that
+	 * user's next page load.
 	 */
-	public static function assertRevocationSafe(int $user_id, int $credential_id): void {
+	public static function assertRevocationSafe(int $user_id, int $credential_id, array $context = []): void {
 		require_once(PathHelper::getIncludePath('data/user_encryption_vaults_class.php'));
 
 		// Check EVERY scope's vault, not just the server-custody 'user' one — a
@@ -759,8 +767,10 @@ class VaultUnlock {
 		// in security_logic): a vault holder must always retain a second
 		// factor beyond memorized secrets. Revoking the last live passkey
 		// while TOTP is off would leave the vault openable with a phished
-		// password + recovery code alone.
-		if ($vaults->count()) {
+		// password + recovery code alone. Skipped on the administrative reset
+		// path: kept strictly there it deadlocks a user who lost every factor,
+		// and the re-enrollment gate closes the exposure at their next page load.
+		if ($vaults->count() && empty($context['admin_reset'])) {
 			require_once(PathHelper::getIncludePath('data/users_class.php'));
 			require_once(PathHelper::getIncludePath('data/passkeys_class.php'));
 			$user = new User($user_id, TRUE);
