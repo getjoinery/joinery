@@ -2337,6 +2337,28 @@
       }
     },
     {
+      "name": "api_agent_rate_limit_requests",
+      "default": "6000",
+      "helptext": "Max agent-channel requests per window per IP (own bucket, not the general API limit). A node agent polls for work on a seconds cadence, so this is sized for machine traffic.",
+      "group": "api_rate_limits",
+      "label": "Max agent channel requests per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "api_agent_rate_limit_window",
+      "default": "3600",
+      "helptext": "Window (seconds) for the agent channel rate limit.",
+      "group": "api_rate_limits",
+      "label": "Agent channel rate limit window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
       "name": "api_upload_rate_limit_requests",
       "default": "10000",
       "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",

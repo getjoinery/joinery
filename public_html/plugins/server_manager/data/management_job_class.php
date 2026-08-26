@@ -2,6 +2,10 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.7 - mjb_agent_outcome records the wire outcome verbatim, so a refusal is countable
+ *                without matching the text of an error message
+ * @version 1.6 - primitive jobs for the agent channel: createPrimitiveJob, claim/report, and the
+ *                claim timeout that returns an unreported job to pending instead of wedging it
  * @version 1.5 - run_command joins filterTypes (node console)
  * @version 1.4
  */
@@ -27,6 +31,26 @@ class ManagementJob extends SystemBase {
 		'mjb_output'            => array('type'=>'text'),
 		'mjb_result'            => array('type'=>'jsonb'),
 		'mjb_current_step'      => array('type'=>'int4', 'default'=>'0'),
+		// How many times a node agent has claimed this job without reporting a
+		// terminal result. A claim that never comes back — a crashed agent, a
+		// lost network, a replayed claim — would otherwise leave the job wedged
+		// in 'running' forever, holding the per-node concurrency lock with it.
+		'mjb_claim_attempts'    => array('type'=>'int4', 'default'=>'0', 'is_nullable'=>false),
+		// The outcome a node agent reported, verbatim from the wire:
+		// completed | failed | refused. NULL for every job no node agent
+		// reported on — including a primitive job this plane gave up on after
+		// repeated lost claims, because in that case the node never said
+		// anything and recording a verdict for it would be inventing one.
+		//
+		// mjb_status stays the three-value vocabulary every dashboard filter
+		// and status consumer already understands, so a refusal reads as the
+		// terminal failure it is. But a refusal is ALSO a distinct fact: once
+		// operate and destructive primitives are dispatched, a rise in
+		// refusals is an attack or misconfiguration signal, and volume
+		// anomalies are supposed to be legible (§3.5.6). A signal that can
+		// only be found by matching a substring of a human-readable message is
+		// not a signal, so the machine-readable answer lives here.
+		'mjb_agent_outcome'     => array('type'=>'varchar(16)'),
 		'mjb_total_steps'       => array('type'=>'int4'),
 		'mjb_error_message'     => array('type'=>'text'),
 		'mjb_external_order_item_id' => array('type'=>'int8'),
@@ -62,6 +86,199 @@ class ManagementJob extends SystemBase {
 		$job->set('mjb_created_by', $created_by);
 		$job->save();
 		return $job;
+	}
+
+	// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
+
+	/** A claim not reported within this many seconds is treated as lost. */
+	const CLAIM_TIMEOUT_SECONDS = 900;
+
+	/** After this many lost claims the job fails rather than looping forever. */
+	const MAX_CLAIM_ATTEMPTS = 3;
+
+	/** Ceiling on a primitive job's params, matched byte-for-byte on the node. */
+	const MAX_PARAMS_BYTES = 16384;
+
+	/** The outcomes a node agent may report. Anything else is refused at the endpoint. */
+	const AGENT_OUTCOMES = ['completed', 'failed', 'refused'];
+
+	/**
+	 * How many jobs a node's agent has refused since a given time.
+	 *
+	 * The count that matters for §3.5.6: a node refusing work is a node whose
+	 * plane is asking for something it should not be, or whose policy has been
+	 * tightened without the plane noticing. Either way the number, not the
+	 * prose, is what an alert reads.
+	 */
+	static function refusalCountForNode($node_id, $since_utc) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT count(*) FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ?
+			   AND mjb_agent_outcome = 'refused'
+			   AND mjb_delete_time IS NULL
+			   AND mjb_completed_time >= ?"
+		);
+		$q->execute([(int)$node_id, $since_utc]);
+		return (int)$q->fetchColumn();
+	}
+
+	/**
+	 * Create a job addressed to a node's agent.
+	 *
+	 * mjb_commands carries {primitive, params} instead of shell steps — the
+	 * queue, progress and result plumbing are untouched, but the unit of work
+	 * is a NAME the node looks up in its own compiled-in vocabulary rather than
+	 * an instruction the plane composed. That difference is the migration.
+	 *
+	 * The params ceiling is enforced here as well as on the node. A job the
+	 * node would refuse for size fails loudly when it is built, rather than
+	 * travelling to a machine that will silently decline it.
+	 */
+	static function createPrimitiveJob($node_id, $job_type, $primitive, $params, $created_by) {
+		$params = $params ?: new stdClass();
+
+		// The payload carries a tripwire step alongside the primitive envelope.
+		//
+		// Nothing on the current release reads it: the node agent's remote
+		// source reads `primitive` and `params`, and its LOCAL source skips any
+		// job carrying a `primitive` key outright. It is here for an agent from
+		// BEFORE this release, which knows neither rule — it would claim this
+		// job out of the local queue, find no steps it recognises, and mark it
+		// completed having done nothing at all. A green job that never ran is
+		// the worst possible outcome for a status check.
+		//
+		// `primitive` is not a step type any released executor knows, so such
+		// an agent fails the job naming exactly that instead. Loud beats
+		// silent; the same rule A4 was decided under.
+		$payload = json_encode([
+			'primitive' => (string)$primitive,
+			'params'    => $params,
+			'steps'     => [[
+				'type'  => 'primitive',
+				'label' => 'Agent primitive: ' . (string)$primitive,
+			]],
+		]);
+		$encoded_params = json_encode($params);
+		if (strlen($encoded_params) > self::MAX_PARAMS_BYTES) {
+			throw new ManagementJobException(
+				'This job carries ' . strlen($encoded_params) . ' bytes of parameters, over the '
+				. self::MAX_PARAMS_BYTES . '-byte limit the node enforces. It would be refused there.');
+		}
+
+		$job = new ManagementJob(NULL);
+		$job->set('mjb_mgn_node_id', $node_id);
+		$job->set('mjb_job_type', $job_type);
+		$job->set('mjb_status', 'pending');
+		$job->set('mjb_commands', $payload);
+		$job->set('mjb_parameters', $params ? json_encode($params) : null);
+		$job->set('mjb_total_steps', 1);
+		$job->set('mjb_current_step', 0);
+		$job->set('mjb_created_by', $created_by);
+		$job->save();
+		return $job;
+	}
+
+	/**
+	 * Create a job from whatever a JobCommandBuilder returned.
+	 *
+	 * A builder now returns one of two shapes: the step list it always did, or
+	 * a {primitive, params} envelope when the operation has crossed to the
+	 * agent channel for this node. Callers dispatch operations, not transports,
+	 * so the shape is read here — which means an operation crosses in Phase 2
+	 * by gaining a build_<op>_primitive method, with no callsite touched.
+	 */
+	static function createFromBuild($node_id, $job_type, $built, $params, $created_by) {
+		if (is_array($built) && isset($built['primitive'])) {
+			return self::createPrimitiveJob($node_id, $job_type, $built['primitive'],
+				$built['params'] ?? [], $created_by);
+		}
+		return self::createJob($node_id, $job_type, $built, $params, $created_by);
+	}
+
+	/**
+	 * Is this job addressed to a node agent rather than to the step executor?
+	 */
+	function isPrimitiveJob() {
+		$commands = $this->get('mjb_commands');
+		if (is_string($commands)) {
+			$commands = json_decode($commands, true);
+		}
+		return is_array($commands) && isset($commands['primitive']);
+	}
+
+	/**
+	 * Return an unreported claim to the queue.
+	 *
+	 * A claim that never comes back is the normal consequence of an agent
+	 * crashing mid-job, and it is also what a replayed claim would leave
+	 * behind. Either way the job is wedged in 'running', holding the per-node
+	 * concurrency lock, and nothing else for that node can move. Returning it
+	 * to pending with a counted attempt turns a wedge into a delay; after
+	 * MAX_CLAIM_ATTEMPTS it fails outright, because a job that kills three
+	 * agents is not going to succeed on the fourth.
+	 *
+	 * @param int|null $node_id Sweep only this node's claims. A polling agent
+	 *   passes its own id — the lock it cares about is its own, and a
+	 *   fleet-wide scan on every poll of every node is a lot of scanning to
+	 *   answer a question about one machine. The scheduled pass passes null,
+	 *   which is what covers an agent that never polls again.
+	 * @return int How many jobs were acted on.
+	 */
+	static function requeueStaleClaims($node_id = null) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$cutoff = gmdate('Y-m-d H:i:s', time() - self::CLAIM_TIMEOUT_SECONDS);
+
+		$sql = "SELECT mjb_id, mjb_claim_attempts FROM mjb_management_jobs
+			 WHERE mjb_status = 'running'
+			   AND mjb_delete_time IS NULL
+			   AND jsonb_exists(mjb_commands, 'primitive')
+			   AND COALESCE(mjb_started_time, mjb_create_time) < ?";
+		$args = [$cutoff];
+		if ($node_id !== null) {
+			$sql .= ' AND mjb_mgn_node_id = ?';
+			$args[] = (int)$node_id;
+		}
+
+		$q = $db->prepare($sql);
+		$q->execute($args);
+		$rows = $q->fetchAll(PDO::FETCH_ASSOC);
+
+		$acted = 0;
+		foreach ($rows as $row) {
+			$attempts = (int)$row['mjb_claim_attempts'];
+			if ($attempts >= self::MAX_CLAIM_ATTEMPTS) {
+				$fail = $db->prepare(
+					"UPDATE mjb_management_jobs
+					 SET mjb_status = 'failed',
+					     mjb_error_message = ?,
+					     mjb_completed_time = now(),
+					     mjb_update_time = now()
+					 WHERE mjb_id = ? AND mjb_status = 'running'"
+				);
+				$fail->execute([
+					'Claimed ' . $attempts . ' times by the node agent without a result each time. '
+					. 'The agent may be crashing on this job; check the node before re-running it.',
+					$row['mjb_id'],
+				]);
+			} else {
+				$requeue = $db->prepare(
+					"UPDATE mjb_management_jobs
+					 SET mjb_status = 'pending',
+					     mjb_started_time = NULL,
+					     mjb_output = COALESCE(mjb_output, '') || ?,
+					     mjb_update_time = now()
+					 WHERE mjb_id = ? AND mjb_status = 'running'"
+				);
+				$requeue->execute([
+					"\n[The node agent claimed this job and did not report back within "
+						. self::CLAIM_TIMEOUT_SECONDS . " seconds. Returned to the queue.]\n",
+					$row['mjb_id'],
+				]);
+			}
+			$acted++;
+		}
+		return $acted;
 	}
 
 	function prepare() {

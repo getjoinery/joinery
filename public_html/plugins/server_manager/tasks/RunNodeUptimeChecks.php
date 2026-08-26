@@ -18,6 +18,8 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 1.7 - sweeps stale agent-channel claims: a job claimed by a node agent that never
+ *                reported back is returned to the queue instead of wedging that node's lock
  * @version 1.6 - a probe that dies in this machine's own resolver is inconclusive, not down:
  *                a broken resolver on the monitoring host no longer alerts the whole fleet down
  * @version 1.5 - P-19: recovered alert reports real down duration (capture down_since before apply_state clears it)
@@ -123,7 +125,19 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 			}
 		}
 
+		// A node agent claims a primitive job and then reports back. When it
+		// never reports — it crashed, the network went, the box rebooted — the
+		// job sits in 'running' holding that node's concurrency lock, and
+		// nothing else for the node can move. The claim endpoint sweeps on
+		// every poll, which heals an agent that comes back; this sweep is for
+		// the agent that does not, where no poll is ever going to arrive.
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		$requeued = ManagementJob::requeueStaleClaims();
+
 		$message = sprintf('Checked %d node(s); %d up/down alert(s); %d cert alert(s); %d skipped; %d not due.', $checked, $alerts, $cert_alerts, $skipped, $not_due);
+		if ($requeued > 0) {
+			$message .= sprintf(' %d stale agent claim(s) returned to the queue.', $requeued);
+		}
 		if (!empty($errors)) {
 			$message .= ' Notes: ' . implode(' | ', array_slice($errors, 0, 5));
 		}

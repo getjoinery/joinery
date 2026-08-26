@@ -2,6 +2,12 @@
 /**
  * API v1 Endpoint
  *
+ * @version 2.17
+ * @changelog 2.17 - Agent channel (/api/v1/agent/*): the server manager's node
+ *   agent claims primitive jobs and posts results over an outbound HTTPS poll,
+ *   authenticated by an Ed25519 keypair the node generated and kept. Its own
+ *   rate-limit bucket; dispatched before key authentication because its
+ *   credential is not an API key. See AgentChannelEndpoint.
  * @version 2.16
  * @changelog 2.16 - a collection GET includes a locked sealed row with its
  *   sealed fields masked and content_locked set (export_for_api_locked),
@@ -278,6 +284,33 @@ if ((string)$settings->get_setting('api_require_https', false, true) !== '0') {
 	if (!$is_https) {
 		api_error('API requires HTTPS. Please use https:// instead of http://', 'SecurityError', 426);
 	}
+}
+
+// Agent channel (/api/v1/agent/*): the node-posture job source of the server
+// manager's agent (specs/agent_on_node_architecture.md §3.1). Dispatched here —
+// before the general API rate limiter — because it is machine traffic with its
+// own profile: a fleet of nodes polling from one NAT'd address would otherwise
+// exhaust a per-IP budget sized for human clients and go silent, which is
+// exactly the failure the channel exists to make visible. It gets its own
+// bucket instead, so abnormal agent volume is still bounded and still legible
+// (§3.5.6, reads are loud).
+//
+// Its credential is not an API key: the node signs with a keypair it generated
+// and kept, and this plane holds only the public half. So it authenticates
+// itself, before the key-header requirement below.
+if (strtolower(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/'))[2] ?? '') === 'agent') {
+	$agent_limit  = (int)($settings->get_setting('api_agent_rate_limit_requests') ?: 6000);
+	$agent_window = (int)($settings->get_setting('api_agent_rate_limit_window') ?: 3600);
+	if (!RequestLogger::check_rate_limit('api_agent', $agent_limit, $agent_window)) {
+		api_error('Agent channel rate limit exceeded.', 'RateLimitError', 429);
+	}
+	if (!class_exists('AgentChannelEndpoint')) {
+		// The server_manager plugin is absent or inactive, so this route does
+		// not exist here. Indistinguishable from any other unknown path.
+		api_error('Not found', 'ActionError', 404);
+	}
+	AgentChannelEndpoint::dispatchPreAuth(explode('/', trim(parse_url($_SERVER['REQUEST_URI'], PHP_URL_PATH), '/')));
+	// dispatchPreAuth() always exits.
 }
 
 // Rate limiting: general API requests (configurable, default 1000/hour per IP)
