@@ -6,6 +6,8 @@
  *                without matching the text of an error message
  * @version 1.6 - primitive jobs for the agent channel: createPrimitiveJob, claim/report, and the
  *                claim timeout that returns an unreported job to pending instead of wedging it
+ * @version 1.6 - run_command and the copy_database types leave filterTypes (A1/A3 retirement);
+ *                list_backups joins it. Historical rows of retired types still render
  * @version 1.5 - run_command joins filterTypes (node console)
  * @version 1.4
  */
@@ -297,11 +299,15 @@ class ManagementJob extends SystemBase {
 	 * @return string[]
 	 */
 	static function filterTypes($include_publish = false) {
+		// run_command and both copy_database types are retired (A1/A3). Historical
+		// rows keep their type strings and still render; what is gone is the
+		// ability to create another, so they are not offered as a filter for a
+		// kind of job that can no longer happen.
 		$types = [
 			'check_status', 'backup_database', 'backup_project',
-			'copy_database', 'copy_database_local', 'restore_database',
+			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
-			'backup_run', 'run_command',
+			'backup_run',
 		];
 		if ($include_publish) {
 			$types[] = 'publish_upgrade';
@@ -317,7 +323,7 @@ class ManagementJob extends SystemBase {
 	 * @return string[]
 	 */
 	static function databaseOpTypes() {
-		$db_ops = ['copy_database', 'copy_database_local', 'restore_database'];
+		$db_ops = ['restore_database'];
 		return array_values(array_intersect(self::filterTypes(), $db_ops));
 	}
 

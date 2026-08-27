@@ -193,51 +193,30 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 |-----|---------|
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
 | **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain |
-| **Database** | Copy database from another node to this one, restore from backup file |
+| **Database** | Restore from a backup file, and the record of database operations |
 | **Updates** | Version comparison (node vs control plane), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
-| **Console** | Run one ad-hoc command on this node. Off until the node opts in — see below |
 
-### Node console
+### Running a command on a node
 
-Some fleet work needs a command no built-in job covers. The Console tab runs
-one, on one node, and records it.
+There is no way to. A control plane holds no mechanism for running an
+instruction it composed at runtime on a managed node — no Console tab, no
+`node_exec.php`, no `run_command` job (decision A1).
 
-**Turning it on.** Overview → Edit → *Allow running commands from the Console
-tab* (`mgn_allow_console`, off by default). Until then the tab shows only a link
-back to that setting. A newly added or provisioned node is never
-console-reachable by default.
+What a node accepts instead is a **primitive**: a name it looks up in a
+vocabulary compiled into its own agent, with parameters validated against a
+declared shape. A job names an operation; it never carries a command. A node
+refuses anything outside that vocabulary whatever this plane asks, so what the
+fleet can be made to do is bounded by what was built and signed, not by what
+someone can compose.
 
-**Running a command.** Type it, choose how long to wait (1, 2, 5 or 10 minutes),
-and — on a container node — choose whether it runs inside the container or on
-its host. A confirmation dialog shows the resolved execution context (which SSH
-user, which host or container, the timeout, the command) before anything is
-sent, so what is confirmed is what actually runs.
-
-**The gate.** A command is refused unless all of these hold: the operator is a
-superadmin (permission 10), the node has `mgn_allow_console` on, and the
-operator has confirmed a second factor recently in this session — the standing
-step-up rule in [Account Security](../../../docs/account_security.md). When a
-confirmation is owed, the passkey ceremony runs inline and the form then
-submits. An account holding no second factor passes that check; the gate binds a
-factor the account has rather than requiring an enrollment. A refusal
-re-renders the tab with the typed command intact.
-
-**What is not checked is the command.** Nothing inspects, classifies or filters
-it — no shell string can be judged safe by inspection, and a filter that
-implied otherwise would be worse than none. The bounds are the gate above, the
-timeout (which kills the command and fails the job), and the audit record.
-
-**Privilege** is the node's SSH identity's: `mgn_ssh_user` over the node's key.
-If that user has no `sudo`, neither does the console.
-
-**The record.** Every run is a `run_command` management job — command, operator,
-node, timestamps, exit status and captured output — on the jobs pages, on the
-job detail page with its live output stream, and in the tab's own *Recent
-commands* list. `node_exec.php` writes the same row (marked as coming from the
-CLI, with no operator), so both ways onto a node produce one audit stream.
-Stored commands and output are redacted for credential material, including
-`PGPASSWORD=`-style env prefixes.
+Work with no primitive yet is done over the operator's **own SSH key**. That is
+deliberate and it costs something real: those sessions are not recorded, where a
+console run produced a job row with its command, operator, output and exit
+status. The audit trail was given up knowingly, because a recorded path that can
+run anything is still a path that can run anything, and a compromised plane
+would have used it. `sshd` stays on across the current fleet (A11), so this is
+the working route until the vocabulary covers the operation.
 
 ### Dashboard Features
 
@@ -330,7 +309,6 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
 | `backup_run` | This control plane's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
-| `run_command` | One ad-hoc command from the node detail Console tab (or `node_exec.php`). Bounded by a chosen timeout; the command itself is never inspected | Depends entirely on the command |
 | `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
@@ -1507,7 +1485,6 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `includes/provisioning/ManagedDomainWatch.php` | Expiry refresh, the six-month prompt, custody detection, the node banner push |
 | `logic/domain_check_logic.php` | `/api/v1/action/server_manager/domain_check` — live availability for the checkout field |
 | `includes/JobCommandBuilder.php` | Command generation for all job types; `ssh_prefix()` is public for use by other tools |
-| `node_exec.php` | **Dev/AI diagnostic CLI** — run any command on a managed node in one call; handles SSH + Docker transparently. Usage: `php node_exec.php` (list nodes), `php node_exec.php <slug> "<cmd>"` (run), or pipe stdin with `--stdin` for SQL queries. |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
 | `includes/TargetUploader.php` | Web-tier upload + delete helpers using S3Signer |

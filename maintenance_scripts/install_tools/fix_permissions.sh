@@ -1,8 +1,12 @@
 #!/usr/bin/env bash
+#VERSION 2.9 - node_exec.php is retired (A1), so the second reader of the provisioning
+#              key is gone. The 640 pin is UNCHANGED here on purpose — tightening a
+#              live fleet key is a deliberate act, not a side effect of deleting a
+#              script — but the reason for the group bit is now one caller short.
+#              See the pin's comment.
 #VERSION 2.8 - Pin config/agent_signing_key (the fleet trust root — whoever reads it can
 #              sign agent releases every node installs as root) to 600 user1:user1, and
-#              config/provisioning_key (the fleet SSH key) to 640 www-data:user1 (600
-#              would lock node_exec.php out — see the pin's comment).
+#              config/provisioning_key (the fleet SSH key) to 640 www-data:user1.
 #              The sweep left both open; the signing key was found 640 group-www-data.
 #VERSION 2.7 - Guarantee cache/static_pages exists before the sweep, so page
 #              caching is on after every permissions run. It sits under a
@@ -150,10 +154,16 @@ fi
 
 # The fleet provisioning SSH key (mgn_ssh_key_path) — reaches every managed
 # node as root, so the sweep must not leave it world-readable. It stops at 640
-# www-data:user1 rather than 600 because two callers ssh with it: the agent as
+# www-data:user1 rather than 600 because two callers ssh'd with it: the agent as
 # root, and node_exec.php as the developer account. OpenSSH's strict-permissions
 # check only applies to key files the caller owns, so group-read on a
-# www-data-owned file is exactly what lets user1 use it at all.
+# www-data-owned file is what let user1 use it at all.
+#
+# node_exec.php is now retired (A1), leaving root the only caller — and root
+# reads the file whatever its mode. So 600 is available, and would take the
+# fleet's SSH key out of group-read entirely. It is NOT changed here: narrowing
+# a key every managed node trusts belongs in its own deliberate change with the
+# fleet watched afterwards, not as a footnote to deleting a script.
 PROVISIONING_KEY="$SITE_ROOT/config/provisioning_key"
 if [ -f "$PROVISIONING_KEY" ]; then
     echo "  Pinning key $PROVISIONING_KEY to 640 www-data:user1..."

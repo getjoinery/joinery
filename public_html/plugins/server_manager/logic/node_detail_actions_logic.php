@@ -19,6 +19,9 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.15 - A1/A3 retirement: run_command (the console) and both copy_database actions are
+ *                 gone. No plane composes an instruction for a node to run; copying a database is
+ *                 backup-on-source then restore-on-target, human-present
  * @version 1.14 - enable_agent: switch a node's agent on remotely and, on request, have it ask to
  *                 join this plane. Approval is untouched — the fingerprint check is the security
  * @version 1.13 - unpair_agent converges on AgentChannelEndpoint::forgetAgent(), the same forgetting
@@ -64,8 +67,6 @@ class NodeDetailActions {
 		'check_status'             => 'overview',
 		'backup_database'          => 'backups',
 		'backup_project'           => 'backups',
-		'copy_database'            => 'database',
-		'copy_database_local'      => 'database',
 		'restore_database'         => 'database',
 		'restore_project'          => 'backups',
 		'restore_chain'            => 'backups',
@@ -78,7 +79,6 @@ class NodeDetailActions {
 		'run_plugin_installers'    => 'overview',
 		'enable_agent'             => 'api_keys',
 		'set_reverse_dns'          => 'overview',
-		'run_command'              => 'console',
 		'save_api_credential'      => 'api_keys',
 		'approve_join'             => 'api_keys',
 		'reject_join'              => 'api_keys',
@@ -136,49 +136,6 @@ class NodeDetailActions {
 			case 'check_status': {
 				$built = JobCommandBuilder::build_check_status($node);
 				$job = ManagementJob::createFromBuild($node->key, 'check_status', $built, null, $uid);
-				return self::jobUrl($job);
-			}
-
-			case 'run_command': {
-				// The node console (specs/server_manager_node_console.md). Every
-				// refusal here returns null rather than a redirect: the operator
-				// has typed a command, and throwing it away to show a message is
-				// the wrong trade. null re-renders this page, message and all,
-				// with the console tab repopulating from $_POST.
-				if ($session->get_permission() < 10) {
-					self::fail($session, $page_regex, 'Running commands on a node is superadmin-only.');
-					return null;
-				}
-				if (!$node->get('mgn_allow_console')) {
-					self::fail($session, $page_regex,
-						'The console is turned off for this site. Turn it on in Overview → Edit before running commands here.');
-					return null;
-				}
-				if (self::step_up_required($session)) {
-					self::fail($session, $page_regex,
-						'Confirm with your passkey or authenticator before running a command.');
-					return null;
-				}
-
-				$command = isset($_POST['console_command']) ? trim((string)$_POST['console_command']) : '';
-				if ($command === '') {
-					self::fail($session, $page_regex, 'Enter a command to run.');
-					return null;
-				}
-				$timeout = isset($_POST['console_timeout']) ? (int)$_POST['console_timeout'] : 0;
-				if (!in_array($timeout, JobCommandBuilder::CONSOLE_TIMEOUTS, true)) {
-					self::fail($session, $page_regex, 'Choose one of the offered timeouts.');
-					return null;
-				}
-
-				$params = [
-					'command' => $command,
-					'timeout' => $timeout,
-					'on_host' => !empty($_POST['console_on_host']),
-					'source'  => 'ui',
-				];
-				$steps = JobCommandBuilder::build_run_command($node, $params);
-				$job = ManagementJob::createJob($node->key, 'run_command', $steps, $params, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -260,38 +217,6 @@ class NodeDetailActions {
 				}
 				$job = ManagementJob::createJob($node->key, 'backup_project', $steps, $params, $uid);
 				return self::jobUrl($job);
-			}
-
-			case 'copy_database': {
-				$source_id = intval($_POST['source_node_id'] ?? 0);
-				if ($source_id) {
-					if ($source_id === $node->key) {
-						self::fail($session, $page_regex, 'Source and target sites must be different.');
-						return $base_url . '&tab=database';
-					}
-					try {
-						$source_node = new ManagedNode($source_id, TRUE);
-					} catch (Exception $e) {
-						self::fail($session, $page_regex, 'Source site not found.');
-						return $base_url . '&tab=database';
-					}
-					$params = ['source_node_id' => $source_id, 'target_node_id' => $node->key];
-					$steps = JobCommandBuilder::build_copy_database($source_node, $node, $params);
-					$job = ManagementJob::createJob($node->key, 'copy_database', $steps, $params, $uid);
-					return self::jobUrl($job);
-				}
-				return $base_url . '&tab=database';
-			}
-
-			case 'copy_database_local': {
-				$source_db_name = trim($_POST['source_db_name'] ?? '');
-				if ($source_db_name) {
-					$params = ['source_db_name' => $source_db_name];
-					$steps = JobCommandBuilder::build_copy_database_by_name($node, $params);
-					$job = ManagementJob::createJob($node->key, 'copy_database_local', $steps, $params, $uid);
-					return self::jobUrl($job);
-				}
-				return $base_url . '&tab=database';
 			}
 
 			case 'restore_database': {
@@ -685,12 +610,12 @@ class NodeDetailActions {
 			'mgn_name', 'mgn_slug', 'mgn_host', 'mgn_ssh_user', 'mgn_ssh_key_path',
 			'mgn_ssh_port', 'mgn_container_name', 'mgn_container_user', 'mgn_web_root',
 			'mgn_site_url', 'mgn_bkt_backup_target_id', 'mgn_notes', 'mgn_enabled',
-			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks', 'mgn_allow_console',
+			'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
 			'mgn_uptime_enabled', 'mgn_uptime_check_type',
 			'mgn_uptime_tcp_port', 'mgn_uptime_interval_seconds',
 		];
 		$bool_fields = ['mgn_enabled', 'mgn_delete_local_after_upload', 'mgn_skip_joinery_checks',
-			'mgn_allow_console', 'mgn_uptime_enabled'];
+			'mgn_uptime_enabled'];
 		foreach ($editable_fields as $field) {
 			if (in_array($field, $bool_fields, true)) {
 				$node->set($field, !empty($_POST[$field]));

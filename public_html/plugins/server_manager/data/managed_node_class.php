@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.10 - mgn_allow_console removed: the Console tab it gated is retired (A1). The physical
+ *                 column lingers as the pairing-token columns do — nothing reads it, and dropping a
+ *                 column is not something a field-spec removal does
  * @version 1.9 - mgn_agent_quiet_time: a node says it is going quiet when its agent is switched
  *                off, so deliberate silence reads differently from a node that broke
  * @version 1.8 - mgn_agent_channel_enabled removed: a connected agent is routed to
@@ -94,7 +97,6 @@ class ManagedNode extends SystemBase {
 		// Default off: the control plane holds SSH keys to every node, so being
 		// reachable from a browser form is a decision made per node rather than
 		// a property every node acquires the moment it is registered.
-		'mgn_allow_console'       => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_mgh_host_id'         => array('type'=>'int8'),
 		'mgn_ssl_state'           => array('type'=>'varchar(20)'),
 		'mgn_port'                => array('type'=>'int4'),

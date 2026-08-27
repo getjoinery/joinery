@@ -1326,3 +1326,15 @@
 	$migration['migration_file'] = 'enable_agent_where_already_installed.php';
 	$migration['migration_sql'] = NULL;
 	$migrations[] = $migration;
+
+	// 175 could not do what it says: settings seeding writes the declared factory
+	// default before it runs, so its "only act on an empty value" guard read a
+	// default as an operator's choice and left the switch off on machines whose
+	// agents were already running — which the installer then stopped. 176 does
+	// the correction, treating only a TRUTHY value as a decision.
+	$migration = array();
+	$migration['database_version'] = '176';
+	$migration['test'] = NULL;
+	$migration['migration_file'] = 'enable_agent_where_it_was_already_installed.php';
+	$migration['migration_sql'] = NULL;
+	$migrations[] = $migration;

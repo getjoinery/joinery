@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.36 - A1/A3 retirement: build_run_command and both copy_database builders are gone.
+ *                 No builder composes an instruction a node executes as text; a database copy is
+ *                 backup-on-source then restore-on-target, through the backup target
  * @version 1.35 - backup_run joins the primitive transport: the same config as declared params,
  *                 composed into the engine's stdin ON THE NODE, so no credential enters argv
  * @version 1.34 - list_backups joins the primitive transport: the node reads its own backup
@@ -887,146 +890,6 @@ class JobCommandBuilder {
 		return $config;
 	}
 
-	/**
-	 * Copy database from source node to target node.
-	 * Auto-prepends a backup of the target before overwrite.
-	 */
-	public static function build_copy_database($source_node, $target_node, $params = []) {
-		$source_creds = self::get_db_credentials_script($source_node);
-		$target_creds = self::get_db_credentials_script($target_node);
-		$target_config = self::get_config_path($target_node);
-
-		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-		$dump_file = "/tmp/copy_{$transfer_id}.sql.gz";
-
-		$steps = [];
-
-		$target_sudo = self::sudo_prefix($target_node);
-		$source_sudo = self::sudo_prefix($source_node);
-
-		// Safety: auto-backup target database first. chmod matches the Ensure
-		// backup directory pattern in build_backup_database: the gzip redirect
-		// runs as the SSH user, so sudo on mkdir alone leaves /backups unwritable
-		// on nodes with a non-root SSH user.
-		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			'cmd' => "{$target_sudo}mkdir -p /backups && {$target_sudo}chmod 1777 /backups && {$target_creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
-			'node_id' => $target_node->key,
-			'timeout' => 3600];
-
-		// Dump source — must run on source node. --no-owner --no-acl because the
-		// restore runs as the TARGET site's own DB user: owner/grant statements
-		// naming the source site's role would error there, and the restore is
-		// ON_ERROR_STOP so any error fails the job.
-		$steps[] = ['type' => 'ssh', 'label' => 'Dump source database',
-			'cmd' => "{$source_creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > {$dump_file}",
-			'node_id' => $source_node->key,
-			'timeout' => 3600];
-
-		// Docker sources: the dump step above is docker exec'd, so the file lands
-		// inside the container — but SCP reads the host filesystem. Stage it out.
-		$source_container = $source_node->get('mgn_container_name');
-		if ($source_container) {
-			$sc = escapeshellarg($source_container);
-			$df = escapeshellarg($dump_file);
-			$steps[] = ['type' => 'ssh', 'label' => 'Copy dump out of container',
-				'cmd' => "docker cp {$sc}:{$df} {$dump_file}",
-				'node_id' => $source_node->key, 'on_host' => true];
-		}
-
-		// Download from source to control plane — must pull from source node
-		$steps[] = ['type' => 'scp', 'label' => 'Download dump from source',
-			'direction' => 'download', 'remote_path' => $dump_file, 'local_path' => $dump_file,
-			'node_id' => $source_node->key];
-
-		// Upload to target host filesystem
-		$steps[] = ['type' => 'scp', 'label' => 'Upload dump to target',
-			'direction' => 'upload', 'local_path' => $dump_file, 'remote_path' => $dump_file,
-			'node_id' => $target_node->key];
-
-		// Docker targets: SCP lands on the host but docker exec runs inside the container.
-		// Copy the dump file from host into the container so the restore step can read it.
-		$target_container = $target_node->get('mgn_container_name');
-		if ($target_container) {
-			$tc = escapeshellarg($target_container);
-			$df = escapeshellarg($dump_file);
-			$steps[] = ['type' => 'ssh', 'label' => 'Copy dump into container',
-				'cmd' => "docker cp {$dump_file} {$tc}:{$df}",
-				'node_id' => $target_node->key, 'on_host' => true];
-		}
-
-		// Restore on target: verify the archive, then replace the schema.
-		// Restores replace — the drop is what removes objects that exist on the
-		// target but not in the snapshot — and ON_ERROR_STOP fails the job on
-		// the first error rather than completing a partial restore.
-		$steps[] = ['type' => 'ssh', 'label' => 'Restore database on target',
-			'cmd' => "gunzip -t {$dump_file} && {$target_creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$dump_file} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
-			'node_id' => $target_node->key,
-			'timeout' => 3600];
-
-		// Teardown: the scratch dump everywhere the job staged one. Tail
-		// placement (nothing after these) keeps un-upgraded agents correct —
-		// they ignore the flag and run the array sequentially, which is
-		// exactly today's trailing-cleanup behaviour. continue_on_error stays
-		// for the same reason: an upgraded agent implies it during teardown,
-		// an old agent needs it spelled out.
-		$steps[] = ['type' => 'ssh', 'label' => 'Clean up source dump',
-			'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key,
-			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-		if ($source_container) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Clean up staged dump on source host',
-				'cmd' => "rm -f {$dump_file}", 'node_id' => $source_node->key, 'on_host' => true,
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-		}
-		// For Docker target: clean up both the copy inside container and the file on host
-		if ($target_container) {
-			$tc = escapeshellarg($target_container);
-			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump in container',
-				'cmd' => "docker exec {$tc} rm -f {$dump_file}", 'node_id' => $target_node->key, 'on_host' => true,
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-			$steps[] = ['type' => 'ssh', 'label' => 'Clean up dump on target host',
-				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key, 'on_host' => true,
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-		} else {
-			$steps[] = ['type' => 'ssh', 'label' => 'Clean up target dump',
-				'cmd' => "rm -f {$dump_file}", 'node_id' => $target_node->key,
-				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-		}
-		$steps[] = ['type' => 'local', 'label' => 'Clean up control plane',
-			'cmd' => "rm -f {$dump_file}",
-			'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
-
-		return $steps;
-	}
-
-	/**
-	 * Copy a database by name within the same PostgreSQL instance (bare-metal nodes).
-	 * Source and target share the same DB user/credentials; no web-root lookup needed.
-	 *
-	 * Params:
-	 *   source_db_name - name of the source database in the same PG instance
-	 */
-	public static function build_copy_database_by_name($node, $params = []) {
-		$creds = self::get_db_credentials_script($node);
-		$source_db = $params['source_db_name'];
-		$transfer_id = substr(md5(uniqid(mt_rand(), true)), 0, 12);
-		$dump_file = "/tmp/local_copy_{$transfer_id}.sql.gz";
-		$sudo = self::sudo_prefix($node);
-
-		return [
-			['type' => 'ssh', 'label' => 'Auto-backup target database before overwrite',
-			 'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_overwrite_\$(date +%Y%m%d_%H%M%S).sql.gz",
-			 'timeout' => 3600],
-			['type' => 'ssh', 'label' => "Dump source database ({$source_db})",
-			 'cmd' => "{$creds} && umask 077 && pg_dump --no-owner --no-acl -U \"\$DB_USER\" " . escapeshellarg($source_db) . " | gzip > {$dump_file}",
-			 'timeout' => 3600],
-			['type' => 'ssh', 'label' => 'Restore to target',
-			 'cmd' => "gunzip -t {$dump_file} && {$creds} && psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\" -c 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;' && gunzip -c {$dump_file} | psql -v ON_ERROR_STOP=1 -U \"\$DB_USER\" \"\$DB_NAME\"",
-			 'timeout' => 3600],
-			['type' => 'ssh', 'label' => 'Clean up temp dump',
-			 'cmd' => "rm -f {$dump_file}",
-			 'teardown' => true, 'timeout' => 120, 'continue_on_error' => true],
-		];
-	}
 
 	/**
 	 * Restore a database from a backup file (local or cloud).
@@ -1651,55 +1514,6 @@ class JobCommandBuilder {
 		];
 	}
 
-	/** Timeouts the node console offers, in seconds. The console's runaway guard
-	 *  is the step timeout, so the set is closed — a hand-posted value outside it
-	 *  is refused rather than clamped. */
-	const CONSOLE_TIMEOUTS = [60, 120, 300, 600];
-	const CONSOLE_TIMEOUT_DEFAULT = 120;
-
-	/**
-	 * One ad-hoc command, typed by a superadmin on the node detail Console tab
-	 * (specs/server_manager_node_console.md). The command arrives verbatim: it
-	 * is not parsed, classified, or filtered, because no inspection of a shell
-	 * string can decide whether it is safe. What bounds it is the gate in front
-	 * (superadmin + step-up + the node's mgn_allow_console), the timeout below,
-	 * and the fact that every run is a job row nobody can run without leaving.
-	 *
-	 * Privilege is the node's SSH identity's — mgn_ssh_user over its key. The
-	 * console grants nothing the control plane could not already do.
-	 *
-	 * @param array $params command, timeout (from CONSOLE_TIMEOUTS), on_host
-	 */
-	public static function build_run_command($node, $params = []) {
-		if (!self::has_ssh($node)) {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot run a command: no SSH credentials configured.");
-		}
-
-		$command = isset($params['command']) ? trim((string)$params['command']) : '';
-		if ($command === '') {
-			throw new Exception('Enter a command to run.');
-		}
-
-		$timeout = isset($params['timeout']) ? (int)$params['timeout'] : self::CONSOLE_TIMEOUT_DEFAULT;
-		if (!in_array($timeout, self::CONSOLE_TIMEOUTS, true)) {
-			throw new Exception('Choose one of the offered timeouts.');
-		}
-
-		$step = [
-			'type'    => 'ssh',
-			'label'   => 'Run command',
-			'cmd'     => $command,
-			'timeout' => $timeout,
-		];
-		// on_host only means anything for a container node — there the choice is
-		// the container's shell or the host's. A bare-metal node has one shell.
-		if ($node->get('mgn_container_name') && !empty($params['on_host'])) {
-			$step['on_host'] = true;
-		}
-
-		return [$step];
-	}
 
 	/**
 	 * Publish a new upgrade from the control plane (runs locally).
