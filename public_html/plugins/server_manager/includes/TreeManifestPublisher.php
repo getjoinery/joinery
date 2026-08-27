@@ -106,10 +106,27 @@ class TreeManifestPublisher {
 		$site_root = rtrim($site_root, '/');
 		$entries = array();
 
-		$rii = new RecursiveIteratorIterator(
+		// Excluded directories are pruned BEFORE descent, not filtered after:
+		// the live site root contains directories the publishing user cannot
+		// read (root-owned backup chains), and an iterator that descends first
+		// throws on them — filtering the entries afterwards never runs. Pruning
+		// also keeps the walk from hashing its way through gigabytes of
+		// excluded backup and upload content.
+		$inner = new RecursiveCallbackFilterIterator(
 			new RecursiveDirectoryIterator($dir, FilesystemIterator::SKIP_DOTS),
-			RecursiveIteratorIterator::SELF_FIRST
+			function ($file) use ($site_root) {
+				$rel = ltrim(str_replace('\\', '/', substr($file->getPathname(), strlen($site_root))), '/');
+				if (self::excluded($rel)) {
+					return false;
+				}
+				// Unreadable entries are pruned rather than fatal: on the live
+				// tree a root-owned stray must not abort a publish, and a file
+				// absent from the manifest is honestly UNAVAILABLE to the
+				// agent, never silently trusted.
+				return $file->isReadable();
+			}
 		);
+		$rii = new RecursiveIteratorIterator($inner, RecursiveIteratorIterator::SELF_FIRST, RecursiveIteratorIterator::CATCH_GET_CHILD);
 		foreach ($rii as $file) {
 			if ($file->isDir()) continue;
 
@@ -117,7 +134,11 @@ class TreeManifestPublisher {
 			$rel = ltrim(str_replace('\\', '/', substr($abs, strlen($site_root))), '/');
 			if (self::excluded($rel)) continue;
 
-			$entries[$rel] = hash_file('sha256', $abs);
+			$hash = hash_file('sha256', $abs);
+			if ($hash === false) {
+				throw new Exception('could not hash ' . $rel);
+			}
+			$entries[$rel] = $hash;
 		}
 
 		ksort($entries);
