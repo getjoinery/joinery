@@ -988,6 +988,30 @@ pub fn assert_converged(world: &World) {
         "the server is holding one real name twice inside a vault, which no device can \
          put at one path: {clashes:?}"
     );
+    // An engine-internal name on the SERVER is transient by contract: a park is
+    // a step inside one operation, and nothing is supposed to still be wearing
+    // one when the fleet has settled. Its presence at convergence is a defect
+    // whatever any entry's verdict says about it.
+    //
+    // Asserted on where the name LIVES rather than on the park verdict, and the
+    // distinction is not academic: a user may legitimately name a local file
+    // `.jd-notes`, the engine parks it `ReservedPrefix`, and that park IS a
+    // designed end state which `held_back` should go on excusing. Keying this on
+    // the verdict would fail convergence for ever over a file the user named
+    // themselves. The workload never mints such a name, so no sweep would have
+    // shown the difference -- a real user would.
+    let internal: Vec<String> = world
+        .server
+        .tree()
+        .into_keys()
+        .filter(|p| p.rsplit('/').next().is_some_and(jd_vfs::is_internal))
+        .collect();
+    assert!(
+        internal.is_empty(),
+        "the server is holding engine-internal names at convergence, so an \
+         operation was left half finished and nothing will ever pick it up: \
+         {internal:?}"
+    );
     let server = owner_view_of_the_server(world);
     // What each encrypted file really contains, by server id. The exemption
     // below matches a parked entry by CONTENT, and an encrypted entry's own

@@ -48,6 +48,22 @@ pub enum ProtoError {
     Io(#[from] std::io::Error),
 }
 
+/// What was already holding a name a request asked for.
+///
+/// `sha256` is the hash the SERVER holds, and only a file has one. For an
+/// encrypted file that is the hash of the CIPHERTEXT: identical plaintext
+/// encrypts to different bytes every time, so it can never compare equal to
+/// anything a client is about to send. Adoption is therefore unavailable for
+/// encrypted holders, which costs nothing — an encrypted file's server name is
+/// `enc-{content id}` and nothing else can be holding it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NameHolder {
+    pub entity_type: String,
+    pub id: i64,
+    pub name: String,
+    pub sha256: Option<String>,
+}
+
 pub type Result<T> = std::result::Result<T, ProtoError>;
 
 impl ProtoError {
@@ -113,6 +129,34 @@ impl ProtoError {
     /// attempting one costs the device forever.
     pub fn may_be_about_the_name(&self) -> bool {
         self.name_taken() || self.refused_without_saying_why()
+    }
+
+    /// What holds the name, when a `name_taken` refusal says.
+    ///
+    /// The server has the colliding row in hand at the moment it refuses, so it
+    /// can name it for nothing. The client cannot find it otherwise: the index
+    /// is a whole-tree cursor walk with no folder scoping, and the occupant is
+    /// by definition absent from the local store — that is what makes the
+    /// collision undiscoverable until the refusal arrives.
+    ///
+    /// `None` from an older server that sends the bare marker. Callers must
+    /// treat that as no evidence rather than as a mismatch or a match.
+    pub fn name_holder(&self) -> Option<NameHolder> {
+        if !self.name_taken() {
+            return None;
+        }
+        let ProtoError::Api { data, .. } = self else {
+            return None;
+        };
+        Some(NameHolder {
+            entity_type: data.get("holder_type").and_then(Value::as_str)?.to_string(),
+            id: data.get("holder_id").and_then(Value::as_i64)?,
+            name: data.get("holder_name").and_then(Value::as_str)?.to_string(),
+            sha256: data
+                .get("holder_sha256")
+                .and_then(Value::as_str)
+                .map(str::to_owned),
+        })
     }
 
     /// Whether the server refused this because the key on it has already been

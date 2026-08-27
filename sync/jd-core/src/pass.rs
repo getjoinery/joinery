@@ -305,6 +305,91 @@ pub fn run_pass(
         // visibly, until the clash clears. The one thing still worth acting on
         // is the server deleting it, which the ordinary path handles: no local
         // delta, a remote delete, and the entry is forgotten.
+        // A park nobody is coming back for.
+        //
+        // `.jd-` names are the engine's own and are transient by contract: one
+        // step inside one operation. If that operation is gone — withdrawn, or
+        // dropped after a kill — the entity is left wearing the scratch name on
+        // the server, the naming pass reads the reserved prefix, and the entry
+        // parks `Unsyncable(ReservedPrefix)`. The skip immediately below then
+        // makes it invisible to every later pass: the device goes QUIET with the
+        // user's file under a name nobody chose, raising nothing. That is the
+        // silent half of the stranded-park defect, and it is the half no resume
+        // can reach, because there is no operation left to resume.
+        //
+        // Put it back where both sides last agreed. The agreement survives —
+        // an index walk writes `remote` and leaves `synced_placement` alone — so
+        // this restores the real name rather than inventing one. What is lost
+        // with the operation is the journey it was making; the file is not.
+        if jd_vfs::is_internal(&entry.remote.name)
+            && !busy.contains(&entry.id)
+            && !entry.remote_deleted
+        {
+            if let Some(agreed) = entry.synced_placement.clone() {
+                if !jd_vfs::is_internal(&agreed.name) {
+                    // The agreed name may have been taken while the park stood.
+                    // Asking for it anyway is refused, the op is overtaken, the
+                    // rescue is planned again next pass, and the file stays
+                    // under the scratch name for ever — non-silent this time,
+                    // but never settling either. Doctrine already answers it:
+                    // park is a naming verdict, and a give-up that is not about
+                    // the name goes BESIDE the agreement rather than into it.
+                    let taken: std::collections::HashSet<String> = env
+                        .store
+                        .every_entry()?
+                        .into_iter()
+                        .filter(|e| {
+                            e.id != entry.id
+                                && !e.remote_deleted
+                                && !e.id.is_provisional()
+                                && e.remote.parent == agreed.parent
+                        })
+                        .map(|e| e.remote.name)
+                        .collect();
+                    let mut wanted = agreed.name.clone();
+                    let mut n = 0u32;
+                    while taken.contains(&wanted) && n < 1000 {
+                        n += 1;
+                        wanted = (env.conflict_name)(&agreed.name, n);
+                    }
+                    env.store.queue_op(
+                        "move_remote",
+                        entry.id,
+                        &serde_json::json!({
+                            "parent": agreed.parent, "name": wanted,
+                        })
+                        .to_string(),
+                        &key_for(),
+                    )?;
+                    env.store.raise_issue(
+                        Some(entry.id),
+                        "reconcile",
+                        &format!(
+                            "an unfinished operation left this on the server as {}; \
+                             putting it back as {}",
+                            entry.remote.name, wanted
+                        ),
+                        (env.now_ms)() as i64,
+                    )?;
+                    continue;
+                }
+            }
+            // No agreement to put it back to, or the agreement is itself a
+            // scratch name. Nothing here can name the file, but going quiet
+            // about it is the posture this whole branch prosecutes: the user
+            // would be left with the engine's own name in their folder and
+            // nothing saying why.
+            env.store.raise_issue(
+                Some(entry.id),
+                "reconcile",
+                &format!(
+                    "an unfinished operation left this on the server as {}, and there is \
+                     no recorded name to put it back to",
+                    entry.remote.name
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
             continue;
         }

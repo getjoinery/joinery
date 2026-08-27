@@ -4640,3 +4640,627 @@ fn a_move_refused_at_both_ends_by_a_silent_server_still_finds_its_way() {
         );
     }
 }
+
+/// Diagnostic: does the folder path's asymmetry survive on a FILE?
+///
+/// Hand-builds the end state the folder-style land-beside would leave — the
+/// record and the server on a conflict name, the disk still wearing the
+/// original — and asks only whether it settles. Decoupled from whether any
+/// recovery can produce that state, which is a separate question.
+#[test]
+#[ignore]
+fn scratch_asymmetric_land_beside() {
+    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+
+    let world = World::new(4480, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    // Somebody else's file holds the plain name on the server. This device has
+    // never met it, which is the whole premise of defect 1.
+    world.server.seed_file(None, "report.txt", b"the occupant, from elsewhere");
+
+    // Ours: the server took it under a conflict name...
+    let mine = b"ours, landed beside";
+    // DIVERGENT on purpose: a different day and a different device from the one
+    // this laptop's own move-aside would mint. The coincident case settled in
+    // one round; the question is whether it depended on the coincidence.
+    let conflict = match std::env::var("COINCIDENT") {
+        Ok(_) => "report (conflicted copy 2026-07-31 from laptop).txt",
+        Err(_) => "report (conflicted copy 2026-07-30 from desktop).txt",
+    };
+    let id = world.server.seed_file(None, conflict, mine);
+
+    // ...the record agrees with the server...
+    laptop
+        .store
+        .put_entry(&Entry {
+            id: EntityId::file(id),
+            remote: Placement { parent: None, name: conflict.into() },
+            remote_content: None,
+            remote_modified_time: None,
+            head_change_id: 0,
+            remote_deleted: false,
+            is_encrypted: false,
+            content_id: None,
+            synced_remote_content: None,
+            synced_content: None,
+            synced_placement: Some(Placement { parent: None, name: conflict.into() }),
+            synced_fingerprint: None,
+            local_name: None,
+            status: LocalStatus::Synced,
+            wrapped_file_key: None,
+        })
+        .unwrap();
+
+    // ...and the disk keeps the original name. That is the asymmetry.
+    laptop.fs.user_write("report.txt", mine);
+
+    for round in 1..=10 {
+        let out = world.pass(laptop);
+        let ops: Vec<String> = out
+            .round
+            .plan
+            .ops
+            .iter()
+            .map(|o| format!("{:?}/{:?}", o.entity, o.action))
+            .collect();
+        eprintln!(
+            "round {round}: quiet={} done={} withdrawn={} overtaken={} retry={} plan={:?}",
+            out.quiet(), out.exec.done, out.exec.withdrawn,
+            out.exec.overtaken, out.exec.retrying, ops
+        );
+    }
+    eprintln!("--- disk (path -> sha) ---");
+    for (p, h) in disk_tree(laptop) { eprintln!("    {p} {h:?}"); }
+    eprintln!("ours   = {}", jd_sim::sha256_hex(mine));
+    eprintln!("theirs = {}", jd_sim::sha256_hex(b"the occupant, from elsewhere"));
+    eprintln!("--- issues ---");
+    for i in laptop.store.open_issues().unwrap() { eprintln!("    {}: {}", i.kind, i.detail); }
+}
+
+/// Diagnostic: does the staleness guard eat a recovered park?
+///
+/// Constructs the aftermath of a kill mid-dance rather than staging one: the
+/// park has landed on the server, and the next pass's index walk has recorded
+/// the scratch name as `entry.remote` — which is the truth. The recovered op
+/// then re-runs. Read-grade reasoning says the guard reads our own park as
+/// somebody else's move and drops the op.
+#[test]
+#[ignore]
+fn scratch_park_then_recover() {
+    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+
+    let world = World::new(4481, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    let src = world.server.seed_folder(None, "Source");
+    let dst = world.server.seed_folder(None, "Dest");
+    let fid = world.server.seed_file(Some(src), "report.txt", b"the travelling file");
+    assert!(world.settle().is_some(), "settle before we stage the aftermath");
+
+    // The user's move has already happened on this disk — that is what the op
+    // exists to push up. Staging the op without it would leave the disk
+    // disagreeing with the destination, and the device would rightly follow the
+    // disk instead of finishing the dance.
+    laptop.fs.user_rename("Source/report.txt", "Dest/renamed.txt");
+
+    // The op that was in flight: a combined move-and-rename, both ends occupied,
+    // so the dance reaches its park last resort.
+    let key = "key-parked-then-killed";
+    laptop
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::file(fid),
+            &serde_json::json!({
+                "parent": dst, "name": "renamed.txt",
+                "from": { "parent": src, "name": "report.txt" }
+            })
+            .to_string(),
+            key,
+        )
+        .unwrap();
+
+    // The park LANDED before the process died.
+    let scratch = jd_core::order::swap_name(key);
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({
+                "entity_type": "file", "entity_id": fid, "name": scratch
+            }),
+        )
+        .expect("the park itself succeeds");
+
+    // ...and the next pass's index walk recorded what the server actually says.
+    let mut e = laptop.store.get_entry(EntityId::file(fid)).unwrap().unwrap();
+    // Only `remote` — that is all an index walk writes. The AGREEMENT still
+    // holds the name both sides last settled on, which is what makes an exact
+    // rescue possible when the op is gone.
+    e.remote = Placement { parent: Some(src), name: scratch.clone() };
+    e.status = LocalStatus::Synced;
+    laptop.store.put_entry(&e).unwrap();
+    eprintln!("staged: server has {scratch}, entry.remote agrees, op queued with from=Source/report.txt");
+
+    // NOOP=1 drops the op first: the rescue arm, which resume can never cover.
+    if std::env::var("NOOP").is_ok() {
+        for op in laptop.store.queued_ops().unwrap() {
+            laptop.store.drop_op(op.op_id).unwrap();
+        }
+        eprintln!("op dropped: this is the rescue arm, journal empty");
+    }
+
+    let mut out = world.pass(laptop);
+    for _ in 0..4 {
+        out = world.pass(laptop);
+    }
+    eprintln!(
+        "after five passes: done={} withdrawn={} overtaken={} retry={} quiet={}",
+        out.exec.done, out.exec.withdrawn, out.exec.overtaken, out.exec.retrying, out.quiet()
+    );
+    eprintln!("ops left: {:?}", laptop.store.queued_ops().unwrap().len());
+    eprintln!("--- server ---");
+    for p in world.server.tree().keys() { eprintln!("    {p}"); }
+    eprintln!("--- entry ---");
+    let after = laptop.store.get_entry(EntityId::file(fid)).unwrap();
+    eprintln!("    {:?}", after.map(|x| (x.remote.name, x.status)));
+
+    // Does the oracle object to a file stranded under the engine's own name?
+    let verdict = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        assert_converged(&world);
+    }));
+    match verdict {
+        Ok(()) => eprintln!(">>> assert_converged PASSED — the oracle is blind to this"),
+        Err(_) => eprintln!(">>> assert_converged FAILED — the oracle catches it"),
+    }
+}
+
+/// An upload refused because the server already gave the name away lands beside
+/// the occupant instead of asking for the same name for ever.
+///
+/// The rival is a live file this device has never been told about, so no local
+/// naming resolution can see it: the refusal is the only way to find out, and
+/// the refusal is the one place a fix can go. Without one the entry stays
+/// `pending_upload`, the operation is minted and dropped on every pass, and the
+/// device never goes quiet — `audited-green` and `no-loss` passing throughout,
+/// because the tree is correct and only the bookkeeping is stuck. Soak rig run
+/// 302 is this, on the real platform.
+#[test]
+fn an_upload_onto_a_name_the_server_gave_away_lands_beside_it() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4482, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    // Somebody else's file holds the name, with DIFFERENT content — a genuine
+    // conflict. The same-content case is a lost record, not a conflict, and is
+    // covered by the adopt scenario below.
+    let theirs = b"the occupant, from another device";
+    let their_id = world.server.seed_file(None, "report.txt", theirs);
+    assert!(world.settle().is_some(), "it arrives first");
+
+    // Now the device LOSES its record of it — the way run 302's device did,
+    // where a folder-move tangle cost both devices their entries — while the
+    // cursor stays where it is, so the feed will never mention it again. The
+    // server still holds it.
+    laptop.store.delete_entry(EntityId::file(their_id)).unwrap();
+
+    // ...and our own file is what is sitting at that path on this disk.
+    let mine = b"ours, written here";
+    laptop.fs.user_write("report.txt", mine);
+    committed.note("report.txt", mine);
+
+    assert!(
+        world.settle().is_some(),
+        "the device must not ask for the same refused name for ever"
+    );
+    assert_no_entry_is_stranded(&world);
+
+    // NOT `assert_converged`, and the reason is the construction rather than the
+    // fix. Hiding the rival by dropping its record also makes it unlearnable —
+    // the cursor is past the change that would re-teach it — so this device can
+    // never materialize a file it has no record of and no way to hear about.
+    // Demanding convergence would be demanding the impossible of it. What the
+    // device CAN be held to is that it stops asking for a name it cannot have,
+    // and that its own bytes survive.
+    let disk = disk_tree(laptop);
+    assert!(
+        disk.values().any(|h| h.as_deref() == Some(jd_sim::sha256_hex(mine).as_str())),
+        "our content did not survive: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        world
+            .server
+            .tree()
+            .iter()
+            .any(|(p, h)| p != "report.txt" && h.is_some()),
+        "our copy never landed beside the occupant on the server: {:?}",
+        world.server.tree()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+#[test]
+fn an_upload_of_bytes_the_server_already_has_adopts_rather_than_duplicates() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4483, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let ours = b"the very same bytes";
+    let their_id = world.server.seed_file(None, "report.txt", ours);
+    assert!(world.settle().is_some(), "it arrives first");
+    committed.note("report.txt", ours);
+
+    // The record linking our disk copy to the server's entity is lost, and the
+    // cursor is past the change that would re-teach it.
+    laptop.store.delete_entry(EntityId::file(their_id)).unwrap();
+
+    assert!(
+        world.settle().is_some(),
+        "a device must not spend itself uploading a file the server already has"
+    );
+    assert_converged(&world);
+    assert_records_agree_with_the_server(&world);
+    assert_no_entry_is_stranded(&world);
+
+    // One file, not two. The whole point.
+    let disk = disk_tree(laptop);
+    assert_eq!(
+        disk.len(),
+        1,
+        "adoption must not leave a conflict copy behind: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        disk.get("report.txt").cloned().flatten(),
+        Some(jd_sim::sha256_hex(ours))
+    );
+    assert_eq!(
+        world.server.tree().len(),
+        1,
+        "and the server should still hold exactly one: {:?}",
+        world.server.tree()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// Diagnostic: the silent case — the server wears a scratch name and the disk
+/// has nothing to argue with. No op, and no local move to drive a repair.
+#[test]
+fn a_park_interrupted_by_a_kill_is_resumed_to_its_destination() {
+    use jd_core::model::{EntityId, LocalStatus, Placement};
+
+    let world = World::new(4485, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let src = world.server.seed_folder(None, "Source");
+    let dst = world.server.seed_folder(None, "Dest");
+    let body = b"the travelling file";
+    let fid = world.server.seed_file(Some(src), "report.txt", body);
+    assert!(world.settle().is_some(), "settle before staging the aftermath");
+    committed.note("Source/report.txt", body);
+
+    // The user's move has already happened here; the op exists to push it up.
+    laptop.fs.user_rename("Source/report.txt", "Dest/renamed.txt");
+    committed.note("Dest/renamed.txt", body);
+
+    let key = "key-parked-then-killed";
+    laptop
+        .store
+        .queue_op(
+            "move_remote",
+            EntityId::file(fid),
+            &serde_json::json!({
+                "parent": dst, "name": "renamed.txt",
+                "from": { "parent": src, "name": "report.txt" }
+            })
+            .to_string(),
+            key,
+        )
+        .unwrap();
+
+    // The park landed before the process died...
+    let scratch = jd_core::order::swap_name(key);
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "file", "entity_id": fid, "name": scratch }),
+        )
+        .expect("the park itself succeeds");
+
+    // ...and an index walk has recorded what the server actually says. Only
+    // `remote`: the agreement is not an index walk's to write.
+    let mut e = laptop.store.get_entry(EntityId::file(fid)).unwrap().unwrap();
+    e.remote = Placement { parent: Some(src), name: scratch };
+    e.status = LocalStatus::Synced;
+    laptop.store.put_entry(&e).unwrap();
+
+    assert!(world.settle().is_some(), "the recovered park must not wedge the device");
+    assert_converged(&world);
+    assert_no_entry_is_stranded(&world);
+
+    let tree = world.server.tree();
+    assert!(
+        tree.contains_key("Dest/renamed.txt"),
+        "the dance was not finished — the move the user made was discarded: {tree:?}"
+    );
+    assert!(
+        !tree.keys().any(|p| p.contains(".jd-")),
+        "an engine-internal name survived to convergence: {tree:?}"
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A park nobody is coming back for is put back where both sides agreed.
+///
+/// The silent half, and the one no resume can reach: the operation is gone —
+/// withdrawn, or dropped after a kill — so there is nothing left to finish. The
+/// device goes QUIET with the file wearing the engine's own name on the server
+/// AND on the user's disk, raising nothing at all.
+///
+/// The agreement survives the index walk, so the real name is recoverable: what
+/// is lost with the operation is the journey it was making, not the file.
+#[test]
+fn a_park_nobody_finishes_is_put_back_under_its_agreed_name() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4486, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let src = world.server.seed_folder(None, "Source");
+    let body = b"the stranded file";
+    let fid = world.server.seed_file(Some(src), "report.txt", body);
+    assert!(world.settle().is_some());
+    committed.note("Source/report.txt", body);
+
+    // A park landed and nothing came back for it. No op, and nothing on the
+    // disk to argue with.
+    let scratch = jd_core::order::swap_name("key-abandoned");
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "file", "entity_id": fid, "name": scratch }),
+        )
+        .unwrap();
+
+    assert!(world.settle().is_some());
+    assert_converged(&world);
+
+    let tree = world.server.tree();
+    assert!(
+        tree.contains_key("Source/report.txt"),
+        "the file was not put back under its agreed name: {tree:?}"
+    );
+    assert!(
+        !disk_tree(laptop).keys().any(|p| p.contains(".jd-")),
+        "the engine's own scratch name was left in the user's folder"
+    );
+    // Never silently. The user is told what happened to their file.
+    let said: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .map(|i| i.detail)
+        .collect();
+    assert!(
+        said.iter().any(|d| d.contains("unfinished operation")),
+        "nothing was surfaced about the repair: {said:?}"
+    );
+    assert_eq!(
+        laptop.store.get_entry(EntityId::file(fid)).unwrap().map(|e| e.remote.name),
+        Some("report.txt".to_string())
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The crash window inside a land-beside heals itself, disk included.
+///
+/// An upload lands beside under a conflict name and the process dies before the
+/// local rename. Recovery re-runs it: the original name is still refused by the
+/// real occupant, the SAME conflict name is minted again — the generator is
+/// deterministic and the counter restarts — and that name is now held by our own
+/// crashed upload. The hashes match, so adoption fires. Adoption must therefore
+/// carry the disk-follow too, or it re-creates the record/disk gap this whole
+/// change exists to close, by way of its own recovery.
+#[test]
+fn a_land_beside_that_died_before_its_rename_heals_on_the_next_run() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4487, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let theirs = b"the occupant, different bytes";
+    let mine = b"ours, uploaded then orphaned";
+
+    // The world as the crash left it: the occupant holds the plain name, our
+    // own bytes are already up under the conflict name the generator produces,
+    // and the disk still wears the original because the rename never ran.
+    let their_id = world.server.seed_file(None, "report.txt", theirs);
+    let ours_id = world.server.seed_file(
+        None,
+        "report (conflicted copy 2026-07-31 from laptop).txt",
+        mine,
+    );
+    assert!(world.settle().is_some(), "both arrive");
+
+    // Both records lost — the device is back to knowing neither. And the disk
+    // holds ONE copy of our bytes, at the original name, because the crash
+    // happened before the rename: the settle above materialized our uploaded
+    // copy, so it is removed here to leave the window as the crash actually
+    // left it. (A device that HAS both copies on disk is a different problem,
+    // and one this construction should not be quietly testing.)
+    laptop.store.delete_entry(EntityId::file(their_id)).unwrap();
+    laptop.store.delete_entry(EntityId::file(ours_id)).unwrap();
+    laptop
+        .fs
+        .user_remove("report (conflicted copy 2026-07-31 from laptop).txt");
+    laptop.fs.user_write("report.txt", mine);
+    committed.note("report.txt", mine);
+
+    assert!(
+        world.settle().is_some(),
+        "the recovered upload must not leave the device churning"
+    );
+    assert_no_entry_is_stranded(&world);
+
+    // Our bytes exist once, under the conflict name, on the disk as well as the
+    // server — no third copy minted, and no record/disk gap left behind.
+    let disk = disk_tree(laptop);
+    let ours = jd_sim::sha256_hex(mine);
+    let holding: Vec<&String> = disk
+        .iter()
+        .filter(|(_, h)| h.as_deref() == Some(ours.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(
+        holding.len(),
+        1,
+        "our bytes should sit at exactly one path: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert!(
+        holding[0].contains("conflicted copy"),
+        "the disk did not follow the server's name: {:?}",
+        holding
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+
+/// A rescue whose agreed name has been retaken lands beside it.
+///
+/// The park stood long enough for somebody else to take the name back. Asking
+/// for it anyway is refused, the rescue op is overtaken, the rescue is planned
+/// again next pass, and the file stays under the engine's scratch name for
+/// ever — noisy this time rather than silent, but never settling either.
+///
+/// Doctrine already answers it: park is a naming verdict, and a give-up that is
+/// not about the name goes BESIDE the agreement rather than into it.
+#[test]
+fn a_rescue_whose_name_was_retaken_lands_beside_it() {
+    let world = World::new(4488, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let src = world.server.seed_folder(None, "Source");
+    let ours = b"the stranded file";
+    let fid = world.server.seed_file(Some(src), "report.txt", ours);
+    assert!(world.settle().is_some());
+    committed.note("Source/report.txt", ours);
+
+    // A park landed and nothing came back for it...
+    let scratch = jd_core::order::swap_name("key-abandoned");
+    world
+        .server
+        .action(
+            "drive_rename",
+            &serde_json::json!({ "entity_type": "file", "entity_id": fid, "name": scratch }),
+        )
+        .unwrap();
+    // ...and while it stood, somebody else took the name back.
+    let theirs = b"a different file, same name";
+    world.server.seed_file(Some(src), "report.txt", theirs);
+
+    assert!(
+        world.settle().is_some(),
+        "a rescue that cannot have its old name must still settle"
+    );
+
+    let tree = world.server.tree();
+    assert!(
+        !tree.keys().any(|p| p.contains(".jd-")),
+        "the engine's scratch name survived: {tree:?}"
+    );
+    assert!(
+        tree.contains_key("Source/report.txt"),
+        "the retaker should keep the plain name: {tree:?}"
+    );
+    // Ours is beside it, under a name that is not the engine's.
+    let disk = disk_tree(laptop);
+    let mine = jd_sim::sha256_hex(ours);
+    assert!(
+        disk.iter()
+            .any(|(p, h)| p != "Source/report.txt" && h.as_deref() == Some(mine.as_str())),
+        "our bytes did not land beside the retaker: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The crash window where our own uploaded copy has come back down.
+///
+/// Upload lands beside under a conflict name, the process dies before the local
+/// rename, and on restart the device materializes its own uploaded copy — so the
+/// disk now holds our bytes TWICE: once at the original name and once at the
+/// conflict name. The recovered upload adopts, and the rename it must then make
+/// finds the conflict path occupied by a byte-identical copy of what the server
+/// already holds under that very name.
+///
+/// Disposing of that copy is within the engine's own doctrine — `make_room`
+/// already consumes an identical file, and two byte-identical files at one
+/// placement are the same file for every purpose a user has. It goes to the
+/// trash rather than being deleted, so the bytes survive in three places.
+#[test]
+fn a_crash_window_that_left_two_copies_of_our_own_bytes_settles_on_one() {
+    use jd_core::model::EntityId;
+
+    let world = World::new(4489, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let theirs = b"the occupant, different bytes";
+    let mine = b"ours, uploaded then orphaned";
+    let their_id = world.server.seed_file(None, "report.txt", theirs);
+    let ours_id = world.server.seed_file(
+        None,
+        "report (conflicted copy 2026-07-31 from laptop).txt",
+        mine,
+    );
+    assert!(world.settle().is_some(), "both arrive, so the disk holds ours twice");
+
+    // Records lost; the disk keeps BOTH copies of our bytes this time.
+    laptop.store.delete_entry(EntityId::file(their_id)).unwrap();
+    laptop.store.delete_entry(EntityId::file(ours_id)).unwrap();
+    laptop.fs.user_write("report.txt", mine);
+    committed.note("report.txt", mine);
+
+    assert!(
+        world.settle().is_some(),
+        "two copies of one file must not leave the device churning"
+    );
+    assert_no_entry_is_stranded(&world);
+
+    // Our bytes end at exactly one path, and nothing extra was minted on the
+    // server for the redundant copy.
+    let disk = disk_tree(laptop);
+    let ours = jd_sim::sha256_hex(mine);
+    let holding: Vec<&String> = disk
+        .iter()
+        .filter(|(_, h)| h.as_deref() == Some(ours.as_str()))
+        .map(|(p, _)| p)
+        .collect();
+    assert_eq!(
+        holding.len(),
+        1,
+        "our bytes should survive at exactly one path: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert_eq!(
+        world.server.tree().len(),
+        2,
+        "the server should hold theirs and ours, nothing more: {:?}",
+        world.server.tree()
+    );
+    assert_nothing_lost(&world, &committed);
+}

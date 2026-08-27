@@ -1,383 +1,97 @@
-# Drive sync: finishing the recovery from a contested name
+# Drive sync: two spellings on the server, one slot on the disk
 
-**Status: DRAFT, for review. Not built.**
-Written 2026-08-27 from soak-rig and sweep evidence. Three defects; the first
-two share a theme, the third was found while hunting for them.
+**Status: DRAFT, not built.** Diagnosis corrected twice and narrowed; no design.
 
----
-
-## What is wrong, in plain terms
-
-Two computers can reach for the same filename at the same moment. The server
-lets only one of them have it, and the other has to be told to do something
-else. The sync client knows several ways to do something else — put the file
-beside the winner under a "conflicted copy" name, take the two steps of a move
-in the other order, step aside into a temporary name and come back — and it
-picks between them from what the server says when it refuses.
-
-Two of those ways are not finished.
-
-**A file that has to land beside a winner never lands at all.** If the server
-already gave the name away and this computer never heard about the file that
-took it, the upload is refused, the client quietly forgets the attempt, and the
-next sweep of the disk decides to upload the very same file again. It does that
-for as long as the computer is switched on. Nothing is lost — the bytes are
-safe on the disk, and the other computer's copy is safe on the server — but the
-tray never stops spinning, and no message ever appears explaining why.
-
-**A file parked in a temporary name can be left wearing it.** When both ends of
-a move are blocked the client steps the file aside into a scratch name of its
-own invention, then moves it and renames it back. If the computer dies, or the
-network drops, between the step aside and the rename back, the file is left on
-the server under a name no person chose. From that moment every computer marks
-it "cannot sync" — correctly, because a real file may not carry the engine's
-reserved prefix — and skips it for ever. The file's real name is gone from the
-record as well.
-
-Neither is a data-loss bug. Both are silence bugs, which is the failure this
-client's own comments say it is not allowed to have.
+What WAS built from the original spec — the `upload_new` recovery and the
+stranded-park repair — is in
+`specs/implemented/drive_sync_contested_name_recovery.md`. This is the remainder.
 
 ---
 
-## Why this is worth doing now
+## Defect 3 — two spellings on the server, one slot on the disk
 
-The first one is not hypothetical. **Soak rig run 302 failed on it**, on
-2026-08-27, against the real platform:
-
-```
-FAIL convergence: still working after 900s — device-a is attention
-  (waiting on 7 pending_upload): 69 items need your attention
-PASS audited-green: 2 devices agree with the server across 820 live entities
-PASS no-loss: 470 live paths findable; all 561 contents ... still there
-```
-
-That combination is the signature and it is worth memorising: **convergence
-fails naming `pending_upload`, while `audited-green` and `no-loss` both pass in
-the same cycle.** The tree is correct and the device is busy for ever.
-
-It went unnoticed for a long time because it is completely silent. The refusal
-classifies as `Overtaken`, which by design raises no issue — the reasoning being
-that a file deleted while its upload was in flight is nobody's problem. Here the
-same silence hides a loop. The only visible symptom is a device that never
-settles.
-
----
-
-## Defect 1 — `upload_new` has no land-beside
-
-### Evidence
-
-Sweep seed 93128, arm `hunt-platform-longhostile` in `scratch_fresh_hunt_sweep`
-(3 devices mac/Windows/HFS+, 80 steps, chaos):
-
-```
-SEED=93128 STEPS=80 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
-  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
-```
-
-Device `pc` holds provisional file `-21`, `PendingUpload`, parent folder 504,
-name `contested.txt`. The server holds a live `contested.txt` in that folder and
-**pc's store has no entry for it** — its only children of 504 are its own
-pending upload and two conflict copies from `mac`.
-
-Run 302 is the same state on the rig: 7 provisional `pending_upload` entries, no
-synced twin for any of them, the files present on both the disk and the server,
-4 queued `upload_new` ops with `attempts=0` in the bundle while the last status
-poll reported `pending_ops` 0 — ops are minted and dropped every pass, so the
-count reads 0 or 4 depending on when you look.
-
-Not a regression, and not the marker-less refusal dial: it fails with `NOPLAIN=1`
-and against the pre-2026-08-26 engine.
-
-### Why no local resolution fires first
-
-The naming layer resolves clashes it can see. It cannot see this one: the rival
-is a live file on the server that this device has never been told about. So the
-clash is discovered only by the server refusing, and the refusal is the one
-place a fix can go.
-
-### The design
-
-Give `upload_new` the recovery `create_remote_folder` already has, and keep the
-two rules that path learned the hard way.
-
-`create_remote_folder`, on `name_taken`:
-
-1. **Wait** when the name is held by something *this device is itself renaming
-   on the server* — a holder visible in our own store, under its server name,
-   with a queued `move_remote` or `park_remote` (`held_by_a_rename_this_device_owes`).
-   Renaming around a collision that clears itself in a moment hands the user a
-   permanent conflict name for nothing.
-2. **Land beside** in every other case, under `(env.conflict_name)(name, n)`,
-   bounded at 1000 attempts.
-
-The file version should mirror it exactly, including the wait-first ordering.
-
-**The server settles on the conflict name; this disk keeps the original.** That
-is what the folder path does and it is the half most likely to be got wrong.
-
-### The trap
-
-Read `reference_drive_standing_to_know` before touching this.
-
-- `entry.remote` is where the **server** has it. Only an answer from the server
-  may write it.
-- `synced_placement` is **not** "where this disk has it". Reconcile treats it as
-  the entry's *claim on a name*, so it has to track `entry.remote`. Leave it
-  pointing at a name the entry has left and any real file wanting that name is
-  parked `Unsyncable(DuplicateName)` against a rival that is not there —
-  permanently, because nothing in a settled tree releases it.
-
-Four defects and a full day were spent learning that the mirror of the first
-rule is false. The land-beside must thread the chosen name through
-`drive_upload_init`, the completion, and the final `entry.remote.name =
-placement.name` without disturbing the agreement.
-
-### Why it was not done on the spot
-
-The upload path is roughly 150 lines of placement selection before it reaches
-the wire, plus init, chunking and completion. It is the most data-critical path
-in the engine and the one where a wrong conflict-copy decision duplicates or
-loses a user's file. It deserves its own sitting, not the tail of another.
-
-### Existing machinery to reuse
-
-`free_conflict_path`, `names_the_server_has`, `(env.conflict_name)`,
-`Action::PreserveLocalAs`.
-
-### How to prove it
-
-- Seed 93128 must pass, as part of `hunt-platform-longhostile`.
-- A deterministic scenario as well, because a seed is regression cover and not a
-  statement of intent: a device with a local file whose name a live server file
-  already holds, where the server file is **not** in the device's store. Assert
-  the fleet settles, the local name is unchanged on the disk, the server gains a
-  conflict-named copy, and nothing is lost.
-- Both must fail with the fix reverted. A test that passes either way proves
-  nothing here, because the tree is already correct in this defect.
-
----
-
-## Defect 2 — a park can be left standing
-
-### Evidence
-
-Seed 96223, three devices mac/Windows/HFS+, 80 steps, chaos:
-
-```
-SEED=96223 STEPS=80 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
-  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
-```
-
-The seed came from an ad-hoc hunt over 95000–97400. A committed arm now covers
-it — `hunt-platform-longhostile-2` (96000..96500) in `scratch_fresh_hunt_sweep`,
-added 2026-08-27 — because a reproducer that lives in no sweep is a reproducer
-that rots. That range has been swept once already and holds exactly one failure,
-this one.
-
-Server file 901 is named `.jd-swap-disk-66ada91174633dfa`. All three devices
-hold it `Unsyncable(ReservedPrefix)` with `synced_name` equal to the scratch
-name, and their disk copies have **diverged** — two different hashes at the one
-path. The fleet reports itself settled.
-
-Not a regression, and not the marker dial: 96223 is not divisible by 4, so the
-dial never arms, and it fails against the pre-2026-08-26 engine.
-
-### Which park made it
-
-Two places mint scratch names, and telling them apart matters or the
-investigation starts in the wrong file:
-
-| site | purpose | token |
-|---|---|---|
-| `order.rs:160` | breaking a cycle of renames (`broken_cycles`) | `{device}-{server_id}` in the sim |
-| `execute.rs:2471` | the `park()` last resort inside `move_remote` | `op.idempotency_key` |
-
-`.jd-swap-disk-66ada91174633dfa` is the second form. This is the **move dance's
-park**, not cycle breaking.
-
-### Why nothing rescues it
-
-`park()` succeeds; the step after it, or the whole operation, is lost — a kill, a
-transport death, a withdrawal. The next pass asks the server where the entity
-actually is (`server_view_after_retry`, and the standing-to-know rule says only
-the server may answer), gets the scratch name, and correctly records it as
-`entry.remote.name`.
-
-From there the naming pass sees a reserved prefix. That verdict **is** derivable
-from the name, so unlike a non-name give-up it is not recomputed away next pass,
-and the pass loop skips every `Unsyncable` entry that is not remote-deleted.
-Self-inflicted, and self-locking.
-
-**The observation worth keeping:** `ReservedPrefix` is the one `UnsyncableReason`
-the engine can inflict on *itself*. Every other reason describes a name a user or
-another client chose, meeting this filesystem. `.jd-swap-…` is a name this
-engine wrote. Treating it as a naming verdict turns an unfinished operation into
-a permanent resting place. **An unfinished park needs recovery, not a verdict.**
-
-### What was tried and rejected
-
-An in-process undo — `if let Err(e) = reparent().and_then(rename) { unpark();
-return Err(e) }` after `park()` — was built and measured on 2026-08-27. **It did
-not move seed 96223 at all**, because the park there outlives the operation, so
-no in-process handler ever runs. It was reverted rather than shipped, because
-nothing could make a test bite it.
-
-It may still be worth having as a second line of defence for the plain
-call-fails case, but only alongside the real fix and only with a server dial
-that can fail a specific call, so that a test can prove it.
-
-### The recovery thread
-
-The scratch name is `.jd-swap-{op.idempotency_key}`. **The name on the server
-names the operation that made it**, and that operation's params carry the
-destination it was going to. A repair can read the key out of the name and
-finish the journey.
-
-That only works while the op is still in the journal. If it has been dropped,
-the destination is genuinely gone, and the honest fallback is a rescue name plus
-a surfaced issue — a file under an odd name that a person can see beats a file
-under an internal name that nobody can. Un-parking alone is **not** sufficient:
-the disk copies also carry the scratch name, so local and remote agree and the
-ordinary reconcile plans nothing.
-
-### Open design question for review
-
-Whether to make the park durable at the point of creation — journalling the park
-together with its intended destination, so a lost follow-up is replayable —
-rather than recovering after the fact from the name. Durable-at-creation is the
-tidier invariant; recovery-from-the-name needs no new state and works on stores
-that are already stranded today. They are not exclusive.
-
-### Interaction to weigh
-
-The 2026-08-26 widening of `move_remote`'s three orders to
-`may_be_about_the_name` makes `park()` reachable on refusals that carry no
-marker, so it **adds instances of this class**. It does not create it — 96223
-predates it and fails without it.
-
-Measured: no new stranding appeared anywhere across the full sweep estate
-(~50,000 seeds) with the widening in place. If that ever changes, the cheap
-mitigation is to keep the first two orders widened — neither strands anything —
-and re-gate only the `park()` last resort on a positive `name_taken`. That would
-cost the scenario
-`a_move_refused_at_both_ends_by_a_silent_server_still_finds_its_way`, which
-needs all three orders.
-
-### How to prove it
-
-- Seed 96223 must pass, from a committed sweep arm covering its range.
-- A deterministic scenario for the recovery: a store holding an entry whose
-  remote name is a scratch name, with the parking op still journalled. Assert
-  the fleet settles, the file ends under a real name, and its content survives.
-- A second scenario for the op-is-gone fallback, asserting the file becomes
-  visible under a rescue name and an issue names it — because a give-up nothing
-  can lift is just a quieter way to lose a file.
-
----
-
-## Defect 3 — a name that differs only in normalisation reads as a rename
-
-Found 2026-08-27 by an ad-hoc hunt over 98000-101200. A committed arm now covers
-it — `hunt-normalisation` (99600..100000) in `scratch_fresh_hunt_sweep`.
+Found 2026-08-27; **diagnosis corrected after review, see below.** Committed arm
+`hunt-normalisation` (99600..100000) in `scratch_fresh_hunt_sweep`.
 
 ```
 SEED=99674 STEPS=60 DEVS=2 CHAOS=1 PLATFORMS=mac,hfs NAMES=mac,disk \
   cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
 ```
 
-Two devices, macOS and HFS+ — both filesystems that normalise. The macOS device
-plans, every pass, for ever:
+### What is actually happening
+
+**The server legitimately holds two live files whose names differ only in
+normalisation**, in one folder, with different content:
 
 ```
-ApplyLocalMove file 935
-  from  "cafe\u{301}-17.txt"   (decomposed, NFD)
-  to    "café-17.txt"          (precomposed, NFC)
-  same parent
+Sub 40 renamed/Sub 12/cafe\u{301}-17.txt   sha 24650884…   (entity 935)
+Sub 40 renamed/Sub 12/café-17.txt          sha 90abe64a…
 ```
 
-It is asking the server to rename a file to the name the server already has,
-spelled the other way. The other device is quiet. Pre-existing: it fails
-identically against the engine before 7eec8b56.
+On the macOS device those are **one slot** — APFS keeps the bytes it is given
+but compares without regard to spelling, so only one of them can sit there. The
+device's entry 935 is `Synced`, claiming the decomposed name, while the single
+disk file it can hold wears the composed bytes. Every pass pairs the two and
+plans `move_remote` onto a name the composed twin already holds. Refused,
+dropped, replanned, for ever. The HFS+ device is quiet.
 
-**Why the 2026-08-26 no-op-move collapse does not catch it.** That guard drops a
-`Delta::Moved` whose `to` equals `entry.synced_placement` — compared with `==`,
-which is byte equality. `café-17.txt` and `cafe\u{301}-17.txt` are not equal
-bytes. On a filesystem that normalises they are one name, and the personality
-already knows that: `tree::key_for` and the naming layer compare through it
-everywhere else.
+### The earlier diagnosis in this document was wrong
 
-**That fix was built and measured on 2026-08-27, and it is NOT sufficient.**
-Comparing through `comparison_key` in the collapse does stop the loop — the
-device goes quiet. But it leaves the mac disk holding `café-17.txt` and the
-server holding `cafe\u{301}-17.txt` for ever, and `assert_converged` calls that
-a divergence:
+It claimed the composed spelling was a rewrite the HFS+ device propagated. That
+is false and was falsified three ways:
 
-```
-mac did not converge with the server
-  only on the disk:   ["Sub 40 renamed/Sub 12/café-17.txt"]
-  only on the server: ["Sub 40 renamed/Sub 12/cafe\u{301}-17.txt"]
-```
+- **The workload cannot mint it.** `leaf(i)` selects spelling by `i % 5`, and
+  `17 % 5 == 2` — the decomposed arm. `café-17.txt` was never the original
+  name of file 17; it entered the world as a second file.
+- **The HFS+ device renames nothing.** Across the run it plans zero move or
+  rename ops for these files. What it does is `UploadAsNew { name: "café-17.txt" }`
+  after a folder-move tangle costs both devices their entries for the original —
+  and an upload-as-new from a decomposing volume legitimately carries NFC,
+  because that volume's engine works in the composed spelling by design.
+- **Both files are live on the server at the end.** The composed twin sits on
+  both sides of the comparison, so it never appears in the convergence diff.
 
-**Do not answer that by folding the oracle.** `disk_tree` already composes one
-side, deliberately and only for volumes that REWRITE the name, and its comment
-says why the other direction is worse:
+**The methodological error worth keeping:** a diff that prints only differences
+was read as though it showed the whole picture. The composed file was present
+and invisible. Dump both trees before concluding what a convergence failure
+means.
 
-> Composing everywhere is the opposite error and the more expensive one: it
-> makes a device holding a decomposed name look like it holds the composed one
-> ... The harness would report convergence while the client renamed the file at
-> the server forever.
+### Where to actually look
 
-That is precisely this defect. Relaxing the oracle to accommodate a partial fix
-would blind the simulator to the class of bug the seed represents.
+The engine already has the designed answer for two server names that are one
+local slot: `resolve_siblings` parks the loser `Unsyncable(UnicodeClash)`, and
+the oracle's `held_back` excuses parked content by hash — so the intended end
+state (winner materialised, loser parked and named) passes the strict oracle
+with no weakening. The question is **why entry 935 is not on the parked side of
+that decision.** The trace shows it `Synced` and claiming the slot on every
+round.
 
-**The distinction that is actually being missed.** `Personality` separates two
-things on purpose: `decomposes_unicode` (HFS+ REWRITES what you give it) and
-`normalization_insensitive` (APFS keeps your bytes and merely COMPARES without
-regard to spelling). The mac device here is the second kind. `disk_tree` folds
-only the first, so mac's side is never folded — correctly, because mac really is
-holding those exact bytes.
+**Narrowed 2026-08-27; the obvious suspect is eliminated.** The mac personality
+is correct — `case_insensitive: true`, `decomposes_unicode: false`,
+`normalization_insensitive: true` (the APFS constructor in `personality.rs`). So
+`comparison_key` DOES fold NFC on that device, the two spellings DO share a key,
+and `resolve_siblings` already has the branch that parks the loser
+`UnicodeClash` when two remote names collide on one key. Nothing is missing in
+either.
 
-**Where the composed spelling actually comes from, traced 2026-08-27.** Not from
-`to_local_name` — that already composes only for `decomposes_unicode`, and its
-comment describes this very symptom as a defect fixed once before ("the soak rig
-held nineteen files that way, one op per accented name, forever"). It comes from
-the workload, which mints both spellings as distinct names on purpose:
+So the fault sits upstream of the decision rather than inside it: something
+stops the two names being offered to `resolve_siblings` as siblings of one
+folder. Start at `apply_naming`'s sibling grouping — what set it builds and from
+where — not at the resolver and not at the personality. Both are ruled out.
 
-```rust
-1 => format!("caf\u{e9}-{i}.txt"),      // composed
-2 => format!("cafe\u{301}-{i}.txt"),    // decomposed, same word
-```
+### How to prove it
 
-The mac device created `café-17.txt` composed and uploaded it. The server now
-holds the DECOMPOSED spelling of that same file, and mac's record faithfully
-follows the server (`remote` and `synced` both NFD, status `Synced`). Something
-turned a composed name on the server into a decomposed one.
-
-**The suspect is the HFS+ device propagating its own filesystem's rewrite.** It
-downloads `café-17.txt`, its volume stores `cafe` + combining-acute, and if its
-scan reads that back as a user rename it pushes the rewrite up — and the server,
-and every other device, inherits a respelling nobody performed. `to_local_name`
-composes on that volume precisely so the record and the disk stay in step; the
-question is whether every later comparison honours the same convention.
-
-**So start on the HFS+ side, not the mac side, and not at the collapse.** The
-mac device is the victim here: its disk holds the user's own bytes and its record
-holds the server's. Whichever fix lands, `assert_converged` must stay strict —
-see the `disk_tree` warning above.
-
-**And on Linux the two spellings ARE different files**, where a rename between
-them is a real user action that must propagate. Whatever the fix, it has to keep
-that working — it is the half a careless change breaks silently.
-
-**How to prove it:** seed 99674 from a committed arm, plus a deterministic
-scenario with a decomposing device and a precomposing one holding one file,
-asserting the fleet settles and neither device renames anything on the server.
-And a Linux counter-scenario asserting that a genuine NFD-to-NFC rename still
-propagates, because that is the half a careless fix breaks.
+- Seed 99674, from the committed `hunt-normalisation` arm.
+- A deterministic scenario needs **two live server files differing only in
+  normalisation, in one folder, plus a normalisation-insensitive device.** The
+  scenario previously sketched here — one decomposing device and one
+  precomposing device holding one file — does not reproduce this and should not
+  be written.
+- The Linux counter-scenario stands unchanged: where the two spellings are
+  genuinely two files, both must materialise and a rename between them must
+  still propagate. That is the half a careless fix breaks silently.
 
 ---
-
 ## A related shape, for context rather than action
 
 The rig has failed `convergence` three times in 270 runs. Run 302 is defect 1.
@@ -429,9 +143,63 @@ end-of-run copy — they can be many cycles apart.
 
 ---
 
-## Ordering
+## Still open
 
-Defect 1 first. It is failing the soak rig today, it is confirmed on the real
-platform, and its precedent (`create_remote_folder`) is already written and
-tested. Defect 2 is more severe per occurrence but rarer, and its fix wants a
-design decision that Defect 1's does not.
+- **This defect**, above: corrected diagnosis, no design. The personality and
+  `resolve_siblings` are both ruled out; start at `apply_naming`'s sibling
+  grouping.
+- **The move-aside duplicate**, ranked behind it. The immediate disk-follow
+  shipped in the implemented half shrank its mainline case to the crash window,
+  and that window is now closed by adoption, so what remains is residual
+  hardening for the occupant-arrival path.
+
+The second-copy-on-disk churn that sat here is FIXED — it turned out to be the
+same crash window, and the occupied-path arm disposes of a provably-redundant
+blocker via the trash. See the implemented spec.
+
+---
+
+## The estate's blind spot is its name generator
+
+Twice in one day a defect turned out to live outside what the harness can
+produce, and both times it was the same cause: the workload's `leaf(i)` mints
+names from a fixed table, so anything the table cannot spell is a class the
+sweeps can never bite.
+
+- It never mints a user file named `.jd-*`. So the first form of the oracle fix
+  above — keyed on the park verdict rather than on where the name lives — would
+  have failed convergence for ever over a file a user named themselves, and
+  **no sweep would have shown the difference.** Only review caught it.
+- It never mints a user file already wearing a conflict-copy-shaped name.
+  (`(conflicted copy ` appears in the sweep file only as a filter that counts
+  them.) That is a thing real users do — they copy a conflict file, or restore
+  one from a backup — and it interacts directly with the conflict-name adoption
+  the move-aside fix needs.
+
+Both are worth an arm. `reference_sim_kinder_than_reality` says the same thing
+in general: check the mock first.
+
+**The constraint that matters more than the suggestion.** `leaf(step)` selects by
+`step % 5`, and the workload is seed-addressed throughout. Adding arms to that
+table changes the modulus, remaps every name in every world, and **silently
+orphans every pinned seed** — 93128, 96223, 99674, the Phase 2 seeds, all of the
+regression cover this document rests on. They would still run; they would simply
+no longer be the worlds they were pinned for, and nothing would say so.
+
+So any hostile-name work goes behind a dial that leaves existing seed-to-world
+mappings untouched, in the `NOPLAIN` pattern: off by default, set only by new
+arms over new ranges. A workload change that orphans the pinned reproducers
+costs more than the blind spot it closes.
+
+---
+
+## Noticed in passing, not in scope
+
+Neither is blocking and both may be known. Recorded so they are not lost:
+
+- Seed 99674's world holds `Sub 9 (10)` **and** `Sub 9 (10) (10b)` as live server
+  folders — a shape suggesting the folder land-beside can re-land beside its own
+  earlier attempt under chaos.
+- In the same run the mac device plans `TrashRemote 903` while its disk still
+  holds that file. `no-loss` held only because both devices re-uploaded the
+  content; that is luck, not design.
