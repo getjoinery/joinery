@@ -70,3 +70,5 @@ public_html/tests/fixtures/email_security_corpus/
 # tools on the same plane as backup files: never committed, and outside
 # public_html so no release archive can carry one site's copy to another's install.
 /content_packs/
+RELEASE_MANIFEST
+RELEASE_MANIFEST.sig
