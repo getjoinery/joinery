@@ -435,56 +435,6 @@ check(count($steps) === 1, 'deleting nothing still emits one step', 'steps: ' . 
 check(strpos($steps[0]['cmd'], 'Nothing to delete') !== false,
 	'that step says nothing was deleted rather than pretending it deleted something');
 
-section('Node console: build_run_command');
-
-// The console is the one builder that must NOT sanitise its input — an
-// operator's command is meant to reach the shell as written. What is asserted
-// here is the opposite of the shell-safety section above: the command survives
-// verbatim, and the bounds live in the timeout and the gate instead.
-$console_cmd = "apache2ctl -M | grep -E 'mpm|fcgi' && echo \$PATH";
-$steps = JobCommandBuilder::build_run_command($ssh_node, array(
-	'command' => $console_cmd, 'timeout' => 120));
-check(count($steps) === 1, 'one command produces exactly one step', 'steps: ' . count($steps));
-check($steps[0]['cmd'] === $console_cmd,
-	'the command reaches the step verbatim — pipes, quotes and all');
-check($steps[0]['type'] === 'ssh' && !empty($steps[0]['label']),
-	'the step is a labelled SSH step like every other job');
-check(($steps[0]['timeout'] ?? null) === 120, 'the chosen timeout rides on the step');
-
-// The timeout is the runaway guard, so the offered set is closed: a hand-posted
-// value outside it is refused rather than quietly clamped to something else.
-$refused = false;
-try { JobCommandBuilder::build_run_command($ssh_node, array('command' => 'ls', 'timeout' => 86400)); }
-catch (Exception $e) { $refused = true; }
-check($refused, 'a timeout outside the offered set is refused');
-
-$refused = false;
-try { JobCommandBuilder::build_run_command($ssh_node, array('command' => '   ', 'timeout' => 60)); }
-catch (Exception $e) { $refused = true; }
-check($refused, 'an empty command is refused rather than creating a job that does nothing');
-
-check(in_array(JobCommandBuilder::CONSOLE_TIMEOUT_DEFAULT, JobCommandBuilder::CONSOLE_TIMEOUTS, true),
-	'the default timeout is one the form actually offers');
-
-// on_host is meaningful only where there are two shells to choose between.
-$console_docker = jcb_node(array('mgn_container_name' => 'consolesite', 'mgn_web_root' => '/var/www/html/consolesite/public_html'));
-$steps = JobCommandBuilder::build_run_command($console_docker, array(
-	'command' => 'ls', 'timeout' => 60, 'on_host' => true));
-check(!empty($steps[0]['on_host']), 'a container node can send the command to the host instead');
-$steps = JobCommandBuilder::build_run_command($ssh_node, array(
-	'command' => 'ls', 'timeout' => 60, 'on_host' => true));
-check(empty($steps[0]['on_host']),
-	'a bare-metal node ignores on_host — it has only one shell to run in');
-
-$no_ssh = jcb_node(array('mgn_ssh_key_path' => ''));
-$refused = false;
-try { JobCommandBuilder::build_run_command($no_ssh, array('command' => 'ls', 'timeout' => 60)); }
-catch (Exception $e) { $refused = true; }
-check($refused, 'a node with no SSH credentials refuses instead of building an unrunnable job');
-
-check(in_array('run_command', ManagementJob::filterTypes(), true),
-	'run_command is a filterable job type, so console runs are findable on the jobs pages');
-
 section('Plugin installers');
 
 // The runner lives in the site dir, one level above web root, and needs the
@@ -862,49 +812,16 @@ if ($chain_steps) {
 		$chain_build_error);
 }
 
-section('Copy database: docker source staging');
-
-// SSH steps against a container node are docker exec'd, so the dump lands
-// inside the container — but SCP reads the host filesystem. A docker source
-// therefore needs the dump staged out with docker cp before the download, or
-// the job fails at "Download dump from source" with No such file (job #80's
-// signature). The target side has had this staging all along; the source side
-// is what these checks pin down.
+// Fixtures the surviving checks still need. They were shared with the
+// copy-database sections, which are retired (A3): $copy_target is the target of
+// a restore, and $dock_source is the SOURCE NODE of a from-backup install —
+// cloning a new site from an existing one is not the retired operation, which
+// was copying a database into a node that already had one.
+$copy_target = jcb_node(array(
+	'mgn_web_root' => '/var/www/html/copytarget/public_html'));
 $dock_source = jcb_node(array(
 	'mgn_container_name' => 'sourcedock',
 	'mgn_web_root' => '/var/www/html/sourcedock/public_html'));
-$bare_source = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/sourcebare/public_html'));
-$copy_target = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/copytarget/public_html'));
-
-$steps = JobCommandBuilder::build_copy_database($dock_source, $copy_target);
-$labels = array_map(function ($s) { return $s['label']; }, $steps);
-
-$stage_at = array_search('Copy dump out of container', $labels);
-$download_at = array_search('Download dump from source', $labels);
-check($stage_at !== false, 'a docker source emits a copy-out-of-container step');
-check($download_at !== false && $stage_at !== false && $stage_at < $download_at,
-	'the dump is staged onto the host before SCP tries to download it',
-	implode(' | ', $labels));
-
-$stage = $stage_at === false ? array() : $steps[$stage_at];
-check(!empty($stage['on_host']), 'the staging step runs on the host, not docker exec\'d');
-check(($stage['node_id'] ?? 0) === $dock_source->key,
-	'the staging step addresses the source node');
-check(strpos($stage['cmd'] ?? '', "docker cp 'sourcedock':") !== false,
-	'the staging step copies out of the source container', $stage['cmd'] ?? '');
-
-check(in_array('Clean up staged dump on source host', $labels),
-	'the staged host copy gets its own cleanup step');
-
-// A bare source needs no staging — the dump is already on the host.
-$steps = JobCommandBuilder::build_copy_database($bare_source, $copy_target);
-$labels = array_map(function ($s) { return $s['label']; }, $steps);
-check(!in_array('Copy dump out of container', $labels),
-	'a bare source emits no container staging step');
-check(!in_array('Clean up staged dump on source host', $labels),
-	'a bare source emits no host staging cleanup');
 
 section('Restore semantics: replace, verified, loud');
 
@@ -915,46 +832,10 @@ section('Restore semantics: replace, verified, loud');
 // 31 tables kept their old data). So every restore site must: verify the
 // archive before destroying anything, drop and recreate the schema, and run
 // psql with ON_ERROR_STOP so a load error fails the job.
-/** Assert one restore command carries the full replace contract. */
-function jcb_check_restore_cmd($label, $cmd) {
-	check(strpos($cmd, 'DROP SCHEMA public CASCADE; CREATE SCHEMA public;') !== false,
-		$label . ': the restore drops and recreates the schema', $cmd);
-	check(substr_count($cmd, 'ON_ERROR_STOP=1') >= 2,
-		$label . ': both the drop and the load run under ON_ERROR_STOP', $cmd);
-	$gate = strpos($cmd, 'gunzip -t');
-	$drop = strpos($cmd, 'DROP SCHEMA');
-	if ($gate !== false) {
-		check($gate < $drop, $label . ': the integrity check precedes the drop', $cmd);
-	}
-	return $gate !== false;
-}
-
-// The copy paths operate on a plaintext dump they just created, so they stay
-// inline and must carry the full drop+ON_ERROR_STOP contract in the command.
-$inline_restore_builders = [
-	'copy_database' => JobCommandBuilder::build_copy_database($dock_source, $copy_target),
-	'copy_database_by_name' => JobCommandBuilder::build_copy_database_by_name($copy_target,
-		['source_db_name' => 'otherdb']),
-];
-
-foreach ($inline_restore_builders as $name => $steps) {
-	$restore_cmd = '';
-	$restore_at = null;
-	$verify_at = null;
-	$backup_at = null;
-	foreach ($steps as $i => $step) {
-		$label = $step['label'] ?? '';
-		if (strpos($label, 'Restore') === 0) { $restore_cmd = $step['cmd']; $restore_at = $i; }
-		if ($label === 'Verify backup archive') { $verify_at = $i; }
-		if (strpos($label, 'Auto-backup') === 0) { $backup_at = $i; }
-	}
-	check($restore_cmd !== '', $name . ': a restore step is emitted');
-	$inline_gate = jcb_check_restore_cmd($name, $restore_cmd);
-	check($inline_gate || ($verify_at !== null && $verify_at < $restore_at),
-		$name . ': destruction is gated on a gunzip -t integrity check');
-	check($backup_at !== null && $backup_at < $restore_at,
-		$name . ': the pre-restore safety dump precedes the restore');
-}
+// The copy builders that restored INLINE — dropping the schema in the command
+// itself — are retired (A3). Every restore that remains delegates to
+// restore_database.sh, whose contract is checked just below, so there is no
+// longer a command that must carry the replace contract in its own text.
 
 // The dashboard restore and the from-backup install DB stage both delegate to
 // the single restore engine (restore_database.sh). The verify-before-destroy,
@@ -998,8 +879,7 @@ jcb_check_engine_restore_cmd('install_node from-backup', $clone_restore);
 // and job-internal dumps are role-portable because the restore runs as the
 // TARGET site's own DB user under ON_ERROR_STOP — an OWNER TO naming the
 // source site's role would fail the job.
-$dump_sets = $inline_restore_builders;
-$dump_sets['restore_database'] = $engine_steps;
+$dump_sets = ['restore_database' => $engine_steps];
 $dump_sets['install_node from-backup'] = $clone_steps;
 foreach ($dump_sets as $name => $steps) {
 	foreach ($steps as $step) {
@@ -1088,10 +968,6 @@ $clone_docker_target = jcb_node(array(
 
 // Every builder in the spec's inventory, in its scratch-heaviest variant.
 $teardown_suites = array(
-	'copy_database docker→docker' => JobCommandBuilder::build_copy_database($dock_source, $dock_target),
-	'copy_database bare→bare'     => JobCommandBuilder::build_copy_database($bare_source, $copy_target),
-	'copy_database_by_name'       => JobCommandBuilder::build_copy_database_by_name($copy_target,
-		array('source_db_name' => 'otherdb')),
 	'discover_nodes'              => JobCommandBuilder::build_discover_nodes(array(
 		'host' => '192.0.2.50', 'ssh_user' => 'root',
 		'ssh_key_path' => '/home/user1/.ssh/id_ed25519_claude')),

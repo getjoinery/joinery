@@ -20,6 +20,8 @@
  * --on and --join may be given together: turn the agent on and ask to join in
  * one call, which is what a management node's remote enable does.
  *
+ * @version 1.1 - --on/--off APPLY the switch (run the installer) rather than only recording it;
+ *                as non-root they print the command instead of implying the work is done
  * @version 1.0
  */
 
@@ -61,17 +63,62 @@ function agent_control_setting(string $name): string {
     return $row === false ? '' : (string)$row[0];
 }
 
+/**
+ * Apply the switch we just recorded, instead of only recording it.
+ *
+ * The setting is the decision; the installer is what carries it out — it
+ * projects the marker, converges supervision, and starts or stops the process.
+ * Writing the setting alone leaves the machine exactly as it was, which is how
+ * this command came to report "on" on nine machines whose agents did not start:
+ * the admin page at least prints the command to run, and the CLI silently did
+ * half the job the page describes.
+ *
+ * Running the installer needs root. When this is run as root, do it and say what
+ * happened. When it is not, print the command rather than implying the work is
+ * done — an honest instruction beats a misleading success.
+ */
+function agent_control_apply(): void {
+    $public_html = rtrim(PathHelper::getIncludePath(''), '/');
+    $site_root   = dirname($public_html);
+    $sitename    = basename($site_root);
+    $installer   = $site_root . '/maintenance_scripts/install_tools/install_agent.sh';
+
+    if (!is_file($installer)) {
+        echo "  note: the agent installer is not in this tree; the switch takes effect at the next root moment\n";
+        return;
+    }
+
+    if (function_exists('posix_geteuid') ? posix_geteuid() !== 0 : trim((string)shell_exec('id -u')) !== '0') {
+        echo "  the switch is recorded. Applying it needs root — run:\n";
+        echo "    sudo bash " . $installer . ' ' . $sitename . "\n";
+        return;
+    }
+
+    echo "  applying it now (running the agent installer as root):\n";
+    $output = [];
+    $exit = 0;
+    exec('bash ' . escapeshellarg($installer) . ' ' . escapeshellarg($sitename) . ' 2>&1', $output, $exit);
+    foreach ($output as $line) {
+        echo '    ' . $line . "\n";
+    }
+    if ($exit !== 0) {
+        echo "  WARNING: the installer exited " . $exit . "\n";
+    }
+}
+
 $changed = false;
 
 if (isset($options['on'])) {
     Setting::put('agent_enabled', '1');
-    echo "agent: on — it installs and starts at the next container start, upgrade, or installer run\n";
+    echo "agent: on\n";
+    agent_control_apply();
     $changed = true;
 }
 
 if (isset($options['off'])) {
     Setting::put('agent_enabled', '');
-    echo "agent: off — it stops at the next container start, upgrade, or installer run\n";
+    echo "agent: off\n";
+    agent_control_apply();
     $changed = true;
 }
 

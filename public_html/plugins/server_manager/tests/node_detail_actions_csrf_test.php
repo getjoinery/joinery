@@ -101,9 +101,10 @@ try {
 	// -----------------------------------------------------------------------
 
 	// A validation-bounce action proves the gate passed without touching a
-	// builder: copy_database with no source returns the database-tab URL, a
-	// destination the reject path never produces.
-	$_POST = ['action' => 'copy_database', SmAdminCsrf::FIELD => $token, 'source_node_id' => '0'];
+	// builder: restore_database with no file returns the database-tab URL, a
+	// destination the reject path never produces. (This was copy_database until
+	// A3 retired it; the property being tested is the CSRF gate, not the action.)
+	$_POST = ['action' => 'restore_database', SmAdminCsrf::FIELD => $token];
 	$r = NodeDetailActions::dispatch($n, $session, $base_url, $page_regex);
 	check($r === $base_url . '&tab=database', 'valid token lets the handler run (database-tab redirect)');
 

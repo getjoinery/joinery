@@ -49,11 +49,14 @@ try {
 
 $tab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
 $skip_joinery = $node->get('mgn_skip_joinery_checks');
-// The Console tab is offered for every node — a non-Joinery server is exactly
-// the kind that needs it — but it only runs commands when the node opts in.
+// No Console tab: arbitrary commands are retired platform-wide (decision A1).
+// A control plane holds no way to run an instruction it composed at runtime on a
+// managed node; investigations use the operator's own SSH key, which is not
+// recorded — a property given up knowingly, and the reason A1 was argued rather
+// than assumed.
 $valid_tabs = $skip_joinery
-	? ['overview', 'jobs', 'console', 'api_keys']
-	: ['overview', 'backups', 'database', 'updates', 'jobs', 'console', 'api_keys'];
+	? ['overview', 'jobs', 'api_keys']
+	: ['overview', 'backups', 'database', 'updates', 'jobs', 'api_keys'];
 if (!in_array($tab, $valid_tabs)) {
 	$tab = 'overview';
 }
@@ -122,7 +125,6 @@ echo '<script>var smNodeName = '
 		<li class="nav-item"><a class="nav-link <?php echo $tab === 'updates' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=updates">Updates</a></li>
 	<?php endif; ?>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'jobs' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=jobs">Jobs</a></li>
-	<li class="nav-item"><a class="nav-link <?php echo $tab === 'console' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=console">Console</a></li>
 	<li class="nav-item"><a class="nav-link <?php echo $tab === 'api_keys' ? 'active' : ''; ?>" href="<?php echo $base_url; ?>&tab=api_keys">API Keys</a></li>
 </ul>
 
