@@ -5,6 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.35 - backup_run joins the primitive transport: the same config as declared params,
+ *                 composed into the engine's stdin ON THE NODE, so no credential enters argv
+ * @version 1.34 - list_backups joins the primitive transport: the node reads its own backup
+ *                 directory from a compiled-in path, so no glob crosses the wire
  * @version 1.33 - build_enable_agent: turn a node's agent on and optionally have it ask to join,
  *                 over SSH. Exists only while SSH does — Phase 3 takes both
  * @version 1.32 - a connected agent IS the cutover: has_agent_channel() asks only whether the
@@ -828,6 +832,19 @@ class JobCommandBuilder {
 			'delete_local_after_upload' => (bool)($params['delete_local_after_upload']
 				?? $node->get('mgn_delete_local_after_upload')),
 		];
+
+		// Primitive path: the SAME config, as declared parameters rather than a
+		// shell heredoc. The node validates every field against its compiled-in
+		// spec, composes the engine's config itself, and hands it to
+		// run_backup.php on stdin — so the credential still never reaches argv,
+		// and nothing this plane sends is executed as syntax.
+		//
+		// A4 becomes structural here: the node declares no parameter through
+		// which encryption key material could arrive, so a job carrying one is
+		// refused as out-of-vocabulary rather than inspected and rejected.
+		if (self::has_primitive($node, 'backup_run')) {
+			return ['primitive' => 'backup_run', 'params' => $config];
+		}
 
 		// JSON_UNESCAPED_SLASHES only for readability in the job log; the value is
 		// consumed by json_decode either way. The heredoc is quoted, so nothing in
@@ -2184,6 +2201,9 @@ class JobCommandBuilder {
 	 * Dispatches to API or SSH based on has_api().
 	 */
 	public static function build_list_backups($node) {
+		if (self::has_primitive($node, 'list_backups')) {
+			return self::build_list_backups_primitive($node);
+		}
 		if (self::has_api($node, 'list_backups')) {
 			return self::build_list_backups_api($node);
 		}
@@ -2194,6 +2214,20 @@ class JobCommandBuilder {
 			"Node '{$node->get('mgn_slug')}' cannot run list_backups: "
 			. "no API credentials (or health probe failed) and no SSH credentials configured."
 		);
+	}
+
+	/**
+	 * Primitive path: a NAME the node looks up in its own vocabulary. The node
+	 * reads its backup directory — the directory and the recognised suffixes are
+	 * compiled into the agent, so this plane cannot ask it to enumerate anything
+	 * else, which the SSH path's shell glob could be steered into doing.
+	 *
+	 * Returns the same files[] shape the management API produces, so
+	 * JobResultProcessor::process_list_backups reads either without knowing
+	 * which transport ran.
+	 */
+	public static function build_list_backups_primitive($node) {
+		return ['primitive' => 'list_backups', 'params' => []];
 	}
 
 	public static function build_list_backups_api($node) {

@@ -2,6 +2,8 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.9 - mgn_agent_quiet_time: a node says it is going quiet when its agent is switched
+ *                off, so deliberate silence reads differently from a node that broke
  * @version 1.8 - mgn_agent_channel_enabled removed: a connected agent is routed to
  *                unconditionally (hard cutover, owner-set)
  * @version 1.7 - pairing-token columns removed: enrollment is a node-initiated join with no shared
@@ -142,6 +144,12 @@ class ManagedNode extends SystemBase {
 		// ajr_agent_join_requests; the moment of approval is what sets the
 		// key above and the time below.
 		'mgn_agent_paired_time'        => array('type'=>'timestamp(6)'),
+		// When the node last said it was going quiet — an operator switched its
+		// agent off there. Distinguishes a deliberate silence from a broken one,
+		// which is otherwise indistinguishable from here: both just stop polling.
+		// Compared against mgn_agent_last_poll rather than cleared, so a node that
+		// comes back needs no second write to look alive again.
+		'mgn_agent_quiet_time'         => array('type'=>'timestamp(6)'),
 
 		// Liveness, centrally visible. The agent's own heartbeat row lives in
 		// each site's OWN database and stays there; a poll against this plane

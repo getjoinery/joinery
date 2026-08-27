@@ -1026,6 +1026,20 @@ $switch_at   = strpos($agent_src, 'if [ "$AGENT_ENABLED" != "1" ]');
 check($converge_at !== false && $switch_at !== false && $converge_at < $switch_at,
     'the binary is installed before the switch is consulted, so off still means installed');
 
+// The switch is projected into a root-owned marker so the things that decide
+// whether the agent runs keep working when the database does not. The keepalive
+// is the one that matters: it runs every minute with no database at all, and a
+// keepalive that ignored the marker would restart an agent an operator switched
+// off, within the minute, forever.
+check(strpos($agent_src, 'MARKER_FILE=') !== false,
+    'the installer projects the switch into a marker file');
+$project_at = strpos($agent_src, '> "$MARKER_FILE"');
+check($project_at !== false && $project_at < $switch_at,
+    'projection happens before the switch is applied');
+check(preg_match('/write_supervise_script\(\)[^}]*\/etc\/joinery-agent\/enabled/s', $agent_src) === 1,
+    'the cron keepalive reads the marker before starting the agent',
+    'without this, off lasts under a minute');
+
 // install.sh --enable-agent is how a site provisioned by a management node
 // comes up running. It has to write the setting BEFORE the host installers run,
 // or the agent is installed and left stopped until some later root moment.

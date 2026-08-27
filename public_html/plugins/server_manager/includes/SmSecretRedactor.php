@@ -21,10 +21,23 @@ class SmSecretRedactor {
 
 	const MASK = '********';
 
-	/** Credential key names whose value is masked (var_export or JSON shape). */
+	/**
+	 * Credential key names whose value is masked (var_export or JSON shape).
+	 *
+	 * Longest first where one name is a prefix of another: the alternation is
+	 * tried in order, so 'credentials' ahead of 'credentials_b64' would match
+	 * the prefix and then fail on the closing quote. Backtracking saves it in
+	 * this engine, but the ordering says what is meant without relying on that.
+	 */
 	private static $secret_keys = array(
 		'secret_key', 'access_key', 'application_key', 'app_key',
 		'api_secret', 'apk_secret_key', 'password', 'passwd', 'token', 'secret',
+		// The storage target's credential, as it travels in a backup job's
+		// parameters and in the SSH path's config heredoc. Nothing renders
+		// either today, but redaction is the only thing standing between that
+		// payload and a support bundle, an export, or a future job view that
+		// shows more than a step's label.
+		'credentials_b64', 'credentials',
 	);
 
 	/**
