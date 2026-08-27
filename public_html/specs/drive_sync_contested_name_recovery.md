@@ -307,15 +307,68 @@ bytes. On a filesystem that normalises they are one name, and the personality
 already knows that: `tree::key_for` and the naming layer compare through it
 everywhere else.
 
-**Likely fix, to be confirmed:** compare through the personality's comparison key
-in the collapse rather than with `==`. That would be a small extension of code
-already written and tested.
+**That fix was built and measured on 2026-08-27, and it is NOT sufficient.**
+Comparing through `comparison_key` in the collapse does stop the loop — the
+device goes quiet. But it leaves the mac disk holding `café-17.txt` and the
+server holding `cafe\u{301}-17.txt` for ever, and `assert_converged` calls that
+a divergence:
 
-**Care needed before assuming it is that small.** On Linux the two spellings ARE
-different files, and a rename between them is a real user action that must
-propagate. The comparison has to be the personality's, not a global
-normalisation — which is the same distinction the rest of the engine draws, so
-the shape of the answer is known even if the placement is not.
+```
+mac did not converge with the server
+  only on the disk:   ["Sub 40 renamed/Sub 12/café-17.txt"]
+  only on the server: ["Sub 40 renamed/Sub 12/cafe\u{301}-17.txt"]
+```
+
+**Do not answer that by folding the oracle.** `disk_tree` already composes one
+side, deliberately and only for volumes that REWRITE the name, and its comment
+says why the other direction is worse:
+
+> Composing everywhere is the opposite error and the more expensive one: it
+> makes a device holding a decomposed name look like it holds the composed one
+> ... The harness would report convergence while the client renamed the file at
+> the server forever.
+
+That is precisely this defect. Relaxing the oracle to accommodate a partial fix
+would blind the simulator to the class of bug the seed represents.
+
+**The distinction that is actually being missed.** `Personality` separates two
+things on purpose: `decomposes_unicode` (HFS+ REWRITES what you give it) and
+`normalization_insensitive` (APFS keeps your bytes and merely COMPARES without
+regard to spelling). The mac device here is the second kind. `disk_tree` folds
+only the first, so mac's side is never folded — correctly, because mac really is
+holding those exact bytes.
+
+**Where the composed spelling actually comes from, traced 2026-08-27.** Not from
+`to_local_name` — that already composes only for `decomposes_unicode`, and its
+comment describes this very symptom as a defect fixed once before ("the soak rig
+held nineteen files that way, one op per accented name, forever"). It comes from
+the workload, which mints both spellings as distinct names on purpose:
+
+```rust
+1 => format!("caf\u{e9}-{i}.txt"),      // composed
+2 => format!("cafe\u{301}-{i}.txt"),    // decomposed, same word
+```
+
+The mac device created `café-17.txt` composed and uploaded it. The server now
+holds the DECOMPOSED spelling of that same file, and mac's record faithfully
+follows the server (`remote` and `synced` both NFD, status `Synced`). Something
+turned a composed name on the server into a decomposed one.
+
+**The suspect is the HFS+ device propagating its own filesystem's rewrite.** It
+downloads `café-17.txt`, its volume stores `cafe` + combining-acute, and if its
+scan reads that back as a user rename it pushes the rewrite up — and the server,
+and every other device, inherits a respelling nobody performed. `to_local_name`
+composes on that volume precisely so the record and the disk stay in step; the
+question is whether every later comparison honours the same convention.
+
+**So start on the HFS+ side, not the mac side, and not at the collapse.** The
+mac device is the victim here: its disk holds the user's own bytes and its record
+holds the server's. Whichever fix lands, `assert_converged` must stay strict —
+see the `disk_tree` warning above.
+
+**And on Linux the two spellings ARE different files**, where a rename between
+them is a real user action that must propagate. Whatever the fix, it has to keep
+that working — it is the half a careless change breaks silently.
 
 **How to prove it:** seed 99674 from a committed arm, plus a deterministic
 scenario with a decomposing device and a precomposing one holding one file,
