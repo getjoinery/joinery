@@ -952,6 +952,104 @@ fn free_conflict_path(
 /// Live only: a trashed sibling is not holding anything, and the server's own
 /// uniqueness rule says the same, so treating one as an obstacle would push
 /// every rescue a suffix further along for no reason.
+/// Make the disk wear the name the server settled on.
+///
+/// Both arms of a contested upload need this and for one reason: an entry whose
+/// `remote` names one thing while the disk names another is read by the next
+/// scan as a user rename, and pushed back at the server as a move onto the
+/// occupant's name — refused, dropped, re-derived, for ever. The gap IS the
+/// defect; closing it is not a tidy-up.
+///
+/// Returns where the file now is. Never silent: if the destination is occupied
+/// or unplaceable the rename cannot happen, and that leaves exactly the gap
+/// above, so it is said out loud rather than skipped.
+fn follow_the_server_name(
+    env: &ExecEnv,
+    id: EntityId,
+    from: &std::path::Path,
+    wanted: &Placement,
+    asked_for: &str,
+    server_holds: &str,
+) -> Result<PathBuf, ExecError> {
+    let Placed::At(to) = path_for(env, wanted)? else {
+        env.store.raise_issue(
+            Some(id),
+            "reconcile",
+            &format!(
+                "{asked_for} was taken, so the server holds this as {}; the local copy \
+                 could not be renamed to match",
+                wanted.name
+            ),
+            (env.now_ms)() as i64,
+        )?;
+        return Ok(from.to_path_buf());
+    };
+    if to == from {
+        return Ok(to);
+    }
+    // `nothing_at`, not `fingerprint().is_none()`. A directory answers None to a
+    // fingerprint exactly as an empty spot does, and this file names that trap
+    // twice already. Walking past a directory here would hand `rename` a
+    // kind mismatch — `NotADirectory` in the sim, `EISDIR` on a real disk —
+    // AFTER the server side has succeeded, so the op fails and retries into the
+    // same wall for ever.
+    if !nothing_at(env, &to)? {
+        // Something is in the way. If it is provably the same bytes the server
+        // now holds under this very name, it is a redundant copy — most often
+        // OUR OWN, left by an upload that landed and died before its rename —
+        // and keeping it would mint the duplicate adoption exists to prevent.
+        //
+        // Proven with the same ladder `make_room` uses, including the
+        // mtime-granularity guard that defuses a same-tick rewrite. Compared
+        // against the hash the SERVER holds under the name, not against a
+        // re-read of our own file: if ours was edited mid-upload the two differ,
+        // and the whole justification for disposing of the blocker is that the
+        // server already has its bytes.
+        //
+        // TRASH, never delete: the bytes survive on the server, in the copy
+        // being renamed into place, and in the OS recycle bin. A directory can
+        // never be hash-equal to a file, so one always takes the move-aside arm
+        // below. On doubt — unreadable, or any error — move aside rather than
+        // dispose. A duplicate is an annoyance; a wrong removal is loss.
+        let identical = match env.vfs.fingerprint(&to)? {
+            Some(fp) => {
+                let existing = match env
+                    .store
+                    .cached_hash(fp, env.vfs.personality().mtime_granularity_ns)?
+                {
+                    Some(h) => Some(h),
+                    None => env.vfs.hash(&to).ok(),
+                };
+                existing.as_deref() == Some(server_holds)
+            }
+            None => false,
+        };
+        if identical {
+            env.vfs.trash(&to)?;
+        } else {
+            let aside = free_conflict_path(env, &to, &wanted.name, &[])?;
+            env.vfs.rename(&to, &aside)?;
+            env.store.raise_issue(
+                Some(id),
+                "kept_aside",
+                &format!(
+                    "{} was moved aside to make room for the synced copy",
+                    wanted.name
+                ),
+                (env.now_ms)() as i64,
+            )?;
+        }
+    }
+    env.vfs.rename(from, &to)?;
+    env.store.raise_issue(
+        Some(id),
+        "kept_aside",
+        &format!("{asked_for} was already taken here, so this copy is {}", wanted.name),
+        (env.now_ms)() as i64,
+    )?;
+    Ok(to)
+}
+
 fn names_the_server_has(env: &ExecEnv, parent: Option<i64>) -> Result<Vec<String>, ExecError> {
     Ok(env
         .store
@@ -1460,7 +1558,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             Placed::Not(why) => unplaced = unplaced.or(Some(why)),
         }
     }
-    let Some((path, fingerprint)) = found else {
+    let Some((mut path, fingerprint)) = found else {
         if let Some(why) = unplaced {
             return Ok(why.outcome());
         }
@@ -1593,18 +1691,186 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
         }
     }
 
-    let outcome = match &mut ciphertext {
-        Some(reader) => {
-            let mut source = Source(&mut **reader);
-            env.api.upload(&params, &mut source)?
-        }
-        None => {
-            let mut reader = env.vfs.open_read(&path)?;
-            let mut source = Source(&mut *reader);
-            env.api.upload(&params, &mut source)?
+    // Land beside an occupant rather than ask for its name for ever.
+    //
+    // The same refusal a folder create can meet, for the same reason and with
+    // the same answer: the rival is a live file on the server this device has
+    // never been told about, so nothing in the store can see it and no amount
+    // of re-planning learns anything new. Read strictly, the refusal leaves the
+    // entry `pending_upload`, the operation is minted and dropped on every pass,
+    // and the device never goes quiet -- with the tree correct and the audit
+    // green throughout, because only the bookkeeping is stuck. Soak rig run 302
+    // is exactly that, against the real platform.
+    //
+    // The server settles on the conflict name and this disk keeps the original,
+    // which is what the folder path does. That asymmetry is transient: when the
+    // occupant syncs down, the ordinary conflict-copy machinery moves the local
+    // file aside, and both sides end where the tracked same-name race already
+    // ends.
+    //
+    // Encrypted files never reach this. Their server name is `enc-{content id}`,
+    // which nothing else can be holding.
+    let mut attempt = 0u32;
+    let outcome = loop {
+        let sent = match &mut ciphertext {
+            Some(reader) => {
+                let mut source = Source(&mut **reader);
+                env.api.upload(&params, &mut source)
+            }
+            None => {
+                let mut reader = env.vfs.open_read(&path)?;
+                let mut source = Source(&mut *reader);
+                env.api.upload(&params, &mut source)
+            }
+        };
+        match sent {
+            Ok(out) => break out,
+            // A name this device can account for is not a name to step around:
+            // the holder is on its way somewhere else and the refusal lifts by
+            // itself. Renaming around it would hand the user a conflict name,
+            // on every device, permanently, for a collision that was about to
+            // clear.
+            Err(e)
+                if e.name_taken()
+                    && held_by_a_rename_this_device_owes(env, &params.name, params.folder_id)? =>
+            {
+                return Ok(OpOutcome::Retry(
+                    "the name is spoken for by something this device is renaming".into(),
+                ));
+            }
+            // The server already holds OUR bytes under that name. This is not a
+            // contested name at all: it is a lost record, and the repair is to
+            // take the server's entity as ours rather than mint a conflict copy
+            // of a file the user never conflicted over.
+            //
+            // Soak rig run 302 is this case and only this case — seven entries
+            // stuck `pending_upload` while `audited-green` passed, because the
+            // disk and the server already agreed and only the bookkeeping had
+            // been lost. Landing beside there would have manufactured seven
+            // duplicates on the rig's one confirmed real-platform failure.
+            //
+            // Keyed on hash equality, never on name equality, and only when the
+            // holder is a FILE — a folder holding the name is a kind mismatch
+            // and adoption means nothing. A holder with no hash is no evidence
+            // and must not compare equal to anything.
+            //
+            // Two byte-identical files at one placement are the same file for
+            // every purpose a user has. If the identities really did differ they
+            // diverge later and the ordinary conflict machinery catches it then,
+            // so adopting cannot lose data — while landing beside on identical
+            // content manufactures a visible duplicate out of nothing.
+            Err(ref e)
+                if e.name_taken()
+                    && e.name_holder().is_some_and(|h| {
+                        h.entity_type == "file"
+                            && h.sha256.as_deref() == Some(params.sha256.as_str())
+                    }) =>
+            {
+                let holder = e.name_holder().expect("just matched");
+                let target = EntityId {
+                    entity_type: EntityType::File,
+                    server_id: holder.id,
+                };
+                if env.store.get_entry(target)?.is_some() {
+                    // Both records exist here; folding them is the whole repair.
+                    env.store.merge_file(entry.id, target)?;
+                    return Ok(OpOutcome::Done);
+                }
+                let mut adopted = entry.clone();
+                env.store.rekey_entry(entry.id, target)?;
+                adopted.id = target;
+                // The server's exact spelling, which an insensitive match can
+                // make different from the name we asked for.
+                adopted.remote = Placement {
+                    parent: placement.parent,
+                    name: holder.name.clone(),
+                };
+                adopted.synced_placement = Some(adopted.remote.clone());
+                adopted.synced_content = Some(ContentId {
+                    sha256: params.sha256.clone(),
+                    size: fingerprint.size,
+                });
+                adopted.synced_fingerprint = Some(fingerprint);
+                adopted.status = LocalStatus::Synced;
+                // The disk has to follow here as well, and the crash window is
+                // why. An upload that lands beside under a conflict name and
+                // dies before its rename comes back through recovery: the
+                // original name is still refused, the same conflict name is
+                // minted again (the generator is deterministic and the counter
+                // restarts), and it is now held by our OWN crashed upload — so
+                // the hashes match and adoption fires. Returning here without
+                // the rename would leave the record on the conflict name and
+                // the disk on the original: the very gap this change exists to
+                // close, reproduced by its own recovery.
+                let settled_at = follow_the_server_name(
+                    env,
+                    adopted.id,
+                    &path,
+                    &adopted.remote,
+                    &placement.name,
+                    &params.sha256,
+                )?;
+                // Deliberately NOT re-fingerprinted here. A rename carries size,
+                // mtime and file id across unchanged, so a re-read can only
+                // return the fingerprint already recorded above — or, if the
+                // user edited the file while the upload was in flight, the
+                // POST-EDIT one. Recording that would be the worst outcome
+                // available: adoption matched on the old hash, so the agreed
+                // content is the old bytes while the agreed fingerprint is the
+                // new ones, and the next scan sees a fingerprint that matches
+                // the disk and skips hashing it. The edit would never be sent,
+                // and both sides would report themselves settled while the
+                // contents differed.
+                //
+                // A fingerprint is only ever permission to SKIP a hash. Leaving
+                // the pre-upload one is the safe direction: it stops matching
+                // the moment the file changes, the next scan re-hashes, and the
+                // edit goes up.
+                let _ = settled_at;
+                env.store.put_entry(&adopted)?;
+                return Ok(OpOutcome::Done);
+            }
+            Err(e) if e.name_taken() && !entry.is_encrypted && attempt < 1000 => {
+                attempt += 1;
+                params.name = (env.conflict_name)(&placement.name, attempt);
+                // A fresh key per name, for the reason the folder create gives:
+                // a key is a promise that the request behind it does not change.
+                params.idempotency_key =
+                    Some(format!("{}-n{attempt}", op.idempotency_key));
+            }
+            Err(e) => return Err(e.into()),
         }
     };
     drop(ciphertext);
+
+    // The disk has to follow the server across a land-beside.
+    //
+    // Left alone, the local file keeps the name the occupant now holds while the
+    // entry claims the conflict name the server settled on — and the next scan
+    // reads that gap as a user rename and pushes `move_remote` onto the
+    // occupant's name, refused, dropped, re-derived, for ever. A second loop
+    // exactly like the one this whole branch exists to end.
+    //
+    // The occupant syncing down would move the local file aside by itself, and
+    // where that happens this rename is a no-op the machinery repeats
+    // harmlessly. But the case that produced the defect is the one where it
+    // never does: the device's record of the occupant is gone and its cursor is
+    // past it, so nothing brings the rival down and nothing displaces our copy.
+    // Doing it here does not depend on the rival ever arriving.
+    if attempt > 0 {
+        let kept = Placement {
+            parent: placement.parent,
+            name: params.name.clone(),
+        };
+        path = follow_the_server_name(
+            env,
+            entry.id,
+            &path,
+            &kept,
+            &placement.name,
+            &params.sha256,
+        )?;
+    }
 
     let file = outcome.file;
     let new_id = file
@@ -2340,7 +2606,24 @@ fn move_remote(
     // never gets the chance while a stale rename is retried into a refusal that
     // waiting cannot lift. The soak rig found it as a move_remote on twenty-one
     // attempts, still asking for a name another file had taken hours earlier.
-    if from.is_some_and(|f| entry.remote != f) {
+    // Our own half-finished dance is not somebody else's move.
+    //
+    // The park below renames the entity to `.jd-swap-{this op's key}` as a step
+    // inside this very operation. If the process dies between that step and the
+    // ones after it, the next pass's index walk records the scratch name as
+    // `entry.remote` — correctly, because that IS where the server has it. The
+    // recovered op then arrives here, the guard sees `entry.remote` differing
+    // from `from`, and drops the operation as overtaken. The park stands, the
+    // naming pass reads the reserved prefix, and the entry self-locks
+    // `Unsyncable(ReservedPrefix)` — skipped by every later pass, with the
+    // user's file on the server under a name nobody chose and its real name
+    // gone from the record too.
+    //
+    // The scratch name carries the key of the op that minted it, so the op can
+    // recognise its own work and finish it. Checked before the guard, because
+    // the guard is what destroys it.
+    let ours_to_finish = entry.remote.name == crate::order::swap_name(&op.idempotency_key);
+    if !ours_to_finish && from.is_some_and(|f| entry.remote != f) {
         return Ok(OpOutcome::Overtaken(
             "the server has moved it since this was planned".into(),
         ));

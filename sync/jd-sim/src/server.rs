@@ -253,6 +253,52 @@ fn name_taken(message: &'static str) -> ApiRefusal {
     }
 }
 
+/// The same refusal, naming what it hit.
+///
+/// The server has the colliding row in its hand at the moment it refuses — it
+/// just looked the collision up in order to decide. Saying which entity holds
+/// the name costs nothing here and saves the client an index walk it cannot
+/// afford: `drive_index` is a whole-tree cursor walk with no way to scope it to
+/// a folder, and running one per refusal is what exhausted this rig's rate
+/// limit when the verifier tried it every settle.
+///
+/// The precedent is `parent_trashed`, which already names the folder it hit.
+///
+/// `holder_sha256` is present only for a file, and it is the hash the SERVER
+/// holds — which for an encrypted file is of the CIPHERTEXT. Identical
+/// plaintext encrypts to different bytes every time, so an encrypted holder can
+/// never compare equal and adoption is structurally unavailable there. That is
+/// correct rather than a gap: an encrypted file's server name is
+/// `enc-{content id}`, which nothing else can be holding.
+fn name_taken_by(
+    message: &'static str,
+    holder_type: &str,
+    holder_id: i64,
+    holder_name: &str,
+    holder_sha256: Option<&str>,
+) -> ApiRefusal {
+    let mut data = serde_json::json!({
+        "reason": "name_taken",
+        "holder_type": holder_type,
+        "holder_id": holder_id,
+        // The occupant's name as the SERVER stores it, exact bytes. A refusal
+        // can come from an insensitive match -- case, or unicode
+        // normalization -- where the name asked for and the name held are not
+        // the same string, and a client adopting the holder has to record the
+        // spelling the server actually has.
+        "holder_name": holder_name,
+    });
+    if let Some(sha) = holder_sha256 {
+        data["holder_sha256"] = serde_json::json!(sha);
+    }
+    ApiRefusal {
+        status: 422,
+        errortype: "ActionError",
+        message: message.into(),
+        data,
+    }
+}
+
 /// The destination folder is in the trash, so nothing new may go into it. The
 /// real server refuses this (`DriveHelper::folder_is_trashed`) at every verb
 /// that places an item; without it here the mock would take the write and hold
@@ -1892,12 +1938,18 @@ impl MockServer {
                 // duplicate names, 91 files no device could place, and a fleet
                 // that never converged again. Trashed siblings do not count,
                 // exactly as there.
-                if st
+                if let Some(holder) = st
                     .files
                     .values()
-                    .any(|f| !f.trashed && f.folder == folder && f.name == name)
+                    .find(|f| !f.trashed && f.folder == folder && f.name == name)
                 {
-                    return Err(name_taken("A file with that name already exists here."));
+                    return Err(name_taken_by(
+                        "A file with that name already exists here.",
+                        "file",
+                        holder.id,
+                        &holder.name,
+                        Some(&holder.sha256),
+                    ));
                 }
                 st.next_file_id += 1;
                 st.next_file_id
