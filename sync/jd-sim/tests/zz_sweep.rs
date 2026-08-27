@@ -1219,6 +1219,34 @@ fn scratch_fresh_hunt_sweep() {
         ],
         true,
     ));
+    // Computers that disagree about what a name is have produced three of the
+    // four defects this file has ever found, off a fraction of its seeds. The
+    // two ranges below were both found by ad-hoc hunts and would otherwise live
+    // nowhere -- a reproducer that is not in a sweep is a reproducer that rots.
+    //
+    // 96000..96500 holds seed 96223: a park left standing under the engine's own
+    // scratch name.
+    arms.push(sweep_on(
+        "hunt-platform-longhostile-2",
+        96000..96500,
+        80,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+    ));
+    // 99600..100000 holds seed 99674: a name differing only in Unicode
+    // normalisation read as a rename, between two filesystems that both
+    // normalise and disagree about how.
+    arms.push(sweep_on(
+        "hunt-normalisation",
+        99600..100000,
+        60,
+        &[("mac", Platform::MacOs), ("disk", Platform::Decomposing)],
+        true,
+    ));
     let _ = std::panic::take_hook();
     no_seed_failed(arms);
 }
