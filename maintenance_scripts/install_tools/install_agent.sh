@@ -53,7 +53,7 @@ fi
 SITE_ROOT="/var/www/html/${SITENAME}"
 PUBLIC_HTML="${SITE_ROOT}/public_html"
 SITE_CONFIG="${SITE_ROOT}/config/Globalvars_site.php"
-DIST_DIR="${PUBLIC_HTML}/plugins/server_manager/agent_dist"
+DIST_DIR="${PUBLIC_HTML}/agent_dist"
 
 BINARY_PATH="/usr/local/bin/joinery-agent"
 SUPERVISE_PATH="/usr/local/bin/joinery-agent-supervise"

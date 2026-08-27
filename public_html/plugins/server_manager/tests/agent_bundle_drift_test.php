@@ -8,7 +8,7 @@
 /**
  * Agent bundle drift — the bundled agent must match the agent source.
  *
- * On a publishing control plane, plugins/server_manager/agent_dist/ is built
+ * On a publishing control plane, public_html/agent_dist/ is built
  * from the agent checkout named by the server_manager_agent_source_path
  * setting. If the two fall out of step, every release published from that box
  * ships an agent the publisher did not intend, and nothing else notices: the
@@ -31,7 +31,7 @@ harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
 
-$dist_dir = PathHelper::getIncludePath('plugins/server_manager/agent_dist');
+$dist_dir = PathHelper::getIncludePath('agent_dist');
 $src      = AgentDistPublisher::sourcePath();
 $manifest = AgentDistPublisher::readManifest($dist_dir);
 

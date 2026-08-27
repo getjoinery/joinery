@@ -371,8 +371,10 @@
 		// not build is a reason to publish nothing at all. Refusing at this
 		// point leaves the tree exactly as it was found.
 		//
-		// It also still precedes plugin archive creation, so a freshly built
-		// agent_dist is captured in the server_manager archive and its tree hash.
+		// agent_dist is CORE now, so it rides the core archive (the core rsync
+		// excludes only theme/* and plugins/*) and no longer touches any plugin's
+		// tree hash — which also ends the churn where every agent rebuild
+		// auto-bumped server_manager's version.
 		publish_output("Bundling management agent artifact...");
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/AgentDistPublisher.php'));
 		$agent_bundle = AgentDistPublisher::publish($full_site_dir, 'publish_output');

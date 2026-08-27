@@ -152,7 +152,7 @@ section('publish() status contract: a failed rebuild is distinguishable from a c
 /** Build a disposable site tree with an agent_dist manifest at $bundled_version. */
 $make_site = function ($label, $bundled_version) use ($tmp_root) {
 	$site = $tmp_root . '/site_' . $label;
-	$dist = $site . '/public_html/plugins/server_manager/agent_dist';
+	$dist = $site . '/public_html/agent_dist';
 	mkdir($dist, 0777, true);
 	mkdir($site . '/config', 0777, true);
 	if ($bundled_version !== null) {
