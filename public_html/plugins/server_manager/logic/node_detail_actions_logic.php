@@ -78,6 +78,7 @@ class NodeDetailActions {
 		'provision_ssl'            => 'overview',
 		'run_plugin_installers'    => 'overview',
 		'enable_agent'             => 'api_keys',
+		'restart_agent'            => 'api_keys',
 		'set_reverse_dns'          => 'overview',
 		'save_api_credential'      => 'api_keys',
 		'approve_join'             => 'api_keys',
@@ -161,12 +162,13 @@ class NodeDetailActions {
 					'full_interval_days' => $policy['full_interval_days'],
 				];
 				try {
-					$steps = JobCommandBuilder::build_backup_run($node, $params);
+					$built = JobCommandBuilder::build_backup_run($node, $params);
 				} catch (Exception $e) {
 					self::fail($session, $page_regex, $e->getMessage());
 					return $base_url . '&tab=backups';
 				}
-				$job = ManagementJob::createJob($node->key, 'backup_run', $steps, $params, $uid);
+				// A paired node gets a primitive envelope here, not steps.
+				$job = ManagementJob::createFromBuild($node->key, 'backup_run', $built, $params, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -354,8 +356,8 @@ class NodeDetailActions {
 			}
 
 			case 'run_plugin_installers': {
-				$steps = JobCommandBuilder::build_run_plugin_installers($node);
-				$job = ManagementJob::createJob($node->key, 'run_plugin_installers', $steps, [], $uid);
+				$built = JobCommandBuilder::build_run_plugin_installers($node);
+				$job = ManagementJob::createFromBuild($node->key, 'run_plugin_installers', $built, [], $uid);
 				return self::jobUrl($job);
 			}
 
@@ -370,6 +372,20 @@ class NodeDetailActions {
 				}
 				$steps = JobCommandBuilder::build_enable_agent($node, $job_params);
 				$job = ManagementJob::createJob($node->key, 'enable_agent', $steps, $job_params, $uid);
+				return self::jobUrl($job);
+			}
+
+			case 'restart_agent': {
+				// Primitive-only, so this can throw for an unpaired node — the
+				// message says why, and there is deliberately no SSH fallback
+				// to quietly succeed with (that fallback would be pkill).
+				try {
+					$built = JobCommandBuilder::build_restart_agent($node);
+				} catch (Exception $e) {
+					self::fail($session, $page_regex, $e->getMessage());
+					return $base_url . '&tab=api_keys';
+				}
+				$job = ManagementJob::createFromBuild($node->key, 'restart_agent', $built, null, $uid);
 				return self::jobUrl($job);
 			}
 

@@ -73,6 +73,30 @@ class ManagementJob extends SystemBase {
 	 * Create a new job from a command builder result.
 	 */
 	static function createJob($node_id, $job_type, $steps, $parameters, $created_by) {
+		// A primitive envelope is not a step list, and burying one here is silent
+		// and expensive. json_encode(['steps' => $envelope]) produces
+		// {"steps":{"primitive":...}} — no top-level "primitive", so
+		// isPrimitiveJob() says no, the job goes to the step executor, and the
+		// agent dies on it with "cannot unmarshal object into ... []main.Step".
+		//
+		// That is not hypothetical either. It took the nightly fleet backup off
+		// every paired node the moment build_backup_run() grew a primitive
+		// branch: the builder started returning an envelope and four call sites
+		// kept handing it to createJob, so backups failed at 04:00 with a JSON
+		// error and nothing said the word "backup".
+		//
+		// createFromBuild() is the entry point that reads a build result and
+		// picks the right storage for it. Refusing here rather than coping means
+		// a builder that gains a primitive branch breaks its callers loudly, at
+		// the moment they are wrong, instead of at 4am on a node.
+		if (is_array($steps) && isset($steps['primitive'])) {
+			throw new Exception(
+				"createJob() was handed a primitive envelope for '{$job_type}' — it would be stored "
+				. "where isPrimitiveJob() cannot see it and the node would refuse to parse it. "
+				. "Call ManagementJob::createFromBuild() instead; it stores either shape correctly."
+			);
+		}
+
 		$job = new ManagementJob(NULL);
 		$job->set('mjb_mgn_node_id', $node_id);
 		$job->set('mjb_job_type', $job_type);
@@ -92,8 +116,46 @@ class ManagementJob extends SystemBase {
 
 	// ── The agent channel (specs/agent_on_node_architecture.md §3.1) ──
 
-	/** A claim not reported within this many seconds is treated as lost. */
+	/**
+	 * A claim not reported within this many seconds is treated as lost — the
+	 * floor, used for any primitive without its own entry below.
+	 */
 	const CLAIM_TIMEOUT_SECONDS = 900;
+
+	/**
+	 * How long each primitive is allowed to hold a claim, in seconds.
+	 *
+	 * MUST NOT be shorter than the deadline the agent applies to itself. If the
+	 * plane gives up first it requeues a job that is still running, and the node
+	 * starts a second copy of work the first copy has not finished — two
+	 * concurrent backups writing one chain. The agent is the authority on how
+	 * long its own primitives may take (primitives.Primitive.Timeout, compiled
+	 * in); these are that value plus room for the result to be posted, and
+	 * primitive_transport_parity_test asserts none of them has fallen behind the
+	 * agent's own declaration.
+	 *
+	 * Anything absent gets CLAIM_TIMEOUT_SECONDS, which suits every primitive
+	 * that reads a directory or writes one small file.
+	 */
+	const PRIMITIVE_CLAIM_BUDGETS = [
+		'backup_run'            => 15720, // 4h20m + slack
+		'upload_backup'         => 5220,  // 85m + slack
+		'run_plugin_installers' => 1020,  // 15m + slack
+	];
+
+	/** The shortest budget in play — the SQL prefilter cannot use less. */
+	private static function shortest_claim_budget() {
+		return min(array_merge([self::CLAIM_TIMEOUT_SECONDS], self::PRIMITIVE_CLAIM_BUDGETS));
+	}
+
+	/** The claim budget for a job, read from the primitive it names. */
+	private static function claim_budget_for($commands) {
+		if (is_string($commands)) {
+			$commands = json_decode($commands, true);
+		}
+		$name = is_array($commands) ? ($commands['primitive'] ?? '') : '';
+		return self::PRIMITIVE_CLAIM_BUDGETS[$name] ?? self::CLAIM_TIMEOUT_SECONDS;
+	}
 
 	/** After this many lost claims the job fails rather than looping forever. */
 	const MAX_CLAIM_ATTEMPTS = 3;
@@ -229,9 +291,15 @@ class ManagementJob extends SystemBase {
 	 */
 	static function requeueStaleClaims($node_id = null) {
 		$db = DbConnector::get_instance()->get_db_link();
-		$cutoff = gmdate('Y-m-d H:i:s', time() - self::CLAIM_TIMEOUT_SECONDS);
 
-		$sql = "SELECT mjb_id, mjb_claim_attempts FROM mjb_management_jobs
+		// Select on the SHORTEST budget, then filter each row against its own
+		// primitive's. A single global cutoff cannot be right for a vocabulary
+		// whose members range from a directory read to a four-hour backup.
+		$cutoff = gmdate('Y-m-d H:i:s', time() - self::shortest_claim_budget());
+
+		$sql = "SELECT mjb_id, mjb_claim_attempts, mjb_commands,
+			        EXTRACT(EPOCH FROM (now() - COALESCE(mjb_started_time, mjb_create_time)))::int AS running_for
+			 FROM mjb_management_jobs
 			 WHERE mjb_status = 'running'
 			   AND mjb_delete_time IS NULL
 			   AND jsonb_exists(mjb_commands, 'primitive')
@@ -248,6 +316,16 @@ class ManagementJob extends SystemBase {
 
 		$acted = 0;
 		foreach ($rows as $row) {
+			// Has this job actually outrun ITS OWN budget? A backup_run is
+			// allowed hours; requeueing it at fifteen minutes does not rescue a
+			// wedge, it starts a SECOND backup of the same node while the first
+			// is still writing — and the agent's own poll is what triggers it,
+			// because the endpoint sweeps this node's claims on every poll.
+			$budget = self::claim_budget_for($row['mjb_commands']);
+			if ((int)$row['running_for'] < $budget) {
+				continue;
+			}
+
 			$attempts = (int)$row['mjb_claim_attempts'];
 			if ($attempts >= self::MAX_CLAIM_ATTEMPTS) {
 				$fail = $db->prepare(
@@ -274,7 +352,7 @@ class ManagementJob extends SystemBase {
 				);
 				$requeue->execute([
 					"\n[The node agent claimed this job and did not report back within "
-						. self::CLAIM_TIMEOUT_SECONDS . " seconds. Returned to the queue.]\n",
+						. $budget . " seconds, this primitive's whole budget. Returned to the queue.]\n",
 					$row['mjb_id'],
 				]);
 			}

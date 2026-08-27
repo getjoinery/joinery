@@ -119,6 +119,28 @@
 		   . '. A poll is how this management node sees the node is alive; nothing has to reach in.'
 		   . ($switched_off ? '' : ' A node that stops polling without saying it was switched off is unreachable — down, or broken.')
 		   . '</div>';
+
+		// Restarting the agent is a PRIMITIVE and has no SSH equivalent, on
+		// purpose: the SSH way is pkill, which is an arbitrary command (A1). So
+		// the button appears only for a connected node, and only while the agent
+		// is actually reaching us — asking a silent agent to restart would queue
+		// work for something that is not listening.
+		//
+		// The node may still refuse, and that is the primitive working: it
+		// restarts only when it can prove something will start it again.
+		if ($session->get_permission() >= 10 && !$switched_off && $node->get('mgn_agent_last_poll')) {
+			echo '<form method="post" action="' . $base_url . '" id="restart_agent_form" class="mb-3">'
+			   . '<input type="hidden" name="action" value="restart_agent">'
+			   . SmAdminCsrf::field()
+			   . '<button type="button" class="btn btn-sm btn-outline-secondary" onclick="JoineryModal.confirm('
+			   . htmlspecialchars(json_encode('Restart the agent on ' . $node->get('mgn_name') . '? '
+				. 'It finishes reporting this job first, then stops, and its supervisor starts it again — '
+				. 'within seconds under systemd, within a minute under the cron keepalive. '
+				. 'The node will refuse if nothing there would start it back up.'), ENT_QUOTES)
+			   . ', function(){ document.getElementById(\'restart_agent_form\').submit(); })">Restart the agent</button>'
+			   . ' <span class="text-muted small ms-1">For an agent that is running but stuck — holding a stale lock, or running a replaced binary.</span>'
+			   . '</form>';
+		}
 	} else {
 		echo '<div class="mb-2"><span class="badge bg-secondary">Not connected</span> <span class="text-muted small ms-2">This node\'s work routes over the API and SSH.</span></div>';
 

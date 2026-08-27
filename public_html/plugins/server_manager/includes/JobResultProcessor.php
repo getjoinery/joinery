@@ -105,6 +105,27 @@ class JobResultProcessor {
 		$ssl_token     = self::parse_ssl_tokens($output);
 		$ssl_new_state = null;  // null = no explicit state change from detection
 
+		// The agent enumerates every certificate lineage on the node rather than
+		// answering about one name the plane chose. Matching the node's expected
+		// host against what it reported happens HERE, so the node stays ignorant
+		// of what this plane believes it is called.
+		//
+		// Folded into the same token shape the SSH step produced, deliberately:
+		// the branch below already does the right thing with "no certificate" —
+		// it falls through to an HTTPS probe, which is what catches a
+		// Cloudflare-terminated site that has no origin certificate at all and is
+		// perfectly healthy. A zero from the node must never short-circuit that.
+		if ($ssl_token === null && $node) {
+			$ssl_token = self::ssl_token_from_certificates($result, $node);
+			if ($ssl_token !== null) {
+				// Lets a view tell "the node looked and found none" apart from
+				// "this transport cannot see certificates". They are not the same
+				// fact, and rendering the second as the first reads as a node
+				// that lost its certificate.
+				$result['ssl_source'] = 'node_enumeration';
+			}
+		}
+
 		if ($ssl_token !== null) {
 			// SSH path: explicit cert check result from the job steps
 			$result['ssl_domain']   = $ssl_token['domain'];
@@ -340,6 +361,75 @@ class JobResultProcessor {
 	 * the check_status SSL step. Returns an array with 'found', 'domain', and
 	 * (when found) 'expiry_raw', or null if no token is present.
 	 */
+	/**
+	 * Build the same token from the agent's enumerated certificate lineages.
+	 *
+	 * The node lists every lineage in /etc/letsencrypt/live and says nothing
+	 * about which one matters; deciding that is this plane's job, because the
+	 * expected hostname is this plane's belief. The SSH step asked the node
+	 * about one name, so a node holding a certificate under a lineage the plane
+	 * did not name looked exactly like a node holding none — which is the real
+	 * shape of a certbot re-issue writing {domain}-0001 while the vhost still
+	 * points at {domain}: a current certificate that is not being served and a
+	 * stale one that is.
+	 *
+	 * Returns null when the node reported no certificate data at all — that is a
+	 * transport that cannot see certificates, not a node without one. The
+	 * management API runs as the web user and /etc/letsencrypt/live is
+	 * drwx------ root, so an API-collected node can never answer this.
+	 */
+	private static function ssl_token_from_certificates($result, $node) {
+		if (!array_key_exists('ssl_certificates', $result)) {
+			return null;
+		}
+		$domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
+		if ($domain === '') {
+			return null;
+		}
+
+		$certs = is_array($result['ssl_certificates']) ? $result['ssl_certificates'] : [];
+		foreach ($certs as $cert) {
+			// A self-signed placeholder is served by Apache and trusted by no
+			// browser. Counted as "a certificate" it would read as "TLS is fine".
+			if (!empty($cert['self_signed'])) {
+				continue;
+			}
+			$names = isset($cert['domains']) && is_array($cert['domains']) ? $cert['domains'] : [];
+			foreach ($names as $name) {
+				if (self::cert_name_covers((string)$name, $domain)) {
+					return [
+						'found'      => true,
+						'domain'     => $domain,
+						'expiry_raw' => (string)($cert['not_after'] ?? ''),
+					];
+				}
+			}
+		}
+
+		// No lineage covers this host — including the zero-certificate case. The
+		// caller probes HTTPS from here, which is what recognises a
+		// Cloudflare-terminated site with no origin certificate as healthy.
+		return ['found' => false, 'domain' => $domain];
+	}
+
+	/** Does a certificate name cover this host? Exact, or a single-label wildcard. */
+	private static function cert_name_covers($name, $domain) {
+		$name   = strtolower(trim($name));
+		$domain = strtolower($domain);
+		if ($name === '' || $domain === '') return false;
+		if ($name === $domain) return true;
+
+		if (strpos($name, '*.') === 0) {
+			// *.example.com covers a.example.com and NOT a.b.example.com or
+			// example.com itself — the same rule browsers apply.
+			$suffix = substr($name, 1);
+			if (strlen($domain) <= strlen($suffix)) return false;
+			if (substr($domain, -strlen($suffix)) !== $suffix) return false;
+			return strpos(substr($domain, 0, -strlen($suffix)), '.') === false;
+		}
+		return false;
+	}
+
 	private static function parse_ssl_tokens($output) {
 		if (preg_match('/SSL_CERT_FOUND domain=(\S+) expiry=(.+)$/m', $output, $m)) {
 			return ['found' => true, 'domain' => $m[1], 'expiry_raw' => trim($m[2])];
@@ -1059,12 +1149,83 @@ HTML;
 	 */
 	private static function process_delete_backup($job) {
 		$output = $job->get('mjb_output') ?: '';
+
+		// The primitive reports a structured result; the SSH steps printed
+		// marker lines. Read the structure first — a primitive job carries no
+		// LOCAL_DELETE_OK, so grepping alone would record a successful delete
+		// as a failed one and the tab would keep showing a file that is gone.
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && array_key_exists('deleted', $data)) {
+			$job->set('mjb_result', json_encode([
+				// Deleted, or already absent: both mean the file is not there,
+				// which is what was asked for. 'deleted' distinguishes them for
+				// anyone who cares which happened.
+				'local_deleted' => true,
+				'was_present'   => (bool)$data['deleted'],
+				'filename'      => $data['filename'] ?? null,
+				'freed_bytes'   => $data['freed_bytes'] ?? null,
+				// The node never deletes a cloud object — that credential stays
+				// on this plane, and backup_actions_logic does it in-process
+				// before the job is ever created.
+				'cloud_deleted' => false,
+			]));
+			$job->save();
+			return;
+		}
+
 		$result = [
 			'local_deleted' => strpos($output, 'LOCAL_DELETE_OK') !== false,
 			'cloud_deleted' => strpos($output, 'CLOUD_DELETE_OK') !== false,
 		];
 
 		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Process upload_backup result.
+	 *
+	 * The primitive invokes a shipped script, so what comes back is text rather
+	 * than fields: the script prints contract lines the plane parses. Read those
+	 * rather than the human sentence above them — the sentence is for a person
+	 * reading the job, the lines are the interface.
+	 */
+	private static function process_upload_backup($job) {
+		$output = $job->get('mjb_output') ?: '';
+
+		$grab = function ($key) use ($output) {
+			return preg_match('/^' . $key . '=(.+)$/m', $output, $m) ? trim($m[1]) : null;
+		};
+
+		$retries = [];
+		if (preg_match_all('/^RETRY: (.+)$/m', $output, $m)) {
+			$retries = array_map('trim', $m[1]);
+		}
+
+		// The envelope's own outcome. 'absent' and 'failed' are deliberately
+		// different: absent means the node knew the key was not there and
+		// uploaded the archive anyway, on an operator's override; failed means
+		// the envelope upload was attempted, stopped, and NOTHING landed. The
+		// envelope goes first precisely so a partial failure leaves an orphan
+		// key rather than an archive nobody can open.
+		$envelope = $grab('UPLOAD_ENVELOPE');
+
+		$job->set('mjb_result', json_encode([
+			'uploaded'          => $grab('UPLOAD_RESULT') === 'ok',
+			'envelope'          => $envelope,
+			'envelope_key'      => $grab('ENVELOPE_KEY'),
+			// The one an operator has to be told about: the cloud copy exists
+			// and cannot be decrypted from itself.
+			'unrecoverable'     => ($envelope === 'absent'),
+			'key'       => $grab('UPLOAD_KEY'),
+			'bytes'     => ($v = $grab('UPLOAD_BYTES')) !== null ? (int)$v : null,
+			'attempts'  => ($a = $grab('UPLOAD_ATTEMPTS')) !== null ? (int)$a : null,
+			// Kept because a transfer that succeeded on the fourth attempt is a
+			// working upload and a sick link, and only one of those is visible
+			// from the green.
+			'retries'   => $retries,
+			'failure'   => preg_match('/^UPLOAD_FAIL: (.+)$/m', $output, $f) ? trim($f[1]) : null,
+		]));
 		$job->save();
 	}
 

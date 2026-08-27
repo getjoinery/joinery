@@ -3,6 +3,9 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.5 - Accepts an already-resolved site root as an optional second argument, so a
+#           site outside /var/www/html is installed where it actually lives. Added as a
+#           second argument so old and new copies of this script and its caller interoperate.
 # Version: 2.4 - The keepalive closes inherited descriptors before launching the
 #                agent. Started from inside an upgrade, it inherited the upgrade's
 #                flock on .upgrade.lock and held it for its whole life, so every
@@ -52,17 +55,37 @@
 # Contract (docs/plugin_developer_guide.md): idempotent, root,
 # non-interactive, exit 0 when not applicable.
 #
-# Usage:  install_agent.sh SITENAME
+# Usage:  install_agent.sh SITENAME [SITE_ROOT]
 
 set -u
 
 SITENAME="${1:-}"
-if [ -z "$SITENAME" ]; then
+# Optional second argument: the site root the caller already resolved.
+#
+# Added as a SECOND argument rather than by reinterpreting the first, because
+# this file and its caller update independently during an upgrade and both
+# mixtures have to work. An old runner passing only a sitename still lands in
+# the branch below; an old copy of THIS script, handed the new second argument,
+# ignores it and behaves exactly as it did. Reinterpreting argument one as a
+# path would have broken that second case — the old script would have built
+# /var/www/html//opt/site and skipped.
+SITE_ROOT_ARG="${2:-}"
+
+if [ -z "$SITENAME" ] && [ -z "$SITE_ROOT_ARG" ]; then
     echo "agent installer: no SITENAME given - skipping" >&2
     exit 0
 fi
 
-SITE_ROOT="/var/www/html/${SITENAME}"
+if [ -n "$SITE_ROOT_ARG" ] && [ -d "$SITE_ROOT_ARG" ]; then
+    # The caller derived it from its own location, so it is right even when the
+    # site does not live under /var/www/html. Without this the runner resolves
+    # an off-convention site correctly and then this script throws the answer
+    # away and rebuilds the convention path.
+    SITE_ROOT="${SITE_ROOT_ARG}"
+    [ -n "$SITENAME" ] || SITENAME="$(basename "$SITE_ROOT")"
+else
+    SITE_ROOT="/var/www/html/${SITENAME}"
+fi
 PUBLIC_HTML="${SITE_ROOT}/public_html"
 SITE_CONFIG="${SITE_ROOT}/config/Globalvars_site.php"
 DIST_DIR="${PUBLIC_HTML}/agent_dist"

@@ -122,8 +122,11 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 					'mode'               => $policy['mode'],
 					'full_interval_days' => $policy['full_interval_days'],
 				);
-				$steps = JobCommandBuilder::build_backup_run($node, $params);
-				ManagementJob::createJob($node->key, 'backup_run', $steps, $params, null);
+				// createFromBuild, not createJob: build_backup_run() returns a
+				// primitive envelope for a paired node and a step list otherwise,
+				// and only this entry point stores both correctly.
+				$built = JobCommandBuilder::build_backup_run($node, $params);
+				ManagementJob::createFromBuild($node->key, 'backup_run', $built, $params, null);
 
 				$dispatched[] = $slug;
 				$in_flight++;
