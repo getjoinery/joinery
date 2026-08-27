@@ -49,6 +49,13 @@
  * File::is_viewable() (owner-or-admin), so a session-gated /uploads URL can
  * never authorize this content.
  *
+ * @version 1.33
+ * @changelog 1.33 - Sent and Drafts are strictly reverse-chronological: the
+ *   unread/starred sectioning is an Inbox affordance and meant nothing on mail
+ *   the member sent or wrote, but it sorted every never-opened outbound row
+ *   above today's send. The per-mailbox unread badge stops counting outbound
+ *   rows, which the Inbox it lands on has never shown
+ *   (specs/bugfix_sent_view_ordering.md).
  * @version 1.32
  * @changelog 1.32 - Sent view (filters[sent]): a pseudo-folder like Spam,
  *   listing conversations that carry an outbound row. Row-level filter,
@@ -423,9 +430,11 @@ class MailboxService {
 			// The badge counts the INBOX's unread, because the Inbox is where
 			// clicking the badge lands: judged spam is excluded (it lives in the
 			// Spam view — specs/inbound_email_spam_filtering.md) and so is archived
-			// mail, matching listThreads' inbox filter exactly. A count that spans
-			// a view the click cannot reach sends the reader looking for unread
-			// mail the Inbox does not hold. IS NOT TRUE, not "= false", so a NULL
+			// mail, matching listThreads' inbox filter exactly — outbound rows
+			// included, since the Inbox does not list those either and their
+			// unread flag is whatever the source's \Seen said, never something the
+			// member set. A count that spans a view the click cannot reach sends
+			// the reader looking for unread mail the Inbox does not hold. IS NOT TRUE, not "= false", so a NULL
 			// from before the column existed counts as not-archived — the same
 			// idiom listThreads uses, or the two would disagree on legacy rows.
 			//
@@ -437,6 +446,7 @@ class MailboxService {
 						COUNT(*) AS total,
 						COUNT(*) FILTER (
 							WHERE iem_is_read = false AND iem_is_archived IS NOT TRUE
+							AND iem_direction IS DISTINCT FROM 'outbound'
 						) AS unread
 					FROM iem_inbound_email_messages
 					WHERE iem_delete_time IS NULL
@@ -950,10 +960,32 @@ class MailboxService {
 		}
 
 		$gk = $drafts ? "'m:' || iem_inbound_email_message_id" : self::GROUP_KEY_SQL;
+
+		// Sectioning (unread first, then starred, then the rest) answers "what
+		// still needs me?" — an Inbox question. On a view of mail the member SENT
+		// or WROTE there is no such question: an outbound row's unread flag is
+		// whatever the source's \Seen said when it was pulled, or the ingest
+		// default of false, and never something the member decided. Ranking by it
+		// sorted 25,000 never-opened imported sent messages above today's send, so
+		// the top of Sent was months old. Those two views are strictly
+		// reverse-chronological instead, which is also what every mail client
+		// does. Emitting rank 2 (rather than dropping the column) keeps the reader
+		// rendering one plain list with no section header
+		// (specs/bugfix_sent_view_ordering.md).
+		$sectioned = !$sent && !$drafts;
+		$rank_sql = $sectioned
+			? "CASE
+						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
+						WHEN BOOL_OR(iem_is_starred) THEN 1
+						ELSE 2
+					END"
+			: '2';
 		// section_rank buckets each thread for the Gmail-style sectioned list:
 		// 0 = has unread, 1 = starred (all read), 2 = everything else. Ordering by
 		// it first keeps the buckets contiguous across pages, so the client renders
-		// one header per section even with pagination.
+		// one header per section even with pagination. On the unsectioned views it
+		// is the constant 2 (see $rank_sql above), which leaves the same ORDER BY
+		// sorting purely by time.
 		//
 		// No content columns (sender/subject/body) are aggregated here — they may
 		// be ciphertext (specs/implemented/inbound_email_encryption_at_rest.md §
@@ -969,11 +1001,7 @@ class MailboxService {
 					MAX(iem_ai_danger_score) AS danger_score,
 					BOOL_OR(iem_direct_verified) AS any_direct_verified,
 					MIN(iem_delete_time) AS trashed_time,
-					CASE
-						WHEN COUNT(*) FILTER (WHERE iem_is_read = false) > 0 THEN 0
-						WHEN BOOL_OR(iem_is_starred) THEN 1
-						ELSE 2
-					END AS section_rank,
+					$rank_sql AS section_rank,
 					ARRAY_AGG(iem_inbound_email_message_id) AS member_ids,
 					(ARRAY_AGG(iem_inbound_email_message_id ORDER BY iem_received_time DESC, iem_inbound_email_message_id DESC))[1] AS latest_id
 				FROM iem_inbound_email_messages

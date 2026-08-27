@@ -20,6 +20,9 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.5 - Sent is ordered by time alone: a read message sent today
+ *                outranks an unread one sent a month ago, Sent renders as one
+ *                plain list, and the Inbox still sections
  * @version 1.4 - Sent view (outbound-carrying threads listed, inbound-only and
  *                trashed excluded)
  * @version 1.3 - search-from-Inbox covers All Mail (archived + sent found,
@@ -313,6 +316,44 @@ class MailboxReaderTest {
 		$this->ok(in_array('<sentonly@x>', $sent_keys, true), 'the sent-only thread is in Sent');
 		$this->ok(in_array('<answered@x>', $sent_keys, true), 'the answered thread is in Sent too');
 		$this->ok(!in_array('<t1@x>', $sent_keys, true), 'a purely inbound thread is not');
+
+		// Sent is ordered by time alone (specs/bugfix_sent_view_ordering.md). The
+		// live failure: an owner's Gmail import left 25,000 sent messages with
+		// iem_is_read = false, and the unread-first sectioning sorted every one of
+		// them above the message he had just sent — the top of his Sent folder was
+		// three weeks old. An outbound row's unread flag is the source's \Seen or
+		// the ingest default, never something the member set, so it cannot order
+		// this view.
+		section('Sent is reverse-chronological, not sectioned by unread');
+		$old_unread_sent = $this->insertMsg($this->beth_alias, '<oldunread@x>', 'sent long ago', false, false, 43200);
+		$new_read_sent   = $this->insertMsg($this->beth_alias, '<newread@x>', 'sent just now', true, false, 1);
+		$mark_outbound->execute([$old_unread_sent]);
+		$mark_outbound->execute([$new_read_sent]);
+
+		$ordered = $this->threadKeys($svc->listThreads(null, array('sent' => true), 1, 50));
+		$pos_new = array_search('<newread@x>', $ordered, true);
+		$pos_old = array_search('<oldunread@x>', $ordered, true);
+		$this->ok($pos_new !== false && $pos_old !== false && $pos_new < $pos_old,
+			'a read message sent today outranks an unread one sent a month ago');
+		$this->ok($pos_new === 0, 'and the newest sent message is the first row');
+
+		$sections = array();
+		foreach ($svc->listThreads(null, array('sent' => true), 1, 50)['threads'] as $t) {
+			$sections[$t['section']] = true;
+		}
+		$this->ok(array_keys($sections) === array('other'),
+			'Sent renders as one plain list, with no unread section',
+			implode(',', array_keys($sections)));
+
+		// The Inbox still sections — the rule is about Sent, not about sectioning.
+		$inbox_sections = array();
+		foreach ($svc->listThreads(null, array('inbox' => true), 1, 50)['threads'] as $t) {
+			$inbox_sections[$t['section']] = true;
+		}
+		$this->ok(isset($inbox_sections['unread']), 'the Inbox still groups unread first');
+
+		$this->db->prepare('DELETE FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id IN (?, ?)')
+			->execute([$old_unread_sent, $new_read_sent]);
 
 		// A discarded sent message is in Trash and nowhere else.
 		$this->db->prepare('UPDATE iem_inbound_email_messages SET iem_delete_time = now()

@@ -1,6 +1,6 @@
 /*
  * Mailbox Reader — vanilla-JS Gmail-style inbox over the scoped AJAX endpoints.
- * No framework. @version 2.52
+ * No framework. @version 2.53
  *
  * The conversation list updates in place after mutations
  * (specs/implemented/mailbox_reader_list_persistence.md): actions that take rows out of
@@ -107,16 +107,61 @@
 		return b;
 	}
 
+	// ── The timestamp ladder ───────────────────────────────────────────────
+	//
+	// A timestamp answers a different question as mail ages. Minutes old, what
+	// matters is how long ago; earlier today, the clock time; this year, roughly
+	// when in the day and on what date; older than that, just the date. So the
+	// format coarsens in four steps — under an hour, under twelve hours, under
+	// six months, and beyond (specs/mailbox_timestamp_ladder.md).
+	//
+	// The clock is composed here rather than delegated to toLocaleTimeString:
+	// the ladder names am/pm, and a locale that prefers 24-hour would render
+	// "15:45" beside "3pm Jan 3" one row down. The MONTH name still comes from
+	// the viewer's locale, which is where the real translation value is.
+
+	function ampm(d) { return d.getHours() < 12 ? 'am' : 'pm'; }
+	function hour12(d) { return d.getHours() % 12 || 12; }
+	function pad2(n) { return (n < 10 ? '0' : '') + n; }
+
+	/** 3:45 pm — the clock, for something earlier the same half-day. */
+	function clockTime(d) { return hour12(d) + ':' + pad2(d.getMinutes()) + ' ' + ampm(d); }
+
+	/** 3pm — the hour alone; on an older message the minute is noise. */
+	function hourOfDay(d) { return hour12(d) + ampm(d); }
+
+	/** Jan 3, in the viewer's locale. */
+	function monthDay(d) { return d.toLocaleDateString([], { month: 'short', day: 'numeric' }); }
+
+	/**
+	 * Six calendar months before $now. JavaScript rolls a short month over
+	 * (Aug 31 minus six months lands on Mar 2 or 3), which can move the boundary
+	 * by a day — immaterial for choosing a display format, and not worth the
+	 * clamping code it would cost to avoid.
+	 */
+	function sixMonthsBefore(now) {
+		var d = new Date(now.getTime());
+		d.setMonth(d.getMonth() - 6);
+		return d;
+	}
+
 	function fmtTime(iso) {
 		if (!iso) return '';
-		// DB times are UTC ISO strings; show a compact local time.
+		// DB times are UTC ISO strings; every comparison below is in local time.
 		var d = new Date(iso.replace(' ', 'T') + 'Z');
 		if (isNaN(d.getTime())) return iso;
 		var now = new Date();
-		var opts = (d.toDateString() === now.toDateString())
-			? { hour: 'numeric', minute: '2-digit' }
-			: { month: 'short', day: 'numeric' };
-		return d.toLocaleString([], opts);
+		var minutes = Math.floor((now.getTime() - d.getTime()) / 60000);
+
+		// Under a minute, and anything dated ahead of now. Clock skew between
+		// this browser and the server routinely puts a just-arrived message a few
+		// seconds into the future, and "-1 minutes ago" reads as a bug; for the
+		// reader's purpose the message is current either way.
+		if (minutes < 1) return 'just now';
+		if (minutes < 60) return minutes + (minutes === 1 ? ' minute ago' : ' minutes ago');
+		if (minutes < 720) return clockTime(d);
+		if (d >= sixMonthsBefore(now)) return hourOfDay(d) + ' ' + monthDay(d);
+		return monthDay(d) + ', ' + d.getFullYear();
 	}
 
 	// A calendar date in the viewer's own timezone — for a purge date, where the
