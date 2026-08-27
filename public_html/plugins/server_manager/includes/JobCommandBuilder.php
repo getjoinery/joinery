@@ -5,6 +5,16 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.38 - upload_backup, delete_backup and run_plugin_installers join the primitive
+ *                 transport. upload/delete send a FILENAME, never a path — the node resolves it
+ *                 inside its own backup directory. delete_backup is local-only: the SSH cloud
+ *                 branch shipped the delete-capable bucket credential to the node, which the
+ *                 write-only node key exists to prevent, so cloud deletes stay plane-side.
+ *                 run_plugin_installers sends nothing at all.
+ * @version 1.37 - restart_agent joins the primitive transport, and is the first operation with
+ *                 NO ssh implementation at all: the SSH equivalent is pkill, which is a command,
+ *                 so the operation exists only where it is safe. The node refuses unless it can
+ *                 prove a supervisor will start it again.
  * @version 1.36 - A1/A3 retirement: build_run_command and both copy_database builders are gone.
  *                 No builder composes an instruction a node executes as text; a database copy is
  *                 backup-on-source then restore-on-target, through the backup target
@@ -1428,6 +1438,9 @@ class JobCommandBuilder {
 	 * ran — read it, don't infer from the green.
 	 */
 	public static function build_run_plugin_installers($node) {
+		if (self::has_primitive($node, 'run_plugin_installers')) {
+			return self::build_run_plugin_installers_primitive($node);
+		}
 		if (!self::has_ssh($node)) {
 			throw new Exception(
 				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: no SSH credentials configured.");
@@ -1512,6 +1525,86 @@ class JobCommandBuilder {
 			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
 			 'timeout' => 900],
 		];
+	}
+
+	/**
+	 * Primitive path: NO PARAMETERS AT ALL.
+	 *
+	 * Both values the SSH step carries are dropped rather than translated:
+	 *
+	 *  - the site name, because the node knows what it is called. Under SSH it
+	 *    was computed here from mgn_web_root, so a node was told its own name by
+	 *    a remote party — as correct as a row someone else can edit, and since
+	 *    the name becomes a filesystem path, as safe.
+	 *  - PGPASSWORD, which existed only because sudo drops the caller's
+	 *    environment. The agent is already root on the node.
+	 *
+	 * So nothing crosses but the node id and a name. Nothing the plane sends can
+	 * influence what runs.
+	 *
+	 * KNOWN GAP, and it is the node's script rather than this builder: the
+	 * runner still requires argv[1] and still connects as `psql -U postgres`
+	 * with an inherited PGPASSWORD, so under the agent it runs the core
+	 * installers, finds no active plugins, and exits 0 saying so. It reads like
+	 * a clean run that had nothing to do. Until the runner derives its own site
+	 * root and reads its own credentials — the way install_agent.sh already does
+	 * in the same directory — a paired node's plugin installers do not run.
+	 * Read the job output; do not infer from the green.
+	 */
+	public static function build_run_plugin_installers_primitive($node) {
+		return ['primitive' => 'run_plugin_installers', 'params' => []];
+	}
+
+	/**
+	 * Restart a node's agent.
+	 *
+	 * PRIMITIVE ONLY, and that is the interesting part: there is no
+	 * build_restart_agent_ssh below, and there never will be. The SSH way to
+	 * restart an agent is `pkill -x joinery-agent` — a command, which is the one
+	 * thing A1 says this plane may not send. So the operation exists on exactly
+	 * one transport, and a node that has not paired simply cannot be asked
+	 * (can_run() reports why). An operation whose only implementation is the
+	 * safe one cannot be performed the unsafe way by accident.
+	 *
+	 * It exists because of a real morning: three container nodes inherited an
+	 * flock on the site's .upgrade.lock across a fork and refused every later
+	 * upgrade with 'Another upgrade is already running', held by the agent
+	 * itself. The agents were healthy enough to poll and take work. Clearing it
+	 * needed a human with an SSH key on each machine, which is the errand this
+	 * whole migration exists to end.
+	 *
+	 * The node may refuse, and a refusal here is the primitive working. It
+	 * restarts only when it can prove something will start it again — systemd
+	 * supervising this process, or the cron keepalive installed and switched on.
+	 * An agent that exits under no supervisor does not come back, and after the
+	 * Phase 3 cutover there is no SSH key left to go and start it with. That
+	 * decision is the node's because the node is the only party that can see the
+	 * answer: this plane cannot read /etc/joinery-agent/enabled, and a plane that
+	 * guessed would be guessing about whether it is about to lose the node.
+	 */
+	public static function build_restart_agent($node) {
+		if (!self::has_primitive($node, 'restart_agent')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be asked to restart its agent: "
+				. "no agent has paired with this plane. Restarting is an agent primitive and has "
+				. "deliberately no SSH equivalent — the SSH version would be an arbitrary command."
+			);
+		}
+		return self::build_restart_agent_primitive($node);
+	}
+
+	/**
+	 * Primitive path: a NAME and nothing else. There is nothing to configure
+	 * about becoming new again, and a parameter would only be a way for this
+	 * plane to influence how the node comes back.
+	 *
+	 * The agent posts this job's result BEFORE it exits. A job that ended when
+	 * the process did would sit claimed until the plane's claim timeout returned
+	 * it to pending, and the restarted agent would run it again — a restart that
+	 * reads as a hang, and then repeats.
+	 */
+	public static function build_restart_agent_primitive($node) {
+		return ['primitive' => 'restart_agent', 'params' => []];
 	}
 
 
@@ -1920,8 +2013,65 @@ class JobCommandBuilder {
 		if (!$target) {
 			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
 		}
+		if (self::has_primitive($node, 'upload_backup')) {
+			return self::build_upload_backup_primitive($node, $params);
+		}
 		$resolve = 'UPLOAD_FILE=' . escapeshellarg('/backups/' . $filename);
 		return [self::upload_step($node, $target, $resolve, false)];
+	}
+
+	/**
+	 * Primitive path: the node uploads one of its own backups.
+	 *
+	 * THE PLANE CANNOT NAME A PATH. It sends a bare filename; the node resolves
+	 * it inside its own compiled-in backup directory and refuses anything that
+	 * is not a recognised backup artifact. Under the SSH path UPLOAD_FILE was a
+	 * full path composed here, so a compromised plane could have named any file
+	 * on any node and had it uploaded to a bucket it controls — read-anything-
+	 * from-every-node, wearing a backup's clothes. That is not narrowed by this
+	 * change, it is unsayable: there is no parameter of the shape.
+	 *
+	 * The object key is composed on the node from prefix/slug/filename, matching
+	 * the REMOTE_KEY the shell built, so existing objects keep their addresses.
+	 *
+	 * provider and target_name are deliberately NOT sent. backup_run declares
+	 * them because the backup engine writes history rows keyed on them; an
+	 * upload writes none, so they are out of the vocabulary rather than sent and
+	 * ignored — an ignored parameter is a lie the sender believes.
+	 */
+	public static function build_upload_backup_primitive($node, $params = []) {
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+		}
+		$primitive_params = [
+			'filename'        => basename(trim((string)($params['filename'] ?? ''))),
+			'bucket'          => $target->get('bkt_bucket'),
+			'path_prefix'     => $target->get('bkt_path_prefix') ?: 'joinery-backups',
+			'slug'            => $node->get('mgn_slug'),
+			// The placeholder, not the secret. AgentChannelEndpoint substitutes
+			// it when the job is handed out, so the credential never rests in
+			// the job row. creds_token() prefers the write-only node slot, and
+			// upload is the one operation that can use it.
+			'credentials_b64' => self::creds_token($target),
+		];
+
+		// Send the flag only when it is true — never as false.
+		//
+		// The node's script refuses an unrecognised key, so a config that always
+		// carried the field would fail outright on a node whose core predates it.
+		// A node that has not upgraded keeps doing exactly what it always did.
+		//
+		// It is a BOOLEAN, not a sidecar filename, and that is the whole reason
+		// the fence holds: the plane names an archive and asks for its key to
+		// travel too; the NODE derives <archive>.keys.json. Letting the plane
+		// name the sidecar directly would have reopened "the plane can express a
+		// path", which is the one property this primitive exists to remove.
+		if (!empty($params['include_envelope'])) {
+			$primitive_params['include_envelope'] = true;
+		}
+
+		return ['primitive' => 'upload_backup', 'params' => $primitive_params];
 	}
 
 	/**
@@ -2197,6 +2347,9 @@ class JobCommandBuilder {
 	 * $params: target ('local', 'cloud', 'both'), local_path, cloud_path, filename
 	 */
 	public static function build_delete_backup($node, $params) {
+		if (self::has_primitive($node, 'delete_backup')) {
+			return self::build_delete_backup_primitive($node, $params);
+		}
 		$which = $params['target'] ?? 'local';
 		$local_path = $params['local_path'] ?? '';
 		$cloud_path = $params['cloud_path'] ?? '';
@@ -2241,6 +2394,38 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Primitive path: delete ONE LOCAL backup file on the node.
+	 *
+	 * Local only, and the omission is the design. The SSH path's cloud branch
+	 * shipped the MAIN, delete-capable bucket credential to the node, because a
+	 * write-only key cannot delete — while creds_token()'s own docblock says
+	 * that credential "stays on the control plane", the whole point of the
+	 * write-only node key being that "a compromised node then cannot erase the
+	 * fleet's backups". Migrating that branch would have carried a live
+	 * contradiction across the boundary and made it look reviewed. So the cloud
+	 * object is deleted by the plane, in-process, with S3Signer — which
+	 * backup_actions_logic already does — and the node's vocabulary has no way
+	 * to name a bucket, a key, or a credential.
+	 *
+	 * The node also cannot be told a path: it gets a filename and resolves it
+	 * inside its compiled-in backup directory.
+	 *
+	 * Outcome rule, which is NOT the step's continue_on_error: a file already
+	 * absent is SUCCESS, because the requested end state holds and deleting the
+	 * same backup twice is not an error; any other failure is loud. The old flag
+	 * ignored the outcome, so a cloud delete that quietly did nothing looked
+	 * exactly like one that worked. Defining the end state is the only kind of
+	 * forgiveness that is safe.
+	 */
+	public static function build_delete_backup_primitive($node, $params) {
+		$filename = basename(trim((string)($params['filename'] ?? ($params['local_path'] ?? ''))));
+		if ($filename === '' || $filename === '.' || $filename === '..') {
+			throw new Exception('No backup filename given.');
+		}
+		return ['primitive' => 'delete_backup', 'params' => ['filename' => $filename]];
+	}
+
+	/**
 	 * Build a local shell command that updates a ManagedNode field in the control plane DB.
 	 * Reads DB credentials from the control plane's Globalvars_site.php. Used during the
 	 * install_node flow to switch mgn_ssh_user to 'user1' after install.sh server disables
@@ -2270,6 +2455,132 @@ class JobCommandBuilder {
 	 *   domain      - FQDN to certify (required)
 	 *   admin_email - Let's Encrypt notification address (uses --register-unsafely-without-email if absent)
 	 */
+	/**
+	 * Issue or renew the origin certificate for a domain, on the node itself.
+	 *
+	 * BARE METAL ONLY, AND THIS PLANE IS THE ONLY PARTY THAT CAN ENFORCE THAT.
+	 *
+	 * On a container node the agent runs inside the container while Apache,
+	 * certbot and /etc/letsencrypt live on the host — which is why every certbot
+	 * step in the SSH job carried on_host. Dispatched at a container node this
+	 * does not simply fail: certbot would install and issue INSIDE the
+	 * container, writing /etc/letsencrypt to a filesystem the next rebuild
+	 * discards, and spending one of the five certificates per domain per week
+	 * Let's Encrypt allows. The failure is invisible, repeats on a timer, and is
+	 * recoverable only by waiting out a rate limit.
+	 *
+	 * The node cannot refuse it on its own. "Am I in a container" has only
+	 * heuristic answers (/.dockerenv, /proc/1/cgroup), and a heuristic that
+	 * misfires would refuse certificates on legitimate machines. mgn_container_name
+	 * is the non-heuristic answer and it lives here, so the gate lives here.
+	 *
+	 * The domain is the only value that crosses, and it is pattern-bound tightly
+	 * on both sides for a reason beyond hygiene: Let's Encrypt allows five FAILED
+	 * validations per hostname per hour. A bare IP, localhost or a wildcard
+	 * cannot succeed but still spends that budget, so they are refused before a
+	 * job exists rather than at the CA.
+	 */
+	public static function build_provision_certificate($node, $params) {
+		if ($node->get('mgn_container_name')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' is a container node, so its certificate is issued on "
+				. "the Docker host, not inside the container. Running certbot in the container would "
+				. "write /etc/letsencrypt to a filesystem the next rebuild discards and spend one of "
+				. "this domain's five certificates per week."
+			);
+		}
+		if (!self::has_primitive($node, 'provision_certificate')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot issue its own certificate: no agent has paired "
+				. "with this plane.");
+		}
+		return self::build_provision_certificate_primitive($node, $params);
+	}
+
+	public static function build_provision_certificate_primitive($node, $params) {
+		// Lowercased before it crosses: the node's pattern accepts either case,
+		// but two cases of one name are two certificate requests against a
+		// weekly limit.
+		$domain = strtolower(trim((string)($params['domain'] ?? '')));
+		if ($domain === '') {
+			throw new Exception('Issuing a certificate needs a domain.');
+		}
+		return ['primitive' => 'provision_certificate', 'params' => ['domain' => $domain]];
+	}
+
+	/**
+	 * Place the one-time routing-probe token in the node's own webroot.
+	 *
+	 * The Cloudflare branch of provision_ssl needs to prove that a domain
+	 * behind Cloudflare actually proxies to THIS node. The node writes a nonce
+	 * this plane minted; this plane then fetches the domain from outside and
+	 * compares. The fetch stays here on purpose — a node verifying its own
+	 * routing proves nothing.
+	 *
+	 * The token is the only value that crosses. The old step also carried the
+	 * PATH, composed here as mgn_web_root with '/var/www/html/{site}/public_html'
+	 * behind a ?: — this plane's belief about the node's layout, with a hardcoded
+	 * guess for when the belief was missing. The node has its own webroot and
+	 * writes where its own probe view reads.
+	 *
+	 * Placing over an existing token SUCCEEDS rather than refusing, and the
+	 * result says replaced:true when it happened. Refusing would look like the
+	 * careful choice and be the wedging one: a probe abandoned between place and
+	 * fetch would then block that domain permanently, curable only by someone
+	 * with filesystem access to the node — and ProvisionPendingSsl retries this
+	 * path, so an orphaned token is likely rather than theoretical. The token has
+	 * no secrecy value (see views/sm_ssl_probe.php), so a refusal defends
+	 * nothing. Treat replaced:true as a signal worth logging: it means either a
+	 * previous probe leaked or two are racing on one node, and both are worth
+	 * knowing before someone debugs it as a Cloudflare problem.
+	 */
+	public static function build_ssl_probe_place($node, $params) {
+		if (!self::has_primitive($node, 'ssl_probe_place')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot place an SSL routing probe: no agent has paired "
+				. "with this plane.");
+		}
+		return self::build_ssl_probe_place_primitive($node, $params);
+	}
+
+	public static function build_ssl_probe_place_primitive($node, $params) {
+		$token = trim((string)($params['token'] ?? ''));
+		// Minted here because the party that compares a nonce is the party that
+		// must own it. The node checks the same shape independently.
+		if (!preg_match('/^sm-ssl-probe-[a-f0-9]{24}$/', $token)) {
+			throw new Exception('An SSL routing probe needs a well-formed one-time token.');
+		}
+		return ['primitive' => 'ssl_probe_place', 'params' => ['token' => $token]];
+	}
+
+	/** Mint a probe token in the one shape both ends accept. */
+	public static function mint_ssl_probe_token() {
+		return 'sm-ssl-probe-' . substr(md5(uniqid(mt_rand(), true)), 0, 24);
+	}
+
+	/**
+	 * Remove the probe token. NO PARAMETERS — the path is compiled into the
+	 * agent, and clearing does not depend on which token is there; a token
+	 * parameter would invite a caller to believe it does.
+	 *
+	 * Clearing when nothing is there is success (cleared:false), so this is safe
+	 * in a finally — which is where it belongs, since a failed probe must not
+	 * leave a token sitting in a public webroot. A cleanup that can fail for
+	 * having nothing to do would mask the error it was cleaning up after.
+	 */
+	public static function build_ssl_probe_clear($node) {
+		if (!self::has_primitive($node, 'ssl_probe_clear')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot clear an SSL routing probe: no agent has paired "
+				. "with this plane.");
+		}
+		return self::build_ssl_probe_clear_primitive($node);
+	}
+
+	public static function build_ssl_probe_clear_primitive($node) {
+		return ['primitive' => 'ssl_probe_clear', 'params' => []];
+	}
+
 	public static function build_provision_ssl($node, $params) {
 		$domain   = $params['domain'] ?? '';
 		$email    = $params['admin_email'] ?? '';

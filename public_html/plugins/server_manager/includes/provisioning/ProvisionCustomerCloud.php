@@ -223,14 +223,16 @@ class ProvisionCustomerCloud {
 		// it, reusing the same job-driven completion path as site installs.
 		if ($is_bare) {
 			try {
-				$steps = JobCommandBuilder::build_check_status($node);
+				$built = JobCommandBuilder::build_check_status($node);
 			} catch (Exception $e) {
 				$node->set('mgn_install_state', 'install_failed');
 				$node->save();
 				$this->alert_and_fail($provision, 'Failed to build verification steps — ' . $e->getMessage());
 				return 1;
 			}
-			ManagementJob::createJob($node->key, 'check_status', $steps, [], null);
+			// createFromBuild: a paired node's check_status is a primitive
+			// envelope, which createJob would store where nothing can find it.
+			ManagementJob::createFromBuild($node->key, 'check_status', $built, [], null);
 			$provision->set('cvp_mgn_node_id', $node->key);
 			$provision->set('cvp_instance_ip', $instance['ip']);
 			$provision->set('cvp_status',      'installing');
