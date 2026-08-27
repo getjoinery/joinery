@@ -22,7 +22,7 @@ The plugin creates its database tables automatically: `mgn_managed_nodes`, `mjb_
 
 #### Release channel (how the agent normally arrives and stays current)
 
-The agent ships inside the platform release. Publishing an upgrade bundles a signed agent artifact into `plugins/server_manager/agent_dist/`:
+The agent ships inside the platform release. Publishing an upgrade bundles a signed agent artifact into `public_html/agent_dist/` — **core, not this plugin**, because every node must receive it and no plugin may arrive as a side effect of a core upgrade (this one is commercial and entitlement-gated). The plugin builds and signs the artifact; the core archive delivers it:
 
 - `manifest.json` — agent version plus, per architecture, the artifact filename, its sha256, and an Ed25519 signature over the raw binary
 - `joinery-agent-linux-amd64.gz` / `joinery-agent-linux-arm64.gz` — the binaries
@@ -33,7 +33,7 @@ On the publishing control plane, `publish_upgrade.php` cross-compiles both archi
 Bundling is the first thing a publish does, before the VERSION file, the archives or the release row, because its outcome decides whether the release happens at all:
 
 - **No agent source on this box** — the existing artifact carries forward unchanged and the publish proceeds. Publishing never depends on a Go toolchain being present.
-- **Source version matches the bundle** — `agent_dist` is left byte-identical, which keeps the `server_manager` plugin tree hash stable between publishes.
+- **Source version matches the bundle** — `agent_dist` is left byte-identical. It sits outside every plugin tree, so a rebuild changes no plugin's tree hash and bumps no plugin's version.
 - **Source is newer and the rebuild succeeds** — the fresh artifact is bundled, and because this happens before plugin archives are built it is captured in the `server_manager` archive and its tree hash.
 - **Source is newer and the rebuild fails** — the publish is refused. The build error is printed, and the VERSION file, archives and release row are all left untouched. Shipping here would mean releasing an agent the publisher already knows is out of date, and the resulting fleet has no way to tell.
 

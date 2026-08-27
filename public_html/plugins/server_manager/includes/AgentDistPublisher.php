@@ -4,7 +4,7 @@
  * release (specs/implemented/agent_release_channel.md).
  *
  * Called by publish_upgrade.php before plugin archives are built. Writes
- * plugins/server_manager/agent_dist/ (manifest.json + gzipped, Ed25519-signed
+ * public_html/agent_dist/ (manifest.json + gzipped, Ed25519-signed
  * per-arch binaries + the systemd unit). The agent on every control plane
  * watches that directory and installs verified updates itself.
  *
@@ -83,7 +83,7 @@ class AgentDistPublisher {
 		$bundled_version = null;
 
 		try {
-			$dist_dir = $full_site_dir . '/public_html/plugins/server_manager/agent_dist';
+			$dist_dir = $full_site_dir . '/public_html/agent_dist';
 			$manifest = self::readManifest($dist_dir);
 			$bundled_version = $manifest['version'] ?? null;
 
