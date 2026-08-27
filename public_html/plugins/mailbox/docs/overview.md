@@ -3575,6 +3575,24 @@ Trash still wins (a discarded sent message is in Trash and nowhere else), a sear
 Sent is bounded to sent mail (an explicit scope), and spam reporting is not offered
 there — a verdict on the member's own outbound mail means nothing.
 
+**Timestamps coarsen with age.** Both places the reader prints a message time —
+the list row and the open message header — run the same ladder: `just now` and
+`N minutes ago` under an hour, `3:45 pm` under twelve hours, `3pm Jan 3` under
+six months, `Jan 3, 2020` beyond. The hour and meridiem are composed rather than
+delegated to `toLocaleTimeString`, which would render 24-hour under some locales
+and disagree with the rung below it; the month name stays locale-aware
+(specs/mailbox_timestamp_ladder.md).
+
+**Sent and Drafts are ordered by time alone.** Every other list is sectioned —
+unread first, then starred, then the rest — which answers *what still needs me?*
+On mail the member sent or wrote there is no such question: an outbound row's
+unread flag is whatever the source's `\Seen` said when it was pulled, or the
+ingest default of false, and never something the member decided. So those two
+views drop the sectioning and read strictly newest-first, the way every mail
+client shows sent mail. The **mailbox unread badge** excludes outbound rows for
+the same reason, and because the Inbox it lands on has never listed them
+(specs/bugfix_sent_view_ordering.md).
+
 **Apply to existing.** A filter saved with *Also apply to matching existing mail*
 sets a pending flag drained by the `ApplyInboundEmailFilters` scheduled task, which
 pages through that mailbox's locally-received, non-deleted history in bounded
