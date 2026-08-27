@@ -170,6 +170,40 @@ class JobResultProcessor {
 		if ($node) {
 			$prev_ssl_state = $node->get('mgn_ssl_state');
 			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
+
+			// Carry forward facts THIS report did not measure.
+			//
+			// Transports do not answer the same questions. The agent can read
+			// /etc/letsencrypt, which the API (running as the web user) cannot;
+			// the API can call BackupRecoveryKey::key_report(), which the agent
+			// has no way to invoke. Replacing the blob wholesale therefore lets
+			// the narrower transport DELETE what the wider one learned.
+			//
+			// That is not hypothetical: backup_recovery_state comes only from the
+			// API/SSH path, and RecoveryKeyFleet gates every backup on it. A
+			// primitive status check wiped it fleet-wide, so build_backup_run
+			// refused for every paired node with "not known yet" — the nightly
+			// fleet backup included. An absent key here means "this transport did
+			// not measure it", never "the node stopped having one".
+			//
+			// Carried keys are named in the blob so a reader can tell a fresh
+			// measurement from an inherited one rather than trusting its age.
+			$previous = json_decode((string)$node->get('mgn_last_status_data'), true);
+			if (is_array($previous)) {
+				$carried = array();
+				foreach ($previous as $key => $value) {
+					if ($key === 'status_carried_keys') continue;
+					if (!array_key_exists($key, $result)) {
+						$result[$key] = $value;
+						$carried[] = $key;
+					}
+				}
+				if ($carried) {
+					sort($carried);
+					$result['status_carried_keys'] = $carried;
+				}
+			}
+
 			$node->set('mgn_last_status_data', json_encode($result));
 			if ($version) {
 				$node->set('mgn_joinery_version', $version);
@@ -210,6 +244,33 @@ class JobResultProcessor {
 				}
 			}
 			$node->save();
+
+			// If backup_recovery_state was INHERITED rather than measured, ask
+			// the node for it now.
+			//
+			// The primitive transport cannot produce that field — it comes from
+			// BackupRecoveryKey::key_report(), PHP the agent cannot call — and
+			// every backup of this node is gated on it. Carrying it forward stops
+			// a primitive status check from deleting the answer, but carried is
+			// not measured: a node whose recovery key genuinely changed would go
+			// unnoticed for as long as only primitives ran. So a primitive status
+			// check schedules the one small observe job that CAN measure it, and
+			// the answer is fresh again by the time anything reads it.
+			//
+			// Queued rather than done inline because measuring it means running a
+			// script on the node, which is a job, not a page render.
+			$carried = $result['status_carried_keys'] ?? [];
+			if (in_array('backup_recovery_state', $carried, true)
+					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')) {
+				try {
+					$built = JobCommandBuilder::build_recovery_key_report($node);
+					ManagementJob::createFromBuild($node->key, 'recovery_key_report', $built, null,
+						$job->get('mjb_created_by'));
+				} catch (Exception $e) {
+					// Not being able to ask is not a reason to fail the status
+					// check that just succeeded.
+				}
+			}
 
 			// An empty slot is REPORTED and nothing else. That slot holds the key
 			// for the site's own backups, and its custodian is whoever
@@ -379,7 +440,19 @@ class JobResultProcessor {
 	 * drwx------ root, so an API-collected node can never answer this.
 	 */
 	private static function ssl_token_from_certificates($result, $node) {
-		if (!array_key_exists('ssl_certificates', $result)) {
+		// Key on the COUNT, not the list. The collector reports
+		// ssl_certificate_count = 0 and returns without setting ssl_certificates
+		// when /etc/letsencrypt/live does not exist — a complete answer, and the
+		// common one on a Cloudflare-terminated node. Keying on the list made
+		// that read as "this transport did not look", so five derived ssl_ fields
+		// fell through to carry-forward on every primitive status check and were
+		// permanently inherited.
+		if (!array_key_exists('ssl_certificate_count', $result)) {
+			return null;
+		}
+		// Looked and could not see. Not an absence, and not something to derive
+		// a state from — leave the previous answer standing.
+		if (!empty($result['ssl_certificates_unreadable'])) {
 			return null;
 		}
 		$domain = parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '';
@@ -387,7 +460,9 @@ class JobResultProcessor {
 			return null;
 		}
 
-		$certs = is_array($result['ssl_certificates']) ? $result['ssl_certificates'] : [];
+		// Absent means zero: see the count check above.
+		$certs = isset($result['ssl_certificates']) && is_array($result['ssl_certificates'])
+			? $result['ssl_certificates'] : [];
 		foreach ($certs as $cert) {
 			// A self-signed placeholder is served by Apache and trusted by no
 			// browser. Counted as "a certificate" it would read as "TLS is fine".
@@ -1183,6 +1258,66 @@ HTML;
 	}
 
 	/**
+	 * Process recovery_key_report result: fold the node's answer into its stored
+	 * status, where RecoveryKeyFleet and every backup builder read it.
+	 *
+	 * It writes into mgn_last_status_data rather than a column of its own so both
+	 * transports leave the same shape: the SSH check_status merges the identical
+	 * keys from the identical parser. A reader cannot tell — and should not have
+	 * to — which route measured it.
+	 */
+	private static function process_recovery_key_report($job) {
+		$output = $job->get('mjb_output') ?: '';
+
+		// Script primitives return their text inside the agent's JSON envelope,
+		// so the RECOVERY_KEY= line is behind escaped newlines that no /m anchor
+		// will match. Unwrap before parsing.
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+
+		$recovery = self::parse_recovery_key_token($output);
+		if ($recovery === null) {
+			// A node too old to carry the tool, or one that answered something
+			// unreadable. Record that we asked and got nothing, and change no
+			// stored fact: a silent node is not a node without a key.
+			$job->set('mjb_result', json_encode(['measured' => false]));
+			$job->save();
+			return;
+		}
+
+		$node_id = $job->get('mjb_mgn_node_id');
+		if ($node_id) {
+			try {
+				$node = new ManagedNode($node_id, TRUE);
+				$status = json_decode((string)$node->get('mgn_last_status_data'), true);
+				if (!is_array($status)) $status = [];
+				$status = array_merge($status, $recovery);
+
+				// It was measured now, so it is no longer inherited.
+				if (!empty($status['status_carried_keys'])) {
+					$status['status_carried_keys'] = array_values(array_diff(
+						$status['status_carried_keys'], array_keys($recovery)));
+					if (!$status['status_carried_keys']) unset($status['status_carried_keys']);
+				}
+
+				$node->set('mgn_last_status_data', json_encode($status));
+				if (isset($recovery['backup_recovery_fpr'])) {
+					$node->set('mgn_backup_recovery_fpr', $recovery['backup_recovery_fpr']);
+				}
+				$node->save();
+			} catch (Exception $e) {
+				// The node record is gone or unreadable; the job result below
+				// still records what the node said.
+			}
+		}
+
+		$job->set('mjb_result', json_encode(array_merge(['measured' => true], $recovery)));
+		$job->save();
+	}
+
+	/**
 	 * Process upload_backup result.
 	 *
 	 * The primitive invokes a shipped script, so what comes back is text rather
@@ -1192,6 +1327,16 @@ HTML;
 	 */
 	private static function process_upload_backup($job) {
 		$output = $job->get('mjb_output') ?: '';
+
+		// A script primitive's text arrives INSIDE the agent's JSON envelope, so
+		// the contract lines are separated by escaped \n rather than real
+		// newlines and a /m anchor matches none of them. Unwrap first, then
+		// parse. Caught only by running it: the upload succeeded, both objects
+		// landed, and the recorded result said uploaded=false.
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
 
 		$grab = function ($key) use ($output) {
 			return preg_match('/^' . $key . '=(.+)$/m', $output, $m) ? trim($m[1]) : null;

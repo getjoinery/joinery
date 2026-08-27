@@ -1755,4 +1755,69 @@ check(!preg_match('/falls back to (a )?self-signed|self-signed fallback/i', $ssl
     'it tries HTTP-01, then DNS-01, then returns having issued nothing');
 
 
+section('The generated keepalive actually launches the agent');
+
+// Every other check on this file reads its SOURCE. That is why the following
+// shipped: the keepalive closed every descriptor above stdio from inside its own
+// script file, which closed the shell's own copy of that file, so it stopped at
+// that line and never reached the launch. The regexes above all still passed —
+// the marker was read, the launch line was present, the text looked right.
+//
+// Both restart paths run through this script (cron, and the installer's own
+// start_agent), so a node whose agent exited was never restarted by anything.
+// joinerydemo at 0.8.347: the agent self-updated, exited as designed, stayed
+// down. Nothing but running the thing catches that, so this runs it.
+$tmp = sys_get_temp_dir() . '/keepalive_' . bin2hex(random_bytes(4));
+@mkdir($tmp, 0777, true);
+
+if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE\n/s', $agent_src, $km)) {
+	check(false, 'the keepalive body can be extracted from the installer', 'heredoc shape changed');
+} else {
+	// Point the generated script at a stand-in agent and temp markers. Only the
+	// paths change; the launch mechanics under test are the shipped ones.
+	$body = $km[1];
+	$body = str_replace('/usr/local/bin/joinery-agent', $tmp . '/fake-agent', $body);
+	// Also retarget the liveness probe: this box runs its own agent, and the
+	// unmodified probe would find it, correctly decide one is already running,
+	// and skip the launch — making the test pass for the wrong reason.
+	$body = str_replace('pgrep -x joinery-agent', 'pgrep -x fake-agent', $body);
+	$body = str_replace('/etc/joinery-agent/enabled', $tmp . '/enabled', $body);
+	$body = str_replace('/etc/joinery-agent/joinery-agent.env', $tmp . '/agent.env', $body);
+	$body = str_replace('/var/log/joinery-agent.log', $tmp . '/agent.log', $body);
+
+	file_put_contents($tmp . '/keepalive.sh', $body);
+	chmod($tmp . '/keepalive.sh', 0755);
+	file_put_contents($tmp . '/enabled', "1\n");
+	file_put_contents($tmp . '/agent.env', "");
+	// Records that it ran, and which descriptors it inherited.
+	file_put_contents($tmp . '/fake-agent',
+		"#!/bin/sh\necho started > " . $tmp . "/ran\nls /proc/\$\$/fd > " . $tmp . "/fds 2>/dev/null\nsleep 2\n");
+	chmod($tmp . '/fake-agent', 0755);
+	touch($tmp . '/lockfile');
+
+	// pgrep must not find a stray real agent on the dev box and skip the launch.
+	$pgrep_safe = (trim((string)shell_exec('pgrep -x fake-agent 2>/dev/null')) === '');
+
+	// Run it holding a descriptor open, exactly as an upgrade holding the
+	// .upgrade.lock does when it calls the host installers.
+	shell_exec('sh -c ' . escapeshellarg('exec 9<' . $tmp . '/lockfile; ' . $tmp . '/keepalive.sh') . ' 2>/dev/null');
+	sleep(1);
+
+	check($pgrep_safe && file_exists($tmp . '/ran'),
+		'the keepalive starts the agent when none is running',
+		'the generated script exited before launching — check that nothing closes the descriptor '
+		. 'the shell reads its own script from');
+
+	// And the reason the descriptor closing exists at all: the launched agent
+	// must NOT inherit the upgrade lock, or every later upgrade on that node is
+	// refused by a lock whose holder is the agent.
+	$fds = file_exists($tmp . '/fds') ? preg_split('/\s+/', trim(file_get_contents($tmp . '/fds'))) : array();
+	check(file_exists($tmp . '/fds') && !in_array('9', $fds, true),
+		'the launched agent does not inherit the caller descriptors',
+		'inherited fds: ' . implode(',', $fds) . ' — fd 9 is the stand-in upgrade lock');
+}
+
+foreach (glob($tmp . '/*') as $f) { @unlink($f); }
+@rmdir($tmp);
+
 harness_finish();
