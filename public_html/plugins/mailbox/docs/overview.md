@@ -3785,6 +3785,18 @@ later moves into a tracked folder (a fresh, higher UID) is ingested whatever its
 age. An unreadable INTERNALDATE counts as in-window — the same fail-toward-
 keeping direction the seek uses (specs/imap_seed_scope_guard.md).
 
+**A draft on the source is not mail.** A message carrying the `\Draft` flag is
+skipped and counted (`source drafts` in the run record), in every folder. Not
+tracking the Drafts folder is not enough on its own: Gmail files every draft in
+`[Gmail]/All Mail` as well, and replaces it on each autosave — old UID expunged,
+a fresh higher one appended — so a coverage pass meets each half-written revision
+as new mail above its cursor. Left unfiltered, writing one email over half an
+hour lands one incoming message from yourself per poll, each with its own
+Message-ID, which no dedup can collapse. The flag travels with the message, so
+asking it covers the Drafts folder, the coverage view and a label alike. An
+unreadable flag list counts as ordinary mail — the same fail-toward-keeping
+direction as the scope guard (specs/bugfix_imap_draft_ingest.md).
+
 The choice is editable at any time. **Any** change to it — a different scope, or a
 different day count — rewinds every folder cursor of that feed
 (`InboundImapFolder::rewindCursors()`) so the next fetch re-seeds: widening
@@ -3810,18 +3822,20 @@ every pass, and a full-history backfill is hundreds of passes — so neither can
 answer *what did the import lose two hours ago*. Every poll that did something
 therefore leaves a durable row in `evl_event_logs` under the event
 **`mailbox_imap_ingest`**, holding the counts (`seen`, `stored`, `duplicates`,
-`out of scope` — the day-window guard's bucket — and `failed`) and each distinct
+`out of scope` — the day-window guard's bucket — `source drafts` — the bucket for
+a message the source still holds as a draft — and `failed`) and each distinct
 failure reason with the number of messages it hit. Fifty messages failing the
 same way read as one line, not fifty.
 
 Two things make an otherwise-silent loss visible:
 
 - **`unaccounted`** — `seen` counts every UID the window walked. If
-  `stored + duplicates + out of scope + failed` does not reconcile against it,
+  `stored + duplicates + out of scope + source drafts + failed` does not
+  reconcile against it,
   the shortfall is named in the note and the row is marked unsuccessful. This is
   the only signal for a message that disappeared without anything reporting a
-  reason. A scope-guard skip is a first-class bucket for exactly this reason:
-  provable-on-purpose, never unaccounted.
+  reason. A scope-guard skip and a source-draft skip are first-class buckets for
+  exactly this reason: provable-on-purpose, never unaccounted.
 - **A UID the server returned no data for** is a counted failure rather than a
   skip, so the reconciliation above stays honest.
 
@@ -4012,7 +4026,9 @@ the mailbox editor to start syncing it.
 
 **The `\All` coverage view (Gmail All Mail).** An all-mail folder is tracked as a
 **coverage source**, not a navigable label: it ingests every message — including
-mail archived with no label — so nothing is missed, but it carries no label. In the
+mail archived with no label — so nothing is missed, but it carries no label. It is
+also where the source's own drafts surface, which is why the `\Draft` skip above is
+folder-agnostic rather than a matter of leaving the Drafts folder untracked. In the
 reader, the **mailbox root is the label-unfiltered “All Mail” view**, so messages with
 no label are reachable there; the labels listed beneath it narrow to one label.
 
