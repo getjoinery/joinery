@@ -1040,6 +1040,41 @@ check(preg_match('/write_supervise_script\(\)[^}]*\/etc\/joinery-agent\/enabled/
     'the cron keepalive reads the marker before starting the agent',
     'without this, off lasts under a minute');
 
+// A binary that was just installed must be STARTED, even though something is
+// already running — what is running is the previous version, and replacing a
+// file does not replace a live process. This is the only path during an artifact
+// move: the old agent's compiled-in artifact directory is gone, so it cannot
+// self-update out of the mismatch. It happened on the dev plane: 1.6.1 on disk,
+// 1.6.0 in memory, heartbeating with an empty bundled_version.
+check(strpos($agent_src, 'BINARY_INSTALLED=1') !== false,
+    'the installer records when it actually replaced the binary');
+check(preg_match('/if agent_running && \[ "\$BINARY_INSTALLED" = "0" \]/', $agent_src) === 1,
+    'a fresh binary is started even when a process is already running',
+    'skipping the start leaves the new binary on disk and the old one running');
+
+// And a machine ALREADY in that state must be curable. Replacing the file leaves
+// the live process on an unlinked inode, which /proc/PID/exe reports as
+// "(deleted)" — the one signal available from outside the process. Without this,
+// a second installer run cannot tell anything is wrong, because on disk
+// everything agrees.
+check(strpos($agent_src, 'running_is_stale()') !== false,
+    'the installer can tell a running process from the binary on disk');
+check(strpos($agent_src, '(deleted)') !== false,
+    'it detects the replaced-binary signature');
+check(preg_match('/if agent_running && \[ "\$BINARY_INSTALLED" = "0" \] && ! running_is_stale/', $agent_src) === 1,
+    'and a stale process is restarted rather than left alone');
+
+// The runner must be invoked AS ROOT by the upgrade, or every installer it runs
+// exits on its own root check and the upgrade still reports success. That is not
+// hypothetical: on the fleet's one bare-metal node with a non-root SSH user, an
+// otherwise-clean upgrade logged "agent installer: not running as root -
+// skipping" and left the agent behind. A container is already root, so the same
+// code path looked fine everywhere else.
+$upgrade_src = is_file($upgrade_php) ? file_get_contents($upgrade_php) : '';
+check(strpos($upgrade_src, "\$root_prefix . 'bash ' . escapeshellarg(\$installers_runner)") !== false,
+    'the upgrade runs the host installers with its root prefix',
+    'without it, a node whose SSH user is not root silently skips every installer');
+
 // install.sh --enable-agent is how a site provisioned by a management node
 // comes up running. It has to write the setting BEFORE the host installers run,
 // or the agent is installed and left stopped until some later root moment.
