@@ -790,6 +790,57 @@ class JobCommandBuilder {
 	public static function build_backup_run($node, $params = []) {
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
+		if (self::has_primitive($node, 'backup_run')) {
+			return self::build_backup_run_primitive($node, $params);
+		}
+
+		$config = self::backup_run_config($node, $params);
+		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
+
+		// JSON_UNESCAPED_SLASHES only for readability in the job log; the value is
+		// consumed by json_decode either way. The heredoc is quoted, so nothing in
+		// the body is expanded by the shell.
+		$json = json_encode($config, JSON_UNESCAPED_SLASHES);
+		$eof  = '__JOINERY_BACKUP_CONFIG_EOF__';
+
+		$cmd = 'php ' . escapeshellarg($web_root . '/utils/run_backup.php') . ' --profile=manager'
+			. " <<'{$eof}'\n{$json}\n{$eof}";
+
+		return [[
+			'type'    => 'ssh',
+			'label'   => 'Run backup to ' . $config['target_name'],
+			'cmd'     => $cmd,
+			// The engine ceiling plus the uploader's own retry budget: the agent
+			// must not kill a transfer part-way through a retry.
+			'timeout' => S3Signer::transfer_budget_seconds() + 10800,
+		]];
+	}
+
+	/**
+	 * Primitive path: the SAME config, as declared parameters rather than a
+	 * shell heredoc. The node validates every field against its compiled-in
+	 * spec, composes the engine's config itself, and hands it to
+	 * run_backup.php on stdin — so the credential still never reaches argv,
+	 * and nothing this plane sends is executed as syntax.
+	 *
+	 * A4 becomes structural here: the node declares no parameter through
+	 * which encryption key material could arrive, so a job carrying one is
+	 * refused as out-of-vocabulary rather than inspected and rejected.
+	 *
+	 * This method's EXISTENCE is what routes backup_run onto the channel —
+	 * has_primitive() and transports_for() discover operations by
+	 * method_exists on build_<op>_primitive, so an inline envelope inside
+	 * build_backup_run would leave the gate permanently false.
+	 */
+	public static function build_backup_run_primitive($node, $params = []) {
+		return ['primitive' => 'backup_run', 'params' => self::backup_run_config($node, $params)];
+	}
+
+	/**
+	 * The shared config both transports carry: validated here on the plane,
+	 * revalidated field by field on the node.
+	 */
+	private static function backup_run_config($node, $params = []) {
 		self::assert_node_can_be_backed_up($node);
 
 		$target = self::get_target($node);
@@ -833,36 +884,7 @@ class JobCommandBuilder {
 				?? $node->get('mgn_delete_local_after_upload')),
 		];
 
-		// Primitive path: the SAME config, as declared parameters rather than a
-		// shell heredoc. The node validates every field against its compiled-in
-		// spec, composes the engine's config itself, and hands it to
-		// run_backup.php on stdin — so the credential still never reaches argv,
-		// and nothing this plane sends is executed as syntax.
-		//
-		// A4 becomes structural here: the node declares no parameter through
-		// which encryption key material could arrive, so a job carrying one is
-		// refused as out-of-vocabulary rather than inspected and rejected.
-		if (self::has_primitive($node, 'backup_run')) {
-			return ['primitive' => 'backup_run', 'params' => $config];
-		}
-
-		// JSON_UNESCAPED_SLASHES only for readability in the job log; the value is
-		// consumed by json_decode either way. The heredoc is quoted, so nothing in
-		// the body is expanded by the shell.
-		$json = json_encode($config, JSON_UNESCAPED_SLASHES);
-		$eof  = '__JOINERY_BACKUP_CONFIG_EOF__';
-
-		$cmd = 'php ' . escapeshellarg($web_root . '/utils/run_backup.php') . ' --profile=manager'
-			. " <<'{$eof}'\n{$json}\n{$eof}";
-
-		return [[
-			'type'    => 'ssh',
-			'label'   => 'Run backup to ' . $target->get('bkt_name'),
-			'cmd'     => $cmd,
-			// The engine ceiling plus the uploader's own retry budget: the agent
-			// must not kill a transfer part-way through a retry.
-			'timeout' => S3Signer::transfer_budget_seconds() + 10800,
-		]];
+		return $config;
 	}
 
 	/**
