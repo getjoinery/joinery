@@ -1203,6 +1203,26 @@
 				}
 			}
 
+			// Deploy the signed release manifest from staging to the site root.
+			// The archive carries RELEASE_MANIFEST(.sig) at its top level, and
+			// the deploy swap above moves public_html alone — without this step
+			// the manifest is unpacked and then discarded with the staging
+			// directory, and script-invoking agent primitives refuse on every
+			// node while the release reports success.
+			foreach (array('RELEASE_MANIFEST', 'RELEASE_MANIFEST.sig') as $mf) {
+				$staged_mf = rtrim($stage_location, '/') . '/' . $mf;
+				if (is_file($staged_mf)) {
+					$mf_out = []; $mf_exit = 0;
+					exec($root_prefix . 'cp ' . escapeshellarg($staged_mf) . ' '
+						. escapeshellarg($full_site_dir . '/' . $mf) . ' 2>&1', $mf_out, $mf_exit);
+					if ($mf_exit !== 0) {
+						out_alert('warning', 'Could not deploy ' . $mf,
+							'The signed tree manifest did not reach the site root; script-invoking '
+							. 'agent primitives will refuse on this node until it does.');
+					}
+				}
+			}
+
 			// Fix permissions using centralized script (production mode).
 			// The script chowns to www-data. Without it, the deployed tree stays
 			// owned by the agent user with mode 770 and Apache cannot read a
