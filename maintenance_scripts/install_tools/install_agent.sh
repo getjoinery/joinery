@@ -3,6 +3,9 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.6 - The keepalive closes descriptors inside sh -c, not inside itself. Closing them
+#           from within the script file closed the shell's own copy of that file, so the
+#           keepalive stopped before launching and no node whose agent exited came back.
 # Version: 2.5 - Accepts an already-resolved site root as an optional second argument, so a
 #           site outside /var/www/html is installed where it actually lives. Added as a
 #           second argument so old and new copies of this script and its caller interoperate.
@@ -229,14 +232,17 @@ if ! pgrep -x joinery-agent >/dev/null 2>&1; then
     set -a
     [ -f /etc/joinery-agent/joinery-agent.env ] && . /etc/joinery-agent/joinery-agent.env
     set +a
-    for fd_path in /proc/$$/fd/*; do
-        fd_num=${fd_path##*/}
-        case "$fd_num" in
-            0|1|2) continue ;;
-        esac
-        eval "exec ${fd_num}>&-" 2>/dev/null || true
-    done
-    nohup /usr/local/bin/joinery-agent >> /var/log/joinery-agent.log 2>&1 < /dev/null &
+    # The descriptor closing happens in a shell that reads its commands from an
+    # ARGUMENT, never from a file, and that detail is the whole fix. A shell
+    # running a script FILE keeps that file open on a descriptor of its own;
+    # closing every descriptor above stdio from inside the script therefore
+    # closes the shell's own copy of the script, and it stops silently at that
+    # line without ever reaching the launch below. Both restart paths ran
+    # through here - the cron keepalive and the installer's own start_agent - so
+    # a node whose agent exited was never restarted by anything. Observed on
+    # joinerydemo at 0.8.347: the agent self-updated to 1.7.0, exited as
+    # designed, and stayed down. sh -c has no script descriptor to lose.
+    nohup sh -c 'for f in /proc/$$/fd/*; do n=${f##*/}; case "$n" in 0|1|2) continue;; esac; eval "exec $n>&-" 2>/dev/null || true; done; exec /usr/local/bin/joinery-agent' >> /var/log/joinery-agent.log 2>&1 < /dev/null &
 fi
 SUPERVISE
     chmod 755 "$SUPERVISE_PATH"

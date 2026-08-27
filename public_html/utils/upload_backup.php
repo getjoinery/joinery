@@ -65,6 +65,10 @@
  *
  * Exits 0 on success, 1 on a transfer failure, 2 on a malformed request.
  *
+ * @version 1.2 - resolves the backup directory from the node's own configured working
+ *                 directory and the named profile, instead of assuming the BACKUP_DIR
+ *                 constant. On a node using the computed default, the constant names a
+ *                 directory that does not exist, so no backup was ever found.
  * @version 1.1 - include_envelope: an encrypted archive's .keys.json travels with it.
  *                Without it a re-uploaded encrypted backup is an offsite copy nobody
  *                can open, and nothing said so.
@@ -128,7 +132,11 @@ if (!is_array($config)) {
 // preference. include_envelope is optional and defaults to false, so a caller
 // that does not know about it behaves exactly as it always did.
 $required = array('bucket', 'path_prefix', 'slug', 'filename', 'credentials_b64');
-$accepted = array_merge($required, array('include_envelope'));
+// 'profile' is accepted but NOT required, for the same reason include_envelope
+// is optional: during a rollout the agent already running on the node predates
+// it and sends no such key. Absent means the site profile, which is what the
+// only directory this script used to look in actually was.
+$accepted = array_merge($required, array('include_envelope', 'profile'));
 
 $unknown = array_diff(array_keys($config), $accepted);
 if ($unknown) {
@@ -169,7 +177,19 @@ if (!BackupNaming::is_backup($filename)) {
 	upload_backup_refuse('that name is not a backup artifact');
 }
 
-$local_path = BackupNaming::BACKUP_DIR . '/' . $filename;
+// WHERE the node keeps this profile's backups — resolved HERE, by the node,
+// from its own configured working directory. BackupNaming::BACKUP_DIR is only
+// the last-resort constant; the real base is the backup_output_dir setting or
+// {siteRoot}/backups, and each profile gets its own directory beneath it. The
+// agent used to assume the constant, so on a node using the computed default it
+// looked in a directory that did not exist and reported no backups at all.
+require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
+require_once(PathHelper::getIncludePath('includes/BackupRunner.php'));
+
+$profile = BackupProfile::normalize((string)($config['profile'] ?? BackupProfile::SITE));
+$backup_dir = BackupProfile::output_dir($profile, BackupRunner::output_dir());
+
+$local_path = $backup_dir . '/' . $filename;
 if (!is_file($local_path)) {
 	upload_backup_refuse('no such backup on this node: ' . $filename);
 }
@@ -194,7 +214,7 @@ $envelope_status = 'not_requested';
 $envelope_key = '';
 if ($include_envelope) {
 	$envelope_name = BackupEnvelope::sidecar_name($filename);
-	$envelope_path = BackupNaming::BACKUP_DIR . '/' . $envelope_name;
+	$envelope_path = $backup_dir . '/' . $envelope_name;
 
 	if (!is_file($envelope_path)) {
 		// Not fatal, deliberately. Whatever asked for this has already decided

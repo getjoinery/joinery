@@ -1556,6 +1556,37 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * Which backup recovery key a node holds.
+	 *
+	 * PRIMITIVE ONLY, and it exists to close a hole this transport could not see
+	 * in itself. Every backup is gated on backup_recovery_state
+	 * (RecoveryKeyFleet::node_state), and that fact comes from
+	 * BackupRecoveryKey::key_report() — PHP the agent cannot call. So a primitive
+	 * check_status answered everything except the field backups depend on. The
+	 * SSH check_status asks for it as one of its steps; the primitive one has no
+	 * equivalent, which is why it is asked for separately here.
+	 *
+	 * It runs the node's own shipped reporting tool rather than anything new:
+	 * set_recovery_key.php --report is reports-only (its write path was removed
+	 * deliberately — a recovery key arriving from outside cannot be verified by
+	 * the site receiving it), and the plane already parses its RECOVERY_KEY=
+	 * line from the SSH path. One definition of what counts as proven, used by
+	 * both transports.
+	 */
+	public static function build_recovery_key_report($node) {
+		if (!self::has_primitive($node, 'recovery_key_report')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot report its recovery key over the agent channel: "
+				. "no agent has paired with this plane. The SSH check_status asks for it as a step.");
+		}
+		return self::build_recovery_key_report_primitive($node);
+	}
+
+	public static function build_recovery_key_report_primitive($node) {
+		return ['primitive' => 'recovery_key_report', 'params' => []];
+	}
+
+	/**
 	 * Restart a node's agent.
 	 *
 	 * PRIMITIVE ONLY, and that is the interesting part: there is no
@@ -2046,6 +2077,11 @@ class JobCommandBuilder {
 		}
 		$primitive_params = [
 			'filename'        => basename(trim((string)($params['filename'] ?? ''))),
+			// WHOSE backup, not where it is. This plane takes manager-profile
+			// backups, so that is the default; the node maps the name to a
+			// directory from its own configured backup base.
+			'profile'         => in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
+				? $params['profile'] : 'manager',
 			'bucket'          => $target->get('bkt_bucket'),
 			'path_prefix'     => $target->get('bkt_path_prefix') ?: 'joinery-backups',
 			'slug'            => $node->get('mgn_slug'),
@@ -2422,7 +2458,11 @@ class JobCommandBuilder {
 		if ($filename === '' || $filename === '.' || $filename === '..') {
 			throw new Exception('No backup filename given.');
 		}
-		return ['primitive' => 'delete_backup', 'params' => ['filename' => $filename]];
+		return ['primitive' => 'delete_backup', 'params' => [
+			'filename' => $filename,
+			'profile'  => in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
+				? $params['profile'] : 'manager',
+		]];
 	}
 
 	/**
