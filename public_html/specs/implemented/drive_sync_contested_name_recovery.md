@@ -548,3 +548,125 @@ them.
 - **Contract coverage.** Only the upload file-collision site emits the enriched
   refusal. Folder-create, rename and reparent still send the bare marker. Fine
   here; the normalisation work will want rename enriched.
+
+
+---
+
+## A gap found after shipping, 2026-08-27
+
+Fresh-range hunting (110000-114400, 4,400 seeds) turned up three never-settles
+that are NOT regressions — all three fail identically against the engine before
+this change — but two of them are upload loops this change was meant to end, and
+understanding why is worth recording.
+
+**Seed 110980 — an unmarked refusal reaches no recovery at all.** `110980 % 4
+== 0`, so the sweep's marker-less refusal dial is armed: the refusal carries no
+`reason`, `name_taken()` is false, and the upload loop's arms are exhausted —
+wait-for-rename, adopt, `name_taken` land-beside, then `Err(e) => return
+Err(e.into())`. **There is no unmarked arm in the upload path.** Zero name
+attempts; straight to withdrawn; entry stays `pending_upload`; next pass plans
+it again. For ever.
+
+A hypothesis raised and dropped in review, recorded so nobody re-chases it: that
+the loop was really the parent FOLDER create (which does have a cap) with the
+file waiting on it. The journal settles it against that — the file's own
+`upload_new` is withdrawn carrying name PROSE in its message, which is precisely
+the no-unmarked-arm story: the dial strips the marker, not the words, so the
+message still reads like a name clash while `name_taken()` is false. The file's
+own upload is the loop.
+
+(An earlier draft of this section blamed a two-attempt cap. That cap is in
+`create_remote_folder`, not here, and the correction matters: the fix is not
+"raise a cap" but "there is nothing to raise". Any real fix has three sites to
+consider — upload, create, and move, which gates on `may_be_about_the_name` —
+which argues for one shared shape rather than three arms.)
+
+**The design, reviewed and not yet built.** Raising or adding a cap is the wrong
+instinct, because repetition carries no information: a quota, validation or size
+refusal answers every candidate name identically, so N unmarked refusals across
+N names is exactly what a NON-name refusal produces. Escalating on repetition
+fires precisely on the case a cap exists to protect. And asking the server what
+holds the name is not available — there is no folder-scoped read, only a
+whole-tree cursor walk.
+
+So spend one call turning unknown into known. After the deterministic
+candidates, ask for a name that CANNOT already be taken — derived from the op's
+idempotency key, so it is unique by construction and DETERMINISTIC, and a
+crash-retry replays the same request and dedups.
+
+- **Probe accepted** — it was the name all along. The file is up, converged,
+  wearing an ugly but true name, and `follow_the_server_name` already moves the
+  disk to match.
+- **Probe refused** — nothing could have been holding that name, so the refusal
+  is not about the name. Now the give-up is justified by evidence rather than by
+  exhaustion.
+
+Encrypted uploads confirm the shape: their names are already unique by
+construction (`enc-{content id}`), so an unmarked refusal there is not-the-name
+by definition and should skip the probe entirely. The probe gives plaintext
+uploads the same epistemic footing encrypted ones get for free.
+
+**The give-up must be a note BESIDE the agreement, never a status.** Park is a
+naming verdict, recomputed each pass from names and keys, so a non-name reason
+stored there is erased next pass and the work re-planned — a lesson already paid
+for once. The template is the `unreadable` table: keyed on the request's inputs
+— (parent, name, content hash), because an unmarked refusal does not say which
+one the server objected to — self-clearing the moment any of them changes, with
+a raised issue whose dismissal is the manual retry.
+
+One further self-clear, because "old cores only" cuts both ways: that population
+upgrades, and a terminal note would outlive the defect, leaving files stuck
+until touched. Record per-server that it has never sent a reason marker; the
+first 422 that arrives WITH one is proof the core now speaks, and clears every
+such note for that server. Evidence-keyed, no expiry clock.
+
+Reproduce:Reproduce:
+
+```
+SEED=110980 STEPS=90 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
+  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
+```
+
+**Seed 111201 — a different shape, not this defect.** `done: 1` every pass: the
+upload SUCCEEDS and something re-mints it. The seed is not divisible by four, so
+the marker is present and both arms were available. The name is `DOC-24.TXT`,
+the case twin of `doc-24.txt`, on a fleet including two case-insensitive
+volumes — so this looks like the case-clash sibling of the unbuilt normalisation
+defect rather than anything about refusals. Same reproduce line with SEED=111201.
+
+
+---
+
+## A failure this change made QUIETER, not smaller — seed 121109
+
+Found 2026-08-27 by a case-clash-targeted hunt (Windows + macOS + Linux, 70
+steps, chaos).
+
+```
+SEED=121109 STEPS=70 DEVS=3 CHAOS=1 PLATFORMS=windows,mac,linux NAMES=pc,mac,lin \
+  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
+```
+
+**Before this change:** `lin` never settled.
+**After it:** all three devices settle, and `lin` is missing a file the server
+holds — `Sub 4 (39) (39b)/Sub 25/Sub 31/slot-1.dat` — while reporting itself
+healthy.
+
+No data is lost: the server has the file and the other devices materialize it.
+But the failure has changed character in the wrong direction. A device that
+loops is loud and a user reports it; a device that says it is finished while a
+file is missing is the silence this engine's own comments say it is not allowed
+to have.
+
+**This is not a regression in the usual sense** — the seed failed before and
+fails now — which is exactly why it could be missed: a sweep that only asks
+pass/fail sees no change. It took comparing the failure MODE across the commit
+boundary to see it.
+
+**Worth checking before the next change lands:** whether any other seed on the
+"was already failing" list has quietly changed shape the same way. A blanket
+before/after over known-failing seeds, comparing the panic TEXT and not just the
+verdict, would answer it cheaply.
+
+Not diagnosed further. Whether the missing file is a consequence of adoption,
+the disk-follow, or something the change merely unmasked is unknown.

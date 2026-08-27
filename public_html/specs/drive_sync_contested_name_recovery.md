@@ -1,6 +1,27 @@
 # Drive sync: two spellings on the server, one slot on the disk
 
-**Status: DRAFT, not built.** Diagnosis corrected twice and narrowed; no design.
+**Status: DRAFT, not built. WARNING — the original reproducer (seed 99674) now
+PASSES; the defect does not.** `f81388e6` incidentally fixed that one instance
+while leaving the class intact. Anyone who runs the documented seed, sees green
+and concludes this is done will be wrong.
+
+Use a THREE-DEVICE reproducer instead:
+
+```
+SEED=111740 STEPS=70 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
+  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
+```
+
+Seed 111120 (STEPS=90, same platforms) is a second. Both still loop, with the
+same composed/decomposed `ApplyLocalMove` every pass.
+
+This lines up with a negative result from the same batch: 800 seeds of the
+two-device mac+HFS+ shape came back clean, while the three-device
+mac/Windows/HFS+ arm produced both surviving instances. Whatever sets the trap
+appears to want the third device — so a two-device reproducer is not just weaker
+here, it may be extinct.
+
+Diagnosis corrected twice and narrowed; no design.
 
 What WAS built from the original spec — the `upload_new` recovery and the
 stranded-park repair — is in
@@ -76,8 +97,50 @@ either.
 
 So the fault sits upstream of the decision rather than inside it: something
 stops the two names being offered to `resolve_siblings` as siblings of one
-folder. Start at `apply_naming`'s sibling grouping — what set it builds and from
-where — not at the resolver and not at the personality. Both are ruled out.
+folder.
+
+**Narrowed again, and the naming layer is ruled out entirely.** `apply_naming`
+groups by `competing_placement(entry).parent` over `all_entries`, skipping only
+`OutOfScope` and remote-deleted — the grouping is right. The reason the resolver
+never sees a clash is simpler: **mac holds only ONE of the two entries.** Dumped
+at the end state, its store has `918` for the composed spelling in folder 504
+and nothing for the decomposed one, while the server holds both, live, in that
+same folder.
+
+A resolver handed one name has nothing to park. So the question is no longer
+about naming at all — it is why a device ends up with no record of one of two
+live server files in one folder. That is a change-feed and absorb question.
+Look there: the personality, `resolve_siblings` and `apply_naming`'s grouping
+are all ruled out by inspection.
+
+**One more candidate eliminated.** `merge_duplicate_files` folds only
+PROVISIONAL entries into real ones, keyed byte-exact on `(parent, remote.name)`,
+so it cannot fold one real entry into another and cannot see two spellings as
+one key. Not the culprit.
+
+**Where the next session should start.** `scratch_trace` with `WATCH` shows mac
+holding the decomposed entry mid-run, and `scratch_dump` shows it absent at the
+end — so the entry is being LOST rather than never learned. Find the round it
+disappears and what ran in it. The remaining removers are `delete_subtree`,
+`delete_entry` (reached from `trash_remote`, `forget` and `merge_file`) and the
+stranded sweep; instrumenting those four is likely faster than reading them.
+
+### A second reproducer, found 2026-08-27
+
+```
+SEED=111740 STEPS=70 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
+  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
+```
+
+Same shape, different file index: mac plans `ApplyLocalMove` from
+`cafe\u{301}-7.txt` to `café-7.txt` for ever, the other two devices quiet. Not a
+regression — it fails identically against the engine before f81388e6.
+
+Two things this settles. The class RECURS, so it is not one unlucky seed. And a
+mac+HFS+ pair alone did not find it: 800 seeds of exactly that two-device shape
+came back clean in the same batch, while the three-way mac/Windows/HFS+ arm hit
+it. Whatever sets the trap seems to want the third device, which is worth
+knowing before anyone builds a two-device reproducer and concludes the fix works.
 
 ### How to prove it
 
