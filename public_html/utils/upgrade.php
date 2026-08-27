@@ -1664,16 +1664,31 @@
 		}
 
 		// ============================================
-		// PLUGIN HOST INSTALLERS
+		// HOST INSTALLERS (core, then every active plugin's)
 		// ============================================
-		// Run every active plugin's declared host_installer (idempotent by
-		// contract) so a plugin's new host requirements land with the deploy.
+		// Idempotent by contract, so a new host requirement lands with the deploy.
 		// Non-fatal: the runner itself always exits 0.
+		//
+		// RUNS AS ROOT, via the same prefix the site-root sync and
+		// fix_permissions use above. Every installer this runs needs root and
+		// says so by exiting when it does not have it — which is what happened
+		// on the one bare-metal node whose SSH user is not root: the upgrade
+		// completed green while "agent installer: not running as root -
+		// skipping" scrolled past, and its agent stayed on the old version with
+		// nothing reporting a problem. A container is already root and the
+		// prefix is empty there, which is why this went unnoticed for so long.
+		//
+		// Known limit: sudo strips the environment, so the runner's active-plugin
+		// lookup can lose PGPASSWORD on bare metal and find none. The CORE
+		// installers are unaffected — install_agent.sh reads the database through
+		// PHP and the site config rather than psql — so the agent converges
+		// either way. build_run_plugin_installers carries the password across
+		// explicitly when the plane dispatches this on its own.
 		$installers_runner = $full_site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
 		if (file_exists($installers_runner)) {
-			out_step('Running Plugin Host Installers');
+			out_step('Running Host Installers');
 			$runner_output = [];
-			exec('bash ' . escapeshellarg($installers_runner) . ' ' . escapeshellarg($site_template) . ' 2>&1', $runner_output);
+			exec($root_prefix . 'bash ' . escapeshellarg($installers_runner) . ' ' . escapeshellarg($site_template) . ' 2>&1', $runner_output);
 			echo nl2br(htmlspecialchars(implode("\n", $runner_output))) . "<br>\n";
 		}
 

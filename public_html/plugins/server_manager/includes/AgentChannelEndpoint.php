@@ -33,6 +33,9 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.7 - a claim carries the agent's version and the plane records it, so the column
+ *                tracks what is running instead of what first paired; and a completed result is
+ *                folded into the node's columns on arrival rather than at the next page view
  * @version 1.6 - credential slots resolve at claim time: the job row keeps the placeholder, the
  *                credential exists only inside the signed hand-out response
  * @version 1.5 - quiet endpoint: a node says it is going quiet when its agent is switched off,
@@ -465,7 +468,10 @@ class AgentChannelEndpoint {
 	private static function handle_claim($body) {
 		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
 
-		$in = self::validate($body, ['node_id' => ['type' => 'int', 'required' => true]]);
+		$in = self::validate($body, [
+			'node_id'       => ['type' => 'int', 'required' => true],
+			'agent_version' => ['type' => 'string', 'max' => 20],
+		]);
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
 		}
@@ -473,6 +479,19 @@ class AgentChannelEndpoint {
 		// A poll IS the heartbeat: it is the only liveness signal this plane can
 		// see for itself, and it costs nothing to record here (§3.1).
 		$node->set('mgn_agent_last_poll', gmdate('Y-m-d H:i:s'));
+
+		// And the version, because this is the only moment the node speaks for
+		// itself about what it is running. It used to be recorded once, at
+		// approval, and never again — so an agent that had self-updated several
+		// times still read as the version it first paired with. The column was
+		// confidently wrong during exactly the operation that consults it: a
+		// rollout. Optional on the wire so an older agent still polls fine; it
+		// simply keeps reporting nothing and the stale value stands until it
+		// updates itself.
+		$reported = trim((string)($in['agent_version'] ?? ''));
+		if ($reported !== '' && $reported !== (string)$node->get('mgn_agent_version')) {
+			$node->set('mgn_agent_version', $reported);
+		}
 		$node->save();
 
 		// A claim that never came back would otherwise hold this node's
@@ -705,6 +724,32 @@ class AgentChannelEndpoint {
 				: ($reason !== '' ? $reason : 'The primitive failed on the node.'));
 		}
 		$job->save();
+
+		// Fold the result into the node's own columns NOW, rather than leaving it
+		// for whoever next opens a page.
+		//
+		// Every other caller of the processor is a page view or a scheduled pass,
+		// so a completed job sat unprocessed until someone looked — and the node
+		// columns it feeds (mgn_joinery_version, mgn_last_status_data, the SSL
+		// state) went on reporting the previous answer. Eighteen check_status jobs
+		// completed over one night's rollout while the dashboard still showed the
+		// version from three releases earlier, which is the worst possible moment
+		// for it to be wrong.
+		//
+		// Never fatal: the node has done its part and been told so. A plane-side
+		// folding error is this plane's problem to log, not a reason to make the
+		// node believe its result was rejected and send it again.
+		if ($job->get('mjb_status') === 'completed') {
+			try {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+				if (in_array((string)$job->get('mjb_job_type'), JobResultProcessor::processable_types(), true)) {
+					JobResultProcessor::process($job);
+				}
+			} catch (Throwable $e) {
+				error_log('AgentChannelEndpoint: could not process result for job '
+					. $job->key . ': ' . $e->getMessage());
+			}
+		}
 
 		api_success(['recorded' => true], '', 200);
 	}

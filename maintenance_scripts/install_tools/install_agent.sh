@@ -3,7 +3,15 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
-# Version: 2.1 - The binary lands on every deployment; agent_enabled decides only
+# Version: 2.3 - Also detect a process already running a REPLACED binary
+#                (/proc/PID/exe reading as deleted) and restart it. 2.2 stopped the
+#                state arising; this cures a machine already in it.
+#          2.2 - A freshly installed binary forces a restart. "Already running" was
+#                allowed to skip the start, which left the new binary on disk and the
+#                OLD one in memory — permanently, whenever the running agent cannot
+#                self-update (as during an artifact move, when its compiled-in path
+#                no longer exists).
+#          2.1 - The binary lands on every deployment; agent_enabled decides only
 #                whether it RUNS. Installing is not running, and a machine that
 #                already has the agent present can be switched on without
 #                fetching anything.
@@ -233,6 +241,28 @@ start_agent() {
     fi
 }
 
+# Is the process that is running actually running the binary that is on disk?
+#
+# Replacing the file does not replace a live process: install(1) puts a new inode
+# at the path and the running agent stays attached to the old, now-unlinked one,
+# which /proc/PID/exe reports with a " (deleted)" suffix. That is the exact
+# signature of "new binary on disk, old one in memory".
+#
+# BINARY_INSTALLED catches this within a single run. This catches it ACROSS runs
+# — a machine left mismatched by an earlier install, or by a self-update that
+# wrote the file and did not exit — which is the difference between preventing
+# the state and curing it. The dev plane was in it, and a second installer run
+# could not tell, because from the file's point of view everything agreed.
+running_is_stale() {
+    STALE_PID="$(pgrep -x joinery-agent 2>/dev/null | head -1)"
+    [ -n "$STALE_PID" ] || return 1
+    STALE_EXE="$(readlink "/proc/${STALE_PID}/exe" 2>/dev/null)" || return 1
+    case "$STALE_EXE" in
+        *"(deleted)") return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
 # Off means stopped and left stopped. The supervision has to go with it - a
 # cron keepalive would restart the agent within the minute, which would read as
 # the switch not working. The binary and the agent's identity stay: this is a
@@ -254,6 +284,12 @@ stop_and_disable_agent() {
 # switched on later without needing the artifact fetched, decompressed and
 # verified at that moment, and an operator turning it on gets a service that
 # starts rather than one that has to be installed first.
+# Set by converge_binary when it actually replaces the binary on disk. A fresh
+# binary MUST be started, even though something is already running — what is
+# running is the OLD one, and the file changing under a live process does not
+# change the process.
+BINARY_INSTALLED=0
+
 converge_binary() {
     case "$(uname -m)" in
         x86_64)  ARCH="linux-amd64" ;;
@@ -317,6 +353,7 @@ EOF
     fi
 
     install -m 755 "${STAGE}/joinery-agent" "$BINARY_PATH"
+    BINARY_INSTALLED=1
     return 0
 }
 
@@ -344,9 +381,26 @@ fi
 
 ensure_supervision
 
-if agent_running; then
+# "Already running" is only a reason to stop if the running process is running
+# the binary we just converged. When a new one went in, the live process is the
+# previous version and has to be replaced.
+#
+# This is not a corner case, it is the ONLY path during an artifact move: the old
+# agent's compiled-in artifact directory no longer exists, so it can never
+# self-update out of the situation. Skipping the restart here would leave a
+# machine with a new binary on disk and an old one in memory, indefinitely — and
+# it did exactly that on this plane before this branch existed.
+if agent_running && [ "$BINARY_INSTALLED" = "0" ] && ! running_is_stale; then
     say "agent_enabled is on - v$(installed_version) already running"
     exit 0
+fi
+
+if agent_running; then
+    if [ "$BINARY_INSTALLED" = "1" ]; then
+        say "restarting into the newly installed v$(installed_version)"
+    else
+        say "the running process is an older binary that was replaced on disk - restarting into v$(installed_version)"
+    fi
 fi
 
 start_agent
