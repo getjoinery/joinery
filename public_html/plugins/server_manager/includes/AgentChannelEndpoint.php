@@ -33,6 +33,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.6 - credential slots resolve at claim time: the job row keeps the placeholder, the
+ *                credential exists only inside the signed hand-out response
  * @version 1.5 - quiet endpoint: a node says it is going quiet when its agent is switched off,
  *                so deliberate silence stops reading as breakage. Not a leave — the pairing stands
  * @version 1.4 - leave endpoint: the node ends the pairing from its own side (either side can
@@ -490,11 +492,30 @@ class AgentChannelEndpoint {
 			$commands = json_decode($commands, true);
 		}
 
+		// Credential slots resolve HERE, at hand-out — not at build. The job
+		// row at rest carries only the placeholder (__SM_CREDS_<id>__), the
+		// same property the SSH executor's in-memory substitution gives it;
+		// the real credential exists only inside this signed HTTPS response.
+		// A slot that cannot be resolved fails the job visibly — a placeholder
+		// must never reach a node, where it would be refused as a malformed
+		// credential and read as a node-side fault.
+		$params = $commands['params'] ?? null;
+		try {
+			$params = self::resolve_credential_slots($params);
+		} catch (\Throwable $e) {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message',
+				'Credential slot could not be resolved at dispatch: ' . $e->getMessage());
+			$job->set('mjb_completed_time', gmdate('Y-m-d H:i:s'));
+			$job->save();
+			api_success(['job' => null], '', 200);
+		}
+
 		$payload = [
 			'job_id'    => (int)$job->key,
 			'node_id'   => (int)$node->key,
 			'primitive' => (string)($commands['primitive'] ?? ''),
-			'params'    => self::params_as_object($commands['params'] ?? null),
+			'params'    => self::params_as_object($params),
 			'issued_at' => gmdate('c'),
 		];
 
@@ -523,6 +544,37 @@ class AgentChannelEndpoint {
 	 * rather than run. The asymmetry is PHP's, so it is corrected on PHP's side
 	 * of the wire rather than by teaching the node to accept two shapes.
 	 */
+	/**
+	 * Replace credential placeholder values in a primitive job's params with
+	 * base64(json(credentials)) for the named backup target — the same shape
+	 * the agent's SSH-path resolver splices (creds.go), produced from the same
+	 * stored slots. The slot the token names is the only slot consulted: a job
+	 * built against __SM_NODE_CREDS_ never falls back to the main credential,
+	 * so an emptied slot fails visibly rather than running with a more
+	 * powerful credential than intended.
+	 */
+	private static function resolve_credential_slots($params) {
+		if (!is_array($params)) {
+			return $params;
+		}
+		foreach ($params as $key => $value) {
+			if (!is_string($value) || !preg_match('/^__SM_(NODE_)?CREDS_(\d+)__$/', $value, $m)) {
+				continue;
+			}
+			$target = new BackupTarget((int)$m[2], TRUE);
+			if (!$target->key) {
+				throw new Exception('backup target ' . (int)$m[2] . ' does not exist');
+			}
+			$creds = ($m[1] === 'NODE_') ? $target->get_node_credentials() : $target->get_credentials();
+			if (empty($creds)) {
+				throw new Exception('backup target "' . $target->get('bkt_name')
+					. '" has no credentials in the slot this job names');
+			}
+			$params[$key] = base64_encode(json_encode($creds));
+		}
+		return $params;
+	}
+
 	private static function params_as_object($params) {
 		if (!is_array($params) || $params === []) {
 			return new stdClass();
