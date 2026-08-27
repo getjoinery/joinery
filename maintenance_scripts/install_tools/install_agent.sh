@@ -3,7 +3,11 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
-# Version: 2.3 - Also detect a process already running a REPLACED binary
+# Version: 2.4 - The keepalive closes inherited descriptors before launching the
+#                agent. Started from inside an upgrade, it inherited the upgrade's
+#                flock on .upgrade.lock and held it for its whole life, so every
+#                later upgrade on that node was refused as already running.
+#          2.3 - Also detect a process already running a REPLACED binary
 #                (/proc/PID/exe reading as deleted) and restart it. 2.2 stopped the
 #                state arising; this cures a machine already in it.
 #          2.2 - A freshly installed binary forces a restart. "Already running" was
@@ -177,7 +181,18 @@ write_supervise_script() {
     cat > "$SUPERVISE_PATH" <<'SUPERVISE'
 #!/bin/sh
 # joinery-agent cron keepalive: start the agent if it is not running AND this
-# machine is switched on. The marker is read, never the database - the keepalive
+# machine is switched on.
+#
+# Every descriptor above stdio is closed before the agent is launched, and that
+# is not hygiene, it is a bug fix. This script runs from inside an upgrade — the
+# upgrade calls the host installers, which call this — and the upgrade process is
+# holding an flock on the site's .upgrade.lock. A child inherits open descriptors,
+# and an flock belongs to the open file description, so the agent inherits the
+# LOCK. The agent then outlives the upgrade by design, and every later upgrade on
+# that node is refused with "Another upgrade is already running" by a lock whose
+# holder is the agent itself. Observed on two container nodes at 0.8.345; the
+# nodes under systemd were unaffected because systemd starts the agent with its
+# own descriptors. The marker is read, never the database - the keepalive
 # has to be right on a machine whose database is down, which is exactly when a
 # wrong answer would matter.
 #
@@ -191,7 +206,14 @@ if ! pgrep -x joinery-agent >/dev/null 2>&1; then
     set -a
     [ -f /etc/joinery-agent/joinery-agent.env ] && . /etc/joinery-agent/joinery-agent.env
     set +a
-    nohup /usr/local/bin/joinery-agent >> /var/log/joinery-agent.log 2>&1 &
+    for fd_path in /proc/$$/fd/*; do
+        fd_num=${fd_path##*/}
+        case "$fd_num" in
+            0|1|2) continue ;;
+        esac
+        eval "exec ${fd_num}>&-" 2>/dev/null || true
+    done
+    nohup /usr/local/bin/joinery-agent >> /var/log/joinery-agent.log 2>&1 < /dev/null &
 fi
 SUPERVISE
     chmod 755 "$SUPERVISE_PATH"
