@@ -568,6 +568,23 @@
 			copy($sql_source, $core_temp_dir . '/maintenance_scripts/install_tools/joinery-install.sql.gz');
 		}
 
+		// Signed tree manifest (component G): two explicit writes, each with a
+		// root matching what it describes. The staging tree is what ships and is
+		// deleted after the tar; without the second write over the live tree the
+		// publishing plane would be the one machine in the fleet whose own
+		// script-invoking primitives never verify. A manifest that cannot be
+		// written or signed aborts the publish — an archive without one silently
+		// disables script primitives on every node that takes it.
+		try {
+			$manifest_keys = AgentDistPublisher::ensureKeys($full_site_dir . '/config');
+			$staged_manifest = TreeManifestPublisher::write($core_temp_dir, $core_temp_dir, $manifest_keys);
+			publish_output("Core tree manifest signed ({$staged_manifest['files']} files)");
+			TreeManifestPublisher::write($full_site_dir, $full_site_dir, $manifest_keys);
+		} catch (Exception $e) {
+			publish_output("ERROR: core tree manifest failed: " . $e->getMessage());
+			exit(1);
+		}
+
 		// Create core tar.gz archive
 		$tar_cmd = sprintf(
 			'tar -czf %s -C %s . 2>&1',
@@ -717,6 +734,19 @@
 			}
 			$new_state['themes'][$theme_name] = array('version' => $theme_version, 'tree_hash' => $current_hash);
 
+			// Per-artifact signed manifest (component G): written into the LIVE
+			// theme directory after the version decision, so it records the
+			// theme.json bytes that actually ship; the tar below archives the
+			// live directory, so the manifest ships and this box keeps its copy.
+			try {
+				TreeManifestPublisher::write($theme_dir, $full_site_dir, $manifest_keys);
+			} catch (Exception $e) {
+				publish_output("ERROR: tree manifest failed for theme {$theme_name}: " . $e->getMessage());
+				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
+				$upgrade->permanent_delete();
+				exit(1);
+			}
+
 			$theme_archive = $themes_dir . '/' . $theme_name . '-' . $theme_version . '.tar.gz';
 
 			// Create tar.gz with just the theme directory
@@ -810,6 +840,17 @@
 				}
 			}
 			$new_state['plugins'][$plugin_name] = array('version' => $plugin_version, 'tree_hash' => $current_hash);
+
+			// Per-artifact signed manifest (component G) — same shape and same
+			// failure posture as the theme write above.
+			try {
+				TreeManifestPublisher::write($plugin_dir, $full_site_dir, $manifest_keys);
+			} catch (Exception $e) {
+				publish_output("ERROR: tree manifest failed for plugin {$plugin_name}: " . $e->getMessage());
+				publish_output("A release must carry every manifest it promises. Removing the release row for {$version} so this version can be republished once the cause is fixed.");
+				$upgrade->permanent_delete();
+				exit(1);
+			}
 
 			$plugin_archive = $plugins_dir . '/' . $plugin_name . '-' . $plugin_version . '.tar.gz';
 
@@ -1089,6 +1130,23 @@
 			// any .gitignore, at any depth.
 			if (in_array('.git', explode('/', $rel), true)) continue;
 			if (basename($rel) === '.gitignore') continue;
+
+			// The signed release manifest is excluded from the hash but still
+			// SHIPS — the archives tar the whole directory, so exclusion here
+			// costs nothing at delivery.
+			//
+			// Excluding it is not tidiness, it is the only correct option, and
+			// the reason cannot be seen from the code: this hash decides whether
+			// a component's version auto-bumps, and it deliberately strips
+			// `version` from the manifest json so a bump never causes another
+			// bump. The release manifest hashes plugin.json's REAL bytes, version
+			// included — it must, since the agent verifies actual bytes on disk.
+			// So a manifest inside the hashed set would reintroduce exactly the
+			// loop the version-stripping exists to prevent: bump the version,
+			// which changes plugin.json, which changes the manifest, which
+			// changes the tree hash, which bumps the version at the next publish,
+			// forever.
+			if (basename($rel) === 'RELEASE_MANIFEST' || basename($rel) === 'RELEASE_MANIFEST.sig') continue;
 
 			if ($manifest_filename !== null && $rel === $manifest_filename) {
 				$decoded = json_decode(file_get_contents($abs), true);

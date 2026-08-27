@@ -63,6 +63,9 @@ CRON_FILE="/etc/cron.d/joinery-agent"
 LOG_FILE="/var/log/joinery-agent.log"
 ENV_DIR="/etc/joinery-agent"
 ENV_FILE="${ENV_DIR}/joinery-agent.env"
+# The projected switch. The setting lives in the site database; this file is its
+# one-way shadow, so the keepalive and the agent can honour it without one.
+MARKER_FILE="${ENV_DIR}/enabled"
 
 say() { echo "agent installer: $*"; }
 
@@ -122,6 +125,13 @@ case "$AGENT_ENABLED" in
     *)             AGENT_ENABLED=0 ;;
 esac
 
+# Project it. Root moments are the cover for a machine whose agent is not running
+# to project for itself - a container that starts with the switch off must not
+# have a keepalive that starts the agent anyway.
+mkdir -p "$ENV_DIR"
+printf '%s\n' "$AGENT_ENABLED" > "$MARKER_FILE"
+chmod 644 "$MARKER_FILE"
+
 # Supervision mode: systemd where it is actually running (PID 1), cron
 # otherwise (Docker containers, minimal hosts).
 if command -v systemctl >/dev/null 2>&1 && [ -d /run/systemd/system ]; then
@@ -158,7 +168,17 @@ write_env_file() {
 write_supervise_script() {
     cat > "$SUPERVISE_PATH" <<'SUPERVISE'
 #!/bin/sh
-# joinery-agent cron keepalive: start the agent if it is not running.
+# joinery-agent cron keepalive: start the agent if it is not running AND this
+# machine is switched on. The marker is read, never the database - the keepalive
+# has to be right on a machine whose database is down, which is exactly when a
+# wrong answer would matter.
+#
+# A missing marker reads as on: an agent installed before the marker existed is
+# running legitimately, and a keepalive that refused to start it would switch off
+# working agents at upgrade.
+if [ -f /etc/joinery-agent/enabled ] && [ "$(cat /etc/joinery-agent/enabled 2>/dev/null)" != "1" ]; then
+    exit 0
+fi
 if ! pgrep -x joinery-agent >/dev/null 2>&1; then
     set -a
     [ -f /etc/joinery-agent/joinery-agent.env ] && . /etc/joinery-agent/joinery-agent.env

@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.5 - switched-off nodes read as switched off, not as broken: the going-quiet stamp is
+ *                compared against the last poll rather than cleared, so a returning node needs no write
  * @version 1.4 - turn the agent on for a node from here, over the SSH this plane already has:
  *                the node is administered from both ends and the fleet should not need a visit each
  * @version 1.3 - the routing checkbox is gone: connected = routed (hard cutover, owner-set)
@@ -96,9 +98,27 @@
 			   . '</span>';
 		}
 		echo '</div>';
+
+		// Silence has two meanings and only the node can tell them apart. A node
+		// whose agent was switched off says so before it stops; one that broke
+		// cannot. Comparing the two stamps rather than clearing either keeps a
+		// node that came back looking alive with no extra write.
+		$quiet_time = $node->get('mgn_agent_quiet_time');
+		$switched_off = $quiet_time && (!$node->get('mgn_agent_last_poll')
+			|| $node->get('mgn_agent_last_poll') <= $quiet_time);
+
+		if ($switched_off) {
+			echo '<div class="alert alert-secondary py-2 small mb-2">'
+			   . '<strong>Switched off by the operator</strong> at ' . htmlspecialchars($node->get_local('mgn_agent_quiet_time'))
+			   . '. The agent told this management node before it stopped, so the silence since then is expected. '
+			   . 'The pairing still stands — it comes back when the agent is switched on there.</div>';
+		}
+
 		echo '<div class="mb-2 text-muted small">Last poll: '
 		   . ($agent_last_poll ? htmlspecialchars($agent_last_poll) : 'never — the agent has not reached this management node since it was connected')
-		   . '. A poll is how this management node sees the node is alive; nothing has to reach in.</div>';
+		   . '. A poll is how this management node sees the node is alive; nothing has to reach in.'
+		   . ($switched_off ? '' : ' A node that stops polling without saying it was switched off is unreachable — down, or broken.')
+		   . '</div>';
 	} else {
 		echo '<div class="mb-2"><span class="badge bg-secondary">Not connected</span> <span class="text-muted small ms-2">This node\'s work routes over the API and SSH.</span></div>';
 

@@ -6,7 +6,7 @@
  * job at a time, and posts the result back (specs/agent_on_node_architecture.md
  * §3.1, component D).
  *
- * Five endpoints, all POST, all under /api/v1/agent/:
+ * Six endpoints, all POST, all under /api/v1/agent/:
  *   join         node-initiated enrollment (Phase 1.5, decision A6): the node
  *                hands over the PUBLIC half of a keypair it generated and
  *                kept, plus a claimed name. NO secret exists in this exchange
@@ -33,6 +33,8 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.5 - quiet endpoint: a node says it is going quiet when its agent is switched off,
+ *                so deliberate silence stops reading as breakage. Not a leave — the pairing stands
  * @version 1.4 - leave endpoint: the node ends the pairing from its own side (either side can
  *                disconnect); forgetAgent() is the one place both endings converge
  * @version 1.3 - a connected agent claims jobs unconditionally: the per-node routing flag is gone
@@ -87,7 +89,7 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave'], true)) {
+		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet'], true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
@@ -108,6 +110,9 @@ class AgentChannelEndpoint {
 				break;
 			case 'leave':
 				self::handle_leave($body);
+				break;
+			case 'quiet':
+				self::handle_quiet($body);
 				break;
 		}
 		exit;
@@ -682,6 +687,48 @@ class AgentChannelEndpoint {
 	 * plane-side Disconnect action and the node-initiated leave do exactly
 	 * this, so they cannot drift apart.
 	 */
+	/**
+	 * A node saying it is about to stop, because an operator switched its agent
+	 * off. Not a leave: the pairing stands, the key stays, and the node is
+	 * expected back — this only stops silence from being read as breakage.
+	 *
+	 * Without it a switched-off node and a dead one look identical from here:
+	 * both simply stop polling. The dashboard needs to tell an operator which
+	 * one they are looking at, and only the node knows.
+	 *
+	 * The acknowledgement matters as much as the record. The agent stops whether
+	 * or not this endpoint answers, but it keeps trying inside a bounded window
+	 * and replays later if it never lands — so what it needs back is a definite
+	 * "recorded", not merely a response from something at this address.
+	 */
+	private static function handle_quiet($body) {
+		$node = self::authenticate_node('/api/v1/agent/quiet', self::body_hash());
+		$in = self::validate($body, [
+			'node_id'    => ['type' => 'int', 'required' => true],
+			'quiet_time' => ['type' => 'string', 'max' => 32],
+		]);
+		if ((int)$in['node_id'] !== (int)$node->key) {
+			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
+		}
+
+		// The node's own clock, because the node is the one that knows when it
+		// stopped — a replayed goodbye can arrive long after the fact, and
+		// stamping it on arrival would date the silence to the wrong moment.
+		// Bounded to something sane so a bad clock cannot park a node's status
+		// in the future forever.
+		$quiet_time = trim((string)($in['quiet_time'] ?? ''));
+		$now = gmdate('Y-m-d H:i:s');
+		if ($quiet_time === '' || !preg_match('/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/', $quiet_time)
+			|| $quiet_time > $now) {
+			$quiet_time = $now;
+		}
+
+		$node->set('mgn_agent_quiet_time', $quiet_time);
+		$node->save();
+
+		api_success(['acknowledged' => true, 'quiet_time' => $quiet_time], '', 200);
+	}
+
 	public static function forgetAgent($node) {
 		$node->set('mgn_agent_public_key', null);
 		$node->set('mgn_agent_paired_time', null);

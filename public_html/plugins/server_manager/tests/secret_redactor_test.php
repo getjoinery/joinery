@@ -60,6 +60,32 @@ check(strpos($out, 'PUB123') === false, 'JSON access_key value masked');
 check(strpos($out, '"region":"eu"') !== false, 'JSON region survives');
 
 // ---------------------------------------------------------------------------
+section('backup job credential (credentials_b64)');
+// ---------------------------------------------------------------------------
+// The storage target's credential, as it travels in a backup job — in the SSH
+// path's config heredoc and in a backup_run primitive's parameters. Nothing
+// renders either today: the job page shows a step's label and type, never its
+// command, and output and results are redacted where they are displayed. That
+// makes this the guard for everywhere redaction is the ONLY defence — a support
+// bundle, a database export, an error path that dumps the payload, or a future
+// job view that shows one field more than today's does.
+
+$job_config = '{"target_name":"b2-main","provider":"b2","bucket":"joinery-backups",'
+	. '"credentials_b64":"' . $SECRET . '","slug":"jeremytunnell","type":"project"}';
+$out = SmSecretRedactor::redact($job_config);
+check(strpos($out, $SECRET) === false, 'credentials_b64 value masked');
+check(strpos($out, '"slug":"jeremytunnell"') !== false, 'slug (non-secret) survives');
+check(strpos($out, '"bucket":"joinery-backups"') !== false, 'bucket (non-secret) survives');
+
+// The bare key too, and specifically alongside the suffixed one: 'credentials'
+// is a prefix of 'credentials_b64', so an alternation in the wrong order can
+// match the short name and then fail on the closing quote.
+$both = '{"credentials":"' . $SECRET . '","credentials_b64":"' . $SECRET . '"}';
+$out  = SmSecretRedactor::redact($both);
+check(substr_count($out, $MASK) === 2, 'both credential spellings masked in one payload', $out);
+check(strpos($out, $SECRET) === false, 'neither value survives');
+
+// ---------------------------------------------------------------------------
 section('node-API header shape ("secret-key: value")');
 // ---------------------------------------------------------------------------
 
