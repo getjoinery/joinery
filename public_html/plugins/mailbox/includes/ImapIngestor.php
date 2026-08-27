@@ -35,6 +35,18 @@
  * already classified it, so no auth rule runs. This gives the reader's Spam view
  * the same meaning for IMAP-polled mail as for locally-received mail.
  *
+ * A message the source still holds as a DRAFT is never ingested (any folder).
+ * Gmail's [Gmail]/All Mail carries drafts alongside real mail, and every autosave
+ * replaces the draft with a fresh UID, so a coverage pass met each half-written
+ * revision as new mail and stored it as an incoming message from yourself — one
+ * per poll for as long as the compose window stayed open. The \Draft flag is the
+ * source's own word for "not mail yet"; Joinery keeps its own drafts as
+ * iem_direction='draft' rows and never wants the source's.
+ *
+ * @version 1.17
+ * @changelog 1.17 - skip \Draft-flagged messages at ingest, counted in the run
+ *   record's own bucket (specs/bugfix_imap_draft_ingest.md). fetchWindow asks
+ *   for FLAGS so the decision can be made without a second round trip.
  * @version 1.16
  * @changelog 1.16 - inline images are adopted into Files at ingest
  *   (specs/bugfix_sealed_inline_images.md): the network half fetches each
@@ -498,6 +510,7 @@ class ImapIngestor {
 		}
 
 		$totalStored = 0; $totalDedup = 0; $totalSeen = 0; $totalFailed = 0; $totalOutOfScope = 0;
+		$totalSourceDraft = 0;
 		$parts = array(); $failedDetail = array();
 		foreach ($folders as $folder) {
 			try {
@@ -505,6 +518,7 @@ class ImapIngestor {
 				$totalStored += $res['stored']; $totalDedup += $res['dedup']; $totalSeen += $res['seen'];
 				$totalFailed += $res['failed'];
 				$totalOutOfScope += $res['out_of_scope'];
+				$totalSourceDraft += intval($res['source_draft'] ?? 0);
 				$failedDetail = array_merge($failedDetail, $res['failed_detail']);
 				$parts[] = $res['status'];
 			} catch (Throwable $e) {
@@ -520,10 +534,12 @@ class ImapIngestor {
 		$statusMsg = 'Ingested ' . count($folders) . ' folder(s): ' . $totalStored . ' stored, '
 			. $totalDedup . ' duplicate, ' . $totalFailed . ' failed'
 			. ($totalOutOfScope ? ', ' . $totalOutOfScope . ' out of scope' : '')
+			. ($totalSourceDraft ? ', ' . $totalSourceDraft . ' source draft' : '')
 			. '. ' . implode(' | ', $parts);
 		$this->account->recordStatus($statusMsg);
 		return array('stored' => $totalStored, 'dedup' => $totalDedup, 'seen' => $totalSeen,
 			'failed' => $totalFailed, 'out_of_scope' => $totalOutOfScope,
+			'source_draft' => $totalSourceDraft,
 			'failed_detail' => $failedDetail, 'status' => $statusMsg);
 	}
 
@@ -594,6 +610,7 @@ class ImapIngestor {
 				$folder->prepare();
 				$folder->save();
 				return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
+					'source_draft' => 0,
 					'failed_detail' => array(), 'status' => $folderName . ': seeded cursor');
 			}
 			$folder->set('iif_last_seen_uid', $lastSeenUid);
@@ -605,6 +622,7 @@ class ImapIngestor {
 			$folder->prepare();
 			$folder->save();
 			return array('stored' => 0, 'dedup' => 0, 'seen' => 0, 'failed' => 0, 'out_of_scope' => 0,
+				'source_draft' => 0,
 				'failed_detail' => array(), 'status' => $folderName . ': no new');
 		}
 
@@ -627,7 +645,8 @@ class ImapIngestor {
 			? (string)$this->account->importCutoffUtc() : '';
 		$seedHighUid = intval($folder->get('iif_seed_high_uid'));
 
-		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $outOfScope = 0; $failedDetail = array();
+		$stored = 0; $dedup = 0; $seen = 0; $failed = 0; $outOfScope = 0; $sourceDraft = 0;
+		$failedDetail = array();
 		$maxUid = $windowEnd;
 		foreach ($uids as $uid) {
 			$seen++;
@@ -644,6 +663,16 @@ class ImapIngestor {
 
 			if ($this->outOfScopeForBackfill($uid, $data, $scopeCutoffUtc, $seedHighUid)) {
 				$outOfScope++;
+				continue;
+			}
+
+			// A draft the source has not sent is not mail. Skipping advances the
+			// cursor past it, which is right: the next autosave replaces it with a
+			// new UID, and if it is ever sent the sent copy arrives as its own
+			// message. A first-class counter, never a silent skip, so the run
+			// record's reconciliation still balances.
+			if ($this->isSourceDraft($data)) {
+				$sourceDraft++;
 				continue;
 			}
 
@@ -664,9 +693,11 @@ class ImapIngestor {
 		$folder->save();
 
 		return array('stored' => $stored, 'dedup' => $dedup, 'seen' => $seen,
-			'failed' => $failed, 'out_of_scope' => $outOfScope, 'failed_detail' => $failedDetail,
+			'failed' => $failed, 'out_of_scope' => $outOfScope, 'source_draft' => $sourceDraft,
+			'failed_detail' => $failedDetail,
 			'status' => $folderName . ': ' . $stored . ' stored, ' . $dedup . ' dup, ' . $failed . ' failed'
-				. ($outOfScope ? ', ' . $outOfScope . ' out of scope' : ''));
+				. ($outOfScope ? ', ' . $outOfScope . ' out of scope' : '')
+				. ($sourceDraft ? ', ' . $sourceDraft . ' source draft' : ''));
 	}
 
 	// ── Run record ─────────────────────────────────────────────────────────
@@ -1006,6 +1037,32 @@ class ImapIngestor {
 	}
 
 	/**
+	 * True when the source still holds this message as a draft (\Draft flag).
+	 *
+	 * Folder-agnostic on purpose. The Drafts special-use folder is untracked by
+	 * default, but a draft is not confined to it: Gmail files every draft in
+	 * [Gmail]/All Mail too, and a user's label can hold one as well. The flag
+	 * travels with the message, so asking it is the only test that covers every
+	 * folder a draft can appear in.
+	 *
+	 * Fails toward ingesting: a server that returns no flags leaves the message
+	 * ordinary mail, because losing real mail is worse than storing a draft.
+	 */
+	private function isSourceDraft($data): bool {
+		try {
+			$flags = $data->getFlags();
+		} catch (Throwable $e) {
+			return false;
+		}
+		foreach ((array)$flags as $flag) {
+			if (strtolower(ltrim((string)$flag, '\\')) === 'draft') {
+				return true;
+			}
+		}
+		return false;
+	}
+
+	/**
 	 * The next UID window at/above $lastSeenUid that actually holds messages,
 	 * as [cursor floor, window end, sorted uids, metaFetch].
 	 *
@@ -1051,6 +1108,7 @@ class ImapIngestor {
 		$query->envelope();
 		$query->size();
 		$query->imapDate(); // INTERNALDATE, for the day-window scope guard
+		$query->flags();    // \Draft, so a half-written source draft is never ingested
 		$query->headerText(array('peek' => true));
 		return $client->fetch($folder, $query, array(
 			'ids' => new Horde_Imap_Client_Ids($startUid . ':' . $endUid),

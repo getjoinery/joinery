@@ -23,7 +23,9 @@
  *
  * Run: php plugins/mailbox/tests/imap_poller_test.php  (requires schema synced).
  *
- * @version 1.1
+ * @version 1.2
+ * @changelog 1.2 - the run-record note now carries the source_draft bucket
+ *   (specs/bugfix_imap_draft_ingest.md)
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -256,7 +258,7 @@ class ImapPollerTest {
 			'failed' => 0, 'failed_detail' => array()));
 		$this->ok($s['success'] === true, 'fully reconciled run is successful');
 		$this->ok($s['unaccounted'] === 0, 'clean run has nothing unaccounted');
-		$this->ok(strpos($s['note'], 'seen 10, stored 8, duplicates 2, out of scope 0, failed 0.') !== false,
+		$this->ok(strpos($s['note'], 'seen 10, stored 8, duplicates 2, out of scope 0, source drafts 0, failed 0.') !== false,
 			'note carries the counts');
 
 		// Repeated failures collapse to one line with a count.
