@@ -5,6 +5,10 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.45 - the three restore operations gain primitive builders so the plane can address
+ *                 what the agent ships, and a destructive-class gate keeps them OFF the primitive
+ *                 transport: node_can_dispatch_destructive() is false until a node-verified
+ *                 approval verifier exists, so live restore stays on SSH
  * @version 1.44 - relay provision pre-flight tars bin/ (the prebuilt sealer) and drops the Go
  *                 source, with an ls guard so a missing binary fails on the plane not the relay
  * @version 1.43 - has_primitive asks the NODE what it can do: the vocabulary an agent reports on
@@ -172,12 +176,69 @@ class JobCommandBuilder {
 	 * absent here is in every agent the fleet has ever paired.
 	 */
 	const PRIMITIVE_MIN_AGENT_VERSION = [
-		'apply_update' => '1.10.0',
+		'apply_update'     => '1.10.0',
+		// Recorded for uniformity rather than for use: the destructive gate
+		// below keeps these off the primitive transport entirely, so no node's
+		// version is ever consulted for them. When the gate opens, this is
+		// already the right floor.
+		'restore_database' => '1.12.0',
+		'restore_project'  => '1.12.0',
+		'restore_chain'    => '1.12.0',
 	];
+
+	/**
+	 * Operations the agent registers as ClassDestructive.
+	 *
+	 * Kept as a plane-side list rather than read from the agent because it is a
+	 * ROUTING decision, and routing has to be answerable on a control plane
+	 * with no agent source beside it. The agent's own class declaration is the
+	 * enforcement — a destructive primitive is refused at its compiled ceiling
+	 * whatever this plane believes — so the two are not a duplicated authority:
+	 * this list decides what the plane will not ask for, and the agent decides
+	 * what it will not do.
+	 */
+	const DESTRUCTIVE_PRIMITIVES = ['restore_database', 'restore_project', 'restore_chain'];
+
+	/**
+	 * May this node be sent a destructive primitive job?
+	 *
+	 * FALSE, UNCONDITIONALLY, AND THIS IS THE ONE PLACE THAT CHANGES.
+	 *
+	 * A destructive primitive is authorized by a signature the NODE verifies,
+	 * over a challenge the NODE issued — the plane relays it and is never the
+	 * gate (specs/restore_dispatch_approval_mechanism.md). Until that verifier
+	 * exists, the agent refuses every destructive job at a compiled ceiling, so
+	 * a plane that routed restore to the primitive transport would be trading a
+	 * working SSH restore for a guaranteed refusal — and it would find that out
+	 * during a restore, which is the worst moment on the list to discover a
+	 * transport does not work.
+	 *
+	 * So restore keeps travelling by SSH. The builders below exist, are tested,
+	 * and are not reachable; flipping this method is what makes them reachable,
+	 * and nothing else in this file has to change for that to happen.
+	 *
+	 * @param ManagedNode $node The node a job would be dispatched to. Unused
+	 *   while this is unconditional — it is in the signature because the
+	 *   approval round's answer is per-node: a node that has an approving
+	 *   public key stored root-owned can be asked, and one that has not, cannot.
+	 */
+	public static function node_can_dispatch_destructive($node) {
+		return false;
+	}
 
 	public static function has_primitive($node, $operation) {
 		if (!self::has_agent_channel($node)
 				|| !method_exists(static::class, "build_{$operation}_primitive")) {
+			return false;
+		}
+
+		// The destructive gate comes FIRST, ahead of every capability question
+		// below it. Whether the node ships the primitive, and whether its
+		// version is new enough, are both irrelevant while nothing may authorize
+		// the job: a node that ships restore_database and would refuse it is
+		// still a node this plane must not dispatch restore to.
+		if (in_array($operation, self::DESTRUCTIVE_PRIMITIVES, true)
+				&& !self::node_can_dispatch_destructive($node)) {
 			return false;
 		}
 
@@ -1006,6 +1067,9 @@ class JobCommandBuilder {
 	 *   cloud_path - provider path if file exists in cloud (may be null)
 	 */
 	public static function build_restore_database($node, $params) {
+		if (self::has_primitive($node, 'restore_database')) {
+			return self::build_restore_database_primitive($node, $params);
+		}
 		$creds      = self::get_db_credentials_script($node);
 		$scripts    = self::get_scripts_path($node);
 		$sudo       = self::sudo_prefix($node);
@@ -1074,6 +1138,150 @@ class JobCommandBuilder {
 	}
 
 	/**
+	 * The one artifact name a restore primitive may carry, checked here.
+	 *
+	 * A NAME, NEVER A PATH — the same fence upload_backup and delete_backup
+	 * stand behind, and the reason the primitive transport is worth crossing to
+	 * at all. Under SSH this plane composed an absolute path and the node ran
+	 * it, which is read-and-overwrite-anything wearing a restore's clothes. The
+	 * node resolves this name inside its own compiled-in backup directory, so
+	 * the shape of the dangerous request no longer exists.
+	 *
+	 * It REFUSES a path rather than quietly taking the basename. A caller that
+	 * sends /backups/x.sql.gz means something by the directory part, and the
+	 * two readings — "that file" and "whatever x.sql.gz is on this node" —
+	 * are not reliably the same file. Silently discarding it would restore the
+	 * second while the operator believed the first.
+	 */
+	private static function restore_artifact_name($params) {
+		$name = trim((string)($params['filename'] ?? ''));
+		if ($name === '') {
+			throw new Exception('No backup filename given to restore.');
+		}
+		// The agent's own backupFileName pattern and length, deliberately
+		// duplicated rather than approximated. A plane rule that is merely
+		// STRICTER would still be wrong: it would refuse jobs the node would
+		// have run, from a message that blames the wrong side. Requiring an
+		// alphanumeric first character is what excludes "." and ".." along with
+		// every hidden file; excluding the separators is what excludes a path.
+		if (strlen($name) > 255 || !preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name)) {
+			throw new Exception(
+				"A restore names a backup, not a path: '{$name}' cannot be sent to a node. "
+				. 'The node resolves the name inside its own backup directory.');
+		}
+		return $name;
+	}
+
+	/**
+	 * Whose backup directory a restore looks in. REQUIRED by the agent for
+	 * database and project restores, and not defaulted there for a reason worth
+	 * repeating here: the two profiles keep separate directories, an archive of
+	 * the same name exists in both often enough, and a guess would eventually
+	 * restore the control plane's own backup over a site.
+	 *
+	 * This plane's own backups are manager-profile, which is why that is the
+	 * answer when a caller does not say — the same default upload_backup and
+	 * delete_backup already send.
+	 */
+	private static function restore_profile($params) {
+		return in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
+			? $params['profile'] : 'manager';
+	}
+
+	/**
+	 * The project a restore lands in: one directory name under the web root's
+	 * parent, bound to the agent's own project_name pattern.
+	 */
+	private static function restore_project_name($node) {
+		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
+		if ($web_root === '') {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' has no recorded web root, so there is no project to restore into.");
+		}
+		$name = basename(dirname($web_root));
+		if (strlen($name) > 128 || !preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name)) {
+			throw new Exception("Cannot derive a usable project name from web root '{$web_root}'.");
+		}
+		return $name;
+	}
+
+	/**
+	 * Primitive path: the node restores one of its own database backups.
+	 *
+	 * NOT REACHABLE IN THIS BUILD. restore_database is ClassDestructive, and
+	 * node_can_dispatch_destructive() is false, so has_primitive() is false and
+	 * build_restore_database() above always takes the SSH path. This exists so
+	 * the plane can address what the agent ships (primitive_transport_parity)
+	 * and so the approval round has a builder to switch on rather than a
+	 * builder to write.
+	 *
+	 * TWO THINGS THE PLANE STOPS BEING ABLE TO SAY, both deliberate:
+	 *
+	 * - A PATH. See restore_artifact_name(). The node's own backup directory is
+	 *   compiled in; a filename is the whole of what crosses.
+	 * - A KEY. The SSH path unseals a decryption key into a temp file on the
+	 *   node and passes --key-file. The primitive sends nothing of the sort:
+	 *   the node decrypts with its own key on its own disk, and a job carrying
+	 *   key material is refused. This is A4 exfiltration doctrine applied to
+	 *   the write side — a plane that cannot hand a node a key cannot use a
+	 *   node to open something the node could not open by itself.
+	 *
+	 * db_name and db_user are sent ONLY when a caller supplies them, and no
+	 * caller does. THIS PLANE HOLDS NO RECORD OF A NODE'S DATABASE NAME: there
+	 * is no mgn_ column for it, and the SSH path greps it out of the node's own
+	 * Globalvars_site.php at run time, which is the only place it exists. So the
+	 * node is the sole party that knows, and composing a value here to satisfy a
+	 * required parameter would be this plane asserting a fact it does not have —
+	 * against the wrong node, that asserted fact names somebody else's database.
+	 * Absent, the agent resolves both from the config it already reads.
+	 *
+	 * The parameter stays in the vocabulary because an operator restoring into a
+	 * deliberately different database is a real case and the node cannot infer
+	 * it. It is optional, not defaulted.
+	 *
+	 * WHAT THIS PATH CANNOT DO YET, and must before the gate opens: a cloud-only
+	 * backup. The SSH path downloads the object to /backups first, using bucket
+	 * credentials; the primitive contract carries no bucket, key or credential,
+	 * by design, so the file must already be on the node. Restoring a cloud-only
+	 * backup over the channel needs upload_backup's mirror image, and that is a
+	 * separate primitive, not a parameter added here.
+	 */
+	public static function build_restore_database_primitive($node, $params) {
+		$primitive_params = [
+			'file' => self::restore_artifact_name($params),
+			// SENT EXPLICITLY, not left to the node's default. The agent treats
+			// an absent profile as the site's own directory — the backup base
+			// itself — while a manager profile lives in manager/ beneath it, and
+			// THIS PLANE'S OWN BACKUPS ARE MANAGER-PROFILE. upload_backup and
+			// delete_backup already default the same way for the same reason. A
+			// silent disagreement about which of two directories a name is
+			// resolved in is how a restore reads "no such backup" for a file the
+			// operator is looking at, or finds a same-named one that is not it.
+			'profile' => self::restore_profile($params),
+		];
+
+		// The agent's patterns, matched exactly. db_name is a PostgreSQL
+		// identifier with no dash; db_user allows one. Both are bounded at 63,
+		// which is PostgreSQL's own identifier limit.
+		$patterns = [
+			'db_name' => '/^[A-Za-z_][A-Za-z0-9_]*$/',
+			'db_user' => '/^[A-Za-z_][A-Za-z0-9_-]*$/',
+		];
+		foreach ($patterns as $key => $pattern) {
+			$value = trim((string)($params[$key] ?? ''));
+			if ($value === '') {
+				continue;
+			}
+			if (strlen($value) > 63 || !preg_match($pattern, $value)) {
+				throw new Exception("'{$value}' is not a usable {$key} for a restore.");
+			}
+			$primitive_params[$key] = $value;
+		}
+
+		return ['primitive' => 'restore_database', 'params' => $primitive_params];
+	}
+
+	/**
 	 * Restore a full project backup (.tar.gz) onto an existing node.
 	 *
 	 * $params:
@@ -1091,6 +1299,9 @@ class JobCommandBuilder {
 	 * correct behaviour something you had to know to ask for.
 	 */
 	public static function build_restore_project($node, $params) {
+		if (self::has_primitive($node, 'restore_project')) {
+			return self::build_restore_project_primitive($node, $params);
+		}
 		$local_path = $params['local_path'] ?? null;
 		$cloud_path = $params['cloud_path'] ?? null;
 		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
@@ -1198,6 +1409,43 @@ class JobCommandBuilder {
 		$steps[] = self::step_verify_served($node, $domain);
 
 		return $steps;
+	}
+
+	/**
+	 * Primitive path: the node restores one of its own project archives.
+	 *
+	 * NOT REACHABLE IN THIS BUILD — see build_restore_database_primitive() for
+	 * why, and node_can_dispatch_destructive() for the single place that
+	 * changes.
+	 *
+	 * `force` is always true and is not a caller's choice. It is what makes
+	 * restore_project.sh non-interactive, and a job dispatched to an agent has
+	 * no terminal to answer a prompt on: an unforced restore over the channel
+	 * would not ask anybody anything, it would hang until the primitive's
+	 * deadline killed it.
+	 *
+	 * NO DOMAIN CROSSES, AND ITS ABSENCE IS THE POINT. The SSH path requires
+	 * one because it can move a site: restore_domain() refuses to infer, since a
+	 * rebuild keeps the site's own domain while a rehearsal must not claim it.
+	 * The primitive answers a narrower question — restore this node's own backup
+	 * onto itself — and restore_project.sh defaults to the machine's own
+	 * configured domain when --domain is absent. So the node keeps its own
+	 * identity and a compromised plane cannot redirect a restore onto a domain
+	 * of its choosing. Moving a site to a different name is install_node's job,
+	 * not this one's. This is why restore_domain() is not called here: there is
+	 * nothing to validate, and validating a value that never crosses would read
+	 * like it did.
+	 *
+	 * Cloud-only archives have the same gap as restore_database: no bucket, no
+	 * key, no credential crosses, so the file must already be on the node.
+	 */
+	public static function build_restore_project_primitive($node, $params) {
+		return ['primitive' => 'restore_project', 'params' => [
+			'project_name' => self::restore_project_name($node),
+			'file'         => self::restore_artifact_name($params),
+			'profile'      => self::restore_profile($params),
+			'force'        => true,
+		]];
 	}
 
 	/**
@@ -1364,6 +1612,9 @@ class JobCommandBuilder {
 	 *   skip_database - bool
 	 */
 	public static function build_restore_chain($node, $params) {
+		if (self::has_primitive($node, 'restore_chain')) {
+			return self::build_restore_chain_primitive($node, $params);
+		}
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
 		$chain_id = trim((string)($params['chain_id'] ?? ''));
@@ -1506,6 +1757,86 @@ class JobCommandBuilder {
 			'teardown' => true, 'continue_on_error' => true, 'timeout' => 300];
 
 		return $steps;
+	}
+
+	/**
+	 * Primitive path: the node restores one of its own backup chains.
+	 *
+	 * NOT REACHABLE IN THIS BUILD — see build_restore_database_primitive() for
+	 * why, and node_can_dispatch_destructive() for the single place that
+	 * changes.
+	 *
+	 * The chain is named, never located. `chain_id` is checked against the same
+	 * pattern the SSH path checks it against, and the node resolves it inside
+	 * its own chain store — so the plane cannot name a bucket, a prefix or a
+	 * directory, and the object layout stops being a thing two implementations
+	 * both compute.
+	 *
+	 * NO RECOVERY KEY CROSSES, which is the sharpest difference from the SSH
+	 * path. That path fetches the chain manifest and has the node open the
+	 * sealed data key with its OWN site key, refusing when the chain belongs to
+	 * a different machine — the plane's recovery private key never travels
+	 * because it is the key of last resort for a machine that no longer exists,
+	 * and a job record holding it would be a copy of it in every job table. The
+	 * primitive keeps exactly that property by having no parameter that could
+	 * carry it: recovery from the plane's key stays a human at a shell.
+	 *
+	 * No domain crosses, for the reason set out in
+	 * build_restore_project_primitive(): the script defaults to the machine's
+	 * own configured domain, so a node restoring its own chain keeps its own
+	 * identity and the plane has no way to point a restore at another name.
+	 *
+	 * THE ARTIFACTS MUST ALREADY BE STAGED. Under SSH this plane composes six
+	 * steps around restore_chain.sh — workspace, manifest fetch, envelope open,
+	 * artifact download, pre-restore dump, restore — and one ScriptSpec starts
+	 * one program. The primitive therefore resolves the artifact directory and
+	 * the chain key at fixed node-side paths and refuses legibly when they are
+	 * not there. Staging them (a node-side job script, and the bucket-read
+	 * credential question that artifact download raises) belongs to
+	 * specs/restore_dispatch_approval_mechanism.md, and this path cannot be
+	 * dispatched before that lands anyway.
+	 *
+	 * seq and skip_database are sent only when they say something. An optional
+	 * key that is always present as its own default is a value the node has to
+	 * interpret and a reader has to check — "restore the whole chain" is what
+	 * an absent seq means, and it means it more clearly by being absent.
+	 */
+	public static function build_restore_chain_primitive($node, $params) {
+		$chain_id = trim((string)($params['chain_id'] ?? ''));
+		if ($chain_id === '' || strlen($chain_id) > 64 || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
+			throw new Exception('A chain restore needs the chain id (for example chain-20260807_231507).');
+		}
+
+		// normalize('') means the SITE profile, a different shelf — so an unset
+		// parameter defaults to manager here rather than falling through to it,
+		// exactly as the SSH path does.
+		// NO PROFILE. The SSH path needs one to compose the bucket key
+		// ({prefix}/{slug}/{profile}/{chain_id}), and the node needs none: it
+		// resolves the chain inside its own store, where the staged artifact
+		// directory is named by the chain id alone. A parameter the node would
+		// ignore is a lie the sender believes, and the agent refuses undeclared
+		// keys outright — so sending it would not be harmlessly redundant, it
+		// would be a refusal.
+		$primitive_params = [
+			'project'  => self::restore_project_name($node),
+			'chain_id' => $chain_id,
+		];
+
+		if (isset($params['seq']) && $params['seq'] !== '') {
+			$seq = (int)$params['seq'];
+			// The agent's own bounds. Out of range is refused here so the
+			// operator sees it, rather than travelling to a node to be refused
+			// there — a refusal on the wire reads as a node problem.
+			if ($seq < 0 || $seq > 100000) {
+				throw new Exception('A chain run number must be between 0 and 100000.');
+			}
+			$primitive_params['seq'] = $seq;
+		}
+		if (!empty($params['skip_database'])) {
+			$primitive_params['skip_database'] = true;
+		}
+
+		return ['primitive' => 'restore_chain', 'params' => $primitive_params];
 	}
 
 	/**

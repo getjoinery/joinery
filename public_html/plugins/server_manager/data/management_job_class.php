@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.10 - claim budgets for the three restore primitives, set before anything can
+ *                 dispatch them: the plane must never give up on a restore the node is still
+ *                 running, and a restore is the worst job to hand out twice
  * @version 1.9 - a claim budget for apply_update, which works for up to an hour on the node
  * @version 1.8 - activeOrRecentForNode: the dedupe test for work the plane queues on its own, so a
  *                reconciler that notices a condition fleet-wide queues one job per node, not per notice
@@ -150,6 +153,22 @@ class ManagementJob extends SystemBase {
 		// start a second upgrade on a node mid-deploy, which is the worst
 		// moment on the list to do it twice.
 		'apply_update'          => 4200,
+		// The three restores, budgeted before they are dispatchable
+		// (specs/restore_over_agent_primitives.md). Deliberately generous:
+		// the safety property is one-directional — a plane budget longer than
+		// the node's own deadline only delays recovery from a genuine crash,
+		// while a shorter one requeues a restore that is still running and
+		// starts a SECOND restore over the first, which is the one job in this
+		// vocabulary where doing it twice concurrently destroys the thing it
+		// was recovering. Sized above the SSH path's own step timeouts (3600
+		// for a database or project, 7200 for a chain's restore step) so the
+		// agent's declared Timeout has room underneath whatever it lands on.
+		// The agent declares 70m for restore_database; this is that plus room to
+		// post the result, not the same number — a budget equal to the node's
+		// deadline requeues a job whose result is still in flight.
+		'restore_database'      => 4500,  // 70m + slack
+		'restore_project'       => 8100,  // 2h15m
+		'restore_chain'         => 15720, // 4h20m + slack — a chain restore replays every run
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */

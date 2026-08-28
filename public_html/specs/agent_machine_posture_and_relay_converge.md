@@ -28,7 +28,7 @@ has never run against a real plane. R3–R5 DEFERRED.**
 The architecture spec (`specs/implemented/agent_on_node_architecture.md`, whose
 A13 records the siteless decision) is implemented and frozen. This spec owns
 the remainder of the transport migration; the sections below predate the
-decisions boxed above and are corrected in project memory pending a rewrite.
+decisions boxed above; §§4, 5, 7.2 and 8 have been corrected to match them.
 
 **Design bar for production installs (owner, 2026-08-28):** the operator's own
 managed boxes keep sshd for troubleshooting (A11 stands; jeremytunnell may
@@ -159,15 +159,21 @@ alarming until you notice the plane cannot sign one.
 
 ## 4. The unifying proposal: a signed bundle for machines with no site
 
-**The problem in one sentence:** three separate pieces of this package need to
-run a *shipped, verified script* on a machine that has no site tree to verify
-it against.
+**BUILT AND GREEN, SHELVED DORMANT (2026-08-28).** Everything below is
+implemented and tested; none of it runs. Two of the three needs that motivated
+it have since gone away — the relay is not a managed machine (§5), so it never
+runs a primitive at all, and the Docker-host work is deferred (§7.2). The
+argument stands and the mechanism is banked; read this section as a design that
+is ready rather than one that is in service.
 
-| Need | Script today |
-|---|---|
-| Relay convergence (§5) | `provision_relay.sh` (1025 lines, v2.8) |
-| Docker-host certificates (§7) | `setup_ssl.sh` → `provision_origin_cert` |
-| Docker-host vhosts (§7) | `manage_domain.sh` |
+**The problem in one sentence:** a machine that has no site tree has nothing to
+verify a shipped script against, and so can run no script primitive at all.
+
+| Need | Script today | Status |
+|---|---|---|
+| Docker-host certificates (§7) | `setup_ssl.sh` → `provision_origin_cert` | deferred with R3 — the bundle's only consumer |
+| Docker-host vhosts (§7) | `manage_domain.sh` | deferred with R3 |
+| ~~Relay convergence (§5)~~ | ~~`provision_relay.sh`~~ | not a bundle consumer — the relay runs no agent |
 
 **The proposal:** the same channel that serves the agent binary serves an
 **agent support bundle** — a small signed tree, published alongside the agent
@@ -195,9 +201,11 @@ Why this is the right shape rather than a convenience:
 
 **The honest cost:** the bundle is a second thing to publish and version, and a
 machine running a bundle older than its plane expects must say so rather than
-half-converge. The bundle therefore carries a version, the agent reports it on
-claim beside `mgn_agent_version`, and `relay_converge` refuses when the bundle
-does not carry the script version its parameters were built for.
+half-do the work. The bundle therefore carries a version and the agent reports
+it on claim beside `mgn_agent_version`, so a primitive whose parameters were
+built for a newer script can refuse rather than guess. That reporting is built
+and live (`mgn_agent_bundle_version`); every node in the fleet reports it
+empty, because every node has a site.
 
 **BUILT in R2**, with three details settled in the building:
 
@@ -230,7 +238,21 @@ a growing allowlist.
 
 ---
 
-## 5. `relay_converge` (question c)
+## 5. `relay_converge` (question c) — RECORD ONLY, NOT BUILT
+
+**The relay is not a managed machine (owner, 2026-08-28).** Its entire
+management surface is a plane-side port probe plus complete reprovisioning: it
+runs no agent, holds no pairing, and invokes no primitive. So `relay_converge`
+is **never built**, and the five SSH builders below are neither retired nor
+replaced — they remain the relay's only management path, and they die as dead
+code at the cutover with nothing taking their place.
+
+What survives this section is not its design. It is three findings: §5.1's
+inventory of what the builders actually do, §5.4's six idempotency defects
+(closed in `provision_relay.sh` 2.9 regardless of whether anything ever
+converges), and §5.6's traced finding that `RelayCloudProvisioner` never held
+the shared provisioning key. Read the rest as the reasoning that produced
+those, not as work owed.
 
 ### 5.1 What the five builders actually do
 
@@ -289,9 +311,18 @@ username, a group, a path, or a line in `authorized_keys`.
 ### 5.4 Six non-idempotent things that must be fixed first
 
 Found in `provision_relay.sh` 2.8. **All six are closed in 2.9** (gate-pinned,
-56 checks), and 2.9 also consumes the prebuilt sealer per the `bin/` contract
-above — so both dispatch paths fail fast at the sealer check until the bundle
-delivers it. That window is accepted and R4 closes it.
+56 checks), and they were worth closing on their own account: a rebuild re-runs
+provisioning end to end, so every non-idempotent step below is a defect in the
+path the relay actually has, not only in a converge it will never get.
+
+2.9 consumes a **prebuilt** `relay-sealer` rather than compiling one on the
+box. That binary ships in the mailbox plugin's own tree
+(`provisioning/bin/relay-sealer-<arch>`, built at publish time by
+`RelaySealerPublisher` and covered by the plugin's signed manifest) and reaches
+the relay inside the provisioning tarball the builders already send. **The
+`bin/` support-bundle convention for relay content is dead** — the bundle
+carries no relay content, because a machine that runs no agent cannot be handed
+one. There is no delivery window to close and nothing here waits on R4.
 
 1. **`ufw --force reset` wipes all firewall state on every run** (line 976) and
    would clobber the rebuild flow's own `ufw deny 25/tcp`. Must become a
@@ -302,9 +333,10 @@ delivers it. That window is accepted and R4 closes it.
    follows.
 3. **`go build` on the box** (line 425) — installs `golang-go`, fetches
    `golang.org/x/crypto` over the network, burns minutes of CPU, and changes
-   the binary's mtime every run. **Ship `relay-sealer` prebuilt in the §4
-   bundle.** This is the single biggest simplification available and it removes
-   a compiler and a network fetch from a mail relay.
+   the binary's mtime every run. **Ship `relay-sealer` prebuilt**, in the
+   mailbox plugin's provisioning tree. This is the single biggest
+   simplification available and it removes a compiler and a network fetch from
+   a mail relay.
 4. **`wg0.conf` accumulates dead `[Peer]` stanzas** when a tenant's key
    rotates: `add-tenant` appends and never removes the old block. This is the
    *same defect class* already fixed once for the main box's peer (the
@@ -341,14 +373,14 @@ architecture's own bootstrap-at-birth pattern — one SSH act, key destroyed
 afterwards — so it **does not block the shared-key destruction** and does not
 have to be retired for the cutover to complete.
 
-What it still owes R4 is a different question: a customer-cloud relay comes out
-of this path with **no `ManagedNode` row, no pairing and no agent**, and
-`relay_converge` presupposes all three. So the path grows rather than dies —
-agent install plus join during provisioning, bootstrap-then-enroll. Three things
-also have no primitive equivalent and are not candidates for one: instance
-lifecycle on the customer's cloud account, the drain-gated upgrade path, and
-main-box-side WireGuard peering, which runs on the main box rather than on the
-relay.
+A customer-cloud relay comes out of this path with **no `ManagedNode` row, no
+pairing and no agent** — which, now that the relay is not a managed machine, is
+the correct end state rather than a gap. The path neither grows nor dies: it
+stays a bootstrap-at-birth SSH act with a per-run key destroyed afterwards.
+Three things here have no primitive equivalent and are not candidates for one
+in any case: instance lifecycle on the customer's cloud account, the
+drain-gated upgrade path, and main-box-side WireGuard peering, which runs on
+the main box rather than on the relay.
 
 ---
 
@@ -404,7 +436,7 @@ exists, refuse what needs what is missing, and never guess a path** — which is
 what the code already does; machine posture makes it a supported state rather
 than an accident.
 
-### 7.2 The Docker host needs an identity, and does not have one
+### 7.2 The Docker host is a node, not a new kind of thing — DEFERRED
 
 `mgh_managed_hosts` carries `mgh_slug`, `mgh_name`, `mgh_host`,
 `mgh_ssh_user`, `mgh_ssh_key_path`, `mgh_ssh_port`, `mgh_max_sites`,
@@ -414,23 +446,27 @@ version. And `mjb_management_jobs` carries `mjb_mgn_node_id` only, so **no job
 row can name a host**. On-host steps are dispatched at a *node* and merely skip
 the `docker exec` wrapper (`runner.go:238-245`).
 
-This is the Step 3 blocker already recorded: the release that destroys the
-shared key is the release after which Docker-node certificate provisioning has
-**no executor at all**. Required:
+An earlier draft answered that by teaching the whole dispatch path a second
+kind of subject: pairing columns on `mgh_managed_hosts`, a nullable
+`mjb_mgh_host_id` with exactly-one-of enforcement, and both
+`AgentChannelEndpoint` and `JobResultProcessor` taught that a job's subject may
+be a host. **That is not the design (owner, 2026-08-28).** A Docker host is a
+machine the plane manages, and this migration already has a word for that: it
+becomes **a plain `ManagedNode` in machine posture**, paired like any other,
+addressed like any other, running host-scoped vocabulary only. It needs no
+schema of its own, and `mgh_managed_hosts` keeps being what it is — the
+placement record for containers, not an identity.
 
-- pairing columns on `mgh_managed_hosts`, mirroring the node set
-  (`_agent_public_key`, `_paired_time`, `_last_poll`, `_agent_version`,
-  `_channel_enabled`);
-- a nullable `mjb_mgh_host_id` on the job table, with exactly one of node/host
-  set, enforced;
-- `AgentChannelEndpoint` and `JobResultProcessor` taught that a job's subject
-  may be a host — both are node-keyed throughout today.
+**R3 is deferred** along with the hardening it served (see the header box):
+getjoinery moves to its own full-site box rather than being hardened in place,
+so nothing needs host-scoped certificates in the near term. The support bundle
+is R3's only consumer, and is shelved with it.
 
-Note also that siblings on a host are found **two different ways that
-disagree**: by the `mgn_host` string and by the `mgn_mgh_host_id` FK, with
-`next_container_port()` hedging across both. A host identity that matters for
-dispatch should settle that, or a host will be paired under one identity and
-addressed under the other.
+One finding here outlives the design and is worth keeping: siblings on a host
+are found **two different ways that disagree** — by the `mgn_host` string and
+by the `mgn_mgh_host_id` FK, with `next_container_port()` hedging across both.
+Whenever the host does become a node, that must be settled first, or the host
+is paired under one identity and addressed under the other.
 
 ### 7.3 Host certificate work
 
@@ -497,12 +533,20 @@ Three installer decisions, approved 2026-08-28:
   fresh siteless machine. Inheriting it there would borrow a default chosen for
   a different problem and start a root service against A9.
 
-**R2 — agent 1.11.0 + plane. The artifact channel (§3, §4). BUILT
-2026-08-28, uncommitted and unpublished.**
-Signed artifact endpoint, the update source abstraction, the support bundle and
-`ToolRoot`. Still no new primitives. At this point a siteless machine can be
-installed, enrolled, kept current, and can verify a script — and script
-primitives become available to it.
+**R2 — agent 1.11.0 + plane. Vocabulary on claim SHIPPING; the artifact
+channel (§3, §4) BUILT AND GREEN but SHELVED DORMANT.**
+The signed artifact endpoint, the update-source abstraction, the support bundle
+and `ToolRoot` are all built and covered, and none of them has a consumer: the
+relay runs no agent and R3's Docker host is deferred, so there is no siteless
+machine for them to serve. They are banked rather than discarded — the publish
+wiring is inert behind `SupportBundlePublisher::hasConsumer()`, the artifact
+endpoint answers a fetch no agent makes, and `ToolRoot` stays empty on every
+node in the fleet. Reactivating is flipping that one method, and the tests
+exercise the builder directly so the mechanism cannot rot unnoticed.
+
+One piece of R2 stands on its own and stays live regardless: `update.go` now
+reads its artifact through an `io.Reader` with a ceiling on the decompressed
+size, which closes a gzip-bomb path in the ordinary node update flow.
 
 R2 also carries **vocabulary on claim**, which is not a siteless concern at all:
 the agent reports `primitives.Names()` on every poll, the plane stores it
@@ -523,18 +567,21 @@ therefore latches the extras off on that specific refusal and keeps claiming in
 the older shape. Losing the capability report costs the plane a fact; losing the
 claim costs it the node.
 
-**R3 — plane schema + Docker host.** Host pairing columns, host-addressable
-jobs, the proto-patch primitive with its slug parameter, host-scoped
-`provision_certificate`. This is where `provision_ssl` stops being a Step 3
-blocker.
+**R3 — the Docker host as a node. DEFERRED (§7.2).** No schema: the host
+enrolls as a `ManagedNode` in machine posture and gets host-scoped vocabulary —
+the proto-patch primitive with its slug parameter, and host-scoped
+`provision_certificate` resolved from the support bundle. This is the only
+consumer the bundle has, and it is deferred with the hardening it served, so it
+is also what would un-shelve R2. Until then `provision_ssl` on a Docker host
+remains without an executor.
 
-**R4 — `relay_converge`.** Ordered last because §5.4's six idempotency fixes
-land in `provision_relay.sh` first and want proving on a rebuilt relay before
-anything converges on a schedule. Retire the five builders **and**
-`RelayCloudProvisioner`'s raw-SSH path in the same release (§5.6).
+**R4 — nothing.** `relay_converge` is not built (§5). The five relay builders
+and `RelayCloudProvisioner`'s bootstrap SSH path are not retired and get no
+replacement; they end when the relay stops being provisioned this way.
 
 **R5 — cutover.** Unchanged in shape from `agent_on_node_architecture.md` §6
-Step 3, but see §9.
+Step 3, but see §9 — and it is now per-node launch-readiness work rather than a
+single near-term event, since both hardening targets are deferred.
 
 ---
 
@@ -605,5 +652,8 @@ eliminate a row or shrink a cell, never shuffle trust between rows.
   zero and the limit never fires. R2's artifact bucket writes its own rows and
   is therefore real; the general one is a pre-existing gap, noticed here and not
   fixed here.
-- **`update_database` is owed** for the two new `mgn_` columns before the claim
-  path can store what a node reports.
+- **`update_database` on the live plane** for the two new `mgn_` columns. Run
+  on dev 2026-08-28 (it added exactly those two); the control plane gets them
+  at its own upgrade, and until it does, a node's reported vocabulary has
+  nowhere to land and `has_primitive()` falls back to the version floor — which
+  is the designed behaviour, not a fault.
