@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # reconcile_site.sh - a site's SHAPE: read it, or make a site match this machine's
+# Version: 1.2.1 - the sudo capability probe asks with -v instead of running true,
+#                  which sudo mails root about when the account may not. Same
+#                  change in the sibling scripts.
 # Version: 1.2.0 - the machine wins when the config claims a shape this box is not. A restore
 #                  made before any of this existed wrote the source machine's config straight
 #                  over the target's, so such a site has been insisting it is in a container
@@ -139,9 +142,11 @@ if [ ! -f "$CONFIG" ]; then
     exit 1
 fi
 
+# -v asks the question without making the escalation attempt sudo mails root about;
+# see backup_files.sh for why. Same test as the sibling scripts use.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo > /dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if command -v sudo > /dev/null 2>&1 && sudo -n -v 2>/dev/null; then
         SUDO="sudo"
     fi
 fi
