@@ -5264,3 +5264,247 @@ fn a_crash_window_that_left_two_copies_of_our_own_bytes_settles_on_one() {
     );
     assert_nothing_lost(&world, &committed);
 }
+
+/// A peer that materialized somebody else's park does not keep the scratch name.
+///
+/// A parks mid-dance and the process dies; B pulls the scratch name down before
+/// anyone finishes; A recovers and resumes, renaming the server entity onward.
+/// B is then holding a name that belongs to nothing — never uploaded, because
+/// the server refuses the prefix for a real file; never cleaned, because the
+/// local walk skips internal names; invisible to every pass and visible only to
+/// an audit.
+///
+/// Sweep seed 122330 is this, and it is a regression the resume itself
+/// introduced: before the resume existed the park simply stood, so B's disk and
+/// the server agreed — wrongly, but consistently enough to converge.
+#[test]
+fn a_peer_left_holding_a_finished_park_cleans_it_up() {
+    let world = World::new(4490, &["laptop"]);
+    let laptop = world.device("laptop");
+    let mut committed = Committed::default();
+
+    let body = b"a file that travelled";
+    world.server.seed_file(None, "report.txt", body);
+    assert!(world.settle().is_some());
+    committed.note("report.txt", body);
+
+    // What a peer is left holding once the parker finishes its dance: the
+    // scratch name it pulled down, standing on the disk, with nothing live
+    // wearing that name any more. Written directly, because the route in
+    // (materialize a park, then watch it be renamed away) is a race this
+    // harness cannot stage — sweep seed 122330 is the one that walked into it.
+    laptop
+        .fs
+        .user_write(&jd_core::order::swap_name("mac-1431032f97c2ac46"), b"orphaned");
+
+    assert!(world.settle().is_some(), "the fleet must still settle");
+    assert_converged(&world);
+
+    assert!(
+        !laptop.fs.all_paths().iter().any(|p| p.contains(".jd-")),
+        "the peer kept an engine-internal name nothing is wearing: {:?}",
+        laptop.fs.all_paths()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// ...but a scratch name something LIVE is wearing is not this rule's business.
+///
+/// The discriminator, and the whole safety argument for cleaning up at all: the
+/// rule fires only on a name nothing live claims. While an entity is still
+/// wearing it, the materialized copy must stay — throwing it away because the
+/// name looks like litter is how a cleaner becomes a data destroyer.
+///
+/// Asserted against the condition directly rather than through a world where a
+/// park stands, because that world is no longer reachable: the rescue arm puts a
+/// standing park back under its agreed name before any peer could be tempted by
+/// it. The two mechanisms compose, which is why this has to be tested on its own.
+#[test]
+fn a_scratch_name_something_live_is_wearing_is_left_alone() {
+    let world = World::new(4491, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    let scratch = jd_core::order::swap_name("key-live");
+    let body = b"do not throw this away";
+
+    // A REAL live entity on the server wearing the scratch name, so the device
+    // has a genuine record of it rather than an invented one.
+    world.server.seed_file(None, &scratch, body);
+    assert!(world.settle().is_some());
+
+    // ...and a copy of it standing on the disk, the way a peer that pulled the
+    // park down before it was finished would be holding one.
+    laptop.fs.user_write(&scratch, body);
+
+    for _ in 0..3 {
+        world.pass(laptop);
+    }
+
+    assert!(
+        laptop.fs.all_paths().iter().any(|p| p == &scratch),
+        "a scratch name a live entity is wearing was thrown away: {:?}",
+        laptop.fs.all_paths()
+    );
+
+    // And the spool namespace is never this rule's business either: `.jd-tmp-`
+    // is minted by the transfer path, and a rule written against `.jd-` rather
+    // than `.jd-swap-` would delete a working file mid-download.
+    laptop.fs.user_write(".jd-tmp-inflight", b"a transfer in progress");
+    world.pass(laptop);
+    assert!(
+        disk_tree(laptop).contains_key(".jd-tmp-inflight")
+            || laptop.fs.all_paths().iter().any(|p| p == ".jd-tmp-inflight"),
+        "a spool file was swept up by the park cleaner"
+    );
+}
+
+/// A twin's local copy is not overwritten by the winner landing on its slot.
+///
+/// On a volume that folds spellings, two server files whose names differ only in
+/// normalization are ONE slot. Naming parks the loser; the winner then
+/// materializes at a path that resolves to the loser's existing file — so the
+/// write lands on it, replacing the bytes and keeping the loser's spelling.
+///
+/// If those bytes were the loser's synced content that is recoverable. If the
+/// user had edited them, they are gone and nobody was asked. This asserts the
+/// edit survives.
+#[test]
+fn a_folded_twin_landing_does_not_eat_an_unsynced_edit() {
+    let world = World::of(4492, &[("mac", jd_sim::Platform::MacOs)]);
+    let mac = world.device("mac");
+    let mut committed = Committed::default();
+
+    // Two live server files that fold to one slot on this volume.
+    let loser = b"the twin that gets parked";
+    world.server.seed_file(None, "caf\u{e9}-1.txt", loser);
+    assert!(world.settle().is_some(), "the first one materializes");
+
+    // The user edits their copy of it. Nothing has synced this yet.
+    let edited = b"the edit nobody has seen";
+    mac.fs.user_write("caf\u{e9}-1.txt", edited);
+    committed.note("caf\u{e9}-1.txt", edited);
+
+    // Now the twin arrives, and its name folds onto the same slot.
+    let winner = b"the twin that wins the slot";
+    world.server.seed_file(None, "cafe\u{301}-1.txt", winner);
+
+    assert!(world.settle().is_some(), "the fleet must settle");
+
+    // The edit must still exist somewhere on this disk, under whatever name.
+    let disk = disk_tree(mac);
+    let want = jd_sim::sha256_hex(edited);
+    assert!(
+        disk.values().any(|h| h.as_deref() == Some(want.as_str())),
+        "the user's unsynced edit was destroyed by the twin landing on its slot: {:?}",
+        disk.keys().collect::<Vec<_>>()
+    );
+    assert_nothing_lost(&world, &committed);
+}
+
+/// A volume that folds spellings still RESPELLS when asked to.
+///
+/// APFS is insensitive when it compares and preserving when it stores, so
+/// `rename(2)` between two normalizations of one name changes the stored bytes.
+/// The mock used to resolve both sides of such a rename onto the existing key
+/// and cancel itself out — silently refusing a thing every Mac does, which
+/// would have eaten any engine fix that worked by respelling and let its test
+/// pass anyway.
+#[test]
+fn a_same_slot_respell_changes_the_stored_spelling() {
+    use jd_vfs::Vfs;
+
+    let world = World::of(4493, &[("mac", jd_sim::Platform::MacOs)]);
+    let fs = &world.device("mac").fs;
+
+    fs.user_write("caf\u{e9}-1.txt", b"one file, two spellings");
+    let before = fs
+        .fingerprint(std::path::Path::new("/sync/caf\u{e9}-1.txt"))
+        .unwrap()
+        .expect("the file exists");
+
+    fs.user_rename("caf\u{e9}-1.txt", "cafe\u{301}-1.txt");
+
+    let names = fs.all_paths();
+    assert!(
+        names.iter().any(|p| p == "cafe\u{301}-1.txt"),
+        "the respell did not take: {names:?}"
+    );
+    assert!(
+        !names.iter().any(|p| p == "caf\u{e9}-1.txt"),
+        "both spellings exist, so the rename copied rather than renamed: {names:?}"
+    );
+
+    // A rename touches neither identity nor mtime on a real disk, and the whole
+    // fingerprint doctrine rests on that: a respell that bumped either would
+    // invalidate cached hashes across the estate.
+    let after = fs
+        .fingerprint(std::path::Path::new("/sync/cafe\u{301}-1.txt"))
+        .unwrap()
+        .expect("still there under the new spelling");
+    assert_eq!(before, after, "a respell changed the file's fingerprint");
+}
+
+/// ...and a volume that REWRITES what it is given still rewrites.
+///
+/// On HFS+ the stored form is decomposed whatever you ask for, so respelling TO
+/// the composed form still lands decomposed. That is the volume behaving, not
+/// the fold resolution coming back.
+#[test]
+fn a_respell_on_a_decomposing_volume_still_decomposes() {
+    let world = World::of(4494, &[("disk", jd_sim::Platform::Decomposing)]);
+    let fs = &world.device("disk").fs;
+
+    fs.user_write("cafe\u{301}-2.txt", b"stored decomposed either way");
+    fs.user_rename("cafe\u{301}-2.txt", "caf\u{e9}-2.txt");
+
+    let names = fs.all_paths();
+    assert!(
+        names.iter().any(|p| p == "cafe\u{301}-2.txt"),
+        "the volume should have stored the decomposed form: {names:?}"
+    );
+}
+
+/// A rename onto a DIFFERENT file's folded slot replaces it, and leaves ONE file.
+///
+/// The occupancy question stays folded even though the destination name is now
+/// taken literally. Collapsing those two cases is how a respell would leave two
+/// files where the volume can only see one: the mover keeps its asked-for
+/// spelling, the occupant keeps its stored one, and the slot has two entries a
+/// real disk could never hold.
+///
+/// Replacement rather than refusal is correct — POSIX `rename(2)` replaces the
+/// destination, and to APFS these two names ARE the destination.
+#[test]
+fn a_rename_onto_another_files_folded_slot_leaves_one_file() {
+    use jd_vfs::Vfs;
+
+    let world = World::of(4495, &[("mac", jd_sim::Platform::MacOs)]);
+    let fs = &world.device("mac").fs;
+
+    fs.user_write("caf\u{e9}-3.txt", b"the occupant");
+    fs.user_write("other-3.txt", b"the mover");
+
+    fs.rename(
+        std::path::Path::new("/sync/other-3.txt"),
+        std::path::Path::new("/sync/cafe\u{301}-3.txt"),
+    )
+    .expect("replacing a folded-equal destination is what a real rename does");
+
+    let caf: Vec<String> = fs
+        .all_paths()
+        .into_iter()
+        .filter(|p| p.contains("-3.txt") && p.starts_with("caf"))
+        .collect();
+    assert_eq!(
+        caf.len(),
+        1,
+        "the fold left two files where the volume can hold one: {caf:?}"
+    );
+    assert_eq!(
+        fs.fingerprint(std::path::Path::new(&format!("/sync/{}", caf[0])))
+            .unwrap()
+            .map(|f| f.size),
+        Some(b"the mover".len() as u64),
+        "the mover did not land"
+    );
+}

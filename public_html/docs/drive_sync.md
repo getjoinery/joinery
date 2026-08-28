@@ -240,6 +240,21 @@ again — its transfer is skipped over every candidate path as somebody else's,
 found nowhere, dropped as overtaken, and planned again on the next pass. Nothing
 fails, nothing queues, no issue is raised, and the device never goes quiet.
 
+When the question is answered honestly and the path really does belong to
+another entry, the transfer still finds nothing — but for a different reason,
+and the difference decides what may be thrown away. A file found nowhere is
+gone, and an identity minted only because the scan saw an untracked file has
+nothing left to be about, so it is dropped. A file whose every candidate was
+refused on the **name** is still on the disk, and dropping its identity would
+say otherwise: the next scan finds the same untracked file, mints another
+identity, and arrives back at the same refusal. So a refusal on the name leaves
+the entry alone. Deciding who gets a contested name belongs to naming, and an
+identity minted after naming has already run for its pass can only be judged by
+surviving into the next one — where the loser is parked, visibly, under
+`unsyncable`. Nothing is raised from the transfer itself: the park carries the
+issue, and `unsyncable` is the one kind a pass withdraws again once the state
+ends.
+
 One shape of it is the client's own bookkeeping rather than anything the user
 can act on, and is repaired without being shown. A device that creates a file or
 folder gives it a provisional identity before the server has named it; if the

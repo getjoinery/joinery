@@ -670,3 +670,99 @@ verdict, would answer it cheaply.
 
 Not diagnosed further. Whether the missing file is a consequence of adoption,
 the disk-follow, or something the change merely unmasked is unknown.
+
+
+---
+
+## REGRESSION: the resume orphans a peer device — seed 122330
+
+Found 2026-08-28 by fresh-range hunting. Deterministic, reproduced three times.
+**This one is caused by this change**, unlike everything else recorded above.
+
+```
+SEED=122330 STEPS=80 DEVS=3 CHAOS=1 PLATFORMS=mac,windows,hfs NAMES=mac,pc,disk \
+  cargo test --release -p jd-sim --test zz_sweep scratch_one -- --ignored --nocapture
+
+BEFORE f81388e6: PASSES
+AFTER  f81388e6: pc did not converge —
+                 only on the disk: ["Sub 7 renamed/.jd-swap-mac-1431032f97c2ac46"]
+```
+
+**Mechanism** (traced for the before/after, instinct for the causal chain): the
+scratch name carries MAC's idempotency key, so mac parked it. Before this
+change, mac's recovered op was dropped by the staleness guard, the park stood,
+and the server kept the scratch name — so pc's disk and the server AGREED,
+wrongly but consistently, and convergence passed. After it, mac resumes the
+dance and renames the server entity onward, and pc's already-materialized copy
+is left wearing a name nothing on the server matches.
+
+**The resume fixes the originating device and orphans a peer.** Every test
+written for the park work exercises the PARKING device; none covers what a
+second device does with a scratch name it has already pulled down. That is the
+hole, and it is in the testing as much as the code.
+
+It also revises a claim made earlier in this document: a scratch name reaching a
+user's folder was described as part of the pre-existing silent case. It is also
+reachable BY the fix.
+
+**FIXED 2026-08-28.** The local walk skipped internal names outright, which is
+why the orphan was permanent — never uploaded (the server refuses the prefix for
+a real file), never cleaned, invisible to every pass and visible only to an
+audit. The rule now lives in that skip: a local file whose name carries
+`order::SWAP_PREFIX`, with no live entity in the store wearing that name, goes
+to the trash.
+
+Four things about it are load-bearing:
+
+- **`SWAP_PREFIX`, never `INTERNAL_PREFIX`.** The latter is `.jd-` and the spool
+  mints `.jd-tmp-` beneath it; a rule written against the umbrella prefix would
+  delete a working file mid-transfer. This is the difference between a cleaner
+  and a data destroyer.
+- **The live-name set is built once** before the walk, not queried per directory
+  entry, and cannot change inside one walk.
+- **Trash, never delete** — the same doctrine as the occupied-path arm.
+- **Safe on a stale view in both directions**, which is rare enough to say out
+  loud: a wrong keep costs nothing, because the next pass asks again; a wrong
+  trash costs a re-download, because the server holds the bytes and the trash
+  holds the copy. So it may act on what it knows without waiting to be certain.
+
+Chosen over preventing the materialization because that plugs one producer while
+this restores the invariant — and because a peer that REFUSES to materialize a
+scratch name makes the file silently absent everywhere but the server if the
+parker never resumes, which is a worse failure than the orphan.
+
+**The discriminating test turned out to be unreachable, for a good reason.** The
+intended pair was "parker resumes, peer cleans up" against "parker never
+resumes, peer keeps its copy". The second cannot be staged any more: the rescue
+arm fires first and puts a standing park back under its agreed name, so there is
+no window in which a park simply stands. The two mechanisms compose. The guard
+is therefore tested directly — a real live entity wearing a scratch name, a copy
+on the disk, and it must survive — together with the spool case in the same test.
+
+**A gap that remains:** how a peer comes to hold a scratch name at all is still
+undocumented. `ReservedPrefix` parking should stop it materializing, yet seed
+122330 does it, so the path exists.
+
+The leading hypothesis, offered in review and NOT confirmed — record it as a
+lead, not a finding: the peer never materialized the park, it FOLLOWED it.
+Parking gates DOWNLOADING a parked entity, but a file the peer already holds
+under its real name takes the move path instead — the parker renames it
+server-side, the peer follows that as an ordinary remote rename of a file it
+already has, and no download guard is ever consulted. The peer's copy is then
+wearing the scratch name legitimately, and whatever happens next leaves it
+behind untracked. It fits what evidence there is: the file sits under
+`Sub 7 renamed/`, and a peer holding bytes it was never entitled to download is
+otherwise hard to explain.
+
+Attempted and failed to confirm: `scratch_trace` never mentions that swap name,
+because it drives the world differently from `scratch_one` and the token comes
+from a key sequence that diverges between them. Confirming it needs
+instrumentation rather than a grep. Not urgent now the end state is cleaned, but
+do not write the hypothesis down as the mechanism until someone has watched it.
+
+**How it was found, which matters for what to run next time.** Verdict-diffing
+catches pass to fail. Shape-diffing catches fail to fail-differently. Neither
+could see this: 122330 was PASSING before, so it was never in the known-failing
+set, and the estate's 32,070 seeds are all previously-swept ground that stayed
+green. It took a fresh seed nobody had ever run. Three different checks, three
+different blind spots.
