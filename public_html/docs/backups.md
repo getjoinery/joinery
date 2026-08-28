@@ -284,6 +284,48 @@ rather than owner-only. A key that exists but cannot be read is an error, never
 treated as absent — minting over a live key would orphan the site recipient for
 every backup already sealed to the first one.
 
+### Opening a backup with no Joinery anywhere
+
+The format is deliberately stock crypto, so a backup opens on any machine with
+`openssl` and PHP's sodium extension (or any libsodium binding) — no Joinery
+code, no server, no network. You need three things: the encrypted archive, its
+envelope (the `{archive}.keys.json` sidecar beside a standalone archive; for a
+chain, the `envelope` object inside the chain's manifest JSON), and the
+recovery private key from the password manager (base64, 32 bytes decoded).
+
+Step 1 — unseal the data key from the envelope (each `recipients[].sealed`
+entry is a libsodium sealed box over the data key; try each until one opens):
+
+```bash
+php -r '
+$env = json_decode(file_get_contents($argv[1]), true);
+$sk  = base64_decode(trim(file_get_contents($argv[2])));
+$kp  = sodium_crypto_box_keypair_from_secretkey_and_publickey(
+           $sk, sodium_crypto_box_publickey_from_secretkey($sk));
+foreach ($env["recipients"] as $r) {
+    $key = sodium_crypto_box_seal_open(base64_decode($r["sealed"]), $kp);
+    if ($key !== false) { file_put_contents("data_key.txt", $key); exit; }
+}
+fwrite(STDERR, "no recipient in this envelope opens with that key\n"); exit(1);
+' {archive}.keys.json recovery_private.b64
+```
+
+Step 2 — decrypt the archive (the data key is the passphrase; the cipher is
+recorded in the envelope's `cipher` field, `aes-256-cbc-pbkdf2`):
+
+```bash
+openssl enc -d -aes-256-cbc -pbkdf2 -pass file:data_key.txt \
+    -in {archive}.tar.gz.enc -out {archive}.tar.gz
+```
+
+Then shred `data_key.txt`. The same two steps work with the site key —
+`config/backup_site_key` is the base64 of the raw sodium keypair, so in step 1
+replace the two keypair lines with
+`$kp = base64_decode(trim(file_get_contents($argv[2])));` — and that is all the
+platform's own restore path does. A chain restores by decrypting the full plus
+each incremental with the one data key from the chain manifest's envelope and
+applying them oldest-first.
+
 ## Recovery key setup
 
 Setup happens on the Backups page and needs no shell. The panel is rendered by

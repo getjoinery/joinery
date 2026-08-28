@@ -19,6 +19,12 @@
  *
  * Test seams: $driver_factory and $runner are injectable statics.
  *
+ * @version 1.9 - the provisioning bundle carries provisioning/bin/, the prebuilt
+ *                relay-sealer binaries, and no longer carries the sealer's Go source.
+ *                The relay does not install a Go toolchain or compile anything;
+ *                provision_relay.sh 2.9 consumes one of these binaries and refuses to
+ *                proceed without it, so a bundle that omitted bin/ would fail every
+ *                run half an hour in.
  * @version 1.8 - completion clears the map hash and force-pushes the fragment:
  *                a rebuilt relay holds no tenant map, and the hash-skip read the
  *                unchanged fragment as delivered — leaving the relay blank (no
@@ -380,9 +386,26 @@ class RelayCloudProvisioner {
 			$tarball = sys_get_temp_dir() . "/joinery-relay-{$transfer_id}.tgz";
 			$remote_tarball = "/tmp/joinery-relay-{$transfer_id}.tgz";
 			$remote_dir = "/tmp/joinery-relay-{$transfer_id}";
+			// The relay has no compiler: provision_relay.sh installs a PREBUILT
+			// sealer from bin/relay-sealer-<uname -m>, cross-compiled into this
+			// plugin at publish time by RelaySealerPublisher. Checked here rather
+			// than left to tar, because "bin: Cannot stat" thirty minutes into a
+			// customer's provisioning run does not say what to do about it.
+			if (!glob($provisioning_dir . '/bin/relay-sealer-*')) {
+				$this->failWithCleanup($run,
+					'This install carries no prebuilt relay-sealer binaries ('
+					. $provisioning_dir . '/bin/). The mailbox plugin ships them; '
+					. 'upgrade to a release built by a publish that produced them, or build one '
+					. 'by hand with provisioning/relay-sealer/build.sh.');
+				return 'sealer binaries missing';
+			}
+			// The bundle carries the binaries and the script, and NOT the sealer's
+			// Go source: nothing on the relay reads it now that the compiler is
+			// gone, and shipping source to a mail machine is the last reason
+			// anyone would think it needs a toolchain.
 			list($code, $out) = $this->run(
 				'tar czf ' . escapeshellarg($tarball) . ' -C ' . escapeshellarg($provisioning_dir)
-				. ' relay-sealer provision_relay.sh');
+				. ' bin provision_relay.sh');
 			if ($code !== 0) {
 				$this->failWithCleanup($run, 'Packaging the provisioning bundle failed: ' . $out);
 				return 'bundle failed';
