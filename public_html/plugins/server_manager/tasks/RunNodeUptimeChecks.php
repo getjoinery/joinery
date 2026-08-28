@@ -18,6 +18,8 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 1.8 - the http_status probe no longer stamps mgn_last_status_check. It reads no status
+ *                data, so stamping it made months-stale figures read as seconds old on every tick
  * @version 1.7 - sweeps stale agent-channel claims: a job claimed by a node agent that never
  *                reported back is returned to the queue instead of wedging that node's lock
  * @version 1.6 - a probe that dies in this machine's own resolver is inconclusive, not down:
@@ -261,8 +263,16 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * http_status check: plain GET to mgn_site_url. Any 2xx/3xx is up.
-	 * Records mgn_last_status_check so the dashboard stays consistent.
+	 * http_status check: plain HEAD to mgn_site_url. Any 2xx/3xx is up.
+	 *
+	 * It stamps nothing about status freshness, deliberately. This probe reads no
+	 * status data at all — it asks a web server whether it answers — and it writes
+	 * its own mgn_uptime_* columns, which is the whole fact it establishes. It
+	 * used to also stamp mgn_last_status_check "so the dashboard stays
+	 * consistent", and since it runs every cron pass it made every node's figures
+	 * look seconds old: the overview said "Last checked: a minute ago" over disk
+	 * and load numbers that were months stale, and the health badge went green off
+	 * them. Consistency with a number nobody measured is not consistency.
 	 */
 	private function check_http_status($node): array {
 		$health_url = trim((string)$node->get('mgn_health_check_url'));
@@ -307,8 +317,6 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		$errno  = curl_errno($ch);
 		$errmsg = curl_error($ch);
 		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
-
-		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 
 		if ($errno) {
 			$detail = $errmsg ?: ('curl errno ' . $errno);

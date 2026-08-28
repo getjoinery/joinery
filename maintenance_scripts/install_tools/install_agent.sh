@@ -3,6 +3,15 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.8 - Installs on a machine with NO Joinery site (--siteless), for relays and Docker
+#           hosts that the plane manages but that host no deployment: the artifact location
+#           becomes an argument (--dist-dir), the run switch is written explicitly rather
+#           than read from a database that is not there, and the manifest is read without
+#           PHP, which such a machine does not have.
+# Version: 2.7 - Defers the swap and the restart while the agent is running a job. An upgrade
+#           dispatched to the agent runs THROUGH this script, so restarting the agent here
+#           killed the process reporting that job; the agent converges itself afterwards
+#           through its own signed self-update instead.
 # Version: 2.6 - The keepalive closes descriptors inside sh -c, not inside itself. Closing them
 #           from within the script file closed the shell's own copy of that file, so the
 #           keepalive stopped before launching and no node whose agent exited came back.
@@ -59,10 +68,61 @@
 # non-interactive, exit 0 when not applicable.
 #
 # Usage:  install_agent.sh SITENAME [SITE_ROOT]
+#         install_agent.sh --siteless --dist-dir=DIR [--enable]
+#
+# The second form is for a machine the management node manages that hosts no
+# Joinery deployment — a mail relay, a Docker host (spec A13). Three things
+# differ, and each is an argument rather than an inference:
+#
+#   --siteless   is EXPLICIT and never guessed. A missing site config keeps its
+#                existing meaning, "not my machine, exit 0" — the two DNS
+#                resolvers rely on that, and so does a node whose config is
+#                briefly absent mid-upgrade or mid-restore. Reading a momentary
+#                absence as "this must be a relay" would install a root service
+#                on a machine that never asked for one.
+#   --dist-dir   because a machine with no site has no public_html/agent_dist
+#                for a release to have delivered into. On a first install the
+#                operator is the delivery; the artifact's sha256 is still
+#                checked here, and publisher-signature enforcement begins at
+#                the agent's first self-update, against the key baked into the
+#                binary. Same trust model as any fresh box, stated above.
+#   --enable     because the run switch lives in a settings table this machine
+#                does not have. It is written here explicitly, OFF unless asked
+#                for: a missing marker reads as ON everywhere else, which is
+#                right for its one situation (an upgrade over an agent older
+#                than the marker) and cannot arise on a machine being installed
+#                for the first time.
 
 set -u
 
-SITENAME="${1:-}"
+SITELESS=0
+DIST_DIR_ARG=""
+SITELESS_ENABLE=0
+
+# Flags are pulled out and the positionals left in order, so every existing
+# caller — the Dockerfile CMD, install.sh, upgrade.php, _plugin_installers_start.sh —
+# passes exactly what it always did and lands in exactly the same branch.
+POSITIONAL_1=""
+POSITIONAL_2=""
+POSITIONAL_SEEN=0
+for arg in "$@"; do
+    case "$arg" in
+        --siteless)   SITELESS=1 ;;
+        --enable)     SITELESS_ENABLE=1 ;;
+        --dist-dir=*) DIST_DIR_ARG="${arg#--dist-dir=}" ;;
+        --*)
+            echo "agent installer: unrecognised option $arg" >&2
+            exit 1
+            ;;
+        *)
+            POSITIONAL_SEEN=$((POSITIONAL_SEEN + 1))
+            if [ "$POSITIONAL_SEEN" = "1" ]; then POSITIONAL_1="$arg"; fi
+            if [ "$POSITIONAL_SEEN" = "2" ]; then POSITIONAL_2="$arg"; fi
+            ;;
+    esac
+done
+
+SITENAME="$POSITIONAL_1"
 # Optional second argument: the site root the caller already resolved.
 #
 # Added as a SECOND argument rather than by reinterpreting the first, because
@@ -72,14 +132,28 @@ SITENAME="${1:-}"
 # ignores it and behaves exactly as it did. Reinterpreting argument one as a
 # path would have broken that second case — the old script would have built
 # /var/www/html//opt/site and skipped.
-SITE_ROOT_ARG="${2:-}"
+SITE_ROOT_ARG="$POSITIONAL_2"
 
-if [ -z "$SITENAME" ] && [ -z "$SITE_ROOT_ARG" ]; then
+if [ "$SITELESS" = "1" ]; then
+    if [ -z "$DIST_DIR_ARG" ]; then
+        echo "agent installer: --siteless needs --dist-dir=DIR naming the unpacked agent artifact" >&2
+        exit 1
+    fi
+    if [ ! -f "${DIST_DIR_ARG}/manifest.json" ]; then
+        echo "agent installer: no manifest.json in ${DIST_DIR_ARG} - that is not an unpacked agent artifact" >&2
+        exit 1
+    fi
+    # No site, so none of the site-derived paths exist. They are left EMPTY
+    # rather than pointed somewhere plausible: every later use is guarded on
+    # SITELESS, and a plausible-looking wrong path is worse than no path.
+    SITE_ROOT=""
+    PUBLIC_HTML=""
+    SITE_CONFIG=""
+    DIST_DIR="$DIST_DIR_ARG"
+elif [ -z "$SITENAME" ] && [ -z "$SITE_ROOT_ARG" ]; then
     echo "agent installer: no SITENAME given - skipping" >&2
     exit 0
-fi
-
-if [ -n "$SITE_ROOT_ARG" ] && [ -d "$SITE_ROOT_ARG" ]; then
+elif [ -n "$SITE_ROOT_ARG" ] && [ -d "$SITE_ROOT_ARG" ]; then
     # The caller derived it from its own location, so it is right even when the
     # site does not live under /var/www/html. Without this the runner resolves
     # an off-convention site correctly and then this script throws the answer
@@ -89,9 +163,11 @@ if [ -n "$SITE_ROOT_ARG" ] && [ -d "$SITE_ROOT_ARG" ]; then
 else
     SITE_ROOT="/var/www/html/${SITENAME}"
 fi
-PUBLIC_HTML="${SITE_ROOT}/public_html"
-SITE_CONFIG="${SITE_ROOT}/config/Globalvars_site.php"
-DIST_DIR="${PUBLIC_HTML}/agent_dist"
+if [ "$SITELESS" != "1" ]; then
+    PUBLIC_HTML="${SITE_ROOT}/public_html"
+    SITE_CONFIG="${SITE_ROOT}/config/Globalvars_site.php"
+    DIST_DIR="${PUBLIC_HTML}/agent_dist"
+fi
 
 BINARY_PATH="/usr/local/bin/joinery-agent"
 SUPERVISE_PATH="/usr/local/bin/joinery-agent-supervise"
@@ -104,12 +180,24 @@ ENV_FILE="${ENV_DIR}/joinery-agent.env"
 # The projected switch. The setting lives in the site database; this file is its
 # one-way shadow, so the keepalive and the agent can honour it without one.
 MARKER_FILE="${ENV_DIR}/enabled"
+# Written by the agent for exactly as long as it is running a job, and read
+# here to decide whether restarting it right now would destroy work. Pinned
+# identically in the agent's jobmarker.go.
+JOB_MARKER_FILE="${ENV_DIR}/job-running"
 
 say() { echo "agent installer: $*"; }
 
 [ "$(id -u)" = "0" ] || { say "not running as root - skipping"; exit 0; }
-[ -f "$SITE_CONFIG" ] || { say "site not initialised yet - skipping"; exit 0; }
-command -v php >/dev/null 2>&1 || { say "php-cli not available - skipping"; exit 0; }
+if [ "$SITELESS" != "1" ]; then
+    [ -f "$SITE_CONFIG" ] || { say "site not initialised yet - skipping"; exit 0; }
+    # Only the site path needs PHP: it reads the switch out of the site
+    # database through PDO. A siteless machine reads no database and parses its
+    # manifest without PHP, because a mail relay has none — provision_relay.sh
+    # installs postfix, opendkim, opendmarc, wireguard, ufw, rspamd and
+    # golang-go, and PHP is not among them. Requiring it here would have made
+    # every siteless install exit 0 having done nothing, which reads as success.
+    command -v php >/dev/null 2>&1 || { say "php-cli not available - skipping"; exit 0; }
+fi
 
 # --- The switch --------------------------------------------------------------
 # One setting decides whether this machine runs an agent at all. Read it from
@@ -145,7 +233,15 @@ read_setting() {
     ' "$SITE_CONFIG" "$1" 2>/dev/null
 }
 
-if ! AGENT_ENABLED="$(read_setting agent_enabled)"; then
+if [ "$SITELESS" = "1" ]; then
+    # No settings table to read, so the switch is stated rather than projected.
+    # OFF unless --enable: markerSaysRun() treats a MISSING marker as on, which
+    # is correct for the single case it exists for — an upgrade over an agent
+    # installed before the marker existed — and would be the wrong default to
+    # inherit on a machine being installed for the first time, where it would
+    # start a root service nobody asked to start (A9).
+    AGENT_ENABLED="$SITELESS_ENABLE"
+elif ! AGENT_ENABLED="$(read_setting agent_enabled)"; then
     say "could not read the agent_enabled setting - leaving this machine as it is"
     exit 0
 fi
@@ -274,6 +370,60 @@ ensure_supervision() {
     fi
 }
 
+# Is the agent in the middle of running a job right now?
+#
+# This exists because of one circular moment. The management node dispatches an
+# upgrade to a node's agent; the agent runs upgrade.php; upgrade.php runs the
+# host installers; the host installers run THIS SCRIPT, whose job is to converge
+# the agent binary and restart the agent onto it. Restarting it here kills the
+# process that is running the job, before it can report the outcome. The plane
+# sees a claim that never came back, requeues it, and the node upgrades again —
+# having already succeeded.
+#
+# So: while a job is running, this script converges everything except the agent
+# itself, and leaves that to the agent's own self-update, which was built for
+# this exact situation. It verifies the artifact's publisher signature against
+# the key baked into the running binary, keeps the previous binary as a backup,
+# refuses to swap while a job is in progress, and rolls back a version that never
+# reaches a healthy start. It looks every 60 seconds, so the swap happens about a
+# minute after the job that delivered it finishes.
+#
+# Leaving the BINARY alone as well as the restart is deliberate, not laziness.
+# The agent's updater takes its rollback backup by copying whatever file is at
+# the install path; if this script had already written the new binary there, the
+# backup would be a copy of the new version and the rollback would restore the
+# thing it was rolling back from.
+#
+# A FILE, not an environment variable, because the signal has to survive
+# upgrade.php's shell-outs and upgrade.php runs the host installers through
+# `sudo -n` on any node whose deploy user is not root. sudo strips the
+# environment — the same reason that call site already loses PGPASSWORD.
+#
+# It cannot wedge a node. The marker names the pid that wrote it, so an agent
+# killed mid-job leaves one pointing at a process that is gone; that reads as
+# stale, is removed, and this script converges normally. There is no timeout to
+# tune and nothing an operator has to remember to clean up.
+AGENT_JOB_ID=""
+agent_job_in_progress() {
+    [ -f "$JOB_MARKER_FILE" ] || return 1
+
+    JOB_PID="$(sed -n '1p' "$JOB_MARKER_FILE" 2>/dev/null | tr -dc '0-9')"
+    AGENT_JOB_ID="$(sed -n '2p' "$JOB_MARKER_FILE" 2>/dev/null | tr -dc '0-9')"
+
+    # No readable pid, a pid that no longer exists, or a pid that has been
+    # recycled by some other program: in every case the marker is debris.
+    if [ -n "$JOB_PID" ] \
+        && [ -r "/proc/${JOB_PID}/comm" ] \
+        && [ "$(cat "/proc/${JOB_PID}/comm" 2>/dev/null)" = "joinery-agent" ]; then
+        return 0
+    fi
+
+    say "clearing a stale job marker (no joinery-agent running as pid ${JOB_PID:-?})"
+    rm -f "$JOB_MARKER_FILE"
+    AGENT_JOB_ID=""
+    return 1
+}
+
 agent_running() {
     if [ "$INIT_MODE" = "systemd" ]; then
         systemctl is-active --quiet "$SERVICE_NAME"
@@ -341,6 +491,64 @@ stop_and_disable_agent() {
 # change the process.
 BINARY_INSTALLED=0
 
+# Read version, filename and sha256 for one architecture out of the shipped
+# manifest, printed as three space-separated fields. Empty output means the
+# manifest names nothing usable for this machine.
+#
+# PHP where there is PHP, awk where there is not. A mail relay has no PHP at
+# all, and the alternative to reading the manifest without it would be dropping
+# the sha256 check on exactly the machines being installed by hand — trading a
+# real integrity guarantee for the convenience of an interpreter.
+#
+# THE AWK READER IS DELIBERATELY NOT LINE-BASED. A manifest is machine
+# generated and its whitespace is not a contract: pretty-printed today, and one
+# line if the generator ever changes. A line-based reader on a one-line manifest
+# matches every architecture's "file" key in turn and keeps the LAST, so asking
+# for amd64 returns the arm64 filename — a wrong answer that looks like an
+# answer. Locating the architecture's object by index and cutting it at its own
+# closing brace is independent of how the file is laid out. Verified to agree
+# with the PHP reader field-for-field on both architectures, and to return
+# nothing rather than a neighbouring block for an architecture the manifest does
+# not carry.
+read_manifest_entry() {
+    if command -v php >/dev/null 2>&1; then
+        php -r '
+            $m = json_decode(file_get_contents($argv[1]), true);
+            $e = $m["binaries"][$argv[2]] ?? null;
+            if (!$m || !$e) { exit(0); }
+            echo $m["version"] . " " . $e["file"] . " " . $e["sha256"];
+        ' "$1" "$2" 2>/dev/null
+        return
+    fi
+
+    awk -v arch="$2" '
+        BEGIN { RS = "\004" }
+        {
+            doc = $0
+            if (match(doc, /"version"[ \t\r\n]*:[ \t\r\n]*"[^"]*"/)) {
+                v = substr(doc, RSTART, RLENGTH)
+                sub(/^"version"[ \t\r\n]*:[ \t\r\n]*"/, "", v); sub(/"$/, "", v)
+            }
+            key = "\"" arch "\""
+            at = index(doc, key)
+            if (at == 0) { exit 0 }
+            rest = substr(doc, at + length(key))
+            end = index(rest, "}")
+            if (end == 0) { exit 0 }
+            blk = substr(rest, 1, end)
+            if (match(blk, /"file"[ \t\r\n]*:[ \t\r\n]*"[^"]*"/)) {
+                f = substr(blk, RSTART, RLENGTH)
+                sub(/^"file"[ \t\r\n]*:[ \t\r\n]*"/, "", f); sub(/"$/, "", f)
+            }
+            if (match(blk, /"sha256"[ \t\r\n]*:[ \t\r\n]*"[^"]*"/)) {
+                h = substr(blk, RSTART, RLENGTH)
+                sub(/^"sha256"[ \t\r\n]*:[ \t\r\n]*"/, "", h); sub(/"$/, "", h)
+            }
+            if (v != "" && f != "" && h != "") { print v, f, h }
+        }
+    ' "$1" 2>/dev/null
+}
+
 converge_binary() {
     case "$(uname -m)" in
         x86_64)  ARCH="linux-amd64" ;;
@@ -354,12 +562,7 @@ converge_binary() {
     }
 
     read -r DIST_VERSION DIST_FILE DIST_SHA256 <<EOF
-$(php -r '
-    $m = json_decode(file_get_contents($argv[1]), true);
-    $e = $m["binaries"][$argv[2]] ?? null;
-    if (!$m || !$e) { exit(0); }
-    echo $m["version"] . " " . $e["file"] . " " . $e["sha256"];
-' "${DIST_DIR}/manifest.json" "$ARCH" 2>/dev/null)
+$(read_manifest_entry "${DIST_DIR}/manifest.json" "$ARCH")
 EOF
 
     if [ -z "${DIST_VERSION:-}" ] || [ -z "${DIST_FILE:-}" ]; then
@@ -408,7 +611,18 @@ EOF
     return 0
 }
 
-converge_binary || true
+# Decided once, before anything acts on it, so the binary pass and the restart
+# pass cannot disagree about whether a job was running.
+DEFER_TO_AGENT=0
+if agent_job_in_progress; then
+    DEFER_TO_AGENT=1
+fi
+
+if [ "$DEFER_TO_AGENT" = "1" ]; then
+    say "agent job #${AGENT_JOB_ID:-?} is running - not touching the agent binary; the agent's own signed self-update will take it"
+else
+    converge_binary || true
+fi
 write_env_file
 
 # --- Apply the switch --------------------------------------------------------
@@ -431,6 +645,18 @@ if [ ! -x "$BINARY_PATH" ]; then
 fi
 
 ensure_supervision
+
+# Supervision above is safe to converge mid-job: it writes a unit file or a cron
+# entry and starts nothing. The restart below is not, so it stops here.
+#
+# Said out loud rather than falling through the "already running" branch below,
+# which would be the correct action described by the wrong sentence — and an
+# operator reading an upgrade transcript needs to see that the new agent is
+# staged and pending, not that there was nothing to do.
+if [ "$DEFER_TO_AGENT" = "1" ]; then
+    say "new agent artifact staged in ${DIST_DIR}, restart deferred to agent - v$(installed_version) keeps running job #${AGENT_JOB_ID:-?} and will self-update within a minute of finishing it"
+    exit 0
+fi
 
 # "Already running" is only a reason to stop if the running process is running
 # the binary we just converged. When a new one went in, the live process is the

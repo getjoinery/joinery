@@ -9,6 +9,8 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.8 - the health badge and the measured-at line read the fold's per-key provenance, so
+ *                figures too old to judge health by grey the badge out instead of colouring it green
  * @version 1.7 - the Actions item leads to the API Keys tab: either the pending join requests to
  *                review, or the connect instructions (enrollment starts on the node — Phase 1.5)
  * @version 1.6 - Actions menu offers agent pairing (superadmin, unpaired nodes) — posts the existing
@@ -62,7 +64,17 @@
 	if (is_string($status_data)) {
 		$status_data = json_decode($status_data, true);
 	}
-	$last_check = $node->get('mgn_last_status_check');
+	// When the figures below were last MEASURED, which is not when a check last
+	// ran: a probe can reach a node, learn nothing from it, and stamp
+	// mgn_last_status_check on the way past. The fold records a measurement time
+	// per key; that column is the fallback for a node whose blob predates it.
+	$last_check = JobResultProcessor::status_last_measured($status_data)
+		?: $node->get('mgn_last_status_check');
+
+	// The three readings the badge is computed from. Named here because the badge
+	// is exactly as current as the stalest of them.
+	$badge_keys = array('disk_usage_percent', 'postgres_status', 'load_1m');
+	$figures_stale = JobResultProcessor::status_figures_are_stale($status_data, $badge_keys);
 
 	$last_check_job = ManagementJob::latestForNode($node->key, 'check_status');
 	$last_job_failed = $last_check_job && $last_check_job->get('mjb_status') === 'failed';
@@ -70,6 +82,11 @@
 	if ($last_job_failed) {
 		$status_color = 'danger';
 	} elseif (!$last_check || !$status_data) {
+		$status_color = 'secondary';
+	} elseif ($figures_stale) {
+		// Grey, not green. Green is a claim about the node right now, and these
+		// numbers are too old to support it — a node that filled its disk a month
+		// after its last real status check showed green the whole time.
 		$status_color = 'secondary';
 	} elseif (
 		(isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 90) ||
@@ -199,7 +216,14 @@
 
 	echo '<div class="d-flex align-items-center gap-2 ps-3 mt-1">';
 	if ($last_check) {
-		echo '<small class="text-muted">Last checked: ' . LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A') . '</small>';
+		// "Measured", not "checked": the word has to survive the distinction the
+		// value now respects, or the honest number reads as the old claim.
+		echo '<small class="text-muted">Figures measured: '
+			. LibraryFunctions::convert_time($last_check, 'UTC', $session->get_timezone(), 'M j, g:i A')
+			. '</small>';
+		if ($figures_stale && $status_data) {
+			echo '<small class="text-warning">Too old to judge health by &mdash; run a status check.</small>';
+		}
 	} elseif (!$status_data) {
 		echo '<small class="text-muted">No status check has been run yet.</small>';
 	}

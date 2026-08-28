@@ -2,6 +2,9 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.9 - a claim budget for apply_update, which works for up to an hour on the node
+ * @version 1.8 - activeOrRecentForNode: the dedupe test for work the plane queues on its own, so a
+ *                reconciler that notices a condition fleet-wide queues one job per node, not per notice
  * @version 1.7 - mjb_agent_outcome records the wire outcome verbatim, so a refusal is countable
  *                without matching the text of an error message
  * @version 1.6 - primitive jobs for the agent channel: createPrimitiveJob, claim/report, and the
@@ -141,6 +144,12 @@ class ManagementJob extends SystemBase {
 		'backup_run'            => 15720, // 4h20m + slack
 		'upload_backup'         => 5220,  // 85m + slack
 		'run_plugin_installers' => 1020,  // 15m + slack
+		// 60m + slack. An upgrade downloads a release, deploys it, runs
+		// migrations, runs the deploy-tier suite against the deployed tree and
+		// then every host installer. Requeuing one that is still running would
+		// start a second upgrade on a node mid-deploy, which is the worst
+		// moment on the list to do it twice.
+		'apply_update'          => 4200,
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */
@@ -431,6 +440,44 @@ class ManagementJob extends SystemBase {
 			return null;
 		}
 		return new ManagementJob($row['mjb_id'], TRUE);
+	}
+
+	/**
+	 * Is this node already covered for a job of this type — either one waiting or
+	 * in flight, or one that finished recently enough that asking again would
+	 * measure the same thing?
+	 *
+	 * The dedupe test for work the PLANE queues on its own rather than work a
+	 * person asked for. A person clicking a button twice means it; a reconciler
+	 * that queues a job every time it notices a condition queues one per notice,
+	 * and conditions are noticed in bulk. Result processing runs on page render
+	 * across the whole fleet at once, so one status sweep put 33 identical
+	 * recovery-key reports into the queue in a minute — nine nodes' worth, several
+	 * times over, each measuring a fact that changes at a human's pace.
+	 *
+	 * A FAILED recent job deliberately does not count as cover: a measurement that
+	 * did not happen is a reason to try again, not a reason to wait.
+	 *
+	 * @param int    $node_id
+	 * @param string $type
+	 * @param int    $recent_seconds how long a completed job keeps counting as cover
+	 * @return bool
+	 */
+	static function activeOrRecentForNode($node_id, $type, $recent_seconds) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT 1 FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			   AND (mjb_status IN ('pending', 'running')
+			        OR (mjb_status = 'completed' AND mjb_completed_time >= ?))
+			 LIMIT 1"
+		);
+		$q->execute([
+			(int)$node_id,
+			(string)$type,
+			gmdate('Y-m-d H:i:s', time() - (int)$recent_seconds),
+		]);
+		return (bool)$q->fetchColumn();
 	}
 }
 
