@@ -271,6 +271,10 @@ Either side can end the pairing, and neither needs the other's cooperation. This
 
 Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
+**A primitive is routed to a node only when that node says it has it.** Every claim carries the agent's own list of the primitives its binary compiled in, and the plane stores it (`mgn_agent_primitives`). Routing consults that list: an operation missing from it is dispatched over API or SSH instead, whatever version the node reports. The node's own account is the only one that is not a guess — a version number says which release a machine runs, and only the machine says what that release compiled into it.
+
+An agent old enough not to send a list leaves the column empty, and those nodes are answered by `JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION`: a per-operation floor naming the agent version that introduced the primitive. A node below the floor, or with no known version, routes away from the primitive — dispatching to a vocabulary that cannot be confirmed trades a working transport for a certain refusal.
+
 **Upgrade the control plane's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
 
 ### Reading refusals
@@ -287,7 +291,48 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 ### Endpoints
 
-`POST /api/v1/agent/join`, `/join_status`, `/claim`, `/result`. Join and join_status are unauthenticated by nature — until approval there is no identity to authenticate — and grant nothing; they are rate-limited, validated, and bounded in number. Claim and result are signed with the node's key; the plane verifies against the public half it holds, and selects jobs by the identity the **signature** proves, never by anything in the request body. Requests are schema-validated, size-capped, and refused for a clock more than five minutes from the plane's. These are a separate route family from `/api/v1/management/*`, which runs the other way — the plane calling in to a node's web tier — and stays status-only.
+`POST /api/v1/agent/join`, `/join_status`, `/claim`, `/result`, `/leave`, `/quiet`, `/artifact`. Join and join_status are unauthenticated by nature — until approval there is no identity to authenticate — and grant nothing; they are rate-limited, validated, and bounded in number. Claim and result are signed with the node's key; the plane verifies against the public half it holds, and selects jobs by the identity the **signature** proves, never by anything in the request body. Requests are schema-validated, size-capped, and refused for a clock more than five minutes from the plane's. These are a separate route family from `/api/v1/management/*`, which runs the other way — the plane calling in to a node's web tier — and stays status-only.
+
+`/artifact` is the one response that is bytes rather than a JSON envelope, and it is described under [Machines with no site](#machines-with-no-site). Its body fetches are metered on their own bucket (`api_agent_artifact_rate_limit_requests`, per address per window) and each is recorded, because they are the expensive ones; the small manifest fetches ride the general agent-channel limit.
+
+## Machines with no site
+
+Some machines a control plane manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.
+
+### Keeping the agent current
+
+A machine with a site tree finds its next binary in `public_html/agent_dist`, put there by its own upgrade, and updates without asking anyone. A machine with no site has no such directory, so it fetches from its management node instead: a signed request to `/api/v1/agent/artifact` for the dist manifest, and — when the version differs from what it is running — for the binary for its architecture.
+
+**Nothing about verification moves.** The agent decompresses, checks the sha256, and verifies an Ed25519 signature against the public key compiled into its own binary at build time, exactly as it does for a locally delivered artifact. The management node does not hold the release key and cannot sign an agent, so a plane serving a hostile binary produces a refusal and a recorded rejection. The endpoint is a delivery route for bytes that were always verified on arrival.
+
+The request names a **kind** from a closed set and, for a binary, an **architecture** matched against a pattern. It never names a file: the plane resolves what to send out of its own manifest, so nothing a node sends is read as a path.
+
+### The support bundle
+
+A script-invoking primitive verifies its script against the signed release manifest before running it as root. On a machine with no site there is no release manifest, so there is nothing to verify against and no script primitive can run at all — which would leave the machine's whole vocabulary in embedded Go.
+
+The support bundle closes that. A publish builds `public_html/agent_dist/support_bundle.tar.gz`: a small tree carrying the scripts those machines' primitives invoke, at site-root-relative paths, with its own `RELEASE_MANIFEST` and `.sig` signed by the release key. A siteless machine fetches it over the same artifact endpoint, verifies the signature against its baked-in key, checks every listed file's hash **and** that the tree holds nothing the manifest does not list, then unpacks it root-owned to `/opt/joinery-agent/tree`. Script primitives resolve against that tree when there is no site root; a machine with a site root uses the site root, and a machine with neither refuses as it always has.
+
+The bundle's contents are a deliberate list in `SupportBundlePublisher`, not a directory sweep — every entry is a script some primitive names, and adding one is a visible decision. A script that sources another needs that sibling in the list at the same relative path. Binaries the scripts invoke ship under `bin/` with one file per architecture (`bin/<tool>-linux-amd64`, `bin/<tool>-linux-arm64`) and the script selecting on `uname -m`: one bundle carries both, so no machine can end up holding one built for the wrong architecture.
+
+Its version is the hash of its own manifest body, so a publish that changes no bundled script leaves the bundle byte-identical and no machine downloads anything. The plane also advertises the tarball's sha256, which an agent uses only to skip a transfer it already has — what makes the tree runnable is the signature inside it.
+
+Each machine reports the bundle version it holds on every claim, stored as `mgn_agent_bundle_version`. On a machine nobody logs into, that column is the evidence the bundle arrived.
+
+### Enrolling and switching one on
+
+There is no admin page on these machines, so the ceremony is the same one reached from the command line:
+
+```bash
+joinery-agent join --management-node=https://plane.example.com
+joinery-agent status
+joinery-agent enable | disable
+joinery-agent leave
+```
+
+`join` generates the keypair, sends only the public half, and prints the fingerprint to compare against the pending request on the plane — the same comparison, and the same approval, as a node enrolling from its own admin page. The run switch is the marker file `/etc/joinery-agent/enabled`, which `enable` and `disable` write directly: on a machine with no settings table, the marker is the switch rather than a projection of one.
+
+Install with `install_agent.sh --siteless`, which is explicit and never inferred — a missing site config keeps meaning "not my machine, exit 0" for everything else. `--dist-dir=DIR` names where the first artifact is, since no release delivered one.
 
 ## Job Types
 

@@ -2359,6 +2359,28 @@
       }
     },
     {
+      "name": "api_agent_artifact_rate_limit_requests",
+      "default": "240",
+      "helptext": "Max agent artifact BODY fetches per window per IP — the agent binary and the support bundle, which are megabytes each. The small manifest fetches are metered by the general agent-channel limit instead. Sized for a fleet behind one address rather than for one machine, because the counter is per IP and a NAT'd fleet shares one: a machine fetches about once per release.",
+      "group": "api_rate_limits",
+      "label": "Max agent artifact downloads per window",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
+      "name": "api_agent_artifact_rate_limit_window",
+      "default": "3600",
+      "helptext": "Window (seconds) for the agent artifact download rate limit.",
+      "group": "api_rate_limits",
+      "label": "Agent artifact download rate limit window (seconds)",
+      "type": "number",
+      "validation": {
+        "min": 1
+      }
+    },
+    {
       "name": "agent_enabled",
       "default": "",
       "managed": true,

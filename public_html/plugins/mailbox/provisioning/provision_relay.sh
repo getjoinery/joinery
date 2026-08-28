@@ -10,7 +10,23 @@
 # recipient's public key at acceptance, and spools ciphertext; each tenant's
 # Joinery box dials out over WireGuard and pulls its own sealed blobs.
 #
-# Version: 2.7 - the firewall admits the Direct egress port (8442/tcp) on the
+# Version: 2.9 - IDEMPOTENCY PASS (specs/agent_machine_posture_and_relay_converge.md
+#                §5.4). A second run on an already-configured relay changes nothing
+#                and restarts nothing, which is the precondition for this script
+#                being the reconciler behind a scheduled relay_converge. Six things
+#                were fixed. The firewall is converged rule by rule instead of
+#                'ufw --force reset', which wiped every rule each run - including,
+#                during a rebuild, the rebuild's own 'ufw deny 25/tcp', so port 25
+#                re-opened while the spool was carried aside. Every service action
+#                is now conditional on a configuration THIS RUN changed. The Go
+#                toolchain is gone: relay-sealer arrives PREBUILT under bin/, with a
+#                loud failure when it is absent. wg0.conf's [Peer] list is derived
+#                from the tenant registry, so a rotated key replaces its predecessor
+#                instead of leaving a dead stanza claiming the same tunnel address.
+#                /etc/default/opendkim and opendmarc are written only when the result
+#                would differ. unattended-upgrades is reconfigured only when
+#                20auto-upgrades does not already say what we want it to say.
+# Version: 2.8 - the firewall admits the Direct egress port (8442/tcp) on the
 #                WireGuard interface. Default-deny was eating it: the listener
 #                binds the tunnel address and was healthy, but every tenant
 #                egress POST was silently dropped, so a fronted deployment's
@@ -84,7 +100,7 @@
 set -euo pipefail
 
 # --- shared definitions --------------------------------------------------------
-RELAY_VERSION="2.8"
+RELAY_VERSION="2.9"
 RELAY_HOME="/opt/joinery-relay"
 SEALER_BIN="${RELAY_HOME}/relay-sealer"
 SPOOL_ROOT="/var/spool/joinery-relay"
@@ -108,6 +124,239 @@ if [[ "${EUID}" -ne 0 ]]; then
     echo "Re-run with: sudo bash $0 ..." >&2
     exit 1
 fi
+
+# =============================================================================
+# Idempotence helpers
+# =============================================================================
+# This script is the reconciler behind relay_converge
+# (specs/agent_machine_posture_and_relay_converge.md §5), so a run that finds the
+# relay already in its intended state must change nothing and - above all -
+# restart nothing. A converge that drops mail service every time it runs cannot
+# be put on a schedule. Every mutation below therefore goes through one of these
+# helpers, and every service action is conditional on a configuration THIS RUN
+# changed.
+
+CHANGED_UNITS=""
+
+mark_changed() {
+    case " ${CHANGED_UNITS} " in
+        *" $1 "*) ;;
+        *) CHANGED_UNITS="${CHANGED_UNITS} $1";;
+    esac
+}
+
+changed() {
+    case " ${CHANGED_UNITS} " in
+        *" $1 "*) return 0;;
+        *) return 1;;
+    esac
+}
+
+# write_if_changed <dest> [mode] [owner:group] - content arrives on stdin.
+# Returns 0 when it WROTE (the caller marks whatever unit reads the file) and 1
+# when the file already matched. USE ONLY AS AN `if` CONDITION: under set -e a
+# bare call that found no difference would end the script.
+write_if_changed() {
+    local dest="$1" mode="${2:-644}" own="${3:-}"
+    mkdir -p "$(dirname "${dest}")"
+    local tmp; tmp="$(mktemp "${dest}.joinery-XXXXXX")"
+    cat > "${tmp}"
+    chmod "${mode}" "${tmp}"
+    if [[ -n "${own}" ]]; then chown "${own}" "${tmp}"; fi
+    if [[ -f "${dest}" ]] && cmp -s "${tmp}" "${dest}"; then
+        rm -f "${tmp}"
+        # Mode and ownership are asserted even when the content matched: they are
+        # part of the desired state, and neither is a reason to restart anything.
+        chmod "${mode}" "${dest}"
+        if [[ -n "${own}" ]]; then chown "${own}" "${dest}"; fi
+        return 1
+    fi
+    mv -f "${tmp}" "${dest}"
+    return 0
+}
+
+# postconf_set <parameter> <value> - set it only when the live value differs, so
+# a converge that changes no Postfix parameter leaves Postfix alone.
+postconf_set() {
+    local key="$1" val="$2" cur
+    cur="$(postconf -h "${key}" 2>/dev/null || true)"
+    if [[ "${cur}" != "${val}" ]]; then
+        postconf -e "${key} = ${val}"
+        mark_changed postfix
+    fi
+    return 0
+}
+
+# converge_socket_default <file> <socket> - /etc/default/{opendkim,opendmarc}.
+# The old edit rewrote the file on every run, and APPENDED a SOCKET= line when
+# the packaged one was commented out, so nothing downstream could tell a run
+# that changed the socket from a run that changed nothing. Returns 0 on a write.
+converge_socket_default() {
+    local file="$1" socket="$2" desired
+    [[ -f "${file}" ]] || return 1
+    if grep -qE '^[[:space:]]*SOCKET=' "${file}"; then
+        desired="$(sed "s#^[[:space:]]*SOCKET=.*#SOCKET=\"${socket}\"#" "${file}")"
+    else
+        desired="$(cat "${file}"; printf 'SOCKET="%s"' "${socket}")"
+    fi
+    if printf '%s\n' "${desired}" | cmp -s - "${file}"; then
+        return 1
+    fi
+    printf '%s\n' "${desired}" > "${file}"
+    return 0
+}
+
+# sync_service <unit> [reload|restart] - start it if it is not running, act on it
+# only if something it reads changed this run, and otherwise leave it alone.
+sync_service() {
+    local unit="$1" mode="${2:-restart}" state
+    state="$(systemctl is-active "${unit}" 2>/dev/null || true)"
+    [[ -n "${state}" ]] || state="unknown"
+    if [[ "${state}" != "active" ]]; then
+        if systemctl start "${unit}" >/dev/null 2>&1; then
+            echo "${unit}: started (was ${state})"
+        else
+            echo "WARN: ${unit} is ${state} and would not start" >&2
+        fi
+    elif changed "${unit}"; then
+        if [[ "${mode}" == "reload" ]]; then
+            systemctl reload "${unit}" >/dev/null 2>&1 \
+                || systemctl restart "${unit}" >/dev/null 2>&1 \
+                || echo "WARN: ${unit} would not reload" >&2
+            echo "${unit}: reloaded (its configuration changed this run)"
+        else
+            systemctl restart "${unit}" >/dev/null 2>&1 \
+                || echo "WARN: ${unit} would not restart" >&2
+            echo "${unit}: restarted (its configuration changed this run)"
+        fi
+    else
+        echo "${unit}: unchanged - left running"
+    fi
+    return 0
+}
+
+# The persisted WireGuard peer list is DERIVED from the tenant registry, never
+# appended to. A tenant that rotated its key used to leave its old [Peer] stanza
+# behind for ever - the same defect class as the AllowedIPs collision fixed once
+# already - and two stanzas claiming one tunnel address is a routing coin toss.
+# Rebuilding the list from ${TENANTS_DIR} makes a rotation a replacement and a
+# removal a removal. The [Interface] block, which holds the private key, is
+# preserved byte for byte. Returns 0 when the file changed.
+converge_wg_peers() {
+    local conf="/etc/wireguard/${WG_IF}.conf"
+    [[ -f "${conf}" ]] || return 1
+    local tmp; tmp="$(mktemp "${conf}.joinery-XXXXXX")"
+    chmod 600 "${tmp}"
+    # The [Interface] block, with trailing blank lines trimmed: each peer below
+    # supplies its own separating blank line, and keeping the one that preceded
+    # the first [Peer] last time would add a line to the file on every single
+    # run — a converge that is not a fixpoint is not a converge.
+    local iface; iface="$(awk '/^\[Peer\]/{exit} {print}' "${conf}")"
+    printf '%s\n' "${iface}" > "${tmp}"
+    local d slug key ip
+    for d in "${TENANTS_DIR}"/*/; do
+        [[ -d "${d}" ]] || continue
+        slug="$(basename "${d}")"
+        [[ "${slug}" =~ ${SLUG_RE} ]] || continue
+        [[ -s "${d}wg_pubkey" ]] || continue
+        key="$(cat "${d}wg_pubkey")"
+        ip="$(cat "${d}tunnel_ip" 2>/dev/null || true)"
+        [[ -n "${key}" && -n "${ip}" ]] || continue
+        printf '\n[Peer]\n# tenant %s\nPublicKey = %s\nAllowedIPs = %s/32\n' \
+            "${slug}" "${key}" "${ip}" >> "${tmp}"
+    done
+    if cmp -s "${tmp}" "${conf}"; then
+        rm -f "${tmp}"
+        return 1
+    fi
+    mv -f "${tmp}" "${conf}"
+    chmod 600 "${conf}"
+    mark_changed "wg-quick@${WG_IF}"
+    return 0
+}
+
+# Apply the converged peer set to the RUNNING interface without taking it down.
+# 'wg syncconf' adds, updates and removes peers in place; restarting wg-quick to
+# change one peer would drop every other tenant's tunnel with it.
+apply_wg_live() {
+    changed "wg-quick@${WG_IF}" || return 0
+    if wg show "${WG_IF}" >/dev/null 2>&1; then
+        if wg syncconf "${WG_IF}" <(wg-quick strip "${WG_IF}") 2>/dev/null; then
+            echo "wireguard: peers synced live on ${WG_IF} (no interface restart)"
+        else
+            echo "WARN: live wg syncconf failed - run 'systemctl restart wg-quick@${WG_IF}'" >&2
+        fi
+    fi
+    return 0
+}
+
+ufw_allow_once() {
+    local rules="$1" spec="$2"
+    if printf '%s\n' "${rules}" | grep -qE "^${spec}[[:space:]]+ALLOW"; then
+        echo "firewall: ${spec} already allowed"
+    else
+        ufw allow "${spec}" >/dev/null 2>&1 || true
+        echo "firewall: allow ${spec}"
+    fi
+    return 0
+}
+
+# Converge the intended rule set instead of 'ufw --force reset'. The reset wiped
+# every rule on every run - including the rebuild flow's own 'ufw deny 25/tcp'
+# (JobCommandBuilder::build_rebuild_relay closes 25 so the queue can drain, then
+# re-runs provisioning). Port 25 is therefore converged ONE WAY here: opened if
+# nothing has deliberately closed it, and an existing DENY is left for the
+# rebuild's own reopen step to lift.
+converge_firewall() {
+    if ! command -v ufw >/dev/null 2>&1; then
+        echo "firewall: ufw not installed - skipped"
+        return 0
+    fi
+    local verbose rules
+    verbose="$(ufw status verbose 2>/dev/null || true)"
+    rules="$(ufw status 2>/dev/null || true)"
+
+    if ! printf '%s\n' "${verbose}" | grep -q 'deny (incoming)'; then
+        ufw default deny incoming >/dev/null 2>&1 || true
+        echo "firewall: default incoming set to deny"
+    fi
+    if ! printf '%s\n' "${verbose}" | grep -q 'allow (outgoing)'; then
+        ufw default allow outgoing >/dev/null 2>&1 || true
+        echo "firewall: default outgoing set to allow"
+    fi
+
+    if printf '%s\n' "${rules}" | grep -qE '^25/tcp[[:space:]]+DENY'; then
+        echo "firewall: 25/tcp is DENY - a rebuild window is open; left closed"
+    else
+        ufw_allow_once "${rules}" '25/tcp'
+    fi
+    ufw_allow_once "${rules}" "${WG_PORT}/udp"
+    ufw_allow_once "${rules}" '22/tcp'
+    # 443 is Joinery Direct's endpoint AND the port its certificate is obtained
+    # on (TLS-ALPN-01, in-process - no web server and no certbot on this
+    # machine). Opened unconditionally: the listener refuses everything except
+    # the one Direct path, and a tenant that has not enabled Direct has no
+    # capability record published, so nothing sends here.
+    ufw_allow_once "${rules}" '443/tcp'
+
+    # The Direct egress proxy for tenants. The listener already binds the tunnel
+    # address only; this rule is scoped to the tunnel interface so the port is
+    # never reachable from the public side even if the bind ever loosened.
+    if printf '%s\n' "${rules}" | grep -qE "^8442/tcp on ${WG_IF}[[:space:]]+ALLOW"; then
+        echo "firewall: 8442/tcp on ${WG_IF} already allowed"
+    else
+        ufw allow in on "${WG_IF}" to any port 8442 proto tcp >/dev/null 2>&1 || true
+        echo "firewall: allow 8442/tcp on ${WG_IF} (Direct egress, tunnel only)"
+    fi
+
+    if printf '%s\n' "${verbose}" | grep -qE '^Status:[[:space:]]+active'; then
+        echo "firewall: already active - not re-enabled"
+    else
+        ufw --force enable >/dev/null 2>&1 || true
+        echo "firewall: enabled"
+    fi
+    return 0
+}
 
 # =============================================================================
 # Tenant operations (add-tenant / remove-tenant / set-domains)
@@ -240,15 +489,20 @@ add_tenant() {
 
     # WireGuard peer: the tenant dials out; the shard listens. AllowedIPs pins
     # the peer to its allocated address — tenant A cannot source as tenant B.
+    #
+    # The REGISTRY is the source of truth and wg0.conf is derived from it. The
+    # old append-if-absent could only ever add: a tenant that rotated its key
+    # left its previous stanza in place, and two stanzas claiming one tunnel
+    # address is a routing coin toss. Converging the whole list makes a rotation
+    # a replacement.
     if [[ -n "${wg_pubkey}" ]]; then
         printf '%s\n' "${wg_pubkey}" > "${TENANTS_DIR}/${slug}/wg_pubkey"
-        if ! grep -qF "${wg_pubkey}" "/etc/wireguard/${WG_IF}.conf" 2>/dev/null; then
-            printf '\n[Peer]\n# tenant %s\nPublicKey = %s\nAllowedIPs = %s/32\n' \
-                "${slug}" "${wg_pubkey}" "${tunnel_ip}" >> "/etc/wireguard/${WG_IF}.conf"
+        if converge_wg_peers; then
+            echo "wireguard: peer list converged (tenant ${slug} at ${tunnel_ip})"
+        else
+            echo "wireguard: peer list already current for tenant ${slug}"
         fi
-        wg set "${WG_IF}" peer "${wg_pubkey}" allowed-ips "${tunnel_ip}/32" 2>/dev/null \
-            || echo "WARN: live wg peer add failed - bring up wg-quick@${WG_IF}" >&2
-        echo "wireguard: peered tenant ${slug} at ${tunnel_ip}"
+        apply_wg_live
     fi
 
     run_merge
@@ -280,21 +534,19 @@ remove_tenant() {
     if [[ -f "${TENANTS_DIR}/${slug}/wg_pubkey" ]]; then
         local key; key="$(cat "${TENANTS_DIR}/${slug}/wg_pubkey")"
         wg set "${WG_IF}" peer "${key}" remove 2>/dev/null || true
-        # Strip the [Peer] block for this key from the persisted config.
-        if [[ -f "/etc/wireguard/${WG_IF}.conf" ]]; then
-            awk -v key="${key}" '
-                /^\[Peer\]/ { block=""; inpeer=1 }
-                inpeer { block=block $0 ORS; if (index($0, key)) drop=1;
-                         if (/^AllowedIPs/) { inpeer=0; if (!drop) printf "%s", block; drop=0 } ; next }
-                { print }
-            ' "/etc/wireguard/${WG_IF}.conf" > "/etc/wireguard/${WG_IF}.conf.tmp" \
-                && mv "/etc/wireguard/${WG_IF}.conf.tmp" "/etc/wireguard/${WG_IF}.conf"
-            chmod 600 "/etc/wireguard/${WG_IF}.conf"
-        fi
     fi
 
     id -u "${user}" >/dev/null 2>&1 && userdel "${user}" 2>/dev/null || true
     rm -rf "${HOMES_DIR}/${slug}" "${TENANTS_DIR}/${slug}" "${spool}"
+
+    # The persisted peer list is rebuilt from what remains in the registry, so
+    # the departing tenant's stanza goes with it. No text surgery on the config:
+    # the awk that used to strip one [Peer] block depended on AllowedIPs being
+    # the last line of every stanza, which is true only of the ones we wrote.
+    if converge_wg_peers; then
+        echo "wireguard: peer list converged after removing ${slug}"
+    fi
+    apply_wg_live
 
     run_merge
 
@@ -365,21 +617,55 @@ if [[ "${SMARTHOST_MODE}" -eq 1 && "$(tenant_count)" -gt 1 ]]; then
 fi
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-SEALER_SRC="${SCRIPT_DIR}/relay-sealer"
 
-if [[ ! -d "${SEALER_SRC}" ]]; then
-    echo "ERROR: sealer source not found at ${SEALER_SRC}" >&2
-    echo "Run this script from the shipped plugins/mailbox/provisioning/ directory." >&2
+# The sealer arrives PREBUILT. It used to be compiled here, which put a Go
+# toolchain on a mail relay, fetched golang.org/x/crypto over the network on
+# every provision, burned minutes of CPU, and produced a byte-identical binary
+# with a fresh mtime each run — so nothing could tell whether the sealer had
+# actually changed. The signed support bundle
+# (specs/agent_machine_posture_and_relay_converge.md §4) delivers the binary
+# instead, in bin/ beside this script, one file per architecture named by
+# `uname -m` (bin/relay-sealer-x86_64, bin/relay-sealer-aarch64). Resolved
+# relative to this script, the way its sibling provisioning files already are.
+SEALER_MACHINE="$(uname -m)"
+SEALER_SRC=""
+SEALER_CANDIDATES=()
+if [[ -n "${JOINERY_RELAY_SEALER:-}" ]]; then
+    SEALER_CANDIDATES+=("${JOINERY_RELAY_SEALER}")
+fi
+SEALER_CANDIDATES+=("${SCRIPT_DIR}/bin/relay-sealer-${SEALER_MACHINE}")
+for candidate in "${SEALER_CANDIDATES[@]}"; do
+    if [[ -f "${candidate}" ]]; then
+        SEALER_SRC="${candidate}"
+        break
+    fi
+done
+if [[ -z "${SEALER_SRC}" ]]; then
+    echo "ERROR: no prebuilt relay-sealer binary was delivered with this script." >&2
+    echo "This machine is ${SEALER_MACHINE}. Looked for:" >&2
+    for candidate in "${SEALER_CANDIDATES[@]}"; do echo "  ${candidate}" >&2; done
+    echo "The binary ships in the signed support bundle. To build one by hand:" >&2
+    echo "  bash ${SCRIPT_DIR}/relay-sealer/build.sh ${SCRIPT_DIR}/bin/relay-sealer-${SEALER_MACHINE}" >&2
     exit 1
 fi
+# A source tree, a text placeholder or a truncated download named like the
+# binary would fail at the first piece of mail — hours later, as a delivery
+# error, on a machine nobody is watching. Refuse it here instead.
+if [[ "$(head -c 4 "${SEALER_SRC}" 2>/dev/null | od -An -tx1 | tr -d ' \n')" != "7f454c46" ]]; then
+    echo "ERROR: ${SEALER_SRC} is not an ELF executable." >&2
+    exit 1
+fi
+echo "relay-sealer: using prebuilt ${SEALER_SRC}"
 
 export DEBIAN_FRONTEND=noninteractive
 
 # --- 1. install packages -----------------------------------------------------
 # No postfix-pgsql (no app DB on the relay), no php, and NO redis: the relay's
-# rspamd is stateless (no Bayes) so nothing needs a store. golang-go builds the
-# sealer.
-PACKAGES=(postfix opendkim opendkim-tools opendmarc wireguard wireguard-tools rsync ufw golang-go ca-certificates)
+# rspamd is stateless (no Bayes) so nothing needs a store. NO COMPILER either -
+# the sealer arrives prebuilt (see the sealer resolution above), which takes a
+# Go toolchain and a network fetch off a mail relay whose smallness is the
+# security property.
+PACKAGES=(postfix opendkim opendkim-tools opendmarc wireguard wireguard-tools rsync ufw ca-certificates)
 MISSING=()
 for pkg in "${PACKAGES[@]}"; do
     if dpkg -s "${pkg}" >/dev/null 2>&1; then
@@ -415,25 +701,34 @@ mkdir -p "${SPOOL_ROOT}"
 chown root:root "${SPOOL_ROOT}"
 chmod 755 "${SPOOL_ROOT}"
 
-echo "building relay-sealer (CGO off, static)..."
-# Build as a normal user context but write into RELAY_HOME. A module-cache dir is
-# needed for the one dependency (golang.org/x/crypto) to be fetched.
-export GOFLAGS="-mod=mod"
-export GOCACHE="${RELAY_HOME}/.gocache"
-export GOPATH="${RELAY_HOME}/.gopath"
-mkdir -p "${GOCACHE}" "${GOPATH}"
-( cd "${SEALER_SRC}" && CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o "${SEALER_BIN}" . )
-chown root:root "${SEALER_BIN}"
-chmod 755 "${SEALER_BIN}"
-echo "sealer built: ${SEALER_BIN} (also the merge-maps unit)"
+# Install the prebuilt sealer, and ONLY when its bytes differ. This one binary
+# is the Postfix pipe transport, the merge-maps unit AND the Joinery Direct
+# service, so replacing it needlessly would restart Direct on every converge.
+# Rename rather than overwrite: a running Direct holds the old inode open, and
+# writing in place would earn ETXTBSY.
+if [[ -f "${SEALER_BIN}" ]] && cmp -s "${SEALER_SRC}" "${SEALER_BIN}"; then
+    echo "relay-sealer: ${SEALER_BIN} already current"
+else
+    cp -f "${SEALER_SRC}" "${SEALER_BIN}.new"
+    chown root:root "${SEALER_BIN}.new"
+    chmod 755 "${SEALER_BIN}.new"
+    mv -f "${SEALER_BIN}.new" "${SEALER_BIN}"
+    mark_changed joinery-direct
+    echo "relay-sealer: installed ${SEALER_BIN} (also the merge-maps unit)"
+fi
 
 # Self-install so tenant lifecycle operations (add-tenant / remove-tenant /
 # set-domains) can run later without re-shipping the provisioning bundle —
 # fleet jobs invoke /opt/joinery-relay/provision_relay.sh directly.
 if [[ "$(readlink -f "${BASH_SOURCE[0]}")" != "${RELAY_HOME}/provision_relay.sh" ]]; then
-    cp "${BASH_SOURCE[0]}" "${RELAY_HOME}/provision_relay.sh"
-    chmod 755 "${RELAY_HOME}/provision_relay.sh"
-    echo "installed: ${RELAY_HOME}/provision_relay.sh (tenant lifecycle operations)"
+    if [[ -f "${RELAY_HOME}/provision_relay.sh" ]] \
+       && cmp -s "${BASH_SOURCE[0]}" "${RELAY_HOME}/provision_relay.sh"; then
+        echo "${RELAY_HOME}/provision_relay.sh is already this version"
+    else
+        cp "${BASH_SOURCE[0]}" "${RELAY_HOME}/provision_relay.sh"
+        chmod 755 "${RELAY_HOME}/provision_relay.sh"
+        echo "installed: ${RELAY_HOME}/provision_relay.sh (tenant lifecycle operations)"
+    fi
 fi
 
 # What built this relay, so joinery-ping can say so and a tenant can tell an
@@ -442,7 +737,7 @@ printf '%s' "${RELAY_VERSION}" > "${RELAY_HOME}/version"
 chmod 644 "${RELAY_HOME}/version"
 
 # --- 2b. tenant shell (the ONLY surface a tenant's SSH key reaches) -----------
-cat > "${TENANT_SHELL}" <<'TENANTSHELL'
+if write_if_changed "${TENANT_SHELL}" 755 <<'TENANTSHELL'
 #!/usr/bin/env bash
 # joinery-tenant-shell <slug> — forced command for tenant pull accounts on a
 # Joinery relay (managed by provision_relay.sh; specs/mailbox_relay_shared_fleet.md).
@@ -593,25 +888,45 @@ case "${TOK[0]}" in
     ;;
 esac
 TENANTSHELL
-chmod 755 "${TENANT_SHELL}"
-echo "tenant shell installed: ${TENANT_SHELL}"
+then
+    echo "tenant shell installed: ${TENANT_SHELL}"
+else
+    echo "tenant shell already current: ${TENANT_SHELL}"
+fi
 
 # Tenants may trigger exactly one root action: the map merge (which validates
 # their fragments against root-owned allowlists — its whole purpose).
 SUDOERS_MERGE="/etc/sudoers.d/joinery-relay-merge"
-echo "%${TENANT_GROUP} ALL=(root) NOPASSWD: ${SEALER_BIN} merge-maps" > "${SUDOERS_MERGE}"
-chmod 440 "${SUDOERS_MERGE}"
-if ! visudo -cf "${SUDOERS_MERGE}" >/dev/null; then
-    rm -f "${SUDOERS_MERGE}"
-    echo "ERROR: generated sudoers rule failed validation - removed." >&2
+# Validated before it is installed, not after: a rule that fails visudo must
+# never sit in /etc/sudoers.d at all, not even for the moment it takes to notice
+# and delete it — sudo reads the directory, and a broken file there breaks sudo
+# for everyone. sudo ignores names containing a dot, so the staging file is
+# inert while it exists.
+SUDOERS_TMP="$(mktemp /etc/sudoers.d/.joinery-relay-merge.XXXXXX)"
+echo "%${TENANT_GROUP} ALL=(root) NOPASSWD: ${SEALER_BIN} merge-maps" > "${SUDOERS_TMP}"
+chmod 440 "${SUDOERS_TMP}"
+if ! visudo -cf "${SUDOERS_TMP}" >/dev/null; then
+    rm -f "${SUDOERS_TMP}"
+    echo "ERROR: generated sudoers rule failed validation - not installed." >&2
     exit 1
 fi
-echo "sudoers: ${TENANT_GROUP} may run '${SEALER_BIN} merge-maps'"
+if [[ -f "${SUDOERS_MERGE}" ]] && cmp -s "${SUDOERS_TMP}" "${SUDOERS_MERGE}"; then
+    rm -f "${SUDOERS_TMP}"
+    chmod 440 "${SUDOERS_MERGE}"
+    echo "sudoers: rule already in place"
+else
+    mv -f "${SUDOERS_TMP}" "${SUDOERS_MERGE}"
+    chmod 440 "${SUDOERS_MERGE}"
+    echo "sudoers: ${TENANT_GROUP} may run '${SEALER_BIN} merge-maps'"
+fi
 
 # --- 3. placeholder synced maps (Postfix must start before the first merge) ---
 for f in "${MAP_DOMAINS}" "${MAP_RECIPIENTS}" "${MAP_TRANSPORT}"; do
     [[ -f "${f}" ]] || : > "${f}"
-    postmap "${f}"
+    if [[ ! -f "${f}.db" || "${f}" -nt "${f}.db" ]]; then
+        postmap "${f}"
+        echo "postmap: rebuilt ${f}.db"
+    fi
 done
 # The SRS accept map is a regexp map (no postmap); create it empty if absent.
 [[ -f "${MAP_SRS}" ]] || : > "${MAP_SRS}"
@@ -634,30 +949,32 @@ SEALER_DEF="joinery unix - n n - 5 pipe flags=DRh user=${RELAY_USER} ${SEALER_AR
 existing_joinery="$(postconf -M joinery/unix 2>/dev/null | tr -s ' \t' ' ' | tr -d '\n' || true)"
 if [[ -z "${existing_joinery}" ]]; then
     postconf -Me "joinery/unix=${SEALER_DEF}"
+    mark_changed postfix
     echo "master.cf: added joinery sealer pipe transport"
 elif [[ ( "${existing_joinery}" == *"${SEALER_ARGV} "* || "${existing_joinery}" == *"${SEALER_ARGV}" ) && "${existing_joinery}" == *"flags=DRh "* ]]; then
     echo "master.cf: joinery sealer transport already correct."
 else
     postconf -Me "joinery/unix=${SEALER_DEF}"
+    mark_changed postfix
     echo "master.cf: repaired stale joinery sealer transport"
 fi
 
 # --- 5. main.cf --------------------------------------------------------------
-postconf -e "myhostname = ${MAIL_HOSTNAME}"
-postconf -e "inet_interfaces = all"
-postconf -e "mydestination = localhost, localhost.localdomain"
+postconf_set "myhostname" "${MAIL_HOSTNAME}"
+postconf_set "inet_interfaces" "all"
+postconf_set "mydestination" "localhost, localhost.localdomain"
 
 # Prefer IPv4 for outbound (forward + SRS bounce legs). A fresh VPS gets an IPv6
 # address whose PTR is almost never set, and big receivers (Gmail) hard-reject
 # IPv6 mail without a matching PTR + authentication (550 IPv6AuthError). The
 # IPv4 PTR is what the provisioning DNS sets, so send from IPv4.
-postconf -e "smtp_address_preference = ipv4"
+postconf_set "smtp_address_preference" "ipv4"
 
 # Box-level acceptance flood control (anvil). Per-tenant enforcement lives in
 # the sealer (forward throttle + spool quota from the tenant's routing block);
 # these anvil limits bound what any single CLIENT can push at the shard.
-postconf -e "smtpd_client_connection_rate_limit = 120"
-postconf -e "smtpd_client_message_rate_limit = 300"
+postconf_set "smtpd_client_connection_rate_limit" "120"
+postconf_set "smtpd_client_message_rate_limit" "300"
 
 # Tunnel submission listener (smarthost) is OPT-IN and SELF-HOSTED-ONLY. Only
 # when opted in is the WireGuard subnet trusted to relay outbound compose
@@ -666,11 +983,11 @@ postconf -e "smtpd_client_message_rate_limit = 300"
 # submission — a compromised relay in default mode can send only the inbound
 # mail it forwards onward, nothing else.
 if [[ "${SMARTHOST_MODE}" -eq 1 ]]; then
-    postconf -e "mynetworks = 127.0.0.0/8, [::1]/128, 10.99.0.0/24"
+    postconf_set "mynetworks" "127.0.0.0/8, [::1]/128, 10.99.0.0/24"
     RCPT_LEAD="permit_mynetworks, "
     echo "smarthost: ENABLED — tunnel submission open (WG subnet trusted to relay outbound compose)"
 else
-    postconf -e "mynetworks = 127.0.0.0/8, [::1]/128"
+    postconf_set "mynetworks" "127.0.0.0/8, [::1]/128"
     RCPT_LEAD=""
     echo "smarthost: DISABLED (inbound-only default) — no tunnel submission listener"
 fi
@@ -678,8 +995,8 @@ fi
 # The relay is authoritative for the hosted domains (merged from tenant
 # fragments) and routes each to the sealer pipe. reject_unauth_destination then
 # accepts recipients in these and rejects relay attempts for anything else.
-postconf -e "relay_domains = hash:${MAP_DOMAINS}"
-postconf -e "transport_maps = hash:${MAP_TRANSPORT}"
+postconf_set "relay_domains" "hash:${MAP_DOMAINS}"
+postconf_set "transport_maps" "hash:${MAP_TRANSPORT}"
 
 # RBL block — verbatim from install_email.sh — plus SMTP-time recipient
 # validation against the merged access map (preserving reject_unmatched: listed
@@ -693,7 +1010,7 @@ postconf -e "transport_maps = hash:${MAP_TRANSPORT}"
 # from Mailgun, SendGrid or Google at random — permanently, since a 5xx stops
 # the sender retrying. SpamCop says as much itself: use it to score, not to
 # refuse. Content scoring is where a weaker signal belongs.
-postconf -e "smtpd_recipient_restrictions = ${RCPT_LEAD}reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
+postconf_set "smtpd_recipient_restrictions" "${RCPT_LEAD}reject_unauth_destination, reject_rbl_client zen.spamhaus.org, reject_rhsbl_helo dbl.spamhaus.org, reject_rhsbl_sender dbl.spamhaus.org, check_recipient_access regexp:${MAP_SRS}, check_recipient_access hash:${MAP_RECIPIENTS}, permit"
 echo "main.cf: relay_domains, transport, recipient validation, RBL, anvil limits set"
 
 # --- 6. opendkim + opendmarc (verify-mode, verbatim from install_email.sh) ----
@@ -706,9 +1023,11 @@ mkdir -p /etc/opendkim
 [[ -f /etc/opendkim/trusted.hosts ]] || printf '127.0.0.1\n::1\nlocalhost\n' > /etc/opendkim/trusted.hosts
 
 OPENDKIM_MARKER='joinery-managed opendkim.conf'
-if ! grep -qF "${OPENDKIM_MARKER}" /etc/opendkim.conf 2>/dev/null; then
-    [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] && cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
-    cat > /etc/opendkim.conf <<OPENDKIMCONF
+if [[ -f /etc/opendkim.conf && ! -f /etc/opendkim.conf.pre-joinery ]] \
+   && ! grep -qF "${OPENDKIM_MARKER}" /etc/opendkim.conf 2>/dev/null; then
+    cp /etc/opendkim.conf /etc/opendkim.conf.pre-joinery
+fi
+if write_if_changed /etc/opendkim.conf 644 <<OPENDKIMCONF
 # ${OPENDKIM_MARKER} — managed by mailbox/provisioning/provision_relay.sh.
 # Mode v = VERIFY inbound only (the relay does not sign; DKIM signing stays in-app
 # on each tenant's main box).
@@ -731,24 +1050,25 @@ SigningTable            refile:/etc/opendkim/signing.table
 ExternalIgnoreList      /etc/opendkim/trusted.hosts
 InternalHosts           /etc/opendkim/trusted.hosts
 OPENDKIMCONF
+then
+    mark_changed opendkim
     echo "opendkim: wrote /etc/opendkim.conf (verify, AuthservID ${AUTHSERV_ID})"
 else
-    echo "opendkim: already managed by us - leaving it."
+    echo "opendkim: /etc/opendkim.conf already correct."
 fi
-if [[ -f /etc/default/opendkim ]]; then
-    if grep -qE '^[[:space:]]*SOCKET=' /etc/default/opendkim; then
-        sed -i 's#^[[:space:]]*SOCKET=.*#SOCKET="inet:8891@localhost"#' /etc/default/opendkim
-    else
-        echo 'SOCKET="inet:8891@localhost"' >> /etc/default/opendkim
-    fi
+if converge_socket_default /etc/default/opendkim "inet:8891@localhost"; then
+    mark_changed opendkim
+    echo "opendkim: /etc/default/opendkim SOCKET set"
 fi
 
 mkdir -p /run/opendmarc
 chown opendmarc:opendmarc /run/opendmarc 2>/dev/null || true
 OPENDMARC_MARKER='joinery-managed opendmarc.conf'
-if ! grep -qF "${OPENDMARC_MARKER}" /etc/opendmarc.conf 2>/dev/null; then
-    [[ -f /etc/opendmarc.conf && ! -f /etc/opendmarc.conf.pre-joinery ]] && cp /etc/opendmarc.conf /etc/opendmarc.conf.pre-joinery
-    cat > /etc/opendmarc.conf <<OPENDMARCCONF
+if [[ -f /etc/opendmarc.conf && ! -f /etc/opendmarc.conf.pre-joinery ]] \
+   && ! grep -qF "${OPENDMARC_MARKER}" /etc/opendmarc.conf 2>/dev/null; then
+    cp /etc/opendmarc.conf /etc/opendmarc.conf.pre-joinery
+fi
+if write_if_changed /etc/opendmarc.conf 644 <<OPENDMARCCONF
 # ${OPENDMARC_MARKER} — managed by mailbox/provisioning/provision_relay.sh.
 # Stamps SPF + DMARC into Authentication-Results; never rejects (stamp-only).
 AuthservID              ${AUTHSERV_ID}
@@ -761,21 +1081,23 @@ SoftwareHeader          true
 SPFSelfValidate         true
 RejectFailures          false
 OPENDMARCCONF
+then
+    mark_changed opendmarc
     echo "opendmarc: wrote /etc/opendmarc.conf (AuthservID ${AUTHSERV_ID})"
 else
-    echo "opendmarc: already managed by us - leaving it."
+    echo "opendmarc: /etc/opendmarc.conf already correct."
 fi
-if [[ -f /etc/default/opendmarc ]]; then
-    if grep -qE '^[[:space:]]*SOCKET=' /etc/default/opendmarc; then
-        sed -i 's#^[[:space:]]*SOCKET=.*#SOCKET="inet:8893@localhost"#' /etc/default/opendmarc
-    else
-        echo 'SOCKET="inet:8893@localhost"' >> /etc/default/opendmarc
-    fi
+if converge_socket_default /etc/default/opendmarc "inet:8893@localhost"; then
+    mark_changed opendmarc
+    echo "opendmarc: /etc/default/opendmarc SOCKET set"
 fi
 
 systemctl enable opendkim opendmarc >/dev/null 2>&1 || true
-systemctl restart opendkim 2>/dev/null || service opendkim restart 2>/dev/null || echo "WARN: restart opendkim manually" >&2
-systemctl restart opendmarc 2>/dev/null || service opendmarc restart 2>/dev/null || echo "WARN: restart opendmarc manually" >&2
+# Neither daemon re-reads its configuration on a signal, so a genuine change
+# means a restart — but ONLY a genuine change. These two are inline in the milter
+# chain: restarting them for nothing stalls acceptance on every converge.
+sync_service opendkim restart
+sync_service opendmarc restart
 
 # --- 6b. rspamd content spam scanner (STATELESS) -------------------------------
 # The relay stamps the X-Spam header inside the sealed raw so each tenant's
@@ -804,37 +1126,53 @@ fi
 mkdir -p /etc/rspamd/local.d
 # The header NAMES are the contract InboundEmailRouter::readSpamHeader() parses;
 # keep them in step with that class's SPAM_*_HEADER constants.
-cat > /etc/rspamd/local.d/milter_headers.conf <<'RSPAMDHDR'
+if write_if_changed /etc/rspamd/local.d/milter_headers.conf 644 <<'RSPAMDHDR'
 # joinery-managed - content spam header contract (InboundEmailRouter::readSpamHeader).
 extended_spam_headers = true;
 use = ["spam-header", "x-spam-status", "authentication-results"];
 RSPAMDHDR
-cat > /etc/rspamd/local.d/actions.conf <<'RSPAMDACT'
+then
+    mark_changed rspamd
+fi
+if write_if_changed /etc/rspamd/local.d/actions.conf 644 <<'RSPAMDACT'
 # joinery-managed - header-stamping only; rejection disabled (out of scope).
 reject = null;
 greylist = null;
 add_header = 6;
 RSPAMDACT
+then
+    mark_changed rspamd
+fi
 # The digest of the two files that ARE the contract, recorded at the moment we
 # write them so joinery-ping can report drift without parsing rspamd's config
 # format (specs/mailbox_relay_scanner_health.md). World-readable: a tenant's
 # forced-command shell computes the comparison, and a hash of our own published
 # configuration is not tenant data.
-cat /etc/rspamd/local.d/milter_headers.conf /etc/rspamd/local.d/actions.conf \
-    | sha256sum | cut -d' ' -f1 > "${RELAY_HOME}/contract.sha256"
-chmod 644 "${RELAY_HOME}/contract.sha256"
-echo "content-spam: header contract digest recorded (${RELAY_HOME}/contract.sha256)"
-cat > /etc/rspamd/local.d/classifier-bayes.conf <<'RSPAMDBAYES'
+CONTRACT_DIGEST="$(cat /etc/rspamd/local.d/milter_headers.conf /etc/rspamd/local.d/actions.conf \
+    | sha256sum | cut -d' ' -f1)"
+if write_if_changed "${RELAY_HOME}/contract.sha256" 644 <<< "${CONTRACT_DIGEST}"; then
+    echo "content-spam: header contract digest recorded (${RELAY_HOME}/contract.sha256)"
+else
+    echo "content-spam: header contract digest unchanged"
+fi
+if write_if_changed /etc/rspamd/local.d/classifier-bayes.conf 644 <<'RSPAMDBAYES'
 # joinery-managed - STATELESS relay: Bayes off. Learned state on a shared
 # relay is a cross-tenant privacy leak and a poisoning vector; each tenant's
 # own rspamd re-scores at ingest with its own state.
 enabled = false;
 autolearn = false;
 RSPAMDBAYES
+then
+    mark_changed rspamd
+fi
 # No local.d/redis.conf: without a global redis config every redis-backed
 # module (statistics, history) stays off — nothing persists.
-rm -f /etc/rspamd/local.d/redis.conf
-cat > /etc/rspamd/local.d/worker-proxy.inc <<'RSPAMDPROXY'
+if [[ -f /etc/rspamd/local.d/redis.conf ]]; then
+    rm -f /etc/rspamd/local.d/redis.conf
+    mark_changed rspamd
+    echo "content-spam: removed a redis config (the relay's rspamd is stateless)"
+fi
+if write_if_changed /etc/rspamd/local.d/worker-proxy.inc 644 <<'RSPAMDPROXY'
 # joinery-managed - Postfix milter (self-scan) on 11332.
 milter = yes;
 timeout = 120s;
@@ -844,15 +1182,20 @@ upstream "local" {
 }
 bind_socket = "*:11332";
 RSPAMDPROXY
+then
+    mark_changed rspamd
+fi
 
 # Wire rspamd into the milter chain AFTER opendkim+opendmarc.
-postconf -e "milter_default_action = accept"
-postconf -e "smtpd_milters = inet:localhost:8891, inet:localhost:8893, inet:localhost:11332"
-postconf -e "non_smtpd_milters ="
+postconf_set "milter_default_action" "accept"
+postconf_set "smtpd_milters" "inet:localhost:8891, inet:localhost:8893, inet:localhost:11332"
+postconf_set "non_smtpd_milters" ""
 echo "main.cf: milters wired (opendkim:8891, opendmarc:8893, rspamd:11332)"
 
 systemctl enable rspamd >/dev/null 2>&1 || true
-systemctl restart rspamd 2>/dev/null || service rspamd restart 2>/dev/null || echo "WARN: restart rspamd manually" >&2
+# rspamd re-reads its configuration on reload, so a converge that changed a
+# local.d file costs no scanning downtime at all.
+sync_service rspamd reload
 echo "content-spam: rspamd milter on 11332 (add-header only, STATELESS - no Bayes/redis)."
 
 # --- 7. WireGuard (the relay LISTENS; tenants dial out) ------------------------
@@ -867,13 +1210,15 @@ fi
 WG_PRIV="$(cat /etc/wireguard/relay_private.key)"
 WG_PUB="$(cat /etc/wireguard/relay_public.key)"
 
-# Write the interface config only if absent, so a re-run never wipes the [Peer]
-# blocks add-tenant has since appended.
+# Write the interface config only if absent: it holds the relay's PRIVATE KEY,
+# which is generated once and must survive every re-run. The [Peer] list below
+# it is converged separately from the tenant registry.
 if [[ ! -f "/etc/wireguard/${WG_IF}.conf" ]]; then
     cat > "/etc/wireguard/${WG_IF}.conf" <<WGCONF
 # joinery-managed - hardened ingest relay tunnel. The relay only LISTENS; each
-# tenant's Joinery box initiates its peering. Tenant [Peer] blocks are appended
-# by 'provision_relay.sh add-tenant' with per-tenant AllowedIPs.
+# tenant's Joinery box initiates its peering. The tenant [Peer] blocks below are
+# DERIVED from /opt/joinery-relay/tenants/*/ by provision_relay.sh; edit the
+# registry, not this list.
 [Interface]
 Address = ${WG_ADDR}
 ListenPort = ${WG_PORT}
@@ -882,10 +1227,25 @@ WGCONF
     chmod 600 "/etc/wireguard/${WG_IF}.conf"
     echo "wireguard: wrote /etc/wireguard/${WG_IF}.conf"
 else
-    echo "wireguard: /etc/wireguard/${WG_IF}.conf exists - leaving it (peer edits preserved)."
+    echo "wireguard: /etc/wireguard/${WG_IF}.conf exists - interface block left as is."
+fi
+# Peers are derived from the tenant registry, so a rotated or departed tenant's
+# stanza is replaced rather than accumulated (§5.4.4).
+if converge_wg_peers; then
+    echo "wireguard: peer list converged from the tenant registry"
+else
+    echo "wireguard: peer list already matches the tenant registry"
 fi
 systemctl enable "wg-quick@${WG_IF}" >/dev/null 2>&1 || true
-systemctl restart "wg-quick@${WG_IF}" 2>/dev/null || echo "WARN: bring up wg-quick@${WG_IF} manually once a peer is added" >&2
+if wg show "${WG_IF}" >/dev/null 2>&1; then
+    # Never restart a live tunnel to change a peer: it would drop every OTHER
+    # tenant's tunnel to add or remove one.
+    apply_wg_live
+    changed "wg-quick@${WG_IF}" || echo "wg-quick@${WG_IF}: unchanged - left up"
+else
+    systemctl start "wg-quick@${WG_IF}" >/dev/null 2>&1 \
+        || echo "WARN: bring up wg-quick@${WG_IF} manually once a peer is added" >&2
+fi
 
 # --- 7b. Joinery Direct endpoint ---------------------------------------------
 # At Fortress the relay IS the Direct endpoint (docs/joinery_direct.md): an SRV
@@ -906,7 +1266,7 @@ mkdir -p "${DIRECT_STATE}" "${DIRECT_ACME}"
 chown -R "${RELAY_USER}:${RELAY_USER}" "${DIRECT_STATE}" "${DIRECT_ACME}"
 chmod 700 "${DIRECT_STATE}" "${DIRECT_ACME}"
 
-cat > /etc/systemd/system/joinery-direct.service <<DIRECTUNIT
+if write_if_changed /etc/systemd/system/joinery-direct.service 644 <<DIRECTUNIT
 [Unit]
 Description=Joinery Direct endpoint (relay)
 Documentation=https://github.com/getjoinery/joinery/blob/main/public_html/docs/joinery_direct.md
@@ -944,14 +1304,25 @@ MemoryDenyWriteExecute=yes
 [Install]
 WantedBy=multi-user.target
 DIRECTUNIT
+then
+    mark_changed joinery-direct
+    mark_changed joinery-direct-unit
+    echo "joinery-direct: unit written"
+else
+    echo "joinery-direct: unit already correct."
+fi
 
 # The spool is setgid to each tenant's group and the sealer writes as the relay
 # user, so the Direct service writing there needs the same group membership the
 # pipe transport already has.
-systemctl daemon-reload >/dev/null 2>&1 || true
+if changed joinery-direct-unit; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
 systemctl enable joinery-direct >/dev/null 2>&1 || true
-systemctl restart joinery-direct 2>/dev/null \
-    || echo "WARN: joinery-direct did not start; it will retry (certificate needs 443 reachable)" >&2
+# Restarted when the unit changed OR the sealer binary behind it was replaced —
+# and otherwise left alone. Direct holds an ACME certificate and live tunnel
+# connections; bouncing it on every converge is not free.
+sync_service joinery-direct restart
 echo "Joinery Direct: endpoint enabled on 443 for ${MAIL_HOSTNAME} (certificate obtained on first request)"
 
 # --- 8. hardening ------------------------------------------------------------
@@ -959,43 +1330,46 @@ echo "Joinery Direct: endpoint enabled on 443 for ${MAIL_HOSTNAME} (certificate 
 if ! dpkg -s unattended-upgrades >/dev/null 2>&1; then
     apt-get install -y unattended-upgrades
 fi
-dpkg-reconfigure -f noninteractive unattended-upgrades >/dev/null 2>&1 || true
+# dpkg-reconfigure ran on every provision, rewriting 20auto-upgrades whether or
+# not it already said what we want. What it actually decides is those two
+# periodic switches, so read them and only reconfigure when they disagree.
+AUTO_UPGRADES=/etc/apt/apt.conf.d/20auto-upgrades
+if [[ -f "${AUTO_UPGRADES}" ]] \
+   && grep -qE '^APT::Periodic::Update-Package-Lists[[:space:]]+"1";' "${AUTO_UPGRADES}" \
+   && grep -qE '^APT::Periodic::Unattended-Upgrade[[:space:]]+"1";' "${AUTO_UPGRADES}"; then
+    echo "unattended-upgrades: already configured - left alone"
+else
+    dpkg-reconfigure -f noninteractive unattended-upgrades >/dev/null 2>&1 || true
+    echo "unattended-upgrades: configured"
+fi
 
 # Key-only SSH.
 SSHD_DROPIN=/etc/ssh/sshd_config.d/10-joinery-relay.conf
 mkdir -p /etc/ssh/sshd_config.d
-cat > "${SSHD_DROPIN}" <<SSHDCONF
+if write_if_changed "${SSHD_DROPIN}" 644 <<SSHDCONF
 # joinery-managed - key-only SSH on the relay.
 PasswordAuthentication no
 ChallengeResponseAuthentication no
 PermitRootLogin prohibit-password
 SSHDCONF
-systemctl reload ssh 2>/dev/null || systemctl reload sshd 2>/dev/null || true
+then
+    systemctl reload ssh >/dev/null 2>&1 || systemctl reload sshd >/dev/null 2>&1 || true
+    echo "sshd: key-only drop-in written and sshd reloaded"
+else
+    echo "sshd: key-only drop-in already correct."
+fi
 
-# Default-deny firewall: SMTP in, WireGuard in, SSH in.
-ufw --force reset >/dev/null 2>&1 || true
-ufw default deny incoming >/dev/null 2>&1 || true
-ufw default allow outgoing >/dev/null 2>&1 || true
-ufw allow 25/tcp        >/dev/null 2>&1 || true
-ufw allow "${WG_PORT}/udp" >/dev/null 2>&1 || true
-ufw allow 22/tcp        >/dev/null 2>&1 || true
-# 443 is Joinery Direct's endpoint AND the port its certificate is obtained on
-# (TLS-ALPN-01, in-process — no web server and no certbot on this machine).
-# Opened unconditionally: the listener refuses everything except the one Direct
-# path, and a tenant that has not enabled Direct has no capability record
-# published, so nothing sends here.
-ufw allow 443/tcp       >/dev/null 2>&1 || true
-# The Direct egress proxy for tenants. The listener already binds the tunnel
-# address only; this rule is scoped to the tunnel interface so the port is
-# never reachable from the public side even if the bind ever loosened.
-ufw allow in on "${WG_IF}" to any port 8442 proto tcp >/dev/null 2>&1 || true
-ufw --force enable      >/dev/null 2>&1 || true
-echo "firewall: default-deny; allow 25/tcp, 443/tcp, ${WG_PORT}/udp, 22/tcp, 8442/tcp on ${WG_IF}"
+# Default-deny firewall: SMTP in, WireGuard in, SSH in — converged rule by rule
+# rather than reset and rebuilt (§5.4.1).
+converge_firewall
 
 # --- 9. validate + restart Postfix -------------------------------------------
 if postfix check; then
-    systemctl restart postfix 2>/dev/null || { postfix stop 2>/dev/null || true; postfix start; }
-    echo "Postfix configuration validated and restarted."
+    # 'postfix reload' re-reads main.cf AND master.cf, so a converge that changed
+    # a parameter costs no accept downtime — and one that changed nothing does
+    # nothing at all.
+    sync_service postfix reload
+    echo "Postfix configuration validated."
 else
     echo "WARNING: 'postfix check' reported problems - NOT restarting. Review above." >&2
     exit 1

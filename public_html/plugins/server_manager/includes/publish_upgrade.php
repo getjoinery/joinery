@@ -388,6 +388,55 @@
 			exit(1);
 		}
 
+		// The support bundle rides beside the agent artifact: the signed script
+		// tree a machine with NO SITE resolves its primitives against. Built
+		// here, while the tree is the tree that is about to ship and before the
+		// core manifest is written, so the tarball is itself covered by the core
+		// manifest.
+		//
+		// A bundle problem is a warning rather than a refusal, unlike a stale
+		// agent. A stale agent runs on every node in the fleet; a stale bundle
+		// affects only machines with no site, and carrying the previous one
+		// forward leaves those machines exactly where they were rather than
+		// blocking a release the rest of the fleet needs.
+		if (SupportBundlePublisher::hasConsumer()) {
+			publish_output("Bundling agent support bundle...");
+			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');
+		}
+
+		// =====================================================
+		// Cross-compile the relay sealer into the mailbox plugin
+		// =====================================================
+		// A mail relay has no compiler: provision_relay.sh consumes a prebuilt
+		// relay-sealer from provisioning/bin/relay-sealer-<uname -m> and refuses
+		// to run without one. The publish is the only place that has the source
+		// and knows a release is being cut, so it builds them.
+		//
+		// Runs HERE, before the plugin loop, because bin/ lives inside the
+		// mailbox plugin tree: the binaries must be on disk in time to be
+		// hashed by component_tree_hash, covered by the plugin's signed
+		// RELEASE_MANIFEST, and tarred with the plugin.
+		//
+		// A failure REFUSES the release, like a stale agent and unlike a stale
+		// support bundle. There is no degraded mode to fall back to: a mailbox
+		// plugin shipped without its binaries is one whose provisioning script
+		// stops on the first relay that runs it, and that failure would surface
+		// on a customer's machine mid-provision rather than here.
+		$relay_sealer_path = PathHelper::getIncludePath('plugins/mailbox/includes/RelaySealerPublisher.php');
+		if (file_exists($relay_sealer_path)) {
+			publish_output("Building relay sealer binaries...");
+			require_once($relay_sealer_path);
+			$relay_sealer = RelaySealerPublisher::publish($full_site_dir, 'publish_output');
+
+			if ($relay_sealer['status'] === RelaySealerPublisher::STATUS_FAILED) {
+				publish_output("\nRefusing to publish {$version} — the mailbox plugin ships "
+					. "provisioning/bin/relay-sealer-<arch>, and the build failed. Publishing now "
+					. "would ship a relay provisioning script with nothing for it to install.");
+				publish_output("Fix the sealer build and publish again. Nothing has been written.");
+				exit(1);
+			}
+		}
+
 		// Write the new version to public_html/VERSION so it ships in the tarball and
 		// becomes the authoritative version for sites upgrading to it.
 		$version_file = PathHelper::getIncludePath('VERSION');

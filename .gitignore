@@ -26,6 +26,12 @@ Globalvars_site.php
 # commercial and entitlement-gated, so it cannot be the carrier.
 public_html/agent_dist/
 
+# Prebuilt relay-sealer binaries - cross-compiled into the mailbox plugin by
+# RelaySealerPublisher on every publish that needs them. They SHIP (the plugin
+# archive tars the live directory, which git does not gate) but they are build
+# output, regenerated from the tracked .go sources beside them.
+public_html/plugins/mailbox/provisioning/bin/
+
 # Data directories (not tracked in git)
 /backups/
 /logs/

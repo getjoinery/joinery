@@ -5,6 +5,11 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.44 - relay provision pre-flight tars bin/ (the prebuilt sealer) and drops the Go
+ *                 source, with an ls guard so a missing binary fails on the plane not the relay
+ * @version 1.43 - has_primitive asks the NODE what it can do: the vocabulary an agent reports on
+ *                 every claim decides routing, and PRIMITIVE_MIN_AGENT_VERSION stays as the
+ *                 fallback for agents that predate the report (1.10.0 and earlier)
  * @version 1.42 - has_primitive gates on the agent version that introduced the primitive, so the
  *                 upgrade delivering a new agent is never dispatched as a primitive the fielded
  *                 agent does not ship (nine refusals on the 0.8.352 rollout)
@@ -175,6 +180,26 @@ class JobCommandBuilder {
 				|| !method_exists(static::class, "build_{$operation}_primitive")) {
 			return false;
 		}
+
+		// THE NODE'S OWN LIST WINS, because it is the only account of a node's
+		// vocabulary that is not a guess. An agent reports what its binary
+		// actually compiled in on every claim; a version number is an inference
+		// about that, and the inference is what failed — the 0.8.352 rollout
+		// dispatched apply_update to nine agents whose vocabulary predated it
+		// and collected nine refusals.
+		//
+		// A primitive absent from a reported vocabulary is NOT routed to that
+		// node, whatever the version map would have allowed. That direction
+		// matters more than the permissive one: dispatching to a node that
+		// cannot run it buys a guaranteed refusal in place of a working
+		// transport.
+		$reported = trim((string)$node->get('mgn_agent_primitives'));
+		if ($reported !== '') {
+			return in_array($operation, explode(',', $reported), true);
+		}
+
+		// No report: an agent at 1.10.0 or earlier, which never sends one. The
+		// version floor is the fallback contract for exactly those, and stays.
 		$min = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? null;
 		if ($min === null) {
 			return true;
@@ -3561,8 +3586,9 @@ BASH;
 		// 1. Pre-flight on the control plane: the sealer source + installer exist,
 		//    packaged into one tarball for delivery.
 		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: package relay provisioning files',
-			'cmd' => "test -d {$provisioning_esc}/relay-sealer && test -f {$provisioning_esc}/provision_relay.sh && "
-			       . "tar czf {$tarball_esc} -C {$provisioning_esc} relay-sealer provision_relay.sh && echo PREFLIGHT_OK"];
+			'cmd' => "test -f {$provisioning_esc}/provision_relay.sh && "
+			       . "ls {$provisioning_esc}/bin/relay-sealer-* >/dev/null 2>&1 && "
+			       . "tar czf {$tarball_esc} -C {$provisioning_esc} bin provision_relay.sh && echo PREFLIGHT_OK"];
 
 		// 2. Deliver the tarball to the relay.
 		$steps[] = ['type' => 'scp', 'label' => 'Upload relay provisioning bundle',

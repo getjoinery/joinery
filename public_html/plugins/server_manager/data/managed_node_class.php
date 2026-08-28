@@ -2,6 +2,9 @@
 /**
  * ManagedNode - A remote Joinery server or container managed by the control plane.
  *
+ * @version 1.11 - mgn_agent_primitives and mgn_agent_bundle_version: the node reports what it can
+ *                 do and which signed script tree it holds, on every claim. A version number is a
+ *                 guess about vocabulary; the machine's own list is not
  * @version 1.10 - mgn_allow_console removed: the Console tab it gated is retired (A1). The physical
  *                 column lingers as the pairing-token columns do — nothing reads it, and dropping a
  *                 column is not something a field-spec removal does
@@ -159,6 +162,30 @@ class ManagedNode extends SystemBase {
 		// last poll IS the heartbeat (§3.1).
 		'mgn_agent_last_poll'     => array('type'=>'timestamp(6)'),
 		'mgn_agent_version'       => array('type'=>'varchar(20)'),
+
+		// What the agent says it can DO, reported on every claim beside the
+		// version. A comma-separated list of primitive names, in the node's own
+		// words.
+		//
+		// The plane must never guess a node's vocabulary, and a version number
+		// is a guess: the first apply_update rollout inferred the capability
+		// from the version, dispatched to nine agents whose compiled-in
+		// vocabulary predated it, and collected nine refusals. A version says
+		// which release a machine is running; only the machine says what that
+		// release compiled into it.
+		//
+		// Empty for an agent that predates the report (1.10.0 and earlier),
+		// which is what keeps JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION a
+		// live fallback rather than dead code.
+		'mgn_agent_primitives'    => array('type'=>'text'),
+
+		// Which signed support bundle the machine holds — the tree its script
+		// primitives resolve against when it has no site of its own. Empty on
+		// every machine that has a site tree, which is every machine that
+		// verifies scripts against its own release manifest and needs no
+		// bundle. It is the only evidence this plane gets that a bundle it
+		// serves actually landed.
+		'mgn_agent_bundle_version' => array('type'=>'varchar(32)'),
 
 		'mgn_is_relay'            => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'mgn_wg_public_key'       => array('type'=>'varchar(255)'),

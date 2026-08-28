@@ -2,10 +2,15 @@
 #
 # build.sh - produce the static relay-sealer binary shipped to the relay.
 #
-# provision_relay.sh calls this on the relay after installing the Go toolchain,
-# so the binary is built for the relay's own architecture. It can also be run on
-# the control plane to pre-build for scp delivery. CGO is disabled for a fully
-# static binary with no libc coupling on the minimal Debian VPS.
+# The publish pipeline is what normally produces these binaries — RelaySealerPublisher
+# cross-compiles both architectures into ../bin/relay-sealer-<uname -m>, which is
+# where provision_relay.sh looks. This script is the by-hand equivalent, for
+# building one architecture outside a publish:
+#
+#   bash build.sh ../bin/relay-sealer-$(uname -m)
+#
+# A relay never runs it. CGO is disabled for a fully static binary with no libc
+# coupling on the minimal Debian VPS.
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"

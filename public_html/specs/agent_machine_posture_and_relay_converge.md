@@ -1,12 +1,34 @@
 # Machine posture, relay convergence, and Docker hosts (WP4)
 
-**Status: R1 BUILT AND LIVE (agent 1.10.0, fleet-wide); R2–R5 approved to
-build.** The support bundle (§4) was approved by the owner on 2026-08-28,
-unblocking R2. This spec **owns the remainder of the transport migration**:
-the architecture spec (`specs/implemented/agent_on_node_architecture.md`,
-whose A13 records the siteless decision) is implemented and frozen; Step 2b,
-the Step 3 cutover, its deploy-tier gate and the destruction of the shared
-provisioning key are all carried here as R2–R5.
+**Status: MIGRATION AT A RESTING MILESTONE (2026-08-28). R1 BUILT AND LIVE
+(agent 1.10.0, fleet-wide). Vocabulary-on-claim BUILT AND LIVE (agent 1.11.0).
+R2 support bundle + artifact channel BUILT AND GREEN but SHELVED DORMANT — no
+siteless consumer on the chosen rollout path; its publish wiring is inert; it
+has never run against a real plane. R3–R5 DEFERRED.**
+
+> **Read this before the body — three owner decisions of 2026-08-28 supersede
+> sections written earlier, which are NOT yet rewritten below:**
+> - **The relay is not managed** (health check + full reprovision only, no
+>   agent). §5's `relay_converge` is **never built**; the five relay SSH
+>   builders die as dead code at the cutover with no replacement; the `bin/`
+>   bundle convention for relay content is **dead** (the sealer ships prebuilt
+>   in the mailbox plugin, not the bundle). §5 stands only as a record.
+> - **The Docker host is a plain `ManagedNode` in machine posture** (§7.2's
+>   host-pairing schema and exactly-one-of enforcement are not built and not
+>   needed). R3 (Docker-host certificates) is the bundle's only consumer, and
+>   is **deferred with getjoinery**.
+> - **Both hardening targets deferred.** getjoinery moves to its own box (a
+>   full-site node, no bundle) before being hardened; jeremytunnell is deferred
+>   for bug-fixing, on a launch-ready to-do (needs a restore-over-agent path
+>   first). The Step 3 cutover / key work is per-node launch-readiness, not
+>   near-term; c7's `specs/r5_cutover_inventory.md` is its map and found there
+>   are **two** keys, of which the fleet key (`id_ed25519_claude`) is the one
+>   that matters and is a Claude-agent key, not the owner's personal key.
+
+The architecture spec (`specs/implemented/agent_on_node_architecture.md`, whose
+A13 records the siteless decision) is implemented and frozen. This spec owns
+the remainder of the transport migration; the sections below predate the
+decisions boxed above and are corrected in project memory pending a rewrite.
 
 **Design bar for production installs (owner, 2026-08-28):** the operator's own
 managed boxes keep sshd for troubleshooting (A11 stands; jeremytunnell may
@@ -105,11 +127,19 @@ calling *a node's* management API — the opposite direction — and is not
 reusable here.
 
 **What is missing is only the fetch.** The verification, installation,
-rollback, and job-lock interlock are all built and proven. So:
+rollback, and job-lock interlock are all built and proven. So (**BUILT in R2**):
 
-- Add `GET /api/v1/agent/artifact` to `AgentChannelEndpoint`, authenticated by
-  the same Ed25519 signature as `claim` and `result` (`remote.go:368`), served
-  from the plane's own `public_html/agent_dist`.
+- Add `/api/v1/agent/artifact` to `AgentChannelEndpoint`, authenticated by
+  the same Ed25519 signature as `claim` and `result`, served from the plane's
+  own `public_html/agent_dist`. **POST, not GET**: `dispatchPreAuth` is
+  POST-only and the signature covers the method, so a GET would have been a
+  second auth shape for one endpoint. The request names a `kind` from a closed
+  set (`agent_manifest`, `agent_binary`, `bundle_manifest`, `bundle_body`) and,
+  for a binary, an architecture matched against a pattern — never a file name.
+  Body responses are streamed in chunks and are the one response on the channel
+  that is not a JSON envelope; the agent reads them with a separate capped
+  reader, leaving the 64 KiB envelope cap exactly as it was. Body fetches carry
+  their own rate bucket and each is recorded (§3.5.6).
 - Introduce an **artifact source** interface behind `Updater` with two
   implementations: the existing local directory, and the channel. A machine
   with a site tree keeps the local one — upgrades still deliver it, and a
@@ -168,6 +198,29 @@ machine running a bundle older than its plane expects must say so rather than
 half-converge. The bundle therefore carries a version, the agent reports it on
 claim beside `mgn_agent_version`, and `relay_converge` refuses when the bundle
 does not carry the script version its parameters were built for.
+
+**BUILT in R2**, with three details settled in the building:
+
+- **The version is a content hash** — the sha256 of the bundle's own manifest
+  body, truncated — rather than the release number. A publish that changes no
+  bundled script therefore leaves the bundle byte-identical and no machine
+  fetches anything, the same property `AgentDistPublisher` already has for the
+  agent artifact. It also makes "has the content changed" answerable with
+  nothing to keep in step.
+- **The trust root is inside the bundle.** The plane advertises the tarball's
+  sha256 alongside it, used for exactly one thing: skipping a transfer a
+  machine already has. What makes the tree runnable is the signature inside it,
+  verified against the compiled-in key, plus a hash of every listed file **and**
+  a walk proving the tree holds nothing the manifest does not list — a tarball
+  can add a file as easily as change one.
+- **Contents are a deliberate list, not a sweep** (`SupportBundlePublisher`).
+  R2 ships `setup_ssl.sh` and the `install.sh` it sources. Binaries the scripts
+  invoke ship under `bin/` with one file per architecture
+  (`bin/relay-sealer-linux-amd64`, `bin/relay-sealer-linux-arm64`) and the
+  script selecting on `uname -m`: **one bundle carrying both architectures**,
+  not one bundle per architecture. Per-arch bundles would double the publish
+  surface and create a way for a machine to hold one built for the wrong
+  architecture, to save a few megabytes of dead weight on a mail relay.
 
 **Rejected alternative — a narrow exec capability in `script.go`.** Allowing
 compiled-in, parameterless commands (`systemctl reload postfix`) would keep the
@@ -235,8 +288,10 @@ username, a group, a path, or a line in `authorized_keys`.
 
 ### 5.4 Six non-idempotent things that must be fixed first
 
-Found in `provision_relay.sh` 2.8. `relay_converge` is not safe to run on a
-schedule until these are closed, and most are latent defects today.
+Found in `provision_relay.sh` 2.8. **All six are closed in 2.9** (gate-pinned,
+56 checks), and 2.9 also consumes the prebuilt sealer per the `bin/` contract
+above — so both dispatch paths fail fast at the sealer check until the bundle
+delivers it. That window is accepted and R4 closes it.
 
 1. **`ufw --force reset` wipes all firewall state on every run** (line 976) and
    would clobber the rebuild flow's own `ufw deny 25/tcp`. Must become a
@@ -272,13 +327,28 @@ schedule until these are closed, and most are latent defects today.
   cannot widen it. Converge writes the allowlist; the fragment keeps arriving
   the way it does.
 
-### 5.6 A path that must not be forgotten
+### 5.6 A path that must not be forgotten — corrected
 
 `RelayCloudProvisioner.php:378-420` performs the same tarball → `scp root@ip` →
 `bash provision_relay.sh` sequence **over raw SSH as root, outside Server
-Manager entirely**. Replacing only the five builders leaves this running. It
-must be converted or retired in the same release, or the shared-key cutover
-will believe the relay is done while a second root-SSH path is still live.
+Manager entirely**.
+
+**It does not hold the shared provisioning key** (traced 2026-08-28,
+superseding this section's first reading). `handleReady` generates a per-run
+Ed25519 keypair, injects the public half at instance creation, seals the private
+half on the run row and erases it at every terminal state. That is the
+architecture's own bootstrap-at-birth pattern — one SSH act, key destroyed
+afterwards — so it **does not block the shared-key destruction** and does not
+have to be retired for the cutover to complete.
+
+What it still owes R4 is a different question: a customer-cloud relay comes out
+of this path with **no `ManagedNode` row, no pairing and no agent**, and
+`relay_converge` presupposes all three. So the path grows rather than dies —
+agent install plus join during provisioning, bootstrap-then-enroll. Three things
+also have no primitive equivalent and are not candidates for one: instance
+lifecycle on the customer's cloud account, the drain-gated upgrade path, and
+main-box-side WireGuard peering, which runs on the main box rather than on the
+relay.
 
 ---
 
@@ -384,7 +454,8 @@ Every agent version must stay above the 1.1.0 legacy floor, and a publish
 updates the whole fleet — so each release must be safe for the nine existing
 site-having nodes, none of which needs any of this.
 
-**R1 — agent 1.11.0. Siteless startup, no new vocabulary.**
+**R1 — agent 1.10.0. Siteless startup, no new vocabulary. SHIPPED
+2026-08-28, fleet-wide.**
 Config becomes optional (B1/B2): no site config is a *posture*, not an error.
 CLI `join`/`status`/`enable`/`disable` (§6). `install_agent.sh` gains a siteless
 install path. Nothing about the nine nodes changes, which is what makes this
@@ -426,11 +497,31 @@ Three installer decisions, approved 2026-08-28:
   fresh siteless machine. Inheriting it there would borrow a default chosen for
   a different problem and start a root service against A9.
 
-**R2 — agent 1.12.0 + plane. The artifact channel (§3, §4).**
+**R2 — agent 1.11.0 + plane. The artifact channel (§3, §4). BUILT
+2026-08-28, uncommitted and unpublished.**
 Signed artifact endpoint, the update source abstraction, the support bundle and
 `ToolRoot`. Still no new primitives. At this point a siteless machine can be
 installed, enrolled, kept current, and can verify a script — and script
 primitives become available to it.
+
+R2 also carries **vocabulary on claim**, which is not a siteless concern at all:
+the agent reports `primitives.Names()` on every poll, the plane stores it
+(`mgn_agent_primitives`) and `has_primitive()` consults it, falling back to
+`PRIMITIVE_MIN_AGENT_VERSION` for agents that predate the report. The map is
+kept — it is the contract for every agent at 1.10.0 or earlier, and there are
+nine of them. It lands here because the plane must never guess a node's
+vocabulary, and the first `apply_update` rollout did exactly that: nine agents,
+nine refusals.
+
+**One compatibility hazard, closed in the agent.** The plane refuses an
+undeclared field on a claim rather than ignoring it, which is the right rule and
+makes a newer agent's extra fields fatal against an older plane. In this fleet
+the plane upgrades first — the agent artifact ships inside the core release —
+but "first in practice" is not an ordering guarantee, and a node whose site
+upgraded ahead of its management node would stop claiming altogether. The agent
+therefore latches the extras off on that specific refusal and keeps claiming in
+the older shape. Losing the capability report costs the plane a fact; losing the
+claim costs it the node.
 
 **R3 — plane schema + Docker host.** Host pairing columns, host-addressable
 jobs, the proto-patch primitive with its slug parameter, host-scoped
@@ -503,3 +594,16 @@ eliminate a row or shrink a cell, never shuffle trust between rows.
   and a converge that installs packages is in the same territory. Each needs a
   declared `Timeout` and a matching `PRIMITIVE_CLAIM_BUDGETS` entry, which
   `primitive_transport_parity_test` will enforce.
+- **R2 is proven by build and unit coverage only.** The fetch path has never run
+  against a real plane: there is no siteless machine in the fleet, so the
+  artifact endpoint and the bundle fire on **zero** machines today. The live
+  proof — install a siteless agent on the scratch box, enroll it, watch it fetch
+  and verify a bundle — is an owner-gated step and is owed before R4 depends on
+  the mechanism.
+- **The general agent-channel rate bucket is vacuous.** `api_agent` is checked
+  in `apiv1.php` but nothing writes an `api_agent` row, so the counter is always
+  zero and the limit never fires. R2's artifact bucket writes its own rows and
+  is therefore real; the general one is a pre-existing gap, noticed here and not
+  fixed here.
+- **`update_database` is owed** for the two new `mgn_` columns before the claim
+  path can store what a node reports.

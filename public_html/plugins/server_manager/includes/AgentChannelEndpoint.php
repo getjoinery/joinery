@@ -6,7 +6,7 @@
  * job at a time, and posts the result back (specs/agent_on_node_architecture.md
  * §3.1, component D).
  *
- * Six endpoints, all POST, all under /api/v1/agent/:
+ * Seven endpoints, all POST, all under /api/v1/agent/:
  *   join         node-initiated enrollment (Phase 1.5, decision A6): the node
  *                hands over the PUBLIC half of a keypair it generated and
  *                kept, plus a claimed name. NO secret exists in this exchange
@@ -19,6 +19,9 @@
  *   result       signed; the terminal report for one job
  *   leave        signed; the node ending the pairing from its own side — the
  *                same forgetting the plane-side Disconnect performs
+ *   artifact     signed; the bytes of the agent's next binary, and of the
+ *                signed support bundle. A DELIVERY ROUTE, NOT A TRUST CHANGE —
+ *                see handle_artifact()
  *
  * These deliberately do NOT live under /api/v1/management/*. That family runs
  * the other way — this plane calling in to a node's web tier — and §3.5.4 pins
@@ -33,6 +36,12 @@
  * data object itself, so a node cannot hand the plane a payload the plane will
  * store verbatim and later parse as its own.
  *
+ * @version 1.9 - a claim carries the node's own vocabulary and bundle version, and the plane
+ *                records both. A version number is a GUESS about what a node can do; the node's
+ *                own list is not (the first apply_update rollout guessed, and nine agents refused)
+ * @version 1.8 - artifact endpoint: a machine with no site tree fetches its agent binary and its
+ *                signed support bundle over the channel it already polls. The plane serves bytes
+ *                it cannot sign — verification stays in the agent, against its baked-in key
  * @version 1.7 - a claim carries the agent's version and the plane records it, so the column
  *                tracks what is running instead of what first paired; and a completed result is
  *                folded into the node's columns on arrival rather than at the next page view
@@ -76,6 +85,25 @@ class AgentChannelEndpoint {
 	/** Log text kept from one result. Bounded by construction, like the params. */
 	const MAX_LOG_BYTES = 131072;
 
+	/**
+	 * The vocabulary a node may report on a claim. Generous against the real
+	 * number (a few dozen names of a few dozen characters) and bounded anyway:
+	 * everything a node sends is attacker-controllable, including a list whose
+	 * only job is to be informative.
+	 */
+	const MAX_VOCABULARY_BYTES = 4096;
+	const MAX_VOCABULARY_NAMES = 200;
+
+	/**
+	 * What the artifact endpoint may be asked for. A flat, closed set — a node
+	 * names one of these and nothing else, so nothing it sends is ever resolved
+	 * as a path on this plane.
+	 */
+	const ARTIFACT_KINDS = ['agent_manifest', 'agent_binary', 'bundle_manifest', 'bundle_body'];
+
+	/** Chunk size for streaming an artifact out. Bounds this plane's memory, not the transfer. */
+	const ARTIFACT_CHUNK_BYTES = 262144;
+
 	/** How far a signed request's clock may be from ours. */
 	const MAX_CLOCK_SKEW_SECONDS = 300;
 
@@ -94,7 +122,7 @@ class AgentChannelEndpoint {
 
 		// Resolve the endpoint BEFORE reading a body. An unknown path is a 404
 		// about the path, not a complaint about whatever was sent to it.
-		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet'], true)) {
+		if (!in_array($endpoint, ['join', 'join_status', 'claim', 'result', 'leave', 'quiet', 'artifact'], true)) {
 			api_error('Unknown agent endpoint.', 'ActionError', 404);
 		}
 
@@ -118,6 +146,9 @@ class AgentChannelEndpoint {
 				break;
 			case 'quiet':
 				self::handle_quiet($body);
+				break;
+			case 'artifact':
+				self::handle_artifact($body);
 				break;
 		}
 		exit;
@@ -469,8 +500,16 @@ class AgentChannelEndpoint {
 		$node = self::authenticate_node('/api/v1/agent/claim', self::body_hash());
 
 		$in = self::validate($body, [
-			'node_id'       => ['type' => 'int', 'required' => true],
-			'agent_version' => ['type' => 'string', 'max' => 20],
+			'node_id'        => ['type' => 'int', 'required' => true],
+			'agent_version'  => ['type' => 'string', 'max' => 20],
+			// The node's own account of what it can do. A comma-separated list
+			// rather than a JSON array on purpose: it validates under the
+			// rules this endpoint already applies to every string — a pattern
+			// and a length — and it stores in the same shape it is compared
+			// against, so nothing here needs a second encoding to be read back.
+			'primitives'     => ['type' => 'string', 'max' => self::MAX_VOCABULARY_BYTES,
+			                     'pattern' => '/^[a-z0-9_,]*$/'],
+			'bundle_version' => ['type' => 'string', 'max' => 32, 'pattern' => '/^[a-z0-9]*$/'],
 		]);
 		if ((int)$in['node_id'] !== (int)$node->key) {
 			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
@@ -491,6 +530,27 @@ class AgentChannelEndpoint {
 		$reported = trim((string)($in['agent_version'] ?? ''));
 		if ($reported !== '' && $reported !== (string)$node->get('mgn_agent_version')) {
 			$node->set('mgn_agent_version', $reported);
+		}
+
+		// And what it can DO, which is a different fact from what it is
+		// running. The plane used to derive one from the other, and derivation
+		// is a guess: the first apply_update rollout read nine version numbers,
+		// inferred a vocabulary that did not exist on any of those agents, and
+		// collected nine refusals. Only the node knows what its binary compiled
+		// in, so only the node says it.
+		//
+		// Absent is meaningful and is left alone: an agent at 1.10.0 or earlier
+		// never reports, and its empty column is what keeps
+		// PRIMITIVE_MIN_AGENT_VERSION a live fallback instead of dead code.
+		if (array_key_exists('primitives', $in)) {
+			$vocabulary = self::normalised_vocabulary($in['primitives']);
+			if ($vocabulary !== (string)$node->get('mgn_agent_primitives')) {
+				$node->set('mgn_agent_primitives', $vocabulary);
+			}
+		}
+		if (array_key_exists('bundle_version', $in)
+			&& (string)$in['bundle_version'] !== (string)$node->get('mgn_agent_bundle_version')) {
+			$node->set('mgn_agent_bundle_version', (string)$in['bundle_version']);
 		}
 		$node->save();
 
@@ -752,6 +812,251 @@ class AgentChannelEndpoint {
 		}
 
 		api_success(['recorded' => true], '', 200);
+	}
+
+	/**
+	 * Reduce a reported vocabulary to names this plane will store.
+	 *
+	 * Every name is re-validated against the same shape the agent's own
+	 * registry enforces, duplicates are dropped and the list is sorted, so what
+	 * lands in the column is a canonical set rather than whatever arrived. That
+	 * matters twice: it is compared against the stored value on every poll (a
+	 * re-ordered list must not read as a change), and it is what has_primitive()
+	 * consults, so a name that could not be a primitive must never get in.
+	 */
+	public static function normalised_vocabulary($reported) {
+		$names = [];
+		foreach (explode(',', (string)$reported) as $name) {
+			$name = trim($name);
+			if ($name === '' || !preg_match('/^[a-z][a-z0-9_]{2,39}$/', $name)) {
+				continue;
+			}
+			$names[$name] = true;
+			if (count($names) >= self::MAX_VOCABULARY_NAMES) {
+				break;
+			}
+		}
+		ksort($names);
+		return implode(',', array_keys($names));
+	}
+
+	// ==================================================================
+	// Artifact
+	// ==================================================================
+
+	/**
+	 * Hand a machine the bytes of its next agent binary, or of the signed
+	 * support bundle.
+	 *
+	 * WHY THIS IS NOT A TRUST CHANGE, and it is worth saying plainly because
+	 * "the agent downloads its own binary from the control plane" reads
+	 * alarming until you notice what this plane cannot do: IT CANNOT SIGN ONE.
+	 * The release key is not here. The agent verifies every artifact against an
+	 * Ed25519 public key compiled into its own binary at build time, and the
+	 * support bundle against the signature the bundle itself carries — neither
+	 * check makes a network call, and neither can be satisfied by anything this
+	 * plane produces. So a compromised plane serving a hostile binary gets a
+	 * refusal and a recorded rejection, exactly as it would from a hostile file
+	 * dropped in a node's own agent_dist. This endpoint is a DELIVERY ROUTE for
+	 * bytes that were always verified on arrival.
+	 *
+	 * What it exists for: a machine with no Joinery site — a mail relay, a
+	 * Docker host — never receives a platform release, so nothing ever delivers
+	 * an artifact to it. Before this it held whatever version it was installed
+	 * with, for ever, and could run no script primitive at all.
+	 *
+	 * WHO IS HOSTILE: still the node (§3.5.8). It names a KIND from a closed set
+	 * and, for a binary, an ARCHITECTURE matched against a pattern — never a
+	 * file, never a path, never a version. This plane resolves what to send from
+	 * its own manifest, so there is no shape in which a node's request selects a
+	 * file of its choosing. Body fetches are metered on their own bucket
+	 * because they are the expensive ones, and each is recorded: a read is
+	 * loud (§3.5.6).
+	 */
+	private static function handle_artifact($body) {
+		$node = self::authenticate_node('/api/v1/agent/artifact', self::body_hash());
+
+		$in = self::validate($body, [
+			'node_id'  => ['type' => 'int', 'required' => true],
+			'kind'     => ['type' => 'string', 'required' => true, 'max' => 32],
+			// The architecture this build runs on. Matched, not interpolated —
+			// it selects a manifest entry and never reaches the filesystem.
+			'platform' => ['type' => 'string', 'max' => 32, 'pattern' => '/^linux-[a-z0-9]{3,12}$/'],
+		]);
+		if ((int)$in['node_id'] !== (int)$node->key) {
+			api_error('The signed identity and the stated node do not match.', 'AuthenticationError', 401);
+		}
+
+		$kind = (string)$in['kind'];
+		if (!in_array($kind, self::ARTIFACT_KINDS, true)) {
+			api_error('Unknown artifact kind.', 'ValidationError', 400);
+		}
+
+		$dist_dir = PathHelper::getIncludePath('agent_dist');
+
+		switch ($kind) {
+			case 'agent_manifest':
+				self::serve_agent_manifest($dist_dir);
+				break;
+			case 'agent_binary':
+				self::meter_artifact_body($node, $kind);
+				self::serve_agent_binary($dist_dir, (string)($in['platform'] ?? ''));
+				break;
+			case 'bundle_manifest':
+				self::serve_bundle_manifest($dist_dir);
+				break;
+			case 'bundle_body':
+				self::meter_artifact_body($node, $kind);
+				self::serve_bundle_body($dist_dir);
+				break;
+		}
+	}
+
+	/**
+	 * Meter and record one body fetch.
+	 *
+	 * The manifest fetches are cheap and happen on a minutes clock; the bodies
+	 * are megabytes and should happen about once per release. So the bucket is
+	 * on the bodies, sized for a fleet of machines behind one address rather
+	 * than for one machine — RequestLogger counts per IP, and a NAT'd fleet
+	 * shares an address.
+	 *
+	 * The row is written whether or not the fetch is allowed, which is what
+	 * makes the bucket fill at all and what makes abnormal volume visible after
+	 * the fact rather than only in the moment.
+	 */
+	private static function meter_artifact_body($node, $kind) {
+		RequestLogger::log('api_agent_artifact', $kind . ' node ' . (int)$node->key, true);
+
+		$settings = Globalvars::get_instance();
+		$limit  = (int)($settings->get_setting('api_agent_artifact_rate_limit_requests') ?: 240);
+		$window = (int)($settings->get_setting('api_agent_artifact_rate_limit_window') ?: 3600);
+		if (!RequestLogger::check_rate_limit('api_agent_artifact', $limit, $window)) {
+			api_error('Artifact fetches from this address are over their limit. The agent will retry.',
+				'RateLimitError', 429);
+		}
+	}
+
+	/**
+	 * The agent's dist manifest, served as the publisher's own bytes.
+	 *
+	 * As a STRING rather than a decoded object, so what the agent hashes is
+	 * exactly what was published. The agent will not retry a manifest that
+	 * failed verification until it changes, and "changed" has to mean the
+	 * publisher's bytes changed rather than a re-encoding of them did.
+	 */
+	private static function serve_agent_manifest($dist_dir) {
+		$raw = @file_get_contents($dist_dir . '/manifest.json');
+		if ($raw === false) {
+			// This plane has published no agent. Not an error: it is what a
+			// plane that has never run a publish looks like, and the agent
+			// treats it the same way it treats an absent directory.
+			api_success(['manifest' => ''], '', 200);
+		}
+		if (strlen($raw) > self::MAX_JOB_BODY) {
+			api_error('This plane\'s agent manifest is larger than an agent will read.', 'ActionError', 500);
+		}
+		api_success(['manifest' => $raw], '', 200);
+	}
+
+	/**
+	 * The binary for one architecture.
+	 *
+	 * The node named an architecture; THIS PLANE names the file, out of its own
+	 * manifest. That ordering is the whole of the path safety here — a node
+	 * that could name a file could name any file, and no amount of validating
+	 * the name it sent would be as good as never accepting one.
+	 */
+	private static function serve_agent_binary($dist_dir, $platform) {
+		if ($platform === '') {
+			api_error('An agent binary request must name the architecture it is for.', 'ValidationError', 400);
+		}
+		$manifest = AgentDistPublisher::readManifest($dist_dir);
+		if (!$manifest || empty($manifest['binaries'][$platform]['file'])) {
+			api_error('This plane has no agent artifact for ' . htmlspecialchars($platform, ENT_QUOTES) . '.',
+				'ActionError', 404);
+		}
+		$file = (string)$manifest['binaries'][$platform]['file'];
+		// Our own data, checked anyway: a manifest is written by a publish, and
+		// a publish is code. A file name that is not a plain file name here
+		// would be a bug that this endpoint turned into an arbitrary read.
+		if (!preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/', $file)) {
+			api_error('This plane\'s agent manifest names an unusable artifact file.', 'ActionError', 500);
+		}
+		self::stream_artifact($dist_dir . '/' . $file, $file);
+	}
+
+	/**
+	 * What support bundle this plane has, if any. Small, so it travels in the
+	 * ordinary envelope.
+	 *
+	 * The sha256 here is for SKIPPING A DOWNLOAD, and nothing else. It is not
+	 * what makes the bundle trustworthy — the signature inside it is, verified
+	 * against a key this plane does not hold. A plane that lies about this hash
+	 * costs a machine one wasted transfer; a plane that tampers with the bundle
+	 * gets a refusal.
+	 */
+	private static function serve_bundle_manifest($dist_dir) {
+		$info = SupportBundlePublisher::info($dist_dir);
+		if (!$info || empty($info['sha256'])
+			|| !file_exists($dist_dir . '/' . SupportBundlePublisher::BUNDLE_NAME)) {
+			api_success(['available' => false], '', 200);
+		}
+		api_success([
+			'available' => true,
+			'version'   => (string)($info['version'] ?? ''),
+			'sha256'    => (string)$info['sha256'],
+			'bytes'     => (int)($info['bytes'] ?? 0),
+		], '', 200);
+	}
+
+	private static function serve_bundle_body($dist_dir) {
+		$path = $dist_dir . '/' . SupportBundlePublisher::BUNDLE_NAME;
+		if (!file_exists($path)) {
+			api_error('This plane ships no support bundle.', 'ActionError', 404);
+		}
+		self::stream_artifact($path, SupportBundlePublisher::BUNDLE_NAME);
+	}
+
+	/**
+	 * Send a file as bytes, in chunks, and stop.
+	 *
+	 * In CHUNKS because the alternative is holding a whole agent binary in this
+	 * process's memory to hand it to one node — a plane serving a fleet through
+	 * a rollout would be doing that several times over, for no reason. Output
+	 * buffers are torn down first so the bytes actually leave rather than
+	 * accumulating in one.
+	 *
+	 * This is the one response on the channel that is not a JSON envelope, and
+	 * the agent reads it with a different reader for that reason. Errors still
+	 * are envelopes, so a refusal reaches the agent in the shape it expects.
+	 */
+	private static function stream_artifact($path, $download_name) {
+		$size = @filesize($path);
+		$handle = @fopen($path, 'rb');
+		if ($handle === false || $size === false) {
+			api_error('That artifact could not be read on this plane.', 'ActionError', 500);
+		}
+
+		while (ob_get_level() > 0) {
+			ob_end_clean();
+		}
+		header('Content-Type: application/octet-stream');
+		header('Content-Length: ' . $size);
+		header('Content-Disposition: attachment; filename="' . $download_name . '"');
+		header('X-Content-Type-Options: nosniff');
+		header('Cache-Control: no-store');
+
+		while (!feof($handle)) {
+			$chunk = fread($handle, self::ARTIFACT_CHUNK_BYTES);
+			if ($chunk === false) {
+				break;
+			}
+			echo $chunk;
+			flush();
+		}
+		fclose($handle);
+		exit;
 	}
 
 	// ==================================================================

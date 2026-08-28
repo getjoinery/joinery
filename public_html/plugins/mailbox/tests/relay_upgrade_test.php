@@ -457,7 +457,7 @@ class RelayUpgradeTest {
 			check(false, 'provision_relay.sh is readable');
 			return null;
 		}
-		if (!preg_match('/^cat > "\$\{TENANT_SHELL\}" <<\'TENANTSHELL\'\n(.*?)\nTENANTSHELL$/ms', $source, $m)) {
+		if (!preg_match('/^if write_if_changed "\$\{TENANT_SHELL\}" 755 <<\'TENANTSHELL\'\n(.*?)\nTENANTSHELL$/ms', $source, $m)) {
 			check(false, 'the tenant shell can be extracted from provision_relay.sh');
 			return null;
 		}
