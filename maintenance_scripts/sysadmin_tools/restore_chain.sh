@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.2.1 - the sudo capability probe asks with -v instead of running true,
+#                  which sudo mails root about when the account may not. Same
+#                  change in the sibling scripts.
 # Version: 1.2.0 - the chain is reconciled to the machine it lands on, exactly as the archive
 #                  path is: this machine's own config and site key survive the extraction, the
 #                  captured virtualhost is never installed, and reconcile_site.sh settles the
@@ -62,7 +65,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.2.0"
+SCRIPT_VERSION="1.2.1"
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; CYAN='\033[0;36m'; NC='\033[0m'
@@ -251,9 +254,11 @@ if [ "$FORCE" != true ]; then
     [[ $REPLY =~ ^[Yy]$ ]] || { print_info "Cancelled."; exit 0; }
 fi
 
+# -v asks the question without making the escalation attempt sudo mails root about;
+# see backup_files.sh for why. Same test as the sibling scripts use.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then SUDO="sudo"; fi
+    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then SUDO="sudo"; fi
 fi
 
 mkdir -p "$PARENT"

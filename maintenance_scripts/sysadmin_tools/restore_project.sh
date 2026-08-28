@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.4.3 - the sudo capability probe asks with -v instead of running true,
+#                  which sudo mails root about when the account may not. Same
+#                  change in the sibling scripts.
 # Version: 1.4.2 - file restore works inside a container, where the process is already root
 #                  and the image ships no sudo: the six sudo calls now go through $SUDO, the
 #                  same test the sibling scripts use. A bare-metal backup restored into a
@@ -248,9 +251,11 @@ PROJECT_DIR="/var/www/html/${PROJECT_NAME}"
 # backup restored into a container hit, after the database had already loaded.
 # Same test as backup_files.sh, backup_project.sh, reconcile_site.sh and
 # restore_chain.sh use.
+# -v asks the question without making the escalation attempt sudo mails root about;
+# see backup_files.sh for why.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo > /dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if command -v sudo > /dev/null 2>&1 && sudo -n -v 2>/dev/null; then
         SUDO="sudo"
     fi
 fi

@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # backup_files.sh - Archive a project's files, optionally as an incremental
+# Version: 1.1.1 - the sudo capability probe asks with -v instead of running true. Running a
+#                  command is an escalation attempt sudo mails root about when the account
+#                  may not, so every nightly backup on a box whose web user has no sudo sent
+#                  a "SECURITY information" alert. The test itself is unchanged.
 # Version: 1.1.0 - tar exit 1 (a file changed while being read) is accepted: on a live
 #                  tree that is the normal case, and --warning=no-file-changed only
 #                  suppresses the message, not the status. Real failures (>=2) still fail.
@@ -46,7 +50,7 @@
 
 set -euo pipefail
 
-SCRIPT_VERSION="1.1.0"
+SCRIPT_VERSION="1.1.1"
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; YELLOW='\033[1;33m'; BLUE='\033[0;34m'; NC='\033[0m'
 print_info()    { echo -e "${BLUE}[INFO]${NC} $1" >&2; }
@@ -147,9 +151,15 @@ fi
 # The tree holds files the invoking account is not meant to read (config/ keys
 # are 600 and web-user owned). Elevate the read if we can; say so plainly if we
 # cannot, because a silently partial backup is worse than a failed one.
+#
+# The question is asked with -v rather than by running a command. Both return the
+# same status, but running one is an escalation ATTEMPT, and sudo mails root about
+# an attempt by an account that may not (mail_no_user is on by default) — so the
+# probe alone sent a "SECURITY information" alert on every run where the answer
+# was no. -l and -v are documented as exempt from that mail, for exactly this.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then
         SUDO="sudo"
     else
         print_warning "No passwordless sudo — reading as $(whoami); an unreadable file will fail this backup"

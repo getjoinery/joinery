@@ -1,6 +1,9 @@
 #!/usr/bin/env bash
 
 # backup_project.sh - Complete project backup script
+# Version: 2.6.2 - the sudo capability probe asks with -v instead of running true,
+#                  which sudo mails root about when the account may not. Same
+#                  change in the sibling scripts.
 # Version: 2.6.1 - shape.json is recorded however the script was invoked. It resolved its
 #                  own directory after cd-ing to the output directory, so a relative call
 #                  looked for reconcile_site.sh in /backups, found none, and skipped the
@@ -412,9 +415,12 @@ mkdir -p "${TEMP_DIR}/${BACKUP_NAME}/project_files"
 #
 # Ownership inside the archive is not load-bearing: restore_project.sh re-derives
 # it by running fix_permissions.sh, which re-pins the relay key itself.
+#
+# -v asks the question without making the escalation attempt sudo mails root about;
+# see backup_files.sh for why. Same test as the sibling scripts use.
 SUDO=""
 if [ "$(id -u)" -ne 0 ]; then
-    if command -v sudo >/dev/null 2>&1 && sudo -n true 2>/dev/null; then
+    if command -v sudo >/dev/null 2>&1 && sudo -n -v 2>/dev/null; then
         SUDO="sudo"
     else
         print_warning "No passwordless sudo — copying as $(whoami); any unreadable file will fail the backup"
