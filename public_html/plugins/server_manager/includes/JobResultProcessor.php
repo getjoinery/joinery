@@ -5,6 +5,14 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.15 - the agent SSL chain reports what it did rather than that it ran: provision_certificate
+ *                 is classified from its output (setup_ssl.sh exits 0 whether or not it issued anything),
+ *                 and the probe place/clear results are recorded, with a replaced token logged
+ * @version 1.14 - one fold path for node status, with per-key provenance: every writer records which
+ *                 transport measured each key and when, unmeasured keys carry with their ORIGINAL
+ *                 measured time, and a key nothing has measured for 30 days is dropped. Adds the
+ *                 run_plugin_installers and restart_agent handlers, and dedupes the recovery_key_report
+ *                 job a primitive status check queues
  * @version 1.13 - records which backup recovery key each node holds, and queues a push to any node
  *                 the status check finds with an empty slot
  * @version 1.12 - process_decommission_node: soft-delete the node only on a verified host teardown
@@ -40,6 +48,219 @@ class JobResultProcessor {
 			}
 		}
 		return $types;
+	}
+
+	/** Where the per-key provenance lives, inside the status blob itself. */
+	const STATUS_META_KEY = 'status_meta';
+
+	/** The derived display list: which keys this blob inherited rather than measured. */
+	const STATUS_CARRIED_KEY = 'status_carried_keys';
+
+	/** The provenance entry describing the fold itself rather than any one key. */
+	const STATUS_FOLD_KEY = '_fold';
+
+	/** Provenance for a key that predates provenance — measured at an unknown time. */
+	const STATUS_TRANSPORT_LEGACY = 'legacy';
+
+	/** A key nothing has measured for this long is dropped rather than carried forever. */
+	const STATUS_MAX_UNMEASURED_DAYS = 30;
+
+	/** Past this age, a reading is too old to colour a health badge with. */
+	const STATUS_STALE_AFTER_SECONDS = 21600; // 6 hours
+
+	/**
+	 * Fold a freshly measured set of node facts into the ones already stored.
+	 *
+	 * EVERY writer of mgn_last_status_data comes through here. There are four —
+	 * a check_status job (agent primitive, API envelope or SSH text), the
+	 * dashboard's synchronous API refresh, the recovery-key report, and the
+	 * dashboard refresh button's HTTP fallback, which learns only a version — and
+	 * before this they disagreed about what a missing key meant. The job path
+	 * carried absent keys forward; the API refresh replaced the whole blob. So
+	 * the same node's facts survived or were deleted depending on which writer
+	 * happened to run last, and nothing recorded which transport had measured
+	 * what.
+	 *
+	 * The rule is that transports answer different questions, so an absent key
+	 * means "this transport did not measure it" and never "the node stopped
+	 * having one". The agent can read /etc/letsencrypt, which the API (running
+	 * as the web user) cannot; the API can call BackupRecoveryKey::key_report(),
+	 * which the agent has no way to invoke.
+	 *
+	 * Carrying alone is not enough, because a carried value keeps looking current
+	 * forever. So each key carries a stamp beside it:
+	 *
+	 *   status_meta: {
+	 *     "<key>":  {"t": "<transport>", "m": "<UTC time it was measured>"},
+	 *     "<key>":  {"t": "legacy", "m": null, "s": "<UTC time this fold first saw it>"},
+	 *     "_fold":  {"t": "<transport>", "m": "<UTC time of this fold>"}
+	 *   }
+	 *
+	 * A writer stamps only the keys it actually measured. A carried key keeps its
+	 * ORIGINAL stamp, so its age is the age of the measurement, not of the carry.
+	 * 'legacy' is the honest answer for a key inherited from a blob written before
+	 * provenance existed: we know we hold the value and not when it was taken, so
+	 * `m` is null and readers treat its age as unknowable rather than fresh. `s`
+	 * starts its expiry clock, which is the only thing about it we can date.
+	 *
+	 * Ageing is what retires a key the fleet no longer measures. `databases` was
+	 * superseded by `db_list` and five ssl_* fields were replaced by the
+	 * certificate enumeration, and every one of them sat in all nine nodes' blobs
+	 * indefinitely because carry-forward has no expiry of its own.
+	 *
+	 * @param string|array|null $previous      the stored blob (raw JSON or decoded)
+	 * @param array             $measured      what THIS writer actually measured
+	 * @param string            $transport     'primitive' | 'api' | 'ssh'
+	 * @param string|null       $measured_time UTC 'Y-m-d H:i:s'; defaults to now
+	 * @return array the blob to store
+	 */
+	public static function fold_status_data($previous, array $measured, $transport, $measured_time = null) {
+		$now       = $measured_time ?: gmdate('Y-m-d H:i:s');
+		$transport = (string)$transport;
+
+		if (is_string($previous)) {
+			$previous = json_decode($previous, true);
+		}
+		if (!is_array($previous)) {
+			$previous = [];
+		}
+
+		$meta = [];
+		if (isset($previous[self::STATUS_META_KEY]) && is_array($previous[self::STATUS_META_KEY])) {
+			$meta = $previous[self::STATUS_META_KEY];
+		}
+		// The fold owns these two; they are never data and never carried as data.
+		unset($previous[self::STATUS_META_KEY], $previous[self::STATUS_CARRIED_KEY]);
+		unset($measured[self::STATUS_META_KEY], $measured[self::STATUS_CARRIED_KEY]);
+
+		$folded   = $measured;
+		$new_meta = [];
+		foreach ($measured as $key => $ignored) {
+			$new_meta[$key] = ['t' => $transport, 'm' => $now];
+		}
+
+		// DB times are ISO-formatted UTC, so string comparison is the ordering.
+		$cutoff = gmdate('Y-m-d H:i:s',
+			strtotime($now . ' UTC') - (self::STATUS_MAX_UNMEASURED_DAYS * 86400));
+
+		foreach ($previous as $key => $value) {
+			if (array_key_exists($key, $folded)) {
+				continue; // measured this time; the fresh stamp stands
+			}
+			$stamp = (isset($meta[$key]) && is_array($meta[$key]) && array_key_exists('m', $meta[$key]))
+				? $meta[$key]
+				: ['t' => self::STATUS_TRANSPORT_LEGACY, 'm' => null, 's' => $now];
+
+			// Age from the measurement when we have one, from first sight when we
+			// do not. Either way the clock is running, so a key the fleet has
+			// stopped measuring leaves rather than becoming permanent furniture.
+			$age_from = $stamp['m'] ?: ($stamp['s'] ?? $now);
+			if ((string)$age_from < $cutoff) {
+				continue;
+			}
+			$folded[$key]   = $value;
+			$new_meta[$key] = $stamp;
+		}
+
+		$carried = [];
+		foreach ($new_meta as $key => $stamp) {
+			if (($stamp['m'] ?? null) !== $now) {
+				$carried[] = $key;
+			}
+		}
+		sort($carried);
+
+		$new_meta[self::STATUS_FOLD_KEY] = ['t' => $transport, 'm' => $now];
+		$folded[self::STATUS_META_KEY]   = $new_meta;
+		if ($carried) {
+			$folded[self::STATUS_CARRIED_KEY] = $carried;
+		}
+		return $folded;
+	}
+
+	/** The provenance map out of a status blob, or an empty one. */
+	public static function status_meta($status) {
+		if (is_string($status)) {
+			$status = json_decode($status, true);
+		}
+		if (!is_array($status) || !isset($status[self::STATUS_META_KEY])
+				|| !is_array($status[self::STATUS_META_KEY])) {
+			return [];
+		}
+		return $status[self::STATUS_META_KEY];
+	}
+
+	/**
+	 * When anything in this blob was last actually measured, or null.
+	 *
+	 * This is the honest answer to "last checked". mgn_last_status_check answers
+	 * a different question — when a check last RAN — and a check that reached the
+	 * node and read nothing off it stamps that column while measuring nothing.
+	 * The fold stamp (_fold) is excluded for the same reason: a fold that folded
+	 * an empty measurement is not a measurement.
+	 */
+	public static function status_last_measured($status) {
+		$newest = null;
+		foreach (self::status_meta($status) as $key => $stamp) {
+			if ($key === self::STATUS_FOLD_KEY || !is_array($stamp)) {
+				continue;
+			}
+			$m = $stamp['m'] ?? null;
+			if ($m && ($newest === null || (string)$m > $newest)) {
+				$newest = (string)$m;
+			}
+		}
+		return $newest;
+	}
+
+	/**
+	 * How old, in seconds, the OLDEST of the named readings is — or null when
+	 * that cannot be known.
+	 *
+	 * Oldest rather than newest because a reader that draws one conclusion from
+	 * several figures is only as current as its stalest input: a health badge
+	 * computed from disk, postgres and load is not fresh because the load number
+	 * is. Null is returned when any named key is present without a measurement
+	 * stamp (a legacy carry), and that is not the same as "no data" — it means we
+	 * hold a figure and cannot date it, which a caller must not render as fresh.
+	 */
+	public static function status_age_seconds($status, array $keys) {
+		if (is_string($status)) {
+			$status = json_decode($status, true);
+		}
+		if (!is_array($status)) {
+			return null;
+		}
+		$meta   = self::status_meta($status);
+		$oldest = null;
+		foreach ($keys as $key) {
+			if (!array_key_exists($key, $status)) {
+				continue;
+			}
+			$m = (isset($meta[$key]) && is_array($meta[$key])) ? ($meta[$key]['m'] ?? null) : null;
+			if (!$m) {
+				return null;
+			}
+			if ($oldest === null || (string)$m < $oldest) {
+				$oldest = (string)$m;
+			}
+		}
+		if ($oldest === null) {
+			return null;
+		}
+		return max(0, time() - strtotime($oldest . ' UTC'));
+	}
+
+	/**
+	 * Are the named readings too old to draw a health conclusion from?
+	 *
+	 * True also when their age cannot be established, which is the case that used
+	 * to read as green: a figure of unknown age is not a figure you may colour a
+	 * badge with.
+	 */
+	public static function status_figures_are_stale($status, array $keys) {
+		$age = self::status_age_seconds($status, $keys);
+		return ($age === null) || ($age > self::STATUS_STALE_AFTER_SECONDS);
 	}
 
 	public static function process($job) {
@@ -171,40 +392,22 @@ class JobResultProcessor {
 			$prev_ssl_state = $node->get('mgn_ssl_state');
 			$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
 
-			// Carry forward facts THIS report did not measure.
+			// Fold what this report measured into what the node already carried.
+			// fold_status_data owns the carry-forward rule and stamps each key
+			// with the transport that measured it, so a later reader can date a
+			// figure instead of assuming the whole blob is as fresh as the check
+			// that last touched it.
 			//
-			// Transports do not answer the same questions. The agent can read
-			// /etc/letsencrypt, which the API (running as the web user) cannot;
-			// the API can call BackupRecoveryKey::key_report(), which the agent
-			// has no way to invoke. Replacing the blob wholesale therefore lets
-			// the narrower transport DELETE what the wider one learned.
-			//
-			// That is not hypothetical: backup_recovery_state comes only from the
-			// API/SSH path, and RecoveryKeyFleet gates every backup on it. A
-			// primitive status check wiped it fleet-wide, so build_backup_run
-			// refused for every paired node with "not known yet" — the nightly
-			// fleet backup included. An absent key here means "this transport did
-			// not measure it", never "the node stopped having one".
-			//
-			// Carried keys are named in the blob so a reader can tell a fresh
-			// measurement from an inherited one rather than trusting its age.
-			$previous = json_decode((string)$node->get('mgn_last_status_data'), true);
-			if (is_array($previous)) {
-				$carried = array();
-				foreach ($previous as $key => $value) {
-					if ($key === 'status_carried_keys') continue;
-					if (!array_key_exists($key, $result)) {
-						$result[$key] = $value;
-						$carried[] = $key;
-					}
-				}
-				if ($carried) {
-					sort($carried);
-					$result['status_carried_keys'] = $carried;
-				}
-			}
+			// Naming the transport honestly matters here: a primitive check_status
+			// arrives in the same envelope shape as an API one, and they do NOT
+			// measure the same things. backup_recovery_state comes only from the
+			// API/SSH path — RecoveryKeyFleet gates every backup on it — so a
+			// primitive check that claimed to have measured it would let the next
+			// fold treat a stale answer as current.
+			$transport = $job->isPrimitiveJob() ? 'primitive' : ($is_api_path ? 'api' : 'ssh');
+			$folded    = self::fold_status_data($node->get('mgn_last_status_data'), $result, $transport);
 
-			$node->set('mgn_last_status_data', json_encode($result));
+			$node->set('mgn_last_status_data', json_encode($folded));
 			if ($version) {
 				$node->set('mgn_joinery_version', $version);
 			}
@@ -220,8 +423,8 @@ class JobResultProcessor {
 			// not ours: the fleet view has to be able to show that a node is
 			// carrying a key the control plane did not put there, because that
 			// is the one case the push deliberately walks away from.
-			if (isset($result['backup_recovery_state'])) {
-				$node->set('mgn_backup_recovery_fpr', (string)($result['backup_recovery_fpr'] ?? ''));
+			if (isset($folded['backup_recovery_state'])) {
+				$node->set('mgn_backup_recovery_fpr', (string)($folded['backup_recovery_fpr'] ?? ''));
 			}
 
 			// What the node says about MY backups of it. The node's history is the
@@ -230,8 +433,8 @@ class JobResultProcessor {
 			// trusting what the last job happened to stamp. The site's own profile
 			// travels in the same payload and is kept as information, never
 			// promoted into a fleet problem.
-			if (isset($result['backups']['manager'])) {
-				$mgr = $result['backups']['manager'];
+			if (isset($folded['backups']['manager'])) {
+				$mgr = $folded['backups']['manager'];
 				// A run still in flight reports 'running' — neither success nor
 				// failure yet. It keeps the previous stamp: writing it as failed
 				// would raise a dashboard alarm for every backup a status check
@@ -259,9 +462,19 @@ class JobResultProcessor {
 			//
 			// Queued rather than done inline because measuring it means running a
 			// script on the node, which is a job, not a page render.
-			$carried = $result['status_carried_keys'] ?? [];
+			//
+			// Asked for at most once per node per six hours. Every primitive
+			// status check carries backup_recovery_state forward, so every one of
+			// them wants this job; the fleet status sweep runs them together and
+			// on 08-28 that queued 33 identical reports across nine nodes inside a
+			// minute. A recovery key that changes does so at a human's pace, so
+			// one measurement per node in a six-hour window is as fresh as the
+			// answer can usefully be, and the check below also refuses to pile on
+			// a report that is already queued or running.
+			$carried = $folded[self::STATUS_CARRIED_KEY] ?? [];
 			if (in_array('backup_recovery_state', $carried, true)
-					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')) {
+					&& JobCommandBuilder::has_primitive($node, 'recovery_key_report')
+					&& !ManagementJob::activeOrRecentForNode($node->key, 'recovery_key_report', 6 * 3600)) {
 				try {
 					$built = JobCommandBuilder::build_recovery_key_report($node);
 					ManagementJob::createFromBuild($node->key, 'recovery_key_report', $built, null,
@@ -286,7 +499,7 @@ class JobResultProcessor {
 			// to the mailbox Setup tab checklist, and a later custom PTR is
 			// never overwritten by routine status checks.
 			if ($ssl_new_state === 'active' && $prev_ssl_state !== 'active') {
-				$rdns_domain = $result['ssl_domain']
+				$rdns_domain = $folded['ssl_domain']
 					?? (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
 				if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
 					require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
@@ -295,7 +508,9 @@ class JobResultProcessor {
 			}
 		}
 
-		// Save structured result on the job
+		// What THIS job measured, which is not what the node now holds — the node
+		// carries the fold, this carries the reading. A job result that repeated
+		// the inherited keys read as a job that had measured them.
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
 	}
@@ -1114,6 +1329,137 @@ HTML;
 	}
 
 	/**
+	 * Record what a provision_certificate job actually achieved.
+	 *
+	 * THE JOB'S STATUS DOES NOT ANSWER THIS, and that is the whole reason this
+	 * handler is more than a status copy. setup_ssl.sh ends `return 0` on every
+	 * branch by design — issued, fell back to DNS-01, or found no challenge path
+	 * at all — so that a site which cannot get a certificate stays on HTTP
+	 * rather than failing its install. A handler that read 'completed' as
+	 * success would set this node's SSL to active while it holds nothing, and
+	 * nothing on the dashboard would look wrong.
+	 *
+	 * SslProvisionOutcome reads the output and separates the states that need
+	 * different things from a person — in particular a missing
+	 * /etc/letsencrypt/{provider}.ini, which is one file away from working and
+	 * which the script has already named — so the recorded result can say which
+	 * one it was instead of "completed".
+	 */
+	private static function process_provision_certificate($job) {
+		$node_id = $job->get('mjb_mgn_node_id');
+		if (!$node_id) return;
+
+		try {
+			$node = new ManagedNode($node_id, TRUE);
+		} catch (Exception $e) { return; }
+
+		$outcome = SslProvisionOutcome::classify($job->get('mjb_output') ?: '');
+		$result  = [
+			'ssl_outcome' => $outcome['state'],
+			'detail'      => $outcome['detail'],
+			'ssl_state'   => $node->get('mgn_ssl_state'),
+		];
+
+		// A job that never ran tells us nothing about the certificate; only the
+		// terminal-failure fact is recorded.
+		if ($job->get('mjb_status') !== 'completed') {
+			$job->set('mjb_result', json_encode($result));
+			$job->save();
+			return;
+		}
+
+		if (!SslProvisionOutcome::is_issued($outcome['state'])) {
+			$result['needs_operator'] = SslProvisionOutcome::needs_operator($outcome['state']);
+			$job->set('mjb_result', json_encode($result));
+			$job->save();
+			return;
+		}
+
+		$was_active = ($node->get('mgn_ssl_state') === 'active');
+		$node->set('mgn_ssl_state', 'active');
+		$node->save();
+
+		$result['ssl_state'] = 'active';
+		$result['challenge'] = $outcome['challenge'];
+
+		// Reverse DNS, on first issuance only, and only where the certificate is
+		// itself the evidence. HTTP-01 cannot have succeeded unless the domain
+		// resolves to this box, which is exactly the precondition the PTR
+		// provider checks. DNS-01 proves control of the zone and says nothing
+		// about where the name points — on a Cloudflare-proxied domain the A
+		// records are Cloudflare's, which is what the provider would reject.
+		// Best-effort: a stale grant leaves the PTR to the Setup tab checklist,
+		// and a later custom PTR is never overwritten by a renewal.
+		if (!$was_active && $outcome['challenge'] === SslProvisionOutcome::CHALLENGE_HTTP_01) {
+			$params = json_decode($job->get('mjb_parameters') ?: '', true);
+			$rdns_domain = is_array($params) && !empty($params['domain'])
+				? $params['domain']
+				: (parse_url($node->get('mgn_site_url') ?: '', PHP_URL_HOST) ?: '');
+			if ($rdns_domain && !filter_var($rdns_domain, FILTER_VALIDATE_IP)) {
+				require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeReverseDns.php'));
+				$result['rdns_attempt'] = NodeReverseDns::setQuietly($node, $rdns_domain);
+			}
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Record a routing-probe placement.
+	 *
+	 * The one fact here worth more than the status is `replaced`. The node
+	 * overwrites an existing token on purpose — refusing would wedge a domain
+	 * permanently whenever a probe died between place and clear — but a
+	 * replacement still means either that an earlier probe leaked or that two
+	 * are racing on one node, and both are worth knowing BEFORE somebody starts
+	 * debugging it as a Cloudflare problem. So it is logged, not just stored.
+	 */
+	private static function process_ssl_probe_place($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+
+		$result = ['placed' => false];
+		if (is_array($data) && array_key_exists('placed', $data)) {
+			$result = [
+				'placed'   => (bool)$data['placed'],
+				'replaced' => !empty($data['replaced']),
+				'filename' => $data['filename'] ?? null,
+			];
+			if (!empty($data['replaced'])) {
+				error_log('JobResultProcessor: SSL routing probe on node '
+					. $job->get('mjb_mgn_node_id') . ' replaced a token that was already there — '
+					. 'an earlier probe did not clean up, or two are in flight.');
+			}
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * Record a routing-probe cleanup.
+	 *
+	 * Nothing to clear is success, not a failure: the request names an end state
+	 * — no probe token on this node — and a file already gone satisfies it. The
+	 * result keeps `was_present` for anyone who cares which of the two happened.
+	 */
+	private static function process_ssl_probe_clear($job) {
+		$data = self::extract_api_envelope_data($job->get('mjb_output') ?: '');
+
+		$result = ['cleared' => false];
+		if (is_array($data) && array_key_exists('cleared', $data)) {
+			$result = [
+				'cleared'     => true,
+				'was_present' => (bool)$data['cleared'],
+				'filename'    => $data['filename'] ?? null,
+			];
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
 	 * Parse discover_nodes output into structured instance data.
 	 */
 	private static function process_discover_nodes($job) {
@@ -1291,16 +1637,15 @@ HTML;
 		if ($node_id) {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
-				$status = json_decode((string)$node->get('mgn_last_status_data'), true);
-				if (!is_array($status)) $status = [];
-				$status = array_merge($status, $recovery);
 
-				// It was measured now, so it is no longer inherited.
-				if (!empty($status['status_carried_keys'])) {
-					$status['status_carried_keys'] = array_values(array_diff(
-						$status['status_carried_keys'], array_keys($recovery)));
-					if (!$status['status_carried_keys']) unset($status['status_carried_keys']);
-				}
+				// The third writer of the status blob, and it measures exactly two
+				// keys. Through the same fold as the other two: it stamps only what
+				// it measured, everything else keeps the stamp it already had, and
+				// the recovery keys stop being listed as inherited because this job
+				// is the measurement they were waiting for.
+				$transport = $job->isPrimitiveJob() ? 'primitive' : 'ssh';
+				$status = self::fold_status_data(
+					$node->get('mgn_last_status_data'), $recovery, $transport);
 
 				$node->set('mgn_last_status_data', json_encode($status));
 				if (isset($recovery['backup_recovery_fpr'])) {
@@ -1421,6 +1766,114 @@ HTML;
 			'note' => $note,
 		]));
 		$job->save();
+	}
+
+	/**
+	 * Read what the plugin-installer runner actually did.
+	 *
+	 * The runner is deliberately fail-safe: it exits 0 whether it ran every
+	 * installer or none of them, because it also runs at container start and a
+	 * broken plugin installer must never stop a site from booting. That is the
+	 * right call there and a lie here — the exit code is all the job has, so
+	 * "run the installers" came back green on nodes where nothing ran at all,
+	 * and the builder's own docblock told operators to read the output instead
+	 * of trusting the colour. This makes the colour worth trusting.
+	 *
+	 * Three things it says, in its own vocabulary:
+	 *   "<name>: ok"                    an installer ran and succeeded
+	 *   "WARNING - ... failed"          an installer ran and failed
+	 *   "... - skipping" / "- refused"  an installer that should have run did not
+	 *
+	 * A missing declared extension is reported separately: it degrades a plugin
+	 * without stopping its installer, so it is worth surfacing and not worth
+	 * failing the job over. "no active plugins - nothing to run" is a complete,
+	 * successful answer and stays green.
+	 */
+	private static function process_run_plugin_installers($job) {
+		$output = (string)($job->get('mjb_output') ?: '');
+
+		// Script primitives return their text inside the agent's JSON envelope,
+		// where the lines are separated by escaped \n that no /m anchor matches.
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+
+		$failures = [];
+		$warnings = [];
+		$ran      = [];
+
+		if (preg_match_all('/^(?:core|plugin) installers: WARNING - (.+)$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$line = trim($line);
+				// The extension installer's own warning; every other WARNING the
+				// runner emits is an installer that failed.
+				if (strpos($line, 'could not install ') === 0) {
+					$warnings[] = $line;
+				} else {
+					$failures[] = $line;
+				}
+			}
+		}
+		if (preg_match_all('/^(?:core|plugin) installers: (.+ - (?:skipping|refused))$/m', $output, $m)) {
+			foreach ($m[1] as $line) {
+				$failures[] = trim($line);
+			}
+		}
+		if (preg_match_all('/^(?:core|plugin) installers: (.+): ok$/m', $output, $m)) {
+			foreach ($m[1] as $name) {
+				$ran[] = trim($name);
+			}
+		}
+
+		$nothing_to_run = (strpos($output, 'no active plugins - nothing to run') !== false);
+
+		// A run that printed nothing is not a run that went well. The runner
+		// narrates every path it takes, including the ones where it does nothing,
+		// so silence means the output never reached us — and a green job whose
+		// output we do not have is the exact thing this handler exists to stop.
+		$silent = (trim($output) === '');
+		if ($silent) {
+			$failures[] = 'the runner produced no output, so nothing about this run can be confirmed';
+		}
+
+		$result = [
+			'installers_run' => $ran,
+			'failures'       => $failures,
+			'warnings'       => $warnings,
+			'nothing_to_run' => $nothing_to_run,
+		];
+
+		if ($failures && $job->get('mjb_status') === 'completed') {
+			$job->set('mjb_status', 'failed');
+			$job->set('mjb_error_message',
+				count($failures) . ' installer step'
+				. (count($failures) === 1 ? '' : 's')
+				. ' did not complete: ' . implode('; ', array_slice($failures, 0, 3)));
+		}
+
+		$job->set('mjb_result', json_encode($result));
+		$job->save();
+	}
+
+	/**
+	 * restart_agent: intentionally thin.
+	 *
+	 * It is here so processable_types() lists restart_agent deliberately rather
+	 * than by omission — without a handler the dashboard sweep skips the type
+	 * entirely and a terminal restart job keeps mjb_result NULL forever, which is
+	 * how the sweep re-processes a job on every render.
+	 *
+	 * There is nothing to fold beyond that. The node's answer to "restart" is the
+	 * job's own terminal status: it restarts only when it can prove something will
+	 * start it again, and when it will not, it REFUSES — which the channel records
+	 * as a refusal on the job, not as text in the output for anyone to parse. So
+	 * process()'s backstop recording the status is the whole result, and inventing
+	 * a richer one here would mean asserting something the output does not say.
+	 */
+	private static function process_restart_agent($job) {
+		// Deliberately empty: see the docblock. The backstop in process() records
+		// the terminal status, which is the entire fact this job produces.
 	}
 
 	/**

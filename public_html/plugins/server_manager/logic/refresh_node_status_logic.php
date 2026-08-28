@@ -3,10 +3,19 @@
  * server_manager/refresh_node_status — dashboard auto-refresh.
  *
  * Calls /api/v1/management/stats on a node (or falls back to a plain HTTP status
- * check), persists the parsed result to the node record, and returns the derived
+ * check), folds the parsed result into the node record, and returns the derived
  * badge color and version-compare state so the client can swap them in without a
  * reload. No job record is created. Superadmin only (floor 10).
  *
+ * Both branches report "last check" as the time the figures were last MEASURED,
+ * read from the status blob's per-key provenance. The fallback branch reads a
+ * version header off a HEAD request and learns nothing else about the node, so
+ * that is all it stamps.
+ *
+ * @version 1.1.1 - the badge is derived from the folded node record, not the raw API response:
+ *                  the staleness test reads provenance, which a raw response does not carry
+ * @version 1.1.0 - the HTTP fallback folds the version it measured instead of stamping
+ *                  mgn_last_status_check, which dated every figure in the blob to the click
  * @version 1.0.0
  */
 
@@ -45,10 +54,21 @@ function refresh_node_status_logic(array $input): LogicResult {
 
 		if ($result['ok']) {
 			$data = $result['data'];
-			$response['status_color'] = JobCommandBuilder::status_color_for_node($node, $data);
+			// The FOLDED blob, not $data. fetch_status_via_api returns what this
+			// call measured, which carries no provenance of its own; the badge
+			// reads provenance, so handing it the raw response would grey out a
+			// node whose figures were taken a moment ago.
+			$folded = json_decode((string)$node->get('mgn_last_status_data'), true);
+			$response['status_color'] = JobCommandBuilder::status_color_for_node($node,
+				is_array($folded) ? $folded : $data);
 			$response['version']      = $data['joinery_version'] ?? null;
+			// The API call just measured these, so this reads as now — but it
+			// reads it from the provenance rather than asserting it, so the one
+			// number means the same thing on both branches.
 			$response['last_check']   = LibraryFunctions::time_ago_or_time(
-				$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
+				JobResultProcessor::status_last_measured($node->get('mgn_last_status_data'))
+					?: $node->get('mgn_last_status_check'),
+				'UTC', $session->get_timezone(), 'M j, g:i A'
 			);
 
 			$cp_version = LibraryFunctions::get_joinery_version();
@@ -100,17 +120,30 @@ function refresh_node_status_logic(array $input): LogicResult {
 
 	$is_up = !$errno && $status >= 200 && $status < 400;
 	if ($is_up) {
-		$node->set('mgn_last_status_check', gmdate('Y-m-d H:i:s'));
+		// This branch reads a header off a HEAD request. It learns the node's
+		// version and that the node answers — it reads no disk, no load, no
+		// postgres — so it stamps the version and nothing else. Stamping
+		// mgn_last_status_check here would date every figure in the node's status
+		// blob to this click, which is the same false freshness the uptime probe
+		// used to write on every tick.
 		if ($node_version_from_header) {
 			$node->set('mgn_joinery_version', $node_version_from_header);
+			$node->set('mgn_last_status_data', json_encode(
+				JobResultProcessor::fold_status_data(
+					$node->get('mgn_last_status_data'),
+					['joinery_version' => $node_version_from_header],
+					'probe')));
 		}
 		$node->save();
 		$response = [
 			'ok'           => true,
 			'elapsed_ms'   => $elapsed_ms,
 			'status_color' => 'success',
+			// When the figures were last measured, not when this probe ran.
 			'last_check'   => LibraryFunctions::time_ago_or_time(
-				$node->get('mgn_last_status_check'), 'UTC', $session->get_timezone(), 'M j, g:i A'
+				JobResultProcessor::status_last_measured($node->get('mgn_last_status_data'))
+					?: $node->get('mgn_last_status_check'),
+				'UTC', $session->get_timezone(), 'M j, g:i A'
 			),
 		];
 		if ($node_version_from_header) {

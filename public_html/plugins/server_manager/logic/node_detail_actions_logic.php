@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.17 - provision_ssl starts the agent SSL chain on a paired bare-metal node (same gates as
+ *                 the scheduled pass) and dispatches through createFromBuild on the SSH path too
+ * @version 1.16 - both apply_update actions dispatch through createFromBuild, so a paired node's
+ *                 upgrade crosses the agent channel instead of being buried under a steps key
  * @version 1.15 - A1/A3 retirement: run_command (the console) and both copy_database actions are
  *                 gone. No plane composes an instruction for a node to run; copying a database is
  *                 backup-on-source then restore-on-target, human-present
@@ -275,8 +279,15 @@ class NodeDetailActions {
 			}
 
 			case 'apply_update': {
-				$steps = JobCommandBuilder::build_apply_update($node);
-				$job = ManagementJob::createJob($node->key, 'apply_update', $steps, [], $uid);
+				// createFromBuild, not createJob: build_apply_update now returns
+				// a primitive envelope on a paired node, and createJob would
+				// bury it under a "steps" key where isPrimitiveJob() cannot see
+				// it. The job would then be handed to the step executor and the
+				// agent would fail to parse it. That is not hypothetical — it is
+				// exactly what happened to the nightly fleet backup the morning
+				// build_backup_run grew its primitive branch.
+				$built = JobCommandBuilder::build_apply_update($node);
+				$job = ManagementJob::createFromBuild($node->key, 'apply_update', $built, [], $uid);
 				return self::jobUrl($job);
 			}
 
@@ -293,8 +304,11 @@ class NodeDetailActions {
 				$queued = 0;
 				foreach ($siblings as $sibling) {
 					try {
-						$steps = JobCommandBuilder::build_apply_update($sibling);
-						ManagementJob::createJob($sibling->key, 'apply_update', $steps, [], $uid);
+						// Same reason as the single-node case above: each sibling
+						// is routed on its own transport, so this loop queues a
+						// mixture of primitive and SSH jobs across a host.
+						$built = JobCommandBuilder::build_apply_update($sibling);
+						ManagementJob::createFromBuild($sibling->key, 'apply_update', $built, [], $uid);
 						$queued++;
 					} catch (Exception $e) {
 						error_log("apply_update_all_on_host: failed to queue node {$sibling->key}: " . $e->getMessage());
@@ -341,6 +355,32 @@ class NodeDetailActions {
 					self::fail($session, $page_regex, 'Cannot provision SSL: node has no site URL with a domain.');
 					return $base_url . '&tab=overview';
 				}
+				// A paired bare-metal node issues its own certificate through the
+				// agent, and gets there by a chain of jobs rather than one. This
+				// dispatches the first step through the same entry the scheduled
+				// pass uses — so the button and the timer are the same operation,
+				// with the same Cloudflare, core-version and A-record gates —
+				// and the pass carries it the rest of the way.
+				if (ProvisionPendingSsl::uses_primitive_route($node)) {
+					$outcome = ProvisionPendingSsl::begin_chain($node, $domain, $uid);
+					if ($outcome['error'] !== '') {
+						self::fail($session, $page_regex, 'Cannot provision SSL: ' . $outcome['error']);
+						return $base_url . '&tab=overview';
+					}
+					// Marked pending either way: the node IS awaiting a
+					// certificate, and that is what makes the scheduled pass pick
+					// it up once the wait the note describes is over.
+					$node->set('mgn_ssl_state', 'pending');
+					$node->save();
+					if ($outcome['started'] === 0) {
+						self::fail($session, $page_regex, $outcome['note'] !== ''
+							? $outcome['note']
+							: 'SSL provisioning is queued; nothing could be dispatched yet.');
+						return $base_url . '&tab=overview';
+					}
+					return $base_url . '&tab=jobs';
+				}
+
 				if (!JobCommandBuilder::has_ssh($node)) {
 					self::fail($session, $page_regex, 'Cannot provision SSL: SSH is not configured for this node.');
 					return $base_url . '&tab=overview';
@@ -349,7 +389,12 @@ class NodeDetailActions {
 				$alert_email = $settings->get_setting('server_manager_provisioning_admin_alert_email') ?: '';
 				$job_params = ['domain' => $domain, 'admin_email' => $alert_email];
 				$steps = JobCommandBuilder::build_provision_ssl($node, $job_params);
-				$job = ManagementJob::createJob($node->key, 'provision_ssl', $steps, $job_params, $uid);
+				// createFromBuild, not createJob: build_provision_ssl returns a
+				// step list today, but a builder that gains a primitive branch
+				// turns a correct createJob call into a broken one without the
+				// call site being touched, and the job then fails on the node
+				// with a JSON error that never says the word SSL.
+				$job = ManagementJob::createFromBuild($node->key, 'provision_ssl', $steps, $job_params, $uid);
 				$node->set('mgn_ssl_state', 'pending');
 				$node->save();
 				return self::jobUrl($job);

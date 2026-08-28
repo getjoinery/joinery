@@ -5,6 +5,12 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.41 - apply_update crosses the agent channel: build_apply_update_primitive, with the
+ *                 SSH builder kept behind it until the Phase 3 cutover
+ * @version 1.40 - status_color_for_node greys a node whose health figures are stale or undateable,
+ *                 off the fold's provenance — the same rule the node detail overview applies
+ * @version 1.39 - fetch_status_via_api folds into the stored status instead of replacing it, so a
+ *                 dashboard refresh no longer deletes the facts only the agent can see
  * @version 1.38 - upload_backup, delete_backup and run_plugin_installers join the primitive
  *                 transport. upload/delete send a FILENAME, never a path — the node resolves it
  *                 inside its own backup directory. delete_backup is local-only: the SSH cloud
@@ -294,9 +300,15 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Synchronously call GET /api/v1/management/stats, persist the result to
-	 * the node record (mgn_last_status_check, mgn_last_status_data, and
-	 * mgn_joinery_version if returned), and return the parsed data.
+	 * Synchronously call GET /api/v1/management/stats, fold the result into the
+	 * node record (mgn_last_status_check, mgn_last_status_data via
+	 * JobResultProcessor::fold_status_data, and mgn_joinery_version if returned),
+	 * and return the parsed data.
+	 *
+	 * What comes back is what this call measured. What the node record holds is
+	 * that folded over what other transports measured earlier — the API cannot
+	 * see everything an agent can, so it stamps its own keys and leaves the rest
+	 * carrying the provenance they already had.
 	 *
 	 * No job record is created — this is a lightweight refresh used by the
 	 * dashboard on page load. For user-initiated status checks with audit
@@ -381,9 +393,20 @@ class JobCommandBuilder {
 			$data['ssl_https_probe']      = true;
 		}
 
-		$node->set('mgn_last_status_data', json_encode($data));
+		// Through the same fold every other status writer uses. This path used to
+		// replace the blob wholesale, so whichever facts the API cannot see — the
+		// certificate lineages the agent reads out of /etc/letsencrypt, among
+		// others — were deleted from the node record every time the dashboard
+		// refreshed, then restored by the next agent check. Which of the two ran
+		// last decided what the node appeared to know.
+		$folded = JobResultProcessor::fold_status_data(
+			$node->get('mgn_last_status_data'), $data, 'api');
+
+		$node->set('mgn_last_status_data', json_encode($folded));
 		$node->save();
 
+		// The caller is told what THIS call measured, not what the node now
+		// holds — it is reporting on a request it just made.
 		return ['ok' => true, 'elapsed_ms' => $elapsed_ms, 'data' => $data,
 			'message' => null, 'reason' => null];
 	}
@@ -418,7 +441,12 @@ class JobCommandBuilder {
 	 * Derive the dashboard badge color for a node. Single source of truth used by
 	 * both the dashboard page render and the AJAX refresh endpoint.
 	 *
-	 * $status_data - parsed mgn_last_status_data array (or fresh API response)
+	 * $status_data - the parsed mgn_last_status_data blob. It must be the FOLDED
+	 *                blob, not a raw transport response: the staleness test reads
+	 *                the per-key provenance the fold writes, and a response that
+	 *                carries none is undateable and greys out — including one
+	 *                measured a moment ago. A caller holding a fresh reading wants
+	 *                the node record it was just folded into.
 	 * $last_job_failed - true if the most recent check_status job failed (page-render path)
 	 */
 	public static function status_color_for_node($node, $status_data = null, $last_job_failed = false) {
@@ -449,6 +477,16 @@ class JobCommandBuilder {
 				if ($uptime === 'up')   return 'success';
 				if ($uptime === 'down') return 'danger';
 			}
+			return 'secondary';
+		}
+
+		// Grey rather than green when the three figures below are too old to draw a
+		// conclusion from, or cannot be dated at all. Same rule and same threshold
+		// as the node detail overview, read off the fold's per-key provenance —
+		// mgn_last_status_check above answers only "did a check run", which a probe
+		// that measured nothing can satisfy.
+		if (JobResultProcessor::status_figures_are_stale($status_data,
+				['disk_usage_percent', 'postgres_status', 'load_1m'])) {
 			return 'secondary';
 		}
 
@@ -1415,9 +1453,24 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Apply a Joinery update on target via upgrade.php.
+	 * Apply a Joinery update on the node via its own upgrade.php.
+	 *
+	 * The most-used operation this plane has, and the last large one to cross.
+	 * The SSH form below composes `cd {web_root} && php utils/upgrade.php
+	 * --verbose` from a column in THIS plane's database and sends it to be run
+	 * as root — which is the whole shape the migration exists to end: the string
+	 * is executed, and the path in it is this plane's belief about where someone
+	 * else's site lives.
+	 *
+	 * The SSH builder stays until the Phase 3 cutover, for the nodes that have
+	 * not paired. transports_for() prefers the primitive wherever it is
+	 * available, so a paired node with the channel switched on stops using this
+	 * path without any caller changing.
 	 */
 	public static function build_apply_update($node, $params = []) {
+		if (self::has_primitive($node, 'apply_update')) {
+			return self::build_apply_update_primitive($node);
+		}
 		$web_root = $node->get('mgn_web_root');
 
 		return [
@@ -1425,6 +1478,32 @@ class JobCommandBuilder {
 			 'cmd' => "cd {$web_root} && php utils/upgrade.php --verbose",
 			 'timeout' => 3600],
 		];
+	}
+
+	/**
+	 * Primitive path: a NAME, and nothing else.
+	 *
+	 * A node upgrades from the source IT is configured with. Every parameter the
+	 * SSH string carried was either this plane's belief about the node (the web
+	 * root, which the node knows better) or a flag the node fixes for itself
+	 * (--verbose, compiled into the primitive because the result processor reads
+	 * the transcript). There is deliberately nothing here through which this
+	 * plane could name a version, a source, or an argument.
+	 *
+	 * WHAT THE NODE DOES WITH ITS AGENT WHILE THIS RUNS. An upgrade runs the
+	 * host installers, and the first of those installs and restarts the agent —
+	 * the process running this job. install_agent.sh 2.7 defers both while a job
+	 * is in progress and the agent takes the new binary through its own signed
+	 * self-update about a minute later. The consequence for this plane is that
+	 * an apply_update job on a paired node routinely completes and is THEN
+	 * followed by the node's agent going away and coming back; a poll gap of a
+	 * minute or two after a successful upgrade is the design working.
+	 *
+	 * This method's EXISTENCE is what routes the operation — has_primitive() and
+	 * transports_for() discover by method_exists on build_<op>_primitive.
+	 */
+	public static function build_apply_update_primitive($node) {
+		return ['primitive' => 'apply_update', 'params' => []];
 	}
 
 	/**
@@ -1542,14 +1621,17 @@ class JobCommandBuilder {
 	 * So nothing crosses but the node id and a name. Nothing the plane sends can
 	 * influence what runs.
 	 *
-	 * KNOWN GAP, and it is the node's script rather than this builder: the
-	 * runner still requires argv[1] and still connects as `psql -U postgres`
-	 * with an inherited PGPASSWORD, so under the agent it runs the core
-	 * installers, finds no active plugins, and exits 0 saying so. It reads like
-	 * a clean run that had nothing to do. Until the runner derives its own site
-	 * root and reads its own credentials — the way install_agent.sh already does
-	 * in the same directory — a paired node's plugin installers do not run.
-	 * Read the job output; do not infer from the green.
+	 * The runner meets it there: it derives its own site root from where the file
+	 * lives and reads its own database credentials out of the site config, so it
+	 * needs neither an argument nor anything in the environment. SITENAME stays
+	 * optional for the callers that still pass one — the Dockerfile CMD,
+	 * install.sh, upgrade.php — which is why this primitive can send nothing at
+	 * all and still have the plugin loop run.
+	 *
+	 * What the runner reports, JobResultProcessor::process_run_plugin_installers
+	 * reads: the runner exits 0 on every path because it also runs at container
+	 * start, where a failing installer must not stop a site from booting, so the
+	 * job's colour comes from parsing its output rather than from its exit code.
 	 */
 	public static function build_run_plugin_installers_primitive($node) {
 		return ['primitive' => 'run_plugin_installers', 'params' => []];

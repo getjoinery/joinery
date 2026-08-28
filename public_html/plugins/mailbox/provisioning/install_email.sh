@@ -2,6 +2,13 @@
 #
 # install_email.sh - host installer + base configurator for Mailbox.
 #
+# Version: 2.17 - Reads the database user and password from the site's own config instead
+#                of connecting as `psql -U postgres` on an inherited PGPASSWORD. That
+#                environment exists under the container CMD and under nothing else, so
+#                the upgrade's installer dispatch applied the main.cf edits and then died
+#                at section 4, leaving a mail host routing through a pgsql map whose role
+#                and grants had not been re-asserted. Same fix, same reason, as
+#                _plugin_installers_start.sh v1.3
 # Version: 2.16 - dbconfig-no-thanks is installed alongside opendmarc, which
 #                depends on `dbconfig-mysql | dbconfig-no-thanks`. Left to
 #                choose, apt takes the first: a MySQL client stack lands on a
@@ -156,21 +163,6 @@ if [[ ! -f "${RENDER_SCRIPT}" ]]; then
     exit 1
 fi
 
-# The site config sits alongside public_html, four levels up from provisioning/.
-# Only the database name is read from it here — it names the dedicated role and
-# the database to grant in.
-SITE_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
-CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
-if [[ ! -f "${CONFIG_FILE}" ]]; then
-    echo "ERROR: site config not found at ${CONFIG_FILE}" >&2
-    exit 1
-fi
-DBNAME="$(grep -oP "settings\['dbname'\]\s*=\s*'\K[^']+" "${CONFIG_FILE}" | head -1)"
-if [[ -z "${DBNAME}" ]]; then
-    echo "ERROR: could not read dbname from ${CONFIG_FILE}" >&2
-    exit 1
-fi
-
 # Resolve the PHP CLI binary. The official php Docker images ship it at
 # /usr/local/bin/php, not /usr/bin/php — hard-coding the path bakes a broken
 # pipe transport into master.cf, and inbound mail then fails silently.
@@ -180,6 +172,47 @@ if [[ -z "${PHP_BIN}" ]]; then
     exit 1
 fi
 echo "PHP CLI: ${PHP_BIN}"
+
+# The site config sits alongside public_html, four levels up from provisioning/.
+# It names the database, and it holds the credentials to reach it.
+SITE_ROOT="$(cd "${SCRIPT_DIR}/../../../.." && pwd)"
+CONFIG_FILE="${SITE_ROOT}/config/Globalvars_site.php"
+if [[ ! -f "${CONFIG_FILE}" ]]; then
+    echo "ERROR: site config not found at ${CONFIG_FILE}" >&2
+    exit 1
+fi
+
+# One setting out of the site config, by name.
+#
+# This script inherits NOTHING about the database. It used to connect as
+# `psql -U postgres` on whatever PGPASSWORD happened to be in the environment:
+# true under the container CMD, which exports it, and false under every other
+# caller. Under the upgrade's installer dispatch it therefore half-ran — the
+# main.cf edits landed, then section 4 died on the first psql, leaving a mail
+# host configured to route mail through a pgsql map whose role and grants had
+# never been re-asserted. Reading the credentials from the site's own config is
+# the same fix _plugin_installers_start.sh v1.3 made, for the same reason.
+read_site_setting() {
+    "${PHP_BIN}" -r '
+        $config = file_get_contents($argv[1]);
+        echo preg_match("/settings\[.".$argv[2].".\]\s*=\s*.([^\x27\"]*)/", $config, $m) ? $m[1] : "";
+    ' "${CONFIG_FILE}" "$1"
+}
+
+DBNAME="$(read_site_setting dbname)"
+if [[ -z "${DBNAME}" ]]; then
+    echo "ERROR: could not read dbname from ${CONFIG_FILE}" >&2
+    exit 1
+fi
+DBUSER="$(read_site_setting dbusername)"
+if [[ -z "${DBUSER}" ]]; then
+    echo "ERROR: could not read dbusername from ${CONFIG_FILE}" >&2
+    exit 1
+fi
+DBHOST="$(read_site_setting dbhost)"
+# Never echoed, never passed in argv: it reaches psql through PGPASSWORD in the
+# environment of that one command, which is where psql looks for it anyway.
+DBPASS="$(read_site_setting dbpassword)"
 
 # --- 1. install packages -----------------------------------------------------
 # ext-sqlite3 (FTS5 compiled in) backs MailboxIndex, the sealed mailbox search
@@ -321,12 +354,25 @@ esac
 # the inbound-domain list. Its password lives only in the map file written
 # below; re-running this script preserves it (a fresh one is generated only
 # when the map file is missing or unreadable).
-DB_PSQL=(psql -U postgres -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
+#
+# Connects as the site's own database user with the site's own password, both
+# read from the config above. That user owns this database and is the account
+# the site itself uses, so it can do everything below; nothing here depends on
+# the environment the caller happened to have.
+DB_PSQL_ARGS=(-U "${DBUSER}" -d "${DBNAME}" -v ON_ERROR_STOP=1 -tAq)
+if [[ -n "${DBHOST}" && "${DBHOST}" != "localhost" ]]; then
+    DB_PSQL_ARGS+=(-h "${DBHOST}")
+fi
+# A prefix assignment, so the password is in psql's environment and not in
+# anyone's argv — the same rule the role password below is set under.
+db_psql() {
+    PGPASSWORD="${DBPASS}" psql "${DB_PSQL_ARGS[@]}" "$@"
+}
 
 # The role's GRANT needs the domains table, which update_database creates after
 # the plugin is activated. Fail clearly rather than half-configure.
-TABLE_CHECK="$("${DB_PSQL[@]}" -c "SELECT to_regclass('public.ied_inbound_email_domains') IS NOT NULL" 2>&1)" || {
-    echo "ERROR: could not query PostgreSQL database '${DBNAME}': ${TABLE_CHECK}" >&2
+TABLE_CHECK="$(db_psql -c "SELECT to_regclass('public.ied_inbound_email_domains') IS NOT NULL" 2>&1)" || {
+    echo "ERROR: could not query PostgreSQL database '${DBNAME}' as '${DBUSER}': ${TABLE_CHECK}" >&2
     exit 1
 }
 if [[ "${TABLE_CHECK}" != "t" ]]; then
@@ -361,12 +407,12 @@ fi
 
 # Create the role once; (re)assert its attributes, password and grants every
 # run, so a re-run is a clean rotation.
-if [[ "$("${DB_PSQL[@]}" -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
-    "${DB_PSQL[@]}" -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
+if [[ "$(db_psql -c "SELECT 1 FROM pg_roles WHERE rolname = '${DB_ROLE}'")" != "1" ]]; then
+    db_psql -c "CREATE ROLE \"${DB_ROLE}\" LOGIN"
     echo "postgres: created role ${DB_ROLE}"
 fi
 # The password is set over stdin, never argv, so it stays out of the process list.
-"${DB_PSQL[@]}" <<SQL
+db_psql <<SQL
 ALTER ROLE "${DB_ROLE}" LOGIN NOSUPERUSER NOCREATEDB NOCREATEROLE NOINHERIT PASSWORD '${ROLE_PW}';
 GRANT CONNECT ON DATABASE "${DBNAME}" TO "${DB_ROLE}";
 GRANT USAGE ON SCHEMA public TO "${DB_ROLE}";
@@ -418,7 +464,7 @@ echo "main.cf: virtual_mailbox_domains = ${VMD_MAP}"
 # AuthenticationResults parser trusts. If they disagree the stamped AR lines are
 # ignored and every message reads "unverified". Read it from the DB (the Setup
 # tab writes it); fall back to myhostname with a loud warning.
-AUTHSERV_ID="$("${DB_PSQL[@]}" -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
+AUTHSERV_ID="$(db_psql -c "SELECT stg_value FROM stg_settings WHERE stg_name = 'mailbox_mail_hostname'" 2>/dev/null | head -1 | tr -d '[:space:]' || true)"
 if [[ -z "${AUTHSERV_ID}" ]]; then
     AUTHSERV_ID="$(postconf -h myhostname 2>/dev/null | tr -d '[:space:]' || true)"
     echo "opendkim/opendmarc: mailbox_mail_hostname is unset — using myhostname '${AUTHSERV_ID}' as AuthservID." >&2
