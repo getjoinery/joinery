@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.42 - has_primitive gates on the agent version that introduced the primitive, so the
+ *                 upgrade delivering a new agent is never dispatched as a primitive the fielded
+ *                 agent does not ship (nine refusals on the 0.8.352 rollout)
  * @version 1.41 - apply_update crosses the agent channel: build_apply_update_primitive, with the
  *                 SSH builder kept behind it until the Phase 3 cutover
  * @version 1.40 - status_color_for_node greys a node whose health figures are stale or undateable,
@@ -151,9 +154,37 @@ class JobCommandBuilder {
 	 * Routing decision at job-build time: should this (node, operation) pair
 	 * run as a primitive job on the node's own agent?
 	 */
+	/**
+	 * A primitive added to the agent after a node's running version does not
+	 * exist on that node, whatever the plane can build. The plane learns each
+	 * node's agent version on every claim, so the floor is checkable here —
+	 * and the first rollout of a new primitive is exactly when it matters:
+	 * the 0.8.352 upgrade was dispatched as an apply_update primitive to nine
+	 * agents whose compiled-in vocabulary predated it, and all nine refused.
+	 * The upgrade that DELIVERS a new agent can never require the new agent.
+	 *
+	 * Only primitives newer than some fielded agent need a row. An operation
+	 * absent here is in every agent the fleet has ever paired.
+	 */
+	const PRIMITIVE_MIN_AGENT_VERSION = [
+		'apply_update' => '1.10.0',
+	];
+
 	public static function has_primitive($node, $operation) {
-		return self::has_agent_channel($node)
-			&& method_exists(static::class, "build_{$operation}_primitive");
+		if (!self::has_agent_channel($node)
+				|| !method_exists(static::class, "build_{$operation}_primitive")) {
+			return false;
+		}
+		$min = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? null;
+		if ($min === null) {
+			return true;
+		}
+		// An unknown agent version routes away from the primitive: sending a
+		// job to a vocabulary we cannot confirm trades a working SSH dispatch
+		// for a guaranteed refusal. Stale-by-one-poll after a self-update is
+		// the known cost, and it only means one extra SSH dispatch.
+		$version = (string)$node->get('mgn_agent_version');
+		return $version !== '' && version_compare($version, $min, '>=');
 	}
 
 	/**

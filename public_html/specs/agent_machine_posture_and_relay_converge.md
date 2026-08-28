@@ -1,14 +1,20 @@
 # Machine posture, relay convergence, and Docker hosts (WP4)
 
-**Status: DESIGN.** Written 2026-08-28 against agent 1.10.0 and 0.8.351.
-Companion to `specs/agent_on_node_architecture.md`, whose **A13** records the
-owner's siteless-posture decision and supersedes A8 in part; this document is
-the design under it.
+**Status: R1 BUILT AND LIVE (agent 1.10.0, fleet-wide); R2–R5 approved to
+build.** The support bundle (§4) was approved by the owner on 2026-08-28,
+unblocking R2. This spec **owns the remainder of the transport migration**:
+the architecture spec (`specs/implemented/agent_on_node_architecture.md`,
+whose A13 records the siteless decision) is implemented and frozen; Step 2b,
+the Step 3 cutover, its deploy-tier gate and the destruction of the shared
+provisioning key are all carried here as R2–R5.
 
-Review state, 2026-08-28: **R1 approved to build.** The support bundle (§4)
-amends a detail the owner had approved as "relay logic compiled into the
-agent", so R2 and later wait on the owner's sign-off. §7.4 and §9 record two
-questions closed since the first draft.
+**Design bar for production installs (owner, 2026-08-28):** the operator's own
+managed boxes keep sshd for troubleshooting (A11 stands; jeremytunnell may
+join service posture later, undecided) — but a production box rolled out
+generally must be designed to need **no SSH for any maintenance reason**. A
+maintenance task that requires a shell on a production install is a vocabulary
+gap to close, never a runbook step. This is the standing acceptance test for
+every primitive and every rung the sentinel spec later adds.
 
 ---
 
