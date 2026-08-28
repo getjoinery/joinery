@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#Version 3.4 - An envelope-sealed archive restores unattended: when no --key-file is given, the
+#              <archive>.keys.json sidecar beside it is opened with this machine's own
+#              backup_site_key, the way restore_project.sh 1.3.0 already does
 #Version 3.3 - A dump from a newer PostgreSQL is refused before the schema is dropped, not
 #              after the load fails on it. An 18 dump into a 16 server died on line 13 with
 #              the target already emptied
@@ -25,8 +28,10 @@
 #         RESTORE_USAGE_ERROR | RESTORE_SERVER_TOO_OLD
 #     Only RESTORE_LOAD_FAILED can leave the database modified; every other
 #     failure exits with it untouched.
-#   * Key resolution order: --key-file -> $BACKUP_ENCRYPTION_KEY ->
-#     ~/.joinery_backup_key -> interactive prompt (only when not --non-interactive).
+#   * Key resolution order: --key-file -> the envelope sidecar beside the
+#     archive (opened with this machine's own config/backup_site_key) ->
+#     $BACKUP_ENCRYPTION_KEY -> ~/.joinery_backup_key -> interactive prompt
+#     (only when not --non-interactive).
 
 set -o pipefail
 
@@ -84,9 +89,12 @@ fi
 find /tmp -maxdepth 1 -name 'jy_restore_*' -user "$(id -un)" -mmin +1440 -delete 2>/dev/null
 GZ_TMP=""
 SQL_TMP=""
+KEY_TMP=""
 cleanup() {
     [ -n "$GZ_TMP" ]  && rm -f "$GZ_TMP"
     [ -n "$SQL_TMP" ] && rm -f "$SQL_TMP"
+    # An unsealed archive key must not outlive the restore that needed it.
+    [ -n "$KEY_TMP" ] && rm -f "$KEY_TMP"
 }
 trap cleanup EXIT
 
@@ -124,12 +132,65 @@ fi
 
 # --- Encryption key resolution -------------------------------------------------
 ENCRYPTION_KEY=""
+
+# The key sealed to THIS machine, in the envelope beside THIS archive.
+#
+# A backup encrypted under an envelope key is not openable with the legacy
+# standing key, and the plane used to bridge that gap itself: it opened
+# <archive>.keys.json with the node's backup_site_key and passed the result as
+# --key-file. A node restoring on its own behalf has no such helper, so without
+# this an envelope-sealed archive is restorable over SSH and not otherwise —
+# and the archives that matter most are envelope-sealed.
+#
+# ONLY REACHED WHEN NO --key-file WAS GIVEN. An explicit key is the caller
+# saying which key to use, and this must not second-guess it; every existing
+# caller passes one, so for them this function does not exist. It is tried
+# ahead of the standing keys below because it is the key that provably belongs
+# to this archive, while $BACKUP_ENCRYPTION_KEY and ~/.joinery_backup_key are
+# defaults that happen to be present — and those return success on existence
+# alone, so a later attempt would never be reached.
+#
+# Failure to open is not an error here: it means this archive was sealed to a
+# different machine, and the standing keys are still worth trying.
+resolve_key_from_envelope() {
+    local sidecar="${INPUT_FILE}.keys.json"
+    [ -f "$sidecar" ] || return 1
+
+    local tools_dir; tools_dir="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+    local envelope_tool="${tools_dir}/backup_envelope.php"
+    # {site root}/maintenance_scripts/sysadmin_tools -> {site root}/config.
+    local site_key; site_key="$(dirname "$(dirname "$tools_dir")")/config/backup_site_key"
+
+    [ -f "$envelope_tool" ] || return 1
+    [ -f "$site_key" ] || return 1
+    command -v php >/dev/null 2>&1 || return 1
+
+    KEY_TMP=$(mktemp --suffix=.key /tmp/jy_restore_XXXXXXXX)
+    if ! php "$envelope_tool" open --sidecar "$sidecar" --private "$site_key" \
+            --key-out "$KEY_TMP" >/dev/null 2>&1; then
+        info "⚠️  The envelope beside this archive did not open with this machine's key."
+        rm -f "$KEY_TMP"; KEY_TMP=""
+        return 1
+    fi
+
+    ENCRYPTION_KEY=$(head -1 "$KEY_TMP" | tr -d '\n\r')
+    rm -f "$KEY_TMP"; KEY_TMP=""
+    if [ -n "$ENCRYPTION_KEY" ]; then
+        info "✓ Archive key recovered from $(basename "$sidecar") using this machine's key."
+        return 0
+    fi
+    return 1
+}
+
 resolve_key() {
     if [ -n "$KEY_FILE" ]; then
         [ -f "$KEY_FILE" ] || return 1
         ENCRYPTION_KEY=$(head -1 "$KEY_FILE" | tr -d '\n\r')
         [ -n "$ENCRYPTION_KEY" ] && return 0
         return 1
+    fi
+    if resolve_key_from_envelope; then
+        return 0
     fi
     if [ -n "$BACKUP_ENCRYPTION_KEY" ]; then
         ENCRYPTION_KEY="$BACKUP_ENCRYPTION_KEY"
@@ -167,7 +228,7 @@ case "$INPUT_FILE" in
     *.enc)
         info "🔍 Encrypted archive — resolving key and decrypting."
         if ! resolve_key; then
-            info "✗ No decryption key available (--key-file / \$BACKUP_ENCRYPTION_KEY / ~/.joinery_backup_key)."
+            info "✗ No decryption key available (--key-file / the envelope sidecar beside the archive / \$BACKUP_ENCRYPTION_KEY / ~/.joinery_backup_key)."
             echo "BACKUP_KEY_MISSING"
             exit 3
         fi

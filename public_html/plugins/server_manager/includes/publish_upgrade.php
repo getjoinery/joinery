@@ -394,11 +394,19 @@
 		// core manifest is written, so the tarball is itself covered by the core
 		// manifest.
 		//
-		// A bundle problem is a warning rather than a refusal, unlike a stale
-		// agent. A stale agent runs on every node in the fleet; a stale bundle
-		// affects only machines with no site, and carrying the previous one
-		// forward leaves those machines exactly where they were rather than
-		// blocking a release the rest of the fleet needs.
+		// SHELVED 2026-08-28 — no siteless consumer on the current rollout path
+		// (relay agent-free; getjoinery/jeremytunnell move as full-site nodes);
+		// reactivate only if shared-host in-place hardening is chosen. The
+		// builder and its tests stand and are green — the pipeline simply does
+		// not call it, because a mechanism that runs on every publish and is
+		// consumed by nobody is a mechanism nobody watches. The switch is
+		// SupportBundlePublisher::hasConsumer(), and it is documented there.
+		//
+		// When it does run again: a bundle problem is a warning rather than a
+		// refusal, unlike a stale agent. A stale agent runs on every node in the
+		// fleet; a stale bundle affects only machines with no site, and carrying
+		// the previous one forward leaves those machines exactly where they were
+		// rather than blocking a release the rest of the fleet needs.
 		if (SupportBundlePublisher::hasConsumer()) {
 			publish_output("Bundling agent support bundle...");
 			$support_bundle = SupportBundlePublisher::publish($full_site_dir, 'publish_output');

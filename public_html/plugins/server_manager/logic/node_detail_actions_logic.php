@@ -19,6 +19,10 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.18 - the three restore actions dispatch through createFromBuild. Their builders now
+ *                 have a primitive branch (kept shut by the destructive gate), and createJob
+ *                 refuses an envelope — so the caller must be able to store either shape before
+ *                 the gate can ever open, not on the morning it does
  * @version 1.17 - provision_ssl starts the agent SSL chain on a paired bare-metal node (same gates as
  *                 the scheduled pass) and dispatches through createFromBuild on the SSH path too
  * @version 1.16 - both apply_update actions dispatch through createFromBuild, so a paired node's
@@ -235,8 +239,15 @@ class NodeDetailActions {
 						'local_path' => $local_path ?: null,
 						'cloud_path' => $cloud_path ?: null,
 					];
-					$steps = JobCommandBuilder::build_restore_database($node, $params);
-					$job = ManagementJob::createJob($node->key, 'restore_database', $steps, $params, $uid);
+					// createFromBuild, not createJob: build_restore_database() has a
+					// primitive branch, and createJob refuses an envelope outright.
+					// The branch cannot fire in this build — restore is destructive
+					// and node_can_dispatch_destructive() is false — but the call
+					// site is where the last such change broke the nightly fleet
+					// backup at 04:00, so it stops being a thing anyone has to
+					// remember on the day the gate opens.
+					$built = JobCommandBuilder::build_restore_database($node, $params);
+					$job = ManagementJob::createFromBuild($node->key, 'restore_database', $built, $params, $uid);
 					return self::jobUrl($job);
 				}
 				return $base_url . '&tab=database';
@@ -260,8 +271,8 @@ class NodeDetailActions {
 				// A missing or malformed domain throws out of the builder; the
 				// central catch in dispatch() turns that into a message on the
 				// Backups tab rather than a 500.
-				$steps = JobCommandBuilder::build_restore_project($node, $params);
-				$job = ManagementJob::createJob($node->key, 'restore_project', $steps, $params, $uid);
+				$built = JobCommandBuilder::build_restore_project($node, $params);
+				$job = ManagementJob::createFromBuild($node->key, 'restore_project', $built, $params, $uid);
 				return self::jobUrl($job);
 			}
 
@@ -273,8 +284,8 @@ class NodeDetailActions {
 					'domain'        => trim($_POST['restore_domain'] ?? ''),
 					'skip_database' => empty($_POST['restore_database']),
 				];
-				$steps = JobCommandBuilder::build_restore_chain($node, $params);
-				$job = ManagementJob::createJob($node->key, 'restore_chain', $steps, $params, $uid);
+				$built = JobCommandBuilder::build_restore_chain($node, $params);
+				$job = ManagementJob::createFromBuild($node->key, 'restore_chain', $built, $params, $uid);
 				return self::jobUrl($job);
 			}
 
