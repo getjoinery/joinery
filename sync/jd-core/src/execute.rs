@@ -1534,6 +1534,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 && e.local_placement() == p
         }))
     };
+    let mut vetoed = false;
     let mut found = None;
     let candidates = [
         as_new.clone(),
@@ -1543,6 +1544,7 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     let mut unplaced = None;
     for candidate in candidates.iter().flatten() {
         if !mine(candidate)? {
+            vetoed = true;
             continue;
         }
         match path_for(env, candidate)? {
@@ -1561,6 +1563,28 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
     let Some((mut path, fingerprint)) = found else {
         if let Some(why) = unplaced {
             return Ok(why.outcome());
+        }
+        // Every candidate was refused because another entry already holds the
+        // name -- which means the file is still HERE. Deleting the identity now
+        // would say the opposite, and the next scan would find the same
+        // untracked file, mint another identity, and arrive back here, for ever.
+        //
+        // The entry is left alone instead, so that naming -- which is what
+        // decides who gets a contested name -- sees it on the next pass and
+        // parks the loser visibly. A provisional is minted AFTER naming has run
+        // for its pass, so surviving one pass is the only way it can ever be
+        // judged.
+        //
+        // Deliberately silent. Naming raises the `unsyncable` issue when it
+        // parks, and that is the only issue kind a pass withdraws again once the
+        // state ends. An issue raised from here would describe a state that
+        // resolves a pass later and would then sit in the user's list for ever,
+        // clearable only by hand -- exactly what the dismissal block at the top
+        // of a pass exists to prevent.
+        if vetoed {
+            return Ok(OpOutcome::Overtaken(
+                "another file already holds this name".into(),
+            ));
         }
         // A provisional entry exists for exactly one reason: a file was found on
         // this disk that nothing was tracking. It has no server side, so nothing

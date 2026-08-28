@@ -290,6 +290,16 @@ fn workload_core(
                 ));
             }
         }
+        if std::env::var("JD_DUMP").is_ok() {
+            for d in &world.devices {
+                for (path, hash) in jd_sim::scenario::disk_tree(d) {
+                    eprintln!("DUMP disk {} {:?} {:?}", d.name, path, hash);
+                }
+            }
+            for (path, hash) in jd_sim::scenario::server_tree(&world.server) {
+                eprintln!("DUMP server {path:?} {hash:?}");
+            }
+        }
         panic!("seed {seed} never settled\n{}", lines.join("\n"));
     }
     assert_nothing_lost(&world, &committed);
@@ -1237,6 +1247,21 @@ fn scratch_fresh_hunt_sweep() {
         ],
         true,
     ));
+    // 111100..111800 holds 111120, 111201 and 111740: an identity minted for an
+    // untracked file, refused the name it wanted, and deleted as if the file
+    // had vanished -- re-minted by the next scan, for ever. Found by ad-hoc
+    // hunt; a range that found three of one class is worth keeping swept.
+    arms.push(sweep_on(
+        "hunt-contested-name",
+        111100..111800,
+        70,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+    ));
     // 99600..100000 holds seed 99674: a name differing only in Unicode
     // normalisation read as a rename, between two filesystems that both
     // normalise and disagree about how.
@@ -2010,5 +2035,66 @@ fn scratch_onekey_trace() {
                 println!("  ROUND {round} {} plan={:?} exec={:?}", d.name, out.round.plan, out.exec);
             }
         }
+    }
+}
+
+#[test]
+#[ignore]
+fn scratch_ghost_probe() {
+    let seed: u64 = std::env::var("SEED").unwrap().parse().unwrap();
+    let steps: usize = std::env::var("STEPS").unwrap_or("70".into()).parse().unwrap();
+    let id: i64 = std::env::var("ENTITY").unwrap().parse().unwrap();
+    let spec = platform_spec(&["mac", "pc", "disk"]);
+    let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
+    let world = sweep_world(seed, &refs, steps, true, Vault::None);
+    let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+        drive(&world, seed, steps, true, sweep_root(Vault::None), Vault::None, false);
+        world.settle();
+    }));
+    // Does the server still know this entity, and is it trashed?
+    let out = world.server.action(
+        "drive_stat",
+        &serde_json::json!({
+            "entities": [{ "entity_type": "file", "entity_id": id }], "urls": false
+        }),
+    );
+    eprintln!("drive_stat({id}) => {out:?}");
+    // And what did the change log ever say about it?
+    let changes = world.server.action(
+        "drive_changes",
+        &serde_json::json!({ "since": 0, "limit": 5000 }),
+    );
+    if let Ok(v) = changes {
+        let hits: Vec<String> = v["changes"].as_array().cloned().unwrap_or_default().iter()
+            .filter(|c| c["entity_id"].as_i64() == Some(id))
+            .map(|c| format!("{}:{}", c["change_id"], c["kind"]))
+            .collect();
+        eprintln!("changes for {id}: {hits:?}");
+    }
+}
+
+/// Seeds that found the contested-name loop, frozen so it cannot come back.
+///
+/// An identity minted for an untracked file, refused the name it wants,
+/// dropped as pointless, and minted again by the next scan -- silently,
+/// raising no issue, for ever.
+///
+/// The refusal was read as the file having vanished, and a provisional identity
+/// for a vanished file is deleted. But the file was still there: it was the
+/// NAME that was taken, which is a naming question, and deleting the identity
+/// is what stopped naming from ever getting to answer it.
+///
+/// Pinned with explicit platforms rather than the sweep's environment
+/// variables, because the mix is what puts two records and one disk slot in the
+/// same neighbourhood, and a different mix reproduces a different world.
+#[test]
+fn frozen_contested_name_loop_seeds() {
+    let refs: [(&str, Platform); 3] = [
+        ("mac", Platform::MacOs),
+        ("pc", Platform::Windows),
+        ("disk", Platform::Decomposing),
+    ];
+    for seed in [111_740u64, 111_201, 111_120] {
+        workload_core(seed, 70, &refs, true, Vault::None, false);
     }
 }

@@ -86,8 +86,16 @@ impl PlanItem {
 /// real files (see `jd_vfs::names`), so this cannot collide with a user's file
 /// even by malice.
 pub fn swap_name(token: &str) -> String {
-    format!(".jd-swap-{}", token)
+    format!("{SWAP_PREFIX}{token}")
 }
+
+/// The prefix [`swap_name`] mints, on its own.
+///
+/// Narrower than `jd_vfs::INTERNAL_PREFIX` (`.jd-`) ON PURPOSE, and anything
+/// cleaning up after a park must use this one. The spool mints `.jd-tmp-`
+/// names under the same umbrella prefix, and a rule written against `.jd-`
+/// could throw away a working file mid-transfer.
+pub const SWAP_PREFIX: &str = ".jd-swap-";
 
 /// The ordered plan for one round.
 #[derive(Debug, Clone, PartialEq, Eq, Default)]

@@ -947,6 +947,16 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
     };
     let mut out = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
+    // Every scratch name the store still has a live entity for. Built once:
+    // asking per file would be a query per directory entry, and the answer
+    // cannot change inside one walk.
+    let live_swap_names: std::collections::HashSet<String> = env
+        .store
+        .every_entry()?
+        .into_iter()
+        .filter(|e| !e.remote_deleted && e.remote.name.starts_with(crate::order::SWAP_PREFIX))
+        .map(|e| e.remote.name)
+        .collect();
     let mut guard = 0;
     let now_ns = (env.now_ms)().saturating_mul(1_000_000);
     let granularity = env.vfs.personality().mtime_granularity_ns.max(1);
@@ -957,6 +967,31 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         }
         for child in env.vfs.read_dir(&dir)? {
             if jd_vfs::is_internal(&child.name) {
+                // A park nobody is coming back for, left standing on THIS disk.
+                //
+                // The walk skips internal names, which is right for the spool
+                // but leaves an abandoned scratch file permanent: never
+                // uploaded (the server refuses the prefix for a real file),
+                // never cleaned, invisible to every pass, and visible only to an
+                // audit. A device that materialized a peer's park and then
+                // watched that peer finish the dance is left holding exactly
+                // this — the name it pulled down now belongs to nothing.
+                //
+                // `SWAP_PREFIX`, never `INTERNAL_PREFIX`: the spool mints
+                // `.jd-tmp-` under the same umbrella, and a rule written
+                // against `.jd-` would throw away a working file mid-transfer.
+                //
+                // Safe on a stale view in BOTH directions, which is rare enough
+                // to say out loud. A wrong keep costs nothing — the next pass
+                // asks again. A wrong trash costs a re-download, because the
+                // server still holds the bytes and the trash still holds the
+                // copy. So this may act on what it knows without waiting to be
+                // certain.
+                if child.name.starts_with(crate::order::SWAP_PREFIX)
+                    && !live_swap_names.contains(&child.name)
+                {
+                    env.vfs.trash(&dir.join(&child.name))?;
+                }
                 continue;
             }
             let path = if rel.is_empty() {

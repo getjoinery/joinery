@@ -380,6 +380,29 @@ impl MemFs {
     /// Linux volume came back composed, so the engine's composed idea of the
     /// name always matched and the mismatch that wedges a real client could not
     /// be reproduced at all.
+    /// A path's key from its OWN bytes, with no fold resolution.
+    ///
+    /// `store_name` still applies, so a volume that rewrites what it is given
+    /// (HFS+ decomposes) still rewrites here — that is the disk behaving, not
+    /// the fold. What this skips is `resolve_case`, which would hand back a
+    /// name that already exists and erase a respell.
+    fn store_path_for(&self, path: &Path) -> VfsResult<String> {
+        let root = PathBuf::from("/sync");
+        let rel = path
+            .strip_prefix(&root)
+            .map_err(|_| VfsError::NotFound(path.to_path_buf()))?;
+        let mut out = String::new();
+        for seg in rel.iter() {
+            let seg = self.store_name(&seg.to_string_lossy());
+            if out.is_empty() {
+                out = seg;
+            } else {
+                out = format!("{out}/{seg}");
+            }
+        }
+        Ok(out)
+    }
+
     fn store_name(&self, name: &str) -> String {
         if self.personality.decomposes_unicode {
             name.nfd().collect()
@@ -701,7 +724,28 @@ impl Vfs for MemFs {
 
     fn rename(&self, from: &Path, to: &Path) -> VfsResult<()> {
         let f = self.key_for(from)?;
-        let t = self.key_for(to)?;
+        // The destination's LITERAL bytes, not what `key_for` resolves them to.
+        //
+        // `key_for` folds a candidate onto whatever is already standing at that
+        // slot, which is right for finding a file and exactly wrong for
+        // renaming one: asking to respell `café` as `cafe` + combining acute
+        // resolved BOTH sides to the same existing key, so the remove and
+        // reinsert cancelled and the rename silently did nothing. A real
+        // `rename(2)` on APFS respells — the volume is insensitive when it
+        // compares and preserving when it stores — so the mock was quietly
+        // refusing a thing every Mac does, and any engine fix that worked by
+        // respelling would have been eaten here with its test passing.
+        //
+        // Occupancy is still asked in FOLDED terms below: a destination that
+        // resolves to a DIFFERENT node is genuinely occupied and still refused.
+        // Only the same-slot case takes the literal name.
+        let t = {
+            let literal = self.store_path_for(to)?;
+            match self.key_for(to)? {
+                resolved if resolved == f => literal,
+                resolved => resolved,
+            }
+        };
         self.check_failure(FsOp::Rename, &f, from)?;
         let mut st = self.state.lock().unwrap();
         let Some(source) = st.nodes.get(&f).cloned() else {
