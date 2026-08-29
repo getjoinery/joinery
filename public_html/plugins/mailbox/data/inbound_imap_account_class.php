@@ -541,7 +541,7 @@ class InboundImapAccount extends SystemBase {
 			$this->set('iia_password_enc', null);
 			return;
 		}
-		$this->set('iia_password_enc', (new SecretBox())->encrypt($plaintext));
+		$this->set('iia_password_enc', (new SecretBox())->seal('iia_inbound_imap_accounts.iia_password_enc', $plaintext));
 		// The credential defines the method: a stored password IS a password
 		// sign-in, whatever the host's default.
 		$this->set('iia_auth_method', self::AUTH_PASSWORD);
@@ -552,7 +552,9 @@ class InboundImapAccount extends SystemBase {
 		if (!$blob) {
 			return null;
 		}
-		return (new SecretBox())->decrypt($blob);
+		// A dead password (moved database / rotated key) reads as null — the
+		// account degrades to needs-reauth rather than throwing.
+		return (new SecretBox())->open($blob)['value'];
 	}
 
 	function hasPassword(): bool {
@@ -567,10 +569,10 @@ class InboundImapAccount extends SystemBase {
 	 */
 	function setOAuthToken(OAuth2Token $token): void {
 		$box = new SecretBox();
-		$this->set('iia_oauth_access_token_enc', $box->encrypt($token->getAccessToken()));
+		$this->set('iia_oauth_access_token_enc', $box->seal('iia_inbound_imap_accounts.iia_oauth_access_token_enc', $token->getAccessToken()));
 		$refresh = $token->getRefreshToken();
 		if ($refresh !== null && $refresh !== '') {
-			$this->set('iia_oauth_refresh_token_enc', $box->encrypt($refresh));
+			$this->set('iia_oauth_refresh_token_enc', $box->seal('iia_inbound_imap_accounts.iia_oauth_refresh_token_enc', $refresh));
 		}
 		$this->set('iia_oauth_token_expires', $token->getExpiresAt());
 		// Persist granted scopes so outbound can detect whether SMTP send was
@@ -611,10 +613,16 @@ class InboundImapAccount extends SystemBase {
 			return null;
 		}
 		$box = new SecretBox();
+		$access = $box->open($accessBlob)['value'];
+		if ($access === null) {
+			// Dead access token (moved database / rotated key): no usable token, so
+			// the account degrades to needs-reauth rather than throwing.
+			return null;
+		}
 		$refreshBlob = $this->get('iia_oauth_refresh_token_enc');
 		return new OAuth2Token(
-			$box->decrypt($accessBlob),
-			$refreshBlob ? $box->decrypt($refreshBlob) : null,
+			$access,
+			$refreshBlob ? $box->open($refreshBlob)['value'] : null,
 			$this->get('iia_oauth_token_expires') ?: null
 		);
 	}

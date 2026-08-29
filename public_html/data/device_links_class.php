@@ -153,7 +153,7 @@ class DeviceLink extends SystemBase {
 	/** Store the one-time session secret, encrypted at rest. */
 	public function seal_secret($plaintext) {
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-		$this->set('dlk_secret_once', (new SecretBox())->encrypt((string)$plaintext));
+		$this->set('dlk_secret_once', (new SecretBox())->seal('dlk_device_links.dlk_secret_once', (string)$plaintext));
 	}
 
 	/** Read back the one-time session secret, or null when it is already gone. */
@@ -163,12 +163,12 @@ class DeviceLink extends SystemBase {
 			return null;
 		}
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-		try {
-			return (new SecretBox())->decrypt($blob);
-		} catch (Exception $e) {
-			error_log('DeviceLink::open_secret failed for dlk=' . $this->key . ': ' . $e->getMessage());
+		$opened = (new SecretBox())->open($blob);
+		if ($opened['value'] === null) {
+			error_log('DeviceLink::open_secret unreadable for dlk=' . $this->key);
 			return null;
 		}
+		return $opened['value'];
 	}
 
 	/**

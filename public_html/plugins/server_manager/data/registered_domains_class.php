@@ -129,10 +129,35 @@ class RegisteredDomain extends SystemBase {
 	public function seal_registrant(array $contact): void {
 		$json = json_encode($contact);
 		try {
-			$this->set('rdm_registrant_sealed', json_encode(array('enc' => (new SecretBox())->encrypt($json))));
+			$box = new SecretBox();
 		} catch (\Throwable $e) {
+			// Zero-config install (no secret_box_key): store readable JSON.
 			$this->set('rdm_registrant_sealed', $json);
+			return;
 		}
+		// seal() outside the catch: a refused (undeclared) locator must fail loudly.
+		$this->set('rdm_registrant_sealed',
+			json_encode(array('enc' => $box->seal('rdm_registered_domains.rdm_registrant_sealed', $json))));
+	}
+
+	/**
+	 * Every stored registrant blob, for the sealed-secret reconciler. The column
+	 * is a JSON {"enc":"<blob>"} envelope, so the reconciler cannot reach the blob
+	 * from the code-free locator alone — this enumerator unwraps it.
+	 *
+	 * @return array<array{ref:string, blob:?string}>
+	 */
+	public static function eachRegistrantBlob(): array {
+		$out = array();
+		$rows = new MultiRegisteredDomain(array('deleted' => false));
+		$rows->load();
+		foreach ($rows as $row) {
+			$decoded = json_decode((string)$row->get('rdm_registrant_sealed'), true);
+			$blob = (is_array($decoded) && isset($decoded['enc']) && is_string($decoded['enc'])
+				&& SecretBox::looksEncrypted($decoded['enc'])) ? $decoded['enc'] : null;
+			$out[] = array('ref' => (string)$row->get('rdm_domain'), 'blob' => $blob);
+		}
+		return $out;
 	}
 
 	/** The stored contact block, or null when there is none / it cannot be read. */
@@ -146,11 +171,11 @@ class RegisteredDomain extends SystemBase {
 			return null;
 		}
 		if (isset($decoded['enc']) && is_string($decoded['enc']) && SecretBox::looksEncrypted($decoded['enc'])) {
-			try {
-				$inner = json_decode((new SecretBox())->decrypt($decoded['enc']), true);
-			} catch (\Throwable $e) {
+			$opened = (new SecretBox())->open($decoded['enc']);
+			if ($opened['value'] === null) {   // dead: moved database or rotated key
 				return null;
 			}
+			$inner = json_decode($opened['value'], true);
 			return is_array($inner) ? $inner : null;
 		}
 		return $decoded;

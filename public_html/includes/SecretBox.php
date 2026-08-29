@@ -23,6 +23,16 @@
  * update_database pipeline — backfills it into the config file on sites
  * installed before the key existed.
  *
+ * A value is sealed through seal($locator, $plaintext), which refuses a locator
+ * that is not declared in a `sealed_secrets` manifest block — the same way
+ * Setting::put() refuses an undeclared setting name. This makes the registry
+ * load-bearing: you cannot seal a value the reconciler does not know how to find
+ * and heal. It is read back through open($stored), which never throws and
+ * reports one of four states (ok / absent / dead / plaintext) so a moved
+ * database or a rotated key is a fact a consumer can handle rather than an
+ * exception that takes down a feature.
+ *
+ * @version 1.2 - seal() teeth, four-state open() contract, key canary
  * @version 1.1
  */
 class SecretBox {
@@ -31,6 +41,23 @@ class SecretBox {
     private $key;
 
     const KEY_BYTES = 32;
+
+    // open() outcomes. Keeping absent and dead apart is the point: absent means
+    // "never configured" (stay silent), dead means "stored but unreadable"
+    // (needs attention). Collapsing them makes a health panel show green over a
+    // dead secret — a lie in the safe-looking direction.
+    const OPEN_OK        = 'ok';
+    const OPEN_ABSENT    = 'absent';
+    const OPEN_DEAD      = 'dead';
+    const OPEN_PLAINTEXT = 'plaintext';
+
+    // The canary: a known constant sealed at key-mint time. On a mass failure it
+    // separates "one secret is corrupt" (canary still opens) from "the key is
+    // wrong so everything is dead" (canary itself fails) — a distinction the
+    // cipher cannot otherwise give, since a wrong key and a bit flip both surface
+    // as the same authentication failure.
+    const CANARY_SETTING = 'secret_box_canary';
+    const CANARY_PLAINTEXT = 'joinery.secretbox.canary.v1';
 
     public function __construct() {
         $settings = Globalvars::get_instance();
@@ -190,6 +217,114 @@ class SecretBox {
     public static function looksEncrypted(string $value): bool {
         return strncmp($value, 'v1.sodium.', 10) === 0
             || strncmp($value, 'v1.aesgcm.', 10) === 0;
+    }
+
+    /**
+     * Encrypt a value for a REGISTERED sealed-secret category.
+     *
+     * The locator must be declared in a `sealed_secrets` manifest block; an
+     * unregistered one is refused outright, exactly as Setting::put() refuses an
+     * undeclared setting name. This is the teeth: the omission fails the moment
+     * someone adds a secret — not months later when the database moves and the
+     * reconciler has no idea the value exists.
+     *
+     * @param string $locator The declared locator (setting name, or "table.column").
+     * @param string $plaintext
+     * @return string Ciphertext blob.
+     * @throws RuntimeException when the locator is not declared.
+     */
+    public function seal(string $locator, string $plaintext): string {
+        require_once(PathHelper::getIncludePath('includes/SealedSecretsDeclarations.php'));
+        if (!SealedSecretsDeclarations::isDeclared($locator)) {
+            throw new RuntimeException(
+                "SecretBox::seal: '{$locator}' is not a declared sealed secret. Add a "
+                . 'sealed_secrets entry to settings.json (core) or the plugin.json before '
+                . 'sealing a value there — an unregistered secret cannot be found or healed '
+                . 'when a database moves.'
+            );
+        }
+        return $this->encrypt($plaintext);
+    }
+
+    /**
+     * Read a stored sealed value without ever throwing into the caller.
+     *
+     * Returns ['state' => one of the OPEN_* constants, 'value' => string|null].
+     * A consumer that gets DEAD treats it the same as ABSENT (reports itself not
+     * configured) and never crashes; the reconciler is what acts on the dead
+     * one. A PLAINTEXT value reads as OK to the feature (value carries the raw
+     * string); the reconciler reseals it on its next cold pass (never here, since
+     * this may run inside a hot request).
+     *
+     * The path distinguishes only what the cipher lets it: structural
+     * malformation is separable, but a wrong key and an in-place bit flip both
+     * surface as the same authentication failure, so both are reported DEAD.
+     *
+     * @param string|null $stored The value read from storage.
+     * @return array{state:string, value:?string}
+     */
+    public function open(?string $stored): array {
+        if ($stored === null || $stored === '') {
+            return array('state' => self::OPEN_ABSENT, 'value' => null);
+        }
+        if (!self::looksEncrypted($stored)) {
+            return array('state' => self::OPEN_PLAINTEXT, 'value' => $stored);
+        }
+        try {
+            return array('state' => self::OPEN_OK, 'value' => $this->decrypt($stored));
+        } catch (\Throwable $e) {
+            return array('state' => self::OPEN_DEAD, 'value' => null);
+        }
+    }
+
+    /**
+     * Mint the key canary if this install has none. Cold-only: the write is a
+     * long SecretBox blob to stg_settings, which the egress guard refuses in a
+     * hot request. Called from update_database and the reconciler, both cold.
+     *
+     * @return bool True once a canary exists.
+     */
+    public static function provisionCanary(): bool {
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $q = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+        $q->execute(array(self::CANARY_SETTING));
+        $existing = $q->fetchColumn();
+        if ($existing !== false && $existing !== '') {
+            return true;
+        }
+
+        $blob = (new self())->encrypt(self::CANARY_PLAINTEXT);
+        // Fill the (usually seeded-but-empty) row only while it is empty, so a
+        // concurrent winner's canary is never overwritten. Mirrors the
+        // signing-key first-mint guard.
+        $ins = $dblink->prepare(
+            "INSERT INTO stg_settings (stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
+             VALUES (?, ?, 1, NOW(), NOW(), 'general')
+             ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value
+             WHERE stg_settings.stg_value IS NULL OR stg_settings.stg_value = ''");
+        $ins->execute(array(self::CANARY_SETTING, $blob));
+        return true;
+    }
+
+    /**
+     * The canary's health right now: OPEN_OK (key is fine — an individual dead
+     * secret is corrupt), OPEN_DEAD (the key is wrong — every sealed value is
+     * dead), or OPEN_ABSENT (no canary minted yet). Cheap: one row, one decrypt.
+     */
+    public static function canaryState(): string {
+        $dblink = DbConnector::get_instance()->get_db_link();
+        $q = $dblink->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+        $q->execute(array(self::CANARY_SETTING));
+        $stored = $q->fetchColumn();
+        if ($stored === false || $stored === '') {
+            return self::OPEN_ABSENT;
+        }
+        $result = (new self())->open((string)$stored);
+        if ($result['state'] === self::OPEN_OK && $result['value'] !== self::CANARY_PLAINTEXT) {
+            // Decrypts but is not the constant we sealed — corrupt, not our key.
+            return self::OPEN_DEAD;
+        }
+        return $result['state'];
     }
 
     private static function b64url(string $bytes): string {

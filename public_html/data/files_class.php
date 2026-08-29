@@ -1681,7 +1681,7 @@ public static function get_by_name($name, $search_deleted = false) {
 			// guard — two requests provisioning at once must not overwrite each
 			// other's key, and put() has no conditional form.
 			$box = new SecretBox();
-			$new_blob = $box->encrypt(base64_encode(random_bytes(32)));
+			$new_blob = $box->seal(self::SIGNING_KEY_SETTING, base64_encode(random_bytes(32)));
 			$ins = $dblink->prepare(
 				"INSERT INTO stg_settings
 					(stg_name, stg_value, stg_usr_user_id, stg_create_time, stg_update_time, stg_group_name)
@@ -1698,7 +1698,15 @@ public static function get_by_name($name, $search_deleted = false) {
 		}
 
 		$box = isset($box) ? $box : new SecretBox();
-		$key = base64_decode($box->decrypt($blob), true);
+		$opened = $box->open($blob);
+		if ($opened['value'] === null) {
+			// Dead (wrong key / moved database): behave as if no key is
+			// provisioned. A hot request treats it as absent; the reconciler
+			// re-mints it on its next cold pass (this is a `regenerable` secret).
+			self::$signing_key = false;
+			return null;
+		}
+		$key = base64_decode((string)$opened['value'], true);
 		if ($key === false || strlen($key) !== 32) {
 			throw new FileException('Signed URL key is malformed.');
 		}

@@ -116,6 +116,24 @@ function stats_handler($request) {
 		// A site too old to have profiles answers the rest of the call normally.
 	}
 
+	// Sealed-secret health — counts only, never a value or ciphertext. A fleet
+	// operator sees "node X has an unreadable credential" without signing in. Read
+	// from the reconciler's CACHED verdict (ssr_last_state), the same computation
+	// the local setup pill uses — no per-request decrypt walk. Built in its own
+	// try/Throwable so a node too old to have the registry answers the rest
+	// normally, and an old management node ignores a key it does not know.
+	try {
+		require_once(PathHelper::getIncludePath('includes/SecretReconciler.php'));
+		$sealed = SecretReconciler::attention_verdict();
+		$result['sealed_secrets'] = array(
+			'dead_operator' => (int)$sealed['operator'],
+			'dead_needs_ack' => (int)$sealed['needs_ack'],
+			'dead_low' => (int)$sealed['low'],
+		);
+	} catch (Throwable $e) {
+		// No registry on this node yet — omit the key entirely.
+	}
+
 	// Cron health — last time process_scheduled_tasks.php fired
 	$settings = Globalvars::get_instance();
 	$cron_last_run = $settings->get_setting('scheduled_tasks_last_cron_run');

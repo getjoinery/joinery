@@ -128,37 +128,35 @@ class ProvisioningSetup {
 
 	/** Write a setting sealed at rest wherever a secret_box_key exists. */
 	public static function writeSecret(string $name, string $plaintext): void {
-		self::writeSetting($name, $plaintext === '' ? '' : self::encryptSecret($plaintext));
+		self::writeSetting($name, $plaintext === '' ? '' : self::encryptSecret($name, $plaintext));
 	}
 
 	/**
-	 * Encrypt a secret for storage. Returns a SecretBox blob when a key is
-	 * available; falls back to the plaintext untouched when SecretBox cannot be
-	 * constructed (no configured key), keeping the zero-config install path alive.
+	 * Seal a secret for storage under its own setting-name locator. Returns a
+	 * SecretBox blob when a key is available; falls back to the plaintext untouched
+	 * when SecretBox cannot be constructed (no configured key), keeping the
+	 * zero-config install path alive.
 	 */
-	private static function encryptSecret(string $plaintext): string {
+	private static function encryptSecret(string $locator, string $plaintext): string {
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 		try {
-			return (new SecretBox())->encrypt($plaintext);
+			$box = new SecretBox();
 		} catch (\Throwable $e) {
+			// Only the zero-config case (no configured key) falls back to plaintext.
 			return $plaintext;
 		}
+		// seal() outside the catch: a refused (undeclared) locator must fail loudly,
+		// not be silently stored as plaintext.
+		return $box->seal($locator, $plaintext);
 	}
 
-	/** Decrypt a stored secret; a non-encrypted (legacy) value passes through. */
+	/** Read a stored secret; a legacy plaintext or dead value is handled by open(). */
 	private static function decryptSecret(string $stored): string {
 		if ($stored === '') {
 			return '';
 		}
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-		if (!SecretBox::looksEncrypted($stored)) {
-			return $stored;
-		}
-		try {
-			return (new SecretBox())->decrypt($stored);
-		} catch (\Throwable $e) {
-			return '';
-		}
+		return (string)((new SecretBox())->open($stored)['value'] ?? '');
 	}
 
 	/**
@@ -223,7 +221,8 @@ class ProvisioningSetup {
 
 		self::writeSetting('server_manager_getjoinery_api_url', self::selfApiUrl());
 		self::writeSetting('server_manager_getjoinery_api_public_key', $public_key);
-		self::writeSetting('server_manager_getjoinery_api_secret_key', self::encryptSecret($secret_plaintext));
+		self::writeSetting('server_manager_getjoinery_api_secret_key',
+			self::encryptSecret('server_manager_getjoinery_api_secret_key', $secret_plaintext));
 
 		return array(
 			'ok' => true,

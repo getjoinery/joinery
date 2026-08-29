@@ -2643,6 +2643,84 @@
       "default": "",
       "managed": true,
       "helptext": "Where the notice sends the owner to move the domain into their own registrar account."
+    },
+    {
+      "name": "secret_box_canary",
+      "default": "",
+      "managed": true,
+      "helptext": "A known constant sealed at key-mint time. On a mass decrypt failure it separates a single corrupt secret (canary still opens) from a wrong key (canary itself fails). Machine-written by SecretBox::provisionCanary; never rendered."
+    }
+  ],
+  "_sealed_secrets_comment": "Every kind of value SecretBox seals is declared here (and in each plugin.json). This is what makes SecretBox::seal() refuse an unregistered value and what the reconciler and import scrub walk. Distinct from a setting's secret:true, which only masks a form field. locator is code-free: a setting name for a singleton, table.column for a row-scoped kind. See includes/SealedSecretsDeclarations.php.",
+  "sealed_secrets": [
+    {
+      "label": "File URL signing key",
+      "feature": "Signed file links",
+      "kind": "regenerable",
+      "locator": "file_signed_url_key",
+      "reprovision": "File::provisionSigningKey"
+    },
+    {
+      "label": "Google OAuth client secret",
+      "feature": "Sign in with Google",
+      "kind": "operator",
+      "locator": "oauth_google_client_secret"
+    },
+    {
+      "label": "Microsoft OAuth client secret",
+      "feature": "Sign in with Microsoft",
+      "kind": "operator",
+      "locator": "oauth_microsoft_client_secret"
+    },
+    {
+      "label": "DigitalOcean OAuth client secret",
+      "feature": "DigitalOcean connection",
+      "kind": "operator",
+      "locator": "oauth_digitalocean_client_secret"
+    },
+    {
+      "label": "DNSimple OAuth client secret",
+      "feature": "DNSimple connection",
+      "kind": "operator",
+      "locator": "oauth_dnsimple_client_secret"
+    },
+    {
+      "label": "Linode OAuth client secret",
+      "feature": "Linode connection",
+      "kind": "operator",
+      "locator": "oauth_linode_client_secret"
+    },
+    {
+      "label": "Device-link session secret",
+      "feature": "Device linking",
+      "kind": "ephemeral",
+      "locator": "dlk_device_links.dlk_secret_once"
+    },
+    {
+      "label": "Joinery Direct signing identity",
+      "feature": "Joinery Direct identity",
+      "kind": "regenerable-breaks-things",
+      "locator": "jdi_direct_identities.jdi_secret_key"
+    },
+    {
+      "label": "Joinery Direct decoy secret",
+      "feature": "Joinery Direct decoy keys",
+      "kind": "regenerable-breaks-things",
+      "locator": "joinery_direct_decoy_secret"
+    },
+    {
+      "label": "Backup target credentials",
+      "feature": "Backup targets",
+      "kind": "operator",
+      "locator": "bkt_backup_targets.bkt_credentials",
+      "enumerator": "BackupTarget::eachCredentialBlob"
+    },
+    {
+      "label": "Backup target node credentials",
+      "feature": "Backup targets",
+      "kind": "operator",
+      "locator": "bkt_backup_targets.bkt_node_credentials",
+      "enumerator": "BackupTarget::eachNodeCredentialBlob"
     }
   ]
 }

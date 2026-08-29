@@ -715,6 +715,24 @@
 			echo "⚠️  File signing key provisioning failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 		}
 
+		// Step: Seed the sealed-secret registry from every on-disk manifest, and
+		// mint the key canary. Both are cold writes and both want secret_box_key
+		// present (ensured above) and the ssr table created (schema step above).
+		// The reconcile itself runs later, after plugin sync, so it sees a fully
+		// built schema — see "Sealed Secret Reconcile" below.
+		echo "<br>\n<strong>Sealed Secret Registry</strong><br>\n";
+		try {
+			require_once(PathHelper::getIncludePath('data/sealed_secret_registry_class.php'));
+			$ssr_seed = SealedSecretRegistry::seed_from_manifests();
+			echo "✓ Sealed-secret registry seeded ({$ssr_seed['seeded']} categories)<br>\n";
+			require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
+			echo SecretBox::provisionCanary()
+				? "✓ Secret-box canary present<br>\n"
+				: "⚠️  Secret-box canary could not be provisioned<br>\n";
+		} catch (Throwable $e) {
+			echo "⚠️  Sealed-secret registry seed failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+		}
+
 		// Step: Seed core menus from public_html/admin_menus.json
 		// Runs after settings seed so settingActivate references resolve. Uses
 		// overwrite=false, prune=false so admin customizations to existing rows survive.
@@ -1128,6 +1146,27 @@
 		} catch (Exception $e) {
 			echo "⚠️  system_version self-heal failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
 		}
+
+			// Step: Reconcile sealed secrets. Runs LAST — after plugin sync, so
+			// every plugin table the reconciler inspects exists and active plugins'
+			// enumerators resolve. This is the cold pass where a dead regenerable
+			// secret (e.g. a missing signing key) is re-minted, and a dead operator
+			// or destructive-regenerable secret is flagged for the operator. It is
+			// wired here in update_database's POST-deploy chain and never into
+			// upgrade.php's pre-deploy pass, which runs against the old core.
+			echo "<br>\n<strong>Sealed Secret Reconcile</strong><br>\n";
+			try {
+				require_once(PathHelper::getIncludePath('includes/SecretReconciler.php'));
+				$ssr_result = SecretReconciler::reconcile();
+				echo "✓ Sealed secrets reconciled — " . htmlspecialchars($ssr_result['summary']) . "<br>\n";
+				if ($ssr_result['key_mismatch']) {
+					echo "  ⚠ Environment key mismatch: many secrets are dead together — this database "
+						. "was very likely copied from another install. Re-enter the flagged credentials.<br>\n";
+				}
+			} catch (\Throwable $e) {
+				echo "⚠️  Sealed secret reconcile failed: " . htmlspecialchars($e->getMessage()) . "<br>\n";
+				// Non-fatal — the reconciler can be run on demand from the secrets health page.
+			}
 
 		// Show final result
 		if ($overall_success) {
