@@ -30,9 +30,13 @@
  *   E. An inactive plugin contributes no rules, matching how plugin task
  *      suspension already works.
  *
+ *   F. A class may declare several windows. One table can hold kinds of row an
+ *      operator would answer "how long?" about differently, so each rule keeps
+ *      its own key, setting and identity rather than sharing one window.
+ *
  * Run: php tests/integration/retention_registry_test.php
  *
- * @version 1.0
+ * @version 1.1 - F: a class may declare several rules; rule ids are ids, not table names
  */
 
 require_once(__DIR__ . '/../lib/harness.php');
@@ -49,10 +53,12 @@ section('A. Every declared rule resolves against its own class');
 
 check(count($rules) > 0, 'the registry found rules at all', 'count=' . count($rules));
 
-foreach ($rules as $table => $rule) {
+foreach ($rules as $rule_id => $rule) {
 	$class = $rule['class'];
 	$policy = $rule['policy'];
-	$label = $class . ' (' . $table . ')';
+	$label = $class . ' (' . $rule_id . ')';
+
+	check(!empty($rule['table']), "$label carries its own table");
 
 	check(!empty($policy['label']), "$label declares a human label");
 
@@ -81,7 +87,7 @@ foreach (SettingsDeclarations::all() as $name => $decl) {
 	$declared[$name] = true;
 }
 
-foreach ($rules as $table => $rule) {
+foreach ($rules as $rule_id => $rule) {
 	$policy = $rule['policy'];
 	check(array_key_exists('window_setting', $policy),
 		$rule['class'] . ' declares a window_setting key');
@@ -168,15 +174,44 @@ section('E. An inactive plugin contributes no rules');
 
 require_once(PathHelper::getIncludePath('includes/PluginHelper.php'));
 $mailbox_active = PluginHelper::isPluginActive('mailbox');
-$has_mailbox_rule = isset($rules['iem_inbound_email_messages']);
+$has_mailbox_rule = false;
+foreach ($rules as $rule) {
+	if ($rule['table'] === 'iem_inbound_email_messages') { $has_mailbox_rule = true; break; }
+}
 check($mailbox_active === $has_mailbox_rule,
 	'mailbox rules are present exactly when the mailbox plugin is active',
 	'active=' . var_export($mailbox_active, true) . ' rule=' . var_export($has_mailbox_rule, true));
 
+// ---------------------------------------------------------------------------
+section('F. A class may declare several rules, each keeping its own identity');
+
+// Rule ids are ids. A multi-rule class prefixes its table, and code that treated
+// the key as a table name would silently look at the wrong rule — or none.
+$mailbox_rules = array();
+foreach ($rules as $rule_id => $rule) {
+	if ($rule['table'] === 'iem_inbound_email_messages') { $mailbox_rules[$rule_id] = $rule; }
+}
+if (PluginHelper::isPluginActive('mailbox')) {
+	check(count($mailbox_rules) === 2,
+		'stored mail declares two windows', implode(', ', array_keys($mailbox_rules)));
+
+	$windows = array();
+	foreach ($mailbox_rules as $rule) { $windows[] = $rule['policy']['window_setting']; }
+	check(count(array_unique($windows)) === count($windows),
+		'no two rules on one table share a window setting', implode(', ', $windows));
+
+	foreach ($mailbox_rules as $rule_id => $rule) {
+		check(strpos($rule_id, 'iem_inbound_email_messages:') === 0,
+			"rule id $rule_id is namespaced by its table, not equal to it");
+		check($rule['table'] === 'iem_inbound_email_messages',
+			"rule $rule_id still reports its real table");
+	}
+}
+
 // Every rule that IS present belongs to core or to an active plugin — the
 // registry never hands the sweep a rule it should not run.
 $all_ok = true;
-foreach ($rules as $table => $rule) {
+foreach ($rules as $rule_id => $rule) {
 	$file = (new ReflectionClass($rule['class']))->getFileName();
 	if (preg_match('#/plugins/([^/]+)/#', $file, $m) && !PluginHelper::isPluginActive($m[1])) {
 		$all_ok = false;

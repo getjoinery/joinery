@@ -32,7 +32,7 @@
  *
  * Run: php plugins/mailbox/tests/mailbox_trash_test.php
  *
- * @version 1.0
+ * @version 1.1 - the second window on this table: unmatched-mail retention
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
@@ -54,7 +54,10 @@ require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.p
 $db = DbConnector::get_instance()->get_db_link();
 
 // Retention is read from the setting, so pin it for the whole run (in-memory only).
+// Both of this table's windows are pinned: the sweep runs every rule, so leaving
+// the unmatched window at its default would let this test's result depend on it.
 harness_set_setting_mem('mailbox_trash_retention_days', '30');
+harness_set_setting_mem('mailbox_unmatched_retention_days', '90');
 
 // ---- fixtures ------------------------------------------------------------
 $owner = make_user('TrashOwner', 5);
@@ -369,7 +372,15 @@ if (!is_dir(MailboxIndex::SHM_DIR)) {
 // reader already shows members as each message's purge date.
 section('Trash retention rule');
 
-$policy = InboundEmailMessage::$retention_policy;
+// The class declares a LIST of windows — Trash is one of them, unmatched mail is
+// the other. Pick this rule out by key rather than assuming a position, so adding
+// a third window later cannot silently repoint these assertions at it.
+$policies = array();
+foreach (InboundEmailMessage::$retention_policy as $p) { $policies[$p['key']] = $p; }
+check(count($policies) >= 2,
+	'the class declares more than one retention window', implode(', ', array_keys($policies)));
+
+$policy = $policies['trash'] ?? array();
 check(($policy['window_setting'] ?? null) === 'mailbox_trash_retention_days',
 	'the rule reads the same setting the reader shows members', json_encode($policy));
 check(is_callable(array('InboundEmailMessage', $policy['purge_method'] ?? '')),
@@ -399,5 +410,69 @@ check(isset($res['removed']) && isset($res['message']),
 check((int)$res['removed'] === 2, 'both past-window messages were counted', json_encode($res));
 check(!$row_exists($old_one) && !$row_exists($old_two), 'both past-window messages are gone');
 check($row_exists($recent), 'a message trashed today is untouched');
+
+// ---- unmatched mail ------------------------------------------------------
+// The second window on this table. Mail stored for an address no alias claims
+// sits in no mailbox, so nobody ever trashes it and the window above never sees
+// it. Before this rule existed nothing removed it at all.
+section('Unmatched-mail retention rule');
+
+$policy_u = $policies['unmatched'] ?? array();
+check(($policy_u['window_setting'] ?? null) === 'mailbox_unmatched_retention_days',
+	'the unmatched rule has its own window setting', json_encode($policy_u));
+check(($policy_u['window_setting'] ?? null) !== ($policy['window_setting'] ?? null),
+	'the two windows are genuinely separate settings');
+check(is_callable(array('InboundEmailMessage', $policy_u['purge_method'] ?? '')),
+	'the declared unmatched purge method exists on the class');
+
+$unm_old    = $make_msg(NULL, '<unm-old@x>', 'Unmatched old', 'unmatchedbody1');
+$unm_recent = $make_msg(NULL, '<unm-new@x>', 'Unmatched recent', 'unmatchedbody2');
+$claimed    = $make_msg($mine_alias, '<claimed@x>', 'Claimed old', 'claimedbody');
+$db->exec("UPDATE iem_inbound_email_messages
+	SET iem_received_time = now() - interval '120 days'
+	WHERE iem_inbound_email_message_id IN ($unm_old, $claimed)");
+
+// The exclusions that make this rule safe, asserted before the purge that would
+// otherwise hide them: an outbound row and a pending-parse row can both carry a
+// NULL alias without being unmatched arriving mail.
+$unm_outbound = $make_msg(NULL, '<unm-out@x>', 'Outbound', 'outboundbody');
+$unm_pending  = $make_msg(NULL, '<unm-pend@x>', 'Pending', 'pendingbody');
+$db->exec("UPDATE iem_inbound_email_messages
+	SET iem_received_time = now() - interval '120 days', iem_direction = 'outbound'
+	WHERE iem_inbound_email_message_id = $unm_outbound");
+$db->exec("UPDATE iem_inbound_email_messages
+	SET iem_received_time = now() - interval '120 days', iem_pending_parse = true
+	WHERE iem_inbound_email_message_id = $unm_pending");
+
+// 0 means never purge, enforced by the sweep skipping the rule — same guarantee
+// as Trash, asserted through the same path.
+harness_set_setting_mem('mailbox_unmatched_retention_days', '0');
+$sweep->run(array());
+check($row_exists($unm_old),
+	'a window of 0 means never purge — 120-day-old unmatched mail survives');
+
+harness_set_setting_mem('mailbox_unmatched_retention_days', '90');
+$res_u = InboundEmailMessage::purgeExpiredUnmatched(90);
+check(isset($res_u['removed']) && isset($res_u['message']),
+	'the unmatched purge returns the removed/message contract', json_encode($res_u));
+check((int)$res_u['removed'] === 1, 'exactly the one past-window unmatched row went', json_encode($res_u));
+check(!$row_exists($unm_old), 'unmatched mail past the window is gone');
+check($row_exists($unm_recent), 'unmatched mail inside the window is untouched');
+check($row_exists($claimed),
+	'a 120-day-old message in a real mailbox is untouched — this window is not a mail expiry');
+check($row_exists($unm_outbound),
+	'an outbound NULL-alias row is not unmatched arriving mail and survives');
+check($row_exists($unm_pending),
+	'a pending-parse row still on its way to a mailbox survives');
+
+// Trashed unmatched mail belongs to the Trash clock, not this one. Its window is
+// 30 here and the row was trashed today, so this rule must leave it for Trash.
+$unm_trashed = $make_msg(NULL, '<unm-trash@x>', 'Unmatched trashed', 'unmtrashbody');
+$db->exec("UPDATE iem_inbound_email_messages
+	SET iem_received_time = now() - interval '120 days', iem_delete_time = now()
+	WHERE iem_inbound_email_message_id = $unm_trashed");
+InboundEmailMessage::purgeExpiredUnmatched(90);
+check($row_exists($unm_trashed),
+	'already-trashed unmatched mail is left to the Trash window and its own clock');
 
 harness_finish();
