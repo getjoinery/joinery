@@ -65,12 +65,18 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
+// Page-view traffic by UTM dimension. Old page views live in the rollup, recent
+// ones raw; the relation unions the two and VISITORS counts distinct people where
+// the rows are raw, the event-count stand-in where they are rolled up.
+$relation = AnalyticsRollup::pageview_relation();
+$visitors = AnalyticsRollup::VISITORS;
+
 //CONTENT
 $sql = "SELECT
-count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_content as content
-FROM vse_visitor_events
-WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_content IS NOT NULL GROUP BY vse_visitor_events.vse_content ORDER BY visitorcount DESC";
+{$visitors} AS visitorcount,
+content
+FROM {$relation}
+WHERE content IS NOT NULL GROUP BY content ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -78,8 +84,8 @@ $dblink = $dbhelper->get_db_link();
 try
 {
 	$q = $dblink->prepare($sql);
-	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 	$success = $q->execute();
 	$q->setFetchMode(PDO::FETCH_OBJ);
 }
@@ -110,10 +116,10 @@ $page->endtable();
 
 //MEDIUM
 $sql = "SELECT
-count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_medium as content
-FROM vse_visitor_events
-WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_medium IS NOT NULL GROUP BY vse_visitor_events.vse_medium ORDER BY visitorcount DESC";
+{$visitors} AS visitorcount,
+medium as content
+FROM {$relation}
+WHERE medium IS NOT NULL GROUP BY medium ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -121,8 +127,8 @@ $dblink = $dbhelper->get_db_link();
 try
 {
 	$q = $dblink->prepare($sql);
-	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 	$success = $q->execute();
 	$q->setFetchMode(PDO::FETCH_OBJ);
 }
@@ -154,10 +160,10 @@ $page->endtable();
 //CAMPAIGN
 
 $sql = "SELECT
-count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_campaign as content
-FROM vse_visitor_events
-WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_campaign IS NOT NULL GROUP BY vse_visitor_events.vse_campaign ORDER BY visitorcount DESC";
+{$visitors} AS visitorcount,
+campaign as content
+FROM {$relation}
+WHERE campaign IS NOT NULL GROUP BY campaign ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -165,8 +171,8 @@ $dblink = $dbhelper->get_db_link();
 try
 {
 	$q = $dblink->prepare($sql);
-	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 	$success = $q->execute();
 	$q->setFetchMode(PDO::FETCH_OBJ);
 }
@@ -197,10 +203,10 @@ $page->endtable();
 //SOURCE
 
 $sql = "SELECT
-count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-vse_visitor_events.vse_source as content
-FROM vse_visitor_events
-WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate AND vse_visitor_events.vse_source IS NOT NULL GROUP BY vse_visitor_events.vse_source ORDER BY visitorcount DESC";
+{$visitors} AS visitorcount,
+source as content
+FROM {$relation}
+WHERE source IS NOT NULL GROUP BY source ORDER BY visitorcount DESC";
 
 $dbhelper = DbConnector::get_instance();
 $dblink = $dbhelper->get_db_link();
@@ -208,8 +214,8 @@ $dblink = $dbhelper->get_db_link();
 try
 {
 	$q = $dblink->prepare($sql);
-	$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-	$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+	$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+	$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 	$success = $q->execute();
 	$q->setFetchMode(PDO::FETCH_OBJ);
 }
