@@ -610,7 +610,15 @@ impl Store {
     /// client is not allowed.
     ///
     /// Returns how many entries went.
-    pub fn delete_subtree(&self, root: EntityId) -> StoreResult<usize> {
+    /// Everything this store BELIEVES is under `root`, root first.
+    ///
+    /// Belief is the important word. These are the entries whose parent
+    /// pointers lead back here, which is not the same question as what the
+    /// server has under that folder — a child moved out while this device was
+    /// not looking still points here until something tells it otherwise. Any
+    /// caller about to DELETE what this returns needs the server's answer
+    /// first; see `forget_folder_the_server_confirms` in `execute`.
+    pub fn subtree_ids(&self, root: EntityId) -> StoreResult<Vec<EntityId>> {
         let mut doomed = vec![root];
         let mut frontier = vec![root.server_id];
         let mut guard = 0;
@@ -626,6 +634,11 @@ impl Store {
                 }
             }
         }
+        Ok(doomed)
+    }
+
+    pub fn delete_subtree(&self, root: EntityId) -> StoreResult<usize> {
+        let doomed = self.subtree_ids(root)?;
 
         self.conn.execute("BEGIN IMMEDIATE", [])?;
         let result = (|| -> StoreResult<()> {
@@ -654,6 +667,37 @@ impl Store {
             Ok(()) => {
                 self.conn.execute("COMMIT", [])?;
                 Ok(doomed.len())
+            }
+            Err(e) => {
+                let _ = self.conn.execute("ROLLBACK", []);
+                Err(e)
+            }
+        }
+    }
+
+    /// Forget ONE entity and every trace of it, leaving its children alone.
+    ///
+    /// `delete_subtree` decides for itself what goes, from the parent pointers
+    /// this store happens to hold; this takes the caller's word for a single
+    /// id. That is the difference a caller needs when the set was decided by
+    /// the SERVER rather than by belief -- it purges the same four tables, so
+    /// nothing is left behind, but it never widens the set on its own.
+    pub fn forget_entry(&self, id: EntityId) -> StoreResult<()> {
+        let t = id.entity_type.to_string();
+        self.conn.execute("BEGIN IMMEDIATE", [])?;
+        let result = (|| -> StoreResult<()> {
+            for table in ["ops", "local_index", "unreadable", "entries"] {
+                self.conn.execute(
+                    &format!("DELETE FROM {table} WHERE entity_type = ?1 AND server_id = ?2"),
+                    params![t, id.server_id],
+                )?;
+            }
+            Ok(())
+        })();
+        match result {
+            Ok(()) => {
+                self.conn.execute("COMMIT", [])?;
+                Ok(())
             }
             Err(e) => {
                 let _ = self.conn.execute("ROLLBACK", []);

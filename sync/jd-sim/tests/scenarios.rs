@@ -5508,3 +5508,131 @@ fn a_rename_onto_another_files_folded_slot_leaves_one_file() {
         "the mover did not land"
     );
 }
+
+/// Restoring a folder brings its whole subtree back on the server and reports
+/// the folder alone. A device that acts only on the entity named in that row
+/// recreates the folder and nothing else: the contents are live on the server,
+/// have no record here, and every change row that described them is already
+/// behind this device's cursor -- so nothing offers them again. The folder
+/// comes back empty on every computer and stays that way.
+///
+/// Two ordinary clicks by one user. No race, no fault, no second device needed
+/// to cause it -- the second device is only here to show that the loss is not
+/// local to whoever pressed delete.
+#[test]
+fn a_restored_folder_brings_its_contents_back_on_every_device() {
+    let world = World::new(4611, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Work");
+    laptop
+        .fs
+        .user_write("Work/report.txt", b"the one that has to come back");
+    assert!(world.settle().is_some(), "the tree settles before the trash");
+    let work = folder_id_named(&world, "Work").expect("the folder reached the server");
+    assert!(
+        desktop.fs.peek("Work/report.txt").is_some(),
+        "the second device has the file before any of this"
+    );
+
+    // The user deletes the folder on one computer. The server cascades, and
+    // every device forgets the subtree -- all of which is correct.
+    laptop.fs.user_remove("Work");
+    assert!(world.settle().is_some(), "the delete settles everywhere");
+    assert!(
+        desktop.fs.peek("Work/report.txt").is_none(),
+        "the delete has to actually reach the other device, or this proves nothing"
+    );
+
+    // ...and then restores it from the web UI. That is a server-side act no
+    // device performed and no device can predict.
+    world
+        .server
+        .action(
+            "drive_restore",
+            &serde_json::json!({ "entity_type": "folder", "entity_id": work }),
+        )
+        .expect("the restore is accepted");
+
+    assert!(world.settle().is_some(), "the restore settles");
+
+    for d in &world.devices {
+        assert!(
+            d.fs.peek("Work/report.txt").is_some(),
+            "{} never got the restored file back",
+            d.name
+        );
+    }
+    assert_converged(&world);
+}
+
+/// A folder trash may only forget what the server's cascade actually took.
+///
+/// The server cascades over the descendants that are there when the trash
+/// runs; this device forgets the descendants it last BELIEVED were there. Here
+/// the device's own move of `Sub` out of `Doomed` commits on the server and the
+/// answer is lost, so belief still has `Sub` inside `Doomed` when the trash
+/// lands. Forgetting on that belief destroys the record of a file the server
+/// deliberately spared — and nothing offers it again, because the strand sweep
+/// looks for entries with a missing parent and a deleted entry is not there to
+/// be found, while every change row describing it is already behind the cursor.
+///
+/// The spared file is one this device TRACKS but has never materialized, so no
+/// local copy exists for an upload to accidentally adopt the record back. What
+/// is asserted is the invariant, not this seed's history: a record may not be
+/// deleted on the strength of a belief the server has not confirmed.
+#[test]
+fn a_folder_trash_must_not_forget_what_the_server_spared() {
+    let world = World::new(4242, &["laptop", "desktop"]);
+    let laptop = world.device("laptop");
+    let desktop = world.device("desktop");
+
+    laptop.fs.user_mkdir("Doomed");
+    laptop.fs.user_mkdir("Doomed/Sub");
+    assert!(world.settle().is_some(), "the tree settles first");
+
+    // A file laptop knows about and has never held: desktop uploads it, and
+    // laptop's download of it is truncated every time.
+    desktop.fs.user_write("Doomed/Sub/file.txt", b"spared by the cascade");
+    world.pass(desktop);
+    laptop.net.set_faults(NetFaults {
+        truncate_download: 1000,
+        ..NetFaults::none()
+    });
+    world.pass(laptop);
+    let file_id = laptop
+        .store
+        .every_entry()
+        .unwrap()
+        .into_iter()
+        .find(|e| e.remote.name == "file.txt")
+        .expect("laptop has a record of the file")
+        .id;
+
+    // The user moves Sub out and deletes Doomed. The move commits on the
+    // server; its answer never comes back, so the parent pointer here still
+    // says Sub is inside Doomed when the trash goes out.
+    laptop.net.set_faults(NetFaults {
+        lose_answer_to: Some("drive_move".into()),
+        ..NetFaults::none()
+    });
+    laptop.fs.user_rename("Doomed/Sub", "Sub");
+    laptop.fs.user_remove("Doomed");
+    world.pass(laptop);
+
+    assert!(
+        laptop
+            .store
+            .every_entry()
+            .unwrap()
+            .iter()
+            .any(|e| e.id == file_id),
+        "a record was deleted on the strength of a belief the server never confirmed"
+    );
+
+    laptop.net.set_faults(NetFaults::none());
+    assert!(world.settle().is_some(), "it settles once the faults stop");
+    assert_converged(&world);
+}
+

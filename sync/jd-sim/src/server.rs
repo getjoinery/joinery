@@ -1424,23 +1424,35 @@ impl MockServer {
                 Some(f) => f.trashed = true,
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
             }
-            Self::record(&mut st, "folder", id, "trashed");
-            // Trashing a folder takes its contents with it, and each one gets
-            // its own feed row: a client that only heard about the folder would
-            // keep every file inside it materialized forever.
+            // Trashing a folder takes its contents with it, and says so with
+            // exactly ONE row -- the platform's shape.
+            // `DriveHelper::soft_delete_folder_cascade` soft-deletes every
+            // descendant by hand and `drive_trash_logic` records a single
+            // KIND_TRASHED for the folder the user named; `FileChange::record`
+            // is never called from a model, so a cascade is silent by
+            // construction there.
+            //
+            // This mock emitted a row per descendant for most of its life,
+            // which quietly told the client more than any real server does. A
+            // client leaning on those rows passes every sweep and loses records
+            // in the field, so the over-reporting is gone: what a device learns
+            // about the contents it now has to ask for.
+            //
+            // Note the cascade reads its children HERE, at trash time, exactly
+            // as the platform does under its placement lock -- so a child moved
+            // out first is spared by both.
             let descendants = Self::subtree(&st, id);
             for fid in descendants.1 {
                 if let Some(f) = st.files.get_mut(&fid) {
                     f.trashed = true;
                 }
-                Self::record(&mut st, "file", fid, "trashed");
             }
             for did in descendants.0 {
                 if let Some(f) = st.folders.get_mut(&did) {
                     f.trashed = true;
                 }
-                Self::record(&mut st, "folder", did, "trashed");
             }
+            Self::record(&mut st, "folder", id, "trashed");
         } else {
             match st.files.get_mut(&id) {
                 Some(f) => f.trashed = true,
@@ -1458,6 +1470,30 @@ impl MockServer {
             match st.folders.get_mut(&id) {
                 Some(f) => f.trashed = false,
                 None => return Err(refuse(404, "NotFound", "That folder does not exist.")),
+            }
+            // Restoring a folder brings its contents back with it, and says so
+            // with exactly ONE row -- which is what the platform does:
+            // `DriveHelper::restore_folder_cascade` un-deletes every descendant
+            // and `drive_restore_logic` records a single KIND_RESTORED for the
+            // folder the user asked for. A client acting only on the entity
+            // named in the row learns nothing about the contents, and every row
+            // that would have described them is behind its cursor for ever.
+            //
+            // The platform restores only descendants trashed at or after the
+            // folder's own delete_time, so a child trashed independently
+            // earlier stays in the trash. This mock keeps no delete_time and
+            // restores every trashed descendant -- more generous, and generous
+            // in the direction that cannot hide the defect.
+            let (folders, files) = Self::subtree(&st, id);
+            for did in folders {
+                if let Some(f) = st.folders.get_mut(&did) {
+                    f.trashed = false;
+                }
+            }
+            for fid in files {
+                if let Some(f) = st.files.get_mut(&fid) {
+                    f.trashed = false;
+                }
             }
             Self::record(&mut st, "folder", id, "restored");
         } else {

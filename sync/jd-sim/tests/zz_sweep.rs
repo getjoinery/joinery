@@ -374,9 +374,34 @@ fn trace(world: &World, tag: &str) {
     let Ok(watch) = std::env::var("WATCH") else {
         return;
     };
-    let watch: i64 = watch.parse().unwrap();
+    let watched: Vec<i64> = watch
+        .split(',')
+        .map(|w| w.trim().parse().unwrap())
+        .collect();
+    let watch = watched[0];
     let needle = std::env::var("NEEDLE").unwrap_or_else(|_| "contested".into());
     println!("--- {tag}");
+    if std::env::var("FOLDERS").is_ok() {
+        for d in &world.devices {
+            for e in d.store.every_entry().unwrap() {
+                if watched.contains(&e.id.server_id)
+                    && (e.id.server_id != watch
+                        || e.id.entity_type == jd_core::model::EntityType::Folder)
+                {
+                    println!(
+                        "  {} {:?} {}: remote={:?}/{:?} status={:?} deleted={}",
+                        d.name,
+                        e.id.entity_type,
+                        e.id.server_id,
+                        e.remote.parent,
+                        e.remote.name,
+                        e.status,
+                        e.remote_deleted,
+                    );
+                }
+            }
+        }
+    }
     for d in &world.devices {
         for e in d.store.every_entry().unwrap() {
             if e.id.server_id != watch {
@@ -781,7 +806,13 @@ fn drive(
             // Let it sync.
             _ => {
                 world.clock.advance_secs(20 * 60);
-                world.pass(device);
+                let out = world.pass(device);
+                if std::env::var("OPS").is_ok() {
+                    println!(
+                        "  STEP {step} {} plan={:?} exec={:?}",
+                        device.name, out.round.plan, out.exec
+                    );
+                }
                 trace(world, &format!("step {step} pass on {}", device.name));
             }
         }
