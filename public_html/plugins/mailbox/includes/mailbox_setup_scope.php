@@ -14,6 +14,10 @@
  * expected to cache (see the reader's setup_status action); this file always
  * answers live.
  *
+ * @version 1.5 - a grant that signed in without mail access is reported as
+ *                that, not as an expired authorization
+ * @version 1.4 - the remembered verdict moved to mailbox_setup_memory.php, so
+ *                a feed save can drop it without loading the check suite
  * @version 1.3 - the machine-sender family (domain.machine_sender*) lands in
  *                Sending and is excluded from Receiving, which otherwise admits
  *                every domain-layer row
@@ -24,6 +28,7 @@
  */
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_memory.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundProviderRegistry.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
@@ -178,67 +183,6 @@ function mailbox_setup_verdict(?array $scoped): array {
 	return array('status' => $evaluated > 0 ? 'ok' : 'unknown', 'reason' => '', 'label' => '');
 }
 
-// ---------------------------------------------------------------------------
-// The remembered verdict
-//
-// Running the checks costs DNS lookups and host probes, so the reader does not
-// re-run them every time an operator clicks a mailbox — it reads the last answer
-// out of their session. That makes freshness the interesting problem: an
-// operator who has just fixed a DNS record must not be told it is still broken.
-//
-// So the answer is written by whoever last learned it, and the Setup tab is the
-// biggest such writer: rendering it runs the full battery for that mailbox
-// anyway, so it stamps the result on the way past. Fixing a record and going
-// back to the mailbox therefore shows the truth immediately — no waiting for a
-// TTL to lapse. The TTL is only the backstop for a mailbox nobody has looked at.
-// ---------------------------------------------------------------------------
-
-/** How long a remembered verdict stays good, in seconds. */
-const MAILBOX_SETUP_STATUS_TTL = 300;
-
-/** The wire shape both the reader and the writers use. */
-function mailbox_setup_status_payload(int $alias_id, array $verdict): array {
-	return array(
-		'status' => $verdict['status'],
-		'reason' => $verdict['reason'],
-		'label'  => $verdict['label'],
-		'url'    => '/plugins/mailbox/admin/admin_mailbox_setup?alias_id=' . $alias_id,
-	);
-}
-
-/**
- * Remember a verdict for this operator. Call it wherever the checks have just
- * run for real — the answer is free at that point, and every surface that would
- * otherwise show a stale banner gets it.
- */
-function mailbox_setup_status_remember(int $alias_id, array $verdict): array {
-	$payload = mailbox_setup_status_payload($alias_id, $verdict);
-	// An unknown verdict is an absence of information, not news. Overwriting a
-	// real answer with it would make the banner flap on one failed lookup.
-	if ($verdict['status'] === 'unknown') {
-		return $payload;
-	}
-	if (session_status() === PHP_SESSION_ACTIVE) {
-		if (!isset($_SESSION['mailbox_setup_status']) || !is_array($_SESSION['mailbox_setup_status'])) {
-			$_SESSION['mailbox_setup_status'] = array();
-		}
-		$_SESSION['mailbox_setup_status'][$alias_id] = array('checked' => time(), 'payload' => $payload);
-	}
-	return $payload;
-}
-
-/** The remembered verdict, or null when there is none or it has aged out. */
-function mailbox_setup_status_recall(int $alias_id): ?array {
-	$entry = $_SESSION['mailbox_setup_status'][$alias_id] ?? null;
-	if (!is_array($entry) || !isset($entry['payload'])) {
-		return null;
-	}
-	if ((time() - intval($entry['checked'] ?? 0)) >= MAILBOX_SETUP_STATUS_TTL) {
-		return null;
-	}
-	return $entry['payload'];
-}
-
 /**
  * Forwarding (outbound) rows: the relay, SRS, and DKIM signing — the only
  * checks that matter when a mailbox forwards mail back out.
@@ -366,6 +310,16 @@ function _setup_imap_receiving_rows(?InboundImapAccount $imap): array {
 		$out[] = $row(InboundEmailSetupCheck::FAIL, 'IMAP connection',
 			'The mailbox is not connected yet.',
 			'Press "Connect" on the Accounts tab to authorize access.', $accounts_link);
+	} elseif ($imap->mailAccessRefused()) {
+		// Named ahead of the expiry row because both present as a failed login,
+		// and this one is not an expiry: the sign-in worked and was never allowed
+		// near the mail. "Renew the authorization" sends the operator round the
+		// same consent screen to make the same omission again.
+		$out[] = $row(InboundEmailSetupCheck::FAIL, 'IMAP connection',
+			'The sign-in did not include permission to read mail.',
+			'The mailbox was connected without granting access to the mail itself, so every fetch '
+				. 'is refused. Press "Reconnect" on the Accounts tab and allow access to your email '
+				. 'on the provider\'s permission screen.', $accounts_link);
 	} elseif ($imap->needsReauth()) {
 		$out[] = $row(InboundEmailSetupCheck::FAIL, 'IMAP connection',
 			'The stored authorization has expired and needs to be renewed.',

@@ -51,7 +51,8 @@
  * cid-rewritten into the stored/sent HTML). The stored iem_body_plain is derived from
  * the final sanitized HTML.
  *
- * @version 1.12
+ * @version 1.13 - a compose send always stores its outbound row; the filed
+ *                  Sent copy reconciles to it by Message-ID
  */
 
 require_once(PathHelper::getIncludePath('includes/EmailMessage.php'));
@@ -267,25 +268,16 @@ class MailboxSender {
 		// §9 Sent / compose interop, only when the feed opted into compose/Sent sync.
 		// Dedup is Message-ID only: the source Sent copy (provider-filed or APPENDed)
 		// reconciles to one row on the next Sent ingest by Message-ID.
-		if ($account && $account->showCompose()) {
-			if (!$transport->filesSent) {
-				// The provider's SMTP does not file Sent (generic / self-hosted): APPEND
-				// the exact MIME ourselves, carrying the same Message-ID so the ingest
-				// dedups. Best-effort — a failed APPEND never fails the send.
-				$this->appendSentCopy($account, $email);
-			} elseif ($account->smtpRewritesMessageId()) {
-				// Gmail rewrites the Message-ID on send, so a stored row could never
-				// match the filed copy. Store no local row; the message appears on the
-				// next Sent ingest (one poll-interval latency). A draft it was sent from
-				// has nothing to morph into, so it is discarded here.
-				if ($draft !== null) {
-					try { $draft->permanent_delete(); }
-					catch (Throwable $e) { error_log('MailboxSender: draft cleanup after pending-ingest send failed: ' . $e->getMessage()); }
-				}
-				return array('ok' => true, 'outbound_id' => 0, 'pending_sent_ingest' => true);
-			}
-			// else (files Sent, preserves Message-ID): store the local row now; the
-			// filed copy dedups by Message-ID on ingest.
+		//
+		// The send always stores its own row below, whichever way the copy gets
+		// filed. The Message-ID this message carries is the one the provider
+		// keeps, so the ingest matches its filed copy to that row and adopts the
+		// locator onto it rather than inserting a second one.
+		if ($account && $account->showCompose() && !$transport->filesSent) {
+			// The provider's SMTP does not file Sent (generic / self-hosted): APPEND
+			// the exact MIME ourselves, carrying the same Message-ID so the ingest
+			// dedups. Best-effort — a failed APPEND never fails the send.
+			$this->appendSentCopy($account, $email);
 		}
 
 		$stored = $this->storeOutboundRow($source, $alias, $mode, $from_address,

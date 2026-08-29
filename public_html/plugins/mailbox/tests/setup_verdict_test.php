@@ -23,16 +23,23 @@
  * all green for this mailbox", so ANYTHING the tab paints amber or red counts,
  * severity included. What stays silent there is only the absence of information.
  *
- * @version 1.1
+ * @version 1.3 - mail-access grading, and the remembered verdict's
+ *   remember/recall/forget contract
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+// Before harness_boot(): the remembered verdict lives in a session, and PHP
+// refuses to start one once anything has printed. A caller that has already
+// written output (the file validator, which runs the file) leaves no session to
+// start — those checks skip rather than fail.
+if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) { @session_start(); }
 harness_boot();
 
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/InboundEmailSetupCheck.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/tasks/CheckDomainSetup.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_hints.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_scope.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
 
 /** One check row in the shape runDomainChecks() returns. */
 function row(string $status, string $severity = InboundEmailSetupCheck::REQUIRED): array {
@@ -158,5 +165,71 @@ check(mailbox_setup_verdict(scoped(array(
 
 check(mailbox_setup_verdict(null)['status'] === 'unknown',
 	'a mailbox that does not resolve reports nothing rather than guessing');
+
+// ---------------------------------------------------------------------------
+section('A sign-in is not mail access');
+// ---------------------------------------------------------------------------
+// Google asks for identity and mailbox access as separate tick boxes, so an
+// operator can return holding a valid token that authorizes nothing. Every
+// symptom of that is the symptom of an expired token — a refused IMAP login —
+// so the grant is graded on what the provider said it granted.
+
+$gmail_identity = 'https://www.googleapis.com/auth/userinfo.email openid';
+check(InboundImapAccount::missingMailScopes('imap_gmail', $gmail_identity)
+		=== array('https://mail.google.com/'),
+	'a Gmail grant carrying only identity scopes is missing mail access');
+check(InboundImapAccount::missingMailScopes('imap_gmail',
+		'https://mail.google.com/ ' . $gmail_identity) === array(),
+	'and one carrying the mail scope is not');
+check(InboundImapAccount::missingMailScopes('imap_microsoft',
+		'https://outlook.office365.com/SMTP.Send offline_access')
+		=== array('https://outlook.office365.com/IMAP.AccessAsUser.All'),
+	'send permission alone does not let Microsoft read the mailbox');
+
+// Silence is not refusal: a refresh response often omits the scope entirely,
+// and turning a working feed away on an absence would be worse than the bug.
+check(InboundImapAccount::missingMailScopes('imap_gmail', '') === array(),
+	'a provider that reports no scope is not treated as having refused');
+check(InboundImapAccount::missingMailScopes('imap_yahoo', $gmail_identity) === array(),
+	'a password host requires no scopes at all');
+
+// The same grant decides whether the mailbox can SEND, because Google's one mail
+// scope covers both directions — so an identity-only grant must not report
+// itself ready to send and then fail at the wire with a raw 535.
+check(InboundImapAccount::requiredSendScopes('google') === array('https://mail.google.com/'),
+	'Google send authorization names the mail scope rather than assuming it');
+check(InboundImapAccount::requiredSendScopes('microsoft')
+		=== array('https://outlook.office365.com/SMTP.Send'),
+	'Microsoft needs its own send scope alongside IMAP');
+
+// ---------------------------------------------------------------------------
+section('The remembered verdict');
+// ---------------------------------------------------------------------------
+// The banner reads its answer out of the operator's session rather than paying
+// for DNS lookups on every mailbox click, which makes staleness the interesting
+// problem: an operator who has just fixed the thing the banner names must not be
+// told it is still broken. So a verdict is dropped the moment anything that
+// produced it changes (InboundImapAccount::save() is the biggest such writer).
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+	harness_skip('the remembered verdict', 'no session available in this context');
+} else {
+
+$attention = array('status' => 'attention', 'reason' => 'Renew the authorization.',
+	'label' => 'IMAP connection');
+mailbox_setup_status_remember(4242, $attention);
+$recalled = mailbox_setup_status_recall(4242);
+check(is_array($recalled) && $recalled['label'] === 'IMAP connection',
+	'a verdict that was reached is remembered');
+
+mailbox_setup_status_forget(4242);
+check(mailbox_setup_status_recall(4242) === null,
+	'and forgetting it sends the next ask back to the live checks');
+
+mailbox_setup_status_remember(4242, array('status' => 'unknown', 'reason' => '', 'label' => ''));
+check(mailbox_setup_status_recall(4242) === null,
+	'an unknown answer is never stored — absence of information is not news');
+
+}
 
 harness_finish();

@@ -3560,10 +3560,9 @@
 		}).then(function (r) { return r.json(); }).then(async function (env) {
 			if (btn) btn.disabled = false;
 			var data = (env && env.data) ? env.data : {};
-			if (!(env && env.errortype) && (data.outbound_id || data.pending_sent_ingest)) {
-				// The draft (if any) was morphed into the Sent row (or deleted in the
-				// Gmail pending-ingest case) server-side — drop our handle without a
-				// save-and-close.
+			if (!(env && env.errortype) && data.outbound_id) {
+				// The draft (if any) was morphed into the Sent row server-side — drop
+				// our handle without a save-and-close.
 				var wasDrafts = state.draftsView;
 				resetDraftState();
 				closeCompose();
