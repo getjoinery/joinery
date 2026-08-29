@@ -256,8 +256,12 @@ The assertion surface:
 Fixtures and teardown (all LIFO, run automatically at finish or on crash):
 
 - `make_user($suffix, $permission = 0)` — a test user, registered for cleanup.
-  The generated email carries a per-process random token, so leftovers from a
+  The generated email carries a per-run random token, so leftovers from a
   killed run can never collide with the next run's same-suffix fixture.
+- `harness_fixture_email($label)` — the address a fixture should use when it
+  needs a real, deliverable one. Use it instead of writing an address by hand:
+  the shared shape is what stops a leftover from colliding with the next run,
+  and what lets teardown recognise the mail that address received.
 - `make_machine_key($user_id, $name, $permission = 4)` — an API key.
 - `harness_register_row($table, $pkey_col, $id)` / `harness_register_user($user)`
   / `harness_register_key_id($id)`.
@@ -277,6 +281,46 @@ Name any standalone fixture `HarnessTest <something>` in the table's name column
 `mgn_managed_nodes`, `qst_questions` are covered) and a leak reports the table
 and the offending row instead of waiting to be noticed as a phantom entry in an
 admin screen. A fixture reachable from a registered parent needs no name.
+
+### Mail a run sends is cleaned up too
+
+`harness_boot()` points sending at the local relay and redirects every recipient
+to a test store alias, so a run never mails a person. That relay is a real mail
+server, though, so those messages are really delivered and stored — addressed to
+an address no alias claims, which means they sit in no mailbox and nobody ever
+trashes them.
+
+Cleanup therefore runs at **both ends of a run**, and needs to:
+
+- **At teardown** — NULL-alias mail received since the run booted, addressed to
+  the test store alias or to a `harness_fixture_email()` address carrying *this
+  run's* token. It runs last, because delivery is asynchronous and every other
+  teardown step is time the relay gets to hand over what the run sent.
+- **At boot** — the same shapes, matching *any* fixture address, but only mail
+  older than a 600-second floor. This is the pass that actually empties the box:
+  teardown provably cannot finish the job, because a message the relay hands
+  over after teardown is already too late, and one was measured doing exactly
+  that. What a previous run sent has certainly landed by the time the next run
+  starts.
+
+The floor is what makes the boot pass safe. It matches addresses belonging to
+other runs — that is the point — so it cannot use the run token to tell "an
+earlier run's leftovers" from "a lane running right now". Age does that instead:
+a suite asserting on mail it just sent does so within seconds.
+
+Both passes only run when `debug` is on, in the `db` tier or above, and both
+patterns are anchored to the fixture domain. That is deliberate and load-bearing
+rather than belt-and-braces: `deploy`-tier tests declare `env: any` and run on
+customer production nodes, `safe` promises no persistent side effects, and a
+customer's own mail to an address that merely starts `harnesstest_` at their own
+domain is not ours to delete.
+
+Anything still missed is caught by `mailbox_unmatched_retention_days`.
+
+The fixture-address half exists for the `dev-web` suites: those make their
+requests inside Apache, which reads the site's real email settings and sends for
+real, so the redirect never applies to them. The recipient is still a fixture
+address, and that is enough to recognise it.
 
 The cleanup list lives only in the test's own memory, so it survives a failure,
 an uncaught exception and a fatal error — all of which still run shutdown

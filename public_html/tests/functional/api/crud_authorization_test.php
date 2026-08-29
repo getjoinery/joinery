@@ -291,7 +291,11 @@ try {
 
 	// ------------------------------------------------------------------
 	section('CreateNew fast-path also honors the write floor (§4.4)');
-	$new_email = 'apitest_createnew_' . strtolower($suffix) . '@dev.getjoinery.com';
+	// harness_fixture_email() rather than a hand-rolled address: creating this
+	// user sends a real welcome mail from inside Apache, which reads the site's
+	// own email settings and so never sees this process's test-mode redirect.
+	// The shared naming is what lets teardown recognise and remove it.
+	$new_email = harness_fixture_email('createnew_' . $suffix);
 	$r = api_request('POST', '/api/v1/User', $ha, array(
 		'usr_email'      => $new_email,
 		'usr_first_name' => 'Created',
