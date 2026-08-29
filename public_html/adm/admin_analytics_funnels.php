@@ -79,6 +79,11 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
+if (!empty($page_vars['rollup_notice'])) {
+	echo '<p style="margin:0 0 1em;padding:.6em .9em;background:#fff8e1;border:1px solid #e6d8a8;border-radius:4px;font-size:.9em;">'
+		. htmlspecialchars($page_vars['rollup_notice']) . '</p>';
+}
+
 if (!empty($page_vars['funnel_stats'])) {
 	$headers = array("Step", "Visits", "Conversion from prev", "Total conversion");
 	$page->tableheader($headers, array('title' => 'Funnel'));

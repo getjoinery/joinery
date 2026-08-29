@@ -63,6 +63,53 @@ The `$_SESSION['checkout_started']` flag is cleared in two places so a fresh car
 - `ShoppingCart::clear_cart()` — cart emptied
 - `cart_charge_logic.php` — after the `PURCHASE` event fires
 
+## Retention and rollup
+
+`vse_visitor_events` is dominated by page views — a busy site accumulates a
+million of them against a handful of conversions. To keep the table and every
+backup small without losing the high-level statistics, page-view rows are rolled
+up into daily totals once they age past a window, and the individual rows are
+deleted. Conversion rows are never rolled up: they are rare and each carries
+per-row data the rollup cannot hold (the order link revenue attribution joins on,
+the visitor's event sequence a funnel reconstructs), so they stay raw forever.
+
+**The window** is the `analytics_retention_days` setting (Settings → Data
+retention): 30 / 90 / 180 / 365 days, default 90, or *never* (`0`) to keep every
+page-view row in full. It follows the platform's `0 = off` retention convention.
+
+**The rollup** is two tables, both written and read only through SQL:
+
+- `vsr_visitor_stats_rollup` — one row per day per dimension combination
+  (`vsr_type`, `vsr_page`, `vsr_source`, `vsr_campaign`, `vsr_medium`,
+  `vsr_content`, `vsr_is_404`) carrying `vsr_event_count`. `vsr_page` is the path
+  only — the query string is stripped before grouping, so `/product?id=1` and
+  `/product?id=2` collapse to one `/product` row.
+- `vsu_visitor_daily_uniques` — one row per day per type carrying
+  `vsu_unique_visitors`, the `COUNT(DISTINCT vse_visitor_id)` for that day. A
+  distinct-visitor count cannot be recovered from a summed rollup, so it is kept
+  separately, at day-and-type grain.
+
+**The job** is `VisitorEvent::rollupAndPrunePageViews()`, the method form of the
+class's `$retention_policy`, run by the daily `RetentionSweep` (there is no
+separate task). It processes whole days older than the window, oldest first, one
+day per transaction — rolling a day into both tables and deleting that day's raw
+rows together, so an interrupted run leaves no day half-summarised or
+double-counted. Backfill and steady state are the same path; a first run on a
+site with years of history is capped at `ROLLUP_MAX_DAYS_PER_RUN` days and
+continues on the next run.
+
+**Reading across the boundary.** Recent page views are raw rows; older ones are
+rollup rows. `AnalyticsRollup::pageview_relation()` returns one relation that
+unions the two — seamless because a day is in exactly one side — so each report
+reads a single shape. `AnalyticsRollup::VISITORS` counts distinct real visitors
+where the rows are raw and falls back to the event count where they are rolled
+up: the ranking a report shows is preserved, but the older span reports page
+views rather than unique visitors. Reports whose range reaches before
+`AnalyticsRollup::proxy_boundary()` show that caveat inline. Conversion numbers
+and revenue read raw rows only and are exact for any range. Funnels read raw rows
+too — conversion-event steps span any range, page-URL steps only reach back to
+the window.
+
 ## Attribution reporting
 
 Admin page: **Statistics → Attribution** (`/admin/admin_analytics_attribution`)
@@ -95,3 +142,4 @@ Implicit **last-touch on the event row**: the UTM that was in session when the c
 2. Wire the call site(s) via `SessionControl::save_visitor_event(VisitorEvent::TYPE_X, ...)`
 3. If the event is a conversion that should appear in attribution reports, add its column to the Part E channels/campaigns queries (conditional `SUM(CASE WHEN vse_type = :type_x THEN 1 ELSE 0 END)`)
 4. If the event uses a reference entity, document the `ref_type` string and target table
+5. Decide whether it is high-volume, low-value traffic that should be rolled up and pruned with the page views (add it to `VisitorEvent::ROLLUP_TYPES`) or a rare, per-row-precious record that should stay raw forever (leave it out — the default). Anything carrying a reference entity or revenue belongs raw.

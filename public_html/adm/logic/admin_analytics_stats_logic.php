@@ -35,23 +35,29 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 			echo "Houston, we have a problem.";
 	}
 
-	// Get unique visitors data
+	// Get unique visitors data. Old page views live in the rollup, recent ones
+	// raw; AnalyticsRollup::pageview_relation() unions the two seamlessly, and
+	// VISITORS counts distinct people where the rows are raw, the event-count
+	// stand-in where they are rolled up. Binds :av_start / :av_end.
 	$dbhelper = DbConnector::get_instance();
 	$dblink = $dbhelper->get_db_link();
 
+	$relation = AnalyticsRollup::pageview_relation();
+	$visitors = AnalyticsRollup::VISITORS;
+
 	$sql = "SELECT
-	date_part('day', vse_visitor_events.vse_timestamp) as day,
-	date_part('month', vse_visitor_events.vse_timestamp) as month,
-	date_part('year', vse_visitor_events.vse_timestamp) as year,
-	count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount
-	FROM vse_visitor_events
-	WHERE vse_visitor_events.vse_timestamp >= :startdate AND vse_visitor_events.vse_timestamp <= :enddate GROUP BY day, month, year ORDER BY year, month, day ASC";
+	date_part('day', d) as day,
+	date_part('month', d) as month,
+	date_part('year', d) as year,
+	{$visitors} AS visitorcount
+	FROM {$relation}
+	GROUP BY day, month, year ORDER BY year, month, day ASC";
 
 	try
 	{
 		$q = $dblink->prepare($sql);
-		$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-		$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+		$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+		$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 		$success = $q->execute();
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
@@ -73,20 +79,17 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 
 	// Get top pages data
 	$sql = "SELECT
-	count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-	vse_visitor_events.vse_page as page
-	FROM vse_visitor_events
-	WHERE
-	vse_visitor_events.vse_timestamp >= :startdate AND
-	vse_visitor_events.vse_timestamp <= :enddate AND
-	(vse_visitor_events.vse_is_404 != TRUE OR vse_visitor_events.vse_is_404 IS NULL)
+	{$visitors} AS visitorcount,
+	page
+	FROM {$relation}
+	WHERE is_404 IS NOT TRUE
 	GROUP BY page ORDER BY visitorcount DESC";
 
 	try
 	{
 		$q = $dblink->prepare($sql);
-		$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-		$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+		$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+		$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 		$success = $q->execute();
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
@@ -99,20 +102,17 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 
 	// Get 404 pages data
 	$sql = "SELECT
-	count(distinct vse_visitor_events.vse_visitor_id) AS visitorcount,
-	vse_visitor_events.vse_page as page
-	FROM vse_visitor_events
-	WHERE
-	vse_visitor_events.vse_timestamp >= :startdate AND
-	vse_visitor_events.vse_timestamp <= :enddate AND
-	vse_visitor_events.vse_is_404 = TRUE
+	{$visitors} AS visitorcount,
+	page
+	FROM {$relation}
+	WHERE is_404 IS TRUE
 	GROUP BY page ORDER BY visitorcount DESC";
 
 	try
 	{
 		$q = $dblink->prepare($sql);
-		$q->bindParam(':startdate', $startdate, PDO::PARAM_STR);
-		$q->bindParam(':enddate', $enddate, PDO::PARAM_STR);
+		$q->bindParam(':av_start', $startdate, PDO::PARAM_STR);
+		$q->bindParam(':av_end', $enddate, PDO::PARAM_STR);
 		$success = $q->execute();
 		$q->setFetchMode(PDO::FETCH_OBJ);
 	}
@@ -135,6 +135,7 @@ function admin_analytics_stats_logic(array $input): LogicResult {
 		'unique_visitors' => $unique_visitors,
 		'page_visitors' => $page_visitors,
 		't404_pages' => $t404_pages,
+		'rollup_notice' => AnalyticsRollup::proxy_notice($startdate),
 	);
 
 	return $result;

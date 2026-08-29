@@ -51,6 +51,29 @@ class VisitorEvent extends SystemBase {
 		'vse_usr_user_id' => ['action' => 'set_value', 'value' => User::USER_DELETED]
 	];
 
+	// Retention is roll-up-then-delete, not a plain age delete, so it is the
+	// method form of a retention policy: the daily RetentionSweep hands the window
+	// to rollupAndPrunePageViews(). 0 in the setting means never — the sweep skips
+	// the rule and every page-view row is kept raw forever.
+	public static $retention_policy = array(
+		'label'          => 'Visitor page-view detail',
+		'purge_method'   => 'rollupAndPrunePageViews',
+		'window_setting' => 'analytics_retention_days',
+	);
+
+	// Only page-view-class rows are rolled up and pruned — the bloat is entirely
+	// page views (a table can hold ~a million of them against a handful of
+	// conversions). Conversion rows carry per-row data the rollup cannot hold: the
+	// order link revenue attribution joins on, and the buyer's event sequence a
+	// funnel reconstructs. They are rare and precious, so they stay raw forever.
+	const ROLLUP_TYPES = array(self::TYPE_PAGE_VIEW, self::TYPE_COOKIE_CONSENT, self::TYPE_COUPON_ATTEMPT);
+
+	// A single sweep rolls up at most this many backlog days, so the first run on
+	// a site with years of history throttles itself across a few nights instead of
+	// holding the sweep for one long stretch. Each day is its own transaction and
+	// leaves no half-done state, so the next run simply continues.
+	const ROLLUP_MAX_DAYS_PER_RUN = 750;
+
 		/**
 	 * Field specifications define database column properties and validation rules
 	 * 
@@ -155,6 +178,108 @@ require_once(PathHelper::getIncludePath('data/users_class.php'));
 			// Silently fail - don't break page for tracking errors
 			error_log("Visitor tracking error: " . $e->getMessage());
 		}
+	}
+
+	/**
+	 * Roll page-view rows older than the window into the daily summary tables and
+	 * delete them. The method form of this class's $retention_policy — called by
+	 * the daily RetentionSweep with the window in days (never with 0; the sweep
+	 * skips a rule whose window is 0).
+	 *
+	 * Whole days only: current_date - :days is a date, and rolling up everything
+	 * strictly before it keeps the most recent :days of raw rows and never splits
+	 * a day across the boundary.
+	 *
+	 * One day per transaction, oldest first. A day enters the batch only while it
+	 * still has raw rows, and each transaction rolls that day up into both summary
+	 * tables and deletes its raw rows together — so an interrupted run leaves no
+	 * day half-summarised (rollback restores the raw rows) and no day double-counted
+	 * (a committed day has no raw rows left to re-select). Backfill and steady state
+	 * are the same path; the first run just has more days to work through, capped at
+	 * ROLLUP_MAX_DAYS_PER_RUN so it self-throttles.
+	 *
+	 * @param int $days  retention window in days
+	 * @return array     removed (raw rows deleted), message
+	 */
+	public static function rollupAndPrunePageViews($days) {
+		$days = (int) $days;
+		if ($days <= 0) {
+			return array('removed' => 0, 'message' => 'retention disabled');
+		}
+
+		$dblink = DbConnector::get_instance()->get_db_link();
+		$type_list = implode(',', array_map('intval', self::ROLLUP_TYPES));
+
+		// The whole days eligible to roll up, oldest first, capped per run.
+		$find = $dblink->prepare(
+			"SELECT DISTINCT date(vse_timestamp) AS d
+			   FROM vse_visitor_events
+			  WHERE vse_type IN ($type_list)
+			    AND vse_timestamp < (current_date - (:days * INTERVAL '1 day'))
+			  ORDER BY d ASC
+			  LIMIT :cap");
+		$find->bindValue(':days', $days, PDO::PARAM_INT);
+		$find->bindValue(':cap', self::ROLLUP_MAX_DAYS_PER_RUN, PDO::PARAM_INT);
+		$find->execute();
+		$days_to_process = $find->fetchAll(PDO::FETCH_COLUMN);
+
+		if (!$days_to_process) {
+			return array('removed' => 0, 'message' => '');
+		}
+
+		// Path only — strip the query string so /product?id=1 and /product?id=2
+		// collapse to one /product row. Full URLs survive on the raw rows inside
+		// the window; only the rolled-up summary loses the query string.
+		$ins_main = $dblink->prepare(
+			"INSERT INTO vsr_visitor_stats_rollup
+			     (vsr_day, vsr_type, vsr_page, vsr_source, vsr_campaign, vsr_medium, vsr_content, vsr_is_404, vsr_event_count)
+			 SELECT date(vse_timestamp), vse_type, split_part(vse_page, '?', 1),
+			        vse_source, vse_campaign, vse_medium, vse_content, COALESCE(vse_is_404, FALSE), count(*)
+			   FROM vse_visitor_events
+			  WHERE vse_type IN ($type_list) AND date(vse_timestamp) = :d
+			  GROUP BY date(vse_timestamp), vse_type, split_part(vse_page, '?', 1),
+			           vse_source, vse_campaign, vse_medium, vse_content, COALESCE(vse_is_404, FALSE)");
+
+		// The distinct-visitor count, which the summed rollup cannot reproduce, in
+		// its own coarse per-day-per-type table.
+		$ins_uniq = $dblink->prepare(
+			"INSERT INTO vsu_visitor_daily_uniques (vsu_day, vsu_type, vsu_unique_visitors)
+			 SELECT date(vse_timestamp), vse_type, count(DISTINCT vse_visitor_id)
+			   FROM vse_visitor_events
+			  WHERE vse_type IN ($type_list) AND date(vse_timestamp) = :d
+			  GROUP BY date(vse_timestamp), vse_type");
+
+		$del = $dblink->prepare(
+			"DELETE FROM vse_visitor_events
+			  WHERE vse_type IN ($type_list) AND date(vse_timestamp) = :d");
+
+		$removed = 0;
+		$rolled_days = 0;
+		foreach ($days_to_process as $d) {
+			$dblink->beginTransaction();
+			try {
+				$ins_main->execute(array(':d' => $d));
+				$ins_uniq->execute(array(':d' => $d));
+				$del->execute(array(':d' => $d));
+				$removed += $del->rowCount();
+				$dblink->commit();
+				$rolled_days++;
+			} catch (Throwable $e) {
+				// One day's failure rolls back cleanly and is re-tried next run.
+				// Re-throw so RetentionSweep records it; other retention rules and
+				// the days already committed stand.
+				if ($dblink->inTransaction()) {
+					$dblink->rollBack();
+				}
+				throw $e;
+			}
+		}
+
+		$more = count($days_to_process) >= self::ROLLUP_MAX_DAYS_PER_RUN ? ' (more remain for the next run)' : '';
+		return array(
+			'removed' => $removed,
+			'message' => $rolled_days . ' day(s) rolled up, ' . $removed . ' row(s) pruned' . $more,
+		);
 	}
 
 }

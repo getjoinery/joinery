@@ -841,6 +841,21 @@
       "helptext": "How many photos each kind of record may carry, as a JSON object. Example: {\"user\": 6}."
     },
     {
+      "name": "analytics_retention_days",
+      "default": "90",
+      "group": "logging",
+      "label": "Days to keep detailed visitor page views",
+      "type": "select",
+      "options": {
+        "30": "30 days",
+        "90": "90 days",
+        "180": "180 days",
+        "365": "1 year",
+        "0": "Never — keep every page view in full"
+      },
+      "helptext": "Page views older than this are rolled up into permanent daily totals and the individual rows removed, so the analytics table and every backup stay small. Top pages, traffic by day, and attribution are all preserved; only the ability to reconstruct one visitor's path is given up past this point, and page-view reports show visit counts rather than unique visitors for the older span. Conversion events (purchases, signups, cart adds) are always kept in full. Never keeps every page view row indefinitely."
+    },
+    {
       "name": "calendar_email_log_retention_days",
       "default": "90",
       "group": "logging",

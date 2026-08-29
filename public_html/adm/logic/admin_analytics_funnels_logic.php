@@ -148,6 +148,15 @@ function admin_analytics_funnels_logic(array $input): LogicResult {
 		$funnel_stats = $q->fetchAll();
 	}
 
+	// Funnels reconstruct per-visitor sequences from individual rows. Conversion
+	// rows are kept raw forever, so conversion-event steps work over any range;
+	// page views are rolled up past the retention window, so page-URL steps only
+	// reach as far back as the window. Say so when the range crosses the boundary.
+	$boundary = AnalyticsRollup::proxy_boundary();
+	$funnel_notice = ($boundary && $startdate && strtotime($startdate) < strtotime($boundary))
+		? 'Funnel steps that are page URLs only reach back to ' . $boundary . ' — individual page views are not kept past the analytics retention window. Steps that are conversion events (cart, checkout, purchase, signup) cover the full range.'
+		: '';
+
 	$result = new LogicResult();
 	$result->data = array(
 		'startdate'        => $startdate,
@@ -156,6 +165,7 @@ function admin_analytics_funnels_logic(array $input): LogicResult {
 		'page_optionvals'  => $page_optionvals,
 		'event_optionvals' => $event_optionvals,
 		'funnel_stats'     => $funnel_stats,
+		'rollup_notice'    => $funnel_notice,
 	);
 
 	return $result;

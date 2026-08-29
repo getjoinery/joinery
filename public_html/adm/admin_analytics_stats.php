@@ -33,6 +33,11 @@ echo $formwriter->end_form();
 
 echo '<br />';
 
+if (!empty($page_vars['rollup_notice'])) {
+	echo '<p style="margin:0 0 1em;padding:.6em .9em;background:#fff8e1;border:1px solid #e6d8a8;border-radius:4px;font-size:.9em;">'
+		. htmlspecialchars($page_vars['rollup_notice']) . '</p>';
+}
+
 ?>
 <div style="width: 1000px; height: 500px;">
 <script src="https://cdn.jsdelivr.net/npm/chart.js@2.8.0"></script>

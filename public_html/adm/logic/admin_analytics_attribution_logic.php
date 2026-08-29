@@ -36,36 +36,45 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 	$dbhelper = DbConnector::get_instance();
 	$dblink   = $dbhelper->get_db_link();
 
-	$type_page_view      = VisitorEvent::TYPE_PAGE_VIEW;
 	$type_cart_add       = VisitorEvent::TYPE_CART_ADD;
 	$type_checkout_start = VisitorEvent::TYPE_CHECKOUT_START;
 	$type_purchase       = VisitorEvent::TYPE_PURCHASE;
 	$type_signup         = VisitorEvent::TYPE_SIGNUP;
 	$type_list_signup    = VisitorEvent::TYPE_LIST_SIGNUP;
 
-	// Optional filter fragment applied to every query.
+	// Optional filter fragment applied to every query. Two forms: filter_sql
+	// against the raw vse_ columns (the conversion queries, which always read
+	// raw), filter_rel against the normalized columns the page-view relation
+	// exposes (the visit queries, which span the raw/rollup seam).
 	$filter_sql = '';
+	$filter_rel = '';
 	$filter_bind = array();
 	if ($source !== '') {
 		$filter_sql .= ' AND LOWER(COALESCE(vse_source, \'\')) = LOWER(:f_source)';
+		$filter_rel .= ' AND LOWER(COALESCE(source, \'\')) = LOWER(:f_source)';
 		$filter_bind[':f_source'] = $source;
 	}
 	if ($campaign !== '') {
 		$filter_sql .= ' AND LOWER(COALESCE(vse_campaign, \'\')) = LOWER(:f_campaign)';
+		$filter_rel .= ' AND LOWER(COALESCE(campaign, \'\')) = LOWER(:f_campaign)';
 		$filter_bind[':f_campaign'] = $campaign;
 	}
+
+	// Page views span the raw/rollup boundary; conversions never do (conversion
+	// rows are kept raw forever). The relation and its visitor measure are used
+	// only for the page-view "visits" numbers.
+	$pv_relation = AnalyticsRollup::pageview_relation();
+	$pv_visitors = AnalyticsRollup::VISITORS;
 
 	// === Section 1: Channels overview ===
 	// Single grouped query using conditional aggregates. Joins ord_orders for revenue.
 	$sql = "
 		WITH
 		visits AS (
-			SELECT COALESCE(LOWER(NULLIF(vse_source, '')), '(direct)') AS src,
-			       COUNT(DISTINCT vse_visitor_id) AS visit_count
-			FROM vse_visitor_events
-			WHERE vse_type = :type_page_view
-			  AND vse_timestamp >= :start_ts AND vse_timestamp <= :end_ts
-			  {$filter_sql}
+			SELECT COALESCE(LOWER(NULLIF(source, '')), '(direct)') AS src,
+			       {$pv_visitors} AS visit_count
+			FROM {$pv_relation}
+			WHERE TRUE {$filter_rel}
 			GROUP BY src
 		),
 		conversions AS (
@@ -112,7 +121,8 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 		$q = $dblink->prepare($sql);
 		$q->bindValue(':start_ts', $start_ts, PDO::PARAM_STR);
 		$q->bindValue(':end_ts', $end_ts, PDO::PARAM_STR);
-		$q->bindValue(':type_page_view', $type_page_view, PDO::PARAM_INT);
+		$q->bindValue(':av_start', $start_ts, PDO::PARAM_STR);
+		$q->bindValue(':av_end', $end_ts, PDO::PARAM_STR);
 		$q->bindValue(':type_cart_add', $type_cart_add, PDO::PARAM_INT);
 		$q->bindValue(':type_checkout_start', $type_checkout_start, PDO::PARAM_INT);
 		$q->bindValue(':type_purchase', $type_purchase, PDO::PARAM_INT);
@@ -153,23 +163,20 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 			$src_bind[$k] = $s;
 		}
 		$sql_ts = "
-			SELECT DATE(vse_timestamp) AS bucket,
-			       COALESCE(LOWER(NULLIF(vse_source, '')), '(direct)') AS src,
-			       COUNT(DISTINCT vse_visitor_id) AS visits
-			FROM vse_visitor_events
-			WHERE vse_type = :type_page_view
-			  AND vse_timestamp >= :start_ts AND vse_timestamp <= :end_ts
-			  AND COALESCE(LOWER(NULLIF(vse_source, '')), '(direct)') IN (" . implode(',', $placeholders) . ")
-			  {$filter_sql}
+			SELECT d AS bucket,
+			       COALESCE(LOWER(NULLIF(source, '')), '(direct)') AS src,
+			       {$pv_visitors} AS visits
+			FROM {$pv_relation}
+			WHERE COALESCE(LOWER(NULLIF(source, '')), '(direct)') IN (" . implode(',', $placeholders) . ")
+			  {$filter_rel}
 			GROUP BY bucket, src
 			ORDER BY bucket
 		";
 
 		try {
 			$q = $dblink->prepare($sql_ts);
-			$q->bindValue(':start_ts', $start_ts, PDO::PARAM_STR);
-			$q->bindValue(':end_ts', $end_ts, PDO::PARAM_STR);
-			$q->bindValue(':type_page_view', $type_page_view, PDO::PARAM_INT);
+			$q->bindValue(':av_start', $start_ts, PDO::PARAM_STR);
+			$q->bindValue(':av_end', $end_ts, PDO::PARAM_STR);
 			foreach ($src_bind as $k => $v) {
 				$q->bindValue($k, $v, PDO::PARAM_STR);
 			}
@@ -194,29 +201,53 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 	}
 
 	// === Section 4: Campaign drilldown (source + campaign) ===
+	// Visits (page views) come from the raw/rollup relation so an old, purely
+	// page-view campaign still appears; conversions come from raw rows, which are
+	// kept in full forever. A full outer join keeps a (src, campaign) that has one
+	// but not the other.
 	$campaigns = array();
 	$sql_camp = "
-		SELECT COALESCE(LOWER(NULLIF(vse_source, '')), '(direct)') AS src,
-		       COALESCE(vse_campaign, '(none)') AS campaign,
-		       SUM(CASE WHEN vse_type = :type_page_view THEN 1 ELSE 0 END) AS visits,
-		       SUM(CASE WHEN vse_type = :type_signup THEN 1 ELSE 0 END) AS signups,
-		       SUM(CASE WHEN vse_type = :type_list_signup THEN 1 ELSE 0 END) AS list_signups,
-		       SUM(CASE WHEN vse_type = :type_cart_add THEN 1 ELSE 0 END) AS cart_adds,
-		       SUM(CASE WHEN vse_type = :type_checkout_start THEN 1 ELSE 0 END) AS checkouts,
-		       SUM(CASE WHEN vse_type = :type_purchase THEN 1 ELSE 0 END) AS purchases
-		FROM vse_visitor_events
-		WHERE vse_type IN (:type_page_view, :type_cart_add, :type_checkout_start, :type_purchase, :type_signup, :type_list_signup)
-		  AND vse_timestamp >= :start_ts AND vse_timestamp <= :end_ts
-		  {$filter_sql}
-		GROUP BY src, campaign
+		WITH pv AS (
+			SELECT COALESCE(LOWER(NULLIF(source, '')), '(direct)') AS src,
+			       COALESCE(campaign, '(none)') AS campaign,
+			       {$pv_visitors} AS visits
+			FROM {$pv_relation}
+			WHERE TRUE {$filter_rel}
+			GROUP BY src, campaign
+		),
+		conv AS (
+			SELECT COALESCE(LOWER(NULLIF(vse_source, '')), '(direct)') AS src,
+			       COALESCE(vse_campaign, '(none)') AS campaign,
+			       SUM(CASE WHEN vse_type = :type_signup THEN 1 ELSE 0 END) AS signups,
+			       SUM(CASE WHEN vse_type = :type_list_signup THEN 1 ELSE 0 END) AS list_signups,
+			       SUM(CASE WHEN vse_type = :type_cart_add THEN 1 ELSE 0 END) AS cart_adds,
+			       SUM(CASE WHEN vse_type = :type_checkout_start THEN 1 ELSE 0 END) AS checkouts,
+			       SUM(CASE WHEN vse_type = :type_purchase THEN 1 ELSE 0 END) AS purchases
+			FROM vse_visitor_events
+			WHERE vse_type IN (:type_cart_add, :type_checkout_start, :type_purchase, :type_signup, :type_list_signup)
+			  AND vse_timestamp >= :start_ts AND vse_timestamp <= :end_ts
+			  {$filter_sql}
+			GROUP BY src, campaign
+		)
+		SELECT COALESCE(pv.src, conv.src) AS src,
+		       COALESCE(pv.campaign, conv.campaign) AS campaign,
+		       COALESCE(pv.visits, 0) AS visits,
+		       COALESCE(conv.signups, 0) AS signups,
+		       COALESCE(conv.list_signups, 0) AS list_signups,
+		       COALESCE(conv.cart_adds, 0) AS cart_adds,
+		       COALESCE(conv.checkouts, 0) AS checkouts,
+		       COALESCE(conv.purchases, 0) AS purchases
+		FROM pv
+		FULL OUTER JOIN conv ON pv.src = conv.src AND pv.campaign = conv.campaign
 		ORDER BY purchases DESC, visits DESC
 		LIMIT 50
 	";
 	try {
 		$q = $dblink->prepare($sql_camp);
+		$q->bindValue(':av_start', $start_ts, PDO::PARAM_STR);
+		$q->bindValue(':av_end', $end_ts, PDO::PARAM_STR);
 		$q->bindValue(':start_ts', $start_ts, PDO::PARAM_STR);
 		$q->bindValue(':end_ts', $end_ts, PDO::PARAM_STR);
-		$q->bindValue(':type_page_view', $type_page_view, PDO::PARAM_INT);
 		$q->bindValue(':type_cart_add', $type_cart_add, PDO::PARAM_INT);
 		$q->bindValue(':type_checkout_start', $type_checkout_start, PDO::PARAM_INT);
 		$q->bindValue(':type_purchase', $type_purchase, PDO::PARAM_INT);
@@ -243,6 +274,7 @@ function admin_analytics_attribution_logic(array $input): LogicResult {
 		'xvals'        => $xvals,
 		'time_series'  => $time_series,
 		'campaigns'    => $campaigns,
+		'rollup_notice' => AnalyticsRollup::proxy_notice($startdate),
 	);
 	return $result;
 }
