@@ -1,4 +1,11 @@
 #!/usr/bin/env bash
+#VERSION 3.0 - The recursive chown -R / chmod -R sweep became a find that changes only files
+#              whose owner or mode is actually wrong, and skips symlinks. An unconditional -R
+#              bumped every file's ctime on every deploy, and GNU tar incremental re-dumps on
+#              ctime, so the first backup after any upgrade re-captured the whole tree unchanged.
+#              The individually pinned secret files are pruned from the sweep (it no longer
+#              corrects them to 770 then re-tightens them); the pins below are unchanged. The
+#              redundant uploads/ and storage/ 770 passes are dropped — the main sweep sets 770.
 #VERSION 2.9 - node_exec.php is retired (A1), so the second reader of the provisioning
 #              key is gone. The 640 pin is UNCHANGED here on purpose — tightening a
 #              live fleet key is a deliberate act, not a side effect of deleting a
@@ -89,31 +96,47 @@ echo -e "${GREEN}Fixing permissions for $SITE_NAME (mode: $MODE)${NC}"
 # a missing or root-owned cache dir silently disables page caching.
 mkdir -p "$SITE_ROOT/cache/static_pages"
 
+# Files with deliberately tighter, non-770 permissions — the secret keys and the
+# admin credentials, each re-pinned individually at the end. They are pruned from
+# the recursive sweep below so it does not keep "correcting" them to 770 and then
+# re-tightening them on every run, which changed their ctime on every deploy.
+PINNED=(
+    "$SITE_ROOT/config/relay_pull_key"
+    "$SITE_ROOT/config/backup_site_key"
+    "$SITE_ROOT/config/agent_signing_key"
+    "$SITE_ROOT/config/provisioning_key"
+    "$SITE_ROOT/config/admin_credentials.txt"
+)
+PRUNE=()
+for p in "${PINNED[@]}"; do PRUNE+=( -not -path "$p" ); done
+
+# Ownership and permissions are corrected with find, matching only what is
+# ALREADY wrong — not a blanket chown -R / chmod -R. A recursive chown/chmod
+# updates a file's ctime even when its owner and mode are unchanged, and GNU
+# tar's incremental backup treats a ctime change as a content change. So an
+# unconditional sweep on every deploy made the very next backup re-capture the
+# whole tree, byte-for-byte unchanged. Touching only the files that actually need
+# it keeps incrementals proportional to real change. Symlinks are skipped: their
+# own mode is meaningless and following one could reach outside the tree (vendor).
+
 # Set ownership: www-data (web server) as owner, user1 (developer) as group
-echo "  Setting ownership to www-data:user1..."
-chown -R www-data:user1 "$SITE_ROOT"
+echo "  Setting ownership to www-data:user1 (only where it differs)..."
+find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
+     \( -not -user www-data -o -not -group user1 \) \
+     -exec chown www-data:user1 {} +
 
 if [ "$MODE" == "production" ]; then
-    # Production mode: 770 (owner+group full access, others nothing)
-    echo "  Setting permissions to 770 (secure)..."
-    chmod -R 770 "$SITE_ROOT"
-
-    # Uploads: www-data (owner) and user1 (group) can write; others cannot
-    if [ -d "$SITE_ROOT/uploads" ]; then
-        echo "  Setting uploads to 770..."
-        chmod -R 770 "$SITE_ROOT/uploads"
-    fi
-
-    # Storage: durable runtime data (offloaded inbound-mail raw .eml) — same
-    # writable treatment as uploads; never web-served.
-    if [ -d "$SITE_ROOT/storage" ]; then
-        echo "  Setting storage to 770..."
-        chmod -R 770 "$SITE_ROOT/storage"
-    fi
+    # Production mode: 770 (owner+group full access, others nothing). This
+    # covers uploads/ and storage/ too — they take the same 770 as the rest, so
+    # they no longer need a separate pass.
+    echo "  Setting permissions to 770 (secure, only where they differ)..."
+    find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -perm 770 -exec chmod 770 {} +
 else
     # Dev mode: 777 (everyone full access) - for development server only
-    echo "  Setting permissions to 777 (dev mode)..."
-    chmod -R 777 "$SITE_ROOT"
+    echo "  Setting permissions to 777 (dev mode, only where they differ)..."
+    find "$SITE_ROOT" "${PRUNE[@]}" \( -type f -o -type d \) \
+         -not -perm 777 -exec chmod 777 {} +
 fi
 
 # SSH private keys demand 0600 and caller-only ownership — the blanket sweep
