@@ -93,8 +93,8 @@ class BackupHistory extends SystemBase {
 		'bkh_encrypted'     => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		'bkh_message'       => array('type'=>'text'),
 
-		// Whose backup this was: 'site' (this site's own) or 'manager' (a control
-		// plane's copy of it). Load-bearing rather than descriptive — chain
+		// Whose backup this was: 'site' (this site's own) or 'manager' (a management
+		// node's copy of it). Load-bearing rather than descriptive — chain
 		// extension, chain retention and cloud retention all ask history what
 		// exists, and a query that spanned both profiles would extend one party's
 		// chain with another party's run, or count somebody else's copies towards
@@ -171,8 +171,8 @@ class BackupHistory extends SystemBase {
 
 	/**
 	 * Days after which a management node's newest proven run stops counting as
-	 * live coverage — long enough to ride out a weekend outage on the control
-	 * plane, short enough that abandoned coverage does not read as protection.
+	 * live coverage — long enough to ride out a weekend outage on the management
+	 * node, short enough that abandoned coverage does not read as protection.
 	 */
 	const MANAGER_COVERAGE_DAYS = 7;
 

@@ -825,8 +825,8 @@ exec('rm -rf ' . escapeshellarg($gr));
 section('A site image carries no live configuration');
 
 // A release archive's config/ holds one file: the template. A live site's holds
-// Globalvars_site.php — database password, secret_box_key — and, on a control
-// plane, the agent signing key, provisioning and relay keys, and the DNS token.
+// Globalvars_site.php — database password, secret_box_key — and, on a management
+// node, the agent signing key, provisioning and relay keys, and the DNS token.
 // Copying the directory wholesale put whichever of those existed into an image
 // layer. It also broke the install: a Globalvars_site.php in the image makes the
 // container skip _site_init.sh, so the site never gets a database.
@@ -1600,8 +1600,12 @@ check(strpos($init_code, 'public_html/cache') === false,
 $fix_perms     = $site_root . '/maintenance_scripts/install_tools/fix_permissions.sh';
 $fix_perms_src = is_file($fix_perms) ? file_get_contents($fix_perms) : '';
 check($fix_perms_src !== '', 'fix_permissions.sh exists', $fix_perms);
+// The sweep corrects only what is already wrong, so the assertion is on the
+// find that owns the tree rather than on a blanket chown -R. What matters here
+// is unchanged either way: the cache directory has to exist before the sweep
+// runs, or it is never given to www-data and page caching silently stays off.
 $fp_mkdir = strpos($fix_perms_src, 'mkdir -p "$SITE_ROOT/cache/static_pages"');
-$fp_chown = strpos($fix_perms_src, 'chown -R www-data:user1 "$SITE_ROOT"');
+$fp_chown = strpos($fix_perms_src, '-exec chown www-data:user1 {} +');
 check($fp_mkdir !== false && $fp_chown !== false && $fp_mkdir < $fp_chown,
     'the permissions sweep guarantees the cache directory exists before it sweeps');
 

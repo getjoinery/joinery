@@ -15,8 +15,8 @@
  *     refused.
  *
  *     That one is worth stating plainly, because it is the clearest thing this
- *     whole migration buys. The absolute path used to arrive from the control
- *     plane, so a plane that had been compromised could name ANY file on ANY
+ *     whole migration buys. The absolute path used to arrive from the management
+ *     node, so a plane that had been compromised could name ANY file on ANY
  *     node — the config with its database password, a private key, a user's
  *     mail — and have the node upload it to a bucket the attacker controlled.
  *     Read-anything-from-every-node, wearing a backup job's clothes. Here the

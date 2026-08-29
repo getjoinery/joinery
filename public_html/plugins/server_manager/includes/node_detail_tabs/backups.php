@@ -12,8 +12,8 @@
  * @version 1.6 - the backup-target line and recoverable box resolve the shelf via get_target(), the
  *                same fallback the job builder uses, so a node that names no target but backs up to the
  *                sole enabled shelf reads as cloud-backed instead of "Local only"
- * @version 1.5 - recoverability is read from the NODE's own verified recovery key, not this control
- *                plane's: backups seal to the key the node holds, so a node without a verified one
+ * @version 1.5 - recoverability is read from the NODE's own verified recovery key, not this management
+ *                node's: backups seal to the key the node holds, so a node without a verified one
  *                is shown as unable to back up and the run button is not offered
  * @version 1.4 - incremental chains are listed and restorable (they are what the schedule actually
  *                produces); every restore asks which domain the site is to answer to; the Apache

@@ -84,8 +84,8 @@ class ManagedNode extends SystemBase {
 		'mgn_last_backup_time'    => array('type'=>'timestamp(6)'),
 		'mgn_last_backup_outcome' => array('type'=>'varchar(20)'),
 
-		// The bucket's own testimony about this node's shelf: when this control
-		// plane last listed it, and the newest object write it saw. Stamped by
+		// The bucket's own testimony about this node's shelf: when this management
+		// node last listed it, and the newest object write it saw. Stamped by
 		// the scheduler from the retention pass's listing — taken with this
 		// management node's credential, never the node's word. Comparing these
 		// against the claimed last run is the only check that catches a node

@@ -15,6 +15,9 @@
  *     the shelf, whatever it is asked for
  *   * the local sweep deletes files by age — it must not take the envelope off
  *     an archive it is keeping, and 0 must mean never
+ *   * the local sweep must reach inside chain directories, and must leave the
+ *     manifest and snapshot alone: nothing else deletes a chain artifact on a
+ *     managed node, and losing either file silently forces a full every run
  *   * the run must ship the archive IT made, not whatever happens to look
  *     newest in the directory
  */
@@ -62,7 +65,9 @@ section('Local sweep');
 $work = sys_get_temp_dir() . '/jy_runner_test_' . getmypid();
 @mkdir($work, 0700, true);
 register_shutdown_function(function () use ($work) {
-	foreach (glob($work . '/*') ?: array() as $f) { @unlink($f); }
+	foreach (glob($work . '/*/*') ?: array() as $f) { @unlink($f); }
+	foreach (glob($work . '/*') ?: array() as $f) { is_dir($f) ? @rmdir($f) : @unlink($f); }
+	foreach (glob($work . '/.*.snar') ?: array() as $f) { @unlink($f); }
 	@rmdir($work);
 });
 
@@ -96,6 +101,50 @@ $keep_all = $make('site-ancient.tar.gz.enc', 400);
 $none = BackupRunner::sweep_local(array('output_dir' => $work, 'keep_local' => 0));
 check($none === 0 && file_exists($keep_all),
 	'a window of 0 sweeps nothing at all, however old the file');
+
+// ── Chain directories ───────────────────────────────────────────────────────
+// Incremental runs write one directory down, where the single-level glob above
+// never sees them. On a managed node nothing else deletes a local chain
+// artifact either — enforce_chain_retention() is gated on pruning the bucket,
+// which such a node deliberately does not do — so a miss here means those
+// archives are kept forever while the sweep reports success.
+section('Local sweep reaches inside a chain');
+
+// The ancient file the previous case parked at the top level would be swept by
+// this pass too, and the count below is meant to be about the chain alone.
+@unlink($keep_all);
+
+$chain_d = $work . '/' . BackupChain::DIR_PREFIX . '20260101_030000';
+@mkdir($chain_d, 0700, true);
+
+$make_in = function ($name, $age_days) use ($chain_d) {
+	$path = $chain_d . '/' . $name;
+	file_put_contents($path, 'x');
+	touch($path, time() - (int)($age_days * 86400));
+	return $path;
+};
+
+$chain_old_files = $make_in('files-0000.tar.gz.enc', 30);
+$chain_old_db    = $make_in('db-0000.sql.gz.enc', 30);
+$chain_old_meta  = $make_in('meta-0000.tar.gz.enc', 30);
+$chain_new_files = $make_in('files-0009.tar.gz.enc', 1);
+$chain_manifest  = $make_in(BackupChain::MANIFEST_NAME, 30);
+$chain_snapshot  = $make('.site.snar', 30);
+
+$swept_chain = BackupRunner::sweep_local(array('output_dir' => $work, 'keep_local' => 7));
+
+check(!file_exists($chain_old_files), 'a chain archive past the window is swept');
+check(!file_exists($chain_old_db) && !file_exists($chain_old_meta),
+	'every artifact kind goes, not just the files tar');
+check(file_exists($chain_new_files),
+	'a recent run in the same chain is kept — the window is per file, not per chain');
+check(file_exists($chain_manifest),
+	'the manifest survives: without it the next run reads no_chain and starts a fresh full');
+check(file_exists($chain_snapshot),
+	'the snapshot survives: without it the next run reads snar_lost and starts a fresh full');
+check(is_dir($chain_d),
+	'the emptied chain directory stays — retiring a chain is chain retention\'s call');
+check($swept_chain === 3, 'the sweep counts what it removed from the chain', (string)$swept_chain);
 
 // ── Plan refusals ───────────────────────────────────────────────────────────
 section('The run refuses rather than producing something worthless');
