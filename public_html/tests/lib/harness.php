@@ -31,6 +31,13 @@ if (!defined('JOINERY_HARNESS_LOADED')) {
 	// discovery runner can locate it even after fatal-error output pollution.
 	define('JOINERY_RESULT_SENTINEL', '@@JOINERY_TEST_RESULT@@');
 
+	// The one domain a fixture address is ever minted at. Shared deliberately by
+	// harness_fixture_email() and by the cleanup patterns that recognise its
+	// mail: if those two ever named the domain separately they could drift, and
+	// a cleanup anchored to the wrong domain either misses its own mail or
+	// reaches somebody else's.
+	define('HARNESS_FIXTURE_DOMAIN', 'dev.getjoinery.com');
+
 	// ---- bootstrap ---------------------------------------------------------
 	// PathHelper cannot be located through PathHelper; find it relative to this
 	// file (tests/lib/harness.php → public_html root is two directories up).
@@ -50,6 +57,10 @@ if (!defined('JOINERY_HARNESS_LOADED')) {
 		'skipped'   => 0,
 		'deferred'  => array(),   // LIFO teardown callables
 		'started'   => microtime(true),
+		// Identity of THIS run, used to name fixtures and to recognise the mail
+		// they caused at teardown. Set once here so every fixture shares it.
+		'run_token'  => bin2hex(random_bytes(4)),
+		'started_utc' => gmdate('Y-m-d H:i:s'),
 		'finished'  => false,
 		'booted'    => false,
 	);
@@ -192,7 +203,27 @@ function harness_boot(array $overrides = array()) {
 		harness_set_setting_mem('email_service', 'smtp');
 		harness_set_setting_mem('email_fallback_service', 'smtp');
 		harness_set_setting_mem('email_test_mode', '1');
-		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@dev.getjoinery.com');
+		harness_set_setting_mem('email_test_recipient', 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN);
+		$h['test_recipient'] = 'joineryemailtests@' . HARNESS_FIXTURE_DOMAIN;
+
+		// Mail this run sends is cleaned up at BOTH ends, because one end is not
+		// enough. Redirecting it keeps it away from people; this is what keeps it
+		// from accumulating for good, since a message delivered to an address no
+		// alias claims is in no mailbox and so is never trashed by anyone.
+		//
+		// Both passes gate themselves — see harness_mail_cleanup_allowed(). They
+		// are DELETE passes, and this block is reached by more than the dev box:
+		// a deploy-tier test declares `env: any` and runs on a customer node.
+		//
+		// Now: whatever earlier runs left behind, which has certainly finished
+		// being delivered. This is the pass that actually empties the box.
+		harness_cleanup_stale_delivered_mail();
+
+		// And at the end: registered FIRST so LIFO teardown runs it LAST, giving
+		// the relay every spare moment to hand over what this run sent. It still
+		// misses anything delivered after that — measured, not assumed — which is
+		// exactly what the boot pass above collects on the next run.
+		harness_defer('harness_cleanup_delivered_mail');
 	}
 
 	register_shutdown_function('harness_shutdown_report');
@@ -328,6 +359,223 @@ function harness_defer(callable $fn) {
 }
 
 /**
+ * The address a fixture should use when it needs a real, deliverable one.
+ *
+ * ONE naming rule, owned here, because two things depend on the shape: a
+ * fixture address must not collide with the next run's (a leftover user from a
+ * SIGKILLed run would otherwise take the email and the next run fails with
+ * "email already been used"), and teardown has to be able to recognise the mail
+ * these addresses received without knowing which suite sent it. A suite that
+ * invents its own address gets neither.
+ *
+ * The domain is the dev inbound domain deliberately: mail to it is delivered
+ * and stored locally, so nothing escapes to a stranger even when a send is
+ * real, and harness_cleanup_delivered_mail() can then remove it.
+ */
+function harness_fixture_email($label) {
+	$h = &$GLOBALS['__harness'];
+	return 'harnesstest_' . strtolower($label) . '_' . $h['run_token'] . '@' . HARNESS_FIXTURE_DOMAIN;
+}
+
+/**
+ * May this process delete delivered test mail at all?
+ *
+ * Three conditions, and the first is the one that matters: THIS IS A DELETE
+ * PASS, so it must never run anywhere but the dev box.
+ *
+ *  - debug on. The platform's own dev/prod discriminator, the same one
+ *    harness_enforce_env() trusts. env alone is NOT enough: deploy-tier tests
+ *    declare `env: any` and run on customer production nodes via
+ *    `run.php deploy`, so an env check would have let a permanent-delete sweep
+ *    loose on a customer's database.
+ *  - a tier that can actually send. `safe` promises "no persistent side
+ *    effects" and cannot send mail without breaking that promise, so a delete
+ *    pass there would earn nothing and cost the tier its contract. `deploy`
+ *    reads only and assumes no repository.
+ *  - a store alias to match. Without one there is nothing to recognise.
+ *
+ * The domain anchor on both patterns is the other half of the same care: a
+ * customer's own mail to an address starting harnesstest_ at THEIR domain is
+ * not ours to delete, and only HARNESS_FIXTURE_DOMAIN is ever minted here.
+ */
+function harness_mail_cleanup_allowed() {
+	$h = &$GLOBALS['__harness'];
+
+	if (trim((string)($h['test_recipient'] ?? '')) === '') {
+		return false;
+	}
+	if (!in_array($h['meta']['tier'] ?? '', array('db', 'test-db', 'live'), true)) {
+		return false;
+	}
+	if (!Globalvars::get_instance()->get_setting('debug')) {
+		return false;
+	}
+	return class_exists('InboundEmailMessage');
+}
+
+/**
+ * Remove the mail this run caused to be delivered and stored.
+ *
+ * A test run sends real mail. harness_boot() points it at the local relay and
+ * redirects every recipient to the test store alias, so nothing reaches a
+ * person — but the relay is a real mail server, so those messages are really
+ * delivered and land in iem_inbound_email_messages addressed to an address no
+ * alias claims. Nothing then removes them: unmatched mail sits in no mailbox,
+ * so nobody trashes it. Left alone the suites deposit ~1,550 messages a month
+ * into dev's Unmatched box.
+ *
+ * Two shapes are ours, and only these two:
+ *  - the test store alias, holding everything email_test_mode redirected;
+ *  - harness_fixture_email() addresses, which receive mail sent by a process
+ *    this one cannot configure. A dev-web suite makes its requests inside
+ *    Apache, which reads the site's real email settings and sends for real, so
+ *    the redirect above never applies to it — but the recipient is still a
+ *    fixture address, and that is enough to recognise it here.
+ *
+ * Bounded to mail received since this run booted, so it can only ever remove
+ * what this run could have caused. Restricted to NULL-alias rows, so a suite
+ * that delivers into a real mailbox on purpose keeps its evidence.
+ *
+ * Deletion goes through permanent_delete() per row, which reclaims the
+ * attachment Files and the stored raw object; a bulk DELETE would leak both.
+ *
+ * BOTH passes match on iem_recipient as plaintext, which is true today only
+ * because an inbound row never seals it — it is the receiving address, routing
+ * metadata rather than content, even on an otherwise sealed row. iem_recipient
+ * IS in $sealed_fields for the outbound case, so if unmatched-mail sealing ever
+ * extends that to inbound (specs/mailbox_unmatched_sealing.md), both passes
+ * quietly stop matching and the accumulation returns with nothing failing.
+ *
+ * Teardown alone does not empty the box, and measurement is what says so:
+ * delivery is asynchronous, and a suite that sends on its way out is still
+ * being delivered when teardown finishes. Registering this first (LIFO makes it
+ * the LAST teardown step) buys every spare moment and is not enough — a real
+ * run was observed leaving one message that arrived seconds after the sweep.
+ *
+ * So it runs at BOTH ends, and the boot pass is the one that actually collects
+ * stragglers: what the previous run sent has certainly landed by the time the
+ * next one starts. See harness_cleanup_stale_delivered_mail().
+ */
+function harness_cleanup_delivered_mail() {
+	$h = &$GLOBALS['__harness'];
+
+	if (!harness_mail_cleanup_allowed()) {
+		return;
+	}
+
+	$recipient = trim((string)$h['test_recipient']);
+	$token = $h['run_token'];
+	$since = $h['started_utc'];
+
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT iem_inbound_email_message_id AS id
+		          FROM iem_inbound_email_messages
+		         WHERE iem_iea_inbound_email_alias_id IS NULL
+		           AND iem_direction = 'inbound'
+		           AND iem_received_time >= ?
+		           AND (iem_recipient = ? OR iem_recipient LIKE ?)";
+		$q = $db->prepare($sql);
+		$q->execute(array($since, $recipient,
+			'harnesstest\_%\_' . $token . '@' . HARNESS_FIXTURE_DOMAIN));
+		$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+	} catch (\Throwable $e) {
+		echo "  WARNING: could not look up delivered test mail: " . $e->getMessage() . "\n";
+		return;
+	}
+
+	$removed = 0;
+	foreach ($ids as $id) {
+		try {
+			$msg = new InboundEmailMessage((int)$id, TRUE);
+			if (!$msg->key) { continue; }
+			$msg->permanent_delete();
+			$removed++;
+		} catch (\Throwable $e) {
+			// One unreclaimable message must not cost the rest their cleanup,
+			// and must never fail the test that has already passed.
+			echo "  WARNING: could not remove delivered test mail $id: " . $e->getMessage() . "\n";
+		}
+	}
+	if ($removed) {
+		echo "  cleaned up $removed delivered test message(s)\n";
+	}
+}
+
+/**
+ * Collect what earlier runs left behind, at boot.
+ *
+ * This is the half that actually works, and the reason is timing rather than
+ * cleverness: mail a previous run sent has certainly been delivered by the time
+ * the next run starts, whereas mail THIS run sends may still be in flight when
+ * its own teardown fires. The end-of-run pass takes what it can reach; this one
+ * takes the rest, one run later.
+ *
+ * Two differences from the teardown pass, both deliberate:
+ *
+ *  - it matches ANY fixture address, not just this run's, because the whole
+ *    point is collecting somebody else's leftovers;
+ *  - it therefore refuses to touch anything recent. SETTLE_SECONDS is a floor,
+ *    not a delay: a suite asserting on mail it just sent does so within seconds,
+ *    and lanes run alongside each other, so anything younger than the floor may
+ *    belong to a run still in progress. Older than that and no live assertion
+ *    can be depending on it.
+ *
+ * The gap between the two passes — a straggler younger than the floor when the
+ * next run boots — closes on the run after that, and mailbox_unmatched_retention_days
+ * is the long backstop under both.
+ */
+function harness_cleanup_stale_delivered_mail() {
+	$h = &$GLOBALS['__harness'];
+
+	// Old enough that no in-flight suite can still be asserting on it.
+	$settle_seconds = 600;
+
+	if (!harness_mail_cleanup_allowed()) {
+		return;
+	}
+
+	$recipient = trim((string)$h['test_recipient']);
+
+	try {
+		$db = DbConnector::get_instance()->get_db_link();
+		$sql = "SELECT iem_inbound_email_message_id AS id
+		          FROM iem_inbound_email_messages
+		         WHERE iem_iea_inbound_email_alias_id IS NULL
+		           AND iem_direction = 'inbound'
+		           AND iem_received_time < ?
+		           AND (iem_recipient = ? OR iem_recipient LIKE ?)
+		         LIMIT 500";
+		$q = $db->prepare($sql);
+		$q->execute(array(
+			gmdate('Y-m-d H:i:s', time() - $settle_seconds),
+			$recipient,
+			'harnesstest\_%@' . HARNESS_FIXTURE_DOMAIN,
+		));
+		$ids = $q->fetchAll(PDO::FETCH_COLUMN);
+	} catch (\Throwable $e) {
+		echo "  WARNING: could not look up stale test mail: " . $e->getMessage() . "\n";
+		return;
+	}
+
+	$removed = 0;
+	foreach ($ids as $id) {
+		try {
+			$msg = new InboundEmailMessage((int)$id, TRUE);
+			if (!$msg->key) { continue; }
+			$msg->permanent_delete();
+			$removed++;
+		} catch (\Throwable $e) {
+			// Never fail a run over housekeeping for a previous one.
+			echo "  WARNING: could not remove stale test mail $id: " . $e->getMessage() . "\n";
+		}
+	}
+	if ($removed) {
+		echo "  cleaned up $removed stale test message(s) from earlier runs\n";
+	}
+}
+
+/**
  * Create a test user at the given permission level, registered for cleanup.
  * Email is unique per $suffix AND per process: the random run token means a
  * leftover user from a killed run (SIGKILL skips teardown) can never collide
@@ -346,13 +594,11 @@ function make_user($suffix, $permission = 0) {
 }
 
 function make_user_row($suffix, $permission = 0) {
-	static $run_token = null;
-	if ($run_token === null) $run_token = bin2hex(random_bytes(4));
 	require_once(PathHelper::getIncludePath('data/users_class.php'));
 	$user = new User(NULL);
 	$user->set('usr_first_name', 'HarnessTest');
 	$user->set('usr_last_name', 'User' . $suffix);
-	$user->set('usr_email', 'harnesstest_' . strtolower($suffix) . '_' . $run_token . '@dev.getjoinery.com');
+	$user->set('usr_email', harness_fixture_email($suffix));
 	$user->set('usr_password', User::GeneratePassword('TestPassword_' . $suffix));
 	$user->set('usr_permission', $permission);
 	$user->set('usr_terms_accepted_time', gmdate('Y-m-d H:i:s'));
