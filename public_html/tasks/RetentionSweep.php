@@ -10,6 +10,11 @@
  * Adding a rule means adding a declaration and a setting; it never means adding
  * another task, another schedule and another row in the admin list.
  *
+ * A class may declare one policy or a list of them: a table can hold kinds of
+ * row an operator would answer "how long?" about differently, and one window
+ * standing in for two would silently apply an answer nobody gave. Each rule
+ * carries its own table, so the registry key is an id and nothing else.
+ *
  * Two forms:
  *  - age form     age_column + age_unit (+ optional only_where) — a DELETE
  *  - method form  purge_method — a static method on the same class, for rules
@@ -22,7 +27,7 @@
  * A rule that throws is caught and recorded, and the remaining rules still run.
  * One bad table must never leave every other retention window unswept.
  *
- * @version 1.0
+ * @version 1.1 - a class may declare a list of retention policies; the registry key is a rule id, and each rule carries its own table
  */
 
 require_once(PathHelper::getIncludePath('includes/ScheduledTaskInterface.php'));
@@ -41,9 +46,10 @@ class RetentionSweep implements ScheduledTaskInterface {
 		$skipped = 0;
 		$failed = 0;
 
-		foreach ($rules as $table => $rule) {
+		foreach ($rules as $rule_id => $rule) {
 			$policy = $rule['policy'];
-			$label = $policy['label'] ?? $table;
+			$table = $rule['table'];
+			$label = $policy['label'] ?? $rule_id;
 
 			try {
 				$window = $this->resolveWindow($policy, $settings);
@@ -66,7 +72,7 @@ class RetentionSweep implements ScheduledTaskInterface {
 				// other table its sweep.
 				$failed++;
 				$parts[] = $label . ': FAILED — ' . $e->getMessage();
-				error_log('RetentionSweep: rule for ' . $table . ' failed: ' . $e->getMessage());
+				error_log('RetentionSweep: rule ' . $rule_id . ' failed: ' . $e->getMessage());
 			}
 		}
 

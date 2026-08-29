@@ -103,7 +103,11 @@
  * cleared last). aliasSealedContentActive() is the search-path key: the sealed FTS index
  * serves a mailbox only while sealed content actually remains.
  *
- * @version 1.24
+ * @version 1.25
+ * @changelog 1.25 - a second retention window, purgeExpiredUnmatched(): stored mail
+ *   for an address no alias claims ages out on its own setting. Nothing removed it
+ *   before — it is in no mailbox, so nobody trashes it, and the Trash window only
+ *   ever sees a row somebody threw away. purgeSelected() is the shared reclaimer.
  * @changelog 1.24 - iem_raw_headers: the RFC822 header block retained at push
  *   ingest (specs/mailbox_show_original_coverage.md), a sealed optional field
  *   on every direction, so Show original can answer a lean record with the
@@ -140,14 +144,28 @@ class InboundEmailMessage extends SystemBase {
 	public static $tablename = 'iem_inbound_email_messages';
 	public static $pkey_column = 'iem_inbound_email_message_id';
 
-	// Retention: Trash. A method rather than an age column because each row owns
+	// Retention: two windows, because this table holds two kinds of row an
+	// operator would answer "how long do we keep it?" about differently. Mail a
+	// member threw away is theirs and they decided; mail nobody was addressed by
+	// was never anyone's. Answering one does not answer the other, so they are
+	// separate settings rather than one window quietly governing both.
+	//
+	// Both are the method form rather than an age column: each row owns
 	// attachment Files and a stored raw object that a bulk DELETE would leak.
-	// 0 in the setting means never purge — the mail reader shows each trashed
-	// message its purge date from this same setting.
+	// 0 in either setting means never purge.
 	public static $retention_policy = array(
-		'label'          => 'Mailbox trash',
-		'purge_method'   => 'purgeExpiredTrash',
-		'window_setting' => 'mailbox_trash_retention_days',
+		array(
+			'key'            => 'trash',
+			'label'          => 'Mailbox trash',
+			'purge_method'   => 'purgeExpiredTrash',
+			'window_setting' => 'mailbox_trash_retention_days',
+		),
+		array(
+			'key'            => 'unmatched',
+			'label'          => 'Unmatched mail',
+			'purge_method'   => 'purgeExpiredUnmatched',
+			'window_setting' => 'mailbox_unmatched_retention_days',
+		),
 	);
 
 	// Spam disposition (specs/inbound_email_spam_filtering.md). A NULL verdict
@@ -1341,24 +1359,16 @@ class InboundEmailMessage extends SystemBase {
 	 * Permanently delete mail that has sat in Trash past the retention window.
 	 *
 	 * Trashing is column-driven (iem_delete_time); this is the only thing that
-	 * ever makes it final.
-	 *
-	 * Row-by-row through permanent_delete(), which reclaims the attachment Files
-	 * and the stored raw object. A bulk DELETE would drop the row in one
-	 * statement and leak both.
+	 * ever makes it final. Selection only — purgeSelected() does the reclaiming.
 	 *
 	 * Sealed mailboxes purge locked: permanent_delete() works on columns and
 	 * storage keys, never on plaintext, so a Fortress mailbox needs no vault
-	 * window here. Each id is queued for refold BEFORE the row goes — the refold
-	 * pass re-inserts only if the message still exists, so a purged id drops out
-	 * of the owner's sealed search index at their next fold.
+	 * window here.
 	 *
 	 * @param int $days  Retention window from the setting
 	 * @return array     removed, message
 	 */
 	public static function purgeExpiredTrash($days) {
-		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
-
 		$db = DbConnector::get_instance()->get_db_link();
 		$stmt = $db->prepare(
 			"SELECT iem_inbound_email_message_id AS id, iem_iea_inbound_email_alias_id AS alias_id
@@ -1376,12 +1386,89 @@ class InboundEmailMessage extends SystemBase {
 			return array('removed' => 0, 'message' => 'no mail past the ' . (int)$days . '-day window');
 		}
 
+		return self::purgeSelected($rows, 'purgeExpiredTrash');
+	}
+
+	/**
+	 * Permanently delete stored mail that arrived for an address no alias
+	 * claims, once it is past the retention window.
+	 *
+	 * A domain set to store unmatched mail keeps every message sent to every
+	 * address nobody defined — mistyped locals, addresses retired years ago, and
+	 * whatever a spam run guesses. Nothing else ever removes those: they sit in
+	 * no member's mailbox, so no member trashes them, and the Trash window above
+	 * only ever sees a row somebody threw away. Without this the pile is
+	 * unbounded on every deployment that stores unmatched mail at all.
+	 *
+	 * Deliberately not filtered on read state. Unmatched mail is unread by
+	 * definition — nobody was addressed by it — so treating unread as "still
+	 * wanted" would exempt the entire category and leave the window doing
+	 * nothing.
+	 *
+	 * Three exclusions, each load-bearing:
+	 *  - already trashed rows belong to the Trash window, which has its own
+	 *    setting and its own clock; sweeping them here would apply this window
+	 *    to a decision a member already made.
+	 *  - outbound rows can also carry a NULL alias (a compose that belongs to a
+	 *    member, not to a mailbox). This window is about mail that ARRIVED.
+	 *  - pending-parse rows have not been routed yet: their content is sealed
+	 *    until the owner unlocks, and the deferred parse can still assign an
+	 *    alias. Purging one would delete mail on the way to a real mailbox.
+	 *
+	 * @param int $days  Retention window from the setting
+	 * @return array     removed, message
+	 */
+	public static function purgeExpiredUnmatched($days) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$stmt = $db->prepare(
+			"SELECT iem_inbound_email_message_id AS id, iem_iea_inbound_email_alias_id AS alias_id
+			   FROM iem_inbound_email_messages
+			  WHERE iem_iea_inbound_email_alias_id IS NULL
+			    AND iem_delete_time IS NULL
+			    AND iem_direction = 'inbound'
+			    AND iem_pending_parse = false
+			    AND iem_received_time < now() - (INTERVAL '1 day' * :days)
+			  ORDER BY iem_received_time ASC
+			  LIMIT :cap");
+		$stmt->bindValue(':days', (int)$days, PDO::PARAM_INT);
+		$stmt->bindValue(':cap', self::PURGE_MAX_PER_RUN, PDO::PARAM_INT);
+		$stmt->execute();
+		$rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
+
+		if (!count($rows)) {
+			return array('removed' => 0, 'message' => 'no unmatched mail past the ' . (int)$days . '-day window');
+		}
+
+		return self::purgeSelected($rows, 'purgeExpiredUnmatched');
+	}
+
+	/**
+	 * Permanently delete a selected batch, row by row, and describe what went.
+	 *
+	 * Shared by both retention windows because the reclamation is the same
+	 * question whichever window chose the row: permanent_delete() per row so the
+	 * attachment Files and stored raw object go with it, one failure never
+	 * stranding the rest of the backlog, and the per-run cap reported so a
+	 * neglected backlog visibly drains over several runs rather than looking
+	 * stuck.
+	 *
+	 * @param array  $rows    id + alias_id, already filtered by the caller
+	 * @param string $context the calling window, for the error log
+	 * @return array          removed, message
+	 */
+	private static function purgeSelected(array $rows, string $context) {
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/MailboxIndex.php'));
+
 		$purged = 0;
 		$failed = 0;
 		foreach ($rows as $row) {
 			$id = (int)$row['id'];
 			$alias_id = (int)$row['alias_id'];
 			try {
+				// Queued BEFORE the row goes — the refold pass re-inserts only if
+				// the message still exists, so a purged id drops out of the
+				// owner's sealed search index at their next fold. Unmatched mail
+				// has no alias and so is in no index to correct.
 				if ($alias_id > 0) {
 					MailboxIndex::enqueueRefold($alias_id, $id);
 				}
@@ -1394,7 +1481,7 @@ class InboundEmailMessage extends SystemBase {
 			} catch (Throwable $e) {
 				// One unreclaimable message must not strand the rest of the backlog.
 				$failed++;
-				error_log('InboundEmailMessage::purgeExpiredTrash: failed for message ' . $id . ': ' . $e->getMessage());
+				error_log('InboundEmailMessage::' . $context . ': failed for message ' . $id . ': ' . $e->getMessage());
 			}
 		}
 

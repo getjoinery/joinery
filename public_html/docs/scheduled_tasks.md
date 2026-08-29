@@ -255,10 +255,9 @@ class GeneralError extends SystemBase {
 }
 ```
 
-There is no `table` key — the class declares that already — and no rule key; a
-rule is identified by its `$tablename`. `age_unit` is `days`, `hours` or
-`minutes`. Optional `only_where` appends a qualifier for a rule that does not
-purge everything:
+There is no `table` key — the class declares that already — and a class with one
+window needs no rule key. `age_unit` is `days`, `hours` or `minutes`. Optional
+`only_where` appends a qualifier for a rule that does not purge everything:
 
 ```php
     public static $retention_policy = array(
@@ -292,6 +291,40 @@ both.
 A rule touching several tables is declared on the class that anchors the
 operation, not split across them: `File::purgeExpiredTrash()` handles Drive
 folders from there. One rule, one owner, one entry in the run summary.
+
+### Several windows on one table
+
+"How long do we keep this?" is a question about a kind of row, not about a
+table. When one table holds kinds an operator would answer differently, the
+class declares a **list** of policies, each with a `key`:
+
+```php
+    public static $retention_policy = array(
+        array(
+            'key'            => 'trash',
+            'label'          => 'Mailbox trash',
+            'purge_method'   => 'purgeExpiredTrash',
+            'window_setting' => 'mailbox_trash_retention_days',
+        ),
+        array(
+            'key'            => 'unmatched',
+            'label'          => 'Unmatched mail',
+            'purge_method'   => 'purgeExpiredUnmatched',
+            'window_setting' => 'mailbox_unmatched_retention_days',
+        ),
+    );
+```
+
+Stored mail is the case: mail a member threw away and mail nobody was ever
+addressed by are both rows in `iem_inbound_email_messages`, and an operator who
+sets one window has said nothing about the other. Each rule gets its own
+setting, its own line in the run summary, and its own selection query; sharing
+one window would apply an answer nobody gave.
+
+The `key` is required in a list — it is what keeps a rule identifiable when a
+sibling is added or removed. `retentionRules()` then returns rules keyed by
+`{table}:{key}`, so **the registry key is an id, not a table name**; each rule
+carries its own `table`, and nothing may derive one from the other.
 
 ### Windows are settings
 
@@ -510,7 +543,7 @@ admin logic file. The registry has four entry points:
 |---|---|
 | `discover()` | Every task class on disk, with its JSON metadata and source |
 | `activateDeclared($scope)` | Create rows for tasks flagged `activate_on_install` in `'core'` or a named plugin |
-| `retentionRules()` | Every `$retention_policy` declared on an active data class |
+| `retentionRules()` | Every `$retention_policy` declared on an active data class, keyed by rule id |
 | `reconcileMissing($skip_grace)` | Retire rows whose code file is gone |
 
 ### Plugin Ownership

@@ -671,6 +671,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 | `mailbox_forwarding_rate_limit_window` | `3600` | Rate limit window (seconds) |
 | `mailbox_log_retention_days` | `30` | Days the inbound delivery log is kept. `0` keeps it indefinitely. |
 | `mailbox_trash_retention_days` | `30` | Days mail stays in Trash before it is permanently deleted. `0` keeps it indefinitely. See [Trash and retention](#trash-and-retention). |
+| `mailbox_unmatched_retention_days` | `90` | Days stored mail for an address no mailbox claims is kept. `0` keeps it indefinitely. See [Trash and retention](#trash-and-retention). |
 | `mailbox_forwarding_smtp_host` | (empty) | Dedicated SMTP relay for forwarding. **When set, it forces the SMTP relay path** (overriding provider relay); falls back to base `smtp_*` for any field left blank. See [Forwarding relay](#forwarding-relay). |
 | `mailbox_forwarding_smtp_port` | (empty) | Falls back to `smtp_port` |
 | `mailbox_forwarding_smtp_username` | (empty) | Falls back to `smtp_username` |
@@ -3364,13 +3365,26 @@ id is queued for refold first, so the owner's sealed search index drops the entr
 next fold. Sealed mailboxes purge **locked**: `permanent_delete()` works on columns and
 storage keys, never on plaintext, so a Fortress mailbox needs no unlock window.
 
-**The window.** `InboundEmailMessage::purgeExpiredTrash()` is declared as that class's
+**The window.** `InboundEmailMessage::purgeExpiredTrash()` is declared in that class's
 `$retention_policy` and runs in the platform's daily retention sweep, purging what was
 trashed longer than `mailbox_trash_retention_days` (default 30) ago. `0` means nothing
 purges. A per-run cap (500) keeps a large backlog draining over several runs rather than
 one enormous transaction, and says so in its result message. Each Trash row shows **when
 it purges**, computed for display from the same setting and the row's delete time — never
 stored, because an operator can change the window.
+
+**Unmatched mail ages out on its own window.** Mail stored for an address no alias claims
+sits in no member's mailbox, so nobody ever trashes it and the window above never sees it.
+`InboundEmailMessage::purgeExpiredUnmatched()` is the second rule in the same
+`$retention_policy` list, deleting stored unmatched mail received longer than
+`mailbox_unmatched_retention_days` (default 90) ago; `0` keeps it indefinitely. It reads
+its own setting because the two questions are different: a member decided about their
+Trash, and nobody ever decided about mail addressed to nobody. Read state is deliberately
+not consulted — unmatched mail is unread by definition, so exempting unread rows would
+exempt the category. Three kinds of NULL-alias row are excluded: already-trashed ones
+(the Trash window owns those, on its own clock), outbound rows (a compose belongs to a
+member, not a mailbox), and pending-parse rows (still on their way to an alias at the
+owner's next unlock). Reclamation and the per-run cap are shared with the Trash purge.
 
 **IMAP-backed mailboxes are one-way.** `ImapSyncer::pushTrash()` moves the source copy
 into the account's Trash folder and repoints the locator (which doubles as the

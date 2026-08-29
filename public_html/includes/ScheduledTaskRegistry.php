@@ -13,7 +13,7 @@
  *  - retentionRules()    collect $retention_policy declarations from data classes
  *  - reconcileMissing()  retire rows whose code file is gone
  *
- * @version 1.0
+ * @version 1.1 - retentionRules() accepts a list of policies per class; the key it returns is a rule id, and each rule carries its own table
  */
 
 require_once(PathHelper::getIncludePath('data/scheduled_tasks_class.php'));
@@ -155,7 +155,19 @@ class ScheduledTaskRegistry {
 	 * already knows how to drop inactive plugins, so a deactivated plugin stops
 	 * contributing rules with no extra check here.
 	 *
-	 * @return array  Keyed by table name: class, policy
+	 * One table can need more than one window, because "how long do we keep
+	 * this?" is a question about a KIND of row, not about a table. Stored mail
+	 * is the case that forces it: mail a member threw away and mail nobody was
+	 * ever addressed by are both rows in iem_inbound_email_messages, and an
+	 * operator who sets one window has said nothing about the other. So a class
+	 * may declare either one policy or a list of them, and a list names each
+	 * one with a 'key' so the rules stay individually addressable — in the
+	 * sweep's summary line, and in whatever reads this next.
+	 *
+	 * The returned key is therefore an opaque rule id, NOT a table name; a rule
+	 * carries its own 'table'. Nothing may key off the id to find a table.
+	 *
+	 * @return array  Keyed by rule id: class, table, policy
 	 */
 	public static function retentionRules() {
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
@@ -183,15 +195,40 @@ class ScheduledTaskRegistry {
 				continue;
 			}
 
-			$policy = $class::$retention_policy;
-			if (!is_array($policy) || empty($policy)) {
+			$declared = $class::$retention_policy;
+			if (!is_array($declared) || empty($declared)) {
 				continue;
 			}
 
-			$rules[$class::$tablename] = array(
-				'class' => $class,
-				'policy' => $policy,
-			);
+			$table = $class::$tablename;
+
+			// One policy, or a list of them. A list is recognised structurally
+			// (element 0 is itself a policy array) rather than by a wrapper key,
+			// so the single form stays exactly what it always was.
+			$is_list = isset($declared[0]) && is_array($declared[0]);
+			$policies = $is_list ? $declared : array($declared);
+
+			foreach ($policies as $policy) {
+				if (!is_array($policy) || empty($policy)) {
+					continue;
+				}
+				// A named rule keeps its identity when a sibling is added or
+				// removed; an unnamed one in a list would silently take another
+				// rule's slot and drop it.
+				$id = $table;
+				if ($is_list) {
+					if (empty($policy['key'])) {
+						throw new Exception($class
+							. ' declares a list of retention policies; each needs a "key"');
+					}
+					$id = $table . ':' . $policy['key'];
+				}
+				$rules[$id] = array(
+					'class' => $class,
+					'table' => $table,
+					'policy' => $policy,
+				);
+			}
 		}
 
 		ksort($rules);
