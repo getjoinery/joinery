@@ -53,8 +53,8 @@ shop.foo.com    ───►   │ routing table (cached │  ──►  node-B
    routing table, held as a local cache on each. Front them with a keepalived VIP (or
    multiple A records). Losing one edge node is a non-event.
 2. **Data plane / management node split, fail-static.** The edge **pulls** the routing
-   table from the management node and **serves from its local cache even if the control
-   plane is down**. A management-node outage costs the ability to *change* routes, never
+   table from the management node and **serves from its local cache even if the management
+   node is down**. A management-node outage costs the ability to *change* routes, never
    the ability to *serve* traffic. The edge never does a per-request lookup against the
    management node or the DB.
 3. **TLS terminates at the edge.** Caddy auto-provisions Let's Encrypt certs for each

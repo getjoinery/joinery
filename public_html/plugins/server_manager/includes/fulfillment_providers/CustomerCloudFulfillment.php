@@ -11,8 +11,8 @@
  * question attachment.
  *
  * fulfill() creates the provision row at purchase time — the provider only
- * registers where server_manager is active, so the store IS the control
- * plane and the row can be written directly. The buyer's Connect page shows
+ * registers where server_manager is active, so the store IS the management
+ * node and the row can be written directly. The buyer's Connect page shows
  * their order immediately instead of after the next poll tick, and the
  * after-purchase message (page + per-product email) carries the Connect
  * link. Poll Hosting Orders remains the safety net: it dedups on existing

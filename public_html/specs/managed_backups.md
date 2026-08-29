@@ -45,7 +45,7 @@ in one plain sentence.
 - **The target model:** `data/backup_target_class.php` already stores
   SecretBox-sealed credentials, and `backup_target_id` is how the scheduled
   task finds its destination. Enrollment writes an ordinary target row.
-- **Control-plane retention:** `FleetBackupRetention` already prunes a
+- **Management-node retention:** `FleetBackupRetention` already prunes a
   bucket shelf from the delete-capable side, chains deleted whole.
 
 ## Design decisions

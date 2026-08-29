@@ -490,8 +490,8 @@ class JobResultProcessor {
 
 			// An empty slot is REPORTED and nothing else. That slot holds the key
 			// for the site's own backups, and its custodian is whoever
-			// administers the site — filling it from here would make this control
-			// plane the holder of the private half of a key the site believes is
+			// administers the site — filling it from here would make this management
+			// node the holder of the private half of a key the site believes is
 			// its own. A management node's own backups of this node need nothing in
 			// it: the manager profile carries its key with each run.
 			// The first confirmation of an active cert doubles as the

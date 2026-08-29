@@ -21,8 +21,8 @@
  * @version 1.3 - Danger Zone onclick values are htmlspecialchars(json_encode(), ENT_QUOTES) — a raw
  *                json_encode string embeds a double quote that closed the double-quoted onclick attribute,
  *                so Permanently Delete Site/Entry silently did nothing when clicked
- * @version 1.2 - Danger Zone: a removed node is offered the host teardown only when this control
- *                plane once saw a live site here (status/version/uptime); otherwise a note + purge only
+ * @version 1.2 - Danger Zone: a removed node is offered the host teardown only when this management
+ *                node once saw a live site here (status/version/uptime); otherwise a note + purge only
  * @version 1.1 - Danger Zone: two-tier delete (Remove from Dashboard / Permanently Delete Site),
  *                plus Permanently Delete Entry (purge_node) on an already-removed node
  * @version 1.0

@@ -1,8 +1,8 @@
 # Backups
 
 Every Joinery site can back itself up: on a schedule, encrypted, uploaded to an
-S3-compatible bucket, with retention enforced. No agent, no SSH, no control
-plane. server_manager is a fleet layer on top of this, not a prerequisite for
+S3-compatible bucket, with retention enforced. No agent, no SSH, no management
+node. server_manager is a fleet layer on top of this, not a prerequisite for
 it — a site running server_manager backs *itself* up through exactly the same
 path as a standalone install, because no site's recovery may depend on another
 machine being alive.
@@ -465,12 +465,24 @@ verifies against them and cannot tell how the object was uploaded.
   point, chains only ever whole. A site switched between modes keeps aging its
   old backups out, and no pass can delete a chain's full out from under its
   incrementals.
-- **Local** — keep M days in `/backups` (default 7). This also sweeps the
-  `auto_pre_*` snapshots a restore leaves behind, which are the size of a full
-  backup. An archive and its envelope are always swept together. `0` means never.
-  With **Delete the local copy once uploaded** on, a chain run removes its
-  artifacts as soon as they are confirmed offsite — the chain stays extendable
-  from just the manifest and the snapshot.
+- **Local** — keep M days in `/backups` (default 7). The local copy is a
+  convenience, not the archive: it lets a restore skip the download, and this
+  window says how long that is worth the disk. Age is per file, so an old
+  chain's early runs go while its recent runs stay, and the emptied chain
+  directory is left for chain retention to retire. A chain's `manifest.json`
+  and the snapshot beside it are never swept — they are what make the chain
+  extendable, and without either the next run silently starts a fresh full. The
+  sweep also removes the `auto_pre_*` snapshots a restore leaves behind, which
+  are the size of a full backup. An archive and its envelope are always swept
+  together. `0` means never. With **Delete the local copy once uploaded** on, a
+  chain run removes its artifacts as soon as they are confirmed offsite instead
+  of waiting out the window.
+
+  On a machine a management node backs up, this window is the *only* thing
+  bounding local disk. Chain retention deletes a chain's local directory as
+  part of pruning the bucket, and a managed node does not prune the bucket —
+  the shelf belongs to the management node, and the credential the node is
+  handed cannot delete.
 
 ## Restoring
 
@@ -560,8 +572,8 @@ answer "does someone back me up?" locally: `BackupHistory::manager_coverage()`
 returns the newest manager-profile success that reached its bucket within
 `MANAGER_COVERAGE_DAYS` (7), or null. The setup wizard's Backups step reads it
 as a green condition, so a fleet-backed node is not asked to configure a bucket
-it is already archived to; coverage goes stale on its own if the control
-plane's runs stop.
+it is already archived to; coverage goes stale on its own if the management
+node's runs stop.
 
 ## Artifact naming
 

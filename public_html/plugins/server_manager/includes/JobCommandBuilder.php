@@ -53,8 +53,8 @@
  *                 instead of the path of the machine it was written on
  * @version 1.28 - fetch_status_via_api returns the curl errno alongside reason 'transport',
  *                 so a caller can tell an unreachable node from an unresolvable name
- * @version 1.27 - a node that names no backup target falls back to the control
- *                 plane's sole enabled one, so a registered node is backed up
+ * @version 1.27 - a node that names no backup target falls back to the management
+ *                 node's sole enabled one, so a registered node is backed up
  *                 without per-node setup; two or more and it still refuses
  * @version 1.26 - paths and the site URL are cast before parsing, so an unset one
  *                 raises nothing on PHP 8.5
@@ -2312,9 +2312,9 @@ class JobCommandBuilder {
 	 * That key decides who can open every backup the node makes — the ones the
 	 * node takes for itself and the ones this management node takes of it, which
 	 * are the same key now. Its custodian is whoever administers the node, and
-	 * possession is proven there, against a challenge that node issued. A control
-	 * plane that could write it, or could pass one with a run, would be a control
-	 * plane that could quietly become the only party able to read the fleet.
+	 * possession is proven there, against a challenge that node issued. A management
+	 * node that could write it, or could pass one with a run, would be a management
+	 * node that could quietly become the only party able to read the fleet.
 	 *
 	 * `set_recovery_key.php --report` is still asked during check_status, because
 	 * whether a node holds a proven key decides whether it can be backed up at

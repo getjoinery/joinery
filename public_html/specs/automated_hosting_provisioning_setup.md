@@ -41,8 +41,8 @@ One click each, idempotent, with live status badges:
    the allowlisted client IP, the offered TLDs, and a sandbox switch. A
    sellable badge tells you whether the leg is actually live.
 
-**Remote-store case:** when the store is a different site from the control
-plane, mint the service user + key on the store site and paste the values
+**Remote-store case:** when the store is a different site from the management
+node, mint the service user + key on the store site and paste the values
 into the three API settings; everything else on the page works the same.
 Managed domain registration is the exception: its intake runs in-process on
 the management node, so it needs the store and Server Manager on one install.

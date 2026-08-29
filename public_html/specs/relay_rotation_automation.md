@@ -12,8 +12,8 @@ off it, then destroy it.
 
 Everything here runs on the deployment that OWNS the relay (the relay row
 lives in the served site's own `mrl_mailbox_relays` table — see
-`docs/../plugins/mailbox/docs/overview.md`). Nothing involves the control
-plane.
+`docs/../plugins/mailbox/docs/overview.md`). Nothing involves the management
+node.
 
 ## What already exists (build on it, don't duplicate)
 

@@ -6,8 +6,8 @@
  * needs: []
  */
 /**
- * The SSL routing probe: /sm-ssl-probe.txt must serve the token a control
- * plane's provisioning job drops in the webroot — and nothing else, ever.
+ * The SSL routing probe: /sm-ssl-probe.txt must serve the token a management
+ * node's provisioning job drops in the webroot — and nothing else, ever.
  *
  * Two ends have to agree for Cloudflare-branch SSL provisioning to work: the
  * server_manager JobCommandBuilder writes {webroot}/sm-ssl-probe.txt and

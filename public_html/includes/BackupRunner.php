@@ -7,8 +7,8 @@
  * happened, and deletes what it no longer needs to keep. server_manager drives
  * OTHER machines; it is not involved in a site backing up itself, and a site
  * running server_manager backs itself up through exactly this path — no site's
- * recovery may depend on the management node being alive, including the control
- * plane's own.
+ * recovery may depend on a management node being alive, including the
+ * management node's own.
  *
  * The order of operations is the design:
  *
@@ -29,8 +29,13 @@
  * lock, the snapshot, the bucket path, the recipient and which history rows the
  * run may look at. The manager profile does NOT prune the bucket: the credential
  * it is handed cannot delete, and pruning that shelf belongs to the party that
- * owns it.
+ * owns it. Local disk is a separate question with a separate answer: every
+ * profile sweeps its own working directory by age, because the machine holding
+ * the files is the only one that can.
  *
+ * @version 1.7 - the local sweep reaches inside chain directories, so a site running
+ *                incrementals ages its local copies out instead of keeping every archive
+ *                it has ever made. manifest.json and the snapshot are never swept
  * @version 1.6 - a rotated recovery key ends the current chain: the next run starts a fresh chain
  *                sealed to the new key instead of extending one only the old key opens
  * @version 1.5 - a manager-profile run seals to THIS machine's own proven recovery key, read
@@ -327,8 +332,8 @@ class BackupRunner {
 	private static function plan_manager(array $config) {
 		$m = isset($config['manager']) && is_array($config['manager']) ? $config['manager'] : array();
 
-		// Refused, not ignored. Reading past a supplied key would leave a control
-		// plane believing it chose who can open these archives.
+		// Refused, not ignored. Reading past a supplied key would leave a management
+		// node believing it chose who can open these archives.
 		foreach (array('recovery_public_key', 'recovery_private_key', 'recovery_fpr', 'recipients') as $forbidden) {
 			if (isset($m[$forbidden])) {
 				throw new BackupRunnerException(
@@ -1206,6 +1211,31 @@ class BackupRunner {
 	 * leave behind, which is most of what accumulates: nothing else ever deleted
 	 * them, and they are the same size as a full backup.
 	 *
+	 * The local copy is a convenience, not the archive — it lets a restore skip
+	 * the download. This window says how long that convenience is worth the disk.
+	 *
+	 * Chain runs are swept here too, and have to be: they write one directory
+	 * down (chain-<id>/files-0003.tar.gz.enc), where a single-level glob never
+	 * sees them. The only other code that removes a local chain file is
+	 * enforce_chain_retention(), and that returns early unless this machine
+	 * prunes the bucket — which a managed node deliberately does not do, since
+	 * the shelf belongs to the management node and the credential it is handed
+	 * cannot delete. Age those artifacts out only here and a node running
+	 * incrementals keeps every archive it has ever made, reporting 'swept 0' on
+	 * every run while the disk fills.
+	 *
+	 * What is NOT swept from a chain directory is the point: manifest.json and
+	 * the .snar snapshot are what let the chain be EXTENDED, and both are small.
+	 * Without the manifest the next run reads no_chain, without the snapshot it
+	 * reads snar_lost, and either way it silently starts a fresh full every
+	 * night — expensive, and it looks like nothing is wrong because the backups
+	 * still succeed. BackupNaming::list_dir() matches archive suffixes only, so
+	 * neither is a candidate; the snapshot is not even in the directory.
+	 *
+	 * Age is per file, not per chain, so an old chain's early runs go while its
+	 * recent runs stay. The emptied directory stays as well: deciding a chain is
+	 * finished is enforce_chain_retention()'s job and belongs in one place.
+	 *
 	 * A window of 0 means never sweep.
 	 */
 	public static function sweep_local(array $plan) {
@@ -1219,6 +1249,9 @@ class BackupRunner {
 		$candidates = BackupNaming::list_dir($dir);
 		foreach (glob($dir . '/auto_pre_*') ?: array() as $p) {
 			if (is_file($p)) { $candidates[] = $p; }
+		}
+		foreach (glob($dir . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $chain_d) {
+			foreach (BackupNaming::list_dir($chain_d) as $p) { $candidates[] = $p; }
 		}
 
 		$swept = 0;

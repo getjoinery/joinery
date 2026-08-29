@@ -48,8 +48,8 @@ class UpgradeRetention {
 
 	/**
 	 * Versions that must never be pruned because something is running them:
-	 * every non-deleted managed node's reported version, plus this control
-	 * plane's own version. Returned as a version-string => label map.
+	 * every non-deleted managed node's reported version, plus this management
+	 * node's own version. Returned as a version-string => label map.
 	 */
 	public static function getInUseVersions() {
 		$in_use = [];

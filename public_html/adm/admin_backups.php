@@ -386,6 +386,14 @@ if (!$hrows) {
 		// cleaned-up read differently at a glance. Retention that cleaned a backup
 		// up stamped bkh_pruned_time; its upload_time survives the prune, so pruned
 		// is checked first or a gone backup would still read as present offsite.
+		//
+		// A management node's run is the one case this site cannot answer. It was
+		// uploaded with a credential that can neither list nor delete, to a shelf
+		// the management node prunes on its own schedule, and that prune is never
+		// reported back here — bkh_pruned_time on these rows is stamped by nobody,
+		// so they would read Present forever, including chains deleted weeks ago.
+		// The row states what this machine actually witnessed, which is the upload,
+		// and says who owns the copy from there on.
 		$pruned = (bool)$h->get('bkh_pruned_time');
 		echo '<td>';
 		if ($pruned) {
@@ -394,6 +402,10 @@ if (!$hrows) {
 			echo '<span class="text-muted">not stored</span>';
 		} elseif ($outcome === 'running') {
 			echo '<span class="text-muted">in progress</span>';
+		} elseif ($is_manager && $h->is_offsite()) {
+			echo '<span class="text-muted">Uploaded</span> <span class="text-muted small">&middot; '
+			   . htmlspecialchars((string)$h->get('bkh_target_name'))
+			   . ', kept for as long as the management node keeps it</span>';
 		} elseif ($h->is_offsite()) {
 			echo '<span class="text-success">Present</span> <span class="text-muted small">&middot; '
 			   . htmlspecialchars((string)$h->get('bkh_target_name')) . '</span>';
