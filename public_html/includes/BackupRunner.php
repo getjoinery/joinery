@@ -2,12 +2,12 @@
 /**
  * BackupRunner — this site backing itself up.
  *
- * No agent, no SSH, no control plane. A site with a configured target and a
+ * No agent, no SSH, no management node. A site with a configured target and a
  * proven recovery key produces an encrypted archive, uploads it, records what
  * happened, and deletes what it no longer needs to keep. server_manager drives
  * OTHER machines; it is not involved in a site backing up itself, and a site
  * running server_manager backs itself up through exactly this path — no site's
- * recovery may depend on the control plane being alive, including the control
+ * recovery may depend on the management node being alive, including the control
  * plane's own.
  *
  * The order of operations is the design:
@@ -303,10 +303,10 @@ class BackupRunner {
 	}
 
 	/**
-	 * A control plane's backup of this site: where it goes arrives with the run,
+	 * A management node's backup of this site: where it goes arrives with the run,
 	 * what opens it does not.
 	 *
-	 * The bucket and its credential are the control plane's to supply — they name
+	 * The bucket and its credential are the management node's to supply — they name
 	 * a shelf this machine has no other way to reach, and they leave with the
 	 * process. The recovery key is different in kind. Sealing to a public key
 	 * always appears to succeed: seal to an attacker's and every archive reports
@@ -316,7 +316,7 @@ class BackupRunner {
 	 *
 	 * So encryption is pinned to THIS site's own proven recovery key, read here,
 	 * locally. A run carrying key material is refused outright rather than
-	 * quietly ignored — the refusal is how a stale control plane or a substituted
+	 * quietly ignored — the refusal is how a stale management node or a substituted
 	 * key becomes visible instead of becoming the new arrangement.
 	 *
 	 * A site with no proven key of its own cannot take an encrypted backup for
@@ -335,7 +335,7 @@ class BackupRunner {
 					'This run arrived carrying encryption key material (' . $forbidden . ') and was refused. '
 					. 'Backups on this machine seal only to the recovery key this machine holds and has '
 					. 'proven; nothing supplies one from outside. Treat a run that carries a key as a '
-					. 'control plane that is out of date, or as an attempt to substitute the key that '
+					. 'management node that is out of date, or as an attempt to substitute the key that '
 					. 'opens these backups.');
 			}
 		}
@@ -361,7 +361,7 @@ class BackupRunner {
 		}
 
 		$target = new EphemeralBackupDestination(array(
-			'bkt_name'        => (string)($m['target_name'] ?? 'control plane storage'),
+			'bkt_name'        => (string)($m['target_name'] ?? 'management node storage'),
 			'bkt_provider'    => (string)($m['provider'] ?? 's3'),
 			'bkt_bucket'      => (string)$m['bucket'],
 			'bkt_path_prefix' => (string)($m['path_prefix'] ?? 'joinery-backups'),
@@ -371,7 +371,7 @@ class BackupRunner {
 		// The one place this run's encryption is decided, and it is a local read.
 		// BackupRecoveryKey::public_key() throws when the key is unset or has
 		// never been proven; the message is rewritten here because the operator
-		// reading it is a control plane's, and the fix is on this machine.
+		// reading it is a management node's, and the fix is on this machine.
 		try {
 			$recipients = BackupEnvelope::recipients();
 		} catch (BackupRecoveryKeyException $e) {
@@ -379,7 +379,7 @@ class BackupRunner {
 				'This machine has no proven recovery key of its own, so no backup taken here can be '
 				. 'encrypted and none will run. Set one up at Admin -> System -> Backups on THIS site '
 				. '(' . BackupRecoveryKey::SETUP_URL . ') and open the verification challenge with it. '
-				. 'No control plane can supply this for you. (' . $e->getMessage() . ')');
+				. 'No management node can supply this for you. (' . $e->getMessage() . ')');
 		}
 		$base = self::output_dir();
 
@@ -946,8 +946,12 @@ class BackupRunner {
 				// Only once every object of the chain is gone are its rows
 				// marked deleted — a half-deleted chain must keep looking like
 				// a chain that still needs deleting, not like one that is done.
+				// Pruned as well as deleted so the history shows a cleaned-up
+				// chain rather than dropping it (a manual hide sets only delete).
+				$now = gmdate('Y-m-d H:i:s');
 				foreach ($chains[$cid] as $row) {
-					$row->set('bkh_delete_time', gmdate('Y-m-d H:i:s'));
+					$row->set('bkh_pruned_time', $now);
+					$row->set('bkh_delete_time', $now);
 					$row->save();
 				}
 				self::rmtree(self::chain_dir($plan, $cid));
@@ -1165,7 +1169,12 @@ class BackupRunner {
 						throw new BackupRunnerException('HTTP ' . $status . ' deleting ' . $key);
 					}
 				}
-				$old->set('bkh_delete_time', gmdate('Y-m-d H:i:s'));
+				$now = gmdate('Y-m-d H:i:s');
+				// Soft-deleted so every "what still exists" query stops counting it,
+				// and stamped pruned so the history can still show it as cleaned up
+				// rather than let it vanish (a manual hide sets only delete_time).
+				$old->set('bkh_pruned_time', $now);
+				$old->set('bkh_delete_time', $now);
 				$old->save();
 				$pruned++;
 			} catch (\Throwable $e) {

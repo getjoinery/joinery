@@ -5,6 +5,9 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.16 - process_backup_run unwraps the primitive/API JSON envelope before parsing BACKUP_RESULT,
+ *                 so a backup that ran over the primitive transport is stamped by its real verdict instead
+ *                 of reading as failed fleet-wide (the /m anchors missed the envelope's escaped newlines)
  * @version 1.15 - the agent SSL chain reports what it did rather than that it ran: provision_certificate
  *                 is classified from its output (setup_ssl.sh exits 0 whether or not it issued anything),
  *                 and the probe place/clear results are recorded, with a replaced token logged
@@ -421,7 +424,7 @@ class JobResultProcessor {
 			}
 			// Which recovery key the node is holding. Recorded even when it is
 			// not ours: the fleet view has to be able to show that a node is
-			// carrying a key the control plane did not put there, because that
+			// carrying a key the management node did not put there, because that
 			// is the one case the push deliberately walks away from.
 			if (isset($folded['backup_recovery_state'])) {
 				$node->set('mgn_backup_recovery_fpr', (string)($folded['backup_recovery_fpr'] ?? ''));
@@ -489,7 +492,7 @@ class JobResultProcessor {
 			// for the site's own backups, and its custodian is whoever
 			// administers the site — filling it from here would make this control
 			// plane the holder of the private half of a key the site believes is
-			// its own. A control plane's own backups of this node need nothing in
+			// its own. A management node's own backups of this node need nothing in
 			// it: the manager profile carries its key with each run.
 			// The first confirmation of an active cert doubles as the
 			// reverse-DNS moment for cloud-born nodes: the domain has just
@@ -787,32 +790,22 @@ class JobResultProcessor {
 	 * runner predates the line.
 	 */
 	private static function process_backup_run($job) {
-		$output = $job->get('mjb_output') ?: '';
-
-		$status = 'unknown';
-		if (preg_match('/^BACKUP_RESULT=(\w+)$/m', $output, $m)) {
-			$status = $m[1];
-		} elseif ($job->get('mjb_status') === 'failed') {
-			// The step never got far enough to say anything — a failed job with
-			// no verdict is a failed backup, not an unknown one.
-			$status = 'error';
-		}
-
-		$time = '';
-		if (preg_match('/^BACKUP_TIME=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$/m', $output, $m)) {
-			$time = $m[1];
-		}
+		$verdict = self::parse_backup_run_verdict(
+			$job->get('mjb_output') ?: '',
+			(string)$job->get('mjb_status')
+		);
+		$status = $verdict['status'];
 
 		$result = ['backup_status' => $status];
-		if (preg_match('/^\[[^\]]+\] manager \w+: (.+)$/m', $output, $m)) {
-			$result['message'] = trim($m[1]);
+		if ($verdict['message'] !== '') {
+			$result['message'] = $verdict['message'];
 		}
 
 		$node_id = $job->get('mjb_mgn_node_id');
 		if ($node_id && $status !== 'skipped') {
 			try {
 				$node = new ManagedNode($node_id, TRUE);
-				$node->set('mgn_last_backup_time', $time !== '' ? $time : gmdate('Y-m-d H:i:s'));
+				$node->set('mgn_last_backup_time', $verdict['time'] !== '' ? $verdict['time'] : gmdate('Y-m-d H:i:s'));
 				$node->set('mgn_last_backup_outcome', ($status === 'success') ? 'success' : 'failed');
 				$node->save();
 			} catch (Exception $e) {
@@ -823,6 +816,53 @@ class JobResultProcessor {
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * Read a manager-profile run's verdict out of its output. Pure — no DB, no
+	 * job mutation — so both wire shapes can be pinned by the fold test.
+	 *
+	 * The verdict comes from the machine-readable BACKUP_RESULT line, not the
+	 * exit status: the runner exits 0 for a run it SKIPPED (another backup was
+	 * already in progress), and a skip is neither success nor failure. The time
+	 * comes from the BACKUP_TIME line (when the run STARTED, as the node's own
+	 * history records it) so the stamp means one thing whichever path wrote it.
+	 *
+	 * The primitive/API transport wraps that text in a JSON envelope
+	 * ({api_version,data:{output}}), where the runner's newlines survive as
+	 * literal \n escapes — so unwrapping FIRST is what lets the /m anchors below
+	 * find a line start. Without it every primitive-transport run parses as
+	 * 'unknown' and stamps 'failed'. The plain SSH path has no envelope, so the
+	 * helper returns null and the raw output stands.
+	 *
+	 * @return array{status:string,time:string,message:string}
+	 */
+	public static function parse_backup_run_verdict(string $output, string $job_status): array {
+		$envelope = self::extract_api_envelope_data($output);
+		if ($envelope !== null && isset($envelope['output']) && is_string($envelope['output'])) {
+			$output = $envelope['output'];
+		}
+
+		$status = 'unknown';
+		if (preg_match('/^BACKUP_RESULT=(\w+)$/m', $output, $m)) {
+			$status = $m[1];
+		} elseif ($job_status === 'failed') {
+			// The step never got far enough to say anything — a failed job with
+			// no verdict is a failed backup, not an unknown one.
+			$status = 'error';
+		}
+
+		$time = '';
+		if (preg_match('/^BACKUP_TIME=(\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2})$/m', $output, $m)) {
+			$time = $m[1];
+		}
+
+		$message = '';
+		if (preg_match('/^\[[^\]]+\] manager \w+: (.+)$/m', $output, $m)) {
+			$message = trim($m[1]);
+		}
+
+		return ['status' => $status, 'time' => $time, 'message' => $message];
 	}
 
 	/**
@@ -1302,7 +1342,7 @@ HTML;
 			// The cert just issued, so the domain provably resolves to this
 			// box — the provider's precondition for accepting it as reverse
 			// DNS. Set the PTR through the birth provision's grant now, so a
-			// standalone site never needs the control-plane panel. Best-effort
+			// standalone site never needs the management-node panel. Best-effort
 			// and first-issuance-only: a stale grant or manual node leaves the
 			// PTR to the mailbox Setup tab checklist, and a later custom PTR
 			// is never overwritten by a cert renewal. Not on the Cloudflare

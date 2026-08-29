@@ -14,8 +14,11 @@
  * backups have been failing for a month looks identical to a healthy one if only
  * successes are written down.
  *
+ * @version 1.4 - bkh_pruned_time distinguishes a backup retention has cleaned up from one an admin
+ *                hid, and the 'include_pruned' collection filter shows present and cleaned-up runs
+ *                together while still excluding hidden ones
  * @version 1.3 - manager_coverage() and the 'finished_since' collection filter: the run
- *                proving a control plane currently backs this site up, so the setup step
+ *                proving a management node currently backs this site up, so the setup step
  *                and dashboards can read fleet custody from local history instead of
  *                calling the site un-backed-up
  * @version 1.2 - bkh_profile and bkh_recovery_fpr: a site can be backed up by more than one
@@ -73,6 +76,14 @@ class BackupHistory extends SystemBase {
 		// no upload time is a local-only backup, which is a real and different
 		// state from "backed up offsite".
 		'bkh_upload_time'   => array('type'=>'timestamp(6)'),
+
+		// Set when retention removed this backup's objects (cloud, and the local
+		// copy with them). The row is still soft-deleted like any pruned run, so
+		// every "what still exists" query is unchanged; this column is only what
+		// lets the history tell a backup that is still present from one that has
+		// been cleaned up, instead of the two looking identical once gone. NULL on
+		// a manually hidden row, which is why a hide and a prune read differently.
+		'bkh_pruned_time'   => array('type'=>'timestamp(6)'),
 
 		// Chain this run belongs to (Phase 3). Null means a standalone full
 		// backup, which is every run until chains land.
@@ -159,7 +170,7 @@ class BackupHistory extends SystemBase {
 	}
 
 	/**
-	 * Days after which a control plane's newest proven run stops counting as
+	 * Days after which a management node's newest proven run stops counting as
 	 * live coverage — long enough to ride out a weekend outage on the control
 	 * plane, short enough that abandoned coverage does not read as protection.
 	 */
@@ -168,7 +179,7 @@ class BackupHistory extends SystemBase {
 	/**
 	 * The run proving another party currently backs this site up: the newest
 	 * manager-profile row that reached its bucket within MANAGER_COVERAGE_DAYS.
-	 * Null means no live coverage — whatever a control plane once did, this
+	 * Null means no live coverage — whatever a management node once did, this
 	 * site cannot currently point to a recent archive it did not make itself.
 	 *
 	 * @return BackupHistory|null
@@ -259,6 +270,15 @@ class MultiBackupHistory extends SystemMultiBase {
 		// "am I backed up?" means.
 		if (isset($this->options['offsite'])) {
 			$filters['bkh_upload_time'] = $this->options['offsite'] ? "IS NOT NULL" : "IS NULL";
+		}
+
+		// A display view that keeps cleaned-up runs visible. Retention soft-deletes
+		// a pruned run AND stamps bkh_pruned_time; a manual hide only soft-deletes.
+		// So "present OR cleaned up, but not hidden" is delete_time IS NULL (still
+		// present) OR pruned_time IS NOT NULL (cleaned up by retention). Do not pass
+		// the 'deleted' option alongside this — this condition IS the delete filter.
+		if (!empty($this->options['include_pruned'])) {
+			$filters['(bkh_delete_time'] = "IS NULL OR bkh_pruned_time IS NOT NULL)";
 		}
 
 		// Runs finished on or after a UTC moment — how "is coverage live?" is

@@ -348,4 +348,46 @@ nsf_call('process_run_plugin_installers', [$job]);
 check($job->get('mjb_error_message') === 'the agent could not reach the node',
 	'an already-failed job keeps the error that failed it');
 
+section('A manager backup is stamped by its verdict, through the agent envelope');
+
+// The exact shape every node's nightly backup_run now takes: since the fleet
+// reports its vocabulary and backup_run routes to the primitive transport, the
+// runner's text arrives wrapped in the agent's JSON envelope, where BACKUP_RESULT
+// sits behind an escaped \n. Parsing the envelope as raw text read every one of
+// the nine nodes as 'failed' on 08-29 while the jobs had all completed.
+$runner = "[2026-08-29 05:00:30 UTC] manager success: Full backup (47.1 MB of files) "
+	. "in chain-20260829_050016 to Backblaze B2 Joinery\n"
+	. "BACKUP_RESULT=success\nBACKUP_TIME=2026-08-29 05:00:16\n";
+$enveloped = json_encode(['api_version' => '1.0', 'data' => ['output' => $runner, 'output_bytes' => 177]]);
+
+$v = JobResultProcessor::parse_backup_run_verdict($enveloped, 'completed');
+check($v['status'] === 'success',
+	'a successful run reads as success through the envelope, not failed',
+	var_export($v, true));
+check($v['time'] === '2026-08-29 05:00:16',
+	'and the start time is read from BACKUP_TIME, not defaulted to now');
+
+// The plain SSH path has no envelope; the same reading still holds.
+$v = JobResultProcessor::parse_backup_run_verdict($runner, 'completed');
+check($v['status'] === 'success',
+	'the raw SSH text parses identically');
+
+// A run the runner skipped (another backup already in progress) is neither
+// success nor failure, so it must not refresh or alarm the stamp.
+$skip = json_encode(['api_version' => '1.0', 'data' => ['output' =>
+	"[2026-08-29 05:00:30 UTC] manager skipped: another backup is already running\n"
+	. "BACKUP_RESULT=skipped\n"]]);
+check(JobResultProcessor::parse_backup_run_verdict($skip, 'completed')['status'] === 'skipped',
+	'a skipped run is reported as skipped, not folded into failed');
+
+// A job that died before the runner said anything is a failed backup, not an
+// unknown one — the only case that leans on the job status.
+check(JobResultProcessor::parse_backup_run_verdict('', 'failed')['status'] === 'error',
+	'a failed job with no verdict line is an error, not unknown');
+
+// A completed job that somehow carried no verdict line stays 'unknown' and
+// therefore stamps 'failed' — the honest reading, distinct from the envelope bug.
+check(JobResultProcessor::parse_backup_run_verdict('nothing useful here', 'completed')['status'] === 'unknown',
+	'a completed job with no BACKUP_RESULT is unknown, not silently success');
+
 harness_finish();

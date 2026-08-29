@@ -10,6 +10,9 @@
  * Chain artifacts are deliberately absent: a chain is one restore point made of
  * many files, and BackupChainListHelper lists those as chains.
  *
+ * @version 1.2 - cloud listing resolves the shelf via JobCommandBuilder::get_target(), so a node that
+ *                names no target still has its remote backups listed (from the sole enabled shelf)
+ *                instead of showing local files only
  * @version 1.1 - chain artifacts are excluded from the flat list
  * @version 1.0
  */
@@ -50,43 +53,48 @@ class BackupListHelper {
 			}
 		}
 
-		// Live cloud listing via TargetLister
+		// Live cloud listing via TargetLister.
+		//
+		// The shelf is resolved the SAME way the job builder resolves it — a node
+		// that names no target still backs up to the sole enabled one, so its
+		// cloud archives have to be listed here too rather than being invisible
+		// because mgn_bkt_backup_target_id happens to be blank. Reading the raw
+		// column left every such node's remote backups off this list. get_target
+		// already returns only an enabled target (or null), so there is no
+		// separate bkt_enabled check.
 		$cloud_files = [];
 		$cloud_error = null;
-		$target_id = $node->get('mgn_bkt_backup_target_id');
-		if ($target_id) {
+		$target = JobCommandBuilder::get_target($node);
+		if ($target) {
 			try {
-				$target = new BackupTarget($target_id, TRUE);
-				if ($target->get('bkt_enabled')) {
-					$listing = TargetLister::list_files($target, 500);
-					if ($listing['success']) {
-						$slug = $node->get('mgn_slug');
-						$prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
-						$node_prefix = $prefix . $slug . '/';
-						foreach ($listing['files'] as $f) {
-							// Only include files under this node's slug.
-							if (strpos($f['key'], $node_prefix) !== 0) continue;
-							// A chain's artifacts are not standalone backups. Listed
-							// flat they invite a restore of one incremental with no
-							// full under it, which restores nothing at all — chains
-							// are offered as chains, by BackupChainListHelper.
-							if (BackupChainListHelper::is_chain_object($f['key'])) continue;
-							$filename = basename($f['key']);
-							$mtime = $f['modified'] ? strtotime($f['modified']) : 0;
-							$cloud_files[$filename] = [
-								'filename' => $filename,
-								'size' => self::format_size($f['size']),
-								'size_bytes' => $f['size'],
-								'date' => $mtime ? gmdate('Y-m-d', $mtime) : '',
-								'mtime' => $mtime,
-								'local_path' => null,
-								'cloud_path' => $f['key'],
-								'location' => 'cloud',
-							];
-						}
-					} else {
-						$cloud_error = $listing['error'] ?? 'unknown error';
+				$listing = TargetLister::list_files($target, 500);
+				if ($listing['success']) {
+					$slug = $node->get('mgn_slug');
+					$prefix = rtrim($target->get('bkt_path_prefix') ?: 'joinery-backups', '/') . '/';
+					$node_prefix = $prefix . $slug . '/';
+					foreach ($listing['files'] as $f) {
+						// Only include files under this node's slug.
+						if (strpos($f['key'], $node_prefix) !== 0) continue;
+						// A chain's artifacts are not standalone backups. Listed
+						// flat they invite a restore of one incremental with no
+						// full under it, which restores nothing at all — chains
+						// are offered as chains, by BackupChainListHelper.
+						if (BackupChainListHelper::is_chain_object($f['key'])) continue;
+						$filename = basename($f['key']);
+						$mtime = $f['modified'] ? strtotime($f['modified']) : 0;
+						$cloud_files[$filename] = [
+							'filename' => $filename,
+							'size' => self::format_size($f['size']),
+							'size_bytes' => $f['size'],
+							'date' => $mtime ? gmdate('Y-m-d', $mtime) : '',
+							'mtime' => $mtime,
+							'local_path' => null,
+							'cloud_path' => $f['key'],
+							'location' => 'cloud',
+						];
 					}
+				} else {
+					$cloud_error = $listing['error'] ?? 'unknown error';
 				}
 			} catch (Exception $e) {
 				$cloud_error = $e->getMessage();
