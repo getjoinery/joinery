@@ -555,13 +555,13 @@ class SetupSteps {
 			'title' => 'Backups',
 			'scope' => 'site',
 			'order' => 80,
-			// A site backed up by its control plane owes nothing here — the
+			// A site backed up by its management node owes nothing here — the
 			// proof is the manager-profile history rows every fleet run writes
 			// locally, so the intro must not ask for a bucket it already has.
 			'copy'  => function (?User $viewer): string {
 				require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
 				if (BackupHistory::manager_coverage() !== null) {
-					return 'This site is already backed up: the control plane that manages this server takes regular archives, sealed to a recovery key its operator holds. Nothing here needs your attention unless you also want backups this site runs itself.';
+					return 'This site is already backed up: the management node that manages this server takes regular archives, sealed to a recovery key its operator holds. Nothing here needs your attention unless you also want backups this site runs itself.';
 				}
 				return 'Everything here should survive this server dying. Point backups at a storage bucket, and create the recovery key that encrypts them to turn on nightly backups.';
 			},
@@ -578,7 +578,7 @@ class SetupSteps {
 				if ($target_ok && $key_ok && $task_ok) {
 					return SetupSteps::STATUS_GREEN;
 				}
-				// A control plane's recent proven run is the other way this
+				// A management node's recent proven run is the other way this
 				// site survives this server dying — read from the local
 				// history rows the fleet run writes, not from any message.
 				require_once(PathHelper::getIncludePath('data/backup_history_class.php'));

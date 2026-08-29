@@ -5,7 +5,7 @@
  *
  * Called by publish_upgrade.php before plugin archives are built. Writes
  * public_html/agent_dist/ (manifest.json + gzipped, Ed25519-signed
- * per-arch binaries + the systemd unit). The agent on every control plane
+ * per-arch binaries + the systemd unit). The agent on every management node
  * watches that directory and installs verified updates itself.
  *
  * Behavior contract:
@@ -13,7 +13,7 @@
  *   cross-compile, sign, regenerate agent_dist.
  * - Agent source present, version unchanged: leave agent_dist byte-identical
  *   (keeps the server_manager plugin tree hash stable between publishes).
- * - Agent source absent (a control plane publishing without the agent repo):
+ * - Agent source absent (a management node publishing without the agent repo):
  *   the existing agent_dist carries forward unchanged. Publishing never
  *   breaks; the agent version simply does not advance.
  * - Signing keypair is generated on first use at {site}/config/
@@ -121,7 +121,7 @@ class AgentDistPublisher {
 			$go = self::findGo();
 			if ($go === null) {
 				// A box holding agent source newer than the bundle is a
-				// publishing control plane; a missing toolchain there is a
+				// publishing management node; a missing toolchain there is a
 				// broken box, not a reason to ship the old agent.
 				throw new Exception('Go toolchain not found');
 			}

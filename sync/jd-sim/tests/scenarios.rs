@@ -5636,3 +5636,50 @@ fn a_folder_trash_must_not_forget_what_the_server_spared() {
     assert_converged(&world);
 }
 
+
+/// A scratch file left on this disk by an operation that never came back must
+/// be cleared up.
+///
+/// The engine renames an entity to `.jd-swap-{key}` as one step of breaking a
+/// rename cycle. If the operation behind it dies, the file is left wearing that
+/// name: never uploaded, since the server refuses the prefix for a real file,
+/// and invisible to the user, since it is a dotfile they did not name.
+///
+/// `observe` has always had the recovery for it. What it did not have was a
+/// listing that shows it the file: an ordinary `read_dir` hides every reserved
+/// name, which on a real filesystem meant the branch could not be entered at
+/// all. The simulator did not filter, so every sweep exercised a path that was
+/// dead in production and reported it working.
+#[test]
+fn an_abandoned_scratch_file_is_cleared_off_this_disk() {
+    let world = World::new(4703, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/report.txt", b"an ordinary file");
+    assert!(world.settle().is_some(), "the tree settles first");
+
+    // What a dropped swap leaves behind, put there directly because the thing
+    // being tested is the clean-up, not the dance that produces it.
+    laptop
+        .fs
+        .user_write("Work/.jd-swap-abandoned", b"bytes nobody is coming back for");
+    assert!(
+        laptop.fs.peek("Work/.jd-swap-abandoned").is_some(),
+        "the scratch file is there to begin with"
+    );
+
+    world.pass(laptop);
+
+    assert!(
+        laptop.fs.peek("Work/.jd-swap-abandoned").is_none(),
+        "the abandoned scratch file is still on the disk, under a name nobody \
+         chose and nothing will ever look at again"
+    );
+    assert!(
+        laptop.fs.peek("Work/report.txt").is_some(),
+        "the ordinary file beside it must be untouched"
+    );
+    assert!(world.settle().is_some(), "and it settles");
+    assert_converged(&world);
+}

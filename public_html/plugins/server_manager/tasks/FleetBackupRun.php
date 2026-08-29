@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetBackupRun — this control plane's own backups of the nodes it manages.
+ * FleetBackupRun — this management node's own backups of the nodes it manages.
  *
  * The node does the backup. This decides when, prunes the shelf beforehand, and
  * dispatches one job per due node. Everything that makes a backup good — the
@@ -9,8 +9,8 @@
  *
  * These are peers, not a hierarchy. A site's own scheduled backups are that
  * site's business, under its own key, and this task neither knows nor cares
- * whether it takes any. What it schedules here is this control plane's copies,
- * under this control plane's key.
+ * whether it takes any. What it schedules here is this management node's copies,
+ * under this management node's key.
  *
  * Three rules keep a fleet of these from behaving like a thundering herd:
  *

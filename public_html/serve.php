@@ -6,7 +6,7 @@
 // lets the sealed decrypt hooks run without a session — the reader's sandboxed
 // iframe and sessionless native clients (specs/bugfix_sealed_inline_images.md).
 // @version 1.6.0 — /sm-ssl-probe.txt serves the SSL routing probe token, so a
-// control plane's Cloudflare-branch provisioning can prove a domain routes here.
+// management node's Cloudflare-branch provisioning can prove a domain routes here.
 // @version 1.5.0 — /profile/conversation(s) hand off to the messenger app when
 // its plugin is active, and serve the older thread views when it is not.
 
@@ -144,7 +144,7 @@ $routes = [
         // signature, never a session.
         '/.well-known/joinery-direct' => ['view' => 'ajax/joinery_direct'],
 
-        // SSL routing probe — serves the one-time token a control plane's SSL
+        // SSL routing probe — serves the one-time token a management node's SSL
         // provisioning job drops in the webroot, proving the domain routes to
         // this installation. Without this route the front controller would 404
         // the file and a Cloudflare-proxied domain could never verify routing.

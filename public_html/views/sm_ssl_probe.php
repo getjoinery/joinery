@@ -2,7 +2,7 @@
 /**
  * SSL routing probe — proof that a domain actually reaches this installation.
  *
- * A control plane provisioning SSL for a Cloudflare-proxied domain cannot use
+ * A management node provisioning SSL for a Cloudflare-proxied domain cannot use
  * DNS to confirm the domain routes to the node it manages: the domain resolves
  * to Cloudflare's edge, never the host. So its provisioning job writes a
  * one-time token to {public_html}/sm-ssl-probe.txt on the node and fetches

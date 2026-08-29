@@ -103,6 +103,69 @@ impl OsVfs {
     }
 }
 
+fn list_dir(
+path: &Path,
+personality: &Personality,
+include_internal: bool,
+) -> VfsResult<Vec<DirEntry>> {
+    let rd = fs::read_dir(path).map_err(|e| io_err(path, e))?;
+    let mut out = Vec::new();
+    for entry in rd {
+        let entry = entry.map_err(|e| io_err(path, e))?;
+        let raw = entry.file_name().to_string_lossy().to_string();
+        // macOS hands back what it stored, which is decomposed, whatever
+        // spelling the file was created with. Left alone, every file with an
+        // accent in its name reads as a rename on the very next scan — the
+        // engine asks the server for `café.txt`, finds `café.txt` spelled
+        // the other way, and pushes the "new" name back. Two devices then
+        // rename it at each other forever.
+        //
+        // Lookups are unaffected: a volume that decomposes also accepts
+        // either spelling when asked for a file, so the composed form we
+        // hand back opens the same file.
+        let name = if personality.decomposes_unicode {
+            crate::names::nfc(&raw)
+        } else {
+            raw
+        };
+        // The engine's own spool and swap files are not part of the tree --
+        // except to `read_dir_all`, whose whole job is to see what this
+        // filter hides.
+        if !include_internal && crate::names::is_internal(&name) {
+            continue;
+        }
+        // symlink_metadata, not metadata: a symlink must be reported as a
+        // symlink rather than silently followed to whatever it points at,
+        // which could be outside the root or a loop back into it.
+        let md = match entry.path().symlink_metadata() {
+            Ok(md) => md,
+            Err(_) => continue, // vanished between listing and stat — the rescan will catch up
+        };
+        let kind = if md.file_type().is_symlink() {
+            EntryKind::Symlink
+        } else if md.is_dir() {
+            EntryKind::Directory
+        } else if md.is_file() {
+            EntryKind::File
+        } else {
+            EntryKind::Other
+        };
+        out.push(DirEntry {
+            name,
+            kind,
+            fingerprint: if kind == EntryKind::File {
+                Some(fingerprint_of(&entry.path(), &md))
+            } else {
+                None
+            },
+        });
+    }
+    // A stable order so two scans of an unchanged directory produce
+    // identical results; readdir order is not guaranteed.
+    out.sort_by(|a, b| a.name.cmp(&b.name));
+    Ok(out)
+}
+
 fn io_err(path: &Path, e: std::io::Error) -> VfsError {
     match e.kind() {
         std::io::ErrorKind::NotFound => VfsError::NotFound(path.to_path_buf()),
@@ -204,60 +267,11 @@ impl Vfs for OsVfs {
     }
 
     fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
-        let rd = fs::read_dir(path).map_err(|e| io_err(path, e))?;
-        let mut out = Vec::new();
-        for entry in rd {
-            let entry = entry.map_err(|e| io_err(path, e))?;
-            let raw = entry.file_name().to_string_lossy().to_string();
-            // macOS hands back what it stored, which is decomposed, whatever
-            // spelling the file was created with. Left alone, every file with an
-            // accent in its name reads as a rename on the very next scan — the
-            // engine asks the server for `café.txt`, finds `café.txt` spelled
-            // the other way, and pushes the "new" name back. Two devices then
-            // rename it at each other forever.
-            //
-            // Lookups are unaffected: a volume that decomposes also accepts
-            // either spelling when asked for a file, so the composed form we
-            // hand back opens the same file.
-            let name = if self.personality.decomposes_unicode {
-                crate::names::nfc(&raw)
-            } else {
-                raw
-            };
-            // The engine's own spool and swap files are not part of the tree.
-            if crate::names::is_internal(&name) {
-                continue;
-            }
-            // symlink_metadata, not metadata: a symlink must be reported as a
-            // symlink rather than silently followed to whatever it points at,
-            // which could be outside the root or a loop back into it.
-            let md = match entry.path().symlink_metadata() {
-                Ok(md) => md,
-                Err(_) => continue, // vanished between listing and stat — the rescan will catch up
-            };
-            let kind = if md.file_type().is_symlink() {
-                EntryKind::Symlink
-            } else if md.is_dir() {
-                EntryKind::Directory
-            } else if md.is_file() {
-                EntryKind::File
-            } else {
-                EntryKind::Other
-            };
-            out.push(DirEntry {
-                name,
-                kind,
-                fingerprint: if kind == EntryKind::File {
-                    Some(fingerprint_of(&entry.path(), &md))
-                } else {
-                    None
-                },
-            });
-        }
-        // A stable order so two scans of an unchanged directory produce
-        // identical results; readdir order is not guaranteed.
-        out.sort_by(|a, b| a.name.cmp(&b.name));
-        Ok(out)
+        list_dir(path, &self.personality, false)
+    }
+
+    fn read_dir_all(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
+        list_dir(path, &self.personality, true)
     }
 
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {

@@ -615,20 +615,8 @@ impl MemFs {
     }
 }
 
-impl Vfs for MemFs {
-    fn personality(&self) -> Personality {
-        self.personality
-    }
-
-    fn root(&self) -> Option<PathBuf> {
-        if self.state.lock().unwrap().root_available {
-            Some(PathBuf::from("/sync"))
-        } else {
-            None
-        }
-    }
-
-    fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
+impl MemFs {
+    fn list(&self, path: &Path, include_internal: bool) -> VfsResult<Vec<DirEntry>> {
         let key = self.key_for(path)?;
         self.check_failure(FsOp::ReadDir, &key, path)?;
         let st = self.state.lock().unwrap();
@@ -651,6 +639,14 @@ impl Vfs for MemFs {
             if rest.is_empty() || rest.contains('/') {
                 continue;
             }
+            // `OsVfs` hides the engine's reserved names from an ordinary
+            // listing, so this must too: without it the simulator hands the
+            // engine files a real disk never shows it, and a recovery that can
+            // only fire on those files looks alive here while being dead in
+            // production. Sweep parity, not decoration.
+            if !include_internal && jd_vfs::is_internal(rest) {
+                continue;
+            }
             out.push(DirEntry {
                 // Composed on the way out only where `OsVfs` composes: on a
                 // volume that decomposes whatever it is given, so that the
@@ -670,6 +666,28 @@ impl Vfs for MemFs {
             });
         }
         Ok(out)
+    }
+}
+
+impl Vfs for MemFs {
+    fn personality(&self) -> Personality {
+        self.personality
+    }
+
+    fn root(&self) -> Option<PathBuf> {
+        if self.state.lock().unwrap().root_available {
+            Some(PathBuf::from("/sync"))
+        } else {
+            None
+        }
+    }
+
+    fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
+        self.list(path, false)
+    }
+
+    fn read_dir_all(&self, path: &Path) -> VfsResult<Vec<DirEntry>> {
+        self.list(path, true)
     }
 
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>> {

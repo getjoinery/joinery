@@ -15,7 +15,7 @@
  *                and an incomplete upload is aborted rather than left claimable
  * @version 1.3 - transient provider failures (5xx, 429, transport errors) are retried with
  *                backoff inside request(), bounded by a wall-clock budget
- * @version 1.2 - list() (ListObjectsV2, continuation-token paged) so the control plane
+ * @version 1.2 - list() (ListObjectsV2, continuation-token paged) so the management node
  *                can enumerate a bucket prefix without a live node
  * @version 1.1
  */
@@ -93,7 +93,7 @@ class S3Signer {
 	/**
 	 * List every object under a prefix (ListObjectsV2), following the continuation
 	 * token so a large bucket pages fully. Runs from anywhere the target credentials
-	 * are available — the control plane included — so a decommissioned node's backups
+	 * are available — the management node included — so a decommissioned node's backups
 	 * stay enumerable with no live host to proxy through.
 	 *
 	 * Returns a flat array of ['key' => string, 'size' => int, 'last_modified' => string].

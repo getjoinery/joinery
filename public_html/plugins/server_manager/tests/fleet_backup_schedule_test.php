@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * When this control plane backs each node up, and what it prunes.
+ * When this management node backs each node up, and what it prunes.
  *
  * Both halves are decisions that cannot be un-made. A due-calculation that
  * drifts either backs a node up every fifteen minutes or never; a retention pass

@@ -17,7 +17,7 @@
 #          1.2 - Runs core's own host installers before the plugin loop. The
 #                joinery-agent is the first of them: it belongs on every
 #                Joinery instance, so gating it on a plugin being active meant
-#                it never reached a managed node at all — only control planes,
+#                it never reached a managed node at all — only management nodes,
 #                where server_manager happens to be turned on. What the agent
 #                does on a given machine is decided by the agent_enabled
 #                setting, which the installer reads (specs/agent_on_node_architecture.md).

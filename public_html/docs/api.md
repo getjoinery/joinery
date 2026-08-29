@@ -33,7 +33,7 @@ The whole security boundary lives in **one class, `ApiAuth`** (`includes/ApiAuth
 | `authorize($contract, $api_entry, $user_permission, $label)` | The one authorization decision point. `$contract` is a small array — `capability` (`read`/`write`/`delete`), optional `requires_machine_key`, `min_user_permission`. Called by the CRUD verbs, the logic endpoint, and the management router. |
 | `attemptLogin()` / `revokeSessionKey()` | Credential-lifecycle decisions that the thin `ApiAuthEndpoint` (the `/auth/*` HTTP shell) delegates to. |
 
-The handler classes around it are **dispatch, not auth**: `ApiLogicEndpoint` runs an action's two faces (POST execute, GET form definition), and `ManagementApiRouter` resolves control-plane handler files. They *consume* the principal and *call* `authorize()` — they don't make auth decisions themselves. See [Two authorization axes](#two-authorization-axes) for the `apk_permission`/`usr_permission` distinction and the declarative `auth` block.
+The handler classes around it are **dispatch, not auth**: `ApiLogicEndpoint` runs an action's two faces (POST execute, GET form definition), and `ManagementApiRouter` resolves management-node handler files. They *consume* the principal and *call* `authorize()` — they don't make auth decisions themselves. See [Two authorization axes](#two-authorization-axes) for the `apk_permission`/`usr_permission` distinction and the declarative `auth` block.
 
 ## Contract
 
@@ -141,7 +141,7 @@ idle/absolute caps.
 
 ### What is *not* contract
 
-An action's `data` is contract only where its keys are documented (in this file or the owning plugin's docs). Several actions serve web pages first and return their page variables — live PHP objects that JSON-serialize as `{"key": N}` husks. Those husks, and any undocumented key, carry no compatibility promise; each action's payload becomes contract when it is documented as an API surface. The management namespace (`/api/v1/management/*`) is an internal control plane consumed only by server_manager and is versioned with it, not with app clients.
+An action's `data` is contract only where its keys are documented (in this file or the owning plugin's docs). Several actions serve web pages first and return their page variables — live PHP objects that JSON-serialize as `{"key": N}` husks. Those husks, and any undocumented key, carry no compatibility promise; each action's payload becomes contract when it is documented as an API surface. The management namespace (`/api/v1/management/*`) is an internal management node consumed only by server_manager and is versioned with it, not with app clients.
 
 ## Authentication
 
@@ -165,7 +165,7 @@ There is one auth story with **three credentials**: two key types, distinguished
 | Revocation | Admin API Keys page | `auth/logout`, the profile **App Sessions** page, the admin API Keys page (type filter), and automatically on password change | Website `/logout` (the API `auth/logout` refuses browser sessions) |
 | Management API | Allowed (with superadmin owner) | **Never** | **Never** |
 
-There is a fourth credential that is not a key at all and does not appear in that table: the **agent channel**. `/api/v1/agent/*` is how a managed node's Go agent takes work from its control plane, and it authenticates with an Ed25519 signature over a canonical message rather than a shared secret — the plane stores only the node's public key, so it holds nothing that could act as the node. It is dispatched before key authentication, has its own rate-limit bucket (`api_agent_rate_limit_requests`), and exists only where the `server_manager` plugin is active. See [Server Manager § The agent channel](../plugins/server_manager/docs/overview.md#the-agent-channel).
+There is a fourth credential that is not a key at all and does not appear in that table: the **agent channel**. `/api/v1/agent/*` is how a managed node's Go agent takes work from its management node, and it authenticates with an Ed25519 signature over a canonical message rather than a shared secret — the plane stores only the node's public key, so it holds nothing that could act as the node. It is dispatched before key authentication, has its own rate-limit bucket (`api_agent_rate_limit_requests`), and exists only where the `server_manager` plugin is active. See [Server Manager § The agent channel](../plugins/server_manager/docs/overview.md#the-agent-channel).
 
 A password change revokes **all** of the user's session keys (the lost-phone path); machine keys owned by the same user are untouched. Session keys are not IP-restricted — devices roam networks by design; the App Sessions view's device label and last-used time are the compensating visibility.
 
@@ -1065,13 +1065,13 @@ Submissions go to `POST /api/v1/action/{action_name}` with a JSON body whose key
 
 ## Management API (Read-Only)
 
-The `/api/v1/management/*` namespace is a separate **read-only** surface used by the server_manager control plane to observe managed nodes (stats, version, backup files, error log). It is **not part of the public CRUD API**: endpoints don't map to SystemBase models and have their own convention.
+The `/api/v1/management/*` namespace is a separate **read-only** surface used by the server_manager management node to observe managed nodes (stats, version, backup files, error log). It is **not part of the public CRUD API**: endpoints don't map to SystemBase models and have their own convention.
 
 ### Authorization
 
 Management endpoints reuse the existing `apk_api_keys` table unchanged. Two gates, both checked before the endpoint is resolved:
 
-- **Machine keys only.** The key's `apk_type` must be `machine`. Session keys minted by `auth/login` get 403 here regardless of who owns them — a superadmin logging into a phone app must not hold a control-plane credential. This boundary is pinned by a dedicated test in `tests/functional/api/session_keys_test.php`; treat that test as load-bearing.
+- **Machine keys only.** The key's `apk_type` must be `machine`. Session keys minted by `auth/login` get 403 here regardless of who owns them — a superadmin logging into a phone app must not hold a management-node credential. This boundary is pinned by a dedicated test in `tests/functional/api/session_keys_test.php`; treat that test as load-bearing.
 - **Superadmin owner.** The key's owning user must have `usr_permission >= 10`.
 - `apk_permission` (1–4 CRUD gradient) is NOT a gate here — it is **orthogonal** to the management check. A superadmin's machine key with `apk_permission = 1` (read-only CRUD) can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
 - All other existing auth checks (active, not deleted, not expired, IP restriction, secret verification) apply unchanged — management dispatch only happens after `apiv1.php`'s full auth chain has passed.

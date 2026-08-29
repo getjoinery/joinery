@@ -10,7 +10,7 @@
  * key, and does it for real — this file runs the script.
  *
  * WHY IT IS RUN RATHER THAN READ. The restore engine's key resolution used to
- * be supplied from outside: the control plane unsealed <archive>.keys.json with
+ * be supplied from outside: the management node unsealed <archive>.keys.json with
  * the node's backup_site_key and passed the result as --key-file. A node
  * restoring on its own behalf over the agent channel has no such helper, so
  * without a fallback inside the script an envelope-sealed archive is restorable

@@ -163,7 +163,7 @@
       "group": "backups",
       "label": "Name this site files backups under",
       "type": "text",
-      "helptext": "The folder inside the bucket that holds this site's backups. Blank uses the project directory name, which is also what a fleet control plane would call this site — so leaving it blank keeps one pile rather than starting a second beside the first. Letters, numbers, hyphens and underscores only."
+      "helptext": "The folder inside the bucket that holds this site's backups. Blank uses the project directory name, which is also what a fleet management node would call this site — so leaving it blank keeps one pile rather than starting a second beside the first. Letters, numbers, hyphens and underscores only."
     },
     {
       "name": "activation_required_login",
@@ -2609,7 +2609,7 @@
       "name": "managed_domain_name",
       "default": "",
       "managed": true,
-      "helptext": "The domain this deployment's operator registered on the owner's behalf. Written by the control plane; empty on every other deployment."
+      "helptext": "The domain this deployment's operator registered on the owner's behalf. Written by the management node; empty on every other deployment."
     },
     {
       "name": "managed_domain_expiry_time",

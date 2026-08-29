@@ -266,8 +266,8 @@ class NodeMonitorHealth {
 		if (!$setup['is_ready']) {
 			return [[
 				'node'   => null,
-				'slug'   => 'control-plane',
-				'name'   => 'Control plane',
+				'slug'   => 'management-node',
+				'name'   => 'Management node',
 				'id'     => 0,
 				'link'   => BackupRecoveryKey::SETUP_URL,
 				'health' => self::result('recovery', 'Backup key recovery not set up',
@@ -281,8 +281,8 @@ class NodeMonitorHealth {
 			&& !self::has_offsite_project_backup()) {
 			$problems[] = [
 				'node'   => null,
-				'slug'   => 'control-plane',
-				'name'   => 'Control plane',
+				'slug'   => 'management-node',
+				'name'   => 'Management node',
 				'id'     => 0,
 				'link'   => '/admin/admin_backups',
 				'health' => self::result('recovery', 'Fleet trust root not yet backed up',
@@ -298,7 +298,7 @@ class NodeMonitorHealth {
 	private static function has_offsite_project_backup(): bool {
 		try {
 			require_once(PathHelper::getIncludePath('data/backup_history_class.php'));
-			// This site's OWN backups. A copy some other control plane took of
+			// This site's OWN backups. A copy some other management node took of
 			// this machine is sealed to that party's key and lives on its shelf,
 			// so it is not evidence that the trust root here is recoverable.
 			$rows = new MultiBackupHistory(
@@ -316,11 +316,11 @@ class NodeMonitorHealth {
 	}
 
 	/**
-	 * Nodes whose backups THIS control plane takes are not working.
+	 * Nodes whose backups THIS management node takes are not working.
 	 *
 	 * The alarm is "my backups of this node are broken", not "this node is
 	 * unprotected". Whether a site also backs itself up is that site's business,
-	 * under its own key, and this control plane is not in a position to judge it:
+	 * under its own key, and this management node is not in a position to judge it:
 	 * a site taking no copies of its own is exercising a choice, and one taking
 	 * plenty is no reason to stop taking mine.
 	 *
@@ -398,7 +398,7 @@ class NodeMonitorHealth {
 		}
 
 		// The node's report and the bucket disagree. The report says the last
-		// run succeeded; the shelf — listed from here with this control plane's
+		// run succeeded; the shelf — listed from here with this management node's
 		// own credential, after that run — holds nothing written since. The
 		// shelf is the one witness a compromised or misconfigured node cannot
 		// talk into its story, so this is the only check that catches a node

@@ -12,7 +12,7 @@
  *                  with an override. The key is minted per artifact and stored nowhere else.
  * @version 1.2.0 - upload_file: push a local-only backup to the node's cloud target, for a
  *                  backup stranded on the node by a transient upload failure.
- * @version 1.1.0 - cloud deletes run control-plane-side via TargetBackups (no agent,
+ * @version 1.1.0 - cloud deletes run management-node-side via TargetBackups (no agent,
  *                  real success/failure); local deletes still run as a node job.
  * @version 1.0.0
  */
@@ -94,7 +94,7 @@ function backup_actions_logic(array $input): LogicResult {
 		$want_cloud = ($target === 'cloud' || $target === 'both') && $cloud_path !== '';
 		$want_local = ($target === 'local' || $target === 'both') && $local_path !== '';
 
-		// The cloud copy is deleted straight from the control plane via S3Signer. It
+		// The cloud copy is deleted straight from the management node via S3Signer. It
 		// needs no live node and no agent, and it reports a real success/failure —
 		// unlike a node job, whose cloud-delete step can only unseal the target
 		// credentials on agent >= 0.4.0 and otherwise no-ops while the job still

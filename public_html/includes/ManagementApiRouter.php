@@ -8,7 +8,7 @@
  *
  * Authorization: the key must be a machine key (apk_type = machine) AND the
  * owning user's permission must be >= 10 (superadmin). Session keys minted by
- * auth/login never reach the control plane — a superadmin logging into a phone
+ * auth/login never reach the management node — a superadmin logging into a phone
  * app must not mint a management credential. apk_permission is the CRUD-axis
  * permission; it is NOT the gate used here.
  *
@@ -50,7 +50,7 @@ class ManagementApiRouter {
 	 * $api_entry is the authenticated ApiKey (machine-key gate).
 	 */
 	public static function dispatch($url_segments, $auth_data, $request_method, $api_entry) {
-		// Authorization — the control-plane default: a machine key owned by a
+		// Authorization — the management-node default: a machine key owned by a
 		// superadmin. Enforced up front, before the endpoint is resolved, so an
 		// unknown path still fails closed (403) for an unauthorized caller rather
 		// than leaking 404s. A handler may TIGHTEN this via its ['auth'] block

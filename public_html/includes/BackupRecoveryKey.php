@@ -17,8 +17,8 @@
  *
  * @version 1.2 - the key is established on this site alone. Nothing writes it from outside and no
  *                proof established elsewhere is accepted here; key_report() reports, and that is
- *                the whole of what a control plane may do with this setting
- * @version 1.1 - key_report(), so a control plane can see what a site holds
+ *                the whole of what a management node may do with this setting
+ * @version 1.1 - key_report(), so a management node can see what a site holds
  * @version 1.0 - extracted to core from the server_manager custody class; covers the recovery
  *                key only, because per-node key escrow no longer exists
  */
@@ -299,7 +299,7 @@ class BackupRecoveryKey {
 	/**
 	 * What this site is holding, in the form something outside it can compare.
 	 *
-	 * A control plane deciding whether a site needs a recovery key must be able
+	 * A management node deciding whether a site needs a recovery key must be able
 	 * to ask without ever handling a private key, and must be able to tell "this
 	 * is the key I manage" from "this is somebody else's key" — so the answer is
 	 * the full fingerprint rather than the abbreviated one the UI shows.
@@ -332,7 +332,7 @@ class BackupRecoveryKey {
 	 * That is why there is no push path and no fingerprint-accepting shortcut:
 	 * set_public_key() plus record_possession_proof(), driven from this site's
 	 * own Backups page, is the whole vocabulary. key_report() answers what a
-	 * control plane may ask — which key this site holds — and asking is all it
+	 * management node may ask — which key this site holds — and asking is all it
 	 * may do.
 	 */
 

@@ -8,7 +8,7 @@
  * @version 1.15 - escrow alert covers recovery-not-set-up as its own row and links to the guided
  *                 walkthrough; heading no longer assumes every row is a node
  * @version 1.14 - Show-all-sites toggle (?show_all=1) surfaces removed (soft-deleted) nodes with a Removed badge
- * @version 1.13 - control-plane-level escrow problems (agent signing key) render without a node link
+ * @version 1.13 - management-node-level escrow problems (agent signing key) render without a node link
  * @version 1.12 - Sweep reconciles all JobResultProcessor-handled types (P-17), not a hardcoded 3
  * @version 1.11 - Shared server_manager.js asset (smApiPost/smEsc/smSafeUrl)
  *          1.10 - Agent self-update surfacing: pending/refused/rolled-back
@@ -94,7 +94,7 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMon
 $monitor_problems = NodeMonitorHealth::problems();
 $recovery_problems = NodeMonitorHealth::backup_recovery_problems();
 
-// Nodes whose backups THIS control plane takes are failing or have stopped.
+// Nodes whose backups THIS management node takes are failing or have stopped.
 // Deliberately not "nodes without backups": whether a site backs itself up is
 // that site's business under its own key, and a node with fleet backups
 // switched off was switched off on purpose. What stops a node falling through
@@ -144,7 +144,7 @@ if ($agent_online) {
 		$agent_update_alert = "Agent v{$bundled} failed to start on this host and was rolled back; the agent is holding at v{$agent->get('ahb_agent_version')} until a newer release ships.";
 		$agent_update_class = 'danger';
 	} elseif ($update_state === 'unsigned_build') {
-		$agent_update_alert = "Agent v{$bundled} is available, but the running agent was built without an update key and cannot self-update. Reinstall once from a published build (Run Plugin Installers on this control plane).";
+		$agent_update_alert = "Agent v{$bundled} is available, but the running agent was built without an update key and cannot self-update. Reinstall once from a published build (Run Plugin Installers on this management node).";
 	} elseif ($bundled && $agent->get('ahb_agent_version') && $bundled !== $agent->get('ahb_agent_version')) {
 		$agent_update_alert = "Agent update to v{$bundled} pending (running v{$agent->get('ahb_agent_version')}). The agent installs it automatically between jobs.";
 	}
@@ -191,7 +191,7 @@ if ($agent_online) {
 		<div class="card-footer">
 			<small class="text-muted">
 				<?php if (!$agent): ?>
-					The joinery-agent service runs on the control plane and services all connected sites.
+					The joinery-agent service runs on the management node and services all connected sites.
 					Install it here: <code>cd /home/user1/joinery-agent &amp;&amp; make release VERSION=1.0.0 &amp;&amp; sudo bash joinery-agent-installer.sh --verbose</code>
 				<?php else: ?>
 					The agent was last seen <?php echo LibraryFunctions::time_ago_or_time($agent->get('ahb_last_heartbeat'), 'UTC', $session->get_timezone(), 'M j, g:i:s A'); ?>.
@@ -231,7 +231,7 @@ if ($agent_online) {
 			<li>
 				<?php if ((int)$p['id'] > 0): ?>
 					<a href="/admin/server_manager/node_detail?mgn_id=<?php echo (int)$p['id']; ?>&tab=backups" class="alert-link"><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></a>
-				<?php else: // control-plane-level problem (recovery setup, agent signing key) ?>
+				<?php else: // management-node-level problem (recovery setup, agent signing key) ?>
 					<strong><?php echo htmlspecialchars($p['name'] ?: $p['slug']); ?></strong>
 				<?php endif; ?>
 				&mdash; <?php echo htmlspecialchars($p['health']['detail']); ?>
@@ -244,7 +244,7 @@ if ($agent_online) {
 </div>
 <?php endif; ?>
 
-<?php // Backups this control plane takes are not happening. Its own runs, its
+<?php // Backups this management node takes are not happening. Its own runs, its
       // own shelf, its own responsibility — which is why this is an alarm.
       // Two shapes land here and both belong: runs that fail or stop landing,
       // and nodes that cannot be backed up at all because they hold no verified
@@ -543,9 +543,9 @@ function render_node_row($node, $db, $session) {
 				<?php endif; ?>
 				<span class="js-version-indicator">
 					<?php if ($version_cmp === -1): ?>
-						<span class="badge bg-warning ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">upgrade available</span>
+						<span class="badge bg-warning ms-1" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">upgrade available</span>
 					<?php elseif ($version_cmp === 1): ?>
-						<span class="badge bg-danger ms-1" title="Control plane is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">ahead of control plane</span>
+						<span class="badge bg-danger ms-1" title="Management node is at <?php echo htmlspecialchars($cp_version ?? ''); ?>">ahead of management node</span>
 					<?php endif; ?>
 				</span>
 				<small class="text-muted ms-1 js-last-check"><?php
@@ -599,11 +599,11 @@ function render_node_row($node, $db, $session) {
 				if (versionSpan && 'version_cmp' in j && j.version_cmp !== null) {
 					versionSpan.innerHTML = '';
 					if (j.version_cmp === -1) {
-						versionSpan.innerHTML = ' <span class="badge bg-warning ms-1" title="Control plane is at ' +
+						versionSpan.innerHTML = ' <span class="badge bg-warning ms-1" title="Management node is at ' +
 							(j.cp_version || '') + '">upgrade available</span>';
 					} else if (j.version_cmp === 1) {
-						versionSpan.innerHTML = ' <span class="badge bg-danger ms-1" title="Control plane is at ' +
-							(j.cp_version || '') + '">ahead of control plane</span>';
+						versionSpan.innerHTML = ' <span class="badge bg-danger ms-1" title="Management node is at ' +
+							(j.cp_version || '') + '">ahead of management node</span>';
 					}
 				}
 

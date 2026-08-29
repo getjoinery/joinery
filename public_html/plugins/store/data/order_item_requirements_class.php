@@ -23,7 +23,7 @@ class OrderItemRequirement extends SystemBase {	public static $prefix = 'oir';
 		'oir_qst_question_id' => ['action' => 'null'],
 	];
 
-	// REST CRUD exposure (Layer 1): the provisioning control plane polls
+	// REST CRUD exposure (Layer 1): the provisioning management node polls
 	// these rows (checkout answers, e.g. the hosting domain question) over
 	// the API. Read-only surface; reads require permission >= 5.
 	public static $api_readable = true;

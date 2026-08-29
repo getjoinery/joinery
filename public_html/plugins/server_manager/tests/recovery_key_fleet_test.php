@@ -9,7 +9,7 @@
  * Which nodes can be backed up at all.
  *
  * Every backup of a node seals to the recovery key that node holds and has
- * proven, read there — the copies this control plane takes as much as the copies
+ * proven, read there — the copies this management node takes as much as the copies
  * the node takes for itself. Nothing supplies a key from here: sealing to a
  * public key always appears to succeed, so a key sent over the wire would let
  * whoever sent it decide who can read a node's database and mail, with nothing
@@ -22,7 +22,7 @@
  *
  *   - proof is the whole test — an unproven key is indistinguishable from a
  *     mistyped one until the moment the answer can no longer be acted on;
- *   - whose key it is is not compared against this control plane's: a node
+ *   - whose key it is is not compared against this management node's: a node
  *     holding a key this machine has never seen is the intended arrangement,
  *     not a discrepancy to correct;
  *   - a node that hosts no Joinery site (a DNS box, a relay) is not applicable
@@ -68,7 +68,7 @@ function rkf_node(array $fields = array(), $recovery = null) {
 	return $node;
 }
 
-$theirs = str_repeat('b2', 32);   // a key this control plane has never seen
+$theirs = str_repeat('b2', 32);   // a key this management node has never seen
 $ours   = str_repeat('c3', 32);   // one it happens to recognise
 
 // ── Not applicable ──────────────────────────────────────────────────────────
@@ -99,12 +99,12 @@ foreach (array('unconfigured', 'invalid') as $reported) {
 	check($state['state'] === 'missing', "a node reporting '{$reported}' has no key", $state['state']);
 	check(!RecoveryKeyFleet::has_own_key($state), "and '{$reported}' cannot be backed up");
 	check(strpos($state['summary'], 'including the ones taken from here') !== false,
-		"the '{$reported}' summary says the control plane's own copies stop too", $state['summary']);
+		"the '{$reported}' summary says the management node's own copies stop too", $state['summary']);
 }
 
 $state = RecoveryKeyFleet::node_state(rkf_node([], array('unconfigured', '')));
 check(strpos(RecoveryKeyFleet::blocker_summary($state), 'cannot supply one') !== false,
-	'and the fix is named as the node\'s, explicitly not this control plane\'s',
+	'and the fix is named as the node\'s, explicitly not this management node\'s',
 	RecoveryKeyFleet::blocker_summary($state));
 
 check(!method_exists('JobCommandBuilder', 'build_push_recovery_key'),
@@ -130,9 +130,9 @@ foreach (array($ours, $theirs) as $fpr) {
 section('A proven key is the whole test, whoever holds it');
 
 // Whose key it is is deliberately not compared. A node holding a key this
-// control plane has never seen is a node whose operator holds their own recovery
+// management node has never seen is a node whose operator holds their own recovery
 // key — which is the point of the arrangement, not a discrepancy.
-foreach (array('the control plane recognises' => $ours, 'it has never seen' => $theirs) as $label => $fpr) {
+foreach (array('the management node recognises' => $ours, 'it has never seen' => $theirs) as $label => $fpr) {
 	$state = RecoveryKeyFleet::node_state(rkf_node([], array('proven', $fpr)));
 	check($state['state'] === 'proven', "a proven key {$label} reads as proven", $state['state']);
 	check(RecoveryKeyFleet::has_own_key($state), "and a node with a key {$label} can be backed up");
@@ -141,6 +141,6 @@ foreach (array('the control plane recognises' => $ours, 'it has never seen' => $
 }
 
 check(!method_exists('RecoveryKeyFleet', 'manager_fingerprint'),
-	'this control plane\'s own key is not consulted at all — there is nothing to compare against');
+	'this management node\'s own key is not consulted at all — there is nothing to compare against');
 
 harness_finish();

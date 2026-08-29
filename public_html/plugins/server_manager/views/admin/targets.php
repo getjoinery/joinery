@@ -6,7 +6,7 @@
  * CRUD page for managing backup storage targets (B2, S3, Linode).
  *
  * @version 2.6 - node credential (write-only): a target can hold a second key handed to nodes
- *                during a backup run, so the delete-capable key never leaves the control plane.
+ *                during a backup run, so the delete-capable key never leaves the management node.
  *                B2 and S3 only; Linode cannot express write-without-delete and says so.
  * @version 2.5 - recovery key setup is drawn once, on the core Backups page; this page keeps the
  *                standing state line and links there. The three POST handlers that served the
@@ -14,7 +14,7 @@
  * @version 2.4 - guided backup key recovery walkthrough (detects the outstanding step and walks
  *                it) replaces the bare verify card; public-key save/clear and bulk node escrow
  *                actions added
- * @version 2.3 - Stored Backups panel: list + delete offsite objects from the control plane
+ * @version 2.3 - Stored Backups panel: list + delete offsite objects from the management node
  *                (node-independent), grouped by site with live/decommissioned/orphaned tags
  * @version 2.2 - possession check for the recovery key; CSRF on the save handler; undecryptable stored credentials surfaced instead of silently merged
  */
@@ -79,7 +79,7 @@ if ($post_action === 'delete_target' && $is_edit) {
 // RecoveryKeySetupPanel. This page shows the standing state and links there.
 
 // Delete every offsite backup object for one site (whole slug prefix). Run from the
-// control plane against the bucket — no live node needed, so a decommissioned site's
+// management node against the bucket — no live node needed, so a decommissioned site's
 // backups are still reachable. Type-to-confirm on the client, slug-validated on the server.
 if ($post_action === 'delete_backup_prefix' && $is_edit) {
 	if (!SmAdminCsrf::valid()) { header('Location: /admin/server_manager/targets'); exit; }
@@ -358,8 +358,8 @@ echo '</div>';
 // ── Which nodes can be backed up at all ──
 // Every backup of a node seals to the recovery key that NODE holds and has
 // proven, read there — the copies taken from here as much as the copies it takes
-// for itself. Nothing supplies a key from this control plane, because a key sent
-// from here would let this control plane decide who can open a node's database
+// for itself. Nothing supplies a key from this management node, because a key sent
+// from here would let this management node decide who can open a node's database
 // and mail, with nothing anywhere looking wrong. So a node with no verified key
 // is not a node with a preference; it is a node nobody is backing up, and this
 // table is the fleet's coverage list.
@@ -377,7 +377,7 @@ if ($rk_rows) {
 	$page->begin_box(['title' => 'Which nodes can be backed up']);
 	echo '<p class="text-muted">A backup is encrypted to the recovery key the node itself holds and '
 	   . 'has verified, and that key is set up by whoever administers the node, on the node\'s own '
-	   . 'Backups page. This control plane deliberately cannot supply one &mdash; a key sent from here '
+	   . 'Backups page. This management node deliberately cannot supply one &mdash; a key sent from here '
 	   . 'would be a key this machine could open every node\'s backups with. A node without a verified '
 	   . 'key takes no backups, including the ones scheduled from here.</p>';
 	echo '<table class="table table-sm"><thead><tr>'
@@ -549,7 +549,7 @@ if ($target !== null) {
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
 		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
 	$formwriter->textinput('node_cred_key_id', 'Node Application Key ID', [
-		'helptext' => 'Optional second B2 key, created with write but not delete capability on this bucket. Nodes are handed this key during a backup run, so a compromised node cannot erase the shelf; the main key above never leaves this control plane.',
+		'helptext' => 'Optional second B2 key, created with write but not delete capability on this bucket. Nodes are handed this key during a backup run, so a compromised node cannot erase the shelf; the main key above never leaves this management node.',
 	]);
 	$formwriter->passwordinput('node_cred_app_key', 'Node Application Key', [
 		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
@@ -560,7 +560,7 @@ if ($target !== null) {
 	echo '<p class="fw-semibold text-muted mt-2 mb-1">Node Credential (write-only)'
 		. ($has_node_creds ? ' <span class="badge bg-success">configured</span>' : '') . '</p>';
 	$formwriter->textinput('node_cred_s3_access_key', 'Node Access Key', [
-		'helptext' => 'Optional second key from an IAM user allowed s3:PutObject but not s3:DeleteObject on this bucket. Nodes are handed this key during a backup run; the main key above never leaves this control plane.',
+		'helptext' => 'Optional second key from an IAM user allowed s3:PutObject but not s3:DeleteObject on this bucket. Nodes are handed this key during a backup run; the main key above never leaves this management node.',
 	]);
 	$formwriter->passwordinput('node_cred_s3_secret_key', 'Node Secret Key', [
 		'helptext' => $has_node_creds ? 'Leave blank to keep the current key.' : 'Leave empty to keep handing nodes the main key.',
@@ -594,7 +594,7 @@ if ($target !== null) {
 
 	$page->end_box();
 
-	// ── Stored Backups (control-plane view of the bucket) ──
+	// ── Stored Backups (management-node view of the bucket) ──
 	if ($is_edit) {
 		$fmt_bytes = function ($b) {
 			if ($b >= 1073741824) return round($b / 1073741824, 1) . ' GB';

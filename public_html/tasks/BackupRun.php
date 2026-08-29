@@ -8,8 +8,8 @@
  * a target on the Backups page is what turns it on.
  *
  * This is the SITE's scheduler. The profile is pinned here rather than taken
- * from task config: a control plane's backups of this site are triggered by that
- * control plane, on its own schedule, and must not be startable by editing a row
+ * from task config: a management node's backups of this site are triggered by that
+ * management node, on its own schedule, and must not be startable by editing a row
  * in this site's task table.
  *
  * @version 1.1 - pinned to the site profile

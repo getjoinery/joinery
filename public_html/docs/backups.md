@@ -12,7 +12,7 @@ Configured at **Admin → System → Backups** (`/admin/admin_backups`).
 ## Two parties, two profiles
 
 A site can be backed up by more than one party. It backs itself up, and a
-control plane managing it may take its own copies. Those are not two ways of
+management node managing it may take its own copies. Those are not two ways of
 doing one thing — they are two parties' backups, on two schedules, onto two
 shelves, answerable to two people. They open with the same key, because that key
 belongs to the machine and its administrator, not to whoever asked for the run.
@@ -21,18 +21,18 @@ A **profile** (`includes/BackupProfile.php`) is the unit that keeps them apart:
 
 | | `site` | `manager` |
 |---|---|---|
-| Configured by | the site's admin, on its Backups page | the control plane |
-| Triggered by | the `Backup` scheduled task | the control plane's `FleetBackupRun` |
+| Configured by | the site's admin, on its Backups page | the management node |
+| Triggered by | the `Backup` scheduled task | the management node's `FleetBackupRun` |
 | Executed by | `BackupRunner` on the machine | `BackupRunner` on the machine |
 | Recovery key | the site's own `backup_recovery_public_key` | the site's own `backup_recovery_public_key` |
 | Bucket credentials | stored on the machine | supplied per run, never stored; write-only via the target's node credential |
-| Prunes the shelf | the site | the control plane |
-| Depends on | nothing | the control plane being alive at the scheduled moment |
+| Prunes the shelf | the site | the management node |
+| Depends on | nothing | the management node being alive at the scheduled moment |
 
 Both run the same engine, so chains, envelopes, deletion replay and history are
 written once and behave identically for both.
 
-**The recovery key is the one thing a control plane does not supply.** It says
+**The recovery key is the one thing a management node does not supply.** It says
 where a backup goes and hands over a write-only credential to put it there; what
 opens the archive is read on the machine, from that machine's own verified
 setting. A manager run that arrives carrying key material is refused, not
@@ -49,18 +49,18 @@ The cost is accepted deliberately: opening a machine's backups needs that
 machine's recovery key, and no single key opens a fleet.
 
 **Neither profile owns the site's backups.** They are peers. A site admin who
-wants copies of their own as well as the control plane's just sets their profile
-up; a control plane keeps taking its own whatever the site does. Two backups a
+wants copies of their own as well as the management node's just sets their profile
+up; a management node keeps taking its own whatever the site does. Two backups a
 night of one machine is a supported configuration, not a misconfiguration to be
 detected.
 
 The asymmetry in the last row is the safety argument: **the site profile depends
-on nothing.** A control plane that is down, retired or hostile costs a site
+on nothing.** A management node that is down, retired or hostile costs a site
 nothing it was relying on.
 
 Everything a run touches that could collide with another run is derived from the
 profile: the working directory (`backups/` for the site, `backups/manager/` for a
-control plane's), and therefore the lock, the tar snapshot, the chain manifest,
+management node's), and therefore the lock, the tar snapshot, the chain manifest,
 the envelope scratch and the local sweep. Sharing a snapshot alone would corrupt
 both chains — each run advances it, so each profile would treat the other's work
 as already archived.
@@ -97,7 +97,7 @@ the next was 37 kB.
 ```
 
 Everything is AES-256-CBC (PBKDF2, random salt). `slug` defaults to the project
-directory name — the same value a control plane would use for this site — so a
+directory name — the same value a management node would use for this site — so a
 standalone site that later joins a fleet keeps one location instead of starting
 a second pile beside the first. `profile` separates the parties, so a listing can
 always say whose backup an object is and each party's retention addresses only
@@ -257,13 +257,13 @@ Every run mints its own random data key, encrypts the archive with it, and seals
 that key to two recipients:
 
 - **recovery** — the site's own `backup_recovery_public_key`, read from this
-  site's settings. Both profiles seal to it: a control plane's copies of this
+  site's settings. Both profiles seal to it: a management node's copies of this
   site open with the same key the site's own copies do, held by the same
   custodian. The private half lives in a password manager and never touches a
   server. A site holds only the public half, so the same key can be configured on
   any number of sites and one private key opens every backup from all of them —
   which is a choice each operator makes for their own sites, not something a
-  control plane can arrange from outside.
+  management node can arrange from outside.
 - **site** — a keypair the site itself holds at `config/backup_site_key`. This is
   what lets a site restore itself unattended: pre-restore rollback snapshots and
   routine restores need no operator. It is disposable — lose it and the recovery
@@ -417,11 +417,11 @@ this site holds and refuses to write it, and a management job that passes key
 material is refused by the tool it passes it to.
 
 **An empty slot means this site takes no backups, for anybody.** Not its own, and
-not a control plane's copies of it — there is no key those could be sealed to,
+not a management node's copies of it — there is no key those could be sealed to,
 and an unencrypted whole-site archive on somebody else's shelf is not a fallback.
 Set the key up at Admin → System → Backups: the page generates a keypair in the
-browser and runs the possession challenge in one pass, needing no control plane
-and no shell. A control plane managing this site can see that the slot is empty
+browser and runs the possession challenge in one pass, needing no management node
+and no shell. A management node managing this site can see that the slot is empty
 and say so on its dashboard — see
 [Server Manager](../plugins/server_manager/docs/overview.md#backups-across-the-fleet)
 — and that is the whole of what it can do about it.
@@ -542,7 +542,7 @@ time.
 ## Scheduling
 
 The **Backup** scheduled task (`tasks/BackupRun.php`) runs this site's own
-backups — it is pinned to the site profile, so a control plane's copies can never
+backups — it is pinned to the site profile, so a management node's copies can never
 be started by editing a row in this site's task table. It is not active
 on install: a site with no target configured runs nothing and warns about
 nothing. Activate it on **Scheduled Tasks**, where its frequency and time are

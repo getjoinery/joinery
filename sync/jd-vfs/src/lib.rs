@@ -191,6 +191,20 @@ pub trait Vfs: Send + Sync {
     /// Lookups are unaffected: a volume that decomposes also accepts either
     /// spelling when asked for a file by name.
     fn read_dir(&self, path: &Path) -> VfsResult<Vec<DirEntry>>;
+
+    /// The same listing INCLUDING the engine's own reserved names.
+    ///
+    /// `read_dir` hides anything starting with [`INTERNAL_PREFIX`], which is
+    /// right for every caller building a picture of the user's tree. It is
+    /// wrong for the one caller whose job is to find what that filter hides: a
+    /// scratch name left on the disk by an operation that never came back is
+    /// invisible to a walk that skips scratch names, so the recovery for it can
+    /// never fire.
+    ///
+    /// Kept as a separate method rather than by relaxing `read_dir`, so the
+    /// safety stays a property of the default listing instead of a convention
+    /// every future caller has to remember.
+    fn read_dir_all(&self, path: &Path) -> VfsResult<Vec<DirEntry>>;
     fn fingerprint(&self, path: &Path) -> VfsResult<Option<Fingerprint>>;
     fn hash(&self, path: &Path) -> VfsResult<String>;
 

@@ -270,8 +270,8 @@ check(substr_count($install_src, '--allow-unsupported-os) ALLOW_UNSUPPORTED_OS=1
 section('A deferred certificate finishes on its own');
 
 // The install no longer aborts when DNS is not ready — but nothing on the node
-// ever retried either. That logic lived only in the control plane, and this
-// path has no control plane.
+// ever retried either. That logic lived only in the management node, and this
+// path has no management node.
 check(strpos($install_src, 'install_ssl_retry_timer') !== false,
     'a deferred certificate installs a retry timer');
 
@@ -850,7 +850,7 @@ check($excl_at !== false && $negate_at !== false && $excl_at < $negate_at,
     'in that order, since the last matching dockerignore rule wins');
 
 // The warning names what it skipped. Executed against a fixture shaped like a
-// live control-plane config, because a find predicate that quietly misses a file
+// live management-node config, because a find predicate that quietly misses a file
 // is a file that ships.
 $fixture = sys_get_temp_dir() . '/joinery_cfgfix_' . getmypid();
 @mkdir($fixture, 0700, true);
@@ -976,12 +976,12 @@ foreach ([
 }
 
 
-section('The agent reaches every node, not only control planes');
+section('The agent reaches every node, not only management nodes');
 
 // The agent is core: it does a machine's own backups, upgrades and health
 // checks, and is how that machine is managed at all once SSH goes. It shipped
 // as the server_manager plugin's host_installer, and the runner only runs
-// ACTIVE plugins' installers — server_manager is active on control planes and
+// ACTIVE plugins' installers — server_manager is active on management nodes and
 // nowhere else, so the agent reached two machines out of twelve and the spec
 // read "the rollout cost is configuration, not deployment" while no managed
 // node had a binary at all (surveyed 2026-08-26).
@@ -1003,13 +1003,13 @@ check($core_at !== false && $plugins_at !== false && $core_at < $plugins_at,
 check(preg_match('/bash "\$\{CORE_PATH\}" "\$\{SITENAME\}"/', $runner_src) === 1,
     'the core installer is told which site it is installing for');
 
-// And it must not also be a plugin installer, or a control plane runs it twice.
+// And it must not also be a plugin installer, or a management node runs it twice.
 $sm_manifest = json_decode(file_get_contents(
     PathHelper::getIncludePath('plugins/server_manager/plugin.json')), true);
 check(is_array($sm_manifest), 'server_manager plugin.json parses');
 check(!isset($sm_manifest['host_installer']),
     'server_manager no longer declares the agent installer as its own',
-    'a control plane would run it twice: once as core, once as the plugin');
+    'a management node would run it twice: once as core, once as the plugin');
 
 // What the agent does on a given machine is one setting. An installer that
 // ignored it would turn a root service on everywhere at the next upgrade.

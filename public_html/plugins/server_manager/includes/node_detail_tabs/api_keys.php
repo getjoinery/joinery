@@ -25,8 +25,8 @@
 
 	$pageoptions = ['title' => 'API Credential'];
 	$page->begin_box($pageoptions);
-	echo '<p class="text-muted small mb-3">Pastable API credentials let the control plane use this node\'s HTTP management API instead of SSH for read-only operations (stats, version, backup listing, backup fetch). ';
-	echo 'Create a key on the node: Admin → API Keys, owned by a superadmin user, with permission 1 (read-only). IP-restrict to this control plane\'s egress IP.</p>';
+	echo '<p class="text-muted small mb-3">Pastable API credentials let the management node use this node\'s HTTP management API instead of SSH for read-only operations (stats, version, backup listing, backup fetch). ';
+	echo 'Create a key on the node: Admin → API Keys, owned by a superadmin user, with permission 1 (read-only). IP-restrict to this management node\'s egress IP.</p>';
 
 	if ($has_api_pub && $has_api_sec) {
 		echo '<div class="mb-2"><span class="badge bg-success">Configured</span>';

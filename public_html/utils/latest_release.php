@@ -4,11 +4,11 @@
  *
  * Redirects to the most recent Joinery release archive.
  * Used by one-liner install commands and the install_node job to fetch the
- * latest version from a control plane.
+ * latest version from a management node.
  *
  * A site that publishes releases serves its own newest archive. A site that
  * consumes releases from an upstream (upgrade_source setting) chains to the
- * upstream's same endpoint, so any control plane can hand out an installable
+ * upstream's same endpoint, so any management node can hand out an installable
  * release regardless of where it sits in the distribution chain. Rows whose
  * archive file is gone from static_files (relics of an earlier publishing
  * role) are skipped, never served.

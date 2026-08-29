@@ -41,14 +41,14 @@
  * @version 1.10 - agent channel actions: pair_agent (one-time token, shown once), unpair_agent,
  *                 and set_agent_channel (the per-node cutover flag)
  * @version 1.9 - a backup is refused for a node with no verified recovery key of its own, named as
- *                such on the tab; the control plane's own key is no longer consulted, because no
+ *                such on the tab; the management node's own key is no longer consulted, because no
  *                key is supplied to a node
  * @version 1.8 - save_backup_policy action (fleet default / custom schedule / off), and backup_run
  *                takes mode and full-interval from the node's policy so a manual run extends the
  *                same family of restore points the schedule builds
  * @version 1.7 - run_command action (node console): superadmin + per-node flag + step-up, and a
  *                refusal re-renders in place so the typed command survives
- * @version 1.6 - backup key escrow runs as a job step on the control plane (the web user cannot read
+ * @version 1.6 - backup key escrow runs as a job step on the management node (the web user cannot read
  *                node SSH keys); the web request only checks that recovery is set up before letting
  *                an encrypting backup be created
  * @version 1.5 - purge_node refuses while offsite backups exist for the slug (or a target can't be
@@ -149,7 +149,7 @@ class NodeDetailActions {
 			}
 
 			case 'backup_run': {
-				// This control plane's own backup of the node, run now instead of
+				// This management node's own backup of the node, run now instead of
 				// waiting for its schedule. Same engine, same chain, same shelf
 				// and same retention as the scheduled one — an on-demand backup
 				// that landed somewhere else would be a restore point nobody's

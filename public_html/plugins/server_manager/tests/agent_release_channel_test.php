@@ -144,7 +144,7 @@ section('publish() status contract: a failed rebuild is distinguishable from a c
 // The distinction is what lets publish_upgrade.php refuse a release rather than
 // ship a bundle it already knows is stale. Getting it wrong in either direction
 // is costly: treat a failure as benign and the release goes out wrong; treat a
-// box without agent source as a failure and control planes cannot publish.
+// box without agent source as a failure and management nodes cannot publish.
 //
 // Everything below runs against throwaway directories with the agent source
 // path overridden in memory for this process only.

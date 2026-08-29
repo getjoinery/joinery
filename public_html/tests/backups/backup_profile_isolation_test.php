@@ -8,7 +8,7 @@
 /**
  * Two parties backing up one site must not collide.
  *
- * A site backs itself up; a control plane managing it takes its own copies.
+ * A site backs itself up; a management node managing it takes its own copies.
  * Those are two parties' backups, and every place they could touch — working
  * directory, lock, tar snapshot, bucket path, envelope recipient, local sweep —
  * has to keep them apart. They are not kept apart by key: both seal to the key
@@ -82,7 +82,7 @@ check(BackupProfile::path_segment(BackupProfile::SITE) !== BackupProfile::path_s
 section('Both profiles seal to the machine\'s own key, and only that one');
 
 $here_recovery  = sodium_crypto_box_keypair();   // this machine's own recovery key
-$other_recovery = sodium_crypto_box_keypair();   // a control plane's, or anyone else's
+$other_recovery = sodium_crypto_box_keypair();   // a management node's, or anyone else's
 $site_key       = sodium_crypto_box_keypair();   // this machine's disposable site key
 
 $data_key = base64_encode(random_bytes(32));
@@ -106,7 +106,7 @@ $opened = null;
 try { $opened = BackupEnvelope::open($envelope, sodium_crypto_box_secretkey($other_recovery)); }
 catch (Throwable $e) { $opened = false; }
 check($opened === false || $opened === null,
-	'a control plane\'s own recovery key does NOT open a backup taken on this machine');
+	'a management node\'s own recovery key does NOT open a backup taken on this machine');
 
 section('No recipient set can be built from a key that arrived from outside');
 
@@ -141,7 +141,7 @@ $swept = BackupRunner::sweep_local(array('output_dir' => $site_out, 'keep_local'
 
 check($swept === 1, 'the site sweep takes its own stale archive', (string)$swept);
 check(!is_file($site_file), 'which is gone');
-check(is_file($mgr_file), 'and the control plane\'s copy is untouched');
+check(is_file($mgr_file), 'and the management node\'s copy is untouched');
 
 $swept = BackupRunner::sweep_local(array('output_dir' => $mgr_out, 'keep_local' => 7));
 check($swept === 1 && !is_file($mgr_file), 'the manager sweep takes its own', (string)$swept);
@@ -152,7 +152,7 @@ check($swept === 1 && !is_file($mgr_file), 'the manager sweep takes its own', (s
 section('The manager profile never prunes the shelf it does not own');
 
 // The credential a node is handed for a manager run cannot delete. Retention
-// there belongs to the control plane — so both passes must decline outright
+// there belongs to the management node — so both passes must decline outright
 // rather than try and fail. The plan carries no keep count on purpose: the
 // flag is the whole answer, and declining must never depend on reading a
 // number the manager plan does not have.

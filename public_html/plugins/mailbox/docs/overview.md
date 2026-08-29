@@ -692,7 +692,7 @@ identity and provisioning (provider, mail hostname/IP, SRS, the relay) live on t
 ├── utils/         — Postfix pipe script (inbound_email_handler.php),
 │                    spam_policy.php (spam posture readout for shell sessions),
 │                    managed_domain_prepare.php (make a domain mail-ready and
-│                    print its DNS plan, for a control plane over SSH)
+│                    print its DNS plan, for a management node over SSH)
 ├── provisioning/  — Host setup: install_email.sh, provision_spam_scanner.sh,
 │                    render_pgsql_map.php
 ├── admin/         — Admin pages (setup, aliases, alias edit, domains, logs)
@@ -4116,10 +4116,10 @@ authorization (every current caller sits behind `check_permission(5)` or
 higher). The setup wizard's one-go apply (`wizard_provision` in
 `admin_mailbox_setup_logic`) is the primary consumer.
 
-### Preparing a domain for a control plane
+### Preparing a domain for a management node
 
 `plugins/mailbox/utils/managed_domain_prepare.php <domain>` is the CLI form of
-the same idea, run **on this box** by a control plane that just registered a
+the same idea, run **on this box** by a management node that just registered a
 domain on the owner's behalf
 ([Server Manager § Managed Domain Registration](../../server_manager/docs/overview.md)).
 It calls `mailbox_provision_domain()`, makes sure a DKIM signing key exists
@@ -4135,7 +4135,7 @@ state the Setup tab prescribes. That is the point of running it here rather
 than computing the records remotely: this box is what knows its receive
 topology, its SPF shape, its signing key and whether it speaks Joinery Direct,
 and a record set computed anywhere else would be plausible and wrong. The
-control plane publishes what it gets; `dkim_ready: false` means the set is
+management node publishes what it gets; `dkim_ready: false` means the set is
 usable but unfinished, so it publishes and comes back for the signing key.
 
 Removals are omitted — a freshly registered domain has nothing to take away,

@@ -346,7 +346,7 @@ $pageoptions = ['title' => 'Publish New Upgrade'];
 $page->begin_box($pageoptions);
 ?>
 <?php if ($may_mint): ?>
-<p class="text-muted">Build upgrade archives from the current control plane source code. The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
+<p class="text-muted">Build upgrade archives from the current management node source code. The version numbers default to the auto-detected next patch; override if you need a specific version.</p>
 <?php else: ?>
 <div class="jy-callout jy-callout-info">This deployment is running exactly the version upstream
 delivered (<?php echo htmlspecialchars($current); ?>), so it republishes that version rather than

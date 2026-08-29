@@ -190,7 +190,7 @@ check(($proj['params']['force'] ?? null) === true,
 check(($proj['params']['profile'] ?? null) === 'manager',
 	'restore_project says whose backup directory to look in',
 	'the agent requires it: the two profiles keep separate directories and an archive of the same '
-	. 'name exists in both, so a guess eventually restores the control plane\'s backup over a site');
+	. 'name exists in both, so a guess eventually restores the management node\'s backup over a site');
 
 // The agent refuses an undeclared parameter, so a key the plane sends "just in
 // case" is not redundant — it is a refusal. restore_chain resolves its artifacts

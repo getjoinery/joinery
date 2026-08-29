@@ -1,6 +1,6 @@
 <?php
 /**
- * ManagedNode - A remote Joinery server or container managed by the control plane.
+ * ManagedNode - A remote Joinery server or container managed by the management node.
  *
  * @version 1.11 - mgn_agent_primitives and mgn_agent_bundle_version: the node reports what it can
  *                 do and which signed script tree it holds, on every claim. A version number is a
@@ -62,12 +62,12 @@ class ManagedNode extends SystemBase {
 		'mgn_delete_local_after_upload' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Fingerprint of the backup recovery public key this node is holding, as
 		// the status check last found it. Stored so the fleet view can show which
-		// nodes have the control plane's key without reaching out to every node
-		// on page load — and so a node holding a key the control plane did not
+		// nodes have the management node's key without reaching out to every node
+		// on page load — and so a node holding a key the management node did not
 		// put there is visible rather than silently left behind.
 		'mgn_backup_recovery_fpr' => array('type'=>'varchar(64)'),
 
-		// This control plane's backup policy for this node — the manager profile.
+		// This management node's backup policy for this node — the manager profile.
 		// A blob rather than a column each because it is read whole, written
 		// whole, and every field of it is a preference: enabled, frequency, time
 		// window, mode, retention count, full interval, target override.
@@ -87,7 +87,7 @@ class ManagedNode extends SystemBase {
 		// The bucket's own testimony about this node's shelf: when this control
 		// plane last listed it, and the newest object write it saw. Stamped by
 		// the scheduler from the retention pass's listing — taken with this
-		// control plane's credential, never the node's word. Comparing these
+		// management node's credential, never the node's word. Comparing these
 		// against the claimed last run is the only check that catches a node
 		// reporting success while nothing actually lands.
 		'mgn_backup_shelf_checked_time' => array('type'=>'timestamp(6)'),
@@ -97,7 +97,7 @@ class ManagedNode extends SystemBase {
 		'mgn_enabled'             => array('type'=>'bool', 'default'=>true, 'is_nullable'=>false),
 		'mgn_skip_joinery_checks' => array('type'=>'bool', 'default'=>false, 'is_nullable'=>false),
 		// Whether the node detail Console tab may run an ad-hoc command here.
-		// Default off: the control plane holds SSH keys to every node, so being
+		// Default off: the management node holds SSH keys to every node, so being
 		// reachable from a browser form is a decision made per node rather than
 		// a property every node acquires the moment it is registered.
 		'mgn_mgh_host_id'         => array('type'=>'int8'),

@@ -468,7 +468,7 @@ Sealing protects *content at rest* — it does nothing about a setting that
 redirects a sealed mailbox's *future* mail before it is ever sealed. A
 filter's "Forward to" action, an alias's destination list, or its delivery
 mode all act at receive time on the plaintext parse, upstream of sealing
-entirely — a control-plane bypass that leaves the content encryption
+entirely — a management-node bypass that leaves the content encryption
 technically intact while quietly routing around it. So once a mailbox is
 sealed (its single owner holds a Sealed Vault), a mutation to any of these is
 refused unless the owner has an **open unlock window** — proof of active,

@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetBackupRetention — pruning the shelf this control plane owns.
+ * FleetBackupRetention — pruning the shelf this management node owns.
  *
  * This is the one place the manager profile deliberately keeps work OFF the
  * node. A node is handed a write-only credential: it can add its archives and
@@ -12,7 +12,7 @@
  * It is driven by a LISTING rather than by recorded history, which is the
  * opposite of what BackupRunner does for a site's own backups — deliberately,
  * and for a reason that only holds here. A site listing a shared bucket cannot
- * know which objects are its own; this control plane defined the whole
+ * know which objects are its own; this management node defined the whole
  * {prefix}/{slug}/manager/ path, knows every slug in it, and is the only party
  * that can delete from it. Listing is also strictly safer for this job: it keeps
  * the newest N sets of objects that ACTUALLY EXIST, so a run that failed
@@ -42,7 +42,7 @@ class FleetBackupRetention {
 	 *
 	 * The result also carries what the listing SAW — `listed` and
 	 * `newest_object_time` — because the listing is the bucket's own testimony
-	 * about this node's shelf, taken with this control plane's credential. The
+	 * about this node's shelf, taken with this management node's credential. The
 	 * scheduler stamps it on the node, and the health check compares it against
 	 * what the node claims: a node that reports success while nothing new lands
 	 * on the shelf is the one failure the node's own reporting can never admit

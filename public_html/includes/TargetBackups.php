@@ -9,7 +9,7 @@
  *
  * Objects are grouped by their slug segment. Classifying those slugs needs to
  * know who owns them, and only the caller knows that: a standalone site owns
- * exactly one slug, while a control plane owns a whole fleet. So the ownership
+ * exactly one slug, while a management node owns a whole fleet. So the ownership
  * map is passed IN (see group_objects), and server_manager's FleetBackups supplies
  * the fleet-wide one. Nothing here reads the node table.
  *

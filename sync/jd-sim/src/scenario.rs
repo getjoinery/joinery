@@ -718,7 +718,12 @@ fn held_by(device: &Device) -> Vec<String> {
 pub fn disk_tree(device: &Device) -> BTreeMap<String, Option<String>> {
     let mut out = BTreeMap::new();
     for path in device.fs.all_paths() {
-        if path.is_empty() || jd_vfs::is_internal(&path) {
+        // Per COMPONENT. `is_internal` on the whole path only ever matched a
+        // root-level name, so a lingering scratch file at the root was invisible
+        // to the oracle while the identical file one folder down failed
+        // convergence -- blindness that varied with depth. The sibling filter a
+        // few hundred lines below already splits on '/'; this one did not.
+        if path.is_empty() || path.split('/').any(jd_vfs::is_internal) {
             continue;
         }
         let hash = device.fs.peek(&path).map(|b| crate::sha256_hex(&b));

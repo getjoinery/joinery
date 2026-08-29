@@ -546,6 +546,9 @@ mod tests {
         fn read_dir(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Vec<jd_vfs::DirEntry>> {
             Ok(Vec::new())
         }
+        fn read_dir_all(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Vec<jd_vfs::DirEntry>> {
+            Ok(Vec::new())
+        }
         fn fingerprint(&self, _p: &std::path::Path) -> jd_vfs::VfsResult<Option<Fingerprint>> {
             Ok(None)
         }

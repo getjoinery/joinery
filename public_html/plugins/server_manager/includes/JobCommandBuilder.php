@@ -61,13 +61,13 @@
  * @version 1.25 - node-bound backup steps carry __SM_NODE_CREDS_<id>__ when the target holds a
  *                 write-only node credential, so a node is handed a key that can add to the shelf
  *                 but never erase it; the main (delete-capable) credential then stays on the
- *                 control plane. With no node credential configured, the main token is emitted
+ *                 management node. With no node credential configured, the main token is emitted
  *                 and nothing changes.
  * @version 1.26 - every restore path reconciles the site to the machine it lands on and proves it
  *                 (identity + served-over-HTTPS gates); the Apache choice is gone, the domain is a
  *                 required parameter, and build_restore_chain() makes the fleet's actual backups —
  *                 incremental chains — restorable from the dashboard for the first time
- * @version 1.24 - build_backup_run(): this control plane's own backup of a node, run by the node's
+ * @version 1.24 - build_backup_run(): this management node's own backup of a node, run by the node's
  *                 own engine with the bucket, a write-only credential and the recovery key supplied
  *                 per run and never stored there. Writing a node's own recovery key is retired —
  *                 that slot's custodian is whoever administers the site. Backup jobs now resolve
@@ -79,7 +79,7 @@
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
- * @version 1.20 - backup key escrow runs as a control-plane step (step_escrow_backup_key) instead of
+ * @version 1.20 - backup key escrow runs as a management-node step (step_escrow_backup_key) instead of
  *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
  *                 them, and encrypting backups seal the key on their way in
  * @version 1.19 - local backup delete is sudo-prefixed on bare-metal nodes (root-owned /backups files;
@@ -190,7 +190,7 @@ class JobCommandBuilder {
 	 * Operations the agent registers as ClassDestructive.
 	 *
 	 * Kept as a plane-side list rather than read from the agent because it is a
-	 * ROUTING decision, and routing has to be answerable on a control plane
+	 * ROUTING decision, and routing has to be answerable on a management node
 	 * with no agent source beside it. The agent's own class declaration is the
 	 * enforcement — a destructive primitive is refused at its compiled ceiling
 	 * whatever this plane believes — so the two are not a duplicated authority:
@@ -293,7 +293,7 @@ class JobCommandBuilder {
 	public static function why_cannot_run($node, $operation) {
 		$op_transports = self::transports_for($operation);
 		if (empty($op_transports)) {
-			return "Operation '{$operation}' has no implementation on the control plane.";
+			return "Operation '{$operation}' has no implementation on the management node.";
 		}
 		$parts = [];
 		if (in_array('primitive', $op_transports) && !self::has_agent_channel($node)) {
@@ -924,15 +924,15 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * A control plane's own backup of a node — the manager profile.
+	 * A management node's own backup of a node — the manager profile.
 	 *
 	 * The node does the work. It builds the archive, extends the chain, seals the
 	 * envelope, uploads and sweeps its own local copies, all through the same
 	 * BackupRunner that takes its own backups. Routing any of that through the
-	 * control plane would drag whole archives down and push them back up for no
-	 * reason, and would put the control plane in the path of every restore.
+	 * management node would drag whole archives down and push them back up for no
+	 * reason, and would put the management node in the path of every restore.
 	 *
-	 * What the control plane contributes is the two things the node has no other
+	 * What the management node contributes is the two things the node has no other
 	 * way to reach: the bucket and the credential. Both arrive with the run and
 	 * leave with it.
 	 *
@@ -941,7 +941,7 @@ class JobCommandBuilder {
 	 * arrives carrying key material. Supplying one from here would be the
 	 * convenient arrangement — one key opening any node's backups — and is
 	 * exactly why it is not built: sealing to a public key always appears to
-	 * succeed, so a control plane that had been tampered with could re-seal
+	 * succeed, so a management node that had been tampered with could re-seal
 	 * every node's next backup, databases and mail included, to a key of its
 	 * choosing, and nothing on any machine would look wrong until someone tried
 	 * to restore. The price is paid knowingly: recovering a node's backup needs
@@ -949,7 +949,7 @@ class JobCommandBuilder {
 	 *
 	 * The credential is a WRITE-ONLY one. The node can add objects to the shelf
 	 * and cannot remove any, so a compromised node cannot erase the fleet's
-	 * backups — which is why manager retention runs on the control plane instead
+	 * backups — which is why manager retention runs on the management node instead
 	 * (see FleetBackupRetention) and why this job never asks the node to prune.
 	 *
 	 * Config travels on stdin, not argv: argv is world-readable on the box for
@@ -1015,13 +1015,13 @@ class JobCommandBuilder {
 		if (!$target) {
 			$enabled_count = self::enabled_target_count();
 			$why = ($enabled_count === 0)
-				? 'this control plane has no enabled backup target at all'
+				? 'this management node has no enabled backup target at all'
 				: ($enabled_count > 1
-					? "this control plane has {$enabled_count} enabled backup targets and this node names "
+					? "this management node has {$enabled_count} enabled backup targets and this node names "
 						. 'none, so which one to use is a real choice — assign one to the node'
 					: 'the backup target this node names is missing or switched off');
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this control plane takes: "
+				"Node '{$node->get('mgn_slug')}' has nowhere to put a backup this management node takes: "
 				. $why . '.');
 		}
 
@@ -1177,7 +1177,7 @@ class JobCommandBuilder {
 	 * database and project restores, and not defaulted there for a reason worth
 	 * repeating here: the two profiles keep separate directories, an archive of
 	 * the same name exists in both often enough, and a guess would eventually
-	 * restore the control plane's own backup over a site.
+	 * restore the management node's own backup over a site.
 	 *
 	 * This plane's own backups are manager-profile, which is why that is the
 	 * answer when a caller does not say — the same default upload_backup and
@@ -1503,7 +1503,7 @@ class JobCommandBuilder {
 		// Read the script out of the container and run it on the host instead.
 		// manage_domain.sh identifies the site by its CONTAINER name (that is what
 		// it looks for in `docker ps` and what it proxies to), not by the node's
-		// slug, which is a control-plane label and need not match.
+		// slug, which is a management-node label and need not match.
 		$c = escapeshellarg($container);
 		$d = escapeshellarg($domain);
 		$s = $c;
@@ -1599,7 +1599,7 @@ class JobCommandBuilder {
 	 *   1. fetch the chain's manifest onto the node
 	 *   2. recover the chain data key from the manifest's envelope, using the
 	 *      node's OWN backup_site_key (every chain seals to the node as well as
-	 *      to the control plane's recovery key, so a node can always open its
+	 *      to the management node's recovery key, so a node can always open its
 	 *      own backups without anybody's private key travelling)
 	 *   3. download every artifact the manifest names, up to the chosen run
 	 *   4. restore_chain.sh verifies each one against its recorded size and hash
@@ -1643,7 +1643,7 @@ class JobCommandBuilder {
 		$creds        = self::get_db_credentials_script($node);
 
 		// {prefix}/{slug}/{profile}/{chain_id}/. The profile segment keeps two
-		// parties' backups apart — the site's own and this control plane's — so
+		// parties' backups apart — the site's own and this management node's — so
 		// it is carried from the listing rather than assumed. A chain restore
 		// started from the dashboard is normally a manager-profile chain.
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
@@ -1673,7 +1673,7 @@ class JobCommandBuilder {
 			'timeout' => 600];
 
 		// Recover the chain data key on the NODE, from the node's own site key.
-		// The control plane's recovery private key never travels: it is the key
+		// The management node's recovery private key never travels: it is the key
 		// of last resort for a machine that no longer exists, and putting it in a
 		// job record would make every stored job a copy of it.
 		$envelope_tool = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
@@ -1690,7 +1690,7 @@ class JobCommandBuilder {
 
 		// Download exactly what the manifest names, in the run range asked for.
 		// Reading the manifest ON the node keeps the artifact list and the file
-		// list one thing — a control plane that computed names itself would be a
+		// list one thing — a management node that computed names itself would be a
 		// second implementation of the chain layout, free to drift.
 		// `|| exit 1` rides the heredoc REDIRECT line, not the line after the
 		// terminator: anything placed after a terminator is a fresh statement, and
@@ -2109,7 +2109,7 @@ class JobCommandBuilder {
 
 
 	/**
-	 * Publish a new upgrade from the control plane (runs locally).
+	 * Publish a new upgrade from the management node (runs locally).
 	 * If major/minor/patch are in $params, passes them as an explicit version arg;
 	 * otherwise the CLI auto-detects the next version.
 	 */
@@ -2144,7 +2144,7 @@ class JobCommandBuilder {
 
 	/**
 	 * Discover Joinery instances on a remote host.
-	 * All steps are 'local' type — the agent runs SSH commands from the control plane.
+	 * All steps are 'local' type — the agent runs SSH commands from the management node.
 	 * No node record is needed.
 	 */
 	public static function build_discover_nodes($params) {
@@ -2284,7 +2284,7 @@ class JobCommandBuilder {
 	 * verified by someone holding its private half — a key sent from here would
 	 * seal just as happily whether or not anybody could ever open the result,
 	 * which is what makes a substituted one invisible. `backup_envelope.php mint`
-	 * refuses a supplied key outright, so a control plane still passing one is
+	 * refuses a supplied key outright, so a management node still passing one is
 	 * told rather than obeyed.
 	 */
 	private static function step_mint_envelope($node, $scratch) {
@@ -2310,7 +2310,7 @@ class JobCommandBuilder {
 	 * no way to hand one to a job.
 	 *
 	 * That key decides who can open every backup the node makes — the ones the
-	 * node takes for itself and the ones this control plane takes of it, which
+	 * node takes for itself and the ones this management node takes of it, which
 	 * are the same key now. Its custodian is whoever administers the node, and
 	 * possession is proven there, against a challenge that node issued. A control
 	 * plane that could write it, or could pass one with a run, would be a control
@@ -2325,7 +2325,7 @@ class JobCommandBuilder {
 	 * Refuse to build a backup job for a node that cannot encrypt one.
 	 *
 	 * The node refuses these runs itself — that is the guard, and it holds
-	 * whatever a control plane believes. This is the second thing: failing at
+	 * whatever a management node believes. This is the second thing: failing at
 	 * BUILD time puts the reason in front of the operator immediately, and keeps
 	 * the fleet schedule from filling the job log with runs that were never going
 	 * to work. Never silently downgrade: the alternative to a refusal here is an
@@ -2432,7 +2432,7 @@ class JobCommandBuilder {
 		}
 
 		// Nothing named. Everything the run needs — bucket, write-only
-		// credential, recovery key — is supplied by this control plane anyway,
+		// credential, recovery key — is supplied by this management node anyway,
 		// so the only open question is which shelf; and with exactly one enabled
 		// target there is no question to ask. Requiring the answer anyway is how
 		// a node ends up silently un-backed-up from the moment it is registered.
@@ -2452,7 +2452,7 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * How many enabled shelves this control plane has, for the refusal message
+	 * How many enabled shelves this management node has, for the refusal message
 	 * that tells an operator which problem they actually have: none configured,
 	 * or several and no choice recorded for this node.
 	 */
@@ -2497,7 +2497,7 @@ class JobCommandBuilder {
 	 * because its original upload hit a transient provider failure.
 	 *
 	 * The file lives on the node, so the transfer runs there. Routing it through
-	 * the control plane instead would drag the whole archive down and push it back
+	 * the management node instead would drag the whole archive down and push it back
 	 * up again for no reason.
 	 *
 	 * Never deletes the local copy, whatever the node's delete-after-upload setting
@@ -2663,7 +2663,7 @@ class JobCommandBuilder {
 	 * When it does, node-bound steps carry __SM_NODE_CREDS_<id>__ and the node
 	 * is handed a key that can add objects to the shelf but never delete —
 	 * a compromised node then cannot erase the fleet's backups. The main
-	 * (delete-capable) credential stays on the control plane for retention and
+	 * (delete-capable) credential stays on the management node for retention and
 	 * listings. When no node credential is configured, the main token is
 	 * emitted and behaviour is unchanged.
 	 *
@@ -2797,7 +2797,7 @@ class JobCommandBuilder {
 		$remote_script = "/tmp/joinery_remove_account_{$transfer_id}.sh";
 		$remote_esc    = escapeshellarg($remote_script);
 
-		// The control plane's own copy of the remover (this is where the agent runs).
+		// The management node's own copy of the remover (this is where the agent runs).
 		$local_script = PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/remove_account.sh';
 
 		$steps = [];
@@ -2904,7 +2904,7 @@ class JobCommandBuilder {
 	 * Local only, and the omission is the design. The SSH path's cloud branch
 	 * shipped the MAIN, delete-capable bucket credential to the node, because a
 	 * write-only key cannot delete — while creds_token()'s own docblock says
-	 * that credential "stays on the control plane", the whole point of the
+	 * that credential "stays on the management node", the whole point of the
 	 * write-only node key being that "a compromised node then cannot erase the
 	 * fleet's backups". Migrating that branch would have carried a live
 	 * contradiction across the boundary and made it look reviewed. So the cloud
@@ -2935,8 +2935,8 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Build a local shell command that updates a ManagedNode field in the control plane DB.
-	 * Reads DB credentials from the control plane's Globalvars_site.php. Used during the
+	 * Build a local shell command that updates a ManagedNode field in the management node DB.
+	 * Reads DB credentials from the management node's Globalvars_site.php. Used during the
 	 * install_node flow to switch mgn_ssh_user to 'user1' after install.sh server disables
 	 * root SSH login.
 	 */
@@ -3125,7 +3125,7 @@ class JobCommandBuilder {
 			// its edge). But "resolves to Cloudflare" only proves the domain is
 			// behind Cloudflare — not that the zone proxies to THIS node. So
 			// completion is gated on a routing probe: the node writes a one-time
-			// token into the site's webroot, and the control plane fetches it
+			// token into the site's webroot, and the management node fetches it
 			// through the domain. The token is only fetchable because the node's
 			// front controller serves it via its /sm-ssl-probe.txt route
 			// (views/sm_ssl_probe.php) — a webroot file is not otherwise
@@ -3334,7 +3334,7 @@ class JobCommandBuilder {
 		$remote_install_dir = "/tmp/joinery_install_{$transfer_id}";
 		$remote_tools_dir = "{$remote_install_dir}/maintenance_scripts/install_tools";
 
-		// Control plane URL — where the target fetches the Joinery release tarball from.
+		// Management node URL — where the target fetches the Joinery release tarball from.
 		// Uses the webDir config setting (our site's own hostname).
 		$settings = Globalvars::get_instance();
 		$webdir = $settings->get_setting('webDir') ?: $_SERVER['HTTP_HOST'] ?? 'dev.getjoinery.com';
@@ -3345,7 +3345,7 @@ class JobCommandBuilder {
 		$domain_esc = escapeshellarg($domain);
 		$mode_flag = ($docker === 'docker') ? ' --docker' : ' --bare-metal';
 		// P-18: pin the container's published port. Without this $port_arg was
-		// empty, so install.sh self-allocated a port the control plane never
+		// empty, so install.sh self-allocated a port the management node never
 		// recorded — mgn_port stayed blank and diverged from reality, and the
 		// next container's MAX(mgn_port)+1 allocation collided. Allocate the port
 		// here (if not already set by a cloud caller), record it, and pass it so
@@ -3367,7 +3367,7 @@ class JobCommandBuilder {
 		// so tail placement is what keeps it correct.
 		$teardown = [];
 
-		// 1. Pre-flight: verify the control plane is serving a release archive
+		// 1. Pre-flight: verify the management node is serving a release archive
 		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: check release archive is available',
 			'cmd' => "CODE=\$(curl -sILo /dev/null -w '%{http_code}' {$release_url_esc}) && "
 			       . "test \"\$CODE\" = '200' -o \"\$CODE\" = '302' || { echo \"Release URL {$release_url} returned HTTP \$CODE\"; exit 1; } && "
@@ -3437,10 +3437,10 @@ class JobCommandBuilder {
 					'cmd' => "docker cp {$sc}:{$pr_r} {$pr_host}"];
 			}
 
-			$steps[] = ['type' => 'scp', 'label' => 'Fetch DB backup to control plane',
+			$steps[] = ['type' => 'scp', 'label' => 'Fetch DB backup to management node',
 				'node_id' => $source_node_id, 'direction' => 'download',
 				'remote_path' => $scp_db_remote, 'local_path' => $local_db_backup];
-			$steps[] = ['type' => 'scp', 'label' => 'Fetch project backup to control plane',
+			$steps[] = ['type' => 'scp', 'label' => 'Fetch project backup to management node',
 				'node_id' => $source_node_id, 'direction' => 'download',
 				'remote_path' => $scp_prj_remote, 'local_path' => $local_project_backup];
 		}
@@ -3566,7 +3566,7 @@ class JobCommandBuilder {
 				'continue_on_error' => true];
 		}
 
-		// Docker mode: record the container name in the control plane DB so future jobs
+		// Docker mode: record the container name in the management node DB so future jobs
 		// (backups, restores, status checks) correctly use docker exec to reach the site.
 		if ($docker === 'docker') {
 			$sitename_db_esc = str_replace("'", "''", $sitename);
@@ -3579,7 +3579,7 @@ class JobCommandBuilder {
 			            . "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extr}) && "
 			            . "psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -c \"UPDATE mgn_managed_nodes SET mgn_container_name = '{$sitename_db_esc}' WHERE mgn_id = {$node_id_int}\" && "
 			            . "echo CONTAINER_NAME_UPDATED";
-			$steps[] = ['type' => 'local', 'label' => 'Record container name in control plane',
+			$steps[] = ['type' => 'local', 'label' => 'Record container name in management node',
 				'cmd' => $update_cmd];
 		}
 
@@ -3749,7 +3749,7 @@ class JobCommandBuilder {
 					'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 			}
 
-			$teardown[] = ['type' => 'local', 'label' => 'Clean up backup files on control plane',
+			$teardown[] = ['type' => 'local', 'label' => 'Clean up backup files on management node',
 				'cmd' => "rm -f {$local_db_backup} {$local_project_backup}",
 				'teardown' => true, 'timeout' => 120, 'continue_on_error' => true];
 
@@ -3796,10 +3796,10 @@ class JobCommandBuilder {
 			'cmd' => $verify_cmd];
 
 		// A new site is NOT given a recovery key here. It is covered from birth by
-		// this control plane's own backups, which carry their key with each run;
+		// this management node's own backups, which carry their key with each run;
 		// the site's own key is its operator's to set up, on its own Backups page,
 		// with the possession ceremony that makes it trustworthy. Handing one over
-		// at install time would put this control plane's key in a slot whose
+		// at install time would put this management node's key in a slot whose
 		// custodian is somebody else.
 		return array_merge($steps, $teardown);
 	}
@@ -3914,7 +3914,7 @@ BASH;
 
 		$steps = [];
 
-		// 1. Pre-flight on the control plane: the sealer source + installer exist,
+		// 1. Pre-flight on the management node: the sealer source + installer exist,
 		//    packaged into one tarball for delivery.
 		$steps[] = ['type' => 'local', 'label' => 'Pre-flight: package relay provisioning files',
 			'cmd' => "test -f {$provisioning_esc}/provision_relay.sh && "

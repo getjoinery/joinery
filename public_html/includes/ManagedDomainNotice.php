@@ -3,14 +3,14 @@
  * ManagedDomainNotice - the one thing a managed-domain owner has to do.
  *
  * A deployment whose domain was bought for it at checkout carries four
- * settings the control plane writes and nothing local edits. While that domain
+ * settings the management node writes and nothing local edits. While that domain
  * still sits in the operator's registrar account, its renewal bills the
  * OPERATOR — and the platform never renews a customer's domain and never
  * fronts the cost. So the domain has to move into the owner's own registrar
  * account before it expires, and this notice is how they find that out.
  *
  * It is deliberately late and deliberately loud in that order. Nothing appears
- * for the first six months of the year the owner paid for; the control plane
+ * for the first six months of the year the owner paid for; the management node
  * pushes a custody state at expiry minus six months and that is the first
  * mention anywhere. From there the notice sharpens as the date approaches,
  * because a lapsed domain takes the website and the email address with it.

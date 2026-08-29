@@ -2,10 +2,10 @@
 /**
  * escrow_keypair.php — offline recovery-keypair tool for backup-key escrow.
  *
- * The control plane can SEAL a node's backup key to a public key, but only this
+ * The management node can SEAL a node's backup key to a public key, but only this
  * tool — holding the private key kept in the operator's password manager, never
- * on the control plane — can UNSEAL it. That is the whole security property:
- * a stolen B2 bucket or a dumped control-plane database yields only sealed blobs.
+ * on the management node — can UNSEAL it. That is the whole security property:
+ * a stolen B2 bucket or a dumped management-node database yields only sealed blobs.
  *
  * Runs on any machine with PHP + libsodium. It is intentionally standalone (no
  * platform bootstrap) so it works during disaster recovery when the platform is
@@ -22,7 +22,7 @@
  *   unseal:    php escrow_keypair.php unseal --private /secure/recovery.key [--in blob.b64]
  *              Reads a sealed blob (base64) from --in or stdin, decrypts it with the
  *              private key, and prints the recovered backup key to stdout. This is
- *              the DR tool; run it on your own machine, never on the control plane.
+ *              the DR tool; run it on your own machine, never on the management node.
  *
  * @version 1.0
  */

@@ -18,10 +18,10 @@
  * trust, however trustworthy the sender. Possession is proven on this site, by
  * whoever administers it, against a challenge this site issued: Admin -> System
  * -> Backups, which generates a keypair in the browser and runs the challenge in
- * one pass. That path needs no control plane and no shell.
+ * one pass. That path needs no management node and no shell.
  *
  * So this tool reads. A --public argument is refused rather than ignored, so a
- * control plane still trying to push a key finds out.
+ * management node still trying to push a key finds out.
  *
  * It lives in sysadmin_tools/ rather than public_html/utils/ for the same
  * reason reset_admin_password.php does: /utils/<name> is web-routable and the
@@ -44,7 +44,7 @@
  * file it is checking.
  *
  * @version 2.0 - reports only. Writing this site's recovery key from outside the site is gone:
- *                no key arrives from a control plane, and no proof established elsewhere is
+ *                no key arrives from a management node, and no proof established elsewhere is
  *                accepted here
  * @version 1.0
  */
@@ -115,7 +115,7 @@ foreach (array('public', 'proven-fpr') as $srk_write_flag) {
     if (isset($opts[$srk_write_flag])) {
         fwrite(STDERR, "ERROR: --{$srk_write_flag} is refused. Only this site sets this site's "
                      . "recovery key, and only by proving possession against a challenge it issued "
-                     . "(Admin -> System -> Backups). A control plane still passing this flag is out "
+                     . "(Admin -> System -> Backups). A management node still passing this flag is out "
                      . "of date. Nothing was changed.\n");
         exit(2);
     }

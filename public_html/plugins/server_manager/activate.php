@@ -3,7 +3,7 @@
  * Server Manager plugin activation hook.
  *
  * Runs after the plugin's tables are created and its declared settings are
- * seeded (PluginManager::onActivate). One job: make sure the control plane
+ * seeded (PluginManager::onActivate). One job: make sure the management node
  * has its customer-cloud provisioning SSH keypair, so the Provisioning
  * page's key row is green from the first visit. Idempotent and
  * non-destructive (an existing key or custom path is never touched);

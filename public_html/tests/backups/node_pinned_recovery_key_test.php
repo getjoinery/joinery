@@ -17,7 +17,7 @@
  *
  * Which is why the capability is gone rather than guarded, and why refusal is
  * the behaviour rather than falling back: a run carrying key material fails and
- * says so, so a stale control plane — or one that has been tampered with — is
+ * says so, so a stale management node — or one that has been tampered with — is
  * discovered instead of obeyed. Silently ignoring the key would look identical
  * from the far end to accepting it.
  *
@@ -96,8 +96,8 @@ check(strpos($message, 'refused') === false && strpos($message, 'bucket') !== fa
 	'a keyless run is refused for what it is actually missing, not for carrying a key', $message);
 
 // ── The node-side tools refuse the same thing ───────────────────────────────
-// The classes above are the refusal a control plane meets. These two are what a
-// control plane that predates the removal actually invokes, over SSH, so they
+// The classes above are the refusal a management node meets. These two are what a
+// management node that predates the removal actually invokes, over SSH, so they
 // are where an out-of-date plane finds out.
 section('The node-side CLI tools refuse a supplied key');
 
@@ -123,7 +123,7 @@ check($rc !== 0 && strpos($out, 'refused') !== false && strpos($out, 'Nothing wa
 
 list($rc, $out) = npr_run($tools . '/set_recovery_key.php', '--report');
 check($rc === 0 && strpos($out, 'RECOVERY_KEY=') === 0,
-	'and still reports what this site holds — asking is what a control plane may do', "rc={$rc} {$out}");
+	'and still reports what this site holds — asking is what a management node may do', "rc={$rc} {$out}");
 
 $scratch = sys_get_temp_dir() . '/jy_npr_' . bin2hex(random_bytes(4));
 list($rc, $out) = npr_run($tools . '/backup_envelope.php',

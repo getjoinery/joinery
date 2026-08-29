@@ -12,7 +12,7 @@
  *   - its row is flagged upg_keep
  *   - a managed node reports running that version — that archive is the node's
  *     rollback target, so removing it would strand the node
- *   - it is the version this control plane is itself running
+ *   - it is the version this management node is itself running
  *
  * @version 1.0
  */
@@ -74,7 +74,7 @@ class UpgradeRetention {
 		$own = LibraryFunctions::get_joinery_version();
 		if ($own !== '') {
 			if (!isset($in_use[$own])) $in_use[$own] = [];
-			$in_use[$own][] = 'this control plane';
+			$in_use[$own][] = 'this management node';
 		}
 
 		$out = [];

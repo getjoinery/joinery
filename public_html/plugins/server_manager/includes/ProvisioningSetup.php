@@ -3,7 +3,7 @@
  * ProvisioningSetup - One-click activation engine for the hosting
  * provisioning pipeline.
  *
- * Everything the activation checklist can do on the control plane itself is
+ * Everything the activation checklist can do on the management node itself is
  * done here programmatically: mint the store API service user + key, create
  * the domain Question, write the pipeline settings, and activate the
  * scheduled tasks. The admin page (views/admin/provisioning_setup.php) is a
@@ -340,7 +340,7 @@ class ProvisioningSetup {
 	/**
 	 * Ensure the customer-cloud provisioning SSH keypair exists and the
 	 * path setting points at it. The public half is installed on created
-	 * instances; the private half is the control plane's only access to
+	 * instances; the private half is the management node's only access to
 	 * them (root passwords are random and never stored).
 	 *
 	 * Idempotent and never destructive: an existing key file is kept, a
@@ -531,7 +531,7 @@ class ProvisioningSetup {
 	/**
 	 * State of the job-executing Go agent. Every job the pipeline creates
 	 * (install_node, provision_ssl, ...) sits pending until an agent polling
-	 * THIS site's queue claims it — a control plane without a live agent looks
+	 * THIS site's queue claims it — a management node without a live agent looks
 	 * activated but can never execute, so the page surfaces it as a hard
 	 * requirement.
 	 *

@@ -390,7 +390,7 @@ class ManagedDomainWatch {
 	 * The values are non-secret, so they go in the SQL directly rather than
 	 * through the stdin dance the credential seeder needs. The settings are
 	 * declared `managed` in core, which keeps them off the node's settings page
-	 * — the control plane is their only author.
+	 * — the management node is their only author.
 	 */
 	protected function pushBannerState($row, $node, string $state): bool {
 		$command = self::buildBannerCommand($row, $node, $state);
@@ -465,7 +465,7 @@ class ManagedDomainWatch {
 		return basename(dirname($web_root));
 	}
 
-	/** Where the take-ownership flow lives, on this control plane. */
+	/** Where the take-ownership flow lives, on this management node. */
 	public static function manageUrl(): string {
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 		return LibraryFunctions::get_absolute_url('/profile/server_manager/domain');

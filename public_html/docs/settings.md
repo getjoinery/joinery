@@ -190,12 +190,12 @@ heartbeats, one-shot markers and keys minted on first use all belong here.
 The managed-domain settings are the same idea across two machines. A
 deployment whose domain was registered for its owner at checkout carries
 `managed_domain_name`, `managed_domain_expiry_time`, `managed_domain_state`
-and `managed_domain_manage_url`, written over SSH by the control plane that
+and `managed_domain_manage_url`, written over SSH by the management node that
 sold the domain and read by `ManagedDomainNotice` to decide whether — and how
 urgently — to show the owner that the domain's renewal is about to become
 theirs. Empty `managed_domain_state` renders nothing, which is what every
 deployment that did not buy a domain this way has. Declaring them `managed`
-is what keeps a local admin from editing a value only the control plane can
+is what keeps a local admin from editing a value only the management node can
 know. See [Server Manager § Managed Domain Registration](../plugins/server_manager/docs/overview.md).
 
 ### Registrar credentials
