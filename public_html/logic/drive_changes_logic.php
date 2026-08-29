@@ -58,8 +58,28 @@ function drive_changes_logic(array $input): LogicResult {
 	}
 
 	// Visibility: own changes plus changes on entities shared to me.
+	//
+	// "Shared to me" has to mean the same thing here as it does in drive_index,
+	// which reaches a granted folder's whole subtree
+	// (_drive_index_shared_reach). Reading the grant rows alone is narrower: a
+	// change row for a file INSIDE a shared folder carries that file's own id
+	// and the OWNER's user id, so it matches neither clause and the grantee is
+	// never told. The cold-start walk hands them the file and no later change
+	// ever arrives — a file that syncs once and is stale for ever, which is the
+	// exact hole this endpoint's own doc calls forbidden.
+	//
+	// So the reach is expanded the way the index expands it, through the same
+	// helper, and files are matched by the folder they sit in rather than by
+	// listing every id in PHP.
 	$file_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FILE);
-	$folder_ids = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FOLDER);
+	$granted_folders = FileAccessGrant::entity_ids_for_user($user_id, DriveHelper::ENTITY_FOLDER);
+	$folder_ids = $granted_folders;
+	foreach ($granted_folders as $root_id) {
+		foreach (DriveHelper::descendant_folder_ids($root_id) as $did) {
+			$folder_ids[] = (int)$did;
+		}
+	}
+	$folder_ids = array_values(array_unique(array_map('intval', $folder_ids)));
 	$file_in = DriveHelper::int_in_list($file_ids);
 	$folder_in = DriveHelper::int_in_list($folder_ids);
 
@@ -69,7 +89,10 @@ function drive_changes_logic(array $input): LogicResult {
 	         WHERE fch_file_change_id > :cursor
 	           AND (fch_usr_user_id = :me
 	                OR (fch_entity_type = 'file'   AND fch_entity_id IN ($file_in))
-	                OR (fch_entity_type = 'folder' AND fch_entity_id IN ($folder_in)))
+	                OR (fch_entity_type = 'folder' AND fch_entity_id IN ($folder_in))
+	                OR (fch_entity_type = 'file'   AND fch_entity_id IN (
+	                        SELECT fil_file_id FROM fil_files
+	                         WHERE fil_fol_folder_id IN ($folder_in))))
 	         ORDER BY fch_file_change_id ASC
 	         LIMIT " . (int)DRIVE_CHANGES_BATCH;
 	$q = $dblink->prepare($sql);

@@ -138,4 +138,55 @@ $reset_feed = drive_changes_logic(array('cursor' => $stale_cursor));
 check(!empty($reset_feed->data['reset']), 'a cursor before the retained window triggers reset', 'new_min=' . var_export($new_min, true) . ' stale=' . $stale_cursor);
 check(empty($reset_feed->data['changes']), 'reset response carries no incremental changes');
 
+
+// ---------------------------------------------------------------------------
+section('a folder shared to me reaches the files inside it');
+
+// drive_index expands a granted folder to its whole subtree, so a cold start
+// hands the grantee every file inside a shared folder. The feed has to reach
+// just as far: a change row for a file INSIDE that folder carries the file's
+// own id and the OWNER's user id, so reading the grant rows alone matches
+// neither clause and the grantee is never told. That is a file which syncs
+// once and is stale for ever -- the hole this endpoint exists to prevent.
+$session->set_api_user($owner->key);
+$rSh = drive_folder_create_logic(array('name' => 'ChShared_' . bin2hex(random_bytes(3))));
+$Fsh = (int)$rSh->data['folder']['id']; $made_folders[] = $Fsh;
+
+$Z = File::createFromBytes('z-' . bin2hex(random_bytes(6)), 'inside.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$Z->set('fil_fol_folder_id', $Fsh); $Z->save();
+$made_files[] = $Z->key;
+FileChange::record(FileChange::KIND_CREATED, 'file', $Z->key, $owner->key, $owner->key);
+
+FileAccessGrant::sync_for_entity('folder', $Fsh, array((int)$grantee->key => 'viewer'), $owner->key);
+
+$cur_sh = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+drive_rename_logic(array('entity_type' => 'file', 'entity_id' => $Z->key, 'name' => 'inside-renamed.txt'));
+
+$session->set_api_user($grantee->key);
+$feed_sh = drive_changes_logic(array('cursor' => $cur_sh));
+$sees_inside = false;
+foreach (($feed_sh->data['changes'] ?? array()) as $c) {
+	if (($c['entity_type'] ?? '') === 'file' && (int)($c['entity_id'] ?? 0) === (int)$Z->key) { $sees_inside = true; }
+}
+check($sees_inside, 'grantee is told when a file inside the folder shared to them changes');
+
+// The widened reach must not become "sees everything": a file the owner keeps
+// outside any shared folder stays invisible.
+$session->set_api_user($owner->key);
+$Q = File::createFromBytes('q-' . bin2hex(random_bytes(6)), 'private.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$Q->set('fil_fol_folder_id', $F); $Q->save();
+$made_files[] = $Q->key;
+$cur_q = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+drive_rename_logic(array('entity_type' => 'file', 'entity_id' => $Q->key, 'name' => 'private-renamed.txt'));
+
+$session->set_api_user($grantee->key);
+$feed_q = drive_changes_logic(array('cursor' => $cur_q));
+$sees_private = false;
+foreach (($feed_q->data['changes'] ?? array()) as $c) {
+	if (($c['entity_type'] ?? '') === 'file' && (int)($c['entity_id'] ?? 0) === (int)$Q->key) { $sees_private = true; }
+}
+check(!$sees_private, 'grantee is still not told about files outside anything shared to them');
+
 harness_finish();
