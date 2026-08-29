@@ -6,6 +6,12 @@
  * opens them, how many are kept, and what has actually happened. No fleet, no
  * agent — server_manager is a layer on top of this, not a prerequisite for it.
  *
+ * @version 1.3 - the history keeps cleaned-up runs visible (include_pruned) so Recent backups can show
+ *                whether each backup is still present or has been pruned by retention
+ * @version 1.2 - one backup history for all profiles (site + management-node runs), newest first, so the
+ *                page shows a single Recent backups list labelled by who initiated each run
+ * @version 1.1 - reports whether a management node runs this site's backups (is_managed / manager_url),
+ *                so the page can defer targets, schedule and retention to the management node
  * @version 1.0
  */
 
@@ -32,11 +38,14 @@ function admin_backups_logic($input = array()) {
 	$targets = new MultiBackupTarget(array('deleted' => false), array('bkt_name' => 'ASC'));
 	$targets->load();
 
-	// This site's own runs. A control plane's copies of this site are a separate
-	// party's backups under a separate key, and mixing them into this list would
-	// make it read as though this site had backups it cannot open.
-	$history = new MultiBackupHistory(array('deleted' => false, 'profile' => BackupProfile::SITE),
-		array('bkh_start_time' => 'DESC'), 25, 0);
+	// Everything that has run, whoever initiated it. A site's own runs and a
+	// management node's copies of it both seal to this site's recovery key, so they
+	// are one history — each row labelled with who ran it. include_pruned keeps
+	// backups retention has cleaned up in the list (shown as such) while still
+	// excluding ones the admin hid; omitting the profile filter loads every
+	// profile.
+	$history = new MultiBackupHistory(array('include_pruned' => true),
+		array('bkh_start_time' => 'DESC'), 30, 0);
 	$history->load();
 
 	// A plan that cannot be made is the most useful thing this page can say, so
@@ -49,26 +58,24 @@ function admin_backups_logic($input = array()) {
 		$plan_problem = $e->getMessage();
 	}
 
-	// Backups somebody else takes of this site. A site admin should never have to
-	// discover from a directory listing that another party is also archiving
-	// their site — nor be told their own backups are therefore redundant, which
-	// they are not: these open with a key the site does not hold.
-	$manager_history = new MultiBackupHistory(
-		array('deleted' => false, 'profile' => BackupProfile::MANAGER),
-		array('bkh_start_time' => 'DESC'), 5, 0);
-	$manager_history->load();
+	// Whether a management node is responsible for this machine. When it is, the
+	// backup targets, schedule and retention are configured on the management
+	// node, not here — so this page stops offering to set them and stops warning
+	// that they are unset.
+	require_once(PathHelper::getIncludePath('includes/ManagementNodeStatus.php'));
 
 	return LogicResult::render(array(
 		'session'       => $session,
 		'settings'      => Globalvars::get_instance(),
 		'targets'       => $targets,
 		'history'       => $history,
-		'manager_history' => $manager_history,
 		'recovery'      => BackupRecoveryKey::setup_state(),
 		'plan'          => $plan,
 		'plan_problem'  => $plan_problem,
 		'default_slug'  => basename(PathHelper::getSiteRoot()),
 		'task'          => _admin_backups_task_state(),
+		'is_managed'    => ManagementNodeStatus::is_managed(),
+		'manager_url'   => ManagementNodeStatus::manager_url(),
 	));
 }
 

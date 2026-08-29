@@ -13,12 +13,13 @@ $session      = $page_vars['session'];
 $settings     = $page_vars['settings'];
 $targets      = $page_vars['targets'];
 $history      = $page_vars['history'];
-$manager_history = $page_vars['manager_history'];
 $recovery     = $page_vars['recovery'];
 $plan         = $page_vars['plan'];
 $plan_problem = $page_vars['plan_problem'];
 $default_slug = $page_vars['default_slug'];
 $task         = $page_vars['task'];
+$is_managed   = $page_vars['is_managed'];
+$manager_url  = $page_vars['manager_url'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -42,7 +43,18 @@ $when = function ($utc) use ($tz) {
 $page->begin_box(array('title' => 'Status'));
 
 $active = !empty($task['sct_is_active']);
-if ($plan_problem !== '') {
+if ($is_managed) {
+	// A management node owns this site's backup arrangements. The local "no target
+	// configured" warning is not this admin's problem to fix — there is nothing
+	// to configure here — so it is replaced by a plain statement of who runs the
+	// backups. The offsite/last-run facts below still come from what actually
+	// happened, which is the honest confirmation that the arrangement is working.
+	echo '<div class="alert alert-info mb-2">This site\'s backups are managed by '
+	   . ($manager_url !== ''
+	       ? '<code>' . htmlspecialchars($manager_url) . '</code>'
+	       : 'a management node')
+	   . '. Where they go, how often they run, and how many are kept are set there, not on this page.</div>';
+} elseif ($plan_problem !== '') {
 	echo '<div class="alert alert-warning mb-2">' . htmlspecialchars($plan_problem) . '</div>';
 } elseif (!$active) {
 	echo '<div class="alert alert-warning mb-2">Everything is configured, but the Backup task is switched off, '
@@ -55,25 +67,81 @@ if ($plan_problem !== '') {
 	   . 'keeping the newest ' . (int)$plan['keep_cloud'] . '.</div>';
 }
 
-$last_ok = null;
+// The newest offsite backup this site can actually open. The history now holds
+// every profile newest-first, so the first run that reached the bucket is the
+// answer — whether this site took it or a management node did, both seal to this
+// site's recovery key. Reading only the site's own runs made a plane-backed
+// node (which runs no local backup of its own) report "never" while nightly
+// offsite backups existed.
+$last_ok = null; $last_ok_by = 'site';
 foreach ($history as $h) {
-	if ($h->get('bkh_outcome') === 'success' && $h->get('bkh_upload_time')) { $last_ok = $h; break; }
+	// Still offsite: uploaded, and not since cleaned up by retention. A pruned
+	// run keeps its upload_time, so is_offsite() alone would report a backup as
+	// stored offsite after it had been deleted.
+	if ($h->is_offsite() && !$h->get('bkh_pruned_time')) {
+		$last_ok = $h;
+		$last_ok_by = ($h->get('bkh_profile') === BackupProfile::MANAGER) ? 'manager' : 'site';
+		break;
+	}
 }
 echo '<table class="table mb-0"><tbody>';
 echo '<tr><th>Last backup stored offsite</th><td>'
    . ($last_ok ? htmlspecialchars($when($last_ok->get('bkh_upload_time')))
                  . ' (' . htmlspecialchars(BackupRunner::human($last_ok->get('bkh_bytes'))) . ')'
+                 . ($last_ok_by === 'manager'
+                     ? ' <span class="text-muted small">&mdash; taken by a management node, recoverable with your key</span>'
+                     : '')
                : 'never') . '</td></tr>';
-echo '<tr><th>Task last ran</th><td>' . htmlspecialchars($when($task['sct_last_run_time'] ?? null));
-if (!empty($task['sct_last_run_message'])) {
-	echo ' &mdash; ' . htmlspecialchars($task['sct_last_run_message']);
+
+// When did a backup last run, and who ran it. A plane-backed node's local task
+// never runs — its backups are dispatched by the management node, which writes no
+// local task row — so falling back to the newest management-node run tells the
+// truth instead of showing a dash under a task nobody scheduled here.
+$local_task_ran = function () use ($when, $task) {
+	echo htmlspecialchars($when($task['sct_last_run_time'] ?? null));
+	if (!empty($task['sct_last_run_message'])) {
+		echo ' &mdash; ' . htmlspecialchars($task['sct_last_run_message']);
+	}
+};
+$last_mgr_run = null;
+foreach ($history as $h) {
+	if ($h->get('bkh_profile') === BackupProfile::MANAGER) { $last_mgr_run = $h; break; }
+}
+
+echo '<tr><th>Task last ran</th><td>';
+if (!empty($task['sct_is_active'])) {
+	// An active local task is what runs backups here; its own last run is the truth.
+	$local_task_ran();
+} elseif ($last_mgr_run) {
+	// No active local task, but a management node is taking backups — report its
+	// last run rather than a dash or a stale local time from before this node
+	// was managed.
+	echo '<span class="text-muted">A management node runs your backups</span> &mdash; last ran '
+	   . htmlspecialchars($when($last_mgr_run->get('bkh_start_time')));
+} elseif (!empty($task['sct_last_run_time'])) {
+	// A local task that has run but is switched off — the run is real, the alert
+	// above says it is paused.
+	$local_task_ran();
+} else {
+	echo '&mdash;';
 }
 echo '</td></tr>';
-echo '<tr><th>Recovery key</th><td>'
-   . ($recovery['is_ready']
-       ? 'verified (' . htmlspecialchars($recovery['fingerprint']) . '&hellip;)'
-       : htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery)))
-   . '</td></tr>';
+
+// The recovery-key line carries its own actions once the key is verified, so the
+// separate setup box below can disappear entirely — an operator returning to a
+// solved problem should not have to scroll past its solution.
+$rotating = !empty($_GET['rotate_recovery']);
+echo '<tr><th>Recovery key</th><td>';
+if ($recovery['is_ready']) {
+	echo 'verified (' . htmlspecialchars($recovery['fingerprint']) . '&hellip;)';
+	if (!$rotating) {
+		echo ' <a href="/admin/admin_recovery_readiness" class="ms-2 small">Verify</a>';
+		echo ' <a href="?rotate_recovery=1#recovery-key" class="ms-2 small">Rotate key&hellip;</a>';
+	}
+} else {
+	echo htmlspecialchars(BackupRecoveryKey::outstanding_summary($recovery));
+}
+echo '</td></tr>';
 echo '</tbody></table>';
 
 // A backup on demand — before a risky change, or to prove the setup works
@@ -88,13 +156,25 @@ if ($plan) {
 $page->end_box();
 
 // ── Recovery key ────────────────────────────────────────────────────────────
+// Only while there is something to do: setting a key, proving possession, or a
+// rotation in progress. A verified key needs no box — its line above holds the
+// Verify and Rotate actions.
 echo '<a id="recovery-key"></a>';
-$page->begin_box(array('title' => 'Recovery key'));
-require_once(PathHelper::getIncludePath('includes/RecoveryKeySetupPanel.php'));
-RecoveryKeySetupPanel::render($page, array('state' => $recovery));
-$page->end_box();
+if (!$recovery['is_ready'] || $rotating) {
+	$page->begin_box(array('title' => 'Recovery key'));
+	require_once(PathHelper::getIncludePath('includes/RecoveryKeySetupPanel.php'));
+	RecoveryKeySetupPanel::render($page, array('state' => $recovery));
+	$page->end_box();
+}
 
-// ── Targets ─────────────────────────────────────────────────────────────────
+// ── Targets and schedule ────────────────────────────────────────────────────
+// Configured here only when this site runs its own backups. On a managed node
+// the target, schedule and retention live on the management node, so both boxes
+// are hidden rather than offering this admin settings the management node would
+// overrule. (The recovery key above stays: it is held on this machine and the
+// management node cannot set it.)
+if (!$is_managed):
+
 $adding = !empty($_GET['add']);
 
 echo '<a id="targets"></a>';
@@ -261,7 +341,13 @@ echo '<p class="text-muted small mb-0">When backups run is set on '
        : '') . '.</p>';
 $page->end_box();
 
-// ── History ─────────────────────────────────────────────────────────────────
+endif; // targets + schedule shown only when this site runs its own backups
+
+// ── Recent backups ──────────────────────────────────────────────────────────
+// One list for every profile. A site's own runs and a management node's copies of
+// it both seal to this site's recovery key, so they belong together rather than
+// in two boxes — each row says where it was initiated. Only this site's own runs
+// carry a Hide action; a management node's records are read-only here.
 $page->begin_box(array('title' => 'Recent backups'));
 
 $hrows = array();
@@ -270,11 +356,14 @@ foreach ($history as $h) { $hrows[] = $h; }
 if (!$hrows) {
 	echo '<p class="text-muted mb-0">No backups have run yet.</p>';
 } else {
+	echo '<p class="text-muted small">Runs this site made itself and runs a management node made on its '
+	   . 'behalf, newest first &mdash; both open with this site\'s recovery key.</p>';
 	echo '<table class="table"><thead><tr>'
-	   . '<th>When</th><th>What</th><th>Result</th><th>Size</th><th>Stored</th><th></th>'
+	   . '<th>When</th><th>What</th><th>Result</th><th>Size</th><th>Initiated by</th><th>Availability</th><th></th>'
 	   . '</tr></thead><tbody>';
 	foreach ($hrows as $h) {
-		$outcome = (string)$h->get('bkh_outcome');
+		$outcome    = (string)$h->get('bkh_outcome');
+		$is_manager = ($h->get('bkh_profile') === BackupProfile::MANAGER);
 		echo '<tr>';
 		echo '<td>' . htmlspecialchars($when($h->get('bkh_start_time'))) . '</td>';
 		echo '<td>' . htmlspecialchars($h->get('bkh_type')) . '</td>';
@@ -286,58 +375,48 @@ if (!$hrows) {
 		}
 		echo '</td>';
 		echo '<td>' . htmlspecialchars(BackupRunner::human($h->get('bkh_bytes'))) . '</td>';
-		echo '<td>' . ($h->is_offsite()
-			? htmlspecialchars((string)$h->get('bkh_target_name'))
-			: '<span class="text-muted">local only</span>') . '</td>';
+		// Where the run was initiated: a management node dispatched it, or this
+		// machine started it itself.
+		echo '<td>' . ($is_manager
+			? 'Management node' . ($manager_url !== ''
+				? ' <span class="text-muted small">(' . htmlspecialchars($manager_url) . ')</span>'
+				: '')
+			: 'This site') . '</td>';
+		// Whether the backup is still there, stated on every row so present and
+		// cleaned-up read differently at a glance. Retention that cleaned a backup
+		// up stamped bkh_pruned_time; its upload_time survives the prune, so pruned
+		// is checked first or a gone backup would still read as present offsite.
+		$pruned = (bool)$h->get('bkh_pruned_time');
 		echo '<td>';
-		$fh = $page->getFormWriter('delh_' . (int)$h->key);
-		$fh->begin_form();
-		$fh->hiddeninput('action', '', array('value' => 'delete_history'));
-		$fh->hiddeninput('bkh_id', '', array('value' => (int)$h->key));
-		$fh->submitbutton('btn_delh_' . (int)$h->key, 'Hide', array('class' => 'btn btn-sm btn-outline-secondary'));
-		$fh->end_form();
+		if ($pruned) {
+			echo '<span class="text-muted">Cleaned up &middot; ' . htmlspecialchars($when($h->get('bkh_pruned_time'))) . '</span>';
+		} elseif ($outcome === 'failed') {
+			echo '<span class="text-muted">not stored</span>';
+		} elseif ($outcome === 'running') {
+			echo '<span class="text-muted">in progress</span>';
+		} elseif ($h->is_offsite()) {
+			echo '<span class="text-success">Present</span> <span class="text-muted small">&middot; '
+			   . htmlspecialchars((string)$h->get('bkh_target_name')) . '</span>';
+		} else {
+			echo '<span class="text-success">Present</span> <span class="text-muted small">&middot; local only</span>';
+		}
+		echo '</td>';
+		echo '<td>';
+		// A management node owns its own records; this site hides only its own — and
+		// hiding only removes the row from this list, never the stored backup. A
+		// cleaned-up run is already gone, so it carries no Hide.
+		if (!$is_manager && !$pruned) {
+			$fh = $page->getFormWriter('delh_' . (int)$h->key);
+			$fh->begin_form();
+			$fh->hiddeninput('action', '', array('value' => 'delete_history'));
+			$fh->hiddeninput('bkh_id', '', array('value' => (int)$h->key));
+			$fh->submitbutton('btn_delh_' . (int)$h->key, 'Hide', array('class' => 'btn btn-sm btn-outline-secondary'));
+			$fh->end_form();
+		}
 		echo '</td></tr>';
 	}
 	echo '</tbody></table>';
 }
 $page->end_box();
-
-// ── Backups somebody else takes of this site ────────────────────────────────
-//
-// Shown whenever they exist, and read-only. This site cannot schedule, run or
-// delete them — they belong to whoever runs them, on their storage, under their
-// key. Saying so plainly is the point: the alternative is a site admin finding
-// unexplained archives in a directory listing, or assuming a copy they cannot
-// open is a copy they can restore from.
-$mrows = array();
-foreach ($manager_history as $m) { $mrows[] = $m; }
-
-if ($mrows) {
-	$page->begin_box(array('title' => 'Backups taken by a control plane'));
-	echo '<p class="text-muted">Another party manages this site and takes its own backups of it. They '
-	   . 'are encrypted to that party\'s recovery key, stored on their storage, and kept to their '
-	   . 'schedule &mdash; this page cannot change or delete them. They do not replace this site\'s own '
-	   . 'backups above, which are the ones you hold the key to.</p>';
-	echo '<table class="table"><thead><tr>'
-	   . '<th>When</th><th>What</th><th>Result</th><th>Size</th><th>Opens with</th>'
-	   . '</tr></thead><tbody>';
-	foreach ($mrows as $m) {
-		$outcome = (string)$m->get('bkh_outcome');
-		echo '<tr>';
-		echo '<td>' . htmlspecialchars($when($m->get('bkh_start_time'))) . '</td>';
-		echo '<td>' . htmlspecialchars($m->get('bkh_type')) . '</td>';
-		echo '<td>' . ($outcome === 'failed' ? '<strong>failed</strong>' : htmlspecialchars($outcome)) . '</td>';
-		echo '<td>' . htmlspecialchars(BackupRunner::human($m->get('bkh_bytes'))) . '</td>';
-		// The site key is a recipient too, so this machine can restore itself from
-		// one of these unattended. Worth stating: it is the difference between a
-		// copy that is merely present and one this site can actually use.
-		echo '<td><span class="small text-muted">their recovery key '
-		   . htmlspecialchars(substr((string)$m->get('bkh_recovery_fpr'), 0, 16)) . '&hellip;, '
-		   . 'and this site\'s own key</span></td>';
-		echo '</tr>';
-	}
-	echo '</tbody></table>';
-	$page->end_box();
-}
 
 $page->admin_footer();

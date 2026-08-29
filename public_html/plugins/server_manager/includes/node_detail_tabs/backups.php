@@ -9,6 +9,9 @@
  * In scope: $node, $page, $session, $base_url, $node_name, $page_regex,
  * $skip_joinery, $tab.
  *
+ * @version 1.6 - the backup-target line and recoverable box resolve the shelf via get_target(), the
+ *                same fallback the job builder uses, so a node that names no target but backs up to the
+ *                sole enabled shelf reads as cloud-backed instead of "Local only"
  * @version 1.5 - recoverability is read from the NODE's own verified recovery key, not this control
  *                plane's: backups seal to the key the node holds, so a node without a verified one
  *                is shown as unable to back up and the run button is not offered
@@ -27,20 +30,29 @@
  * @version 1.0
  */
 
-	// Load target info
+	// Where this node's backups actually go — resolved the SAME way the job
+	// builder resolves it, so the tab never says "Local only" about a node that
+	// is in fact uploading to the management node's sole enabled shelf. Reading the
+	// raw mgn_bkt_backup_target_id here was how a working, cloud-backed node
+	// showed as local-only whenever it named no target of its own.
 	require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
-	$target_id = $node->get('mgn_bkt_backup_target_id');
-	$target_name = 'Local only';
+	$cloud_target  = JobCommandBuilder::get_target($node);
+	$names_own     = (bool) $node->get('mgn_bkt_backup_target_id');
+	$target_name   = 'Local only';
 	$target_provider = 'local';
-	if ($target_id) {
-		try {
-			$target = new BackupTarget($target_id, TRUE);
-			$provider_labels = ['local' => 'Local', 'b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
-			$target_provider = $target->get('bkt_provider');
-			$target_name = htmlspecialchars($target->get('bkt_name')) . ' (' . ($provider_labels[$target_provider] ?? $target_provider) . ')';
-		} catch (Exception $e) {
-			$target_name = 'Local only (configured target not found)';
+	if ($cloud_target) {
+		$provider_labels = ['local' => 'Local', 'b2' => 'Backblaze B2', 's3' => 'Amazon S3', 'linode' => 'Linode Object Storage'];
+		$target_provider = $cloud_target->get('bkt_provider');
+		$target_name = htmlspecialchars($cloud_target->get('bkt_name')) . ' (' . ($provider_labels[$target_provider] ?? $target_provider) . ')';
+		// Make the fallback legible rather than silent: this node named no shelf,
+		// so it is using the only one this management node has.
+		if (!$names_own) {
+			$target_name .= ' &mdash; <span class="text-muted">the management node\'s only shelf (this node names none)</span>';
 		}
+	} elseif ($names_own) {
+		// It named a shelf, but that shelf is gone or switched off — not the same
+		// thing as choosing local-only, and worth saying so.
+		$target_name = 'Local only (the shelf this node named is missing or switched off)';
 	}
 
 	echo '<div class="alert alert-light border mb-3">';
@@ -49,9 +61,9 @@
 	echo '</div>';
 
 	// Whether backups of this node can be recovered at all — which is a question
-	// about the NODE, not about this control plane. Every backup seals to the
+	// about the NODE, not about this management node. Every backup seals to the
 	// recovery key the node holds and has proven, read on the node; nothing is
-	// supplied from here, so this control plane's own key has no bearing on
+	// supplied from here, so this management node's own key has no bearing on
 	// whether this node can be backed up or by whom its archives can be opened.
 	require_once(PathHelper::getIncludePath('includes/BackupRecoveryKey.php'));
 	require_once(PathHelper::getIncludePath('plugins/server_manager/includes/RecoveryKeyFleet.php'));
@@ -59,15 +71,14 @@
 	$recovery_ready = ($rk_node['state'] === 'n/a') || RecoveryKeyFleet::has_own_key($rk_node);
 
 	// Encryption is forced for exactly the nodes whose archives leave the box —
-	// asked of the same function the job builder asks, so the form can never
-	// offer a choice the builder is going to overrule. (An enabled target is what
-	// counts: a disabled one uploads nothing, so nothing leaves.)
-	$cloud_target = JobCommandBuilder::get_target($node);
+	// $cloud_target is the same value the job builder resolves (computed above),
+	// so the form can never offer a choice the builder is going to overrule. (An
+	// enabled target is what counts: a disabled one uploads nothing.)
 	$require_encryption = (bool) $cloud_target;
 
 	// When backups are paused outright (below), that box says everything this
 	// status alert would — so it is not repeated here.
-	if ($target_id && $recovery_ready && $rk_node['fingerprint'] !== '') {
+	if ($cloud_target && $recovery_ready && $rk_node['fingerprint'] !== '') {
 		echo '<div class="alert alert-success border mb-3 py-2">';
 		echo '<strong>Backups are recoverable.</strong> Every backup carries its own key sealed to this '
 			. 'node\'s verified recovery key '
@@ -103,11 +114,11 @@
 	$page->begin_box($pageoptions);
 
 	if (!$cloud_target) {
-		// No shelf, so there is nothing for this control plane to take a copy
+		// No shelf, so there is nothing for this management node to take a copy
 		// onto. Not a fault of the node's — say what would change it.
 		echo '<div class="alert alert-light border mb-0">';
 		echo '<strong>No backups are taken of this node from here.</strong> ';
-		echo 'Backups this control plane takes go to its own cloud storage, and this node has no '
+		echo 'Backups this management node takes go to its own cloud storage, and this node has no '
 		   . 'backup target set. ';
 		echo '<a href="' . $base_url . '&tab=overview&edit=1#connectionSettings" class="alert-link">Choose one</a> '
 		   . 'to start backing it up.';
@@ -141,7 +152,7 @@
 			   . ', keeping ' . (int)$policy['keep'] . ' restore point' . ($policy['keep'] === 1 ? '' : 's')
 			   . ($policy['mode'] === 'chain' ? ', as incremental chains' : ', a full backup every time');
 		} else {
-			echo '<strong>Not scheduled.</strong> This control plane takes no backups of this node '
+			echo '<strong>Not scheduled.</strong> This management node takes no backups of this node '
 			   . 'except when someone runs one.';
 		}
 		echo '</p>';
@@ -360,7 +371,7 @@
 		} else {
 			echo '<table class="table table-striped table-sm">';
 			echo '<thead><tr><th>Chain</th><th>Taken by</th><th>Restore points</th><th>Newest</th><th>Size</th><th>Actions</th></tr></thead><tbody>';
-			$profile_labels = ['manager' => 'This control plane', 'site' => 'The site itself'];
+			$profile_labels = ['manager' => 'This management node', 'site' => 'The site itself'];
 			foreach ($chain_list['chains'] as $c) {
 				$runs = $c['runs'];
 				$last = end($runs);

@@ -11,6 +11,9 @@
  * So chains are listed as chains: one row per chain, with the runs inside it as
  * the restore points, read from the manifest that is the restore contract.
  *
+ * @version 1.1 - the shelf is resolved via JobCommandBuilder::get_target(), so a node that names no
+ *                target still has its chains listed (from the sole enabled shelf) instead of appearing
+ *                to have no restore points
  * @version 1.0
  */
 
@@ -34,9 +37,9 @@ class BackupChainListHelper {
 	 * The bucket path a chain lives at.
 	 *
 	 * `{prefix}/{slug}/{profile}/{chain_id}/`. The profile segment is not
-	 * decoration: a site backs itself up and a control plane takes its own
+	 * decoration: a site backs itself up and a management node takes its own
 	 * copies, and those are two parties' backups under two recovery keys. A
-	 * restore that guessed the segment would look for a control plane's chain
+	 * restore that guessed the segment would look for a management node's chain
 	 * on the site's own shelf.
 	 */
 	public static function chain_path($target, $slug, $profile, $chain_id) {
@@ -53,17 +56,14 @@ class BackupChainListHelper {
 	 * not ask" must not look the same.
 	 */
 	public static function for_node($node, $max_chains = 20) {
-		$target_id = $node->get('mgn_bkt_backup_target_id');
-		if (!$target_id) {
-			return ['chains' => [], 'error' => null];
-		}
-
-		try {
-			$target = new BackupTarget($target_id, TRUE);
-		} catch (Exception $e) {
-			return ['chains' => [], 'error' => 'The configured backup target could not be loaded.'];
-		}
-		if (!$target->get('bkt_enabled')) {
+		// Resolve the shelf the SAME way the job builder does, so a node that names
+		// no target still has the chains it wrote to the sole enabled shelf listed
+		// here. Reading the raw mgn_bkt_backup_target_id returned an empty list for
+		// every such node — indistinguishable from "no restore points" when
+		// backups were in fact landing fine. get_target returns only an enabled
+		// target (or null), so no separate bkt_enabled check is needed.
+		$target = JobCommandBuilder::get_target($node);
+		if (!$target) {
 			return ['chains' => [], 'error' => null];
 		}
 
