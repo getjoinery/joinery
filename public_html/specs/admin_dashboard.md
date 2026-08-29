@@ -72,7 +72,7 @@ fields: `scope` and `copy`); whichever spec lands first creates the registry.
 - **store**: payment keys for the active checkout type; live-vs-test mode
   surfaced.
 - **mailbox**: inbound domain + DKIM/SRS state.
-- **server_manager** (control planes): links the whole Provisioning page as
+- **server_manager** (management nodes): links the whole Provisioning page as
   one card whose status is the page's aggregate.
 
 **Plugin cards aggregate — they never duplicate.** A plugin that has its own

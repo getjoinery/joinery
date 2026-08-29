@@ -3,7 +3,7 @@
  * FleetBackups — the fleet's view of a backup target.
  *
  * Core's TargetBackups knows how to read a bucket but deliberately does not know
- * who owns the slugs it finds there; a standalone site owns one, a control plane
+ * who owns the slugs it finds there; a standalone site owns one, a management node
  * owns dozens. This supplies the fleet answer, from the managed node table, so a
  * decommissioned site's backups are labelled as such rather than looking orphaned.
  *

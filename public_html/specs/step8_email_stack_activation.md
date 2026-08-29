@@ -24,7 +24,7 @@ The new VPS (node 176, `jeremytunnell-vps`, 45.79.204.178, bare-metal) owns its 
 | Hostname | `hostname -f` returns `localhost` | Mail needs a real FQDN (HELO/EHLO name); set with the mail hostname in Phase 2 |
 | Provisioning scripts on box | all present (`install_email.sh`, `provision_dkim.sh`, `provision_relay*.sh`, `relay-sealer/`) | Nothing to ship; just execute |
 | WireGuard | not present | Fine — only needed for step 9 relay topology |
-| **Postgres port 5432** | **open to the entire internet and accepting connections** (ufw ALLOW 5432 from Anywhere; verified reachable from dev; password auth is the only gate). VPS A refuses 5432, so this is specific to node 176's bare-metal/from-backup install path | **Security finding — close before this box holds real mail.** Determine what legitimately needs it (control-plane restore push?) and restrict to that source, or remove the rule. Logged as deferred_fixes entry 14 |
+| **Postgres port 5432** | **open to the entire internet and accepting connections** (ufw ALLOW 5432 from Anywhere; verified reachable from dev; password auth is the only gate). VPS A refuses 5432, so this is specific to node 176's bare-metal/from-backup install path | **Security finding — close before this box holds real mail.** Determine what legitimately needs it (management-node restore push?) and restrict to that source, or remove the rule. Logged as deferred_fixes entry 14 |
 
 ## What already exists (inventory, verified in code 2026-07-19)
 
@@ -66,7 +66,7 @@ Also fixed while shipping these: CLI `upgrade.php` re-execs itself after a self-
 ## Build items (gaps found)
 
 1. ~~Mail-stack install as a platform action~~ **BUILT 2026-07-19**: `JobCommandBuilder::build_run_plugin_installers` + node-detail Actions item — general (any plugin's `host_installer`), not mail-specific. Tests 84/84, UI verified live.
-2. ~~rDNS as a platform action~~ **BUILT 2026-07-19**, three layers so standalone sites are covered (the panel is control-plane-only):
+2. ~~rDNS as a platform action~~ **BUILT 2026-07-19**, three layers so standalone sites are covered (the panel is management-node-only):
    - **Automatic at cert issuance**: `JobResultProcessor` (1.5) sets the PTR to the site domain the first time `provision_ssl` completes (and on the check_status SSL-transition path) — the moment the domain provably resolves here, which is the provider's own precondition. Best-effort via `NodeReverseDns::setQuietly` (stale grant/manual node → recorded on the job result, never blocks SSL); first-issuance-only so a custom PTR is never overwritten by renewals.
    - **Operator button**: Reverse DNS panel on node detail Overview (cloud-born nodes) — shows current PTR, suggests `mail.<domain>`, forward-A-record precheck with an actionable refusal, expired-grant reconnect link. Live-verified on node 176.
    - **Manual checklist fallback**: the mailbox Setup tab PTR check (guidance text updated) remains the item a standalone site owner acts on via their provider's panel.
@@ -77,7 +77,7 @@ Also fixed while shipping these: CLI `upgrade.php` re-execs itself after a self-
 
 The path is fully specified, and the one missing platform piece was found and built (2026-07-19 overnight):
 
-- **A relay shard hosts no Joinery site** — `build_provision_relay` is self-delivering (tarballs the sealer + installer from the control plane's tree, pushes over SSH, runs `provision_relay.sh` on the host). But the cloud-birth pipeline always installed a site. The gap is closed: the Install New Node cloud target now offers install type **Bare instance** (admin-origin only; instance + SSH key + managed node with `mgn_skip_joinery_checks`, no web root/site URL/SSL flow; completion = passing `check_status` job). Tests 31/31, form behavior verified live.
+- **A relay shard hosts no Joinery site** — `build_provision_relay` is self-delivering (tarballs the sealer + installer from the management node's tree, pushes over SSH, runs `provision_relay.sh` on the host). But the cloud-birth pipeline always installed a site. The gap is closed: the Install New Node cloud target now offers install type **Bare instance** (admin-origin only; instance + SSH key + managed node with `mgn_skip_joinery_checks`, no web root/site URL/SSL flow; completion = passing `check_status` job). Tests 31/31, form behavior verified live.
 - **Topology:** dev is the fleet operator — VPS B is born bare on dev's server_manager, stood up as a shard via the Relay tab's provision action (`skeleton_only` for fleet mode), and jeremytunnell.com enrolls as a *tenant* through the fleet service (`fleet_enroll`, DNS TXT domain claim, MX → per-tenant hostname in the operator's `mailbox_fleet_mx_zone`). The tenant's own steady-state access (spool pull, map push) uses its relay pull key, not dev's admin key.
 
 Sequence: VPS B bare-birth → shard provision → operator fleet service on (`mailbox_fleet_service_enabled`, shard row, MX zone) → tenant enrollment from jeremytunnell.com → `specs/fortress_live_verification_runbook.md` phases (guided Fortress domain setup → edge-seal proof → protected-identity send) → `specs/mailbox_security_model_pentest_brief.md`. The N=2 multi-tenant proof (`specs/mailbox_relay_shared_fleet.md`) rides on the same shard.

@@ -574,12 +574,12 @@ connections on port 25. `mgn_skip_joinery_checks` redirects `api` to
 `http_status`, and leaves an explicitly chosen `http_status` or `tcp_port`
 alone.
 
-### FleetBackupRun — the control plane's backups of its nodes
+### FleetBackupRun — the management node's backups of its nodes
 
 The Server Manager's **FleetBackupRun** task (`every_run`) schedules the
-manager-profile backups — this control plane's own copies of the nodes it
+manager-profile backups — this management node's own copies of the nodes it
 manages, under its own recovery key. The node does the backup; the task decides
-when, prunes the node's manager shelf first with the control plane's
+when, prunes the node's manager shelf first with the management node's
 delete-capable credential, and dispatches one `backup_run` job per due node.
 
 Three rules keep a fleet of these from behaving like a thundering herd: each

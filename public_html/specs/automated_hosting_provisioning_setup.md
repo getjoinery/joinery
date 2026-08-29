@@ -1,7 +1,7 @@
 # Automated Hosting Provisioning — Activation
 
 **Status (updated 2026-07-18): activation is now a guided admin page, not a
-manual checklist.** The control plane's **Server Manager → Provisioning** page
+manual checklist.** The management node's **Server Manager → Provisioning** page
 (`/admin/server_manager/provisioning_setup`) shows the live state of every
 pipeline requirement and does the automatable work itself
 (`ProvisioningSetup` engine, `plugins/server_manager/includes/`). What
@@ -34,7 +34,7 @@ One click each, idempotent, with live status badges:
    the Linode OAuth app credentials. The provisioning keypair itself is
    generated automatically at plugin activation (default
    `{site root}/config/provisioning_key`); the page's Generate button covers
-   control planes activated before the key existed.
+   management nodes activated before the key existed.
 
 6. **Domain registrar** (only if you want to sell buyers their domain name):
    the Namecheap API username, API key (sealed at rest by the card itself),
@@ -45,16 +45,16 @@ One click each, idempotent, with live status badges:
 plane, mint the service user + key on the store site and paste the values
 into the three API settings; everything else on the page works the same.
 Managed domain registration is the exception: its intake runs in-process on
-the control plane, so it needs the store and Server Manager on one install.
+the management node, so it needs the store and Server Manager on one install.
 
 The page also shows (as requirement #1) a **job agent heartbeat badge** —
 every job the pipeline creates sits pending until a joinery-agent polling
-this site's queue claims it, so a control plane without a live agent cannot
+this site's queue claims it, so a management node without a live agent cannot
 execute anything.
 
 ## Remaining operator steps (genuinely manual)
 
-0. **Job agent**: install joinery-agent on the control plane's host
+0. **Job agent**: install joinery-agent on the management node's host
    (`sudo bash joinery-agent-installer.sh --config <Globalvars_site.php path>`,
    built from `{agent repo}/build_installer.sh`). Hosts without systemd
    (Docker containers) are auto-detected and supervised via cron. The
@@ -66,7 +66,7 @@ execute anything.
    stamps `pro_fulfillment_provider = customer_cloud` and asks the domain
    question at checkout automatically (the `CustomerCloudFulfillment`
    provider contributes it) — and put the Connect link
-   (`https://<control-plane-host>/profile/server_manager/connect_cloud`) in
+   (`https://<management-node-host>/profile/server_manager/connect_cloud`) in
    the product's after-purchase message. For shared-host products, attach
    the domain question as a requirement instead — the attachment is what
    makes an order a hosting order. The Connect page is deliberately not in
@@ -79,7 +79,7 @@ execute anything.
    - **Registrar account.** Namecheap grants API access only to accounts
      with 20 or more domains, $50 in the balance, or $50 spent in the last
      two years. Turn on API access at Profile → Tools → Namecheap API
-     Access, add the control plane's public **IPv4** address to Whitelisted
+     Access, add the management node's public **IPv4** address to Whitelisted
      IPs (IPv6 is not accepted), and copy the key into the Provisioning
      page's Domain registration card. Rehearse against the sandbox first —
      the same card has the switch.
@@ -108,7 +108,7 @@ execute anything.
    be a routable public IP.
 3. **Customer-cloud fulfillment only**: register the OAuth client in Linode
    Cloud Manager (Profile → OAuth Apps → Create OAuth App, **not** public,
-   callback `https://<control-plane-host>/oauth_callback`) and enter the
+   callback `https://<management-node-host>/oauth_callback`) and enter the
    client ID/secret at **Admin → System → OAuth Providers**. Optionally copy
    the referral URL from Cloud Manager → Profile → Referrals into the
    Provisioning page's field.

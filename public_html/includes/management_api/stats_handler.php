@@ -79,7 +79,7 @@ function stats_handler($request) {
 		$result['joinery_version'] = $version;
 	}
 
-	// Which backup recovery key this site is holding. A control plane needs it
+	// Which backup recovery key this site is holding. A management node needs it
 	// to see whether the site can encrypt its own scheduled backups yet, and to
 	// tell its own key from one somebody else configured here. Only the
 	// fingerprint and the state travel — the public key is not secret, but
@@ -99,7 +99,7 @@ function stats_handler($request) {
 	//
 	// Both are REPORTED. The site profile is this site's own business — a site
 	// that takes no copies of its own is exercising a choice, not failing — and
-	// reporting it here lets a control plane show why a box is busy at 3am
+	// reporting it here lets a management node show why a box is busy at 3am
 	// without treating it as a problem to chase. The manager profile is reported
 	// so whoever runs it can see their own runs landing without reading a bucket.
 	try {
@@ -169,7 +169,7 @@ function _mgmt_stats_format_size($bytes) {
  * about runs that FAILED — a bucket listing shows successes and says nothing
  * about the month of failures that preceded them.
  *
- * The schedule half only applies to the site's own profile: a control plane's
+ * The schedule half only applies to the site's own profile: a management node's
  * backups are scheduled where they are run from, not here.
  */
 function _mgmt_stats_backup_profile($profile) {

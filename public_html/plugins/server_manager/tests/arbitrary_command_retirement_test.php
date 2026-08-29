@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * A control plane holds no way to run an instruction it composed on a node.
+ * A management node holds no way to run an instruction it composed on a node.
  *
  * This replaces the node console's gate test, and the replacement is the point.
  * That test asked whether the gate in front of arbitrary command execution was

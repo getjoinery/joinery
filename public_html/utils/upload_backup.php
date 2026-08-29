@@ -4,7 +4,7 @@
  * management node's cloud storage target, in its own process.
  *
  * The file is here and the archive can be many gigabytes, so the transfer runs
- * here. Routing it through the control plane would drag the whole thing down and
+ * here. Routing it through the management node would drag the whole thing down and
  * push it back up again for no reason.
  *
  * WHAT THIS SCRIPT WILL NOT DO, and why the list is the point:

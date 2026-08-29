@@ -4,7 +4,7 @@ The Server Manager plugin provides a web UI for managing remote Joinery producti
 
 The system has two components:
 - **PHP plugin** (`plugins/server_manager/`) -- admin UI, job creation, command generation
-- **Go agent** (`/home/user1/joinery-agent/`) -- runs a control plane's own job queue, and on a managed node takes work from its plane over the [agent channel](#the-agent-channel)
+- **Go agent** (`/home/user1/joinery-agent/`) -- runs a management node's own job queue, and on a managed node takes work from its plane over the [agent channel](#the-agent-channel)
 
 ## Quick Start
 
@@ -28,7 +28,7 @@ The agent ships inside the platform release. Publishing an upgrade bundles a sig
 - `joinery-agent-linux-amd64.gz` / `joinery-agent-linux-arm64.gz` — the binaries
 - `joinery-agent.service` — the systemd unit
 
-On the publishing control plane, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent).
+On the publishing management node, `publish_upgrade.php` cross-compiles both architectures from the checkout named by the `server_manager_agent_source_path` setting (default `/home/user1/joinery-agent`) whenever the source version differs from the bundled one, and signs them with the key at `{site root}/config/agent_signing_key` (generated on first publish; the `.pub` sibling holds the base64 public key that gets baked into the built agent).
 
 Bundling is the first thing a publish does, before the VERSION file, the archives or the release row, because its outcome decides whether the release happens at all:
 
@@ -41,7 +41,7 @@ The last line of a publish names the agent version the release carries. `plugins
 
 **First install** is handled by the core installer `maintenance_scripts/install_tools/install_agent.sh`, which runs at every root moment — site install, code upgrade, container start, and the node-detail **Run Plugin Installers** action. It installs the bundled binary, writes the env file with the right `JOINERY_CONFIG`, and sets up systemd or cron supervision automatically.
 
-The installer is core rather than a plugin's, and runs on every Joinery instance: the agent does a machine's own backups, upgrades and health checks, and only a control plane has `server_manager` turned on. The artifact stays in this plugin's tree because this plugin builds and signs it, and it reaches every node regardless — the plugin is `included_in_publish` and `receives_upgrades`, both independent of whether it is active there.
+The installer is core rather than a plugin's, and runs on every Joinery instance: the agent does a machine's own backups, upgrades and health checks, and only a management node has `server_manager` turned on. The artifact stays in this plugin's tree because this plugin builds and signs it, and it reaches every node regardless — the plugin is `included_in_publish` and `receives_upgrades`, both independent of whether it is active there.
 
 **The binary lands on every deployment.** Installing is not running: the artifact is converged at each root moment regardless of the switch, so a machine that is switched on later starts a service that is already there rather than fetching, decompressing and verifying one at that moment.
 
@@ -51,7 +51,7 @@ Three ways to set it, all writing the same setting:
 
 - the machine's own **Admin → System → Management Node** page, which also says what is still needed for it to take effect
 - `php utils/agent_control.php --on` (also `--off`, `--join=URL`, `--leave`, `--status`) on the machine
-- from a control plane, the node detail **Agent Channel** panel's *Turn on the agent over SSH*, which switches it on, runs the installer, and has the node ask to join — the fleet path, available only while SSH is, and retired with it at the Phase 3 cutover
+- from a management node, the node detail **Agent Channel** panel's *Turn on the agent over SSH*, which switches it on, runs the installer, and has the node ask to join — the fleet path, available only while SSH is, and retired with it at the Phase 3 cutover
 - `install.sh --enable-agent` at install time. A site this management node provisions passes it automatically, so a node it builds comes up running its agent — the one case where whether the machine should run one is already answered
 
 None of those enroll anything. A join is a request; approving it here after comparing key fingerprints is what binds a node, unchanged.
@@ -66,7 +66,7 @@ The dashboard's Agent Status bar surfaces all of this from the heartbeat row (`a
 
 #### Manual install (bootstrap fallback)
 
-For a control plane that has no bundled artifact yet, build and install by hand:
+For a management node that has no bundled artifact yet, build and install by hand:
 
 ```bash
 cd /home/user1/joinery-agent
@@ -87,7 +87,7 @@ Both modes create:
 
 `--config PATH` stamps `JOINERY_CONFIG` into the env file, pointing the agent at the right site without editing anything.
 
-**Every control plane needs a live agent.** All jobs (install_node, provision_ssl, backups, upgrades) sit `pending` until an agent polling that site's own database claims them. The **Server Manager → Provisioning** page shows an agent heartbeat badge as requirement #1.
+**Every management node needs a live agent.** All jobs (install_node, provision_ssl, backups, upgrades) sit `pending` until an agent polling that site's own database claims them. The **Server Manager → Provisioning** page shows an agent heartbeat badge as requirement #1.
 
 #### Configure (usually not needed)
 
@@ -141,7 +141,7 @@ Go to `/admin/server_manager/node_add` (or click **Add Node** on the dashboard).
 The **Auto-Detect Joinery Servers** panel scans a remote host for Joinery instances automatically. Enter:
 
 1. **SSH Host** -- the server IP (e.g., `23.239.11.53`)
-2. **SSH Key Path** -- path to the private key on the control plane (defaults to `/home/user1/.ssh/id_ed25519_claude`)
+2. **SSH Key Path** -- path to the private key on the management node (defaults to `/home/user1/.ssh/id_ed25519_claude`)
 3. Click **Detect**
 
 The plugin creates a `discover_nodes` job. The Go agent SSHes to the host, finds Docker containers (or bare-metal installs) running Joinery, and reports back with each instance's container name, web root, domain, database name, and version.
@@ -194,12 +194,12 @@ The node detail page (`/admin/server_manager/node_detail?mgn_id=N&tab=...`) has 
 | **Overview** | Status summary (health dot, disk/memory/load/postgres/version), action buttons (Check Status, Test Connection), recent jobs for this node, connection settings (collapsed by default), delete node. The Actions dropdown also offers **Run Plugin Installers** — queues a `run_plugin_installers` job that executes every active plugin's declared `host_installer` on the node as root (idempotent); this is how a bare-metal node picks up system-service configuration (e.g. the mail stack) after a plugin is activated, since it has no container-start moment |
 | **Backups** | Target indicator, run database/project backup, backup file browser with scan, per-file upload-to-cloud and delete, restore full project from a `.tar.gz` archive, restore from an incremental chain |
 | **Database** | Restore from a backup file, and the record of database operations |
-| **Updates** | Version comparison (node vs control plane), apply update |
+| **Updates** | Version comparison (node vs management node), apply update |
 | **Jobs** | Job history filtered to this node, with status and type filters |
 
 ### Running a command on a node
 
-There is no way to. A control plane holds no mechanism for running an
+There is no way to. A management node holds no mechanism for running an
 instruction it composed at runtime on a managed node — no Console tab, no
 `node_exec.php`, no `run_command` job (decision A1).
 
@@ -224,7 +224,7 @@ The dashboard shows:
 
 - **Agent Status** -- online/offline indicator with version and last heartbeat time
 - **Managed Nodes** -- cards with health-based status dots (green=healthy, yellow=warning, red=problem, gray=no data), key metrics, and action buttons
-- **Publish Upgrade** -- build upgrade archives from control plane source code (node-independent)
+- **Publish Upgrade** -- build upgrade archives from management node source code (node-independent)
 - **Recent Jobs** -- latest 20 jobs across all nodes
 
 Health dot colors reflect actual server health, not check recency:
@@ -235,7 +235,7 @@ Health dot colors reflect actual server health, not check recency:
 
 ## The agent channel
 
-A node's agent polls its control plane over an outbound HTTPS connection, takes one job at a time, and posts the result back. Nothing has to reach in: a node behind NAT or Cloudflare works the same as one with a public address, and the poll itself is how the plane knows the node is alive.
+A node's agent polls its management node over an outbound HTTPS connection, takes one job at a time, and posts the result back. Nothing has to reach in: a node behind NAT or Cloudflare works the same as one with a public address, and the poll itself is how the plane knows the node is alive.
 
 **A job names an operation; it never carries a command.** The payload is `{primitive, params}` — a name the agent looks up in a vocabulary compiled into its own binary, plus parameters validated against the bounds that primitive declares. A name the agent does not have, a parameter it did not declare, or an operation class the node does not accept is **refused on the node**, with the reason recorded and reported back, whatever the plane asked for.
 
@@ -275,7 +275,7 @@ Operations cross one at a time. An operation has crossed when `JobCommandBuilder
 
 An agent old enough not to send a list leaves the column empty, and those nodes are answered by `JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION`: a per-operation floor naming the agent version that introduced the primitive. A node below the floor, or with no known version, routes away from the primitive — dispatching to a vocabulary that cannot be confirmed trades a working transport for a certain refusal.
 
-**Upgrade the control plane's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
+**Upgrade the management node's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
 
 ### Reading refusals
 
@@ -297,7 +297,7 @@ An agent claims a job and then reports. If it never reports — it crashed, the 
 
 ## Machines with no site
 
-Some machines a control plane manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.
+Some machines a management node manages host no Joinery site at all — a mail relay, a Docker host. They run the same agent in a **machine posture**: no site root, no local database, no admin page, and no platform release ever delivered to them. Two things follow, and both are served by the same endpoint.
 
 ### Keeping the agent current
 
@@ -349,11 +349,11 @@ Install with `install_agent.sh --siteless`, which is explicit and never inferred
 | `restore_project` | Restore a full project `.tar.gz` (files + DB) in place on an existing node, then reconcile it to that machine. Runs `restore_project.sh --force --domain <domain>`, which cascades `--non-interactive` into `restore_database.sh`. Pre-restore snapshots of DB and files written to `/backups/auto_pre_project_restore_*`. Every file in the archive must exist under the project directory afterwards or the restore fails and names what is missing | **Yes** |
 | `restore_chain` | Restore a node from an incremental backup chain — what the fleet's scheduled backups actually produce. Fetches the chain manifest, recovers the chain key on the node from the node's own `backup_site_key`, downloads every artifact the manifest names up to the chosen run, then runs `restore_chain.sh`, which verifies each artifact against its recorded size and hash **before writing anything** and applies them in order | **Yes** |
 | `apply_update` | Run `upgrade.php` on target | **Yes** |
-| `publish_upgrade` | Run `publish_upgrade.php` locally on control plane (in plugin) | No |
+| `publish_upgrade` | Run `publish_upgrade.php` locally on management node (in plugin) | No |
 | `discover_nodes` | Scan a remote host for Joinery instances (Docker + bare metal) | No |
 | `install_node` | Provision a fresh Joinery site on a remote host (fresh or from-backup) | No (target must be clean) |
 | `provision_ssl` | Run certbot on the node's host to obtain a Let's Encrypt cert | No |
-| `backup_run` | This control plane's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
+| `backup_run` | This management node's own backup of a node. The node runs its backup engine — chain, envelope, upload, local sweep — with the bucket and a write-only credential supplied for that run and never stored there. What opens the archive is not supplied: the node seals to the recovery key it holds and has verified | No |
 | `decommission_node` | Ship and run `remove_account.sh` on the host to permanently delete the site, verify it is gone, then soft-delete the node record | **Yes** |
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
@@ -371,10 +371,10 @@ Destructive operations auto-backup the target database before proceeding. The UI
 
 Two install types:
 
-- **Fresh**: empty Joinery site with default schema. Admin picks the domain. The admin login is `admin@example.com` with a password generated for that site alone — there is no shared default. Like the generated Postgres password, it stays on the node rather than in the control plane: read it at `/var/www/html/{sitename}/config/admin_credentials.txt` (root only), or set a new one with `maintenance_scripts/sysadmin_tools/reset_admin_password.php`. `usr_force_password_change=true`, so the first sign-in forces a new password.
+- **Fresh**: empty Joinery site with default schema. Admin picks the domain. The admin login is `admin@example.com` with a password generated for that site alone — there is no shared default. Like the generated Postgres password, it stays on the node rather than in the management node: read it at `/var/www/html/{sitename}/config/admin_credentials.txt` (root only), or set a new one with `maintenance_scripts/sysadmin_tools/reset_admin_password.php`. `usr_force_password_change=true`, so the first sign-in forces a new password.
 - **From Backup**: fresh install + restore of a source node's DB and project files, then reconciliation to the new node — its own domain (the node's recorded URL), its own deployment shape, its own paths. Use source admin credentials to log in; cut DNS over when ready and the certificate is issued on its own.
 
-The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the control plane, and pushed to the target after install.
+The job composes existing primitives: the installer artifacts from `maintenance_scripts/install_tools/` are packaged locally, SCP'd, extracted on the target, and `install.sh -y -q site SITENAME - DOMAIN` runs non-interactively. Docker installs add a follow-up step that invokes `manage_domain.sh set SITENAME DOMAIN --no-ssl` on the target to auto-install Apache + mod_proxy (if missing) and wire up an HTTP reverse proxy on port 80 — so the site is reachable at `http://DOMAIN/` as soon as DNS points here. SSL stays a separate admin step (`certbot --apache -d DOMAIN` on the target). For From-Backup, source backups are captured (or an existing cached backup is used), fetched to the management node, and pushed to the target after install.
 
 From-Backup restores files by extracting the source archive with **both** of its
 leading path components stripped, taking only the `project_files/` subtree —
@@ -394,7 +394,7 @@ The `mgn_install_state` column tracks the lifecycle: `installing` → `NULL` (su
 **Docker notes:**
 - The reverse proxy step (`manage_domain.sh`) is skipped when the domain is a bare IP address — a routable hostname is required for Apache `ServerName`-based virtual hosting. With an IP domain, the site is accessible directly on its mapped port.
 - `backup_project.sh` requires `rsync`. The bare-metal and Docker install scripts install rsync as part of the essential packages (`install.sh` line ~948). Sites installed before this was added can install it manually with `apt install rsync`.
-- After a Docker install, `mgn_container_name` is automatically recorded in the control plane DB so future jobs correctly use `docker exec` to reach the site.
+- After a Docker install, `mgn_container_name` is automatically recorded in the management node DB so future jobs correctly use `docker exec` to reach the site.
 
 ## SSL Management
 
@@ -426,7 +426,7 @@ The **Overview** tab shows an **SSL Setup card** when `mgn_ssl_state` is not `ac
 
 The `provision_ssl` job runs `certbot --apache -d DOMAIN` on the node's host (for Docker nodes, certbot runs on the reverse-proxy host, not inside the container). On success, `mgn_ssl_state` is set to `active` by `JobResultProcessor`.
 
-**Cloudflare-proxied domains** skip certbot (Cloudflare terminates TLS at its edge) but are gated on a routing probe: the job writes a one-time token to `{webroot}/sm-ssl-probe.txt` on the node, and the control plane fetches `/sm-ssl-probe.txt` through the domain. The token is only fetchable because core serve.php routes that URL to `views/sm_ssl_probe.php`, which serves the file — a Joinery front controller never serves arbitrary webroot files, so a node whose code predates that route cannot pass the probe and needs an upgrade first. Only a match — proof that traffic for the domain actually lands on this node — patches the proxy's `X-Forwarded-Proto` and marks SSL `active` (`JobResultProcessor` additionally requires the `CF_ROUTING_VERIFIED` marker). A miss fails the job and the domain stays pending until the customer's DNS actually routes here.
+**Cloudflare-proxied domains** skip certbot (Cloudflare terminates TLS at its edge) but are gated on a routing probe: the job writes a one-time token to `{webroot}/sm-ssl-probe.txt` on the node, and the management node fetches `/sm-ssl-probe.txt` through the domain. The token is only fetchable because core serve.php routes that URL to `views/sm_ssl_probe.php`, which serves the file — a Joinery front controller never serves arbitrary webroot files, so a node whose code predates that route cannot pass the probe and needs an upgrade first. Only a match — proof that traffic for the domain actually lands on this node — patches the proxy's `X-Forwarded-Proto` and marks SSL `active` (`JobResultProcessor` additionally requires the `CF_ROUTING_VERIFIED` marker). A miss fails the job and the domain stays pending until the customer's DNS actually routes here.
 
 ### Automated Provisioning (installs only)
 
@@ -477,15 +477,15 @@ with key/.pub existence badges, referral URL, instance defaults). The page
 also shows what stays manual: attaching the question or the Managed domain
 requirement to hosting products, opting a shared host in, and registering the
 Linode OAuth app. When the store
-is a remote site rather than the control plane itself, the service key is
+is a remote site rather than the management node itself, the service key is
 minted on the store site and its values entered in the API settings fields.
 
 The customer-cloud provisioning keypair (the public half is installed on
-created instances; the private half is the control plane's only access to
+created instances; the private half is the management node's only access to
 them) is generated automatically at plugin activation
 (`activate.php` → `ProvisioningSetup::ensureSshKey()`), defaulting to
 `{site root}/config/provisioning_key`. The page's **Generate provisioning
-key** button runs the same idempotent action for control planes activated
+key** button runs the same idempotent action for management nodes activated
 before the key existed; an existing key or custom path is never overwritten.
 
 ### Customer-Cloud Fulfillment
@@ -565,7 +565,7 @@ register:
 
 1. **Registrar credentials** — the *Domain registration* card on
    **Server Manager → Provisioning**. Namecheap needs an API username, an API
-   key (sealed at rest), and the control plane's public IPv4 address
+   key (sealed at rest), and the management node's public IPv4 address
    allowlisted in its API panel. Namecheap grants API access only to accounts
    with 20+ domains, $50 in the balance, or $50 spent in the last two years.
    A sandbox switch points every registrar call at Namecheap's sandbox for a
@@ -626,7 +626,7 @@ because a stamp written after a charge is one crash away from a second charge
 
 The web records unblock certificate issuance, so `ProvisionPendingSsl`
 succeeds without the buyer doing anything. The mail records are **not**
-computed on the control plane: `plugins/mailbox/utils/managed_domain_prepare.php`
+computed on the management node: `plugins/mailbox/utils/managed_domain_prepare.php`
 runs on the box over SSH, makes the domain mail-ready, and prints the record
 set `InboundEmailSetupCheck::dnsPlan()` prescribes — the box is what knows its
 own topology, SPF shape, DKIM key and Joinery Direct state. A record set
@@ -705,7 +705,7 @@ status, custody, expiry and per-step progress.
 ### Node settings
 
 Four core settings, declared `managed` so the node's own settings page does not
-offer them and the control plane is their only author:
+offer them and the management node is their only author:
 `managed_domain_name`, `managed_domain_expiry_time`, `managed_domain_state`,
 `managed_domain_manage_url`. Empty `managed_domain_state` renders no notice,
 which is what every deployment that did not buy a domain this way has.
@@ -732,7 +732,7 @@ Backup targets define where backup files are uploaded after creation. Each node 
 | **Amazon S3** | Access Key + Secret Key + Region |
 | **Linode Object Storage** | Access Key + Secret Key + Region + Endpoint URL |
 
-All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls from either the control plane (web tier) or the node (via a heredoc'd `node_uploader.php` script). New S3-compatible providers can be added by configuration alone, no script changes.
+All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls from either the management node (web tier) or the node (via a heredoc'd `node_uploader.php` script). New S3-compatible providers can be added by configuration alone, no script changes.
 
 Nodes with no backup target leave backups local-only on the remote server.
 
@@ -757,13 +757,13 @@ Credentials are stored on the `bkt_backup_targets` table using a unified shape f
 {"access_key": "...", "secret_key": "...", "region": "...", "endpoint": "..."}
 ```
 
-Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the control plane itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to the shelf but never erase it*). Both are SecretBox-sealed at rest.
+Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the management node itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to the shelf but never erase it*). Both are SecretBox-sealed at rest.
 
 A persisted job command never contains a credential — it carries a placeholder token that the agent resolves in memory immediately before the step runs: `__SM_CREDS_<target_id>__` for the main slot, `__SM_NODE_CREDS_<target_id>__` for the node slot. The builder decides at build time which token a step gets: node-side **uploads** carry the node token whenever the node slot is filled, while node-side **downloads and cloud deletes** always carry the main token, because those need the read and delete capability a write-only key deliberately lacks. The agent resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
 
 For node-side operations (upload, delete, download), the resolved credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
 
-Because the script is composed from the control plane's own copy of those two files, changes to the signer or the uploader reach every node on its next job — there is no agent release or node upgrade in the loop.
+Because the script is composed from the management node's own copy of those two files, changes to the signer or the uploader reach every node on its next job — there is no agent release or node upgrade in the loop.
 
 ### Transient Failures
 
@@ -784,7 +784,7 @@ The **Backups** tab on each node includes a file browser that lists backup files
 
 - **Scan for Backups** — creates a `list_backups` job to scan local `/backups/` on the node
 - **Unified file table** — shows filename, size, date, and location (Local / Cloud / Both)
-- **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the control plane would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
+- **Upload to cloud** — offered on rows that exist only on the node, when the node has an enabled cloud target. Creates an `upload_backup` job that pushes that one file from the node to the target. The transfer runs on the node, where the file already is; routing it through the management node would drag the archive down and push it straight back up. The local copy is kept regardless of the node's delete-after-upload setting — an operator asking for an offsite copy of a file they are looking at did not ask for that file to disappear, and deleting stays an explicit action. The button waits for the job's real verdict, so a failed transfer reports as failed with a link to the job output rather than reading as done
 - **Delete** — single Delete button per row that removes the file from every location it exists in (local, cloud, or both); the confirmation dialog names the file and locations explicitly
 - **Restore Full Project** — for `.tar.gz` archives, see the `restore_project` row in the Job Types table
 - **Restore points (incremental chains)** — a second table listing each chain on the node's shelf with its runs, size and newest restore point, read from the chain's own `manifest.json` by `BackupChainListHelper`. Restoring picks a run: the full, then every incremental up to it, in order. Chain artifacts are deliberately absent from the flat file table above — listed there, `files-0003.tar.gz.enc` invites a restore of one incremental with no full under it, which restores nothing at all
@@ -805,13 +805,13 @@ Cloud listings are fetched live via `TargetLister` on every page render (one Sig
 
 ### Stored Backups (target-side)
 
-The **Backup Targets** edit page has a **Stored Backups** panel that lists the target's objects directly from the bucket and groups them by site. It runs entirely on the control plane via `TargetBackups` (which lists through `S3Signer::list`, a continuation-token-paged ListObjectsV2), so it needs no live node — the authoritative view of what is actually stored offsite. Each group is tagged against the node table:
+The **Backup Targets** edit page has a **Stored Backups** panel that lists the target's objects directly from the bucket and groups them by site. It runs entirely on the management node via `TargetBackups` (which lists through `S3Signer::list`, a continuation-token-paged ListObjectsV2), so it needs no live node — the authoritative view of what is actually stored offsite. Each group is tagged against the node table:
 
 - **live** — a current node owns the slug; a link jumps to that node's Backups tab for granular local+cloud management
 - **decommissioned** — a soft-deleted node owned the slug; the site is gone but its offsite backups remain here, reachable and deletable
 - **orphaned** — no node, present or deleted, matches the slug
 
-Delete acts through `S3Signer` from the control plane: a single object (guarded so the key must sit under the target's own prefix), or a whole site's prefix (type-to-confirm the slug). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
+Delete acts through `S3Signer` from the management node: a single object (guarded so the key must sit under the target's own prefix), or a whole site's prefix (type-to-confirm the slug). This is the deliberate path for erasing a retired site's offsite backups — deleting a node never touches them.
 
 ## Retiring a node
 
@@ -826,7 +826,7 @@ Removed sites are hidden from the dashboard by default. The **Show all sites (in
 
 Opening a removed node's detail page offers two follow-up actions in its Danger Zone:
 
-- **Permanently Delete Site** — the same `decommission_node` host teardown, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this control plane once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page cannot probe the host directly — the web user holds no host SSH key — so this uses evidence already on the record; the `decommission_node` job itself is idempotent and reports `REMOVE_ACCOUNT_NOTHING` if it reaches a host with nothing to remove.)
+- **Permanently Delete Site** — the same `decommission_node` host teardown, for a node that was only removed from the dashboard while its site kept running (e.g. an orphaned container). For a removed node it is offered only when this management node once saw a live site there — a recorded status check, Joinery version, or uptime result. With no such evidence (for example an install that failed and never stood a site up) the action is hidden behind a short note and only **Permanently Delete Entry** is offered, since there is nothing on the host to tear down. (The page cannot probe the host directly — the web user holds no host SSH key — so this uses evidence already on the record; the `decommission_node` job itself is idempotent and reports `REMOVE_ACCOUNT_NOTHING` if it reaches a host with nothing to remove.)
 - **Permanently Delete Entry** — hard-deletes the Server Manager record itself (`purge_node`). Offered only for an already-removed node — purging a still-tracked node is refused, since that is how a live site becomes an untracked orphan. It is also refused while the node's slug still has offsite backups on any enabled target (or while a target cannot be listed to confirm): deleting the record would orphan those backups from the node they belong to, so they must be cleared from the target's Stored Backups panel first. Once allowed, the host is not touched and the job history survives the purge (cascade rules null the references).
 
 ## Backup Encryption and Key Custody
@@ -846,7 +846,7 @@ archive as a JSON envelope (`{archive}.keys.json`), which is uploaded with it:
   held by whoever administers that node, and never touches a server. An operator
   who administers several sites may configure the same public key on all of them,
   and then one private key opens all of theirs; that is their arrangement to
-  make, on each site, and not something this control plane can impose from here.
+  make, on each site, and not something this management node can impose from here.
 - **site** — a keypair the node itself holds at `config/backup_site_key`. This is
   what lets a site restore itself with nobody present: pre-restore rollback
   snapshots and routine restores need no operator. It is disposable — lose it and
@@ -928,7 +928,7 @@ the panel. `BackupRecoveryKey::setup_state()` is the single source of truth for
 that state, so the panel, the node Backups tab, and the dashboard cannot
 disagree.
 
-That panel covers this control plane's own site. Whether a **node** can be backed
+That panel covers this management node's own site. Whether a **node** can be backed
 up is a question about the node's key, answered by `RecoveryKeyFleet::node_state()`
 from the last status check: a node whose key is missing, unverified or not yet
 checked shows the explanation in place of the Run Backup forms, and the job
@@ -939,8 +939,8 @@ not a node whose backups are late.
 
 ### Backups across the fleet
 
-This control plane takes its own backups of the nodes it manages. They are a
-separate party's copies of each site, on this control plane's shelf — the
+This management node takes its own backups of the nodes it manages. They are a
+separate party's copies of each site, on this management node's shelf — the
 `manager` profile described in
 [Backups](../../../docs/backups.md#two-parties-two-profiles). A site's own
 backups are the `site` profile: its own schedule, its own business.
@@ -952,26 +952,26 @@ either side needs the other to be absent.
 **Both open with the node's key.** The two profiles differ in who schedules them,
 where the archive lands and who prunes it — not in who can read it. That belongs
 to the node's administrator in both cases, which is what makes a compromise of
-this control plane a metadata problem rather than a fleet-wide disclosure.
+this management node a metadata problem rather than a fleet-wide disclosure.
 
 **The node does the work.** `backup_run` hands it the bucket and a credential on
 stdin, and its own `BackupRunner` builds the archive, extends the chain, seals the
 envelope to the node's own verified recovery key, uploads and sweeps its local
-copies. Routing archives through the control plane would drag every byte down and
+copies. Routing archives through the management node would drag every byte down and
 push it back up, and would put this machine in the path of every restore.
 
 **Nothing is left on the node, and nothing is given to it.** The credential is
 substituted into the step by the agent at run time and never written to a job row
 or a node's database, and it leaves with the run. No encryption key goes the other
 way: a run that arrives carrying key material is refused rather than obeyed, so a
-control plane that had been tampered with cannot re-seal the fleet's next backups
+management node that had been tampered with cannot re-seal the fleet's next backups
 to a key of its choosing. A node holds no key to anyone's backups but its own, and
 a node that leaves this fleet takes nothing with it.
 
 #### The node may write to the shelf but never erase it
 
 A backup target holds two credential slots. The main credential
-(`bkt_credentials`) is the control plane's own — it lists, prunes and downloads.
+(`bkt_credentials`) is the management node's own — it lists, prunes and downloads.
 The **node credential** (`bkt_node_credentials`, on the target edit form) is an
 optional second key created **write-only** — `writeFiles` without `deleteFiles`
 on B2, `s3:PutObject` without `s3:DeleteObject` on S3. When it is set, that is
@@ -986,7 +986,7 @@ credential that can erase the fleet's backups, which is the first move of any
 ransomware worth the name and the exact thing these copies exist to survive.
 
 Pruning is driven by a bucket **listing**, which is the opposite of what a site
-does for its own backups, and correct only here: this control plane defined the
+does for its own backups, and correct only here: this management node defined the
 whole `{prefix}/{slug}/manager/` path, knows every slug under it, and is the only
 party that can delete from it. It is also stricter — it keeps the newest N sets
 of objects that actually exist, so a run that failed part-way can never be
@@ -1050,14 +1050,14 @@ which recovery key it sealed to. The manager profile's answer is denormalised
 onto `mgn_last_backup_time` and `mgn_last_backup_outcome` so the dashboard reads
 columns instead of visiting nodes.
 
-**The dashboard alarms only on this control plane's own runs** —
+**The dashboard alarms only on this management node's own runs** —
 `NodeMonitorHealth::fleet_backup_problems()` raises a node whose last backup from
 here failed, or whose backups have stopped arriving within its schedule's window.
 The alarm is "my backups of this node are broken", not "this node is
-unprotected", which is not this control plane's call to make.
+unprotected", which is not this management node's call to make.
 
 **The node's word is cross-checked against the bucket.** The retention pass
-lists each node's shelf with this control plane's own credential before every
+lists each node's shelf with this management node's own credential before every
 run, and the scheduler stamps what it saw — when the shelf was listed and the
 newest object write on it — onto `mgn_backup_shelf_checked_time` and
 `mgn_backup_shelf_newest_time`. The health check compares that against the
@@ -1080,11 +1080,11 @@ page load.
 That state decides whether the node can be backed up at all, by anyone — the
 Targets page lists it as fleet coverage, and `RecoveryKeyFleet::has_own_key()` is
 the one predicate every surface asks. Whose key it is is not compared against
-this control plane's: a node holding a key this machine has never seen is a node
+this management node's: a node holding a key this machine has never seen is a node
 whose operator holds their own recovery key, which is the intended arrangement.
 
 It is **reported and never written**. There is no job type that can write it, and
-`set_recovery_key.php` refuses `--public` outright so a stale control plane finds
+`set_recovery_key.php` refuses `--public` outright so a stale management node finds
 out rather than succeeding. A node's key is set up on that node's own Backups
 page, with the possession ceremony that makes it trustworthy — the page generates
 a keypair in the browser and runs the challenge in one pass.
@@ -1102,7 +1102,7 @@ To rebuild a lost node from its offsite backups:
 On the node itself no key is needed: `restore_project.sh` finds the envelope beside
 the archive and opens it with `config/backup_site_key`.
 
-This works when the control plane itself is the casualty — the envelopes sit in the
+This works when the management node itself is the casualty — the envelopes sit in the
 bucket alongside the archives, so bucket credentials plus the password-manager
 private key are sufficient. No site's recovery depends on any other site being
 alive.
@@ -1222,7 +1222,7 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 | `on_host` | No | If `true`, run on the SSH host directly, not inside the Docker container. Used for `docker stats`, etc. |
 | `direction` | scp | `upload` (local to remote) or `download` (remote to local) |
 | `remote_path` | scp | File path on the remote host |
-| `local_path` | scp/api | File path on the control plane (for `api`, set to stream the response body to a file instead of appending to job output — used by `backups/fetch`) |
+| `local_path` | scp/api | File path on the management node (for `api`, set to stream the response body to a file instead of appending to job output — used by `backups/fetch`) |
 | `method` | api | HTTP method: `GET`, `POST`, `PUT`, `DELETE` (in practice always `GET` — the management API is read-only) |
 | `endpoint` | api | Path relative to `/api/v1/management/` — e.g. `stats`, `backups/list`, `backups/fetch` |
 | `expect_status` | api | HTTP status code that counts as success (default 200) |
@@ -1234,7 +1234,7 @@ header('Location: /admin/server_manager/job_detail?job_id=' . $job->key);
 
 ## Management API (Read-Only)
 
-Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The control plane prefers this over SSH for observability operations (`check_status`, `list_backups`) because it's faster, parallelizable, and auditable.
+Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/management/*`. The management node prefers this over SSH for observability operations (`check_status`, `list_backups`) because it's faster, parallelizable, and auditable.
 
 **Endpoints** (all under `/api/v1/management/`, all `GET`, all JSON except `backups/fetch` which streams binary):
 
@@ -1246,13 +1246,13 @@ Every Joinery instance exposes a namespaced read-only HTTP surface at `/api/v1/m
 | `databases` | `List databases` |
 | `errors/recent` | `Recent errors` |
 | `backups/list` | `list_backups` |
-| `backups/fetch?path=...` | (no control-plane consumer — streams a backup file as binary) |
+| `backups/fetch?path=...` | (no management-node consumer — streams a backup file as binary) |
 
 Discovery: `GET /api/v1/management` returns every endpoint with its description.
 
-**Authentication** uses the existing API key system (`apk_api_keys` — same key headers and hashing as public CRUD; resolved by `ApiAuth::authenticate()`). The gate (`ApiAuth::authorize()`, with `requires_machine_key + min_user_permission: 10`) has **two requirements**: the key must be a **machine key** (`apk_type = machine`) — user session keys minted via `/api/v1/auth/login` get 403 here, so a superadmin logging into a phone app can't reach the control plane — **and** its owning user must be a superadmin (`usr_permission >= 10`). `apk_permission` is NOT a gate here — it's the CRUD-axis capability and is orthogonal. A superadmin's machine key with `apk_permission=1` can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
+**Authentication** uses the existing API key system (`apk_api_keys` — same key headers and hashing as public CRUD; resolved by `ApiAuth::authenticate()`). The gate (`ApiAuth::authorize()`, with `requires_machine_key + min_user_permission: 10`) has **two requirements**: the key must be a **machine key** (`apk_type = machine`) — user session keys minted via `/api/v1/auth/login` get 403 here, so a superadmin logging into a phone app can't reach the management node — **and** its owning user must be a superadmin (`usr_permission >= 10`). `apk_permission` is NOT a gate here — it's the CRUD-axis capability and is orthogonal. A superadmin's machine key with `apk_permission=1` can call management endpoints; a permission-5 admin's key cannot, regardless of `apk_permission`.
 
-**Adding a management key for a node:** on the target node, Admin → API Keys → New Key (admin-created keys are machine keys, which is what the control plane requires), owner = a superadmin user, `apk_permission = 1`, IP-restrict to the control plane's egress IP. Paste the public/secret pair into the node's Overview tab on the control plane's Server Manager ("API Credential" panel).
+**Adding a management key for a node:** on the target node, Admin → API Keys → New Key (admin-created keys are machine keys, which is what the management node requires), owner = a superadmin user, `apk_permission = 1`, IP-restrict to the management node's egress IP. Paste the public/secret pair into the node's Overview tab on the management node's Server Manager ("API Credential" panel).
 
 > **IP restriction on docker-prod nodes:** for sites fronted directly by host Apache (no Cloudflare), the container now reads the real client IP via `mod_remoteip` + the host's `X-Forwarded-For: %{REMOTE_ADDR}s` header, so IP restriction works end-to-end. For Cloudflare-fronted sites, the container sees Cloudflare's edge IP — IP restriction is not yet meaningful in that case (a future spec will trust Cloudflare's ranges and read `CF-Connecting-IP`).
 
@@ -1395,7 +1395,7 @@ Add more types by adding a method to `RunNodeUptimeChecks` and a `case` to the d
 
 Constants on the class: `TIMEOUT_SECONDS=10`, `FAILURE_THRESHOLD=2`. The cron tick interval (~15 min) is the natural rate limiter.
 
-**A probe only concludes when it reached the node.** A failure inside the monitoring host's own name resolution is evidence about the monitoring host, not about the node, so it is inconclusive. Without this, one broken resolver on the control plane fails every probe within a single tick, carries the whole fleet past the failure threshold together, and mails the operator that every site is down while every site is serving traffic — an inverted signal, since the one machine actually at fault is the only one reporting nothing wrong.
+**A probe only concludes when it reached the node.** A failure inside the monitoring host's own name resolution is evidence about the monitoring host, not about the node, so it is inconclusive. Without this, one broken resolver on the management node fails every probe within a single tick, carries the whole fleet past the failure threshold together, and mails the operator that every site is down while every site is serving traffic — an inverted signal, since the one machine actually at fault is the only one reporting nothing wrong.
 
 `NodeMonitorHealth::is_name_resolution_failure($errno, $message)` makes the call, and all three check types route through it. It matches curl's `CURLE_COULDNT_RESOLVE_HOST`/`_PROXY` by number, and matches on message text for the two cases that carry no distinguishing number: a resolver that hangs rather than answering (curl reports the generic `CURLE_OPERATION_TIMEDOUT`, wording it "Resolving timed out after…"), and `fsockopen`, which reports getaddrinfo's text with errno 0. Everything else — refused connections, TLS failures, timeouts once dialling has begun — stays a genuine down result.
 
@@ -1443,7 +1443,7 @@ This is distinct from `mgn_ssl_state` / the SSL tile, which track certbot **prov
 
 6. **Single-threaded agent** -- One job at a time. Queued jobs run sequentially.
 
-7. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the control plane.
+7. **Remote credentials at runtime** -- Database credentials for backup/copy/restore are extracted from each node's `Globalvars_site.php` at execution time, never stored on the management node.
 
 ## API Actions
 

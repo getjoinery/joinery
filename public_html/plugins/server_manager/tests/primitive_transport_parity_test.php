@@ -25,7 +25,7 @@
  *
  * This is the check neither side could make alone.
  *
- * A box with no agent source is not a publishing control plane and has no
+ * A box with no agent source is not a publishing management node and has no
  * vocabulary to compare against; those checks report as skipped.
  *
  * Run: php plugins/server_manager/tests/primitive_transport_parity_test.php

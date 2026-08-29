@@ -83,7 +83,7 @@ Two procedures; per-node choice recorded in Open Decisions:
 
 **Ordering within the fleet:**
 1. Scratch box (Phase 0).
-2. Dev box / control plane (in-place; it is the one box that is not rebuild-from-backup friendly today).
+2. Dev box / management node (in-place; it is the one box that is not rebuild-from-backup friendly today).
 3. One expendable managed node via procedure A — this validates the whole rebuild path.
 4. Remaining web nodes and Docker hosts, one at a time; each must pass its gates before the next starts (serial, per the one-at-a-time working rule).
 5. Special boxes last, each with its own smoke test:

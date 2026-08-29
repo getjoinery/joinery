@@ -152,7 +152,7 @@ rollback, and job-lock interlock are all built and proven. So (**BUILT in R2**):
 
 The plane is already forbidden from being a trust root here, and that is what
 makes serving the artifact safe. It is worth saying plainly in the spec,
-because "the agent downloads its own binary from the control plane" reads
+because "the agent downloads its own binary from the management node" reads
 alarming until you notice the plane cannot sign one.
 
 ---
@@ -630,7 +630,7 @@ eliminate a row or shrink a cell, never shuffle trust between rows.
 ### 9.4 Still open
 
 - **Which plane converges the relay.** A relay's registration lives in the
-  **served deployment's** `mrl_mailbox_relays`, not the control plane's, so the
+  **served deployment's** `mrl_mailbox_relays`, not the management node's, so the
   box holding the desired state and the box holding the Server Manager job
   queue are not necessarily the same machine. This goes to the owner, and it
   needs facts first: **R4 design must trace the live topology** — where the
@@ -653,7 +653,7 @@ eliminate a row or shrink a cell, never shuffle trust between rows.
   is therefore real; the general one is a pre-existing gap, noticed here and not
   fixed here.
 - **`update_database` on the live plane** for the two new `mgn_` columns. Run
-  on dev 2026-08-28 (it added exactly those two); the control plane gets them
+  on dev 2026-08-28 (it added exactly those two); the management node gets them
   at its own upgrade, and until it does, a node's reported vocabulary has
   nowhere to land and `has_primitive()` falls back to the version floor — which
   is the designed behaviour, not a fault.

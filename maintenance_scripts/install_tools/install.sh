@@ -491,7 +491,7 @@ print_email_setup_notice() {
 #   3. Neither (root reached by password, no key) — the only way in is root.
 #      Leave root login alone and print the remedy.
 #
-# This is the same pre-stage the control plane performs before running
+# This is the same pre-stage the management node performs before running
 # `install.sh server` on a managed node (JobCommandBuilder::build_install_node,
 # "Pre-stage user1 for managed access"). Doing it here means a hand-run install
 # gets the same protection instead of relying on the operator knowing the trap.
@@ -3592,7 +3592,7 @@ do_site_docker() {
         # A release archive's config/ holds exactly one file, so copying it all
         # looked harmless. A LIVE site's config/ is a different thing: it holds
         # Globalvars_site.php — database password and secret_box_key — beside
-        # whatever the deployment keeps next to it, which on a control plane is
+        # whatever the deployment keeps next to it, which on a management node is
         # the agent signing key, the provisioning and relay keys, and the DNS
         # token. `install.sh site` run from a site directory rather than an
         # extracted archive baked all of that into an image layer.

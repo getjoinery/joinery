@@ -124,7 +124,7 @@
 	}
 	$is_removed = (bool)$node->get('mgn_delete_time');
 	// The page cannot SSH to hosts (the web user has no host key), so "does the
-	// site still exist?" is answered from evidence this control plane already holds:
+	// site still exist?" is answered from evidence this management node already holds:
 	// a status check, a read version, or an uptime result all mean a live site was
 	// once seen here. With none of that — e.g. an install that failed and never
 	// stood a site up — there is nothing to tear down, so a removed node is not
@@ -136,7 +136,7 @@
 	// Whether the record may be purged: blocked while offsite backups still exist
 	// for the slug (or a target can't be listed). Checked here so the menu item
 	// says "not allowed" up front instead of only rejecting after the confirm box.
-	// Backup listing is a control-plane S3 call (the web user can do it), unlike the
+	// Backup listing is a management-node S3 call (the web user can do it), unlike the
 	// host SSH probe, so it is safe to run on render — only for a removed node.
 	$purge_block = null; // null = allowed; string = reason it is blocked
 	if ($is_removed) {
@@ -381,10 +381,10 @@
 			$subline = '';
 			if ($version_cmp === -1) {
 				$badge = ' <span class="badge bg-warning ms-1">upgrade available</span>';
-				$subline = 'Control plane: ' . htmlspecialchars($cp_version);
+				$subline = 'Management node: ' . htmlspecialchars($cp_version);
 			} elseif ($version_cmp === 1) {
-				$badge = ' <span class="badge bg-danger ms-1">ahead of control plane</span>';
-				$subline = 'Control plane: ' . htmlspecialchars($cp_version);
+				$badge = ' <span class="badge bg-danger ms-1">ahead of management node</span>';
+				$subline = 'Management node: ' . htmlspecialchars($cp_version);
 			} elseif ($version_cmp === 0) {
 				$badge = ' <span class="badge bg-success ms-1">up to date</span>';
 			}

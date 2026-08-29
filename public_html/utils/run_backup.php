@@ -13,7 +13,7 @@
  *
  *   php utils/run_backup.php
  *
- * With --profile=manager it runs a control plane's backup of this site. Where the
+ * With --profile=manager it runs a management node's backup of this site. Where the
  * archive goes arrives with the run — the bucket and a write-only credential, as
  * JSON **on stdin** — and leaves with the process.
  *
@@ -36,7 +36,7 @@
  * @version 1.2 - a manager-profile run no longer accepts a recovery key on stdin; encryption is
  *                pinned to this site's own proven key and a supplied one is refused
  * @version 1.1 - --profile, manager-profile config read from stdin, and the machine-readable
- *                BACKUP_RESULT / BACKUP_TIME contract lines for a control plane parsing the output
+ *                BACKUP_RESULT / BACKUP_TIME contract lines for a management node parsing the output
  * @version 1.0
  */
 
@@ -97,9 +97,9 @@ $result = BackupRunner::run($config);
 echo '[' . gmdate('Y-m-d H:i:s') . ' UTC] ' . $profile . ' '
 	. ($result['status'] ?? '?') . ': ' . ($result['message'] ?? '') . "\n";
 
-// Machine-readable lines for a control plane parsing the step output. The
+// Machine-readable lines for a management node parsing the step output. The
 // human line above is not a contract; these are. The time is when this run
-// STARTED, matching what the history rows record — so a control plane stamping
+// STARTED, matching what the history rows record — so a management node stamping
 // it holds the same value a later status check would copy from history, and
 // "when was this node last backed up" means one thing however it was learned.
 echo 'BACKUP_RESULT=' . ($result['status'] ?? 'error') . "\n";

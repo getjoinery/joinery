@@ -4,7 +4,7 @@
  * whether that node can be backed up at all.
  *
  * Every backup a node makes seals to the recovery key that node holds and has
- * proven, read on the node. That is true of the copies this control plane takes
+ * proven, read on the node. That is true of the copies this management node takes
  * as much as the copies the node takes for itself: nothing supplies a key from
  * here, because sealing to a public key always appears to succeed, so a key sent
  * over a wire would let whoever sent it decide who can open a node's database
@@ -13,18 +13,18 @@
  * The consequence this class exists to report: a node with no proven key of its
  * own takes no backups, for anybody. It is not a shrug and not a preference —
  * it is an un-backed-up node, and the fix is on the node, at its own Backups
- * page, by whoever administers it. This control plane cannot do it from here and
+ * page, by whoever administers it. This management node cannot do it from here and
  * must not be able to.
  *
  * Whose key it is does not matter and is not compared. A node holding a key this
- * control plane has never seen is a node whose operator holds their own recovery
+ * management node has never seen is a node whose operator holds their own recovery
  * key — the intended arrangement, not a discrepancy.
  *
  * The answer comes from what the last status check recorded, not from reaching
  * out to every node when someone opens a page.
  *
  * @version 2.0 - a node's own proven key is what every backup seals to, so this reports coverage
- *                rather than key distribution: no comparison against the control plane's key, and
+ *                rather than key distribution: no comparison against the management node's key, and
  *                "no proven key" is an un-backed-up node rather than a note
  * @version 1.1 - reports only; the push is retired
  * @version 1.0
@@ -93,8 +93,8 @@ class RecoveryKeyFleet {
 			case 'missing':
 				return 'This node has no backup recovery key, so no backup of it can be encrypted and '
 					. 'none will run. Its administrator sets one up on the node\'s own Backups page — '
-					. 'this control plane cannot supply one, by design, because a key sent from here '
-					. 'would be a key this control plane could open every backup with.';
+					. 'this management node cannot supply one, by design, because a key sent from here '
+					. 'would be a key this management node could open every backup with.';
 			case 'unproven':
 				return 'This node has a backup recovery key that nobody has proven possession of, so '
 					. 'backups still refuse to run. Its administrator opens the verification challenge '

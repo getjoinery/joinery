@@ -43,7 +43,7 @@ closes that gap.
    Every checkpoint below names the row to look at. Read-only queries run
    via `node_exec.php getjoinery --stdin`.
 2. **Verify on getjoinery itself.** Dev proving something is not this spec;
-   the point is the production control plane's own config and cron.
+   the point is the production management node's own config and cron.
 3. **Phases are ordered by blast radius:** test-mode first, one small live
    charge before the expensive live provision. A phase does not start until
    the previous one's checkpoints all pass.

@@ -10,7 +10,7 @@
 function health_handler_api() {
 	return [
 		'method'      => 'GET',
-		'description' => 'Liveness probe. Used by the server_manager control plane to pick API vs SSH.',
+		'description' => 'Liveness probe. Used by the server_manager management node to pick API vs SSH.',
 	];
 }
 

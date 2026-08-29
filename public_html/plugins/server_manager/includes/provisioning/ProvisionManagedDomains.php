@@ -30,7 +30,7 @@
  *
  * The mail records are NOT computed here. They are asked of the box itself,
  * over SSH, because the box is what knows its own topology, its SPF shape, its
- * DKIM key and whether it speaks Joinery Direct. A control plane that guessed
+ * DKIM key and whether it speaks Joinery Direct. A management node that guessed
  * would publish a plausible record set the box does not actually match.
  *
  * @version 1.1 - send_failure_alert() is a protected seam, so tests intercept the mail edge
@@ -416,7 +416,7 @@ class ProvisionManagedDomains {
 		$payload = $this->prepare_on_node($node, $domain);
 		if ($payload === null) {
 			// Treated as transient in every case, including a node too old to
-			// carry the utility: a control plane that gave up here would leave
+			// carry the utility: a management node that gave up here would leave
 			// a paid-for domain with no mail and no path back.
 			$row->set('rdm_error', mb_substr('Transient (mail DNS): the node could not prepare '
 				. $domain . ' for mail.', 0, 4000));

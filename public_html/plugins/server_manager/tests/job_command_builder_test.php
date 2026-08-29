@@ -6,7 +6,7 @@
  * needs: []
  */
 /**
- * JobCommandBuilder — the commands the control plane sends to production nodes.
+ * JobCommandBuilder — the commands the management node sends to production nodes.
  *
  * Everything this class emits is executed as root, over SSH, on a live server.
  * Two properties therefore matter more than anything else it does.
@@ -766,7 +766,7 @@ try {
 		'chain_id' => 'chain-20260807_231507',
 		'domain'   => 'chain.example.com'));
 } catch (Exception $e) {
-	// Only legitimate when this control plane has no enabled target at all —
+	// Only legitimate when this management node has no enabled target at all —
 	// then there is no shelf to read a chain from, and saying so at build time
 	// beats a job that dies halfway through a download.
 	$chain_build_error = $e->getMessage();
@@ -787,7 +787,7 @@ if ($chain_steps) {
 		'every artifact the manifest names is downloaded');
 
 	// {prefix}/{slug}/{profile}/{chain_id}/. Dropping the profile segment would
-	// send a control plane's restore looking on the site's own shelf, where a
+	// send a management node's restore looking on the site's own shelf, where a
 	// chain of the same id may well exist and be somebody else's backup.
 	check(strpos($chain_all, '/chainsite/manager/chain-20260807_231507') !== false,
 		'the chain is read from the profile shelf it was written to', $chain_all);
@@ -996,7 +996,7 @@ foreach ($pub_steps as $step) {
 }
 check(!$pub_has_teardown, 'publish_upgrade emits no teardown step — its archives are the deliverable');
 
-// The step runs on whichever control plane builds the release. getjoinery
+// The step runs on whichever management node builds the release. getjoinery
 // publishes as well as dev, so a path from the machine this was written on is a
 // job that fails at `cd` on every other site.
 $pub_cmd = isset($pub_steps[0]['cmd']) ? $pub_steps[0]['cmd'] : '';
@@ -1289,7 +1289,7 @@ $run_node = jcb_node(array(
 // Refusals: a job that cannot say where the backup goes, or which site to back
 // up, fails at build time with a message the operator sees — not part-way
 // through a backup on the node.
-// Where a backup goes is the control plane's decision, not the node's: the
+// Where a backup goes is the management node's decision, not the node's: the
 // bucket and the credential travel with the run. So a node that names no target
 // is only a problem when the choice is genuinely ambiguous. With several shelves
 // enabled, refuse and say so.
@@ -1431,7 +1431,7 @@ check(strpos($run_cmd, "'application_key'") === false && strpos($run_cmd, '"appl
 	'no credential data appears anywhere in the command');
 
 // No encryption key travels, in any field. Sealing to a public key always
-// appears to succeed, so a control plane that could supply one could re-seal
+// appears to succeed, so a management node that could supply one could re-seal
 // every node's next backup — database and mail — to a key of its choosing, and
 // nothing would look wrong until a restore was attempted. The node reads the
 // key it holds and has proven; there is nothing here for a tampered plane to
@@ -1485,7 +1485,7 @@ foreach ($rk_cases as $label => $pair) {
 	catch (Exception $e) { $rk_refusal = $e->getMessage(); }
 	check(strpos($rk_refusal, 'cannot be backed up') !== false,
 		"{$label} is refused a fleet backup at build time", $rk_refusal);
-	check(strpos($rk_refusal, 'control plane cannot supply') !== false
+	check(strpos($rk_refusal, 'management node cannot supply') !== false
 		|| strpos($rk_refusal, 'administrator') !== false
 		|| strpos($rk_refusal, 'status check') !== false,
 		"and the refusal for {$label} says where it is fixed", $rk_refusal);

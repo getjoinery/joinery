@@ -27,7 +27,7 @@
 			<strong>Current Version:</strong> <?php echo htmlspecialchars($node_version); ?>
 		</div>
 		<div class="col-md-4">
-			<strong>Control Plane Version:</strong> <?php echo htmlspecialchars($local_version); ?>
+			<strong>Management Node Version:</strong> <?php echo htmlspecialchars($local_version); ?>
 		</div>
 		<div class="col-md-4">
 			<?php if ($up_to_date): ?>

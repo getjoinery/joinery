@@ -1,6 +1,6 @@
 <?php
 /**
- * FleetBackupPolicy — when this control plane backs up each node, and how.
+ * FleetBackupPolicy — when this management node backs up each node, and how.
  *
  * A node's policy is its own settings layered over the fleet defaults, and the
  * fleet default is ENABLED. That default is doing real work: it is what stops a
@@ -10,7 +10,7 @@
  * purpose, and is not reported as a problem.
  *
  * Nothing here says anything about the backups a SITE takes of itself. Those run
- * on that site's schedule, under its own key, and are not this control plane's
+ * on that site's schedule, under its own key, and are not this management node's
  * to schedule, count or alarm about.
  *
  * @version 1.0
@@ -52,7 +52,7 @@ class FleetBackupPolicy {
 	}
 
 	/**
-	 * Nodes this control plane could back up: live, enabled, hosting a Joinery
+	 * Nodes this management node could back up: live, enabled, hosting a Joinery
 	 * site, and past install. Bare infrastructure nodes (a DNS box, a mail
 	 * relay) have no site to archive and are not a gap.
 	 *

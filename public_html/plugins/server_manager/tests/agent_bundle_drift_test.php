@@ -8,7 +8,7 @@
 /**
  * Agent bundle drift — the bundled agent must match the agent source.
  *
- * On a publishing control plane, public_html/agent_dist/ is built
+ * On a publishing management node, public_html/agent_dist/ is built
  * from the agent checkout named by the server_manager_agent_source_path
  * setting. If the two fall out of step, every release published from that box
  * ships an agent the publisher did not intend, and nothing else notices: the
@@ -18,7 +18,7 @@
  *
  * This is that invariant as a check that costs nothing and runs every day.
  *
- * A box with no agent source is not a publishing control plane; there is no
+ * A box with no agent source is not a publishing management node; there is no
  * drift to detect and the source checks report as skipped.
  *
  * Run: php plugins/server_manager/tests/agent_bundle_drift_test.php
@@ -64,7 +64,7 @@ section('Bundle matches the agent source on this box');
 $has_source = is_dir($src) && file_exists($src . '/main.go');
 
 if (!$has_source) {
-	// Not a publishing control plane. Recorded rather than silently absent, so
+	// Not a publishing management node. Recorded rather than silently absent, so
 	// a run on the wrong box cannot be mistaken for a passing drift check.
 	harness_skip('drift check not applicable', "no agent source at {$src}");
 } else {

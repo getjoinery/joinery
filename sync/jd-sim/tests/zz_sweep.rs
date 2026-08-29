@@ -243,8 +243,30 @@ fn sweep_world(
     world
 }
 
+/// Which name table the workload draws from.
+///
+/// `Ordinary` is the table every pinned seed was found under, and it must never
+/// change: `leaf` selects by `step % N`, so adding an arm to it remaps every
+/// name in every world and silently orphans 93128, 96223, 99674 and the Phase 2
+/// seeds. They would still run; they would simply no longer be the worlds they
+/// were pinned for, and nothing would say so.
+///
+/// So a new name class arrives as a new VARIANT used by new arms over new
+/// ranges, never as an extra arm in the ordinary table. Same discipline as the
+/// NOPLAIN dial, expressed as a parameter rather than an environment variable
+/// because arms share a process and an env var would silently re-world them all.
+#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+enum Names {
+    Ordinary,
+    /// Names a real user produces that the ordinary table cannot spell. Today:
+    /// a file already wearing a conflict-copy-shaped name, which is what
+    /// happens when somebody copies a conflict file or restores one from a
+    /// backup -- and which lands directly on the conflict-name adoption path.
+    Hostile,
+}
+
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
-    let _ = workload_core(seed, steps, devices, chaos, Vault::None, false);
+    let _ = workload_core(seed, steps, devices, chaos, Vault::None, false, Names::Ordinary);
 }
 
 fn workload_core(
@@ -254,11 +276,12 @@ fn workload_core(
     chaos: bool,
     vault: Vault,
     kills: bool,
+    names: Names,
 ) -> usize {
     let root = sweep_root(vault);
     let world = sweep_world(seed, devices, steps, chaos, vault);
     let committed = Committed::default();
-    drive(&world, seed, steps, chaos, root, vault, kills);
+    drive(&world, seed, steps, chaos, root, vault, kills, names);
     // Counted before settling, because settling is where a seed panics and a
     // panicking seed never reports anything.
     let kills_made = world.power_cycles();
@@ -444,6 +467,7 @@ fn drive(
     root: &str,
     vault: Vault,
     kills: bool,
+    names: Names,
 ) {
     let mut rng = SimRng::new(seed ^ 0x5EED_1234);
     if chaos {
@@ -453,13 +477,37 @@ fn drive(
     }
 
     // Names that stress the parts the engine finds hard.
-    let leaf = |i: usize| -> String {
-        match i % 5 {
-            0 => format!("doc-{i}.txt"),
-            1 => format!("caf\u{e9}-{i}.txt"),          // composed
-            2 => format!("cafe\u{301}-{i}.txt"),        // decomposed, same word
-            3 => format!("Report {i}.docx"),
-            _ => format!("DOC-{i}.TXT"),                // case twin of arm 0
+    //
+    // The ordinary table is FROZEN. `leaf` selects by `step % 5`, and every
+    // pinned seed in this file is pinned to the worlds that modulus produces --
+    // change the arm count and 93128, 96223, 99674 and the Phase 2 seeds all
+    // quietly become different worlds while still passing. A new name class
+    // goes in the hostile table below, reached only by arms that ask for it.
+    let leaf = move |i: usize| -> String {
+        match names {
+            Names::Ordinary => match i % 5 {
+                0 => format!("doc-{i}.txt"),
+                1 => format!("caf\u{e9}-{i}.txt"),          // composed
+                2 => format!("cafe\u{301}-{i}.txt"),        // decomposed, same word
+                3 => format!("Report {i}.docx"),
+                _ => format!("DOC-{i}.TXT"),                // case twin of arm 0
+            },
+            // The first five are the ordinary table unchanged, so a hostile arm
+            // still exercises the folds and case twins; the extra arm is the
+            // shape no sweep has ever been able to mint.
+            Names::Hostile => match i % 6 {
+                0 => format!("doc-{i}.txt"),
+                1 => format!("caf\u{e9}-{i}.txt"),
+                2 => format!("cafe\u{301}-{i}.txt"),
+                3 => format!("Report {i}.docx"),
+                4 => format!("DOC-{i}.TXT"),
+                // A file already wearing a conflict copy's name. Real users
+                // make these constantly -- they copy a conflict file, or
+                // restore one out of a backup -- and it lands straight on the
+                // conflict-name machinery, which has always been free to assume
+                // it invented every name of this shape itself.
+                _ => format!("doc-{i} (conflicted copy 2026-07-31 from mac).txt"),
+            },
         }
     };
 
@@ -864,7 +912,7 @@ fn sweep_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, Vault::None, false)
+    sweep_core(label, seeds, steps, devices, chaos, Vault::None, false, Names::Ordinary)
 }
 
 /// The same sweep with the whole workload inside a vault every device can open.
@@ -877,7 +925,7 @@ fn sweep_vault(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, Vault::Shared, false)
+    sweep_core(label, seeds, steps, &named, chaos, Vault::Shared, false, Names::Ordinary)
 }
 
 /// A vault only the first device can open, with the rest working around it.
@@ -890,7 +938,7 @@ fn sweep_vault_one_key(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, Vault::OneKeyHolder, false)
+    sweep_core(label, seeds, steps, &named, chaos, Vault::OneKeyHolder, false, Names::Ordinary)
 }
 
 /// A vault workload on computers that disagree about what a name is.
@@ -902,7 +950,7 @@ fn sweep_vault_on(
     devices: &[(&str, Platform)],
     chaos: bool,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, Vault::Shared, false)
+    sweep_core(label, seeds, steps, devices, chaos, Vault::Shared, false, Names::Ordinary)
 }
 
 /// The same sweep on machines that die with work still on their lists.
@@ -923,7 +971,7 @@ fn sweep_killing(
     vault: Vault,
 ) -> Vec<(String, u64)> {
     let named: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
-    sweep_core(label, seeds, steps, &named, chaos, vault, true)
+    sweep_core(label, seeds, steps, &named, chaos, vault, true, Names::Ordinary)
 }
 
 /// The same, on computers that disagree about what a name is.
@@ -942,7 +990,7 @@ fn sweep_killing_on(
     chaos: bool,
     vault: Vault,
 ) -> Vec<(String, u64)> {
-    sweep_core(label, seeds, steps, devices, chaos, vault, true)
+    sweep_core(label, seeds, steps, devices, chaos, vault, true, Names::Ordinary)
 }
 
 #[must_use]
@@ -954,6 +1002,7 @@ fn sweep_core(
     chaos: bool,
     vault: Vault,
     kills: bool,
+    names: Names,
 ) -> Vec<(String, u64)> {
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
@@ -964,7 +1013,7 @@ fn sweep_core(
         let r = std::panic::catch_unwind(|| {
             let refs: Vec<(&str, Platform)> =
                 owned.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-            workload_core(seed, steps, &refs, chaos, vault, kills)
+            workload_core(seed, steps, &refs, chaos, vault, kills, names)
         });
         match r {
             Ok(made) => kills_made += made,
@@ -1307,6 +1356,95 @@ fn scratch_fresh_hunt_sweep() {
     no_seed_failed(arms);
 }
 
+/// Names a real user makes that the ordinary workload cannot spell.
+///
+/// The estate's blind spot has always been its name generator: a class the
+/// table cannot mint is a class no seed can ever reach, however many millions
+/// are run. `leaf`'s ordinary table is frozen because every pinned seed hangs
+/// off its modulus, so a new class arrives here instead -- a new variant, on
+/// new ranges, leaving every existing seed-to-world mapping untouched.
+///
+/// What this adds: a file already wearing a conflict copy's name. Users produce
+/// them constantly by copying a conflict file or restoring one from a backup,
+/// and they land on machinery that has been free until now to assume it minted
+/// every name of that shape itself.
+#[test]
+#[ignore]
+fn scratch_hostile_name_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_core(
+        "hostilename-clean-2dev",
+        120000..120400,
+        40,
+        &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+        false,
+        Vault::None,
+        false,
+        Names::Hostile,
+    ));
+    arms.push(sweep_core(
+        "hostilename-hostile-2dev",
+        120400..120800,
+        40,
+        &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+        true,
+        Vault::None,
+        false,
+        Names::Hostile,
+    ));
+    arms.push(sweep_core(
+        "hostilename-hostile-3dev",
+        120800..121100,
+        60,
+        &[
+            ("a", Platform::Linux),
+            ("b", Platform::Linux),
+            ("c", Platform::Linux),
+        ],
+        true,
+        Vault::None,
+        false,
+        Names::Hostile,
+    ));
+    arms.push(sweep_core(
+        "hostilename-platform",
+        121100..121500,
+        60,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+        Vault::None,
+        false,
+        Names::Hostile,
+    ));
+    arms.push(sweep_core(
+        "hostilename-kill",
+        121500..121800,
+        40,
+        &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+        true,
+        Vault::None,
+        true,
+        Names::Hostile,
+    ));
+    arms.push(sweep_core(
+        "hostilename-vault",
+        121800..122100,
+        40,
+        &[("laptop", Platform::Linux), ("desktop", Platform::Linux)],
+        true,
+        Vault::Shared,
+        false,
+        Names::Hostile,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 /// Fresh seeds, all hostile, so the marker-less refusal dial actually fires.
 ///
 /// [`MockServer::refuses_without_saying_why`] only comes on for a chaos seed,
@@ -1487,7 +1625,7 @@ fn scratch_dump() {
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills);
+        drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, Names::Ordinary);
         world.settle();
     }));
 
@@ -1670,7 +1808,7 @@ fn scratch_trace() {
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
-    drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills);
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, Names::Ordinary);
     for round in 0..12 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -1702,7 +1840,7 @@ fn scratch_one() {
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    let _ = workload_core(seed, steps, &refs, chaos, vault, kills);
+    let _ = workload_core(seed, steps, &refs, chaos, vault, kills, Names::Ordinary);
 }
 
 /// Scratch: watch what happens to an entry the server has told us about, whose
@@ -1941,6 +2079,7 @@ fn scratch_vaultplat_one() {
         chaos,
         Vault::Shared,
         kills,
+        Names::Ordinary,
     );
 }
 
@@ -2039,7 +2178,7 @@ fn scratch_onekey_one() {
         vec!["holder", "guest"]
     };
     let refs: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
-    let _ = workload_core(seed, steps, &refs, chaos, Vault::OneKeyHolder, false);
+    let _ = workload_core(seed, steps, &refs, chaos, Vault::OneKeyHolder, false, Names::Ordinary);
 }
 
 /// Scratch: trace one seed from the one-key-holder arms.
@@ -2057,7 +2196,7 @@ fn scratch_onekey_trace() {
     let refs: Vec<(&str, Platform)> = names.iter().map(|n| (*n, Platform::Linux)).collect();
     let vault = Vault::OneKeyHolder;
     let world = sweep_world(seed, &refs, steps, chaos, vault);
-    drive(&world, seed, steps, chaos, sweep_root(vault), vault, false);
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault, false, Names::Ordinary);
     for round in 0..8 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);
@@ -2079,7 +2218,7 @@ fn scratch_ghost_probe() {
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, true, Vault::None);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, true, sweep_root(Vault::None), Vault::None, false);
+        drive(&world, seed, steps, true, sweep_root(Vault::None), Vault::None, false, Names::Ordinary);
         world.settle();
     }));
     // Does the server still know this entity, and is it trashed?
@@ -2126,6 +2265,6 @@ fn frozen_contested_name_loop_seeds() {
         ("disk", Platform::Decomposing),
     ];
     for seed in [111_740u64, 111_201, 111_120] {
-        workload_core(seed, 70, &refs, true, Vault::None, false);
+        workload_core(seed, 70, &refs, true, Vault::None, false, Names::Ordinary);
     }
 }

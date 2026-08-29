@@ -140,7 +140,7 @@ Mechanically self-sufficient, then — rungs 3–5 need no recovery key and no s
 
 **This is the real constraint on the guarantee, and it is a hard one.**
 
-A chain's data key is recovered **on the node, from the node's own `config/backup_site_key`** — `build_restore_chain` says so in as many words, and adds that "the control plane's recovery private key never travels." That is what makes rungs 3–5 unattended.
+A chain's data key is recovered **on the node, from the node's own `config/backup_site_key`** — `build_restore_chain` says so in as many words, and adds that "the management node's recovery private key never travels." That is what makes rungs 3–5 unattended.
 
 Rungs 6 and 7 destroy that key. A wiped or rebuilt machine mints a *fresh* `backup_site_key`, and a fresh key does not open a chain sealed to the old one. The restore path already handles this explicitly and hands off to a human:
 
@@ -200,7 +200,7 @@ Each rung is a runbook-as-data — **precondition, action, verification, rollbac
 
 (Provider API tokens: none in service v1 — §13.O7. Box posture: the box-first draft's credential model stands, §4.2.)
 
-**All of this is new work, and §14.J and §14.N cost it.** Today the fleet authenticates with **one shared provisioning keypair**, stored as a plaintext path on the control plane's disk (`mgn_ssh_key_path`); there are no per-node keys, no restricted account, no sudo allowlist, no node-posture agent, and no sealed custody. SecretBox in Server Manager covers backup-target credentials and OAuth tokens — not SSH, and SecretBox is the wrong tool here anyway: a running plane can always open its own SecretBox, which is precisely the skeleton-key property this design removes. **The two channels gate the first external customer, not the packaging phase.**
+**All of this is new work, and §14.J and §14.N cost it.** Today the fleet authenticates with **one shared provisioning keypair**, stored as a plaintext path on the management node's disk (`mgn_ssh_key_path`); there are no per-node keys, no restricted account, no sudo allowlist, no node-posture agent, and no sealed custody. SecretBox in Server Manager covers backup-target credentials and OAuth tokens — not SSH, and SecretBox is the wrong tool here anyway: a running plane can always open its own SecretBox, which is precisely the skeleton-key property this design removes. **The two channels gate the first external customer, not the packaging phase.**
 
 **Why not simply store the root password.** Not revocable without the customer's help, cannot be scoped, very often reused elsewhere, and the fleet already authenticates with keys. Note also that a storable break-glass root does not exist on the current fleet — the installer disables root SSH, and provider-provisioned nodes get a random root password that is deliberately never stored.
 
@@ -234,7 +234,7 @@ Rules that follow, non-negotiable and posture-independent:
 
 **Vantage supply, per posture (O6):**
 
-- **Service:** the plane plus a **second getjoinery-operated probe location on an independent network** — a tiny HTTP probe endpoint, not a second control plane. Two independent opinions from day one, for every subscriber including single-node customers — which was the box model's awkward gap, closed for free. A customer's other enrolled nodes count as additional vantages via the node-side probe task.
+- **Service:** the plane plus a **second getjoinery-operated probe location on an independent network** — a tiny HTTP probe endpoint, not a second management node. Two independent opinions from day one, for every subscriber including single-node customers — which was the box model's awkward gap, closed for free. A customer's other enrolled nodes count as additional vantages via the node-side probe task.
 - **Box:** §13.6 carries — mutual node vantage is the default and the floor, no getjoinery dependency required. Once the service exists, its probe endpoint is available to box sentinels as a third opinion; a one-guarded-node box customer without it supplies any URL-probe they control or accepts a rung-2 ceiling, and the dashboard says which in plain words.
 
 ### 7.3 Who watches the watcher

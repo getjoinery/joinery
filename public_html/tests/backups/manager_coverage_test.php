@@ -6,7 +6,7 @@
  * needs: [db]
  */
 /**
- * BackupHistory::manager_coverage() — the run proving a control plane
+ * BackupHistory::manager_coverage() — the run proving a management node
  * currently backs this site up. The setup wizard's backups step reads it as
  * a second green path, so what counts as coverage has to be exact: a recent
  * manager-profile success that reached its bucket, and nothing else — not a

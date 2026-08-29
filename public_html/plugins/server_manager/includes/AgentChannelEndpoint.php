@@ -849,7 +849,7 @@ class AgentChannelEndpoint {
 	 * support bundle.
 	 *
 	 * WHY THIS IS NOT A TRUST CHANGE, and it is worth saying plainly because
-	 * "the agent downloads its own binary from the control plane" reads
+	 * "the agent downloads its own binary from the management node" reads
 	 * alarming until you notice what this plane cannot do: IT CANNOT SIGN ONE.
 	 * The release key is not here. The agent verifies every artifact against an
 	 * Ed25519 public key compiled into its own binary at build time, and the

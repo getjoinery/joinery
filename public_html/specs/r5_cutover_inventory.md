@@ -501,7 +501,7 @@ section('The agent carries no SSH')                // skip if §3 resolves as (a
     require golang.org/x/crypto; runner.go has no "case \"ssh\"" or
     "case \"scp\"".
   - guard on the source being present, the way AgentDistPublisher does — a
-    control plane without the agent repo must skip, not fail.
+    management node without the agent repo must skip, not fail.
 
 section('No node is configured with a plane-readable key')
   - every live mgn_ row and mgh_ row has an empty ssh_key_path, except rows in

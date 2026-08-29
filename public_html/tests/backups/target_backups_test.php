@@ -6,10 +6,10 @@
  * needs: []
  */
 /**
- * TargetBackups + S3Signer listing — the control-plane view of a backup bucket.
+ * TargetBackups + S3Signer listing — the management-node view of a backup bucket.
  *
  * This is the path that keeps a decommissioned site's backups reachable: it lists
- * the bucket straight from the control plane and groups the objects by site, so a
+ * the bucket straight from the management node and groups the objects by site, so a
  * node that no longer exists can still have its offsite backups found and deleted.
  * Two things have to hold. The listing must page through a truncated ListObjectsV2
  * response (a bucket with more than one page of keys must not silently show only

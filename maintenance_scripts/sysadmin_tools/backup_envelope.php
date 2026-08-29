@@ -213,7 +213,7 @@ function be_identity($secret) {
  *
  * The only platform bootstrap in this tool, and it is here for a reason: whose
  * key a backup seals to is a fact about this machine, and reading it anywhere
- * else — argv, a job row, a control plane — makes it a fact somebody else can
+ * else — argv, a job row, a management node — makes it a fact somebody else can
  * assert. BackupRecoveryKey::public_key() refuses an unset or unproven key, so
  * a site that has not finished recovery setup mints nothing rather than sealing
  * to a value nobody has ever opened a challenge with.
@@ -262,7 +262,7 @@ if ($mode === 'mint') {
     if (isset($opts['recovery-pub'])) {
         be_fail('--recovery-pub is refused. This site seals its backups to the recovery key it '
             . 'holds and has proven, read from its own settings; no caller supplies one. A job '
-            . 'still passing this flag comes from a control plane that is out of date.');
+            . 'still passing this flag comes from a management node that is out of date.');
     }
 
     $recovery = be_site_recovery_key();

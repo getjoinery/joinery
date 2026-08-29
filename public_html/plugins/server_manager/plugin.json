@@ -217,7 +217,7 @@
     {
       "name": "server_manager_agent_source_path",
       "default": "",
-      "helptext": "Path to the joinery-agent source checkout on this control plane. When set (or when the default /home/user1/joinery-agent exists), publishing a release rebuilds and signs the bundled agent artifact; otherwise the previously bundled artifact carries forward.",
+      "helptext": "Path to the joinery-agent source checkout on this management node. When set (or when the default /home/user1/joinery-agent exists), publishing a release rebuilds and signs the bundled agent artifact; otherwise the previously bundled artifact carries forward.",
       "group": "publishing",
       "label": "Agent source path",
       "type": "text"
@@ -228,7 +228,7 @@
       "group": "backups",
       "label": "Back up newly managed nodes by default",
       "type": "checkbox",
-      "helptext": "Whether a node this control plane manages gets backed up here unless someone says otherwise. On by default, and that default is what stops a new node being forgotten. A site's own backups are separate and unaffected either way."
+      "helptext": "Whether a node this management node manages gets backed up here unless someone says otherwise. On by default, and that default is what stops a new node being forgotten. A site's own backups are separate and unaffected either way."
     },
     {
       "name": "server_manager_fleet_backup_window_start",
@@ -264,7 +264,7 @@
       "group": "backups",
       "label": "Restore points kept per node",
       "type": "number",
-      "helptext": "How many backups to keep on this control plane's shelf for each node. Chains are kept or deleted whole, never partly."
+      "helptext": "How many backups to keep on this management node's shelf for each node. Chains are kept or deleted whole, never partly."
     },
     {
       "name": "server_manager_fleet_backup_full_interval_days",
@@ -304,7 +304,7 @@
       "group": "domains",
       "label": "Allowlisted client IP",
       "type": "text",
-      "helptext": "The control plane's egress IP, allowlisted in the Namecheap API panel."
+      "helptext": "The management node's egress IP, allowlisted in the Namecheap API panel."
     },
     {
       "name": "server_manager_namecheap_sandbox",

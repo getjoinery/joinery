@@ -996,7 +996,12 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         if guard > 100_000 {
             return Err(ExecError::Contract("the local walk does not end".into()));
         }
-        for child in env.vfs.read_dir(&dir)? {
+        // `read_dir_all`, not `read_dir`: the branch immediately below exists to
+        // find abandoned scratch names, and the ordinary listing hides exactly
+        // those. Against a real filesystem this walk saw none of them and the
+        // recovery could never fire -- dead code that every sweep reported
+        // working, because the simulator did not filter and production does.
+        for child in env.vfs.read_dir_all(&dir)? {
             if jd_vfs::is_internal(&child.name) {
                 // A park nobody is coming back for, left standing on THIS disk.
                 //

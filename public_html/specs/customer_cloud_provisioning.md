@@ -7,7 +7,7 @@ the First live test below.
 (`specs/implemented/automated_hosting_provisioning.md`) being activated
 (`specs/automated_hosting_provisioning_setup.md`) — this spec adds a second
 fulfillment mode to that pipeline, it does not replace it.
-**Control plane:** getjoinery.com (per the site-roles decision in
+**Management node:** getjoinery.com (per the site-roles decision in
 `specs/new_site_deployment_fortress_verification.md`) — it is both the store
 taking the hosting order and the Server Manager fulfilling it.
 
@@ -58,7 +58,7 @@ Integration-point inventory (everything this touches, decided up front):
 | Token + account record | new server_manager data class (`cca_customer_cloud_accounts`) | Per-user provider account link: provider key, SecretBox-encrypted refresh token, granted scopes, status (`active` / `revoked` / `refresh_failed`) |
 | Compute driver | `plugins/server_manager/includes/cloud_compute/` | Small `CloudComputeProvider` interface — `createInstance`, `getInstance`, `deleteInstance`, plan/region catalogs — with `LinodeComputeDriver` as the only implementation. This is the seam for DigitalOcean etc.; do not build a second driver now |
 | Fulfillment mode | hosting product configuration | Product declares `shared_host` (existing behavior) or `customer_cloud`. Poll Hosting Orders branches on it |
-| Provisioning flow | existing Poll Hosting Orders task | `customer_cloud` orders wait in a `pending_connect` state until the OAuth grant lands, then: create instance (Ubuntu LTS image, plan from product config, region from checkout answer or default) with the control plane's **provisioning SSH public key** in `authorized_keys` → poll until `running` → run the existing install_node job against the new IP → register managed node |
+| Provisioning flow | existing Poll Hosting Orders task | `customer_cloud` orders wait in a `pending_connect` state until the OAuth grant lands, then: create instance (Ubuntu LTS image, plan from product config, region from checkout answer or default) with the management node's **provisioning SSH public key** in `authorized_keys` → poll until `running` → run the existing install_node job against the new IP → register managed node |
 | Node registry | `mgn_managed_nodes` | Customer-cloud nodes are ordinary managed nodes (install, upgrades, uptime checks all reuse) plus a linkage to the `cca_` account record marking them customer-owned |
 | Scopes | consent request | `linodes:read_write` only. Do not request account/billing/ips/volumes scopes |
 | Referral link | server_manager setting | `server_manager_linode_referral_url`, shown on the Connect page's signup path |
@@ -102,7 +102,7 @@ automatically.
    Provisioning page's referral field on getjoinery.com.
 3. The rest of the pipeline activation is the guided **Server Manager →
    Provisioning** page (`/admin/server_manager/provisioning_setup`) on
-   getjoinery.com (the prod control plane) — see
+   getjoinery.com (the prod management node) — see
    `specs/automated_hosting_provisioning_setup.md`.
 
 ## First live test

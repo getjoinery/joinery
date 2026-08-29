@@ -50,7 +50,7 @@ try {
 $tab = isset($_GET['tab']) ? $_GET['tab'] : 'overview';
 $skip_joinery = $node->get('mgn_skip_joinery_checks');
 // No Console tab: arbitrary commands are retired platform-wide (decision A1).
-// A control plane holds no way to run an instruction it composed at runtime on a
+// A management node holds no way to run an instruction it composed at runtime on a
 // managed node; investigations use the operator's own SSH key, which is not
 // recorded — a property given up knowingly, and the reason A1 was argued rather
 // than assumed.

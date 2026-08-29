@@ -39,21 +39,21 @@ The three standing deployments and what each is for:
   deployment of the email / calendar / drive / password features (with and
   without encryption). It moves to its own VPS via the copy-site path and
   becomes the second fleet tenant for the Fortress verification below.
-- **getjoinery.com** — the **production control plane**: Server Manager,
+- **getjoinery.com** — the **production management node**: Server Manager,
   automated provisioning fulfillment, and — once this testing program is
   green — the publish source for all production upgrades.
 - **dev.getjoinery.com** — the **development site**: where features are
   built, the publish source for the beta-tester upgrade channel, and other
   dev actions.
 
-There are **two control planes**, with different fleets — nothing migrates
+There are **two management nodes**, with different fleets — nothing migrates
 between them:
 
-- **Dev control plane** (dev.getjoinery.com, the existing node registry):
+- **Dev management node** (dev.getjoinery.com, the existing node registry):
   manages the *deployment* fleet. It is how code reaches getjoinery.com and
-  every other node — a prod control plane can only ever be deployed *from*
+  every other node — a prod management node can only ever be deployed *from*
   dev — and it publishes the beta upgrade channel.
-- **Prod control plane** (getjoinery.com): manages the *customer/production*
+- **Prod management node** (getjoinery.com): manages the *customer/production*
   fleet — provisioning hosts, customer-cloud nodes, and the production
   upgrade channel once this testing program is green. It registers its own
   hosts from scratch and never needs dev's registry.
@@ -76,11 +76,11 @@ above. Each step gates the next.
      collect the referral URL from the Cloud Manager profile.
 3. **Publish + upgrade getjoinery.com from dev** (Updates tab). First live
    publish→apply exercise of the new release cycle; getjoinery.com must be
-   current before it can serve as the prod control plane.
+   current before it can serve as the prod management node.
 4. **Activate provisioning on getjoinery.com** — the
    `specs/automated_hosting_provisioning_setup.md` checklist (domain
    Question, service user + API key, `server_manager_*` settings, scheduled
-   tasks) executed **on getjoinery.com**, not dev, per the two-control-plane
+   tasks) executed **on getjoinery.com**, not dev, per the two-management-node
    decision; plus the customer-cloud settings (OAuth client credentials,
    referral URL).
 5. **Test order #1 — BYO-Linode** (satisfies item 2, fresh-install gate):
@@ -89,7 +89,7 @@ above. Each step gates the next.
    account, installs, registers the node, SSL. This is the from-scratch
    install proof *and* the final-state provisioning proof in one run.
 6. **Test order #2 — shared-host mode**: flip VPS A to Provisioning Enabled
-   on the prod control plane, place a second test order → container install
+   on the prod management node, place a second test order → container install
    on VPS A proves the original shared-host fulfillment mode. Both modes
    tested on one VPS.
 7. **Clone jeremytunnell.com onto VPS A** (satisfies item 3, copy-site

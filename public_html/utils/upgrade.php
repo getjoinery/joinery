@@ -1284,7 +1284,7 @@
 			// version left behind by past upgrades (they accumulated because only
 			// the current download was ever removed). Consumer-side only: served
 			// archives on a publisher live in static_files/, never uploads/, so
-			// this can never touch what a control plane hands out. Non-fatal —
+			// this can never touch what a management node hands out. Non-fatal —
 			// the deploy already succeeded.
 			$upload_cache_dir = $full_site_dir . '/uploads';
 			$cached_pkgs = array_merge(

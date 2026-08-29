@@ -17,7 +17,7 @@ colocated on each host and baked in at install time.
 
 Insert a stable indirection layer between the public name and the hosting node, so the
 thing DNS points at never changes. DNS points once at an **edge tier**; the edge routes
-each domain to whichever node currently hosts it, from a control-plane-owned routing
+each domain to whichever node currently hosts it, from a management-node-owned routing
 table. Moving a site = flip one row + copy the site. No DNS edit, instant cutover,
 instant rollback.
 
@@ -41,7 +41,7 @@ shop.foo.com    ───►   │ routing table (cached │  ──►  node-B
                        └──────────────────────┘
                               ▲ polls /routes
                               │
-                   control plane (Server Manager)
+                   management node (Server Manager)
                    - owns the routing table (source of truth)
                    - exposes GET .../routes
                    - "move site" job flips the row
@@ -52,16 +52,16 @@ shop.foo.com    ───►   │ routing table (cached │  ──►  node-B
 1. **Stateless, replicated edge.** N identical Caddy proxies; the only state is the
    routing table, held as a local cache on each. Front them with a keepalived VIP (or
    multiple A records). Losing one edge node is a non-event.
-2. **Data plane / control plane split, fail-static.** The edge **pulls** the routing
-   table from the control plane and **serves from its local cache even if the control
-   plane is down**. A control-plane outage costs the ability to *change* routes, never
+2. **Data plane / management node split, fail-static.** The edge **pulls** the routing
+   table from the management node and **serves from its local cache even if the control
+   plane is down**. A management-node outage costs the ability to *change* routes, never
    the ability to *serve* traffic. The edge never does a per-request lookup against the
-   control plane or the DB.
+   management node or the DB.
 3. **TLS terminates at the edge.** Caddy auto-provisions Let's Encrypt certs for each
    routed domain. Backends serve plain HTTP on the private side (or re-encrypt — see open
    questions). Per-node SSL provisioning is retired (see migration).
 
-## New data model (control plane)
+## New data model (management node)
 
 ### `EdgeNode` — `edge_node_class.php`, prefix `edn`
 
@@ -126,11 +126,11 @@ $field_specifications = array(
 `MultiSiteRoute::getMultiResults()` options: `domain`, `node_id`, `region`, `enabled`,
 `deleted` — following the filter conventions in `MultiManagedNode`.
 
-## Control-plane API: `GET /routes`
+## Management-node API: `GET /routes`
 
 The endpoint the edge polls. Returns the full active routing table as JSON. Authenticated
 by the edge node's `edn_poll_secret` (bearer token), not the per-node management keys
-(those are for control-plane → node; this is edge → control-plane).
+(those are for management-node → node; this is edge → management-node).
 
 Lives under the Server Manager management API surface. Response shape:
 
@@ -158,14 +158,14 @@ cleanly onto a pulled routing table.
 - A small **route-sync sidecar** (shell/Go, runs on the edge) polls `GET /routes` on an
   interval, writes the result to a **local cache file**, and reconfigures Caddy (via its
   admin API or a regenerated Caddyfile + reload) only when the table changed.
-- **Fail-static:** if the poll fails (control plane down, network blip), the sidecar keeps
+- **Fail-static:** if the poll fails (management node down, network blip), the sidecar keeps
   the last good cache and leaves Caddy serving the current routes. It never blanks routes
   on a failed fetch.
 - TLS: Caddy provisions/renews certs per `domain` with `tls = auto`. Backends receive
   proxied HTTP on the private side.
 
 The edge is provisioned/managed through Server Manager jobs (see below) — same
-"smart control plane, dumb executor" pattern as the Go agent, so we are not introducing a
+"smart management node, dumb executor" pattern as the Go agent, so we are not introducing a
 second ops model.
 
 ## New jobs (`JobCommandBuilder` + admin view dispatch)
@@ -176,14 +176,14 @@ switch — `views/admin/node_detail.php` calls the builder per action and enqueu
 follow suit from the new edge/routing views.)
 
 1. **`build_install_edge($edge_node, $params)`** — bootstrap a fresh edge host: install
-   Caddy + the route-sync sidecar, write the sidecar config (control-plane `/routes` URL +
+   Caddy + the route-sync sidecar, write the sidecar config (management-node `/routes` URL +
    `edn_poll_secret`), enable services. `ssh`-type steps against `edn_host`.
 
 2. **`build_move_site($site_route, $target_node, $params)`** — orchestrates a migration
    from existing primitives:
    - `build_backup_database` / `build_backup_project` on the source node,
    - `build_restore_database` / `build_restore_project` on the target node,
-   - flip `srt_mgn_node_id` to the target (control-plane DB write, in the result processor
+   - flip `srt_mgn_node_id` to the target (management-node DB write, in the result processor
      or view on success),
    - edge converges on next poll. (Optional `build_push_routes_to_edge` for instant
      cutover can layer on later; pull-with-cache is the floor.)
@@ -239,5 +239,5 @@ Per repo docs rules (docs describe current state only, present tense), update
    for the route-sync sidecar, or a standalone small binary / shell + cron? Leaning toward
    a tiny standalone poller to keep the edge free of node assumptions.
 3. **Health-aware routing.** Should the edge drop a backend that fails health checks
-   (Caddy active health checks), and should the control plane reflect that? Out of scope
+   (Caddy active health checks), and should the management node reflect that? Out of scope
    for v1 but the schema (`mgn_health_check_url`) supports it later.

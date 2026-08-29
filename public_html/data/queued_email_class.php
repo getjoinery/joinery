@@ -16,7 +16,7 @@ class QueuedEmail extends SystemBase {	public static $prefix = 'equ';
 	public static $tablename = 'equ_queued_emails';
 	public static $pkey_column = 'equ_queued_email_id';
 
-	// REST CRUD exposure (Layer 1): the provisioning control plane queues
+	// REST CRUD exposure (Layer 1): the provisioning management node queues
 	// welcome/alert emails through the API (POST QueuedEmail). Writes
 	// require an admin-level principal (default authorization).
 	public static $api_writable = true;

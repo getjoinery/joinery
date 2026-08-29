@@ -255,7 +255,7 @@ function _filter_default_scope(array $options): string {
  * Vault-Gated Settings): a filter — especially a "Forward to" action — acts
  * at receive time, on the plaintext parse, before sealing ever happens. Left
  * ungated, editing a sealed mailbox's filters would let its future mail be
- * silently redirected around the vault entirely, at the control plane rather
+ * silently redirected around the vault entirely, at the management node rather
  * than the content. So a mutation to a single-owner, vault-holding mailbox's
  * filters requires an open unlock window — and since `VaultUnlock::isOpen()`
  * is scoped to the CALLING session, this can only ever be satisfied by the

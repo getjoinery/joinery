@@ -4,15 +4,15 @@
  * managed_domain_prepare.php - make this box mail-ready for one domain, and
  * say what DNS that requires.
  *
- * Runs ON the node, called over SSH by the control plane's managed-domain
- * provisioning phase (specs/managed_domain_registration.md). The control plane
+ * Runs ON the node, called over SSH by the management node's managed-domain
+ * provisioning phase (specs/managed_domain_registration.md). The management node
  * owns the registrar and the zone; the box owns everything that decides what
  * belongs in that zone — its receive topology, its SPF shape, its DKIM key,
- * whether it speaks Joinery Direct. A control plane that computed those
+ * whether it speaks Joinery Direct. A management node that computed those
  * records itself would publish a plausible set the box does not match, and the
  * mismatch would show up as mail silently failing authentication.
  *
- * So the split is: this prints desired state, the control plane publishes it.
+ * So the split is: this prints desired state, the management node publishes it.
  *
  * Three steps, all idempotent — re-running for a prepared domain changes
  * nothing and just reprints the plan:

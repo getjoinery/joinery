@@ -6,9 +6,9 @@
  * needs: []
  */
 /**
- * JobResultProcessor — turning a remote node's output into control-plane state.
+ * JobResultProcessor — turning a remote node's output into management-node state.
  *
- * Job output is the least trustworthy input the control plane handles. It is
+ * Job output is the least trustworthy input the management node handles. It is
  * whatever a remote server wrote to a pipe: a node under load, a half-finished
  * command, an agent from a different release, or a box that is no longer the one
  * it claims to be. That text is then parsed into records the admin UI presents
@@ -96,7 +96,7 @@ section('Dispatch');
 $node = jrp_node();
 
 // An unknown job type must be inert. New job types ship with the agent before
-// the control plane knows them, so this is a normal state, not an error.
+// the management node knows them, so this is a normal state, not an error.
 $job = jrp_job($node, 'no_such_job_type', 'anything at all');
 $threw = false;
 try { JobResultProcessor::process($job); } catch (\Throwable $e) { $threw = true; }

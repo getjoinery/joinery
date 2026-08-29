@@ -92,7 +92,7 @@ ScrollDaddy site node while checking:
 1. Its `mailgun_api_key` is **disabled** at Mailgun — that site's transactional
    mail is broken at the API level today, independent of this work. Needs the
    consolidated account's key.
-2. It runs **0.8.87** against a 0.8.174 control plane, so `defaultreplyto` (step
+2. It runs **0.8.87** against a 0.8.174 management node, so `defaultreplyto` (step
    1's setting) is not seeded there. Upgrade required before step 2 completes.
 
 ### 3. Mailbox side: register the bare domain at the provider

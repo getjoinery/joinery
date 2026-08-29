@@ -3,7 +3,7 @@
  * BackupProfile — whose backup this is.
  *
  * A site can be backed up by more than one party. It backs itself up, and a
- * control plane managing it may take its own copies. Those are not two ways of
+ * management node managing it may take its own copies. Those are not two ways of
  * doing the same thing: they are two parties' backups, under two recovery keys,
  * on two schedules, answerable to two people.
  *
@@ -18,8 +18,8 @@
  *
  *   site     the site's own, configured on its Backups page, sealed to its own
  *            recovery key, dependent on nothing else being alive
- *   manager  a control plane's, configured and triggered there, sealed to the
- *            control plane's key, which travels with the run and is never
+ *   manager  a management node's, configured and triggered there, sealed to the
+ *            management node's key, which travels with the run and is never
  *            stored here
  *
  * @version 1.0
@@ -32,7 +32,7 @@ class BackupProfile {
 	/** The site's own backups. The default for anything that does not say. */
 	const SITE = 'site';
 
-	/** A control plane's backups of this site. */
+	/** A management node's backups of this site. */
 	const MANAGER = 'manager';
 
 	/**
@@ -53,7 +53,7 @@ class BackupProfile {
 	/**
 	 * Accept a profile name, or say so. Unknown names throw rather than falling
 	 * back to `site`: a typo that silently ran as the site profile would seal a
-	 * control plane's backup to the site's key and file it on the site's shelf.
+	 * management node's backup to the site's key and file it on the site's shelf.
 	 */
 	public static function normalize($name): string {
 		$name = trim((string)$name);
@@ -70,7 +70,7 @@ class BackupProfile {
 	/** How this profile is described to a person. */
 	public static function label($name): string {
 		return (self::normalize($name) === self::MANAGER)
-			? 'control plane'
+			? 'management node'
 			: 'this site';
 	}
 

@@ -156,7 +156,7 @@ check(strpos($command, 'mdwtest') !== false, 'and the container is named');
 check(strpos($command, 'PGPASSWORD') !== false,
 	'the DB password is read from the node\'s own config, never carried from here');
 check(strpos($command, ManagedDomainWatch::manageUrl()) !== false,
-	'the take-ownership link points back at this control plane');
+	'the take-ownership link points back at this management node');
 
 section('An empty custody state is a real value — it is what renders nothing');
 
