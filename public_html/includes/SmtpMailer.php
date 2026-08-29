@@ -22,7 +22,7 @@ use PHPMailer\PHPMailer\SMTP;
  * SMTP send (global, connected-account, per-mailbox) is "new SmtpMailer($config),
  * applyMessage($m), send()".
  *
- * @version 2.2
+ * @version 2.3 - UTF-8 charset; no X-Mailer fingerprint
  */
 class SmtpMailer extends PHPMailer {
     // Only encoding is truly universal
@@ -36,6 +36,21 @@ class SmtpMailer extends PHPMailer {
 
         // Set encoding (only truly universal value)
         $this->Encoding = self::SMTP_ENCODING;
+
+        // UTF-8, because the platform's text is UTF-8 everywhere else. PHPMailer
+        // defaults to iso-8859-1 and does NOT transcode — it only labels — so the
+        // default puts a UTF-8 curly quote, an accented name or an emoji on the
+        // wire under a label that cannot describe it, and the recipient reads
+        // mojibake. It also drags the same wrong label into the encoded-word
+        // headers (Subject, display names).
+        $this->CharSet = PHPMailer::CHARSET_UTF8;
+
+        // No X-Mailer. PHPMailer stamps its own name and version when the field is
+        // the empty default, which fingerprints ordinary person-to-person mail as
+        // library output for every filter that reads it, and tells a recipient
+        // nothing they wanted to know. A single space is how PHPMailer is asked to
+        // omit the header entirely (it trims, then emits only a non-empty result).
+        $this->XMailer = ' ';
 
         $this->Host = $config->host ?: '';
         $this->Port = intval($config->port ?: 25);

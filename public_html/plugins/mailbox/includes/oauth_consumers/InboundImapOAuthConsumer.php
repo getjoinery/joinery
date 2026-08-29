@@ -27,7 +27,10 @@
  * Discovered by interface from this plugin's includes/oauth_consumers/ (see
  * OAuth2ConsumerRegistry); no registration call is needed.
  *
- * @version 2.1
+ * @version 2.2
+ * @changelog 2.2 - both entry points check WHAT was granted and refuse a grant
+ *   that authorizes sign-in but not mail access, instead of storing it and
+ *   letting the next poll fail with an opaque authentication error
  * @changelog 2.1 - reconnect checks WHICH address signed in and refuses a
  *   mismatch with both named; a never-configured feed finishes in the wizard's
  *   configure state; any provisioning failure stashes the token, not just the
@@ -95,6 +98,17 @@ class InboundImapOAuthConsumer implements OAuth2Consumer {
 			return self::ACCOUNTS_URL;
 		}
 
+		// WHAT was granted. Signing in is not the same permission as being let
+		// into the mailbox, and the consent screen asks for them separately — so
+		// a grant that carries only identity is refused HERE, named, with the
+		// feed's existing state untouched, instead of being discovered as an
+		// opaque "Authentication failed" on the next scheduled poll.
+		$refusal = $this->mailAccessRefusal($account->get('iia_provider_key'), $token);
+		if ($refusal !== null) {
+			SessionControl::get_instance()->save_message($refusal);
+			return self::ACCOUNTS_URL;
+		}
+
 		$account->setOAuthToken($token);
 		$account->set('iia_needs_reauth', false);
 		$account->set('iia_last_status', 'Connected via OAuth ' . gmdate('Y-m-d H:i') . ' UTC.');
@@ -134,6 +148,12 @@ class InboundImapOAuthConsumer implements OAuth2Consumer {
 			'security_level' => (string)($payload['security_level'] ?? ''),
 		);
 
+		$refusal = $this->mailAccessRefusal($provider_key, $token);
+		if ($refusal !== null) {
+			SessionControl::get_instance()->save_message($refusal);
+			return self::ACCOUNTS_URL;
+		}
+
 		$address = $this->learnAddress($provider_key, $token);
 		if ($address === null) {
 			ImapConnectStash::put($provider_key, $intent, $token);
@@ -163,6 +183,29 @@ class InboundImapOAuthConsumer implements OAuth2Consumer {
 		}
 		ImapConnectStash::clear();
 		return self::WIZARD_URL . '?state=configure&account_id=' . intval($account->key) . '&connected=1';
+	}
+
+	/**
+	 * The message to show when a grant cannot read mail, or null when it can.
+	 *
+	 * Both entry points ask the same question of the same grant, so they ask it
+	 * in one place: a first connection that cannot open the mailbox is exactly as
+	 * useless as a reconnection that cannot, and telling an operator two
+	 * different stories about one missed tick box is how they stop reading
+	 * either.
+	 */
+	private function mailAccessRefusal(?string $preset_key, OAuth2Token $token): ?DisplayMessage {
+		if (!InboundImapAccount::missingMailScopes($preset_key, $token->getScope())) {
+			return null;
+		}
+		$label = InboundImapAccount::PRESETS[$preset_key]['label'] ?? 'the mail provider';
+		return new DisplayMessage(
+			'You signed in, but did not grant access to the mail itself, so nothing can read the '
+				. 'mailbox. Nothing was changed. Connect again and, on the permission screen, allow '
+				. htmlspecialchars($label) . ' access to your email — approving only your name and '
+				. 'email address is what leaves it looking connected while every fetch is refused.',
+			'Mail access not granted', '~/plugins/mailbox/admin/~',
+			DisplayMessage::MESSAGE_ERROR, DisplayMessage::MESSAGE_DISPLAY_IN_PAGE);
 	}
 
 	/**

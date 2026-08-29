@@ -12,16 +12,22 @@
  * Run: php plugins/mailbox/tests/inbound_imap_account_test.php
  * (requires schema synced — iia_inbound_imap_accounts table + iea aliases).
  *
- * @version 1.0
+ * @version 1.1 - saving a feed retires the remembered Setup verdict
  */
 
 require_once(__DIR__ . '/../../../tests/lib/harness.php');
+// Before harness_boot(): the remembered verdict lives in a session, and PHP
+// refuses to start one once anything has printed. A caller that has already
+// written output (the file validator, which runs the file) leaves no session to
+// start — those checks skip rather than fail.
+if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) { @session_start(); }
 harness_boot();
 require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 require_once(PathHelper::getIncludePath('includes/oauth/OAuth2Token.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_domain_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_email_alias_class.php'));
 require_once(PathHelper::getIncludePath('plugins/mailbox/data/inbound_imap_account_class.php'));
+require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_memory.php'));
 
 class InboundImapAccountTest {
 	private $db;
@@ -43,6 +49,7 @@ class InboundImapAccountTest {
 			$this->testOAuthTokenRoundTrip();
 			$this->testFilters();
 			$this->testCursor();
+			$this->testSaveForgetsSetupVerdict();
 		} catch (\Throwable $e) {
 			check(false, 'uncaught exception', $e->getMessage() . ' @ ' . $e->getFile() . ':' . $e->getLine());
 		} finally {
@@ -226,6 +233,36 @@ class InboundImapAccountTest {
 		$after = new InboundImapAccount($acct->key, TRUE);
 		$this->ok(strlen((string)$after->get('iia_last_status')) <= 500, 'last_status truncated to 500');
 		$this->ok($after->get('iia_last_poll_time') !== null, 'recordStatus stamps last_poll_time');
+	}
+
+	/**
+	 * A saved feed retires the remembered Setup verdict for its mailbox.
+	 *
+	 * The bug this pins down: an operator reconnects an expired Gmail feed, goes
+	 * back to the reader, and is still told the authorization has expired —
+	 * because the banner was reading a verdict reached before the reconnect.
+	 */
+	private function testSaveForgetsSetupVerdict() {
+		section('Saving a feed retires the remembered verdict');
+		if (session_status() !== PHP_SESSION_ACTIVE) {
+			harness_skip('saving a feed retires the remembered verdict',
+				'no session available in this context');
+			return;
+		}
+		$acct = $this->makeAccount('imap_gmail');
+
+		mailbox_setup_status_remember($this->alias_id, array('status' => 'attention',
+			'reason' => 'The stored authorization has expired and needs to be renewed.',
+			'label' => 'IMAP connection'));
+		$this->ok(mailbox_setup_status_recall($this->alias_id) !== null,
+			'the banner has an answer to show before the reconnect');
+
+		$acct->setOAuthToken(new OAuth2Token('ACCESS-' . $this->suffix, 'REFRESH-' . $this->suffix,
+			gmdate('Y-m-d H:i:s', time() + 3600)));
+		$acct->save();
+
+		$this->ok(mailbox_setup_status_recall($this->alias_id) === null,
+			'reconnecting the feed drops it, so the next ask runs the checks live');
 	}
 
 	private function tearDown() {

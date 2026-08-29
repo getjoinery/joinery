@@ -34,6 +34,8 @@
  * the stored grant power SMTP send (SmtpConfig::fromConnectedAccount), and the
  * outbound helpers below report SMTP send-capability and granted-scope state.
  *
+ * @version 1.4 - saving a feed drops the remembered Setup verdict for its
+ *   mailbox, so a reconnect is believed immediately
  * @version 1.3 - the catalog's 'auth' is the default (easiest) method, not the
  *   only one: Gmail defaults to app password with OAuth still supported;
  *   iia_auth_method is per-account truth, stamped by setPassword/setOAuthToken
@@ -98,20 +100,15 @@ class InboundImapAccount extends SystemBase {
 	 * fixed SMTP host: connected-account outbound is unavailable for it, and a
 	 * relay-class provider is used to send for those mailboxes.
 	 *
-	 * 'smtp_rewrites_message_id' records whether the provider's SMTP rewrites the
-	 * Message-ID on send (Gmail does) — true means a Joinery-composed message can
-	 * never be matched to its filed Sent copy by Message-ID, so no local outbound
-	 * row is stored and the message surfaces on the next Sent ingest (§9 dedup).
-	 *
-	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool,smtp_rewrites_message_id:bool}>
+	 * @var array<string,array{label:string,host:?string,port:int,encryption:string,auth:string,oauth_provider:?string,smtp_host:?string,smtp_port:int,smtp_encryption:?string,smtp_files_sent:bool}>
 	 */
 	const PRESETS = array(
-		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>'google',    'app_password_url'=>'https://myaccount.google.com/apppasswords',              'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>true),
-		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'app_password_url'=>null,                                                     'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://login.yahoo.com/myaccount/security/app-password', 'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://account.apple.com/account/manage',                'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://app.fastmail.com/settings/security',              'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true,  'smtp_rewrites_message_id'=>false),
-		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>null,                                                     'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false, 'smtp_rewrites_message_id'=>false),
+		'imap_gmail'     => array('label'=>'Gmail / Google Workspace', 'host'=>'imap.gmail.com',        'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>'google',    'app_password_url'=>'https://myaccount.google.com/apppasswords',              'smtp_host'=>'smtp.gmail.com',     'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_microsoft' => array('label'=>'Microsoft 365 / Outlook',  'host'=>'outlook.office365.com', 'port'=>993, 'encryption'=>'ssl', 'auth'=>'oauth2',   'oauth_provider'=>'microsoft', 'app_password_url'=>null,                                                     'smtp_host'=>'smtp.office365.com', 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_yahoo'     => array('label'=>'Yahoo / AOL',              'host'=>'imap.mail.yahoo.com',   'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://login.yahoo.com/myaccount/security/app-password', 'smtp_host'=>'smtp.mail.yahoo.com','smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
+		'imap_icloud'    => array('label'=>'iCloud',                   'host'=>'imap.mail.me.com',      'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://account.apple.com/account/manage',                'smtp_host'=>'smtp.mail.me.com',   'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>true),
+		'imap_fastmail'  => array('label'=>'Fastmail',                 'host'=>'imap.fastmail.com',     'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>'https://app.fastmail.com/settings/security',              'smtp_host'=>'smtp.fastmail.com',  'smtp_port'=>465, 'smtp_encryption'=>'ssl', 'smtp_files_sent'=>true),
+		'imap_generic'   => array('label'=>'Generic IMAP',             'host'=>null,                    'port'=>993, 'encryption'=>'ssl', 'auth'=>'password', 'oauth_provider'=>null,        'app_password_url'=>null,                                                     'smtp_host'=>null,                 'smtp_port'=>587, 'smtp_encryption'=>'tls', 'smtp_files_sent'=>false),
 	);
 
 	/**
@@ -300,11 +297,6 @@ class InboundImapAccount extends SystemBase {
 		return !empty($this->getPreset()['smtp_files_sent']);
 	}
 
-	/** Whether the provider's SMTP rewrites the Message-ID on send (Gmail) — drives §9 dedup. */
-	function smtpRewritesMessageId(): bool {
-		return !empty($this->getPreset()['smtp_rewrites_message_id']);
-	}
-
 	// --- Import scope helpers ----------------------------------------------
 
 	/** How far back this feed reaches: future | days | full. */
@@ -418,8 +410,82 @@ class InboundImapAccount extends SystemBase {
 		if ($oauthProviderKey === 'microsoft') {
 			return array('https://outlook.office365.com/SMTP.Send');
 		}
-		// Google: the IMAP scope already covers SMTP send.
+		if ($oauthProviderKey === 'google') {
+			// Google's one mail scope covers both directions — which is exactly why
+			// it has to be named here. Treating Google as needing no scope at all
+			// was true of a grant that had it and false of one that did not, and
+			// the second case reported itself as authorized right up until SMTP
+			// answered 535 BadCredentials into the error log.
+			return array('https://mail.google.com/');
+		}
 		return array();
+	}
+
+	/**
+	 * The scopes a grant must carry before this feed can READ mail at all.
+	 *
+	 * Signing in and being allowed into the mailbox are two different
+	 * permissions, and a provider will happily grant the first without the
+	 * second: Google's consent screen lists mail access as its own tick box, so
+	 * an operator can come back holding a perfectly valid token that identifies
+	 * them and authorizes nothing. IMAP then fails to log in, minutes later,
+	 * under a scheduled poll, saying only "Authentication failed" — which reads
+	 * as a broken or expired sign-in and sends the operator round the same loop.
+	 *
+	 * Keyed by IMAP PRESET (the key learnAddress takes), so a caller holding a
+	 * feed's provider never has to translate between the two key spaces.
+	 *
+	 * @return string[] every scope that must be present; empty for a host with
+	 *                  no OAuth (a password feed authorizes by password).
+	 */
+	static function requiredMailScopes(?string $preset_key): array {
+		$oauth_key = self::PRESETS[$preset_key]['oauth_provider'] ?? null;
+		if ($oauth_key === 'microsoft') {
+			return array('https://outlook.office365.com/IMAP.AccessAsUser.All');
+		}
+		if ($oauth_key === 'google') {
+			// Google's IMAP scope, which also covers SMTP send (requiredSendScopes).
+			return array('https://mail.google.com/');
+		}
+		return array();
+	}
+
+	/**
+	 * Which required mail scopes a REPORTED grant does not carry.
+	 *
+	 * A provider that reports no scope at all has told us nothing, and silence
+	 * is not evidence of refusal — that case returns empty, so a grant is only
+	 * ever turned away on what the provider actually said.
+	 *
+	 * @return string[] the missing scopes; empty means "nothing known to be wrong".
+	 */
+	static function missingMailScopes(?string $preset_key, string $reported_scope): array {
+		$reported = trim($reported_scope);
+		if ($reported === '') {
+			return array();
+		}
+		$granted = preg_split('/\s+/', $reported);
+		$missing = array();
+		foreach (self::requiredMailScopes($preset_key) as $scope) {
+			if (!in_array($scope, $granted, true)) {
+				$missing[] = $scope;
+			}
+		}
+		return $missing;
+	}
+
+	/**
+	 * True when the grant this feed holds is known NOT to authorize reading the
+	 * mailbox — connected, but not let in. Distinct from "never connected" and
+	 * from "the token went bad", and the only one of the three an operator can
+	 * fix by ticking a box on the way through the consent screen.
+	 */
+	function mailAccessRefused(): bool {
+		if (!$this->isOAuth() || !$this->hasOAuthToken()) {
+			return false;
+		}
+		return (bool)self::missingMailScopes((string)$this->get('iia_provider_key'),
+			(string)$this->get('iia_oauth_scopes'));
 	}
 
 	/** The scopes the stored grant was issued with (space-delimited → array). */
@@ -452,6 +518,12 @@ class InboundImapAccount extends SystemBase {
 			return true;
 		}
 		$granted = $this->grantedScopes();
+		if (empty($granted)) {
+			// The provider reported no scopes, so there is nothing to grade
+			// against. Silence is not refusal: blocking a send on an absence would
+			// strand every feed whose grant predates scope recording.
+			return true;
+		}
 		foreach ($required as $scope) {
 			if (!in_array($scope, $granted, true)) {
 				return false;
@@ -568,6 +640,31 @@ class InboundImapAccount extends SystemBase {
 		$this->set('iia_last_poll_time', gmdate('Y-m-d H:i:s'));
 		$this->set('iia_last_status', substr($status, 0, 500));
 		$this->save();
+	}
+
+	/**
+	 * Saving a feed retires the operator's remembered Setup verdict for its
+	 * mailbox.
+	 *
+	 * The reader's "this mailbox needs attention" banner does not re-run the
+	 * checks on every click — it reads the last answer out of the operator's
+	 * session (mailbox_setup_memory.php). For an IMAP-pull mailbox, that answer
+	 * is largely a reading of THIS row: connected, needing reconnection, feed
+	 * switched off. So every write here is a write to what the banner should
+	 * say, and leaving the memory in place is how an operator who has just
+	 * reconnected a mailbox gets told, for the rest of the window, that the
+	 * authorization they renewed has expired.
+	 *
+	 * Forgetting rather than recomputing is deliberate: the correct answer costs
+	 * DNS lookups and host probes, and a poll running under cron has no operator
+	 * to answer for. Dropping the memory makes the next ask — from someone
+	 * actually looking at the mailbox — run live.
+	 */
+	function save($debug = false) {
+		$result = parent::save($debug);
+		require_once(PathHelper::getIncludePath('plugins/mailbox/includes/mailbox_setup_memory.php'));
+		mailbox_setup_status_forget(intval($this->get('iia_iea_inbound_email_alias_id')));
+		return $result;
 	}
 }
 

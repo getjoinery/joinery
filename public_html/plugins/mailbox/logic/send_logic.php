@@ -77,7 +77,6 @@ function send_logic(array $input): LogicResult {
 
 	return LogicResult::render(array(
 		'outbound_id' => intval($result['outbound_id']),
-		'pending_sent_ingest' => !empty($result['pending_sent_ingest']),
 	));
 }
 

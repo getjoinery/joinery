@@ -3754,6 +3754,18 @@ The token grants full mailbox **read** access; secrets (IMAP passwords and OAuth
 refresh tokens) are stored encrypted at rest with [`SecretBox`](/docs/secret_box.md)
 and never logged or echoed.
 
+**A grant is checked before it is stored.** Signing in and being allowed into the
+mailbox are separate permissions on the consent screen, and a provider will grant
+the first without the second — leaving a valid token that no IMAP session can log
+in with. `InboundImapOAuthConsumer` therefore grades what came back
+(`InboundImapAccount::missingMailScopes()`) and refuses a grant missing the mail
+scope: nothing is stored, the feed keeps whatever state it had, and the operator
+is told to allow email access on the way through. A provider that reports no scope
+at all is not treated as having refused — only what the provider actually says is
+acted on. A feed already holding such a grant reports it as
+`mailAccessRefused()`, which the Setup tab names in its own right rather than as
+an expired authorization.
+
 ### The poll cadence
 
 The **PollImapAccounts** scheduled task is the heartbeat. It runs every cron pass
@@ -4070,10 +4082,10 @@ column) is distinct from deletion and stays local.
 reply/forward feature): the source Sent folder is ingested like any tracked folder,
 so mail sent from the native client appears in Joinery. When a feed’s SMTP does not
 auto-file sent mail (self-hosted / generic), Joinery `APPEND`s the sent copy to the
-source Sent folder itself. Sent dedup is **by Message-ID only**: a provider that
-preserves the Message-ID reconciles the filed copy to the locally-stored sent row,
-while a provider that rewrites it on send (Gmail) stores no local row — the message
-appears on the next Sent ingest (one poll-interval later).
+source Sent folder itself. Sent dedup is **by Message-ID only**: a compose send always
+stores its own outbound row, carrying the Message-ID the message was sent with, and
+the filed copy reconciles to that row on the next Sent ingest — adopting its IMAP
+locator rather than inserting a second row.
 
 A message filed in the source Sent folder reads as **sent mail** (`iem_direction =
 'outbound'`) whichever folder stored it first: when the `\All` coverage pass wins the
