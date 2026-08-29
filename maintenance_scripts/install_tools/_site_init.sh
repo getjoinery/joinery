@@ -363,6 +363,21 @@ if [ -n "$CLONE_FROM" ]; then
         log "Sequences synchronized"
     fi
 
+    # Scrub sealed secrets. The clone carries ciphertext sealed to the SOURCE
+    # site's secret_box_key, which this environment does not have, so every sealed
+    # value is dead here. Null them at their declared locators (read from the
+    # registry table that travelled inside the dump) so the copy lands clean —
+    # "not configured" rather than a pile of broken features. Runs after the
+    # config file exists (it needs DB credentials) and needs no plugin code.
+    log "Scrubbing sealed secrets from the cloned database..."
+    if [ -f "$SITE_ROOT/public_html/utils/scrub_sealed_secrets.php" ]; then
+        if php "$SITE_ROOT/public_html/utils/scrub_sealed_secrets.php" 2>/dev/null; then
+            log "Sealed secrets scrubbed"
+        else
+            log_error "Warning: Sealed-secret scrub failed (non-fatal); a later update_database reconcile will flag any dead secret"
+        fi
+    fi
+
 elif [ "$DB_EXISTS" = false ]; then
     # ==========================================================================
     # NORMAL MODE: Load from SQL file

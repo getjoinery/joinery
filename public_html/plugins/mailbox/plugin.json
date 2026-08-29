@@ -711,5 +711,49 @@
                 "link_template": "/plugins/mailbox/admin/admin_mailbox_setup"
             }
         }
-    }
+    },
+    "sealed_secrets": [
+        {
+            "label": "IMAP account password",
+            "feature": "Mailbox inbound IMAP",
+            "kind": "operator",
+            "locator": "iia_inbound_imap_accounts.iia_password_enc"
+        },
+        {
+            "label": "IMAP OAuth access token",
+            "feature": "Mailbox inbound IMAP",
+            "kind": "operator",
+            "locator": "iia_inbound_imap_accounts.iia_oauth_access_token_enc"
+        },
+        {
+            "label": "IMAP OAuth refresh token",
+            "feature": "Mailbox inbound IMAP",
+            "kind": "operator",
+            "locator": "iia_inbound_imap_accounts.iia_oauth_refresh_token_enc"
+        },
+        {
+            "label": "Relay transport secret",
+            "feature": "Mailbox relay transport",
+            "kind": "regenerable-breaks-things",
+            "locator": "mrl_mailbox_relays.mrl_transport_secret_sealed"
+        },
+        {
+            "label": "Relay cloud provisioning token",
+            "feature": "Relay cloud provisioning",
+            "kind": "ephemeral",
+            "locator": "rcp_relay_cloud_provisions.rcp_sealed_token"
+        },
+        {
+            "label": "Relay cloud provisioning SSH key",
+            "feature": "Relay cloud provisioning",
+            "kind": "ephemeral",
+            "locator": "rcp_relay_cloud_provisions.rcp_sealed_ssh_key"
+        },
+        {
+            "label": "IMAP connect wizard token",
+            "feature": "Mailbox connect wizard",
+            "kind": "ephemeral",
+            "locator": "session:mailbox_imap_connect_stash"
+        }
+    ]
 }

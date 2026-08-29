@@ -82,10 +82,9 @@ class GoogleOAuthProvider implements OAuth2Provider {
         if ($stored === '') {
             return '';
         }
-        if (SecretBox::looksEncrypted($stored)) {
-            return (new SecretBox())->decrypt($stored);
-        }
-        return $stored;
+        // open() collapses the legacy-plaintext passthrough: a plaintext value
+        // comes back raw, a sealed one decrypted, a dead one as '' (not configured).
+        return (string)((new SecretBox())->open($stored)['value'] ?? '');
     }
 
     public static function isConfigured(): bool {

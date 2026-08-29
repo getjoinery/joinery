@@ -395,6 +395,40 @@ class SetupSteps {
 			},
 		));
 
+		// A fault that appears long after setup finished, not an onboarding step:
+		// it is absent until a secret goes dead, then amber until it is dealt
+		// with. No decision — you cannot say "not now" to a broken credential.
+		// Reads the reconciler's cached verdict, never a live decrypt walk.
+		$sealed_attention = function (): array {
+			require_once(PathHelper::getIncludePath('includes/SecretReconciler.php'));
+			$v = SecretReconciler::attention_verdict();
+			return $v;
+		};
+		self::register('sealed_secrets', array(
+			'title' => 'Stored secrets',
+			'scope' => 'site',
+			'order' => 85,
+			'copy'  => function (?User $viewer): string {
+				return 'A stored secret here — a credential, token, or signing key — cannot be read with this '
+					. "site's key. This usually means the database was copied from another environment, or the "
+					. 'key was rotated. Re-enter the affected credential, or acknowledge a re-mint, to clear it.';
+			},
+			'render_file' => 'includes/setup_steps/sealed_secrets.php',
+			'home_url' => '/admin/admin_sealed_secrets',
+			'dismiss_line' => 'A stored secret cannot be read here.',
+			// Present ONLY when something needs a human: off until there is
+			// something to see, on a convention operators already know.
+			'active' => function (?User $viewer) use ($sealed_attention): bool {
+				$v = call_user_func($sealed_attention);
+				return ($v['operator'] + $v['needs_ack']) > 0;
+			},
+			'status' => function (?User $viewer) use ($sealed_attention): string {
+				$v = call_user_func($sealed_attention);
+				return ($v['operator'] + $v['needs_ack']) > 0
+					? SetupSteps::STATUS_AMBER : SetupSteps::STATUS_NONE;
+			},
+		));
+
 		self::register('signin_security', array(
 			'title' => 'Sign-in security',
 			'scope' => 'user',

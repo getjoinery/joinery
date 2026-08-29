@@ -89,31 +89,31 @@ class RelayCloudProvision extends SystemBase {
 	/** Seal the provider access token onto the row (not saved here). */
 	public function sealToken(string $access_token): void {
 		$box = new SecretBox();
-		$this->set('rcp_sealed_token', $box->encrypt($access_token));
+		$this->set('rcp_sealed_token', $box->seal('rcp_relay_cloud_provisions.rcp_sealed_token', $access_token));
 	}
 
-	/** @return string '' when no token is held. */
+	/** @return string '' when no token is held (or it is unreadable here). */
 	public function unsealToken(): string {
 		$stored = (string)$this->get('rcp_sealed_token');
 		if ($stored === '') {
 			return '';
 		}
-		return (new SecretBox())->decrypt($stored);
+		return (string)((new SecretBox())->open($stored)['value'] ?? '');
 	}
 
 	/** Seal the per-run root SSH private key onto the row (not saved here). */
 	public function sealSshKey(string $private_key): void {
 		$box = new SecretBox();
-		$this->set('rcp_sealed_ssh_key', $box->encrypt($private_key));
+		$this->set('rcp_sealed_ssh_key', $box->seal('rcp_relay_cloud_provisions.rcp_sealed_ssh_key', $private_key));
 	}
 
-	/** @return string '' when no key is held. */
+	/** @return string '' when no key is held (or it is unreadable here). */
 	public function unsealSshKey(): string {
 		$stored = (string)$this->get('rcp_sealed_ssh_key');
 		if ($stored === '') {
 			return '';
 		}
-		return (new SecretBox())->decrypt($stored);
+		return (string)((new SecretBox())->open($stored)['value'] ?? '');
 	}
 
 	/**

@@ -619,8 +619,17 @@ class JobCommandBuilder {
 			&& $ssl_domain !== 'localhost'
 			&& $node->get('mgn_ssl_state') !== 'active';
 
+		// A stored secret a human must act on (a dead operator credential, or a
+		// destructive re-mint awaiting acknowledgement) shows amber on the node's
+		// badge. The fix happens ON the node — the management node never holds the
+		// node's keys — so this is notify-and-link, never remote-fix.
+		$sealed = isset($status_data['sealed_secrets']) && is_array($status_data['sealed_secrets'])
+			? $status_data['sealed_secrets'] : array();
+		$sealed_attention = (int)($sealed['dead_operator'] ?? 0) + (int)($sealed['dead_needs_ack'] ?? 0);
+
 		if ((isset($status_data['disk_usage_percent']) && $status_data['disk_usage_percent'] > 80) ||
 			(isset($status_data['load_1m']) && $status_data['load_1m'] > 5) ||
+			$sealed_attention > 0 ||
 			$ssl_warn) {
 			return 'warning';
 		}

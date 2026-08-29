@@ -375,6 +375,33 @@
 			echo '</div></div>';
 		}
 
+		// Sealed-secret health. Counts only ride up in the status blob — never a
+		// value. A dead operator credential or a re-mint awaiting acknowledgement
+		// is fixed ON the node (the management node holds none of the node's keys),
+		// so this links out to the node's own secrets page rather than acting here.
+		if (isset($status_data['sealed_secrets']) && is_array($status_data['sealed_secrets'])) {
+			$ss = $status_data['sealed_secrets'];
+			$ss_attention = (int)($ss['dead_operator'] ?? 0) + (int)($ss['dead_needs_ack'] ?? 0);
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Stored Secrets</div>';
+			if ($ss_attention > 0) {
+				echo '<div class="mt-1"><span class="badge bg-warning">' . (int)$ss_attention . ' unreadable</span></div>';
+				$ss_bits = array();
+				if (!empty($ss['dead_operator'])) $ss_bits[] = (int)$ss['dead_operator'] . ' need re-entry';
+				if (!empty($ss['dead_needs_ack'])) $ss_bits[] = (int)$ss['dead_needs_ack'] . ' need a re-mint OK';
+				echo '<div class="text-muted small mt-2">' . htmlspecialchars(implode(' · ', $ss_bits)) . '</div>';
+				$ss_site = rtrim((string)$node->get('mgn_site_url'), '/');
+				if ($ss_site !== '') {
+					echo '<div class="small mt-2"><a href="' . htmlspecialchars($ss_site . '/admin/admin_sealed_secrets')
+						. '" target="_blank" rel="noopener">Fix on the node &rarr;</a></div>';
+				}
+			} else {
+				echo '<div class="mt-1"><span class="badge bg-success">All readable</span></div>';
+			}
+			echo '</div></div>';
+		}
+
 		// Joinery version
 		if ($node_version) {
 			$badge = '';

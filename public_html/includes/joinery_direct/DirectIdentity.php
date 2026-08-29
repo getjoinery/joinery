@@ -173,7 +173,7 @@ class DirectSigningIdentity {
 			$row->set('jdi_owner_usr_user_id', $owner_id);
 		} else {
 			$box = new SecretBox();
-			$row->set('jdi_secret_key', $box->encrypt(base64_encode($secret)));
+			$row->set('jdi_secret_key', $box->seal('jdi_direct_identities.jdi_secret_key', base64_encode($secret)));
 		}
 		$row->save();
 
@@ -247,7 +247,8 @@ class DirectSigningIdentity {
 			throw new RuntimeException('Direct signing identity ' . $identity->key . ' holds no secret key.');
 		}
 		$box = new SecretBox();
-		$decoded = base64_decode($box->decrypt($stored), true);
+		$opened = $box->open($stored);
+		$decoded = $opened['value'] === null ? false : base64_decode($opened['value'], true);
 		if ($decoded === false) {
 			throw new RuntimeException('Direct signing identity ' . $identity->key . ' is unreadable.');
 		}

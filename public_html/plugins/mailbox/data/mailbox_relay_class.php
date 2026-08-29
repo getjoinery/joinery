@@ -186,7 +186,7 @@ class MailboxRelay extends SystemBase {
 		require_once(PathHelper::getIncludePath('includes/SealedBox.php'));
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 		$kp = (new SealedBox())->generateKeypair();
-		$sealed_secret = (new SecretBox())->encrypt($kp['secret']);
+		$sealed_secret = (new SecretBox())->seal('mrl_mailbox_relays.mrl_transport_secret_sealed', $kp['secret']);
 		$this->set('mrl_transport_public_key', $kp['public']);
 		$this->set('mrl_transport_secret_sealed', $sealed_secret);
 		$this->save();
@@ -466,7 +466,11 @@ class MailboxRelay extends SystemBase {
 			throw new MailboxRelayException('MailboxRelay: transport keypair not initialised');
 		}
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
-		return (new SecretBox())->decrypt($sealed);
+		$opened = (new SecretBox())->open($sealed);
+		if ($opened['value'] === null) {
+			throw new MailboxRelayException('MailboxRelay: transport secret is unreadable (moved database or rotated key)');
+		}
+		return $opened['value'];
 	}
 
 }

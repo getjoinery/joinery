@@ -57,9 +57,9 @@ class CustomerCloudAccount extends SystemBase {
 	 */
 	public function storeToken(OAuth2Token $token) {
 		$box = new SecretBox();
-		$this->set('cca_access_token', $box->encrypt($token->getAccessToken()));
+		$this->set('cca_access_token', $box->seal('cca_customer_cloud_accounts.cca_access_token', $token->getAccessToken()));
 		$refresh = $token->getRefreshToken();
-		$this->set('cca_refresh_token', $refresh !== null ? $box->encrypt($refresh) : null);
+		$this->set('cca_refresh_token', $refresh !== null ? $box->seal('cca_customer_cloud_accounts.cca_refresh_token', $refresh) : null);
 		$this->set('cca_token_expires', $token->getExpiresAt());
 		$this->set('cca_scopes', $token->getScope());
 	}
@@ -73,10 +73,15 @@ class CustomerCloudAccount extends SystemBase {
 			return null;
 		}
 		$box = new SecretBox();
+		$access = $box->open($access_stored)['value'];
+		if ($access === null) {
+			// Dead access token (moved database / rotated key): degrade to no token.
+			return null;
+		}
 		$refresh_stored = (string)$this->get('cca_refresh_token');
 		return new OAuth2Token(
-			$box->decrypt($access_stored),
-			$refresh_stored !== '' ? $box->decrypt($refresh_stored) : null,
+			$access,
+			$refresh_stored !== '' ? $box->open($refresh_stored)['value'] : null,
 			$this->get('cca_token_expires') ?: null,
 			(string)$this->get('cca_scopes')
 		);

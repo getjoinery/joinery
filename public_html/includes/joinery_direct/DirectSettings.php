@@ -90,9 +90,11 @@ class DirectSettings {
 		require_once(PathHelper::getIncludePath('includes/SecretBox.php'));
 		$stored = (string)self::raw('joinery_direct_decoy_secret', '');
 		if ($stored !== '') {
-			try {
-				return (new SecretBox())->decrypt($stored);
-			} catch (\Throwable $e) {
+			$opened = (new SecretBox())->open($stored);
+			// Fail closed on ANYTHING but a clean open: a decoy is always a sealed
+			// value, so a dead OR a bare-plaintext stored value is suspect and must
+			// not be silently accepted (or silently re-minted).
+			if ($opened['state'] !== SecretBox::OPEN_OK) {
 				// A stored secret that will not decrypt means the SecretBox key
 				// changed or the row is corrupt. Minting a fresh one here would
 				// silently rotate EVERY decoy — and a decoy that changes between two
@@ -102,11 +104,12 @@ class DirectSettings {
 				// distinguishable by the fault.
 				throw new RuntimeException('Joinery Direct: the decoy secret is present but unreadable; '
 					. 'refusing to re-mint it, which would rotate every decoy key. Restore the SecretBox key, '
-					. 'or clear joinery_direct_decoy_secret deliberately to rotate.', 0, $e);
+					. 'or clear joinery_direct_decoy_secret deliberately to rotate.');
 			}
+			return (string)$opened['value'];
 		}
 		$secret = base64_encode(random_bytes(32));
-		self::persist('joinery_direct_decoy_secret', (new SecretBox())->encrypt($secret));
+		self::persist('joinery_direct_decoy_secret', (new SecretBox())->seal('joinery_direct_decoy_secret', $secret));
 		return $secret;
 	}
 

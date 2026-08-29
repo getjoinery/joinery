@@ -112,16 +112,21 @@ class BackupTarget extends SystemBase {
 	private function unseal_column($column) {
 		$arr = self::creds_to_array($this->get($column));
 		if (self::looks_sealed($arr)) {
-			try {
-				$plain = (new SecretBox())->decrypt($arr['enc']);
-			} catch (\Throwable $e) {
+			// Read through the shared open() contract. This target's deliberate
+			// fail-loud surface is preserved: a dead credential still throws rather
+			// than reading as "no credentials", it just reads the same way every
+			// other sealed value does now.
+			$result = (new SecretBox())->open($arr['enc']);
+			// looks_sealed() guarantees a blob reached here, so a non-OK result is a
+			// genuine failure — fail loud rather than reading as "no credentials".
+			if ($result['state'] !== SecretBox::OPEN_OK) {
 				throw new BackupTargetException(
-					'Backup target "' . $this->get('bkt_name') . '" credentials cannot be decrypted ('
-					. $e->getMessage() . '). The stored value is sealed with secret_box_key; if that key '
+					'Backup target "' . $this->get('bkt_name') . '" credentials cannot be decrypted. '
+					. 'The stored value is sealed with secret_box_key; if that key '
 					. 'was rotated or this database was moved to a machine without it, restore the '
 					. 'original key or re-enter the credentials on the target.');
 			}
-			$inner = json_decode($plain, true);
+			$inner = json_decode((string)$result['value'], true);
 			return is_array($inner) ? $inner : [];
 		}
 		return $arr;
@@ -147,7 +152,37 @@ class BackupTarget extends SystemBase {
 		}
 		// An actual encryption failure propagates: silently persisting plaintext
 		// when encryption was expected would defeat at-rest protection unnoticed.
-		$this->set($column, array('enc' => $box->encrypt(json_encode($arr))));
+		$this->set($column, array('enc' => $box->seal(self::$tablename . '.' . $column, json_encode($arr))));
+	}
+
+	/**
+	 * Every stored credential blob, for the sealed-secret reconciler. Its column
+	 * is a jsonb {"enc":"<blob>"} envelope, so the reconciler cannot reach the
+	 * blob from the code-free locator alone — this enumerator unwraps it.
+	 *
+	 * @return array<array{ref:string, blob:?string}>
+	 */
+	public static function eachCredentialBlob(): array {
+		return self::each_column_blob('bkt_credentials');
+	}
+
+	/** As eachCredentialBlob(), for the node-facing credential column. */
+	public static function eachNodeCredentialBlob(): array {
+		return self::each_column_blob('bkt_node_credentials');
+	}
+
+	private static function each_column_blob(string $column): array {
+		$out = array();
+		$targets = new MultiBackupTarget(array('deleted' => false));
+		$targets->load();
+		foreach ($targets as $target) {
+			$arr = self::creds_to_array($target->get($column));
+			$out[] = array(
+				'ref'  => (string)$target->get('bkt_name'),
+				'blob' => self::looks_sealed($arr) ? (string)$arr['enc'] : null,
+			);
+		}
+		return $out;
 	}
 
 	/** Normalise the stored credential value (array or JSON string) to an array. */

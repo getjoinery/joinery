@@ -50,7 +50,7 @@ class OAuth2ProviderConfig {
 						return 'Cannot store the client secret: ' . $e->getMessage();
 					}
 				}
-				$value = $box->encrypt($value);
+				$value = $box->seal($setting, $value);
 			}
 			$writes[$setting] = $value;
 		}

@@ -328,5 +328,38 @@
       "managed": true,
       "helptext": "High-water mark over order items already checked for a paid domain year that produced no registration. Written by ManagedDomainWatch so each such order is reported once."
     }
+  ],
+  "sealed_secrets": [
+    {
+      "label": "Domain registrant contact",
+      "feature": "Domain registration",
+      "kind": "operator",
+      "locator": "rdm_registered_domains.rdm_registrant_sealed",
+      "enumerator": "RegisteredDomain::eachRegistrantBlob"
+    },
+    {
+      "label": "Customer cloud access token",
+      "feature": "Customer cloud accounts",
+      "kind": "operator",
+      "locator": "cca_customer_cloud_accounts.cca_access_token"
+    },
+    {
+      "label": "Customer cloud refresh token",
+      "feature": "Customer cloud accounts",
+      "kind": "operator",
+      "locator": "cca_customer_cloud_accounts.cca_refresh_token"
+    },
+    {
+      "label": "Namecheap API key",
+      "feature": "Server Manager provisioning",
+      "kind": "operator",
+      "locator": "server_manager_namecheap_api_key"
+    },
+    {
+      "label": "getjoinery provisioning API secret",
+      "feature": "Server Manager provisioning",
+      "kind": "regenerable-breaks-things",
+      "locator": "server_manager_getjoinery_api_secret_key"
+    }
   ]
 }

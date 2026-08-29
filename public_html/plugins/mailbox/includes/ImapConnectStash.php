@@ -36,7 +36,7 @@ class ImapConnectStash {
 		$_SESSION[self::SESSION_KEY] = array(
 			'provider_key' => $provider_key,
 			'intent'       => $intent,
-			'token'        => (new SecretBox())->encrypt(json_encode(array(
+			'token'        => (new SecretBox())->seal('session:mailbox_imap_connect_stash', json_encode(array(
 				'access_token'  => $token->getAccessToken(),
 				'refresh_token' => $token->getRefreshToken(),
 				'expires_at'    => $token->getExpiresAt(),
@@ -60,12 +60,12 @@ class ImapConnectStash {
 			self::clear();
 			return null;
 		}
-		try {
-			$decoded = json_decode((new SecretBox())->decrypt((string)$held['token']), true);
-		} catch (\Throwable $e) {
+		$opened = (new SecretBox())->open((string)$held['token']);
+		if ($opened['value'] === null) {   // dead / unreadable stash
 			self::clear();
 			return null;
 		}
+		$decoded = json_decode($opened['value'], true);
 		if (!is_array($decoded) || empty($decoded['access_token'])) {
 			self::clear();
 			return null;

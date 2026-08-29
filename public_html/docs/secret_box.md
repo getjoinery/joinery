@@ -12,23 +12,34 @@ about SecretBox is OAuth-specific.
 ## API
 
 ```php
-$box = new SecretBox();                  // throws if secret_box_key is missing/malformed
-$blob  = $box->encrypt($plaintext);      // -> "v1.<algo>.<nonce>.<ciphertext>"
-$plain = $box->decrypt($blob);           // throws on tamper / wrong key / malformed blob
+$box = new SecretBox();                      // throws if secret_box_key is missing/malformed
+$blob   = $box->seal($locator, $plaintext);  // seal a REGISTERED secret; refuses an unregistered locator
+$result = $box->open($stored);               // never throws — ['state' => ok|absent|dead|plaintext, 'value' => ...]
 
-SecretBox::looksEncrypted($value);       // static bool: is this a SecretBox blob vs. legacy plaintext?
+SecretBox::looksEncrypted($value);           // static bool: is this a SecretBox blob vs. legacy plaintext?
 ```
 
-- **`__construct()`** — reads the key (below) and validates it's exactly 32 bytes.
-  If absent or the wrong length it **throws** — SecretBox fails closed and never
-  silently stores plaintext.
-- **`encrypt($plaintext): string`** — fresh random nonce per call, so encrypting
-  the same value twice yields different blobs.
-- **`decrypt($blob): string`** — verifies the authentication tag; any tampering,
-  wrong key, or malformed input throws rather than returning garbage.
-- **`looksEncrypted($value): bool`** (static) — cheap prefix check so a caller can
-  tell a blob from a pre-existing plaintext value and migrate lazily, without a
-  separate flag column.
+Consumers use **`seal()` / `open()`** — the registered, non-throwing contract:
+
+- **`seal($locator, $plaintext): string`** — encrypts a value for a declared
+  sealed-secret category. The `$locator` must be declared in a `sealed_secrets`
+  manifest block (a setting name, or `table.column`); an unregistered one is
+  **refused**, the same way `Setting::put()` refuses an undeclared setting name.
+  This makes the registry load-bearing — you cannot seal a value the reconciler
+  cannot find and heal when a database moves. See [Sealed Secrets](sealed_secrets.md).
+- **`open($stored): array`** — reads a stored value without ever throwing.
+  `state` is one of `ok` (here is the secret, in `value`), `absent` (nothing
+  stored — not configured), `dead` (stored but undecryptable — moved database or
+  rotated key), or `plaintext` (a legacy unencrypted value, returned raw in
+  `value`). A consumer that gets `dead` treats it like `absent` and never crashes.
+- **`looksEncrypted($value): bool`** (static) — cheap prefix check.
+- **`__construct()`** — reads the key (below) and validates it's exactly 32 bytes;
+  throws if absent or wrong length (fail closed).
+
+`encrypt()` / `decrypt()` remain as the low-level primitives underneath, but they
+are **not** the consumer API: a grep-enforced test
+(`tests/unit/sealed_secret_callsites_test.php`) fails CI on any raw
+`->encrypt()` / `->decrypt()` call outside `SecretBox` itself.
 
 ## Blob format
 
@@ -64,17 +75,22 @@ like the DB password: per-environment, backed up, never rotated casually.
 
 ## Usage pattern
 
-Encrypt before persisting, decrypt on read, and use `looksEncrypted()` to migrate
-any pre-existing plaintext in place:
+Seal before persisting, open on read. `open()` collapses the legacy-plaintext
+migration idiom — a plaintext value comes back in `value` with `state` `plaintext`:
 
 ```php
 // write
-$setting->set('stg_value', (new SecretBox())->encrypt($plaintext));
+$setting->set('stg_value', (new SecretBox())->seal('my_secret', $plaintext));
 
-// read (tolerating a legacy plaintext value)
+// read (tolerating a moved database and a legacy plaintext value)
 $stored = $settings->get_setting('my_secret');
-$plain  = SecretBox::looksEncrypted($stored) ? (new SecretBox())->decrypt($stored) : $stored;
+$result = (new SecretBox())->open($stored);
+$plain  = $result['value'];   // null when dead/absent — treat as not configured
 ```
+
+Every new sealed value needs a `sealed_secrets` declaration naming its category,
+kind, and locator — see [Sealed Secrets](sealed_secrets.md). Without it, `seal()`
+refuses the value.
 
 ## Guarantees
 

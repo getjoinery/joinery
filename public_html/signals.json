@@ -58,5 +58,25 @@
             "body_template": "On \"{post_title}\": {comment_excerpt}",
             "link_template": "{post_url}"
         }
+    },
+    "secret.unreadable": {
+        "label": "Sealed secret unreadable",
+        "description": "A stored secret (a credential, token, or signing key) cannot be decrypted with this install's key — most often because the database was moved to a machine without the matching secret_box_key, or the key was rotated. Raised once when a secret goes dead, not on every reconcile.",
+        "category": "System",
+        "payload": {
+            "label": "Human name of the affected secret (or a batch summary)",
+            "feature": "Feature the secret belongs to",
+            "count": "How many secrets this alert covers",
+            "link": "Admin surface to act on it",
+            "recipients": "Admin user ids to notify (the in-system leg must always land)"
+        },
+        "notify": {
+            "ntf_type": "system",
+            "supports_topic": true,
+            "default_email": true,
+            "title_template": "Secret unreadable: {label}",
+            "body_template": "{feature}: a stored secret cannot be decrypted here. Re-enter it, or acknowledge a re-mint, on the secrets health page.",
+            "link_template": "{link}"
+        }
     }
 }
