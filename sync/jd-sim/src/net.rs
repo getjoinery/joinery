@@ -290,12 +290,19 @@ impl SimNet {
     }
 
     fn run(&self, name: &str, body: &Value, key: Option<&str>) -> jd_proto::Result<Value> {
+        let netlog = std::env::var("JD_NETLOG").is_ok();
         if self.refused_before(name) {
+            if netlog {
+                eprintln!("NETLOG {} {name} {body} => REFUSED-BEFORE", self.device);
+            }
             return Err(ProtoError::Transport(
                 "connection reset before the request was sent".into(),
             ));
         }
         if let Some(e) = self.before_call() {
+            if netlog {
+                eprintln!("NETLOG {} {name} {body} => DROPPED {e:?}", self.device);
+            }
             return Err(e);
         }
         self.server.acting_as(Some(&self.device));
@@ -303,6 +310,19 @@ impl SimNet {
             Some(k) => self.server.action_idempotent(name, body, k),
             None => self.server.action(name, body),
         };
+        if netlog {
+            match &out {
+                Ok(v) => {
+                    let brief = format!("{v}");
+                    let brief: String = brief.chars().take(400).collect();
+                    eprintln!("NETLOG {} {name} {body} => OK {brief}", self.device);
+                }
+                Err(r) => eprintln!(
+                    "NETLOG {} {name} {body} => ERR {} {} {}",
+                    self.device, r.status, r.message, r.data
+                ),
+            }
+        }
         let value = out.map_err(to_proto)?;
         // Deliberately after the server committed and before the caller can
         // record it. See `die_after_calls`.
@@ -310,6 +330,9 @@ impl SimNet {
             panic!("{DIED}");
         }
         if self.answer_lost() || self.answer_lost_to(name) {
+            if netlog {
+                eprintln!("NETLOG {} {name} => ANSWER LOST", self.device);
+            }
             // Deliberately after the server committed. This is the case the
             // whole idempotency discipline exists for, and the only way to test
             // it is to produce it on purpose.

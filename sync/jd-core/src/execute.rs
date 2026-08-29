@@ -527,6 +527,23 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
             // nothing to say the parent is a folder, and a file's server id can
             // coincide with a folder's -- so handing it a file id would sweep
             // away an unrelated folder's contents.
+            //
+            // Deliberately NOT the confirmed forget that `trash_local` and
+            // `trash_remote` use, though the same stale-belief argument applies
+            // on paper. This op is reached when the folder is gone from the
+            // server, and asking about the children then invites the opposite
+            // failure: a child the server still answers for, kept, under a
+            // parent this op is about to delete -- stranded, which is the state
+            // `delete_subtree` exists to prevent and which cost soak run 209 six
+            // live files. `forgetting_a_folder_takes_what_was_under_it` holds
+            // that line and fails the moment this asks.
+            //
+            // It is also unreachable rather than merely unreproduced. This op
+            // is planned only once the folder's trash row has been absorbed,
+            // and a spared child's move committed before that trash, so its row
+            // is lower and was absorbed in the same batch first: the pointer is
+            // already repaired before anything here decides what to forget. See
+            // `forget_folder_the_server_confirms` for the full statement.
             if op.entity.entity_type == EntityType::Folder {
                 env.store.delete_subtree(op.entity)?;
             } else {
@@ -1754,8 +1771,17 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
             // itself. Renaming around it would hand the user a conflict name,
             // on every device, permanently, for a collision that was about to
             // clear.
+            //
+            // Gated on `may_be_about_the_name`, so a server answering in prose
+            // alone still reaches it. The evidence here is entirely LOCAL -- a
+            // tracked live sibling under that name with a server-side rename
+            // this device still owes -- so it holds whatever the refusal turns
+            // out to have been about, and it clears itself: once the owed
+            // rename is Done, Withdrawn or Overtaken it leaves the queue, the
+            // predicate goes false, and the next attempt meets the real
+            // refusal.
             Err(e)
-                if e.name_taken()
+                if e.may_be_about_the_name()
                     && held_by_a_rename_this_device_owes(env, &params.name, params.folder_id)? =>
             {
                 return Ok(OpOutcome::Retry(
@@ -1859,6 +1885,33 @@ fn upload(env: &ExecEnv, op: &Op, as_new: Option<Placement>) -> Result<OpOutcome
                 params.name = (env.conflict_name)(&placement.name, attempt);
                 // A fresh key per name, for the reason the folder create gives:
                 // a key is a promise that the request behind it does not change.
+                params.idempotency_key =
+                    Some(format!("{}-n{attempt}", op.idempotency_key));
+            }
+            // A refusal that would not say why. Read strictly this arm does not
+            // exist, and a server answering in prose alone leaves the upload
+            // undone and the identical one planned again on every pass -- no
+            // growing queue and no issue, only a device that never goes quiet.
+            // Sweep seed 93128 is that; `move_remote` was widened for its twin,
+            // seed 90664, and this path was left behind.
+            //
+            // Capped hard, and far below the marked cap, for the reason the
+            // folder create gives: a refusal that really is about something
+            // else would otherwise cost a thousand attempts a pass against a
+            // server that was never going to take any of them -- and here each
+            // attempt can be a full re-upload of the body.
+            //
+            // What this arm cannot do is tell a taken name from OUR OWN BYTES
+            // already on the server under it. The marked path adopts those
+            // (above), but adoption needs the holder the marker carries, so
+            // under a silent server it is unreachable and this arm lands beside
+            // instead -- leaving the user two identical copies. Both sides
+            // converge and nothing is lost, which is why it is preferred to the
+            // forever-loop, but it is a real cost and the cap of two is what
+            // bounds it.
+            Err(e) if e.refused_without_saying_why() && !entry.is_encrypted && attempt < 2 => {
+                attempt += 1;
+                params.name = (env.conflict_name)(&placement.name, attempt);
                 params.idempotency_key =
                     Some(format!("{}-n{attempt}", op.idempotency_key));
             }
@@ -3166,6 +3219,109 @@ fn rescue_unsynced(
     Ok(rescued)
 }
 
+/// Forget a folder, and of what was under it only what the SERVER confirms went
+/// with it.
+///
+/// The two cascades are not the same cascade. The server takes the descendants
+/// that are there when the trash runs; this store knows the descendants it last
+/// believed were there. Those disagree exactly when a child left the folder
+/// without this device learning of it yet — its own move whose answer was lost,
+/// or another device's move that has not reached the feed here. A record
+/// deleted on the strength of the stale half is not recoverable: the strand
+/// sweep finds entries whose parent is missing, and a deleted entry is not
+/// there to be found, while every change row that described it is already
+/// behind this cursor.
+///
+/// So the believed subtree is only a list of QUESTIONS. Stat answers them, the
+/// answers go through the ordinary absorb path, and only what came back gone is
+/// forgotten. A spared child comes back alive at its real parent, absorption
+/// re-parents it, and it stops being a descendant of this folder at all — it
+/// survives structurally rather than by being exempted, which is why the same
+/// code covers the lost answer, the other device and a lost stat alike.
+///
+/// The cost is one extra call for almost any real folder: `drive_stat` is
+/// batched five hundred at a time on both sides, and this is paid only on
+/// deletes. A stat that fails takes the whole operation with it rather than
+/// falling back on belief — the operation retries, and trashing is idempotent.
+///
+/// # Why the other belief-based forgets are safe, and this one is not
+///
+/// **Spared implies moved-before-trashed implies absorbed-before-planned.** A
+/// child the server spares is one whose move committed BEFORE the trash ran, so
+/// its move row carries the lower change id — the feed is ordered by that id on
+/// both the mock and the platform, and a pass absorbs the whole batch in order
+/// before it plans anything. So any deletion MOTIVATED BY ABSORBED SERVER
+/// KNOWLEDGE — `forget`, the `trash_local` arms, the strand sweep — has already
+/// repaired the child's parent pointer by the time it decides what to forget,
+/// and a spared child cannot be in its doomed set at all.
+///
+/// The deletion that escapes is the one motivated by nothing the server has
+/// said yet: a device trashing a folder it deleted itself, in the same pass as
+/// its own move whose FIRST attempt lost its answer. Nothing has been absorbed
+/// to correct it and no retry has happened to repair it. That is `trash_remote`,
+/// and that is sweep seed 93128.
+///
+/// `trash_local` is wired through here as well. Under the invariant above that
+/// is belt-and-braces rather than load-bearing — it costs one call and covers
+/// shapes nobody has enumerated, but a green estate is not evidence it was
+/// needed.
+fn forget_folder_the_server_confirms(env: &ExecEnv, root: EntityId) -> Result<(), ExecError> {
+    let believed = env.store.subtree_ids(root)?;
+    let (provisional, real): (Vec<EntityId>, Vec<EntityId>) = believed
+        .into_iter()
+        .filter(|id| *id != root)
+        .partition(|id| id.is_provisional());
+
+    // A provisional has no server side to ask about, and asking is worse than
+    // pointless: `drive_stat` drops every id at or below zero, so provisionals
+    // come back in neither `items` nor `missing` -- and a chunk that is ALL
+    // provisional leaves nothing to ask, which both servers refuse with a 400
+    // that classifies as Withdrawn and puts a spurious warning in front of the
+    // user. Belief is the only account of a provisional that exists, which is
+    // the same reason the provisional-root arm forgets its subtree wholesale.
+    //
+    // Nothing is lost by it here: a local file that has not reached the server
+    // is rescued out of the folder before the trash, not forgotten with it.
+    for id in provisional {
+        env.store.forget_entry(id)?;
+    }
+
+    if real.is_empty() {
+        env.store.forget_entry(root)?;
+        return Ok(());
+    }
+
+    let answers = crate::pass::stat_all(env, &real)?;
+    // Absorbed before anything is deleted, and deliberately including the ones
+    // about to go: if this process dies between here and the deletes below,
+    // every confirmed-gone descendant is left marked deleted and the next pass
+    // clears it through the ordinary path, instead of the truth dying with the
+    // process and the whole question being re-derived from nothing.
+    for (id, state) in &answers {
+        crate::pass::absorb_remote(env, *id, state)?;
+    }
+    // `deleted` here is the server declining to show it to us, which is not
+    // quite the same statement as "trashed": a `missing` row means gone OR no
+    // longer visible, so an entity this caller has merely lost access to counts
+    // as gone. That is the right call for a record whose whole purpose is to
+    // tie a local file to something reachable on the server -- but it is two
+    // different server statements wearing one flag, and worth knowing if a
+    // sharing change ever makes an entity stop being visible without being
+    // deleted.
+    let gone: std::collections::HashSet<EntityId> = answers
+        .iter()
+        .filter(|(_, state)| state.deleted)
+        .map(|(id, _)| *id)
+        .collect();
+    for id in real {
+        if gone.contains(&id) {
+            env.store.forget_entry(id)?;
+        }
+    }
+    env.store.forget_entry(root)?;
+    Ok(())
+}
+
 fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     let Some(entry) = require_entry(env, op.entity)? else {
         return Ok(OpOutcome::Overtaken(
@@ -3186,6 +3342,10 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // point of telling the two apart is that a volume that is not there
         // must never be read as "every file is gone".
         Placed::Not(Unplaced::AncestorMissing) => {
+            // Belief-based, and safe for the reason
+            // `forget_folder_the_server_confirms` sets out: this arm is reached
+            // off absorbed server knowledge, so a spared child's move row has
+            // already been taken in and its pointer repaired.
             if op.entity.entity_type == EntityType::Folder {
                 env.store.delete_subtree(op.entity)?;
             } else {
@@ -3243,9 +3403,12 @@ fn trash_local(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // leaves its children naming a parent that is gone, and an entry with
         // no parent has no path — a pass finds work by resolving paths, so
         // those entries are never considered again and the files behind them
-        // sit there forever. The server deleted the folder, which took its
-        // contents with it, so there is nothing under here left to agree about.
-        env.store.delete_subtree(op.entity)?;
+        // sit there forever.
+        //
+        // But only what the server actually took: it cascaded over what was
+        // there, and this store may still believe a child is inside that has
+        // already left.
+        forget_folder_the_server_confirms(env, op.entity)?;
     } else {
         env.store.delete_entry(op.entity)?;
     }
@@ -3266,7 +3429,11 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
     // folder's contents.
     let forget_here = |env: &ExecEnv| -> Result<(), ExecError> {
         if op.entity.entity_type == EntityType::Folder {
-            env.store.delete_subtree(op.entity)?;
+            // Only what the server confirms went with it. Its cascade took the
+            // descendants that were there; this store knows the ones it last
+            // believed were there, and a child that left without this device
+            // hearing of it is in the second list and not the first.
+            forget_folder_the_server_confirms(env, op.entity)?;
         } else {
             env.store.delete_entry(op.entity)?;
         }
@@ -3276,7 +3443,15 @@ fn trash_remote(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         // It never reached the server. Forgetting it locally is the whole job --
         // and a provisional folder can perfectly well have provisional children
         // beneath it, which have nowhere to belong once it goes.
-        forget_here(env)?;
+        //
+        // Belief is the only account of a provisional subtree that exists, so
+        // it is forgotten wholesale: there is nothing to ask the server about,
+        // and nothing it could answer.
+        if op.entity.entity_type == EntityType::Folder {
+            env.store.delete_subtree(op.entity)?;
+        } else {
+            env.store.delete_entry(op.entity)?;
+        }
         return Ok(OpOutcome::Done);
     }
     let body = json!({

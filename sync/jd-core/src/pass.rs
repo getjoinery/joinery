@@ -632,6 +632,7 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
     }
 
     let mut wanted: Vec<EntityId> = Vec::new();
+    let mut a_folder_came_back = false;
     for change in feed
         .get("changes")
         .and_then(Value::as_array)
@@ -641,9 +642,32 @@ fn poll_remote(env: &ExecEnv) -> Result<RemotePoll, ExecError> {
         let Some(id) = entity_of(&change) else {
             continue;
         };
+        // A restored folder is the one change whose consequences are invisible
+        // in the feed. The server brings the whole subtree back and reports the
+        // folder alone, so the contents are live again with no record here and
+        // every row that describes them already behind the cursor. Statting the
+        // folder returns a folder; nothing enumerates what is now inside it,
+        // and nothing ever will.
+        //
+        // The kind is what separates this from a folder that was just created,
+        // whose contents are still coming as rows of their own -- so the answer
+        // has to be read off `kind` rather than guessed from the shape.
+        //
+        // Treated as a hole in coverage, which is what it is, and answered the
+        // way a feed reset is answered: look at everything. A restore is a rare
+        // deliberate act, so one walk each is a bounded price for the only
+        // thing that makes the contents visible again.
+        if id.entity_type == EntityType::Folder
+            && change.get("kind").and_then(Value::as_str) == Some("restored")
+        {
+            a_folder_came_back = true;
+        }
         if !wanted.contains(&id) {
             wanted.push(id);
         }
+    }
+    if a_folder_came_back {
+        return Ok((walk_index(env)?, next, true));
     }
     Ok((stat_all(env, &wanted)?, next, false))
 }
@@ -700,7 +724,10 @@ pub(crate) fn stat_one(env: &ExecEnv, id: EntityId) -> Result<Option<RemoteState
     Ok(stat_all(env, &[id])?.into_iter().next().map(|(_, s)| s))
 }
 
-fn stat_all(env: &ExecEnv, ids: &[EntityId]) -> Result<Vec<(EntityId, RemoteState)>, ExecError> {
+pub(crate) fn stat_all(
+    env: &ExecEnv,
+    ids: &[EntityId],
+) -> Result<Vec<(EntityId, RemoteState)>, ExecError> {
     let mut out = Vec::new();
     for chunk in ids.chunks(STAT_BATCH) {
         if chunk.is_empty() {
@@ -820,7 +847,11 @@ fn state_of(item: &Value) -> Option<(EntityId, RemoteState)> {
 /// The separation is the whole design: this is an *observation*, and an
 /// observation must never be mistaken for a state both sides settled on. Only
 /// the executor, once the bytes have moved, writes the agreement.
-fn absorb_remote(env: &ExecEnv, id: EntityId, state: &RemoteState) -> Result<(), ExecError> {
+pub(crate) fn absorb_remote(
+    env: &ExecEnv,
+    id: EntityId,
+    state: &RemoteState,
+) -> Result<(), ExecError> {
     match env.store.get_entry(id)? {
         Some(mut entry) => {
             // The deleted flag is written down, not merely acted on. The feed
@@ -1600,6 +1631,10 @@ fn sweep_stranded_entries(env: &ExecEnv) -> Result<usize, ExecError> {
             // Dropping it is safe in the direction that matters. If a local
             // file for it does turn up, the next scan finds it as something new
             // and uploads it, which costs a transfer and loses nothing.
+            // Belief-based, and safe for the reason
+            // `forget_folder_the_server_confirms` sets out: this sweep runs
+            // after the feed has been absorbed, so a child the server spared
+            // has already been re-parented and is not under here to be taken.
             env.store.delete_subtree(entry.id)?;
         } else {
             real_stranded += 1;
