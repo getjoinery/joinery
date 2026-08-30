@@ -5683,3 +5683,125 @@ fn an_abandoned_scratch_file_is_cleared_off_this_disk() {
     assert!(world.settle().is_some(), "and it settles");
     assert_converged(&world);
 }
+
+/// A file the user named `.jd-something` cannot sync, and must not be silent
+/// about it.
+///
+/// The prefix is reserved for this client's own working files: the server
+/// refuses it for a real file, and the ordinary directory listing hides it, so
+/// the file is invisible to every later pass. That is the designed end state
+/// and it is defensible. Saying nothing is not — the file sits in a synced
+/// folder looking synced, for ever, and silence is the one failure this client
+/// is not allowed.
+///
+/// The issue is a state rather than an event: it goes when the file does.
+#[test]
+fn a_file_wearing_the_reserved_prefix_says_so() {
+    let world = World::new(4801, &["laptop"]);
+    let laptop = world.device("laptop");
+
+    laptop.fs.user_mkdir("Work");
+    laptop.fs.user_write("Work/report.txt", b"an ordinary file");
+    assert!(world.settle().is_some(), "the tree settles first");
+
+    laptop
+        .fs
+        .user_write("Work/.jd-notes.txt", b"a file the user named themselves");
+    world.pass(laptop);
+
+    let said: Vec<String> = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "reserved_prefix")
+        .map(|i| i.detail)
+        .collect();
+    assert_eq!(
+        said.len(),
+        1,
+        "the device has to say the file cannot sync, not just skip it: {said:?}"
+    );
+    assert!(
+        said[0].contains("Work/.jd-notes.txt"),
+        "and say WHICH file: {said:?}"
+    );
+
+    // Untouched on disk. It cannot sync; that is no reason to take it away.
+    assert!(
+        laptop.fs.peek("Work/.jd-notes.txt").is_some(),
+        "the file itself must be left exactly where the user put it"
+    );
+
+    // Raised again on a second pass must not stack up.
+    world.pass(laptop);
+    let again = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "reserved_prefix")
+        .count();
+    assert_eq!(again, 1, "one standing issue, not one per pass");
+
+    // A state, so it ends when the state does.
+    laptop.fs.user_rename("Work/.jd-notes.txt", "Work/notes.txt");
+    assert!(world.settle().is_some(), "it settles once renamed");
+    let left = laptop
+        .store
+        .open_issues()
+        .unwrap()
+        .into_iter()
+        .filter(|i| i.kind == "reserved_prefix")
+        .count();
+    assert_eq!(left, 0, "the warning has to go when the file it names is gone");
+    assert_converged(&world);
+}
+
+#[test]
+fn probe_escaped_name_lands_escaped() {
+    let world = World::of(9001, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    // Legal on Linux, unwritable on Windows.
+    boxd.fs.user_write("notes.", b"a trailing dot");
+    boxd.fs.user_write("CON.txt", b"a reserved stem");
+    assert!(world.settle().is_some(), "it settles");
+
+    let tree = jd_sim::scenario::disk_tree(pc);
+    let names: Vec<&String> = tree.keys().collect();
+    assert!(
+        pc.fs.peek("notes%2E").is_some(),
+        "the windows box must hold the escaped name; it has {names:?}"
+    );
+    assert!(
+        pc.fs.peek("notes.").is_none(),
+        "and must not hold the raw one it cannot write: {names:?}"
+    );
+    assert!(
+        pc.fs.peek("%43ON.txt").is_some(),
+        "the reserved stem must be escaped too: {names:?}"
+    );
+
+    // Now the shape the sweep actually found: a name that needed no escaping
+    // is RENAMED into one that does.
+    boxd.fs.user_write("plain.txt", b"ordinary to begin with");
+    assert!(world.settle().is_some(), "the ordinary name settles");
+    assert!(pc.fs.peek("plain.txt").is_some(), "and reaches the windows box");
+
+    boxd.fs.user_rename("plain.txt", "plain.");
+    assert!(world.settle().is_some(), "the rename settles");
+
+    let after = jd_sim::scenario::disk_tree(pc);
+    let after_names: Vec<&String> = after.keys().collect();
+    assert!(
+        pc.fs.peek("plain%2E").is_some(),
+        "after a rename into a name windows cannot hold, the disk must follow \
+         the escape: {after_names:?}"
+    );
+    assert!(
+        pc.fs.peek("plain.").is_none(),
+        "and must not be left holding the raw name: {after_names:?}"
+    );
+}

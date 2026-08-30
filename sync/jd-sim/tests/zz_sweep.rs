@@ -263,6 +263,29 @@ enum Names {
     /// happens when somebody copies a conflict file or restores one from a
     /// backup -- and which lands directly on the conflict-name adoption path.
     Hostile,
+    /// Names that are perfectly legal on one computer and cannot be written on
+    /// another. `to_local_name` escapes them -- a reserved DOS stem, a character
+    /// Windows forbids, a trailing dot Windows silently strips -- so the file
+    /// lands under a name that is NOT the one the server holds. Everything
+    /// after that has to keep the two apart: the scan must not read the escape
+    /// as a rename, a move must carry it, and the peer that can spell the name
+    /// properly must go on seeing the original.
+    ///
+    /// The machinery for this exists and no seed has ever exercised it, because
+    /// the ordinary table cannot spell a name any filesystem objects to.
+    WindowsHostile,
+}
+
+/// Which name table a scratch runner should use, from `NAMECLASS`.
+///
+/// The sweeps pass `Names` explicitly; this is only so a single seed from a
+/// hostile arm can be re-run and dumped by hand.
+fn scratch_names() -> Names {
+    match std::env::var("NAMECLASS").unwrap_or_default().as_str() {
+        "hostile" => Names::Hostile,
+        "windows" => Names::WindowsHostile,
+        _ => Names::Ordinary,
+    }
 }
 
 fn workload_on(seed: u64, steps: usize, devices: &[(&str, Platform)], chaos: bool) {
@@ -483,7 +506,18 @@ fn drive(
     // change the arm count and 93128, 96223, 99674 and the Phase 2 seeds all
     // quietly become different worlds while still passing. A new name class
     // goes in the hostile table below, reached only by arms that ask for it.
-    let leaf = move |i: usize| -> String {
+    // Takes the device that is about to create the file, because a name is
+    // only hostile relative to a filesystem. Minting `CON.txt` ON the Windows
+    // box would be testing a thing that cannot happen: real Windows refuses
+    // it at the door, and `MemFs` -- which enforces no naming rules -- would
+    // accept it and upload it raw, leaving the peer to sync down a name its own
+    // record says it should be escaping. That is a harness artifact, not a
+    // defect.
+    //
+    // So a hostile name is created only where it is legal, and reaches the
+    // filesystem that objects the way it does in life: by syncing. That is the
+    // direction the escaping code actually runs in.
+    let leaf = move |i: usize, on: &jd_sim::engine::Device| -> String {
         match names {
             Names::Ordinary => match i % 5 {
                 0 => format!("doc-{i}.txt"),
@@ -492,6 +526,35 @@ fn drive(
                 3 => format!("Report {i}.docx"),
                 _ => format!("DOC-{i}.TXT"),                // case twin of arm 0
             },
+            // Legal on Linux, unwritable on Windows. Minted the same way on
+            // every device, so whichever one draws it creates a name its peer
+            // has to escape -- which is the direction that matters, since the
+            // escape happens on the way DOWN to the filesystem that objects.
+            Names::WindowsHostile => {
+                let p = jd_vfs::Vfs::personality(&on.fs);
+                let candidate = match i % 8 {
+                0 => format!("doc-{i}.txt"),
+                1 => format!("caf\u{e9}-{i}.txt"),
+                2 => format!("Report {i}.docx"),
+                3 => format!("DOC-{i}.TXT"),
+                // A reserved DOS device stem, still reserved whatever follows.
+                4 => format!("CON.{i}.txt"),
+                // A character Windows forbids outright.
+                5 => format!("a:b-{i}.txt"),
+                // Trailing dot: Windows strips it silently, which would read as
+                // a rename on the very next scan if it were not escaped.
+                6 => format!("notes-{i}."),
+                    // Trailing space, the same trap wearing different bytes.
+                    _ => format!("memo-{i} "),
+                };
+                // Legal here? Then create it. If not, this device would never
+                // have been able to make it, so it makes an ordinary one and
+                // some other device mints the hostile name instead.
+                match jd_vfs::to_local_name(&candidate, &p) {
+                    jd_vfs::LocalName::AsIs(_) => candidate,
+                    _ => format!("doc-{i}.txt"),
+                }
+            }
             // The first five are the ordinary table unchanged, so a hostile arm
             // still exercises the folds and case twins; the extra arm is the
             // shape no sweep has ever been able to mint.
@@ -583,7 +646,7 @@ fn drive(
                 } else {
                     rng.pick(&dirs).cloned().unwrap_or_default()
                 };
-                let path = join(&dir, &leaf(step));
+                let path = join(&dir, &leaf(step, device));
                 let body = format!("body {step} {}", device.name).into_bytes();
                 device.fs.user_write(&path, &body);
                 bodies.insert(path.clone(), body);
@@ -616,7 +679,7 @@ fn drive(
                 if let Some(p) = rng.pick(&files).cloned() {
                     if device.fs.exists(&p) {
                         let dir = p.rsplit_once('/').map(|(d, _)| d).unwrap_or("");
-                        let to = join(dir, &leaf(step + 1));
+                        let to = join(dir, &leaf(step + 1, device));
                         device.fs.user_rename(&p, &to);
                         files.push(to);
                     }
@@ -1356,6 +1419,80 @@ fn scratch_fresh_hunt_sweep() {
     no_seed_failed(arms);
 }
 
+/// Names that one computer can hold and another cannot.
+///
+/// A reserved DOS stem, a forbidden character, a trailing dot or space: all
+/// legal on Linux, none writable on Windows. `to_local_name` escapes them, so
+/// the file lands under a name that is NOT the one the server holds -- and
+/// everything downstream has to keep the two apart. The scan must not read the
+/// escape as a rename, a move must carry it, and the peer that can spell the
+/// name properly must go on seeing the original.
+///
+/// All of that machinery exists and no seed had ever reached it, because the
+/// ordinary name table cannot spell a name any filesystem objects to.
+#[test]
+#[ignore]
+fn scratch_windows_hostile_name_sweep() {
+    let mut arms: Vec<Vec<(String, u64)>> = Vec::new();
+    std::panic::set_hook(Box::new(|_| {}));
+    arms.push(sweep_core(
+        "winname-linux-pc",
+        123000..123400,
+        40,
+        &[("box", Platform::Linux), ("pc", Platform::Windows)],
+        false,
+        Vault::None,
+        false,
+        Names::WindowsHostile,
+    ));
+    arms.push(sweep_core(
+        "winname-hostile",
+        123400..123800,
+        40,
+        &[("box", Platform::Linux), ("pc", Platform::Windows)],
+        true,
+        Vault::None,
+        false,
+        Names::WindowsHostile,
+    ));
+    arms.push(sweep_core(
+        "winname-three-platform",
+        123800..124200,
+        60,
+        &[
+            ("mac", Platform::MacOs),
+            ("pc", Platform::Windows),
+            ("disk", Platform::Decomposing),
+        ],
+        true,
+        Vault::None,
+        false,
+        Names::WindowsHostile,
+    ));
+    arms.push(sweep_core(
+        "winname-kill",
+        124200..124500,
+        40,
+        &[("box", Platform::Linux), ("pc", Platform::Windows)],
+        true,
+        Vault::None,
+        true,
+        Names::WindowsHostile,
+    ));
+    arms.push(sweep_core(
+        "winname-vault",
+        124500..124800,
+        40,
+        &[("box", Platform::Linux), ("pc", Platform::Windows)],
+        true,
+        Vault::Shared,
+        false,
+        Names::WindowsHostile,
+    ));
+    let _ = std::panic::take_hook();
+    no_seed_failed(arms);
+}
+
 /// Names a real user makes that the ordinary workload cannot spell.
 ///
 /// The estate's blind spot has always been its name generator: a class the
@@ -1625,7 +1762,7 @@ fn scratch_dump() {
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
     let _ = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
-        drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, Names::Ordinary);
+        drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, scratch_names());
         world.settle();
     }));
 
@@ -1840,7 +1977,7 @@ fn scratch_one() {
     let names: Vec<&str> = if n == 3 { vec!["a", "b", "c"] } else { vec!["laptop", "desktop"] };
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
-    let _ = workload_core(seed, steps, &refs, chaos, vault, kills, Names::Ordinary);
+    let _ = workload_core(seed, steps, &refs, chaos, vault, kills, scratch_names());
 }
 
 /// Scratch: watch what happens to an entry the server has told us about, whose

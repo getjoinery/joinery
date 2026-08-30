@@ -1,7 +1,7 @@
 # Drive sync: what the estate could not see
 
-**Status: BUILT and verified 2026-08-29.** Three fidelity defects and one new
-name class. Found by auditing the estate's own blind spots rather than by a
+**Status: mostly BUILT and verified 2026-08-29; one change HELD, see below.**
+Four fidelity defects and two new name classes. Found by auditing the estate's own blind spots rather than by a
 failing seed — every one of these was green in a 36,170-seed run.
 
 ---
@@ -104,6 +104,66 @@ name does not break the conflict machinery, which was the specific worry — tha
 machinery had been free to assume it minted every name of that shape itself. A
 negative result, and worth pinning precisely because the class was unreachable
 before.
+
+---
+
+## The second name class: names one computer can hold and another cannot
+
+A reserved DOS stem, a character Windows forbids, a trailing dot Windows
+strips. All legal on Linux, none writable on Windows, and `to_local_name`
+escapes them — so the file lands under a name that is NOT the one the server
+holds, and everything downstream has to keep the two apart.
+
+Added as `Names::WindowsHostile` on 123000..124800. Finding it required fixing
+two things in the harness first, and the ratio is the point: **the first run was
+307 failures out of 400, and not one of them was a defect.**
+
+**The oracle could not express an escape.** `assert_converged` compared raw
+server paths against the disk, which is only valid when no escaping is needed —
+true of every previous sweep because the ordinary table cannot spell a name any
+filesystem objects to. It already transformed the server path for one platform
+rule (Unicode normalisation); escaping is the same idea, and now goes through
+the same `to_local_name` the engine uses. A component that cannot be
+materialised at all drops its whole path from the expectation, since refusing to
+write it is the designed end state.
+
+**The workload created files that cannot exist.** It minted `CON.txt` ON the
+Windows device. Real Windows refuses that at the door; `MemFs` enforces no
+naming rules at all, so it accepted the name and uploaded it raw, leaving the
+peer to sync down a name its own record said it should be escaping. `leaf` now
+takes the device that is about to create the file and only mints a hostile name
+where it is legal — so it reaches the filesystem that objects the way it does in
+life, by syncing.
+
+### Defect found: a move ignored the escape
+
+`path_for` built a probe entry with `local_name: None`, so `effective_local_name`
+fell back to the placement's raw server name and **every move destination was
+the unescaped name**. Fresh downloads were unaffected, which is why nothing had
+ever caught it: a file created hostile landed escaped, and only a file RENAMED
+into a hostile name landed raw.
+
+On a real Windows volume that write is silently altered — `plain.` becomes
+`plain` — so the file ends up somewhere the engine never looks while the record
+insists it is elsewhere.
+
+Ten of the twelve failing seeds went green with the leaf escaped in `path_for`.
+
+### Held for review, because the fix may be implicated
+
+Seed 123010 does not settle, and it now holds TWO files where before the fix it
+held one: the escaped name and a leftover raw one, with the raw one looping as a
+provisional upload that is refused every pass.
+
+The underlying defect is clear and independent: **naming records an escape, but
+nothing renames a file already on disk to match it.** The record changes and the
+disk does not follow — the same shape as the trash work above. What is NOT clear
+is whether `path_for` is the right home for the escape, or whether it papers
+over that gap and manufactures the duplicate. That is a placement-path design
+call and it is unreviewed.
+
+Treat the `path_for` change as provisional. The oracle fix, the workload fix and
+the reserved-prefix issue stand on their own.
 
 ---
 

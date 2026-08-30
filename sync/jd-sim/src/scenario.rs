@@ -1121,19 +1121,37 @@ pub fn assert_converged(world: &World) {
                 (disk, server.clone())
             };
 
-        let server = if jd_vfs::Vfs::personality(&device.fs).decomposes_unicode {
-            server
-                .iter()
-                .filter(|(_, h)| !held_back(h))
-                .map(|(p, h)| (jd_vfs::nfc(p), h.clone()))
-                .collect()
-        } else {
-            server
-                .iter()
-                .filter(|(_, h)| !held_back(h))
-                .map(|(p, h)| (p.clone(), h.clone()))
-                .collect()
+        // What this device SHOULD hold, which is not always what the server
+        // calls it. A name the server is perfectly happy with can be one this
+        // filesystem cannot write -- a reserved DOS stem, a forbidden
+        // character, a trailing dot Windows strips -- and the engine escapes it
+        // on the way down. Comparing raw server paths against the disk then
+        // reads a correct escape as a divergence.
+        //
+        // The unicode case was already handled this way; escaping is the same
+        // idea, and every previous sweep avoided needing it only because the
+        // ordinary name table cannot spell a name any filesystem objects to.
+        //
+        // A component that cannot be materialized at all takes its whole path
+        // out of the expectation: refusing to write it is the designed end
+        // state, and the entry is parked and surfaced rather than lost.
+        let personality = jd_vfs::Vfs::personality(&device.fs);
+        let expected_path = |p: &str| -> Option<String> {
+            let mut out: Vec<String> = Vec::new();
+            for part in p.split('/') {
+                match jd_vfs::to_local_name(part, &personality) {
+                    jd_vfs::LocalName::AsIs(n) => out.push(n),
+                    jd_vfs::LocalName::Escaped { local, .. } => out.push(local),
+                    jd_vfs::LocalName::Unsyncable(_) => return None,
+                }
+            }
+            Some(out.join("/"))
         };
+        let server: BTreeMap<String, Option<String>> = server
+            .iter()
+            .filter(|(_, h)| !held_back(h))
+            .filter_map(|(p, h)| expected_path(p).map(|q| (q, h.clone())))
+            .collect();
         if disk != server {
             let only_disk: Vec<_> = disk.keys().filter(|k| !server.contains_key(*k)).collect();
             let only_server: Vec<_> = server.keys().filter(|k| !disk.contains_key(*k)).collect();
