@@ -660,6 +660,25 @@ fn local_path(env: &ExecEnv, entry: &Entry) -> Result<Placed, ExecError> {
 
 /// Where a placement would put something.
 fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
+    // What this filesystem would actually call it. A placement carries the
+    // SERVER's name, and a name the server is happy with can be one this disk
+    // cannot write -- a reserved DOS stem, a forbidden character, a trailing dot
+    // Windows strips. Left raw, a move lands the file under a name the volume
+    // silently alters, so it ends up somewhere the engine never looks while the
+    // record insists it is elsewhere.
+    //
+    // Derived rather than read from the store because the destination name is
+    // new: naming records the mapping on the pass AFTER the move, and the file
+    // has to go to the right place now. Deriving forwards is deterministic and
+    // is the same function naming itself uses; only the reverse direction is
+    // unreliable, and nothing here reverses it. The parents are unaffected --
+    // they come from stored entries and already carry their own local names.
+    let local_leaf = match jd_vfs::to_local_name(&p.name, &env.vfs.personality()) {
+        jd_vfs::LocalName::Escaped { local, .. } => Some(local),
+        // Unsyncable is left alone: refusing to place it is naming's verdict to
+        // make and it parks the entry visibly, which is not this function's job.
+        jd_vfs::LocalName::AsIs(_) | jd_vfs::LocalName::Unsyncable(_) => None,
+    };
     let probe = Entry {
         id: EntityId::file(0),
         remote: p.clone(),
@@ -673,7 +692,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
         synced_content: None,
         synced_placement: None,
         synced_fingerprint: None,
-        local_name: None,
+        local_name: local_leaf,
         status: LocalStatus::Synced,
         wrapped_file_key: None,
     };

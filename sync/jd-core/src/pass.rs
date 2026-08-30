@@ -977,6 +977,7 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
         return Ok(Vec::new());
     };
     let mut out = Vec::new();
+    let mut reserved: Vec<String> = Vec::new();
     let mut queue = vec![(root.clone(), String::new())];
     // Every scratch name the store still has a live entity for. Built once:
     // asking per file would be a query per directory entry, and the answer
@@ -1027,6 +1028,22 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
                     && !live_swap_names.contains(&child.name)
                 {
                     env.vfs.trash(&dir.join(&child.name))?;
+                } else if !child.name.starts_with(crate::order::SWAP_PREFIX) {
+                    // Not the engine's litter -- a file whose name the USER
+                    // chose, which happens to start with the prefix this client
+                    // reserves for itself. It cannot sync: the server refuses
+                    // the prefix for a real file, and the ordinary listing hides
+                    // it from every later pass.
+                    //
+                    // That is defensible; being quiet about it is not. Left
+                    // alone the file sits in a synced folder looking synced, for
+                    // ever, and the one failure this client is not allowed is
+                    // the silent one. Collected here and said once below.
+                    reserved.push(if rel.is_empty() {
+                        child.name.clone()
+                    } else {
+                        format!("{rel}/{}", child.name)
+                    });
                 }
                 continue;
             }
@@ -1062,6 +1079,37 @@ fn observe(env: &ExecEnv) -> Result<Vec<ObservedFile>, ExecError> {
             }
         }
     }
+
+    // A state, not an event: re-derived from the disk every pass and withdrawn
+    // the moment the files are gone or renamed, so it can never outlive what it
+    // describes. Compared before writing rather than raised blindly, because
+    // raising the same wording every pass would churn the row and re-raising a
+    // changed one would leave the stale wording standing beside it.
+    reserved.sort();
+    let want = if reserved.is_empty() {
+        None
+    } else {
+        Some(format!(
+            "{} file(s) here have names beginning {}, which this client reserves for its              own working files. They cannot be synced and are otherwise invisible to it.              Rename them and they will sync: {}",
+            reserved.len(),
+            jd_vfs::names::INTERNAL_PREFIX,
+            reserved.join(", "),
+        ))
+    };
+    let have = env
+        .store
+        .open_issues()?
+        .into_iter()
+        .find(|i| i.kind == "reserved_prefix")
+        .map(|i| i.detail);
+    if have != want {
+        env.store.withdraw_issues("reserved_prefix")?;
+        if let Some(detail) = want {
+            env.store
+                .raise_issue(None, "reserved_prefix", &detail, (env.now_ms)() as i64)?;
+        }
+    }
+
     Ok(out)
 }
 
