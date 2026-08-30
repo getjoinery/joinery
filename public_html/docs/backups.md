@@ -265,8 +265,7 @@ that key to two recipients:
   which is a choice each operator makes for their own sites, not something a
   management node can arrange from outside.
 - **site** — a keypair the site itself holds at `config/backup_site_key`. This is
-  what lets a site restore itself unattended: pre-restore rollback snapshots and
-  routine restores need no operator. It is disposable — lose it and the recovery
+  what lets a site restore itself unattended: routine restores need no operator. It is disposable — lose it and the recovery
   key still opens everything, and the next run mints a new one.
 
 Nothing on the machine is precious as a result. Losing a site, or its whole
@@ -559,14 +558,18 @@ openssl magic bytes, not the filename, so a renamed archive still restores. It
 takes `--domain` to name the domain the restored site is to answer to; without
 it the site keeps the domain this machine's config already names.
 
-A **pre-restore safety dump** of the existing database is written beside the
-archive before anything is dropped — on unattended restores as well as manual
-ones, because a restore over the agent channel runs one script and has nowhere
-to prepend its own. A caller that has already taken one passes
-`--no-pre-restore-dump`, and `--pre-restore-dump-dir` directs it somewhere that
-will survive when the archive is sitting in a staging directory. It is
-best-effort: a machine with no room says so and the restore continues, because
-refusing to restore is not the safer answer when somebody is already recovering.
+**Nothing is saved before a restore.** The schema is dropped and replaced, and
+the state that was there is not kept anywhere. A restore happens because the
+current state is wrong, so preserving it preserves what the operator has decided
+to discard — and it kept a full copy of the database, per restore, indefinitely,
+on a disk sized for backups rather than for regret. The approval an operator
+answers already says in words that anything written since the archive was taken
+is gone.
+
+What that gives up, stated plainly: a load that fails part way leaves the schema
+already replaced and nothing on the machine to put back
+(`RESTORE_LOAD_FAILED`). The answer is the archive itself, which is still on the
+shelf and can be retried, or an earlier one.
 
 The target's PostgreSQL must be at least as new as the source's. A dump carries
 the syntax of the version that wrote it, so the restore reads that version from
@@ -620,6 +623,16 @@ to that job and that statement, and stages it for the node's own site. The
 node's Backups page shows the pending approval; the operator opens the challenge
 there with their recovery key, in their browser, and answers. The agent verifies
 the answer against what it sealed and only then restores.
+
+**What a database restore leaves behind, and what it does not roll back.** A
+database restore replaces the database and nothing else, so a dump taken before
+an upgrade lands under files that are still on the newer release: the site's
+recorded `system_version` and its settings go back to the older value while the
+code on disk stays put. This is self-correcting — the next upgrade re-runs the
+migrations, which are idempotent — but it means the version a freshly restored
+node reports from its database can trail its files until then. A restore also leaves the
+archive it was given in the backup directory; the local sweep expires it on the
+ordinary `keep_local_days` schedule.
 
 **The management node is not in that path at all** — not as a gate, and not as a
 relay. The challenge and the answer live entirely between the node's own site and

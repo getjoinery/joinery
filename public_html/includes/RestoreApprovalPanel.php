@@ -44,6 +44,20 @@ class RestoreApprovalPanel {
 	 * @param array  $pending Pre-read RestoreApproval::pending(), when the page has it.
 	 * @return bool Whether anything was rendered.
 	 */
+	/**
+	 * A wait, said the way a person would say it. "about 60 minutes" is what
+	 * the arithmetic produces and not what anybody means.
+	 */
+	private static function humanise_wait($seconds) {
+		$minutes = (int)ceil(max(0, $seconds) / 60);
+		if ($minutes <= 1)  { return 'a minute'; }
+		if ($minutes < 45)  { return $minutes . ' minutes'; }
+		if ($minutes < 75)  { return 'an hour'; }
+		if ($minutes < 105) { return 'an hour and a half'; }
+		$hours = (int)round($minutes / 60);
+		return $hours . ' hours';
+	}
+
 	public static function render($page, ?array $pending = null): bool {
 		$pending = $pending ?? RestoreApproval::pending();
 		if ($pending === null) {
@@ -70,10 +84,22 @@ class RestoreApprovalPanel {
 		}
 		echo '</tbody></table>';
 
-		$minutes = (int)ceil($pending['seconds_left'] / 60);
-		echo '<p class="text-muted small mb-2">This request expires in about ' . $minutes . ' minute'
-		   . ($minutes === 1 ? '' : 's') . '. If it expires nothing happens, and the restore can be '
-		   . 'asked for again.</p>';
+		// The deadline, and the thing an operator cannot otherwise know: this
+		// machine is holding its whole job queue open while it waits. The agent
+		// runs one job at a time, so nothing else — no backup, no status check,
+		// no upgrade — happens until this is answered or expires.
+		//
+		// That makes DECLINING strictly better than walking away, and nothing
+		// said so. Someone who has decided not to approve, or who cannot find
+		// their key, releases the machine immediately by pressing Decline;
+		// closing the tab leaves it waiting for the rest of the window.
+		echo '<p class="text-muted small mb-2">This request expires in about '
+		   . htmlspecialchars(self::humanise_wait((int)$pending['seconds_left']))
+		   . '. Until you answer it, <strong>this machine runs nothing else</strong> — no backup, no '
+		   . 'status check, no upgrade. If you are not going to approve it, press <em>Decline</em> '
+		   . 'rather than closing this page: declining frees the machine now, and letting it expire '
+		   . 'leaves it waiting. Either way nothing is restored, and the restore can be asked for '
+		   . 'again.</p>';
 
 		// The key box. Outside the form on purpose, exactly as the possession
 		// ceremony does it: the recovery key is used in the page and never

@@ -21,8 +21,8 @@
 #     (the one path allowed to modify the database and then fail)
 #   * dump from a newer PostgreSQL -> RESTORE_SERVER_TOO_OLD, target UNTOUCHED
 #   * target database absent -> created and loaded
-#   * an unattended restore takes a pre-restore safety dump of what it is about
-#     to destroy, and --no-pre-restore-dump is the only way to turn that off
+#   * an unattended restore keeps NOTHING of what it destroys, and the two flags
+#     that used to control that are refused rather than ignored
 #
 # The "untouched" assertions are the point: verify-before-destroy means a bad
 # key or corrupt archive can never leave a half-dropped database behind.
@@ -181,48 +181,50 @@ chk "absent-target restore marker (createdb branch)" "$M" "RESTORE_OK"
 chk "absent-target restore row count" \
     "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t" 2>/dev/null)" "500"
 
-# --- 9: the pre-restore safety dump -------------------------------------------
+# --- 9: nothing is saved before the schema is dropped -------------------------
 #
-# The one thing standing between a wrong restore and unrecoverable loss, and it
-# used to be skipped for exactly the restores that had no other safety net.
-# --non-interactive turned it off on the reasoning that "the dashboard always
-# prepends its own auto-backup step" — true of the SSH path, and structurally
-# impossible on the primitive path, where one job runs one script.
+# The inverse of what this section used to assert, and the change is a decision
+# rather than a regression (owner, 2026-08-30). A restore happens because the
+# current state is wrong, so dumping it first preserved the thing being
+# discarded and left a full copy of the database, per restore, for ever.
+#
+# It is checked rather than merely removed because "no file appears" is exactly
+# the kind of property that comes back by accident — a caller re-adding a flag,
+# a merge restoring a stage. And the flags are checked as REFUSALS: the script
+# rejects unknown options, so a caller still passing one gets a failed restore
+# rather than a silently ignored argument, and that is worth knowing here rather
+# than on a node.
 dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
 psql -U postgres -d "$DST" -q -c "CREATE TABLE t(id int, v text); INSERT INTO t VALUES (1,'about-to-be-destroyed');" >/dev/null 2>&1
-rm -f "$WORK"/*-pre-restore.sql.gz
+rm -f "$WORK"/*-pre-restore.sql.gz*
 M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --db-user postgres 2>/dev/null)
 chk "unattended restore still succeeds" "$M" "RESTORE_OK"
-SAFETY=$(ls -t "$WORK"/"$DST"-*-pre-restore.sql.gz 2>/dev/null | head -1)
-chk "an unattended restore takes a safety dump" "$([ -n "$SAFETY" ] && [ -s "$SAFETY" ] && echo yes)" "yes"
-# It has to hold what was there BEFORE, or it is not a safety dump.
-chk "the safety dump holds what was destroyed" \
-    "$(gunzip -c "$SAFETY" 2>/dev/null | grep -c 'about-to-be-destroyed')" "1"
-# And it lands beside the archive, which is the node's backup directory — not in
-# whatever directory the caller happened to be standing in.
-chk "the safety dump lands beside the archive" "$(dirname "$SAFETY")" "$(dirname "$PLAIN")"
-# It is a full plaintext copy of the live database, and on a container node it
-# lands inside the site tree. Created closed rather than created open and
-# tightened — a chmod after the redirect leaves a window in which anything with
-# a shell can read the whole database.
-chk "the safety dump is never readable beyond its owner" "$(stat -c '%a' "$SAFETY" 2>/dev/null)" "600"
+chk "an unattended restore leaves no dump of what it destroyed" \
+    "$(ls "$WORK"/*-pre-restore.sql.gz* 2>/dev/null | wc -l)" "0"
+# Nowhere else either: a dump written to the caller's working directory would be
+# the same copy in a worse place.
+chk "and none in the working directory" \
+    "$(ls ./*-pre-restore.sql.gz* 2>/dev/null | wc -l)" "0"
+# The destroyed row is genuinely gone — proving the restore really did replace
+# the schema, so the absence above is "nothing was kept" and not "nothing ran".
+chk "the state it replaced is gone" \
+    "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t WHERE v='about-to-be-destroyed'" 2>/dev/null)" "0"
 
-# The opt-out, for the caller that has genuinely taken its own dump.
+# The two flags are gone, and the script refuses them rather than ignoring them.
 dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
-rm -f "$WORK"/*-pre-restore.sql.gz
-M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --no-pre-restore-dump --db-user postgres 2>/dev/null)
-chk "the opt-out still restores" "$M" "RESTORE_OK"
-chk "--no-pre-restore-dump takes no dump" \
-    "$(ls "$WORK"/*-pre-restore.sql.gz 2>/dev/null | wc -l)" "0"
+bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --no-pre-restore-dump --db-user postgres >/dev/null 2>&1
+chk "--no-pre-restore-dump is refused, not ignored" "$?" "1"
+bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --pre-restore-dump-dir "$WORK" --db-user postgres >/dev/null 2>&1
+chk "--pre-restore-dump-dir is refused, not ignored" "$?" "1"
 
-# A caller whose archive sits in a directory it is about to delete says where
-# the dump should go instead. restore_project.sh is that caller.
-dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
-ELSEWHERE="$WORK/elsewhere"; mkdir -p "$ELSEWHERE"
-M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --pre-restore-dump-dir "$ELSEWHERE" --db-user postgres 2>/dev/null)
-chk "a directed safety dump still restores" "$M" "RESTORE_OK"
-chk "the safety dump goes where it was directed" \
-    "$(ls "$ELSEWHERE"/*-pre-restore.sql.gz 2>/dev/null | wc -l)" "1"
+# No caller may still be passing them. A refused flag is a failed restore, and
+# the callers that used to pass these are the dashboard's own restore paths.
+# Invocations only. A test that ASSERTS the flags are gone names them too, and
+# so does restore_database.sh's own changelog; neither passes one to anything.
+CALLERS=$(grep -rn -- "--no-pre-restore-dump\|--pre-restore-dump-dir" \
+    "$ROOT/maintenance_scripts" "$ROOT/public_html/plugins" 2>/dev/null \
+    | grep -v "/tests/" | grep -v "restore_database.sh:" | grep -v "^\s*#" | wc -l)
+chk "no caller still passes a removed flag" "$CALLERS" "0"
 
 echo
 if [ "$failed" -eq 0 ]; then

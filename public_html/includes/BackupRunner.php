@@ -33,6 +33,12 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.10 - sweep_local also removes staged chain restores nobody came back for. A
+ *                 staged-and-unapproved chain left the whole chain on the node, plus the
+ *                 recovered chain.key beside it, with nothing to remove either
+ * @version 1.9 - sweep_local expires pre-restore dumps of both generations. Nothing writes them
+ *                any more, but machines that restored before that decision still carry one, and
+ *                each is a full copy of a database the sweep did not recognise
  * @version 1.8 - every uploaded artifact is recorded in the node-side integrity ledger, so a
  *                restore can tell this machine's own archive from bytes a management node
  *                chose; an artifact that could not be recorded is reported, not swallowed
@@ -1277,14 +1283,25 @@ class BackupRunner {
 		$dir = $plan['output_dir'];
 
 		$candidates = BackupNaming::list_dir($dir);
-		foreach (glob($dir . '/auto_pre_*') ?: array() as $p) {
-			if (is_file($p)) { $candidates[] = $p; }
+		// Pre-restore dumps. NOTHING WRITES THESE ANY MORE — a restore keeps
+		// nothing of what it replaces (owner, 2026-08-30; see
+		// restore_database.sh stage 2) — but machines that restored before that
+		// decision are still carrying them, and each is a full copy of a
+		// database. They are not backups and BackupNaming does not know their
+		// shape, so they are swept by name until the fleet has aged them out.
+		//
+		// `auto_pre_*` is the older dashboard-prepended kind;
+		// `*-pre-restore.sql.gz[.enc]` is the one the engine briefly wrote.
+		foreach (array('/auto_pre_*', '/*-pre-restore.sql.gz', '/*-pre-restore.sql.gz.enc') as $pattern) {
+			foreach (glob($dir . $pattern) ?: array() as $p) {
+				if (is_file($p)) { $candidates[] = $p; }
+			}
 		}
 		foreach (glob($dir . '/' . BackupChain::DIR_PREFIX . '*', GLOB_ONLYDIR) ?: array() as $chain_d) {
 			foreach (BackupNaming::list_dir($chain_d) as $p) { $candidates[] = $p; }
 		}
 
-		$swept = 0;
+		$swept = self::sweep_staged_restores($plan, $cutoff);
 		foreach (array_unique($candidates) as $path) {
 			if (!is_file($path) || filemtime($path) >= $cutoff) {
 				continue;
@@ -1296,6 +1313,68 @@ class BackupRunner {
 			if (@unlink($path)) {
 				$swept++;
 				if (is_file($sidecar)) { @unlink($sidecar); }
+			}
+		}
+		return $swept;
+	}
+
+	/**
+	 * Prefix of a staged chain restore's working directory, under the backup
+	 * BASE. It is `restore_` plus the chain id, and the agent derives the same
+	 * name from its own side (primitives/restore_paths.go,
+	 * `chainWorkspacePrefix`) — the two have to agree or a staged chain is
+	 * invisible to the restore that needs it.
+	 */
+	const STAGED_RESTORE_PREFIX = 'restore_';
+
+	/**
+	 * Remove staged chain restores nobody came back for.
+	 *
+	 * `stage_chain` downloads a whole chain — the full, every incremental, the
+	 * database dump — and recovers the chain data key beside them, so an
+	 * operator can approve a restore against artifacts already verified on the
+	 * node. Nothing removed them afterwards, and nothing removed them when the
+	 * restore was never approved at all: a staged-and-abandoned chain is the
+	 * ordinary outcome of a person looking at an approval screen and deciding
+	 * not to. On the node this measured 67MB for a small site.
+	 *
+	 * SWEPT AS A UNIT, by the directory's own age, rather than by folding its
+	 * files into the list above. Two reasons: the workspace holds `chain.key`,
+	 * a recovered plaintext data key that `BackupNaming` does not recognise and
+	 * would therefore have left behind — which is the worse half of the leak —
+	 * and removing files one by one would leave an empty directory that still
+	 * reads as a staged restore.
+	 *
+	 * It lives under the backup BASE, not the profile directory: that is where
+	 * stage_chain puts it and where restore_chain.sh looks, so it is resolved
+	 * here rather than from the plan's own output_dir, which for a
+	 * manager-profile run is a level deeper and would never have matched.
+	 */
+	private static function sweep_staged_restores(array $plan, $cutoff) {
+		// From the PLAN, which already carries it — a manager-profile run's
+		// output_dir is a level deeper than the base, so resolving it from
+		// there would never match.
+		$base = (string)($plan['base_dir'] ?? '');
+		if ($base === '') {
+			try { $base = self::output_dir(); } catch (\Throwable $e) { return 0; }
+		}
+		$base = rtrim($base, '/');
+
+		$swept = 0;
+		$pattern = $base . '/' . self::STAGED_RESTORE_PREFIX . BackupChain::DIR_PREFIX . '*';
+		foreach (glob($pattern, GLOB_ONLYDIR) ?: array() as $work) {
+			// The directory's own mtime, which the last download moved. A
+			// workspace a restore is still using is minutes old; one past the
+			// retention window is one nobody came back for.
+			$age = @filemtime($work);
+			if ($age === false || $age >= $cutoff) {
+				continue;
+			}
+			foreach (glob($work . '/*') ?: array() as $f) {
+				if (is_file($f)) { @unlink($f); }
+			}
+			if (@rmdir($work)) {
+				$swept++;
 			}
 		}
 		return $swept;

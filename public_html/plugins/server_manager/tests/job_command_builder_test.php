@@ -795,23 +795,30 @@ check(strpos($engine_threw, 'no paired agent') !== false,
 	'restore_database: an unpaired node is refused rather than sent dead SSH steps', $engine_threw);
 
 // THE PRE-RESTORE SAFETY DUMP MOVED INTO THE ENGINE, and that is the correction
-// this section used to be pinning the wrong side of. It used to be a step this
-// plane prepended, and restore_database.sh skipped its own whenever
-// --non-interactive was given on exactly that reasoning — which is impossible to
-// honour on the primitive path, where one job runs one script and there is
-// nowhere to prepend anything. Every unattended restore would have dropped a
-// live schema with nothing behind it.
+// this section used to be pinning the wrong side of.
 //
-// The engine now takes the dump itself, by default, including unattended; a
-// caller that has genuinely taken one passes --no-pre-restore-dump. Proven
-// against a real PostgreSQL in restore_roundtrip_gate.sh, which is where a
-// behavioural claim about a script belongs.
+// NOTHING IS KEPT BEFORE A RESTORE, decided 2026-08-30. The engine took a
+// safety dump for a while, including unattended; that preserved exactly the
+// state the operator had decided to discard and left a full copy of the
+// database, per restore, indefinitely. The flags that controlled it are gone,
+// and the engine REFUSES an unknown option — so a builder still passing one
+// composes a job that fails on the node rather than one that quietly ignores an
+// argument. That is what makes this a wire-format check and not a preference.
+//
+// The behaviour itself is proven against a real PostgreSQL in
+// restore_roundtrip_gate.sh, which is where a claim about a script belongs.
 $engine_src = (string)file_get_contents(
 	PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/restore_database.sh');
-check(strpos($engine_src, 'PRE_RESTORE_DUMP=true') !== false,
-	'restore_database.sh takes a pre-restore safety dump by default, unattended included');
-check(strpos($engine_src, '--no-pre-restore-dump') !== false,
-	'and a caller that has taken its own can say so');
+check(strpos($engine_src, 'PRE_RESTORE_DUMP=true') === false,
+	'restore_database.sh keeps nothing before it drops the schema');
+$builder_src = (string)file_get_contents(
+	PathHelper::getSiteRoot() . '/public_html/plugins/server_manager/includes/JobCommandBuilder.php');
+foreach (array('--no-pre-restore-dump', '--pre-restore-dump-dir') as $dead_flag) {
+	check(strpos($engine_src, $dead_flag . ')') === false,
+		'the engine no longer accepts ' . $dead_flag);
+	check(strpos($builder_src, $dead_flag) === false,
+		'no builder still passes ' . $dead_flag . ', which the engine would refuse outright');
+}
 
 // The install-node clone restore follows the same engine contract.
 $clone_restore = '';

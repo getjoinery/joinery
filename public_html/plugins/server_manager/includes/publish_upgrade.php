@@ -571,7 +571,14 @@
 		// Note: Use anchored patterns (/theme/*, /plugins/*) to only exclude top-level directories,
 		// not subdirectories like assets/vendor/Trumbowyg-2-26/dist/plugins/
 		$rsync_core_cmd = sprintf(
-			'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
+			// agent_dist.* excludes the SWAP LEAVINGS, never agent_dist itself:
+			// the publisher moves the previous bundle to agent_dist.old before
+			// putting the new one in place, and a .old that cannot be removed
+			// (one left root-owned by a publish that ran as root) otherwise ships
+			// to every node — 10MB of superseded, still-signed agent binaries,
+			// which is dead weight at best and a stale artifact to explain at
+			// worst. Verified the hard way: 0.8.355 carried one.
+			'rsync -av --exclude=.git --exclude=.gitignore --exclude=.claude --exclude=specs%s --exclude=uploads --exclude=cache --exclude=logs --exclude=backups --exclude=.playwright-mcp --exclude=theme-sources --exclude="/agent_dist.*" --exclude="/theme/*" --exclude="/plugins/*" %s %s 2>&1',
 			$agent_excludes_str,
 			escapeshellarg($full_site_dir . '/public_html/'),
 			escapeshellarg($core_temp_dir . '/public_html/')

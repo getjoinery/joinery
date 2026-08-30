@@ -25,6 +25,10 @@
  * happen, which publish_upgrade.php treats as a reason to refuse the release
  * rather than ship a bundle it already knows is stale.
  *
+ * @version 1.6 - rrmdir reports whether the tree is actually gone, and the caller names the real
+ *                cause. A root-owned agent_dist.old left by a publish that ran as root could not
+ *                be cleared by a later publish running as the site user, and the failure surfaced
+ *                two steps later as 'cannot move previous agent_dist aside'
  * @version 1.5 - go build runs with -buildvcs=false: the version is already stamped via ldflags,
  *                and VCS stamping made the build fail whenever the publish ran as a user other
  *                than the agent repo's owner (git "dubious ownership" exits 128)
@@ -178,7 +182,19 @@ class AgentDistPublisher {
 
 			// Swap staging into place; the old artifact survives any failure above.
 			$old = $dist_dir . '.old';
-			self::rrmdir($old);
+			if (!self::rrmdir($old)) {
+				// Said here, where it is known, rather than as the rename's
+				// failure one line down. The usual cause is ownership: this
+				// directory is left behind by whoever published last, and a
+				// publish that ran as root leaves one the site user cannot
+				// touch.
+				$owner = @fileowner($old);
+				$who   = ($owner !== false && function_exists('posix_getpwuid'))
+					? (string)(@posix_getpwuid($owner)['name'] ?? $owner) : (string)$owner;
+				throw new Exception('cannot clear the previous ' . basename($old)
+					. ' (owned by ' . ($who !== '' ? $who : 'another user')
+					. ', and this publish runs as ' . self::whoami() . '). Remove it and publish again');
+			}
 			if (is_dir($dist_dir) && !rename($dist_dir, $old)) {
 				throw new Exception('cannot move previous agent_dist aside');
 			}
@@ -344,13 +360,35 @@ class AgentDistPublisher {
 	}
 
 	/** Recursively remove a directory if it exists. */
+	/**
+	 * Remove a directory tree. Returns TRUE only if it is actually gone.
+	 *
+	 * The return value is the whole point, and it was added after a silent
+	 * failure cost an evening. A publish that once ran as root leaves
+	 * agent_dist.old owned by root; every later publish runs as the site user,
+	 * cannot unlink anything inside it, and — when this swallowed that — went on
+	 * to fail at the NEXT step with 'cannot move previous agent_dist aside'.
+	 * That message names the wrong operation and sends the reader to the wrong
+	 * file. The build then refuses, correctly, because it will not ship a stale
+	 * agent; but the reason it gives has to be the reason it happened.
+	 */
+	/** Which account this publish is running as, for an ownership message. */
+	private static function whoami() {
+		if (function_exists('posix_geteuid') && function_exists('posix_getpwuid')) {
+			$u = @posix_getpwuid(posix_geteuid());
+			if (is_array($u) && !empty($u['name'])) { return (string)$u['name']; }
+		}
+		return (string)@get_current_user();
+	}
+
 	private static function rrmdir($dir) {
-		if (!is_dir($dir)) { return; }
+		if (!is_dir($dir)) { return true; }
+		$ok = true;
 		foreach (scandir($dir) ?: array() as $f) {
 			if ($f === '.' || $f === '..') { continue; }
 			$path = $dir . '/' . $f;
-			is_dir($path) ? self::rrmdir($path) : @unlink($path);
+			$ok = (is_dir($path) ? self::rrmdir($path) : @unlink($path)) && $ok;
 		}
-		@rmdir($dir);
+		return @rmdir($dir) && $ok;
 	}
 }
