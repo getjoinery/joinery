@@ -2,7 +2,7 @@
 
 **Status:** **READY FOR BUILD — 2026-08-25, unbuilt.** Owner direction 2026-08-25 inverted the 2026-08-22 box-first draft: **the default sale is a centralized subscription service run by getjoinery; the customer-owned sentinel box becomes the power-user posture** — the ScrollDaddy pattern. The spec was rewritten the same day, **all eight decisions the inversion opened (O1–O8) were resolved with the owner in walkthrough**, and a second owner correction the same day (**§13.O9**) re-architected credential custody: **the plane holds no credential that can act destructively while unattended** — routine repairs run through an enumerated node-side tool vocabulary over the API, and destructive rungs require the customer to log into the sentinel UI and unlock a sealed SSH key (§6). Decisions carried from the box-first draft are marked **CARRIED**; those the inversion replaced are **SUPERSEDED**.
 
-**Prerequisite (owner-set, 2026-08-25): `specs/agent_on_node_architecture.md` — the fleet-wide Server Manager transport migration — completes before this spec's build begins.** The same skeleton-key vulnerability O9 closes for customers exists in Server Manager today (one shared SSH key, arbitrary command steps); the platform migrates first, and this spec's vocabulary channel (§6, §14.N) is that spec's architecture, consumed rather than defined here.
+**Prerequisite (owner-set, 2026-08-25): `specs/agent_on_node_architecture.md` — the fleet-wide Server Manager transport migration — completes before this spec's build begins.** *(2026-08-30: that migration's destructive gate is now built and shipped at agent 1.13.0 — see the note in §6. It does not resolve O10 for sentinel; it changes what O10 can assume it inherits.)* The same skeleton-key vulnerability O9 closes for customers exists in Server Manager today (one shared SSH key, arbitrary command steps); the platform migrates first, and this spec's vocabulary channel (§6, §14.N) is that spec's architecture, consumed rather than defined here.
 
 **Origin:** Owner feedback that prospective self-hosters fear their Joinery going down with no skills to fix it. The box-first draft answered the sovereignty objections but aimed the product at the wrong buyer: the person frightened of their site dying is exactly the person who will not provision, pay for, and maintain a second VPS. A second box is a power-user feature. The service is the product.
 
@@ -186,6 +186,27 @@ Each rung is a runbook-as-data — **precondition, action, verification, rollbac
 **The design rule (owner-set, §13.O9): the plane holds no credential that can act destructively while unattended.** Everything the driver does on its own initiative travels the vocabulary channel; everything that can lose data travels a key only the customer can decrypt. A plane that cannot hurt anyone unattended is not worth attacking the way a vault of usable SSH keys is — that is the whole point.
 
 **The vocabulary channel (unattended).** Guarded nodes run the platform's signed agent in **node posture**: a root systemd service, independent of the web stack (so it survives php-fpm, Apache, and postgres being dead), that **polls the plane outbound over HTTPS** and executes only an **enumerated tool vocabulary compiled into it** — service restarts, the §4.5 forced reboots, disk reclaim, certificate renewal, upgrade completion, the §14.E evidence collectors, pre-destructive snapshot staging, and the database restore check (§9). The node holds a pairing credential to reach the plane; **the plane holds nothing that reaches into the node.** A fully compromised plane can queue vocabulary jobs — bounded, non-destructive, logged in the incident record — and nothing else. The node also runs its own backup schedule locally (it is a full Joinery site); the plane monitors that runs land, it does not conduct them.
+
+> **THE FLEET-WIDE GATE SHIPPED FIRST, AND IT IS NOT A PASSKEY (2026-08-30).**
+> `specs/implemented/restore_dispatch_approval_mechanism.md` built the
+> destructive gate for Server Manager's own fleet, and it answers with the
+> node's **backup recovery key**, not a registered approval passkey: the node
+> seals a job-bound one-time challenge to the recovery public key it already
+> holds and has already seen proven, stages it on its own admin page, and the
+> human opens it in their browser with the private half. No signature, no
+> WebAuthn on the node, no second credential to register at enrollment — and
+> critically, **no account on the plane**, which is what a passkey would have
+> required and what would have made the plane the issuer of its own approvals.
+>
+> **This section is not superseded, because sentinel's case is genuinely
+> different and this spec has to settle it.** Two things do not carry: a node in
+> trouble may not be serving its own admin page, which is exactly when rungs 3–5
+> fire; and a *customer's* recovery key is a backup credential, so binding
+> repair approval to it means a customer who has lost that key can neither
+> restore nor be repaired. Either sentinel keeps a passkey for its own rungs and
+> accepts holding two mechanisms, or it finds a third answer. **What it must not
+> do is assume it inherits this one.** The statement below stands as written
+> until sentinel's own round decides.
 
 **The approval gate (owner-present — rungs 3–5, O10).** Destructive repairs travel the same vocabulary channel, but the agent executes a `destructive` primitive only when the job carries an **approval the node verifies itself**: at enrollment the customer registers an **approval passkey** whose public key is stored root-owned on the node; to approve a staged repair, the customer signs the node-issued challenge — which binds that specific job — and the agent checks the signature before opening the door. **The plane is a relay, not the gate**, so even a plane compromised deeply enough to capture a customer's unlock credential holds nothing that opens any node (§13.O10). When the node is healthy enough to serve its own admin, approval happens there — true origin, no plane page involved at all. Every destructive-door opening fires an out-of-band notification. The consequence stands from O9: **destructive repairs wait for the owner** (§3).
 

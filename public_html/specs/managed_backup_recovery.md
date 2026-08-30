@@ -4,6 +4,19 @@
 `specs/managed_backups.md`; requires managed storage (the wrapped key lives
 in the managed bucket, the server share lives at getjoinery).
 
+> **THE RECOVERY KEY GAINED A SECOND JOB (2026-08-30).** It is no longer only
+> what decrypts a backup: it is what **authorises a destructive restore** over
+> the agent channel — the node seals a job-bound challenge to the recovery public
+> key it holds, and the human opens it with the private half
+> (`specs/implemented/restore_dispatch_approval_mechanism.md`). That raises this
+> spec's stakes in both directions. Losing the key now costs the customer the
+> ability to *approve* a repair as well as the ability to read a backup, so the
+> loss mode below is worse than it was. And the wrapping design has a new
+> requirement to state: whatever unwraps the key can approve a destructive
+> restore, so a wrapping credential is a destructive-authorisation credential and
+> has to be reasoned about as one — the server share in particular, which lives
+> at getjoinery, and which must not be able to reconstruct the key on its own.
+
 **What it is:** managed storage closes every loss mode except one — the
 customer losing their own recovery key. This spec closes that one by
 storing the recovery **private** key alongside the backups, wrapped

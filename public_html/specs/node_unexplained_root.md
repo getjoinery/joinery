@@ -43,7 +43,7 @@ Anything else executing with uid 0 is **unexplained root**. That is the whole vo
 
 ### 2.2 The windowed allowlist — the approval ledger
 
-The node's own opinion is not enough, because a node's local config is exactly what a root attacker edits first. The second half of the assertion lives on the management node: the approval records for destructive jobs (§3.3's node-verified passkey signatures), the `ssh_window_open` windows of the A5 service posture, and the job history itself.
+The node's own opinion is not enough, because a node's local config is exactly what a root attacker edits first. The second half of the assertion lives on the management node: the approval records for destructive jobs (§3.3's node-verified approvals — as built 2026-08-30 these are answers to a challenge the node sealed to its own backup recovery key, not passkey signatures; the plane records that a job was approved and holds nothing that could produce the approval), the `ssh_window_open` windows of the A5 service posture, and the job history itself.
 
 **The rule: an event is explained only when the node's compiled allowlist and the plane's ledger both say so.** Neither alone suffices.
 

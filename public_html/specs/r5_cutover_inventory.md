@@ -1,5 +1,10 @@
 # R5 — the cutover release inventory
 
+> **SUPERSEDED SNAPSHOT (2026-08-30).** Kept for its measurements, which were
+> taken carefully and are still the best record of what the SSH cutover touched.
+> Its open questions are answered in `agent_management_first_principles.md`; do
+> not work from the list at the bottom of this file.
+
 **Status: DEFERRED (owner, 2026-08-28).** Both hardening targets were deferred,
 so the cutover and the key removal below are launch-readiness work rather than
 near-term work. This document is the inventory the release will be written from
@@ -210,6 +215,11 @@ Not blockers, but they must be a decision rather than a side effect:
   siblings. Restores are human-present by design (A3's note), but "human
   present" currently still means a plane-dispatched SSH job. After the cutover
   there is no plane-side restore path.
+  **ANSWERED 2026-08-30:** all three have primitives and the destructive gate is
+  open for a paired node on agent 1.13.0. "Human present" now means a human on
+  the *node's* own site answering an approval the node issued — not a human at
+  the plane dispatching an SSH job. See
+  `specs/implemented/restore_dispatch_approval_mechanism.md`.
 
 `enable_agent` is the third of these and is handled at §1.7.
 
@@ -532,8 +542,13 @@ down instead).
    is currently unproven.
 3. `install_node` versus deleting the agent's SSH — (a), (b) or (c) in §3.
 4. Whether the API transport dies with the SSH transport (§1.2).
-5. What replaces `decommission_node` and the three restore builders, or the
-   explicit decision that nothing does (§1.6).
+5. ~~What replaces `decommission_node` and the three restore builders~~ —
+   **the restores are answered** (primitives plus the destructive gate, plus
+   `download_backup` / `stage_chain` for the artifact; the SSH builders stay in
+   the tree unreachable until one live restore has been done). `decommission_node`
+   is still open, and cannot inherit the same answer: it deletes the machine from
+   the outside through the provider API, so a node-side approval only works while
+   the node is alive and serving (§1.6).
 6. What happens to `ProvisionManagedDomains` and `ManagedDomainWatch` (§2.1) —
    the largest unscoped item.
 7. Whether `authorized_keys` removal is a runbook or wants a primitive shipped

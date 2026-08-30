@@ -36,6 +36,18 @@ the data key to the destination's site key at provisioning time, which makes it 
 **provisioning change, not a backup-format one**. It should be specced against
 the provisioning path rather than bolted onto the backup engine.
 
+**A second wall, added 2026-08-30 and in the same place.** The restore dispatch
+round gave every node an **upload ledger** — a record, written at upload time, of
+what that machine sent and what the bytes were — and a node refuses to restore
+from an artifact it has no record of uploading
+(`specs/implemented/restore_dispatch_approval_mechanism.md`). That is exactly
+right against a management node choosing a restore's bytes, and it means a
+destination node cannot accept the *source* node's archive either: it never
+uploaded it. So whatever closes the envelope gap has to hand over the ledger
+entries alongside the re-sealed data key. Both are the same handover, at the same
+moment, from the same party — which is an argument for specifying them together
+rather than discovering the second one during an install-from-backup.
+
 ## 3. Multipart upload
 
 `S3Signer` does a single PUT. The 5 GB single-PUT ceiling on S3/B2 is the first

@@ -1,5 +1,14 @@
 # Customer-Cloud Provisioning — Bring Your Own Linode
 
+> **SUPERSEDED ON ONE POINT (owner, 2026-08-30): we never put a key on a machine
+> we create.** Wherever this document describes installing the platform's SSH
+> public key into a new instance's `authorized_keys`, that is no longer the
+> design. We already generate the instance's root password at creation; it is
+> kept for the length of the install and destroyed once the agent has joined, so
+> nothing of ours is ever placed on the machine. See `keyless_provisioning.md`.
+> Nodes that already hold a key are dealt with manually — there is no automated
+> retirement path, deliberately.
+
 **Status:** Built on dev 2026-07-18 (all components; validated, test suite
 written) — pending schema sync, db-tier test run, and live verification via
 the First live test below.
