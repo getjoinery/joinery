@@ -1,6 +1,16 @@
 #!/usr/bin/env bash
 
 # restore_project.sh - Complete project restore script
+# Version: 1.5.2 - the interactive replace branch carries config/backup-ledger across the move.
+#                  It moved the whole tree aside and made a fresh directory, so this machine's
+#                  record of what it uploaded went with it and every later restore refused
+# Version: 1.5.1 - the database engine's pre-restore safety dump is directed beside the ARCHIVE
+#                  rather than beside the extracted dump, which is inside the staging directory
+#                  this script deletes on the way out
+# Version: 1.5.0 - config/backup-ledger is kept from the machine being restored rather than
+#                  taken from the archive: it is this machine's record of what IT uploaded,
+#                  and a restore-over-agent checks archives against it. Merging the archive's
+#                  stale copy in would let the first restore break the second
 # Version: 1.4.3 - the sudo capability probe asks with -v instead of running true,
 #                  which sudo mails root about when the account may not. Same
 #                  change in the sibling scripts.
@@ -516,6 +526,11 @@ perform_restore() {
                 if [ -n "$DB_USER" ]; then
                     db_flags+=(--db-user "$DB_USER")
                 fi
+                # The engine's safety dump goes beside the ARCHIVE, not beside
+                # the extracted dump. Extraction stages beside the archive and
+                # is cleaned up when this finishes, so a dump written there
+                # would be deleted by the very restore it exists to undo.
+                db_flags+=(--pre-restore-dump-dir "$(dirname "$BACKUP_FILE")")
                 # The dump was encrypted with the same key as the archive around
                 # it, so hand over whatever opened the archive — which may have
                 # come from the envelope rather than from --key-file.
@@ -564,6 +579,28 @@ perform_restore() {
                 # Explicitly checked: perform_restore runs as an `if` condition,
                 # which suppresses `set -e` for the whole function body — any
                 # command without its own check silently continues on failure.
+                # This machine's own upload ledger goes with the moved tree, and
+                # the staged copy has had its own stripped — so without this the
+                # fresh directory ends up with none at all, and every restore
+                # over the agent channel refuses until the next backup run
+                # rebuilds it. The --force branch below does not have this
+                # problem: it keeps the directory in place and copies over it.
+                #
+                # Best effort. The ledger is recoverable from the moved tree and
+                # rebuilds itself on the next backup, so it must never be the
+                # reason a restore someone is in the middle of stops.
+                if [ -d "${EXISTING_BACKUP}/config/backup-ledger" ]; then
+                    $SUDO mkdir -p "${PROJECT_DIR}/config" 2>/dev/null || true
+                    if $SUDO cp -a "${EXISTING_BACKUP}/config/backup-ledger" \
+                            "${PROJECT_DIR}/config/backup-ledger" 2>/dev/null; then
+                        print_info "Kept this machine's own config/backup-ledger"
+                    else
+                        print_warning "Could not carry config/backup-ledger across; a copy is at"
+                        print_warning "${EXISTING_BACKUP}/config/backup-ledger. Restores over the agent"
+                        print_warning "channel will refuse until the next backup run rebuilds it."
+                    fi
+                fi
+
                 if ! $SUDO mkdir -p "$PROJECT_DIR"; then
                     print_error "Failed to create project directory: $PROJECT_DIR"
                     return 1
@@ -575,6 +612,21 @@ perform_restore() {
                 print_error "Failed to create project directory: $PROJECT_DIR"
                 return 1
             fi
+        fi
+
+        # config/backup-ledger is the MACHINE's record of what IT uploaded, and
+        # is dropped from the staged copy whole.
+        #
+        # Every entry in it was written by this machine at upload time, and it is
+        # what a restore-over-agent checks an archive against before loading it.
+        # The archive's copy is a snapshot of that record from whenever the
+        # backup was taken, so merging it in would replace a complete ledger with
+        # a stale one — and the first restore would quietly break the second.
+        # There is nothing in another machine's ledger this machine could use
+        # either: the entries are hashes of files that machine uploaded.
+        if [ -d "$backup_dir/project_files/config/backup-ledger" ]; then
+            $SUDO rm -rf "$backup_dir/project_files/config/backup-ledger"
+            print_info "Keeping this machine's own config/backup-ledger"
         fi
 
         # Two files are the MACHINE's, not the backup's, and are dropped from the

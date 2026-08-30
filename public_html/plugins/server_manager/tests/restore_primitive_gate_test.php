@@ -6,24 +6,30 @@
  * needs: []
  */
 /**
- * Restore is built for the agent channel and must not travel it yet.
+ * What a restore job carries, now that restore travels the agent channel.
  *
- * The three restore primitives exist on both sides — the agent compiles them
- * in, this plane can address them — and a destructive primitive is refused at
- * the agent's compiled ceiling until a node-verified approval verifier exists
- * (specs/restore_dispatch_approval_mechanism.md). A plane that routed restore
- * to the primitive transport today would therefore trade a working SSH restore
- * for a guaranteed refusal, and would find that out during a restore.
+ * The gate opened (specs/restore_dispatch_approval_mechanism.md): a destructive
+ * primitive is dispatchable to a node whose agent can ask its own operator to
+ * approve it. That makes everything below LIVE rather than latent — the
+ * envelope this plane composes is the one a node acts on, so what it can and
+ * cannot say is the whole security surface this file exists to pin.
  *
- * So the gate is the subject of this file. Not "does the builder compose the
- * right envelope" alone, but "is the envelope unreachable", asserted the way
- * the dispatcher asks it rather than by reading the constant back.
+ * Three properties, and none of them is about permission — this plane grants
+ * none, and cannot:
  *
- * The strongest form of that question is the one asked below: a node that has
- * PAIRED, is running a NEW ENOUGH agent, and REPORTS the restore primitives in
- * its own claim vocabulary — every condition that normally means "route here" —
- * still does not get a restore over the channel. If the gate held only for
- * nodes that could not run restore anyway, it would not be a gate.
+ *   * A restore names a BACKUP, never a path. Under SSH this plane composed an
+ *     absolute path and a root process ran it, which is read-and-overwrite-
+ *     anything wearing a restore's clothes.
+ *   * Nothing crossing this wire can OPEN anything: no key, no bucket, no
+ *     credential. The node decrypts with its own key, on its own disk, or not
+ *     at all.
+ *   * The plane's validation MIRRORS the agent's rather than approximating it.
+ *     A stricter rule refuses jobs the node would have run, from a message that
+ *     blames the wrong side; a looser one sends a job to be refused on the wire,
+ *     where the refusal reads as a node problem.
+ *
+ * The gate itself, and the wire format that makes an approval unrelayable, are
+ * pinned next door in restore_dispatch_test.php.
  *
  * Run: php plugins/server_manager/tests/restore_primitive_gate_test.php
  */
@@ -40,9 +46,10 @@ require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_
 const RESTORE_OPS = ['restore_database', 'restore_project', 'restore_chain'];
 
 /**
- * A node with EVERY reason to be routed at: paired, current, and reporting the
- * restore primitives in its own vocabulary. Nothing but the destructive gate
- * stands between this node and a primitive restore.
+ * A node with every reason to be routed at: paired, current, and reporting the
+ * restore primitives in its own vocabulary. What stands between this node and a
+ * replaced database is not anything on this plane — it is an operator at that
+ * machine's own site, opening a challenge with its backup recovery key.
  */
 function rpg_node(array $fields = array()) {
 	$node = new ManagedNode(NULL);
@@ -53,19 +60,19 @@ function rpg_node(array $fields = array()) {
 	$node->set('mgn_ssh_key_path', '/home/user1/.ssh/id_ed25519_claude');
 	$node->set('mgn_web_root', '/var/www/html/gatesite/public_html');
 	$node->set('mgn_agent_public_key', base64_encode(str_repeat("\x01", 32)));
-	$node->set('mgn_agent_version', '1.12.0');
+	$node->set('mgn_agent_version', '1.13.0');
 	$node->set('mgn_agent_primitives',
 		'apply_update,backup_run,check_status,restore_chain,restore_database,restore_project');
 	foreach ($fields as $k => $v) { $node->set($k, $v); }
 	return $node;
 }
 
-section('Restore does not travel the agent channel in this build');
+section('Restore travels the agent channel, to a node that can ask its own operator');
 
-check(JobCommandBuilder::node_can_dispatch_destructive(rpg_node()) === false,
-	'node_can_dispatch_destructive() is false',
-	'this is the single seam the approval round flips; while it is false no destructive '
-	. 'primitive may be dispatched to any node');
+check(JobCommandBuilder::node_can_dispatch_destructive(rpg_node()) === true,
+	'node_can_dispatch_destructive() is true for a paired node',
+	'this is a ROUTING decision and never permission — the node still refuses the job unless '
+	. 'somebody at its own site opens a challenge sealed to its own backup recovery key');
 
 check(JobCommandBuilder::DESTRUCTIVE_PRIMITIVES === RESTORE_OPS,
 	'the destructive set names exactly the three restore operations',
@@ -73,50 +80,45 @@ check(JobCommandBuilder::DESTRUCTIVE_PRIMITIVES === RESTORE_OPS,
 
 $paired = rpg_node();
 foreach (RESTORE_OPS as $op) {
-	check(JobCommandBuilder::has_primitive($paired, $op) === false,
-		"has_primitive() refuses {$op} on a paired node that reports it",
-		'the node is paired, runs 1.12.0 and lists this primitive in its own claim vocabulary — '
-		. 'every condition that routes an operation to the channel. The destructive gate is the '
-		. 'only thing that must stop it, and it did not');
+	check(JobCommandBuilder::has_primitive($paired, $op) === true,
+		"has_primitive() routes {$op} to a paired node that reports it");
 
-	// The question the dispatcher actually asks. transports_for() still offers
-	// the primitive (the builder exists, which is what parity requires); the
-	// gate lives one level down, so this asserts the OUTCOME rather than the
-	// absence of a method.
 	check(in_array('primitive', JobCommandBuilder::transports_for($op), true),
-		"transports_for() still lists a primitive transport for {$op}",
-		'the builder must exist for primitive_transport_parity_test — the gate is has_primitive(), '
-		. 'not a missing method');
+		"transports_for() lists a primitive transport for {$op}");
 }
 
-// And the builders themselves: a paired node still gets SSH steps.
-$db_steps = JobCommandBuilder::build_restore_database($paired,
+// A paired node gets a primitive envelope, not steps. This is the check that
+// would catch the transport silently reverting to a route the agent refuses.
+$db_built = JobCommandBuilder::build_restore_database($paired,
 	['filename' => 'joinerytest_20260828.sql.gz.enc', 'local_path' => '/backups/joinerytest_20260828.sql.gz.enc']);
-check(is_array($db_steps) && !isset($db_steps['primitive']) && isset($db_steps[0]['type']),
-	'build_restore_database() returns SSH steps for a fully paired node',
-	'it returned a primitive envelope, so live restore has moved to a transport that refuses');
+check(($db_built['primitive'] ?? null) === 'restore_database' && !isset($db_built[0]),
+	'build_restore_database() composes a primitive envelope for a paired node',
+	'it returned steps — the agent refuses ssh and scp by name, so those would die at step one');
 
-$chain_steps = JobCommandBuilder::build_restore_chain($paired,
+$chain_built = JobCommandBuilder::build_restore_chain($paired,
 	['chain_id' => 'chain-20260807_231507', 'domain' => 'gate.example.com']);
-check(is_array($chain_steps) && !isset($chain_steps['primitive']) && isset($chain_steps[0]['type']),
-	'build_restore_chain() returns SSH steps for a fully paired node',
-	'it returned a primitive envelope');
+check(($chain_built['primitive'] ?? null) === 'restore_chain' && !isset($chain_built[0]),
+	'build_restore_chain() composes a primitive envelope for a paired node');
 
-section('The version floor is recorded, and is not what is doing the work');
+section('The version floor is live, and is not the same thing as the gate');
 
 foreach (RESTORE_OPS as $op) {
-	check((JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION[$op] ?? null) === '1.12.0',
-		"{$op} declares its introducing agent version",
-		'kept for contract uniformity: when the destructive gate opens, the floor is already right '
-		. 'and no rollout dispatches to an agent that predates the primitive');
+	check((JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION[$op] ?? null) === '1.13.0',
+		"{$op} requires the agent release that can ask for approval",
+		'an earlier agent ships the restore vocabulary and refuses every job in it at a compiled '
+		. 'ceiling, so routing to it trades a transport for a guaranteed refusal — discovered '
+		. 'during a restore');
 }
 
-// Proven, not assumed: an agent OLD enough to fail the floor is refused for the
-// same operation, so a reader cannot mistake the floor for the gate.
+// Proven, not assumed: an agent below the floor is refused, and so is an
+// unpaired node, and they are refused for different reasons.
 $ancient = rpg_node(['mgn_agent_version' => '1.9.0', 'mgn_agent_primitives' => '']);
 check(JobCommandBuilder::has_primitive($ancient, 'restore_database') === false,
-	'an agent below the floor is refused too',
-	'both refusals are false, and only one of them would still be false if the gate opened');
+	'an agent below the floor is not routed at');
+
+$unpaired = rpg_node(['mgn_agent_public_key' => '']);
+check(JobCommandBuilder::node_can_dispatch_destructive($unpaired) === false,
+	'an unpaired node cannot be sent a restore — there is nobody on it to do the asking');
 
 section('A restore job may never be given up on while the node is still running it');
 
@@ -125,6 +127,10 @@ $budgets = ManagementJob::PRIMITIVE_CLAIM_BUDGETS;
 // for a database or project restore, 7200s for a chain's restore step. A plane
 // budget under the node's deadline requeues a restore that is still running,
 // and a second concurrent restore destroys the thing the first was recovering.
+// Each budget now also has to cover the APPROVAL WINDOW: the node claims the
+// job and holds it open while a person at that machine answers the challenge.
+// A budget sized for the restore alone would requeue a job during the approval
+// the restore requires.
 $floors = ['restore_database' => 3600, 'restore_project' => 3600, 'restore_chain' => 7200];
 foreach ($floors as $op => $floor) {
 	check(isset($budgets[$op]) && $budgets[$op] > $floor,
@@ -192,16 +198,19 @@ check(($proj['params']['profile'] ?? null) === 'manager',
 	'the agent requires it: the two profiles keep separate directories and an archive of the same '
 	. 'name exists in both, so a guess eventually restores the management node\'s backup over a site');
 
-// The agent refuses an undeclared parameter, so a key the plane sends "just in
-// case" is not redundant — it is a refusal. restore_chain resolves its artifacts
-// inside the node's own store by chain id, and declares no profile.
-check(!isset($chain['params']['profile']),
-	'restore_chain sends no profile, which the agent does not declare',
-	'got: ' . json_encode($chain['params'] ?? null));
-
 $chain = JobCommandBuilder::build_restore_chain_primitive($paired,
 	['chain_id' => 'chain-20260807_231507', 'seq' => '3', 'skip_database' => true,
 	 'domain' => 'attacker.example.com']);
+
+// The agent refuses an undeclared parameter, so a key the plane sends "just in
+// case" is not redundant — it is a refusal. restore_chain resolves its artifacts
+// inside the node's own store by chain id, and declares no profile.
+//
+// (This check used to read $chain before it was assigned, so it passed on an
+// undefined value and would have passed whatever the builder sent.)
+check(!isset($chain['params']['profile']),
+	'restore_chain sends no profile, which the agent does not declare',
+	'got: ' . json_encode($chain['params'] ?? null));
 check(($chain['params']['chain_id'] ?? null) === 'chain-20260807_231507'
 		&& ($chain['params']['project'] ?? null) === 'gatesite'
 		&& ($chain['params']['seq'] ?? null) === 3
@@ -251,29 +260,24 @@ foreach (['restore_database' => $db, 'restore_project' => $proj, 'restore_chain'
 		. 'redirect a restore onto a name of its choosing');
 }
 
-section('The SSH restore still resolves its own key, so the script fallback is unreachable there');
+section('A restore with nowhere to go refuses rather than composing a dead transport');
 
-// restore_database.sh 3.4 gained an envelope-sidecar fallback for the primitive
-// path, which has no plane preamble to unseal a key for it. That fallback fires
-// ONLY when --key-file is absent, and the SSH path must therefore keep passing
-// one — including in the case where nothing unsealed, where KEY_PATH falls back
-// to the node's standing key rather than to the empty string. An empty
-// --key-file would reach the new branch, which is a behaviour change in the one
-// path that had to stay byte-for-byte identical.
-$restore_cmd = '';
-foreach ($db_steps as $step) {
-	if (strpos($step['cmd'] ?? '', 'restore_database.sh') !== false) {
-		$restore_cmd = $step['cmd'];
+// The SSH builders are still in the file — they are the only written record of
+// what a restore used to do, and they come out once the primitive path has been
+// proven live on a node (WP5). What must never happen is that one of them gets
+// COMPOSED: the agent refuses ssh and scp steps by name, so a job built that way
+// dies at its first step with a message about a step type, during a restore.
+foreach ([[$unpaired, 'no paired agent'], [$ancient, '1.13.0']] as [$node, $expected]) {
+	$refused = '';
+	try {
+		JobCommandBuilder::build_restore_database($node,
+			['filename' => 'x.sql.gz.enc', 'local_path' => '/backups/x.sql.gz.enc']);
+	} catch (Exception $e) {
+		$refused = $e->getMessage();
 	}
+	check($refused !== '' && strpos($refused, $expected) !== false,
+		'a restore that cannot travel refuses, naming ' . $expected,
+		$refused === '' ? 'it composed a job instead' : $refused);
 }
-check($restore_cmd !== '', 'the SSH restore step invokes restore_database.sh');
-check(strpos($restore_cmd, '--key-file "$KEY_PATH"') !== false,
-	'the SSH restore passes --key-file explicitly',
-	'without it the script would fall through to its own sidecar resolution, which is the '
-	. 'primitive path\'s fallback and not this path\'s behaviour');
-check(strpos($restore_cmd, 'KEY_PATH="$HOME/.joinery_backup_key"') !== false,
-	'KEY_PATH is never empty — it defaults to the node\'s standing key',
-	'an unsealed-nothing case that left KEY_PATH empty would pass --key-file "" and reach the '
-	. 'new fallback, changing the SSH path this round promised not to touch');
 
 harness_finish();

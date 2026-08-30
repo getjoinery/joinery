@@ -177,13 +177,20 @@ class JobCommandBuilder {
 	 */
 	const PRIMITIVE_MIN_AGENT_VERSION = [
 		'apply_update'     => '1.10.0',
-		// Recorded for uniformity rather than for use: the destructive gate
-		// below keeps these off the primitive transport entirely, so no node's
-		// version is ever consulted for them. When the gate opens, this is
-		// already the right floor.
-		'restore_database' => '1.12.0',
-		'restore_project'  => '1.12.0',
-		'restore_chain'    => '1.12.0',
+		// The restore family. These floors are live now: the destructive gate
+		// below opens for a node whose agent can ask its own operator for
+		// approval, and that verifier landed in 1.13.0. A 1.12.0 agent ships the
+		// restore vocabulary and refuses every job in it at a compiled ceiling,
+		// so routing to it would trade a transport for a guaranteed refusal —
+		// during a restore, which is the worst moment on the list to find that
+		// out.
+		'restore_database' => '1.13.0',
+		'restore_project'  => '1.13.0',
+		'restore_chain'    => '1.13.0',
+		// Bringing a backup back off the shelf, which is what makes any of the
+		// above have something to restore FROM.
+		'download_backup'  => '1.13.0',
+		'stage_chain'      => '1.13.0',
 	];
 
 	/**
@@ -202,28 +209,50 @@ class JobCommandBuilder {
 	/**
 	 * May this node be sent a destructive primitive job?
 	 *
-	 * FALSE, UNCONDITIONALLY, AND THIS IS THE ONE PLACE THAT CHANGES.
+	 * TRUE FOR A NODE WHOSE AGENT CAN ASK ITS OWN OPERATOR, and that is the
+	 * whole of what this method decides. It is not permission to destroy
+	 * anything: this plane grants none, holds none, and is not in the approval
+	 * path at all — not as a gate, and not as a relay.
 	 *
-	 * A destructive primitive is authorized by a signature the NODE verifies,
-	 * over a challenge the NODE issued — the plane relays it and is never the
-	 * gate (specs/restore_dispatch_approval_mechanism.md). Until that verifier
-	 * exists, the agent refuses every destructive job at a compiled ceiling, so
-	 * a plane that routed restore to the primitive transport would be trading a
-	 * working SSH restore for a guaranteed refusal — and it would find that out
-	 * during a restore, which is the worst moment on the list to discover a
-	 * transport does not work.
+	 * WHAT ACTUALLY AUTHORIZES A RESTORE happens entirely on the node. Its agent
+	 * claims the job, runs nothing, composes its OWN statement of what it would
+	 * do from its own records, seals a one-time challenge to the backup recovery
+	 * public key it already holds, and stages it for the node's own site. An
+	 * operator there opens the challenge with their recovery key and answers.
+	 * Only then does the restore run. This plane sees neither half, and the
+	 * restore vocabulary declares no parameter through which an approval answer
+	 * could travel — so relaying one is impossible by wire format rather than by
+	 * builder care (specs/restore_dispatch_approval_mechanism.md).
 	 *
-	 * So restore keeps travelling by SSH. The builders below exist, are tested,
-	 * and are not reachable; flipping this method is what makes them reachable,
-	 * and nothing else in this file has to change for that to happen.
+	 * So a compromised management node can dispatch a restore job and can do
+	 * nothing whatsoever to get it approved.
 	 *
-	 * @param ManagedNode $node The node a job would be dispatched to. Unused
-	 *   while this is unconditional — it is in the signature because the
-	 *   approval round's answer is per-node: a node that has an approving
-	 *   public key stored root-owned can be asked, and one that has not, cannot.
+	 * THE VERSION FLOOR IS CHECKED HERE, and it has to be here rather than left
+	 * to has_primitive()'s general path. That path returns early for a node that
+	 * REPORTS its vocabulary — the node's own list wins, which is right for
+	 * every other operation — so a node running 1.12.0 reports
+	 * `restore_database,restore_project,restore_chain` (it ships them) and is
+	 * routed at, while its agent refuses the whole class at a compiled ceiling
+	 * because the approval verifier only landed in 1.13.0. Shipping the
+	 * vocabulary and being able to AUTHORIZE a job in it are different facts,
+	 * and only this method knows the difference.
+	 *
+	 * What that cost, before the floor moved here: a mid-rollout node collected
+	 * the agent's opaque "this node does not accept destructive primitives"
+	 * instead of this plane's "apply an update first, there is no SSH route
+	 * left" — the worse of the two messages, at the worse of the two moments.
+	 *
+	 * @param ManagedNode $node The node a job would be dispatched to.
 	 */
 	public static function node_can_dispatch_destructive($node) {
-		return false;
+		if (!self::has_agent_channel($node)) {
+			return false;
+		}
+		// One floor for the family: every restore carries the same requirement,
+		// which is an agent that can ask its own operator.
+		$min = self::PRIMITIVE_MIN_AGENT_VERSION['restore_database'];
+		$version = trim((string)$node->get('mgn_agent_version'));
+		return $version !== '' && version_compare($version, $min, '>=');
 	}
 
 	public static function has_primitive($node, $operation) {
@@ -233,10 +262,11 @@ class JobCommandBuilder {
 		}
 
 		// The destructive gate comes FIRST, ahead of every capability question
-		// below it. Whether the node ships the primitive, and whether its
-		// version is new enough, are both irrelevant while nothing may authorize
-		// the job: a node that ships restore_database and would refuse it is
-		// still a node this plane must not dispatch restore to.
+		// below it. Shipping the primitive is not the same as being able to
+		// authorize a job in it: a node that ships restore_database and would
+		// refuse it at a compiled ceiling is still a node this plane must not
+		// dispatch restore to. The version and vocabulary checks below then
+		// apply as they do to everything else.
 		if (in_array($operation, self::DESTRUCTIVE_PRIMITIVES, true)
 				&& !self::node_can_dispatch_destructive($node)) {
 			return false;
@@ -1079,6 +1109,19 @@ class JobCommandBuilder {
 		if (self::has_primitive($node, 'restore_database')) {
 			return self::build_restore_database_primitive($node, $params);
 		}
+		// The SSH path below no longer runs anywhere. SSH and SCP were removed
+		// from the agent on 2026-08-30, and it refuses a step of either type by
+		// name — so composing these steps would produce a job that dies at its
+		// first step with a message about a deprecated capability, during a
+		// restore. Say what is actually wrong instead, and say it where the
+		// operator is standing.
+		//
+		// The steps themselves are kept, not deleted, and deliberately: they are
+		// the only written record of what a restore used to do, and they come out
+		// once the primitive path has been proven live on a node
+		// (specs/restore_dispatch_approval_mechanism.md, WP5).
+		self::refuse_dead_restore_transport($node, 'restore_database');
+
 		$creds      = self::get_db_credentials_script($node);
 		$scripts    = self::get_scripts_path($node);
 		$sudo       = self::sudo_prefix($node);
@@ -1135,7 +1178,7 @@ class JobCommandBuilder {
 		// that needed it. The node's standing legacy key is not ours to remove.
 		$key_resolve = self::step_resolve_restore_key($node, $restore_path);
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
+			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --no-pre-restore-dump --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
 				. '; RC=$?; if [ -n "$KEY_PATH" ] && [ "$KEY_PATH" != "$HOME/.joinery_backup_key" ]; then rm -f "$KEY_PATH"; fi; exit $RC',
 			'timeout' => 3600];
 
@@ -1311,6 +1354,19 @@ class JobCommandBuilder {
 		if (self::has_primitive($node, 'restore_project')) {
 			return self::build_restore_project_primitive($node, $params);
 		}
+		// The SSH path below no longer runs anywhere. SSH and SCP were removed
+		// from the agent on 2026-08-30, and it refuses a step of either type by
+		// name — so composing these steps would produce a job that dies at its
+		// first step with a message about a deprecated capability, during a
+		// restore. Say what is actually wrong instead, and say it where the
+		// operator is standing.
+		//
+		// The steps themselves are kept, not deleted, and deliberately: they are
+		// the only written record of what a restore used to do, and they come out
+		// once the primitive path has been proven live on a node
+		// (specs/restore_dispatch_approval_mechanism.md, WP5).
+		self::refuse_dead_restore_transport($node, 'restore_project');
+
 		$local_path = $params['local_path'] ?? null;
 		$cloud_path = $params['cloud_path'] ?? null;
 		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
@@ -1624,6 +1680,19 @@ class JobCommandBuilder {
 		if (self::has_primitive($node, 'restore_chain')) {
 			return self::build_restore_chain_primitive($node, $params);
 		}
+		// The SSH path below no longer runs anywhere. SSH and SCP were removed
+		// from the agent on 2026-08-30, and it refuses a step of either type by
+		// name — so composing these steps would produce a job that dies at its
+		// first step with a message about a deprecated capability, during a
+		// restore. Say what is actually wrong instead, and say it where the
+		// operator is standing.
+		//
+		// The steps themselves are kept, not deleted, and deliberately: they are
+		// the only written record of what a restore used to do, and they come out
+		// once the primitive path has been proven live on a node
+		// (specs/restore_dispatch_approval_mechanism.md, WP5).
+		self::refuse_dead_restore_transport($node, 'restore_chain');
+
 		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
 
 		$chain_id = trim((string)($params['chain_id'] ?? ''));
@@ -2586,6 +2655,321 @@ class JobCommandBuilder {
 		}
 
 		return ['primitive' => 'upload_backup', 'params' => $primitive_params];
+	}
+
+	/**
+	 * Bring one of a node's own backups back from the shelf, onto the node.
+	 *
+	 * THE OPERATION THAT MADE RESTORE POSSIBLE AGAIN. Every node in the fleet
+	 * deletes its local archive once it is safely uploaded — right for a small
+	 * disk, and it means the normal state of a machine is "my backups are all
+	 * offsite". The restore primitives take the NAME of a file they expect to
+	 * find in their own backup directory, and that file is never there. Opening
+	 * the destructive gate on its own would have produced a restore that was
+	 * permitted and still restored nothing.
+	 *
+	 * NO CREDENTIAL IS SENT, and that is the whole design of this builder. A node
+	 * holds a WRITE-ONLY bucket credential on purpose: it may add to the shelf
+	 * and may not read from it, because a node that could read the shelf is a
+	 * node whose compromise reaches every other node's backups. So this plane
+	 * signs ONE object key here, with the credential it already holds, for a
+	 * window no longer than the job's own claim budget, and sends the SIGNATURE.
+	 * A signature is not a key: it names one object, the object name is inside
+	 * it, and it expires. There is deliberately no parameter in the primitive
+	 * through which access_key, secret_key or a credentials blob could arrive.
+	 *
+	 * THE NODE CHECKS WHAT ARRIVES. This plane chooses the bucket, the signature
+	 * and the name the file lands under, so the node verifies what it fetches
+	 * against its own upload ledger — written by its own backup run, at upload
+	 * time, before the bytes were anywhere this plane could reach — and refuses
+	 * anything it has no record of making. See BackupLedger; the point of it is
+	 * REPLAY, which sealing does not touch: this plane could otherwise serve a
+	 * node its own genuine month-old archive under a fresh-looking name.
+	 *
+	 * PRIMITIVE ONLY, and there is no SSH twin to fall back to. The SSH path
+	 * heredoc'd a downloader program with credentials baked into it, which is
+	 * the exact capability being deleted; a node that cannot take a primitive
+	 * cannot be given this, and says so.
+	 *
+	 * @param array $params filename, cloud_path (the object key from the
+	 *   listing), profile, include_envelope
+	 */
+	public static function build_download_backup($node, $params = []) {
+		if (!self::has_primitive($node, 'download_backup')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot fetch its own backups back: that needs a paired "
+				. 'agent of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['download_backup'] . '. '
+				. 'There is no SSH equivalent — the old one shipped a downloader with the bucket '
+				. 'credentials inside it.');
+		}
+		return self::build_download_backup_primitive($node, $params);
+	}
+
+	public static function build_download_backup_primitive($node, $params = []) {
+		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+		require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
+
+		$filename = basename(trim((string)($params['filename'] ?? '')));
+		if ($filename === '' || $filename === '.' || $filename === '..') {
+			throw new Exception('No backup filename given.');
+		}
+
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target, "
+				. 'so there is no shelf to fetch from.');
+		}
+
+		$profile = in_array(($params['profile'] ?? ''), ['site', 'manager'], true)
+			? $params['profile'] : 'manager';
+		$key = self::node_object_key($node, $target, $params['cloud_path'] ?? '', $profile);
+
+		$creds = $target->get_credentials();
+		if (empty($creds)) {
+			throw new Exception('The backup target has no stored credentials, so no download can be signed.');
+		}
+
+		$expires = self::signed_link_seconds('download_backup');
+		$primitive_params = [
+			'filename' => $filename,
+			// WHOSE shelf, so the node knows which ledger to check the bytes
+			// against. This plane's own backups of a node are manager-profile,
+			// which is why that is the default here as it is on every other
+			// backup primitive. node_object_key() has already checked it agrees
+			// with the shelf the object is actually on.
+			'profile'  => $profile,
+			'url'      => S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires),
+		];
+
+		// The envelope, when it is wanted. Its object key is DERIVED here from
+		// the archive's, and its landing name is derived again on the node from
+		// the archive it was given — so neither side is naming a .keys.json file
+		// the other did not expect. An encrypted archive without its envelope is
+		// a restore point nobody can open, which is why this is normally on.
+		if (!empty($params['include_envelope'])) {
+			$envelope_key = self::sidecar_object_key($key);
+			$primitive_params['envelope_url'] = S3Signer::presign_get(
+				$creds, $target->get('bkt_bucket'), '/' . ltrim($envelope_key, '/'), $expires);
+		}
+
+		return ['primitive' => 'download_backup', 'params' => $primitive_params];
+	}
+
+	/**
+	 * Put a whole incremental chain back on a node, ready to restore.
+	 *
+	 * Chains are what this fleet actually produces, so this is the staging the
+	 * common restore needs. It replaces the six SSH steps that used to surround
+	 * restore_chain.sh — workspace, manifest fetch through a heredoc'd
+	 * downloader, envelope open, a PYTHON PROGRAM COMPOSED ON THIS PLANE to work
+	 * out which artifacts a run needs, artifact downloads, pre-restore dump.
+	 *
+	 * The Python program is the part worth naming. It made the chain layout
+	 * something two implementations computed, with the authoritative one running
+	 * on the machine that did not write the chain. Here this plane signs every
+	 * object it can see under the chain's prefix and hands the links over keyed
+	 * by bare name; the NODE reads its own manifest and decides which of them it
+	 * needs. This plane has no say in that and cannot express one.
+	 *
+	 * ClassOperate on the node: staging destroys nothing, so it needs no
+	 * approval and can run while the operator is still deciding.
+	 */
+	public static function build_stage_chain($node, $params = []) {
+		if (!self::has_primitive($node, 'stage_chain')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot stage a backup chain: that needs a paired agent "
+				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['stage_chain'] . '.');
+		}
+		return self::build_stage_chain_primitive($node, $params);
+	}
+
+	public static function build_stage_chain_primitive($node, $params = []) {
+		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
+		require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
+
+		$chain_id = trim((string)($params['chain_id'] ?? ''));
+		if ($chain_id === '' || strlen($chain_id) > 64 || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
+			throw new Exception('Staging a chain needs the chain id (for example chain-20260807_231507).');
+		}
+
+		$target = self::get_target($node);
+		if (!$target) {
+			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+		}
+		$creds = $target->get_credentials();
+		if (empty($creds)) {
+			throw new Exception('The backup target has no stored credentials, so no download can be signed.');
+		}
+
+		$slug = trim((string)$node->get('mgn_slug'));
+		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
+			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
+		}
+		// normalize('') means the SITE profile, a different shelf — so an unset
+		// parameter defaults to manager rather than falling through to it, the
+		// same rule the restore builders follow.
+		$profile   = BackupProfile::normalize(trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
+		$chain_key = BackupChainListHelper::chain_path($target, $slug, $profile, $chain_id);
+
+		// Everything on the shelf under this chain, signed. Listed rather than
+		// computed: this plane signs what is THERE, and the node picks from what
+		// its own manifest names. A name in the manifest with no link here is a
+		// missing object, and the node says so by name.
+		$listing = S3Signer::list($creds, $target->get('bkt_bucket'), $chain_key . '/');
+		if (empty($listing) || !is_array($listing)) {
+			throw new Exception("Nothing is stored under {$chain_id} on this node's shelf, so there is "
+				. 'nothing to stage.');
+		}
+
+		$expires  = self::signed_link_seconds('stage_chain');
+		$manifest_url = '';
+		$artifact_urls = [];
+		foreach ($listing as $object) {
+			$key  = (string)($object['key'] ?? $object['Key'] ?? '');
+			if ($key === '' || strpos($key, $chain_key . '/') !== 0) {
+				continue;
+			}
+			$name = basename($key);
+			$url  = S3Signer::presign_get($creds, $target->get('bkt_bucket'), '/' . ltrim($key, '/'), $expires);
+			if ($name === BackupChain::MANIFEST_NAME) {
+				$manifest_url = $url;
+				continue;
+			}
+			// Bare names only, and the node bounds them again. A key with
+			// anything else in it is not something this chain's manifest can
+			// name, so signing it would only widen what travels.
+			if (preg_match('/^[A-Za-z0-9][A-Za-z0-9._-]*$/', $name)) {
+				$artifact_urls[$name] = $url;
+			}
+		}
+
+		if ($manifest_url === '') {
+			throw new Exception("The chain {$chain_id} has no manifest on the shelf, so its artifacts "
+				. 'cannot be identified. A chain without its manifest is not a restore point.');
+		}
+		if (!$artifact_urls) {
+			throw new Exception("The chain {$chain_id} has a manifest but no artifacts on the shelf.");
+		}
+
+		$primitive_params = [
+			'chain_id'      => $chain_id,
+			'profile'       => BackupProfile::path_segment($profile),
+			'manifest_url'  => $manifest_url,
+			'artifact_urls' => $artifact_urls,
+		];
+		if (isset($params['seq']) && $params['seq'] !== '') {
+			$seq = (int)$params['seq'];
+			if ($seq < 0 || $seq > 100000) {
+				throw new Exception('A chain run number must be between 0 and 100000.');
+			}
+			$primitive_params['seq'] = $seq;
+		}
+
+		// The node applies the same ceiling, byte for byte. Checked here so a
+		// chain too long to describe in one job fails where an operator is
+		// standing, naming the reason, rather than travelling to a node to be
+		// refused there.
+		$size = strlen((string)json_encode($primitive_params));
+		if ($size > ManagementJob::MAX_PARAMS_BYTES) {
+			throw new Exception("Staging {$chain_id} would need {$size} bytes of signed links, over the "
+				. ManagementJob::MAX_PARAMS_BYTES . '-byte job limit. This chain has grown longer than a '
+				. 'single staging job can describe — start a fresh chain, or restore it from a shell.');
+		}
+
+		return ['primitive' => 'stage_chain', 'params' => $primitive_params];
+	}
+
+	/**
+	 * Stop a restore that would be composed for a transport nothing runs.
+	 *
+	 * Every restore now travels as a primitive to the node's own agent, where
+	 * the node's own operator approves it. A node that cannot take one has no
+	 * remaining route: the agent refuses ssh and scp steps outright. This turns
+	 * that into an answer an operator can act on — upgrade the agent, or pair
+	 * the node — rather than a job that fails at step one with a message about
+	 * a step type.
+	 */
+	private static function refuse_dead_restore_transport($node, $operation) {
+		$slug = $node->get('mgn_slug');
+		if (!self::has_agent_channel($node)) {
+			throw new Exception(
+				"Node '{$slug}' has no paired agent, so there is no way to restore it in place. "
+				. 'Restores travel to the node\'s own agent and are approved on the node itself; '
+				. 'the SSH route was removed. Pair the node, or rebuild it from a backup.');
+		}
+		$min     = self::PRIMITIVE_MIN_AGENT_VERSION[$operation] ?? '';
+		$version = (string)$node->get('mgn_agent_version');
+		throw new Exception(
+			"Node '{$slug}' is running agent " . ($version !== '' ? $version : 'an unknown version')
+			. ", which cannot ask its own operator to approve a restore. That needs at least {$min}. "
+			. 'Apply an update to the node first — there is no SSH route left to fall back to.');
+	}
+
+	/**
+	 * How long a signed download link stays valid: exactly the claim budget of
+	 * the job that carries it.
+	 *
+	 * "Expiring with the job" rather than a round number chosen for comfort. A
+	 * link that outlives its job is a standing read on someone else's backup
+	 * sitting in a job row; a link shorter than the transfer it authorizes is a
+	 * download that dies half way through a multi-gigabyte archive.
+	 */
+	private static function signed_link_seconds($primitive) {
+		return (int)(ManagementJob::PRIMITIVE_CLAIM_BUDGETS[$primitive] ?? ManagementJob::CLAIM_TIMEOUT_SECONDS);
+	}
+
+	/**
+	 * The object key a download may name, checked to be one of THIS node's.
+	 *
+	 * The caller passes the key it read out of the shelf listing, which is the
+	 * honest source — this plane should not be recomputing an object layout the
+	 * node's own backup engine already decided. What it must not do is sign a
+	 * key belonging to a different node: every node's archives live in one
+	 * bucket under its own slug, so an unchecked key here would let one node be
+	 * handed another's backup and, with a matching ledger entry absent, at least
+	 * waste a transfer — and at worst, on a slug typo, restore the wrong site.
+	 */
+	private static function node_object_key($node, $target, $cloud_path, $profile = null) {
+		$key = ltrim(trim((string)$cloud_path), '/');
+		if ($key === '') {
+			throw new Exception('No cloud object was named for this download.');
+		}
+		if (strpos($key, '..') !== false) {
+			throw new Exception('That is not a usable object key.');
+		}
+		$slug = trim((string)$node->get('mgn_slug'));
+		$prefix = rtrim(trim((string)$target->get('bkt_path_prefix')) ?: 'joinery-backups', '/');
+		$node_prefix = $prefix . '/' . $slug . '/';
+		if (strpos($key, $node_prefix) !== 0) {
+			throw new Exception("That backup is not on node '{$slug}' shelf, so it will not be sent there.");
+		}
+
+		// The profile has to agree with the shelf the object is actually on.
+		//
+		// The two are chosen independently — one from the caller's parameter,
+		// one from the object key it read out of a listing — and nothing made
+		// them agree. A disagreement is not exploitable (the node lands the file
+		// in the named profile's directory and checks it against that profile's
+		// ledger, where the name will not be found, so it refuses) but it is a
+		// job that was always going to fail, dispatched, and a refusal for a
+		// reason that has nothing to do with what went wrong. Two values that
+		// look like they should agree, and did not have to, is how a real
+		// mismatch hides.
+		$rest = substr($key, strlen($node_prefix));
+		$segment = strtok($rest, '/');
+		if ($profile !== null && in_array($segment, array('site', 'manager'), true) && $segment !== $profile) {
+			throw new Exception("That backup is on the '{$segment}' shelf but the restore names the "
+				. "'{$profile}' one. The node would look for it in the wrong directory and refuse.");
+		}
+		return $key;
+	}
+
+	/** The envelope's object key beside an archive's. Derived, never supplied. */
+	private static function sidecar_object_key($key) {
+		$dir = trim((string)dirname($key), '.');
+		$name = BackupEnvelope::sidecar_name(basename($key));
+		return ($dir === '' || $dir === '/') ? $name : rtrim($dir, '/') . '/' . $name;
 	}
 
 	/**
@@ -3658,7 +4042,7 @@ class JobCommandBuilder {
 			$restore_engine = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/restore_database.sh";
 			$db_dump_arg = escapeshellarg($remote_db_dump);
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
-				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
+				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --no-pre-restore-dump --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
 				'timeout' => 3600]);
 
 			// backup_project.sh archives are two levels deep:

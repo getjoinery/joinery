@@ -166,9 +166,25 @@ class ManagementJob extends SystemBase {
 		// The agent declares 70m for restore_database; this is that plus room to
 		// post the result, not the same number — a budget equal to the node's
 		// deadline requeues a job whose result is still in flight.
-		'restore_database'      => 4500,  // 70m + slack
-		'restore_project'       => 8100,  // 2h15m
-		'restore_chain'         => 15720, // 4h20m + slack — a chain restore replays every run
+		//
+		// Each of these now carries the agent's APPROVAL WINDOW as well as its
+		// work. A destructive job is claimed, and then held while the node's own
+		// operator opens a challenge on the node's own site and answers it — the
+		// wait happens inside the claim, because a challenge is bound to a
+		// specific job and re-dispatching would issue a different one. Fifteen
+		// minutes of that is inside every number below. A budget sized for the
+		// restore alone would requeue a job during the approval the restore
+		// requires.
+		'restore_database'      => 5400,  // 70m + 15m approval + slack
+		'restore_project'       => 8100,  // 70m + 15m approval, with room
+		'restore_chain'         => 15720, // 2h20m + 15m approval + slack
+		// Bringing a backup back off the shelf. Mirrors upload_backup's budget,
+		// because it is the same transfer in the other direction and S3Signer's
+		// window is what bounds both.
+		'download_backup'       => 5220,  // 85m + slack
+		// A whole chain: a full plus every incremental, each of them possibly
+		// gigabytes. Sized to the agent's own declaration for it.
+		'stage_chain'           => 8700,  // 2h20m + slack
 	];
 
 	/** The shortest budget in play — the SQL prefilter cannot use less. */

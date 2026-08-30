@@ -2420,6 +2420,18 @@
       "helptext": "JSON handoff from the Management Node admin page to this machine's root agent: {requested_time}. The web tier writes it when the admin asks to disconnect from the management node; the agent sends one best-effort signed goodbye (so the management node forgets this machine's key), deletes its identity, and clears it. Never holds a credential."
     },
     {
+      "name": "restore_approval_request",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff from this machine's root agent to its own Backups page: {job_id, primitive, summary, facts, challenge, public_key, info, issued_time, expires_time}. The agent writes it when it has claimed a job that would erase this machine's data — it runs nothing until a person here approves. The challenge is a one-time secret sealed to this machine's own backup recovery public key, so the web tier can render the screen without being able to approve anything itself. Cleared by the agent when the job ends. Never holds a key."
+    },
+    {
+      "name": "restore_approval_answer",
+      "default": "",
+      "managed": true,
+      "helptext": "JSON handoff the other way: {job_id, answer} or {job_id, declined}. Written by this machine's Backups page after an administrator opened the pending challenge with their recovery key in the browser; the agent compares the answer in constant time against what it sealed, and only then restores. The answer is a one-time secret bound to one job and is worthless for anything else. Cleared by the agent."
+    },
+    {
       "name": "api_upload_rate_limit_requests",
       "default": "10000",
       "helptext": "Max Drive chunk-upload requests per window per IP (own bucket, not the general API limit).",

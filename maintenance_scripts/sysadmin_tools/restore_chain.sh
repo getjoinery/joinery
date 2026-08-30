@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 
 # restore_chain.sh - Restore a project from an incremental backup chain
+# Version: 1.3.0 - config/backup-ledger is held across the extraction. The incremental extract
+#                  replays deletions, and the directory is absent from the listings of runs
+#                  taken before it existed — so a chain restore DELETED the record every later
+#                  restore checks its archives against, and the next one refused everything
 # Version: 1.2.1 - the sudo capability probe asks with -v instead of running true,
 #                  which sudo mails root about when the account may not. Same
 #                  change in the sibling scripts.
@@ -297,6 +301,37 @@ if [ "${#KEPT_FILES[@]}" -gt 0 ]; then
     print_info "Holding this machine's own ${KEPT_FILES[*]} across the extraction"
 fi
 
+# config/backup-ledger is held across the extraction for a DIFFERENT reason, and
+# it is a directory rather than a file.
+#
+# The incremental extract below replays deletions: each archive carries its
+# directories' full listings and tar removes anything local the listing does not
+# mention. This directory did not exist when the chain's earlier runs were taken,
+# so config/'s listing does not mention it — and tar deletes it. Not overwrites:
+# deletes. The first chain restore would therefore destroy the record every
+# LATER restore checks its archives against, and the second restore would refuse
+# everything with "this node has no upload ledger". A safety file that is only
+# missing on the day it is needed is worse than no safety file at all.
+#
+# Best effort, deliberately, and this is the difference from the two files
+# above. Losing Globalvars_site.php or backup_site_key is unrecoverable or
+# site-breaking, so failing to hold those aborts the restore. Losing the ledger
+# costs the NEXT restore, not this one, and it rebuilds itself from the next
+# backup run — so it must never be the reason a recovery in progress stops.
+LEDGER_REL="config/backup-ledger"
+LEDGER_KEPT=false
+if [ -d "${PROJECT_DIR}/${LEDGER_REL}" ]; then
+    mkdir -p "${KEEP_TMP}/config"
+    if ${SUDO} cp -a "${PROJECT_DIR}/${LEDGER_REL}" "${KEEP_TMP}/${LEDGER_REL}" 2>/dev/null; then
+        LEDGER_KEPT=true
+        print_info "Holding this machine's own ${LEDGER_REL} across the extraction"
+    else
+        print_warning "Could not hold ${LEDGER_REL} across the extraction. The restore continues;"
+        print_warning "archives uploaded before the next backup run may not be restorable over the"
+        print_warning "agent channel until then."
+    fi
+fi
+
 # ── Apply ───────────────────────────────────────────────────────────────────
 #
 # --incremental on extraction is what replays deletions: each archive carries
@@ -319,6 +354,23 @@ for archive in "${FILES_ARCHIVES[@]}"; do
     i=$((i+1))
 done
 print_success "Files restored to ${PROJECT_DIR}"
+
+# The ledger goes back first, and wholesale: this machine's record of what IT
+# uploaded is the only correct one, and a chain from another machine carries
+# hashes of files this machine never wrote. The destination is removed rather
+# than merged for the same reason — a merge would leave the archive's stale
+# entries sitting beside the live ones.
+if [ "$LEDGER_KEPT" = true ]; then
+    ${SUDO} rm -rf "${PROJECT_DIR}/${LEDGER_REL}"
+    ${SUDO} mkdir -p "${PROJECT_DIR}/config"
+    if ${SUDO} cp -a "${KEEP_TMP}/${LEDGER_REL}" "${PROJECT_DIR}/${LEDGER_REL}"; then
+        print_info "Put this machine's own ${LEDGER_REL} back"
+    else
+        print_warning "Could not put ${LEDGER_REL} back; a copy is at ${KEEP_TMP}/${LEDGER_REL}"
+        print_warning "until this script exits. Restores over the agent channel will refuse until"
+        print_warning "the next backup run rebuilds it."
+    fi
+fi
 
 # Put this machine's own files back over whatever the chain brought.
 for rel in ${KEPT_FILES[@]+"${KEPT_FILES[@]}"}; do

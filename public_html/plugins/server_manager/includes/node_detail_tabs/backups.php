@@ -324,6 +324,19 @@
 				echo '<button type="button" class="btn btn-outline-warning btn-sm me-1" onclick="openRestoreModal(' . $ra . ')">Restore</button>';
 			}
 
+			// A backup that exists ONLY in the cloud cannot be restored — the
+			// node's restore takes a name it resolves in its own backup
+			// directory, and every node in this fleet deletes its local copy
+			// after upload, so this is the normal state rather than an unusual
+			// one. Bringing it back is a separate, non-destructive step: the
+			// object is signed here and the node checks what arrives against its
+			// own upload ledger before it lands.
+			if ($has_cloud && !$has_local) {
+				$da = htmlspecialchars(json_encode($fn)) . ', '
+				    . htmlspecialchars(json_encode($cloud_path)) . ', this';
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="downloadBackup(' . $da . ')">Bring back to node</button>';
+			}
+
 			// A backup that exists only on the node is one disk failure from gone —
 			// which is the state an upload interrupted by a transient provider error
 			// leaves behind. Offer the push whenever there is somewhere to push to.
@@ -387,13 +400,23 @@
 				    . htmlspecialchars(json_encode(array_map(function ($r) {
 						return ['seq' => $r['seq'], 'level' => $r['level'], 'time' => substr((string)$r['time'], 0, 16)];
 					}, $runs)));
+				// Prepare, then restore. Two buttons rather than one, because
+				// they are genuinely two decisions: staging downloads the chain
+				// and recovers its data key from this machine's own key, and
+				// destroys nothing; the restore replays it over live data and
+				// has to be approved on the node itself.
+				$sa = htmlspecialchars(json_encode($c['chain_id'])) . ', '
+				    . htmlspecialchars(json_encode($c['profile'])) . ', this';
+				echo '<button type="button" class="btn btn-outline-primary btn-sm me-1" onclick="stageChain(' . $sa . ')">Prepare</button>';
 				echo '<button type="button" class="btn btn-outline-warning btn-sm" onclick="openChainRestoreModal(' . $ca . ')">Restore</button>';
 				echo '</td></tr>';
 			}
 			echo '</tbody></table>';
 			echo '<p class="text-muted small mb-0">A chain restores as at one of its runs: the full, then every '
 			   . 'incremental up to that run, in order. Each artifact is checked against its recorded size and '
-			   . 'hash before anything is written.</p>';
+			   . 'hash before anything is written. <strong>Prepare first</strong> — that downloads the chain onto '
+			   . 'the node and recovers its data key there; the restore itself then has to be approved on the '
+			   . 'node\'s own Backups page with its backup recovery key.</p>';
 		}
 
 		$page->end_box();
@@ -706,6 +729,101 @@ function uploadBackup(filename, localPath, btn) {
 		})
 		.catch(function() {
 			uploadBackupFailed(btn, 'Upload request failed');
+		});
+}
+
+// Bring one cloud-only backup back onto the node, so a restore has something to
+// restore from. Deliberately shares pollUploadJob's shape rather than
+// pollBackupList's: a transfer can genuinely fail, and a failed transfer
+// reported as done is the exact thing that would send someone into a restore
+// with nothing there.
+function downloadBackup(filename, cloudPath, btn) {
+	var status = document.getElementById('backupScanStatus');
+	if (btn) { btn.disabled = true; btn.textContent = 'Fetching...'; }
+	status.style.display = 'block';
+	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Bringing '
+		+ smEsc(filename) + ' back onto the node...</span>';
+
+	smApiPost('backup_actions', { action: 'download_file', node_id: backupNodeId,
+			filename: filename, cloud_path: cloudPath })
+		.then(function(data) {
+			if (!data.success) {
+				downloadBackupFailed(btn, smEsc(data.message));
+				return;
+			}
+			// Re-scan when it lands. Without it the archive is on the node and
+			// the row still says cloud-only, so Restore stays hidden and the
+			// operator has to guess that a manual scan is what unblocks them.
+			pollTransferJob(data.job_id, btn, 'Bring back to node',
+				'On the node now — rescanning so Restore becomes available...', refreshBackupList);
+		})
+		.catch(function() {
+			downloadBackupFailed(btn, 'Request failed');
+		});
+}
+
+function downloadBackupFailed(btn, html) {
+	if (btn) { btn.disabled = false; btn.textContent = 'Bring back to node'; }
+	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
+}
+
+// Download a whole chain onto the node and recover its data key there. Nothing
+// is destroyed by this, which is why it is a separate button from Restore.
+function stageChain(chainId, profile, btn) {
+	var status = document.getElementById('backupScanStatus');
+	if (btn) { btn.disabled = true; btn.textContent = 'Preparing...'; }
+	status.style.display = 'block';
+	status.innerHTML = '<span class="text-muted"><span class="spinner-border spinner-border-sm me-1"></span> Downloading '
+		+ smEsc(chainId) + ' onto the node and recovering its key there...</span>';
+
+	smApiPost('backup_actions', { action: 'stage_chain', node_id: backupNodeId,
+			chain_id: chainId, profile: profile })
+		.then(function(data) {
+			if (!data.success) {
+				stageChainFailed(btn, smEsc(data.message));
+				return;
+			}
+			pollTransferJob(data.job_id, btn, 'Prepare',
+				'Ready on the node. Restore now, and approve it on the node\'s own Backups page.');
+		})
+		.catch(function() {
+			stageChainFailed(btn, 'Request failed');
+		});
+}
+
+function stageChainFailed(btn, html) {
+	if (btn) { btn.disabled = false; btn.textContent = 'Prepare'; }
+	document.getElementById('backupScanStatus').innerHTML = '<span class="text-danger">' + html + '</span>';
+}
+
+// One poller for both directions of transfer. Like pollUploadJob it distinguishes
+// "finished" from "succeeded"; unlike it, it does not reload the page — a
+// prepared chain has nothing new to show in the list, and a reload would throw
+// away the message that says what to do next.
+function pollTransferJob(jobId, btn, label, doneMessage, onDone) {
+	var status = document.getElementById('backupScanStatus');
+
+	smApiPost('backup_actions', { action: 'list_status', node_id: backupNodeId, job_id: jobId })
+		.then(function(data) {
+			if (data.status === 'pending' || data.status === 'running') {
+				setTimeout(function() { pollTransferJob(jobId, btn, label, doneMessage, onDone); }, 3000);
+				return;
+			}
+			if (btn) { btn.disabled = false; btn.textContent = label; }
+			if (data.job_status !== 'completed') {
+				status.innerHTML = '<span class="text-danger">Did not finish. '
+					+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
+					+ '">See the job output</a> for what the node said.</span>';
+				return;
+			}
+			status.innerHTML = '<span class="text-success">' + smEsc(doneMessage) + '</span>';
+			if (typeof onDone === 'function') { onDone(); }
+		})
+		.catch(function() {
+			if (btn) { btn.disabled = false; btn.textContent = label; }
+			status.innerHTML = '<span class="text-danger">Lost track of the job. '
+				+ '<a href="/admin/server_manager/job_detail?job_id=' + encodeURIComponent(jobId)
+				+ '">Check it here</a>.</span>';
 		});
 }
 

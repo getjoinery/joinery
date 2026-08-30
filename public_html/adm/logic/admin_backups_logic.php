@@ -64,6 +64,12 @@ function admin_backups_logic($input = array()) {
 	// that they are unset.
 	require_once(PathHelper::getIncludePath('includes/ManagementNodeStatus.php'));
 
+	// A restore this machine's own agent is holding open, waiting for a person
+	// here to authorize it. Read on every render rather than cached: the agent
+	// stages and clears it underneath a running process, and a stale copy would
+	// be an approval screen for a restore that is no longer running.
+	require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));
+
 	return LogicResult::render(array(
 		'session'       => $session,
 		'settings'      => Globalvars::get_instance(),
@@ -76,6 +82,7 @@ function admin_backups_logic($input = array()) {
 		'task'          => _admin_backups_task_state(),
 		'is_managed'    => ManagementNodeStatus::is_managed(),
 		'manager_url'   => ManagementNodeStatus::manager_url(),
+		'approval'      => RestoreApproval::pending(),
 	));
 }
 
@@ -120,6 +127,43 @@ function _admin_backups_handle($action, array $input, $session) {
 				BackupRecoveryKey::record_possession_proof((string)($input['recovery_proof'] ?? ''));
 				$say('Verified — the key you hold opens what this site seals.', true);
 				return $url . '#recovery-key';
+
+			// ── Approving a restore this machine's own agent is holding ──
+			//
+			// Nothing is decided here. The answer is a one-time secret that only
+			// the recovery key could have produced, and the agent compares it in
+			// constant time against what it sealed. This handler moves a string;
+			// a compromised web tier gains nothing by reaching it, because it
+			// still could not produce the string.
+			//
+			// BOTH ACTIONS VERIFY THEIR TOKEN, and DECLINE is the one that needs
+			// it. Approving is self-protecting — an attacker cannot produce the
+			// sealed answer — but declining takes nothing but a job id that is
+			// printed on the page. This handler runs on any request carrying an
+			// `action`, GET included, so without a token check a superadmin
+			// lured to a crafted link would refuse a restore that was mid-flight
+			// on a machine somebody is trying to recover. It fails safe (nothing
+			// is destroyed) and it fails at the worst moment, which is why these
+			// two are checked where the rest of this file's actions are not.
+			case 'approve_restore':
+			case 'decline_restore': {
+				require_once(PathHelper::getIncludePath('includes/RestoreApproval.php'));
+				$form = ($action === 'approve_restore') ? 'restore_approval_form' : 'restore_decline_form';
+				$fw = new FormWriterV2HTML5($form);
+				if (!$fw->validateCSRF($input)) {
+					$say('That request could not be verified — reload the Backups page and try again.', false);
+					return $url;
+				}
+				$job_id = (int)($input['approval_job_id'] ?? 0);
+				if ($action === 'approve_restore') {
+					RestoreApproval::answer($job_id, (string)($input['approval_answer'] ?? ''));
+					$say('Approved. This machine is checking your answer and will start the restore.', true);
+				} else {
+					RestoreApproval::decline($job_id);
+					$say('Declined. Nothing was restored, and the job is reported refused.', true);
+				}
+				return $url;
+			}
 
 			case 'save_target': {
 				$id = (int)($input['bkt_id'] ?? 0);
