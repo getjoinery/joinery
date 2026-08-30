@@ -33,6 +33,9 @@
  * profile sweeps its own working directory by age, because the machine holding
  * the files is the only one that can.
  *
+ * @version 1.8 - every uploaded artifact is recorded in the node-side integrity ledger, so a
+ *                restore can tell this machine's own archive from bytes a management node
+ *                chose; an artifact that could not be recorded is reported, not swallowed
  * @version 1.7 - the local sweep reaches inside chain directories, so a site running
  *                incrementals ages its local copies out instead of keeping every archive
  *                it has ever made. manifest.json and the snapshot are never swept
@@ -62,6 +65,7 @@
  */
 
 require_once(PathHelper::getIncludePath('includes/BackupEnvelope.php'));
+require_once(PathHelper::getIncludePath('includes/BackupLedger.php'));
 require_once(PathHelper::getIncludePath('includes/BackupChain.php'));
 require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
 require_once(PathHelper::getIncludePath('includes/BackupProfile.php'));
@@ -1107,6 +1111,7 @@ class BackupRunner {
 		$base_key = $prefix . '/' . $plan['slug'] . '/' . BackupProfile::path_segment($plan['profile']) . '/';
 
 		$out = array();
+		$unledgered = array();
 		foreach ($artifacts as $a) {
 			$key = $base_key . $sub . $a['name'];
 			$resp = S3Signer::put_file($creds, $bucket, '/' . ltrim($key, '/'), $a['path']);
@@ -1115,9 +1120,34 @@ class BackupRunner {
 				$msg = S3Signer::extract_error($resp['body'] ?? '') ?: ('HTTP ' . $status);
 				throw new BackupRunnerException('Upload of ' . $a['name'] . ' failed: ' . $msg);
 			}
+
+			// Record what went up, hashed from the file that went up, on the
+			// machine that made it. This is the only moment the bytes and the
+			// name are together somewhere no management node has ever been, so
+			// it is the only moment a record of the pairing is worth anything.
+			// The relative name is what a later download will ask for, chain
+			// subdirectory included.
+			if (!BackupLedger::record($plan['profile'], $sub . $a['name'], $a['path'], $key)) {
+				$unledgered[] = $a['name'];
+			}
+
 			$a['key'] = $key;
 			$out[] = $a;
 		}
+
+		// Said out loud rather than logged quietly. An artifact that reached the
+		// bucket but was not recorded here is a real backup that cannot be
+		// restored over the agent channel — the node refuses an archive it has
+		// no record of making — and the operator should learn that now rather
+		// than during a restore. The usual cause is a backup run by an
+		// unprivileged user: the ledger is root-owned on purpose.
+		if ($unledgered) {
+			error_log('BackupRunner: uploaded but NOT recorded in the integrity ledger ('
+				. BackupLedger::dir() . ' is not writable by ' . self::whoami() . '): '
+				. implode(', ', $unledgered)
+				. ' — these archives cannot be restored over the agent channel.');
+		}
+
 		return $out;
 	}
 

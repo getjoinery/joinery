@@ -1,4 +1,13 @@
 #!/usr/bin/env bash
+#Version 3.6 - The safety dump is created under umask 077 rather than chmod'd after the
+#              redirect: it is a full plaintext copy of the live database, and on a container
+#              node it lands inside the site tree where the web tier could read it in the gap
+#Version 3.5 - The pre-restore safety dump is taken in --non-interactive mode too. It used to be
+#              skipped there on the grounds that "the dashboard always prepends its own
+#              auto-backup step" — true of the SSH path and structurally impossible on the
+#              primitive path, where one job runs one script. Every unattended restore over the
+#              agent channel therefore dropped a live schema with no dump behind it. The caller
+#              that really has taken one passes --no-pre-restore-dump
 #Version 3.4 - An envelope-sealed archive restores unattended: when no --key-file is given, the
 #              <archive>.keys.json sidecar beside it is opened with this machine's own
 #              backup_site_key, the way restore_project.sh 1.3.0 already does
@@ -14,8 +23,15 @@
 # The one implementation of PostgreSQL restore used by every path (dashboard
 # jobs, project restore, from-backup install, manual ops). Contract:
 #
-#   restore_database.sh DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]
+#   restore_database.sh DB_NAME FILE [--non-interactive] [--key-file PATH]
+#                       [--db-user USER] [--no-pre-restore-dump]
+#                       [--pre-restore-dump-dir PATH]
 #
+#   * A safety dump of the existing database is written beside the archive
+#     before anything is dropped, unless --no-pre-restore-dump says a caller has
+#     already taken one. It is best-effort and never blocks the restore: a
+#     machine with no room says so and carries on, because refusing to restore
+#     is not the safer answer when someone is already recovering.
 #   * Verify before destroy: the archive is decrypted (if .enc) and integrity-
 #     checked into a temp file BEFORE the target database is touched. A bad key,
 #     truncated file, or corrupt archive exits with the database untouched.
@@ -42,6 +58,18 @@ info() { echo "$@" >&2; }
 NON_INTERACTIVE=false
 KEY_FILE=""
 DB_USER="postgres"
+# The safety dump is ON by default, including unattended. A caller that has
+# genuinely taken its own opts out; a caller that forgets gets the safe thing.
+# That direction is the whole point of the flag — the previous shape assumed
+# every unattended caller had prepended a dump, and the one that could not
+# (a primitive runs one script) silently lost it.
+PRE_RESTORE_DUMP=true
+# Where the safety dump goes. Empty means "beside the archive", which is right
+# whenever the archive is sitting in a backup directory. A caller whose archive
+# is in a staging directory it is about to delete has to say so — restore_project
+# extracts beside the archive and cleans up after itself, so a dump written
+# there would be removed by the very restore it exists to undo.
+PRE_RESTORE_DUMP_DIR=""
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
@@ -51,8 +79,12 @@ while [[ $# -gt 0 ]]; do
         --key-file=*)         KEY_FILE="${1#*=}"; shift ;;
         --db-user)            DB_USER="$2"; shift 2 ;;
         --db-user=*)          DB_USER="${1#*=}"; shift ;;
+        --no-pre-restore-dump) PRE_RESTORE_DUMP=false; shift ;;
+        --pre-restore-dump-dir)   PRE_RESTORE_DUMP_DIR="$2"; shift 2 ;;
+        --pre-restore-dump-dir=*) PRE_RESTORE_DUMP_DIR="${1#*=}"; shift ;;
         --help|-h)
             info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
+            info "          [--no-pre-restore-dump] [--pre-restore-dump-dir PATH]"
             info ""
             info "Supported formats: .sql  .sql.gz  .sql.gz.enc"
             info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR"
@@ -319,16 +351,50 @@ if [ -n "$DUMP_PG_MAJOR" ] && [ -n "$TARGET_VERSION_NUM" ]; then
     fi
 fi
 
-# --- Stage 2: optional pre-restore safety dump (manual runs only) --------------
-# The dashboard always prepends its own auto-backup step, so we skip ours in
-# --non-interactive mode to avoid a duplicate dump and any openssl prompt.
-if [ "$NON_INTERACTIVE" != true ]; then
+# --- Stage 2: pre-restore safety dump -----------------------------------------
+#
+# THIS RUNS UNATTENDED TOO, and that is the correction. It used to be skipped
+# whenever --non-interactive was given, on the reasoning that "the dashboard
+# always prepends its own auto-backup step". That was true of the SSH path,
+# which composed a pg_dump step in front of this one — and it is structurally
+# impossible on the primitive path, where one job runs one script and there is
+# nowhere to prepend anything. So every unattended restore over the agent
+# channel dropped a live schema with nothing behind it.
+#
+# A caller that really has taken its own dump says so with
+# --no-pre-restore-dump. Defaulting the other way would put the safety of the
+# most destructive operation in the platform back into a promise each caller has
+# to remember to keep.
+#
+# Best-effort by design: a machine with no room to write the dump says so and
+# continues. Refusing to restore is not the safer answer at the moment somebody
+# is already recovering from something.
+if [ "$PRE_RESTORE_DUMP" = true ]; then
     DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null)
     if [ "$DB_EXISTS" = "1" ]; then
         now=$(date +"%Y%m%d_%H%M%S")
-        safety="${DB_NAME}-${now}-pre-restore.sql.gz"
+        # BESIDE THE ARCHIVE, not in the current directory. A bare filename put
+        # the dump wherever the caller happened to be standing — which for a
+        # root agent is whatever its working directory is, and for an operator
+        # is wherever they ran the command from. Beside the archive is where
+        # somebody looking for it will look, and it is the one directory on the
+        # machine that is sized for backups.
+        dump_dir="${PRE_RESTORE_DUMP_DIR:-$(dirname "$INPUT_FILE")}"
+        safety="${dump_dir}/${DB_NAME}-${now}-pre-restore.sql.gz"
         info "📦 Creating pre-restore safety dump: $safety"
-        if pg_dump -U "$DB_USER" "$DB_NAME" 2>/dev/null | gzip -9 > "$safety" 2>/dev/null; then
+        # umask BEFORE the redirect, not chmod after it. The redirect creates the
+        # file under the ambient umask (typically 0644) and it is a full
+        # plaintext copy of the live database — on a container node the backup
+        # directory resolves inside the site tree, so between creation and the
+        # chmod anything with a shell, the web tier included, can read the whole
+        # database. Creating it closed removes the window rather than shortening
+        # it; the chmod stays as a belt for a pre-existing file.
+        old_umask=$(umask)
+        umask 077
+        pg_dump -U "$DB_USER" "$DB_NAME" 2>/dev/null | gzip -9 > "$safety" 2>/dev/null
+        dump_rc=$?
+        umask "$old_umask"
+        if [ "$dump_rc" -eq 0 ]; then
             chmod 600 "$safety" 2>/dev/null
             info "✓ Pre-restore safety dump written."
         else

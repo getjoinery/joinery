@@ -21,6 +21,8 @@
 #     (the one path allowed to modify the database and then fail)
 #   * dump from a newer PostgreSQL -> RESTORE_SERVER_TOO_OLD, target UNTOUCHED
 #   * target database absent -> created and loaded
+#   * an unattended restore takes a pre-restore safety dump of what it is about
+#     to destroy, and --no-pre-restore-dump is the only way to turn that off
 #
 # The "untouched" assertions are the point: verify-before-destroy means a bad
 # key or corrupt archive can never leave a half-dropped database behind.
@@ -178,6 +180,49 @@ M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --db-user postgres 2>/dev/n
 chk "absent-target restore marker (createdb branch)" "$M" "RESTORE_OK"
 chk "absent-target restore row count" \
     "$(psql -U postgres -d "$DST" -XtAc "SELECT count(*) FROM t" 2>/dev/null)" "500"
+
+# --- 9: the pre-restore safety dump -------------------------------------------
+#
+# The one thing standing between a wrong restore and unrecoverable loss, and it
+# used to be skipped for exactly the restores that had no other safety net.
+# --non-interactive turned it off on the reasoning that "the dashboard always
+# prepends its own auto-backup step" — true of the SSH path, and structurally
+# impossible on the primitive path, where one job runs one script.
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+psql -U postgres -d "$DST" -q -c "CREATE TABLE t(id int, v text); INSERT INTO t VALUES (1,'about-to-be-destroyed');" >/dev/null 2>&1
+rm -f "$WORK"/*-pre-restore.sql.gz
+M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --db-user postgres 2>/dev/null)
+chk "unattended restore still succeeds" "$M" "RESTORE_OK"
+SAFETY=$(ls -t "$WORK"/"$DST"-*-pre-restore.sql.gz 2>/dev/null | head -1)
+chk "an unattended restore takes a safety dump" "$([ -n "$SAFETY" ] && [ -s "$SAFETY" ] && echo yes)" "yes"
+# It has to hold what was there BEFORE, or it is not a safety dump.
+chk "the safety dump holds what was destroyed" \
+    "$(gunzip -c "$SAFETY" 2>/dev/null | grep -c 'about-to-be-destroyed')" "1"
+# And it lands beside the archive, which is the node's backup directory — not in
+# whatever directory the caller happened to be standing in.
+chk "the safety dump lands beside the archive" "$(dirname "$SAFETY")" "$(dirname "$PLAIN")"
+# It is a full plaintext copy of the live database, and on a container node it
+# lands inside the site tree. Created closed rather than created open and
+# tightened — a chmod after the redirect leaves a window in which anything with
+# a shell can read the whole database.
+chk "the safety dump is never readable beyond its owner" "$(stat -c '%a' "$SAFETY" 2>/dev/null)" "600"
+
+# The opt-out, for the caller that has genuinely taken its own dump.
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+rm -f "$WORK"/*-pre-restore.sql.gz
+M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --no-pre-restore-dump --db-user postgres 2>/dev/null)
+chk "the opt-out still restores" "$M" "RESTORE_OK"
+chk "--no-pre-restore-dump takes no dump" \
+    "$(ls "$WORK"/*-pre-restore.sql.gz 2>/dev/null | wc -l)" "0"
+
+# A caller whose archive sits in a directory it is about to delete says where
+# the dump should go instead. restore_project.sh is that caller.
+dropdb -U postgres --if-exists "$DST" >/dev/null 2>&1; createdb -U postgres "$DST"
+ELSEWHERE="$WORK/elsewhere"; mkdir -p "$ELSEWHERE"
+M=$(bash "$ENGINE" "$DST" "$PLAIN" --non-interactive --pre-restore-dump-dir "$ELSEWHERE" --db-user postgres 2>/dev/null)
+chk "a directed safety dump still restores" "$M" "RESTORE_OK"
+chk "the safety dump goes where it was directed" \
+    "$(ls "$ELSEWHERE"/*-pre-restore.sql.gz 2>/dev/null | wc -l)" "1"
 
 echo
 if [ "$failed" -eq 0 ]; then

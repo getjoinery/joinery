@@ -452,6 +452,59 @@ unfinished large files after 7 days) as the backstop.
 `sha256` and `bytes` are computed from the local file either way; a restore
 verifies against them and cannot tell how the object was uploaded.
 
+### The upload ledger
+
+Every artifact that reaches the bucket is also recorded on the machine that made
+it, in `config/backup-ledger/{profile}.json`: the artifact's name relative to
+its backup directory, its sha256, its size, and when it went up. `BackupLedger`
+writes it, from `BackupRunner::upload()`, at the moment of upload.
+
+It exists for one adversary: the party that chooses where a restore's bytes come
+from. When a management node runs this machine's backups it also owns the bucket
+and signs the download, and the person approving a restore approves a *name* and
+a date — they never see the bytes. The ledger is the only thing on the machine
+able to say whether those bytes are the ones it uploaded under that name. Two
+attacks fail against it, and the second is the one that carries it:
+
+- **Forgery** — an artifact whose content is simply made up. The hash does not
+  match.
+- **Replay** — this machine's own genuine month-old archive, served under a
+  fresh-looking name. Every signature verifies and every envelope opens, because
+  it really is this machine's backup; sealing does not touch this at all. The
+  name it is offered under has no record, so it is refused.
+
+A name that is legitimately rewritten keeps its earlier versions. Only one is:
+a chain's `manifest.json`, which every run of that chain rewrites. The ledger
+answers "did this machine make these bytes", not "are these the newest bytes it
+made" — so a chain staged for restore is not refused because a scheduled backup
+happened to land while somebody was reading the approval screen. What is
+reported back is the version that matched, so the age shown on that screen is
+the age of the bytes being restored.
+
+The address is chosen for two properties that are invisible from the code that
+reads it. `config/` is a named volume on a container node, so the ledger survives
+a container rebuild — a ledger under `/var/lib` would not, and since a ledger
+only records what has been uploaded *since*, restore would stay broken for as
+long as the current chain is old. And `restore_project.sh` drops
+`config/backup-ledger` from a staged archive the same way it drops
+`Globalvars_site.php` and `backup_site_key`: they are the machine's, not the
+backup's, so the first restore cannot overwrite the record that vouches for the
+second.
+
+A backup taken by an unprivileged process cannot write the ledger; the run
+reports that rather than hiding it, because an unledgered artifact is one the
+machine will refuse to restore from over the agent channel. On a managed node
+the backups that matter are taken by the root agent, so they are ledgered as a
+matter of course.
+
+The ledger is `0700`/`0600`, and both the platform and the agent **refuse** one
+that group or other can write rather than reading it. Anything that can write
+the ledger can vouch for any bytes it likes, so a loose ledger does not weaken
+the check — it makes the check report success. The test is on the mode, not on
+the owner: backups legitimately run as root on a managed node and as the site
+user elsewhere. `fix_permissions.sh` pins the directory out of its sweep to
+match.
+
 ## Retention
 
 - **Cloud** — keep the newest N restore points (default 4). Older ones are
@@ -506,6 +559,15 @@ openssl magic bytes, not the filename, so a renamed archive still restores. It
 takes `--domain` to name the domain the restored site is to answer to; without
 it the site keeps the domain this machine's config already names.
 
+A **pre-restore safety dump** of the existing database is written beside the
+archive before anything is dropped — on unattended restores as well as manual
+ones, because a restore over the agent channel runs one script and has nowhere
+to prepend its own. A caller that has already taken one passes
+`--no-pre-restore-dump`, and `--pre-restore-dump-dir` directs it somewhere that
+will survive when the archive is sitting in a staging directory. It is
+best-effort: a machine with no room says so and the restore continues, because
+refusing to restore is not the safer answer when somebody is already recovering.
+
 The target's PostgreSQL must be at least as new as the source's. A dump carries
 the syntax of the version that wrote it, so the restore reads that version from
 the dump header and refuses before replacing the schema when the target is
@@ -519,6 +581,64 @@ new hardware is: install the site, then restore onto it. See
 
 Bucket credentials plus the password-manager private key are sufficient to
 recover from total loss of the machine.
+
+### Restoring a managed node from its management node
+
+A managed node is restored over the agent channel, and it takes three steps
+because they are three genuinely different decisions.
+
+**Bring the backup back.** Every node deletes its local archive once it is
+safely uploaded, so the normal state of a machine is that its backups are all
+offsite — and a restore takes the name of a file it expects to find in its own
+backup directory. *Bring back to node* on the node's Backups tab (or *Prepare*,
+for a chain) fetches it. No bucket credential is sent: the management node signs
+one object key, for no longer than the job's own claim budget, and the node
+receives the signature. A node's stored credential is write-only by design,
+because a node that could read the shelf is a node whose compromise reaches
+every other node's backups. Everything fetched is checked against the node's own
+upload ledger before it lands, and lands `0600` — created that way, not chmod'd
+afterwards, because on a container node the backup directory is inside the site
+tree and a descriptor opened during a multi-gigabyte transfer stays open. The
+transfer is capped at the size the ledger recorded, so a response that declines
+to say how big it is cannot run the node's disk to zero; and a failed download
+reports its HTTP status without its body, because the plane picks the URL and
+reads the transcript.
+
+**Ask for the restore.** The management node dispatches it as a primitive. It
+sends a *name* and a profile — no path, no key, no bucket, no domain. A chain
+restore also carries a project, and the node treats it as a claim to check
+rather than an instruction: `restore_chain.sh` spends that value twice, on the
+tree it replaces and on the database name it loads over, so the node uses its
+own project and refuses a job naming any other.
+
+**Approve it on the node.** The node's agent claims the job and runs nothing. It
+composes its own statement of what it would do — which project, which database,
+which archive, the archive's real age, size and fingerprint — from its own
+records, seals a
+one-time challenge to the backup recovery public key it already holds, binds it
+to that job and that statement, and stages it for the node's own site. The
+node's Backups page shows the pending approval; the operator opens the challenge
+there with their recovery key, in their browser, and answers. The agent verifies
+the answer against what it sealed and only then restores.
+
+**The management node is not in that path at all** — not as a gate, and not as a
+relay. The challenge and the answer live entirely between the node's own site and
+its own agent, and the restore vocabulary declares no parameter through which an
+approval answer could travel, so relaying one is impossible by wire format rather
+than by care. A management node can dispatch a restore and can do nothing
+whatsoever to get it approved.
+
+The costs are deliberate and worth stating. Restoring in place requires the
+node's site to be up; a node whose site will not boot is rebuilt and restored
+(`install_mode = from_backup`), which needs no approval because there is no node
+yet to ask. An unanswered challenge expires and the job is refused, so a restore
+nobody is watching fails rather than pinning the node. And a support-driven
+restore requires the customer to be reachable: there is no unattended
+destructive path, including for us.
+
+The archive's age is on the approval screen as an age, above the key box, because
+it is the one fact no automatic check can substitute for — a replayed archive is
+genuine, signed and openable, and only its date is wrong.
 
 ## The node tool
 

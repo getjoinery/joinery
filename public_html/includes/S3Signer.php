@@ -9,6 +9,8 @@
  * Expected credential shape: ['access_key' => ..., 'secret_key' => ...,
  *                             'region' => ..., 'endpoint' => ...]
  *
+ * @version 1.5 - presign_get(): a URL that reads one object for a bounded time, so a node can
+ *                fetch a backup back without ever being handed a bucket credential
  * @version 1.4 - multipart upload: put_file() switches to the S3 multipart API above
  *                MULTIPART_THRESHOLD_BYTES, lifting the 5 GB single-PUT ceiling; parts
  *                are hashed and signed individually, retried on the existing budget,
@@ -675,6 +677,87 @@ class S3Signer {
 		if (preg_match('#<Message>(.*?)</Message>#s', $xml_body, $m)) return trim($m[1]);
 		if (preg_match('#<Code>(.*?)</Code>#s', $xml_body, $m)) return trim($m[1]);
 		return null;
+	}
+
+	/**
+	 * A URL that reads ONE object, for a bounded number of seconds, and can do
+	 * nothing else.
+	 *
+	 * This exists so that a node fetching a backup back out of the bucket never
+	 * receives a bucket credential. The standing rule for the fleet is that a
+	 * node holds a WRITE-ONLY credential — it may add to the shelf and may not
+	 * read from it or clear it — because a node that could read the shelf is a
+	 * node whose compromise reaches every other node's backups. A restore needs
+	 * a read, and the honest way to grant exactly one read is to sign one, here,
+	 * on the machine that already holds the credential, and hand over the
+	 * signature rather than the key.
+	 *
+	 * What the node gets is therefore not a narrower credential; it is not a
+	 * credential. It names one object key, it expires, and it cannot be
+	 * re-pointed: the object key is inside the signature.
+	 *
+	 * SigV4 query-string form. The payload hash is UNSIGNED-PAYLOAD because a
+	 * GET has no payload and every S3-compatible provider accepts that here;
+	 * host is the only signed header, so the fetching side needs to set nothing
+	 * but the URL.
+	 *
+	 * @param array  $creds   ['access_key','secret_key','region','endpoint']
+	 * @param string $bucket  Bucket name.
+	 * @param string $path    Object path after the bucket, leading slash required.
+	 * @param int    $expires Seconds the URL stays valid. Clamped to the SigV4
+	 *                        maximum of seven days; callers should pass the
+	 *                        smallest window the transfer can finish in.
+	 */
+	public static function presign_get($creds, $bucket, $path, $expires = 3600) {
+		self::validate_creds($creds);
+
+		$expires = (int)$expires;
+		if ($expires < 60) { $expires = 60; }
+		if ($expires > 604800) { $expires = 604800; }   // SigV4 ceiling: 7 days
+
+		$parsed = parse_url($creds['endpoint']);
+		if (empty($parsed['host'])) {
+			throw new S3SignerException('Invalid endpoint: ' . $creds['endpoint']);
+		}
+		$scheme = $parsed['scheme'] ?? 'https';
+		// The port belongs in the host for the signature as well as the URL —
+		// same reason request() gives: SigV4 signs the host header and curl
+		// sends host:port.
+		$host = $parsed['host'] . (isset($parsed['port']) ? ':' . $parsed['port'] : '');
+
+		$region     = $creds['region'];
+		$amz_date   = gmdate('Ymd\THis\Z');
+		$date_stamp = gmdate('Ymd');
+		$scope      = "{$date_stamp}/{$region}/" . self::SERVICE . "/aws4_request";
+
+		$canonical_uri = '/' . rawurlencode($bucket) . self::encode_path($path);
+
+		$params = [
+			'X-Amz-Algorithm'     => 'AWS4-HMAC-SHA256',
+			'X-Amz-Credential'    => $creds['access_key'] . '/' . $scope,
+			'X-Amz-Date'          => $amz_date,
+			'X-Amz-Expires'       => (string)$expires,
+			'X-Amz-SignedHeaders' => 'host',
+		];
+		ksort($params);
+		$canonical_qs = '';
+		foreach ($params as $k => $v) {
+			if ($canonical_qs !== '') { $canonical_qs .= '&'; }
+			$canonical_qs .= rawurlencode($k) . '=' . rawurlencode($v);
+		}
+
+		$canonical_headers = "host:{$host}\n";
+		$canonical_request = "GET\n{$canonical_uri}\n{$canonical_qs}\n{$canonical_headers}\nhost\nUNSIGNED-PAYLOAD";
+		$string_to_sign    = "AWS4-HMAC-SHA256\n{$amz_date}\n{$scope}\n" . hash('sha256', $canonical_request);
+
+		$k_date    = hash_hmac('sha256', $date_stamp, 'AWS4' . $creds['secret_key'], true);
+		$k_region  = hash_hmac('sha256', $region, $k_date, true);
+		$k_service = hash_hmac('sha256', self::SERVICE, $k_region, true);
+		$k_signing = hash_hmac('sha256', 'aws4_request', $k_service, true);
+		$signature = hash_hmac('sha256', $string_to_sign, $k_signing);
+
+		return $scheme . '://' . $host . $canonical_uri . '?' . $canonical_qs
+			. '&X-Amz-Signature=' . $signature;
 	}
 
 	private static function validate_creds($creds) {

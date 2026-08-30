@@ -131,6 +131,38 @@ chk "the changed file has the NEW content" \
 chk "the DELETED file is gone, not resurrected" \
     "$([ -e "$W/out/site/will_delete.txt" ] && echo present || echo gone)" "gone"
 
+# ── The machine's own upload ledger survives the extraction ─────────────────
+#
+# The check above — "the DELETED file is gone, not resurrected" — is the same
+# mechanism seen from the other side, and it is what makes this necessary.
+# --incremental extraction replays deletions from each archive's directory
+# listings, so ANYTHING present locally that the listings do not mention is
+# removed. config/backup-ledger did not exist when these runs were taken, so it
+# is not in any listing.
+#
+# Without the hold in restore_chain.sh, the first chain restore deletes the
+# record that every LATER restore checks its archives against, and the next
+# restore refuses everything with "this node has no upload ledger". The
+# safety file would be missing only on the day it was needed.
+echo "== The machine's own ledger survives a chain restore =="
+rm -rf "$W/out"; mkdir -p "$W/out/site/config/backup-ledger"
+printf '{"db-0000.sql.gz.enc":{"sha256":"deadbeef","bytes":1}}'     > "$W/out/site/config/backup-ledger/manager.json"
+chmod 700 "$W/out/site/config/backup-ledger"
+chmod 600 "$W/out/site/config/backup-ledger/manager.json"
+
+bash "$RESTORE" testsite --target-dir "$W/out/site" --artifacts "$W/arts" \
+    --key-file "$W/chain.key" --force --skip-database >/dev/null 2>&1
+
+chk "the upload ledger survives a chain restore" \
+    "$([ -f "$W/out/site/config/backup-ledger/manager.json" ] && echo present || echo deleted)" "present"
+chk "and still holds what this machine recorded, not the archive's copy" \
+    "$(grep -c deadbeef "$W/out/site/config/backup-ledger/manager.json" 2>/dev/null)" "1"
+# Permissions matter as much as presence: the agent refuses a ledger that is
+# group- or other-writable, so a restore that put it back wide open would leave
+# every later restore refusing for a different reason.
+chk "and is not left writable by group or other" \
+    "$(stat -c '%a' "$W/out/site/config/backup-ledger/manager.json" 2>/dev/null)" "600"
+
 # ── Snapshot loss degrades to a new chain ───────────────────────────────────
 echo "== Snapshot loss =="
 rm -f "$SNAR"

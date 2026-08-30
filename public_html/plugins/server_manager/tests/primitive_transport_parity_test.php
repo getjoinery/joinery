@@ -112,11 +112,47 @@ section('The plane waits at least as long as the node intends to work');
 //
 // The safety property is one-directional: plane budget >= agent timeout. Longer
 // only slows recovery from a genuine crash; shorter duplicates live work.
+
+/**
+ * Package-level duration constants in the agent's primitives package, as
+ * seconds. Only the simple `const Name = N * time.Unit` form — anything more
+ * elaborate is left unresolved, so a Timeout referring to it still fails loudly
+ * rather than being guessed at.
+ */
+function parity_agent_duration_constants($source_path) {
+	$units = [
+		'time.Nanosecond' => 1e-9, 'time.Microsecond' => 1e-6, 'time.Millisecond' => 1e-3,
+		'time.Second' => 1, 'time.Minute' => 60, 'time.Hour' => 3600,
+	];
+	$out = [];
+	foreach (glob(rtrim($source_path, '/') . '/primitives/*.go') as $file) {
+		if (substr($file, -8) === '_test.go') continue;
+		$src = file_get_contents($file);
+		if (!preg_match_all('/^const\s+(\w+)\s*=\s*(\d+)\s*\*\s*(time\.\w+)\s*$/m', $src, $m, PREG_SET_ORDER)) {
+			continue;
+		}
+		foreach ($m as $c) {
+			if (isset($units[$c[3]])) {
+				$out[$c[1]] = (int)((int)$c[2] * $units[$c[3]]);
+			}
+		}
+	}
+	return $out;
+}
+
 function parity_agent_timeouts($source_path) {
 	$units = [
 		'time.Nanosecond' => 1e-9, 'time.Microsecond' => 1e-6, 'time.Millisecond' => 1e-3,
 		'time.Second' => 1, 'time.Minute' => 60, 'time.Hour' => 3600,
 	];
+	// Named durations the agent adds to a primitive's own work, read from the
+	// agent's source rather than copied here. The restore family declares
+	// `70*time.Minute + ApprovalWindow`, and that is the honest expression: the
+	// node holds a claimed destructive job open while its own operator answers a
+	// challenge, so the wait is part of the deadline the plane must not undercut.
+	// Resolving the constant keeps the agent free to write it that way; a test
+	// that could only read literals would push the number into three places.
+	$constants = parity_agent_duration_constants($source_path);
 	$timeouts = [];
 
 	foreach (glob(rtrim($source_path, '/') . '/primitives/*.go') as $file) {
@@ -137,6 +173,8 @@ function parity_agent_timeouts($source_path) {
 				$term = trim($term);
 				if (preg_match('/^(\d+)\s*\*\s*(time\.\w+)$/', $term, $m) && isset($units[$m[2]])) {
 					$total += (int)$m[1] * $units[$m[2]];
+				} elseif (isset($constants[$term])) {
+					$total += $constants[$term];
 				} else { $ok = false; break; }
 			}
 			$timeouts[$n[1]] = $ok ? (int)$total : false;

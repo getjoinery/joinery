@@ -450,6 +450,15 @@ window.recoveryReadiness = (function () {
 	// renders in several places and each one wiring its own listeners is how one
 	// of them ends up with a button that does nothing.
 	function attachPanel() {
+		// The restore-approval screen (RestoreApprovalPanel) uses the same
+		// ceremony — open a challenge sealed to the recovery key, submit what
+		// came out — under its OWN global. Separate because the two panels can
+		// appear on one page, and a second assignment to window.rrPanel would
+		// silently replace the first: on the approval screen, that means a
+		// button that does nothing on the page where someone is trying to
+		// authorize a restore.
+		if (window.rrApproval) attachCeremony(window.rrApproval);
+
 		var cfg = window.rrPanel;
 		if (!cfg) return;
 		if (cfg.generator) attachGenerator(cfg.generator);

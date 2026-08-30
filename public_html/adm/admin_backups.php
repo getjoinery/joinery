@@ -20,6 +20,7 @@ $default_slug = $page_vars['default_slug'];
 $task         = $page_vars['task'];
 $is_managed   = $page_vars['is_managed'];
 $manager_url  = $page_vars['manager_url'];
+$approval     = $page_vars['approval'];
 
 $page = new AdminPage();
 $page->admin_header(array(
@@ -36,6 +37,19 @@ $tz = $session->get_timezone();
 $when = function ($utc) use ($tz) {
 	return $utc ? LibraryFunctions::convert_time($utc, 'UTC', $tz, 'M j, Y g:i A T') : '—';
 };
+
+// ── A restore waiting on a person ───────────────────────────────────────────
+// FIRST, above everything, when there is one. This machine's own agent has
+// claimed a job that will erase live data, has run nothing, and is holding it
+// open until somebody here says yes with the recovery key. It is the most urgent
+// thing this page can be showing, and it is showing it because the machine
+// itself asked — not because a management node did.
+if ($approval) {
+	require_once(PathHelper::getIncludePath('includes/RestoreApprovalPanel.php'));
+	$page->begin_box(array('title' => 'Approve a restore'));
+	RestoreApprovalPanel::render($page, $approval);
+	$page->end_box();
+}
 
 // ── Status ──────────────────────────────────────────────────────────────────
 // One box that answers "am I backed up?", because that is the only question

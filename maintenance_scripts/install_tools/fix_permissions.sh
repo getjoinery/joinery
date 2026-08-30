@@ -1,4 +1,7 @@
 #!/usr/bin/env bash
+#VERSION 3.1 - config/backup-ledger is pruned from the sweep and pinned to 700/600. The sweep
+#              made it 770 (prod) or 777 (dev), so anyone with a shell could rewrite the one
+#              file a restore consults to decide whether bytes are this machine's own
 #VERSION 3.0 - The recursive chown -R / chmod -R sweep became a find that changes only files
 #              whose owner or mode is actually wrong, and skips symlinks. An unconditional -R
 #              bumped every file's ctime on every deploy, and GNU tar incremental re-dumps on
@@ -107,8 +110,17 @@ PINNED=(
     "$SITE_ROOT/config/provisioning_key"
     "$SITE_ROOT/config/admin_credentials.txt"
 )
+
+# Directories with deliberately tighter permissions. Separate from PINNED
+# because a directory needs BOTH itself and its contents pruned — a lone
+# -not -path skips the directory and then walks straight into it.
+PINNED_DIRS=(
+    "$SITE_ROOT/config/backup-ledger"
+)
+
 PRUNE=()
 for p in "${PINNED[@]}"; do PRUNE+=( -not -path "$p" ); done
+for d in "${PINNED_DIRS[@]}"; do PRUNE+=( -not -path "$d" -not -path "$d/*" ); done
 
 # Ownership and permissions are corrected with find, matching only what is
 # ALREADY wrong — not a blanket chown -R / chmod -R. A recursive chown/chmod
@@ -160,6 +172,28 @@ if [ -f "$BACKUP_KEY" ]; then
     echo "  Pinning key $BACKUP_KEY to 640 www-data:www-data..."
     chown www-data:www-data "$BACKUP_KEY"
     chmod 640 "$BACKUP_KEY"
+fi
+
+# config/backup-ledger records what this machine uploaded, and a restore checks
+# an archive against it before loading it as root over live data. The sweep
+# above would make it 770 in production and 777 in dev — which is not "the web
+# user owns it", it is "anyone with a shell on this box can vouch for any bytes
+# they like", on the one file whose entire job is vouching. That turns a
+# management node's forged or replayed archive into an accepted one.
+#
+# 0700/0600 www-data:www-data, the same posture and the same reasoning as
+# config/backup_site_key above: backups run under more than one account (the web
+# user on a scheduled run, root via the agent on a managed node), and both are
+# parties already trusted to make a backup. What is closed is everybody else.
+# The agent refuses a ledger that is group- or other-writable, so a future sweep
+# that widened this again would fail restores loudly rather than silently
+# accepting whatever it found.
+LEDGER_DIR="$SITE_ROOT/config/backup-ledger"
+if [ -d "$LEDGER_DIR" ]; then
+    echo "  Pinning $LEDGER_DIR to 700 www-data:www-data..."
+    chown -R www-data:www-data "$LEDGER_DIR"
+    chmod 700 "$LEDGER_DIR"
+    find "$LEDGER_DIR" -type f -exec chmod 600 {} +
 fi
 
 # The agent release signing key — the fleet trust root. Anyone who can read it

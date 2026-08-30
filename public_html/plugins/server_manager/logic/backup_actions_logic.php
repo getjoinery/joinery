@@ -2,11 +2,18 @@
 /**
  * server_manager/backup_actions — backup browser actions.
  *
- * Input: action ∈ {refresh_list, delete_file, upload_file, list_status} + node_id
- * (+ target/local_path/cloud_path for delete_file, local_path for upload_file,
- * job_id for list_status). refresh_list, delete_file and upload_file create jobs;
- * list_status returns the cached backup list. Superadmin only (floor 10).
+ * Input: action ∈ {refresh_list, delete_file, upload_file, download_file,
+ * stage_chain, list_status} + node_id (+ target/local_path/cloud_path for
+ * delete_file, local_path for upload_file, cloud_path for download_file,
+ * chain_id/profile for stage_chain, job_id for list_status). Everything but
+ * list_status creates a job; list_status returns the cached backup list.
+ * Superadmin only (floor 10).
  *
+ * @version 1.4.0 - download_file and stage_chain: bring a cloud-only backup, or a whole
+ *                  incremental chain, back onto the node so a restore has something to
+ *                  restore from. Neither sends a bucket credential — the object is signed
+ *                  here and the node receives the signature, checked against its own
+ *                  upload ledger before anything lands.
  * @version 1.3.0 - upload_file refuses to send an encrypted archive offsite without the key
  *                  that opens it: the envelope travels with it, or the upload is blocked
  *                  with an override. The key is minted per artifact and stored nowhere else.
@@ -203,6 +210,73 @@ function backup_actions_logic(array $input): LogicResult {
 		]);
 	}
 
+	// ── Bring a cloud-only backup back onto the node ────────────────────────
+	//
+	// The action that makes a restore possible at all on this fleet. Every node
+	// deletes its local archive once it is safely uploaded, so the normal state
+	// of a machine is "my backups are all offsite" — and the restore primitives
+	// take the NAME of a file they expect to find in their own backup directory.
+	// Without this they find nothing.
+	//
+	// No credential is sent. The builder signs one object key here, for no
+	// longer than the job's own claim budget, and the node receives the
+	// signature. It then checks what arrives against its own upload ledger and
+	// refuses anything it has no record of making.
+	if ($action === 'download_file') {
+		$cloud_path = trim((string)($input['cloud_path'] ?? ''));
+		$filename   = basename(trim((string)($input['filename'] ?? '')) ?: $cloud_path);
+		if ($cloud_path === '' || $filename === '') {
+			return LogicResult::render(['success' => false, 'message' => 'Missing cloud_path']);
+		}
+
+		require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
+		$params = [
+			'filename'   => $filename,
+			'cloud_path' => $cloud_path,
+			'profile'    => in_array((string)($input['profile'] ?? ''), ['site', 'manager'], true)
+				? (string)$input['profile'] : 'manager',
+			// An encrypted archive without its envelope is not a restore point,
+			// it is noise — the data key exists nowhere else. So the key file
+			// travels back with anything sealed, always, rather than being an
+			// option somebody has to know to tick.
+			'include_envelope' => BackupNaming::is_encrypted($filename),
+		];
+
+		try {
+			$built = JobCommandBuilder::build_download_backup($node, $params);
+		} catch (Exception $e) {
+			return LogicResult::render(['success' => false, 'message' => $e->getMessage()]);
+		}
+
+		$job = ManagementJob::createFromBuild($node->key, 'download_backup', $built, $params, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
+	// ── Put a whole incremental chain back on the node, ready to restore ────
+	//
+	// Separate from the restore, and deliberately so. Staging destroys nothing,
+	// needs no approval, and can be done while the operator is still deciding —
+	// so the destructive step stays as small as it can be, and an operator can
+	// look at what arrived before authorizing anything.
+	if ($action === 'stage_chain') {
+		$params = [
+			'chain_id' => trim((string)($input['chain_id'] ?? '')),
+			'profile'  => trim((string)($input['profile'] ?? '')),
+		];
+		if (isset($input['seq']) && $input['seq'] !== '') {
+			$params['seq'] = (int)$input['seq'];
+		}
+
+		try {
+			$built = JobCommandBuilder::build_stage_chain($node, $params);
+		} catch (Exception $e) {
+			return LogicResult::render(['success' => false, 'message' => $e->getMessage()]);
+		}
+
+		$job = ManagementJob::createFromBuild($node->key, 'stage_chain', $built, $params, $session->get_user_id());
+		return LogicResult::render(['success' => true, 'job_id' => $job->key]);
+	}
+
 	if ($action === 'list_status') {
 		$job_id = isset($input['job_id']) ? (int) $input['job_id'] : 0;
 
@@ -257,7 +331,7 @@ function backup_actions_logic_descriptor(): array {
 		'requires_session'        => true,
 		'auth'        => ['min_user_permission' => 10],
 		'input'       => [
-			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'list_status'], 'label' => 'Action'],
+			'action'     => ['type' => 'string', 'required' => false, 'enum' => ['refresh_list', 'delete_file', 'upload_file', 'download_file', 'stage_chain', 'list_status'], 'label' => 'Action'],
 			'node_id'    => ['type' => 'int',    'required' => false, 'label' => 'Node ID'],
 			'job_id'     => ['type' => 'int',    'required' => false, 'label' => 'Job ID (list_status)'],
 			'target'     => ['type' => 'string', 'required' => false, 'label' => 'Delete target'],

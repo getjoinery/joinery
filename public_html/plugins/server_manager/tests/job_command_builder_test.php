@@ -629,124 +629,75 @@ check(file_exists($partial . '/public_html/index.php') && !file_exists($partial 
 	'the partial fixture has site code but a missing upload');
 check($run_verify($partial) === 1, 'verification rejects a restore that silently lost one file');
 
-section('Restore-project job: the verification step is a gate');
+section('Restore jobs travel to the node, and refuse when they cannot');
 
-// The restore job's own verify step used to be a directory listing, which
-// succeeds whether or not anything was restored — a green step that proves
-// nothing. It has to be able to fail.
+// Restore moved to the agent channel on 2026-08-30
+// (specs/restore_dispatch_approval_mechanism.md). The SSH steps this section
+// used to compose are unreachable — the agent refuses ssh and scp by name — so
+// composing them would produce a job that dies at its first step, during a
+// restore. The entry point says what is actually wrong instead.
 $restore_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/restoresite/public_html',
 	'mgn_ssh_user' => 'root'));
-$restore_steps = JobCommandBuilder::build_restore_project($restore_node, array(
-	'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz',
-	'domain'     => 'restored.example.com',
-));
 
-$rp_verify = null;
-foreach ($restore_steps as $step) {
-	if (($step['label'] ?? '') === 'Verify restore') { $rp_verify = $step; }
-}
-check($rp_verify !== null, 'the restore job emits a verification step');
-$rp_cmd = $rp_verify['cmd'] ?? '';
-check(strpos($rp_cmd, 'exit 1') !== false,
-	'the verification can fail the job', $rp_cmd);
-check(strpos($rp_cmd, 'serve.php') !== false,
-	'it asserts the web root actually holds a site', $rp_cmd);
-check(!preg_match('/^ls -la/', $rp_cmd),
-	'it is not a bare directory listing', $rp_cmd);
-
-// Run it against a web root that has no site: it must fail rather than report.
-$empty_root = $tmpdir . '/emptyroot';
-@mkdir($empty_root, 0777, true);
-$probe = 'test -s ' . escapeshellarg($empty_root) . '/serve.php || '
-	. "{ echo 'VERIFY FAILED'; exit 1; }";
-@shell_exec('( ' . $probe . ' ) >/dev/null 2>&1; echo $? > ' . escapeshellarg($empty_root . '/.rc'));
-$probe_rc = trim((string)@file_get_contents($empty_root . '/.rc'));
-check($probe_rc === '1', 'that assertion fails on a web root with no site', 'rc: ' . $probe_rc);
-
-section('Restore jobs reconcile the site to the machine they land on');
-
-// A backup can be rebuilt anywhere, so the machine it lands on is usually not
-// the one it came from. Every restore path has to settle the domain, the
-// deployment shape and the serving config — and prove it did.
-
-$rp_labels = array_map(function ($s) { return $s['label']; }, $restore_steps);
-$rp_all    = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $restore_steps));
-
-check(strpos($rp_all, '--domain ' . escapeshellarg('restored.example.com')) !== false,
-	'the restore is told which domain the site is to answer to');
-check(strpos($rp_all, '--skip-apache') === false,
-	'no restore path asks the script to skip the serving config');
-check(in_array('Verify the site agrees with this machine', $rp_labels),
-	'the job proves the restored identity', implode(' | ', $rp_labels));
-check(in_array('Verify the site is served', $rp_labels),
-	'the job proves the site is actually served', implode(' | ', $rp_labels));
-
-// The drill's failure passed an HTTP-only check comfortably: the site answered
-// on :80 the whole time, under a container's internal virtualhost, with a valid
-// certificate sitting unused on disk.
-$served = null;
-$identity = null;
-foreach ($restore_steps as $step) {
-	if (($step['label'] ?? '') === 'Verify the site is served') { $served = $step['cmd'] ?? ''; }
-	if (($step['label'] ?? '') === 'Verify the site agrees with this machine') { $identity = $step['cmd'] ?? ''; }
-}
-check(strpos((string)$served, 'https://') !== false,
-	'the served check asks for HTTPS, not merely HTTP', (string)$served);
-check(strpos((string)$served, 'exit 1') !== false,
-	'the served check can fail the job', (string)$served);
-check(strpos((string)$identity, 'deployment_environment') !== false
-	&& strpos((string)$identity, 'baremetal') !== false,
-	'the identity check asserts the deployment shape of THIS machine', (string)$identity);
-check(strpos((string)$identity, 'webDir') !== false,
-	'the identity check asserts the domain the site calls itself', (string)$identity);
-
-// The domain is required, never inferred. A node provisioned during an incident
-// carries whatever hostname somebody typed in a hurry, so adopting it silently
-// is the failure that only surfaces after DNS moves.
-$threw = false;
+$rp_threw = '';
 try {
 	JobCommandBuilder::build_restore_project($restore_node, array(
-		'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz'));
-} catch (Exception $e) {
-	$threw = (strpos($e->getMessage(), 'domain') !== false);
-}
-check($threw, 'a restore with no domain is refused at job-build time, naming the reason');
+		'local_path' => '/backups/restoresite-2026-01-01-000000.tar.gz',
+		'domain'     => 'restored.example.com',
+	));
+} catch (Exception $e) { $rp_threw = $e->getMessage(); }
+check(strpos($rp_threw, 'no paired agent') !== false,
+	'an unpaired node refuses a project restore, naming why', $rp_threw);
+check(strpos($rp_threw, 'rebuild it from a backup') !== false,
+	'and says what to do instead — a machine with no agent is rebuilt, not restored in place',
+	$rp_threw);
 
-// A container's public face is the HOST's proxy virtualhost, which lives
-// outside the container and so appears in no backup at all.
-$dock_restore = jcb_node(array(
-	'mgn_container_name' => 'dockrestore',
-	'mgn_web_root'       => '/var/www/html/dockrestore/public_html'));
-$dock_steps = JobCommandBuilder::build_restore_project($dock_restore, array(
-	'local_path' => '/backups/dockrestore-2026-01-01-000000.tar.gz',
-	'domain'     => 'restored.example.com'));
-$dock_publish = null;
-foreach ($dock_steps as $step) {
-	if (($step['label'] ?? '') === 'Publish the domain on the container host') { $dock_publish = $step; }
-}
-check($dock_publish !== null, 'a container restore publishes the domain on its host');
-check(!empty($dock_publish['on_host']),
-	'that step runs on the host, not inside the container');
-check(strpos($dock_publish['cmd'] ?? '', 'manage_domain.sh') !== false,
-	'it uses manage_domain.sh, which owns the proxy virtualhost', $dock_publish['cmd'] ?? '');
+// A paired node gets a primitive envelope, and the envelope carries a NAME.
+$paired_restore = jcb_node(array(
+	'mgn_web_root'         => '/var/www/html/restoresite/public_html',
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x01", 32)),
+	'mgn_agent_version'    => '1.13.0'));
+$rp_built = JobCommandBuilder::build_restore_project($paired_restore, array(
+	'filename' => 'restoresite-2026-01-01-000000.tar.gz',
+	'domain'   => 'restored.example.com',
+));
+check(($rp_built['primitive'] ?? '') === 'restore_project',
+	'a paired node gets a primitive envelope');
+check(!isset($rp_built['params']['domain']),
+	'the domain does not travel — the node keeps its own identity, and a plane that could name '
+	. 'one could redirect a restore onto a name of its choosing',
+	json_encode($rp_built['params'] ?? null));
 
-// A bare-metal node has nothing to proxy.
-$bare_publish = false;
-foreach ($restore_steps as $step) {
-	if (($step['label'] ?? '') === 'Publish the domain on the container host') { $bare_publish = true; }
-}
-check(!$bare_publish, 'a bare-metal restore emits no host proxy step');
+// WHAT WAS LOST WITH THE SSH STEPS, recorded rather than quietly dropped.
+//
+// The SSH job wrapped the restore in plane-side checks: "Verify restore" (the
+// web root actually holds a serve.php), "Verify the site agrees with this
+// machine", and "Verify the site is served" — the last of which exists because
+// an HTTP-only check once passed comfortably while the site was answering on
+// :80 under a container virtualhost with a valid certificate sitting unused.
+//
+// A primitive runs ONE script, so there is nowhere to hang those. The reconcile
+// half moved into the scripts (restore_project.sh 1.4.0, restore_chain.sh both
+// call reconcile_site.sh), but nothing proves afterwards that the site came
+// back up. This is an assurance gap, not a data-safety one, and it needs a
+// decision rather than a quiet fix — a probe inside the restore script would
+// fail good restores whenever SSL or DNS was not yet settled.
+harness_skip('a restore proves the site is served afterwards',
+	'the SSH path checked it plane-side and the primitive path has nowhere to; '
+	. 'see specs/restore_dispatch_approval_mechanism.md');
 
 section('Chain restore: the fleet backups are restorable at all');
 
 // The manager backup profile writes CHAINS, not standalone archives. Without a
 // chain restore job the backups every scheduled run uploads could not be
 // restored from the dashboard.
+// Paired, because that is the only way a chain restore travels now.
 $chain_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/chainsite/public_html',
-	'mgn_slug'     => 'chainsite',
-	'mgn_ssh_user' => 'root'));
+	'mgn_web_root'         => '/var/www/html/chainsite/public_html',
+	'mgn_slug'             => 'chainsite',
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x02", 32)),
+	'mgn_agent_version'    => '1.13.0'));
 
 $chain_threw = '';
 try {
@@ -756,61 +707,41 @@ try {
 check(strpos($chain_threw, 'chain id') !== false,
 	'a malformed chain id is refused, naming what was expected', $chain_threw);
 
-// The shape of the job itself. A chain restore that skipped any of these would
-// be a restore that wrote before it verified, or one that could not open what
-// it downloaded.
-$chain_steps = array();
-$chain_build_error = '';
+// The shape of the job itself. A chain restore is now a primitive: the plane
+// names the chain and the node resolves everything else inside its own store.
+$chain_built = JobCommandBuilder::build_restore_chain($chain_node, array(
+	'chain_id' => 'chain-20260807_231507',
+	'domain'   => 'chain.example.com'));
+
+check(($chain_built['primitive'] ?? '') === 'restore_chain',
+	'a chain restore is a primitive envelope, not a list of steps');
+check(($chain_built['params']['chain_id'] ?? '') === 'chain-20260807_231507',
+	'it names the chain');
+check(($chain_built['params']['project'] ?? '') === 'chainsite',
+	'and the project, from this node\'s own recorded web root');
+
+// The properties the six SSH steps used to carry, restated against what
+// actually crosses now. Each of these was a thing the plane could say and no
+// longer can.
+$chain_json = (string)json_encode($chain_built);
+check(strpos($chain_json, 'BackupRecoveryKey') === false
+	&& strpos($chain_json, 'recovery_private') === false
+	&& strpos($chain_json, 'key') === false,
+	'no key of any kind travels in the job record', $chain_json);
+check(strpos($chain_json, 'chain.example.com') === false,
+	'no domain travels — the node keeps its own', $chain_json);
+check(!isset($chain_built['params']['profile']),
+	'no profile travels — the node resolves the chain inside its own store by id');
+
+// Staging is a SEPARATE, non-destructive job, and it is what fetches the
+// manifest and recovers the chain key on the node. A chain restore dispatched
+// without it refuses on the node, naming what is missing.
+$stage_threw = '';
 try {
-	$chain_steps = JobCommandBuilder::build_restore_chain($chain_node, array(
-		'chain_id' => 'chain-20260807_231507',
-		'domain'   => 'chain.example.com'));
-} catch (Exception $e) {
-	// Only legitimate when this management node has no enabled target at all —
-	// then there is no shelf to read a chain from, and saying so at build time
-	// beats a job that dies halfway through a download.
-	$chain_build_error = $e->getMessage();
-}
-
-if ($chain_steps) {
-	$chain_labels = array_map(function ($s) { return $s['label']; }, $chain_steps);
-	$chain_all    = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $chain_steps));
-
-	check(in_array('Fetch the chain manifest', $chain_labels),
-		'the manifest is fetched first — it is the restore contract', implode(' | ', $chain_labels));
-	check(in_array('Recover the chain key', $chain_labels),
-		'the chain key is recovered on the node from its own site key');
-	check(strpos($chain_all, 'BackupRecoveryKey') === false
-		&& strpos($chain_all, 'recovery_private') === false,
-		'no recovery private key travels in the job record');
-	check(in_array('Download the chain artifacts', $chain_labels),
-		'every artifact the manifest names is downloaded');
-
-	// {prefix}/{slug}/{profile}/{chain_id}/. Dropping the profile segment would
-	// send a management node's restore looking on the site's own shelf, where a
-	// chain of the same id may well exist and be somebody else's backup.
-	check(strpos($chain_all, '/chainsite/manager/chain-20260807_231507') !== false,
-		'the chain is read from the profile shelf it was written to', $chain_all);
-	check(strpos($chain_all, 'restore_chain.sh') !== false,
-		'the restore runs through restore_chain.sh, which verifies before it writes');
-	check(strpos($chain_all, '--domain ' . escapeshellarg('chain.example.com')) !== false,
-		'the chain restore is told which domain the site is to answer to');
-	check(in_array('Verify the site agrees with this machine', $chain_labels)
-		&& in_array('Verify the site is served', $chain_labels),
-		'a chain restore is gated the same way an archive restore is');
-
-	// The key must not outlive the restore that needed it.
-	$chain_restore_cmd = '';
-	foreach ($chain_steps as $step) {
-		if (($step['label'] ?? '') === 'Restore the chain') { $chain_restore_cmd = $step['cmd'] ?? ''; }
-	}
-	check(strpos($chain_restore_cmd, 'rm -f') !== false && strpos($chain_restore_cmd, 'exit $RC') !== false,
-		'the chain key is shredded afterwards without eating the exit code', $chain_restore_cmd);
-} else {
-	check(strpos($chain_build_error, 'target') !== false,
-		'with no shelf configured, the chain restore is refused at build time naming why',
-		$chain_build_error);
-}
+	JobCommandBuilder::build_stage_chain($chain_node, array(
+		'chain_id' => 'not-a-chain-id', 'profile' => 'manager'));
+} catch (Exception $e) { $stage_threw = $e->getMessage(); }
+check($stage_threw !== '', 'staging refuses a malformed chain id', $stage_threw);
 
 // Fixtures the surviving checks still need. They were shared with the
 // copy-database sections, which are retired (A3): $copy_target is the target of
@@ -852,20 +783,35 @@ function jcb_check_engine_restore_cmd($label, $cmd) {
 		$label . ': the restore does not drop the schema inline (the engine owns it)', $cmd);
 }
 
-$engine_steps = JobCommandBuilder::build_restore_database($copy_target,
-	['local_path' => '/backups/copytarget-2026-01-01-000000.sql.gz']);
-$restore_cmd = '';
-$restore_at = null;
-$backup_at = null;
-foreach ($engine_steps as $i => $step) {
-	$label = $step['label'] ?? '';
-	if (strpos($label, 'Restore') === 0) { $restore_cmd = $step['cmd']; $restore_at = $i; }
-	if (strpos($label, 'Auto-backup') === 0) { $backup_at = $i; }
-}
-check($restore_cmd !== '', 'restore_database: a restore step is emitted');
-jcb_check_engine_restore_cmd('restore_database', $restore_cmd);
-check($backup_at !== null && $restore_at !== null && $backup_at < $restore_at,
-	'restore_database: the pre-restore safety dump precedes the restore');
+// A database restore no longer composes steps at all — it names a primitive, and
+// the engine contract below belongs to the SCRIPT rather than to a command this
+// plane builds.
+$engine_threw = '';
+try {
+	JobCommandBuilder::build_restore_database($copy_target,
+		['local_path' => '/backups/copytarget-2026-01-01-000000.sql.gz']);
+} catch (Exception $e) { $engine_threw = $e->getMessage(); }
+check(strpos($engine_threw, 'no paired agent') !== false,
+	'restore_database: an unpaired node is refused rather than sent dead SSH steps', $engine_threw);
+
+// THE PRE-RESTORE SAFETY DUMP MOVED INTO THE ENGINE, and that is the correction
+// this section used to be pinning the wrong side of. It used to be a step this
+// plane prepended, and restore_database.sh skipped its own whenever
+// --non-interactive was given on exactly that reasoning — which is impossible to
+// honour on the primitive path, where one job runs one script and there is
+// nowhere to prepend anything. Every unattended restore would have dropped a
+// live schema with nothing behind it.
+//
+// The engine now takes the dump itself, by default, including unattended; a
+// caller that has genuinely taken one passes --no-pre-restore-dump. Proven
+// against a real PostgreSQL in restore_roundtrip_gate.sh, which is where a
+// behavioural claim about a script belongs.
+$engine_src = (string)file_get_contents(
+	PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/restore_database.sh');
+check(strpos($engine_src, 'PRE_RESTORE_DUMP=true') !== false,
+	'restore_database.sh takes a pre-restore safety dump by default, unattended included');
+check(strpos($engine_src, '--no-pre-restore-dump') !== false,
+	'and a caller that has taken its own can say so');
 
 // The install-node clone restore follows the same engine contract.
 $clone_restore = '';
@@ -879,8 +825,7 @@ jcb_check_engine_restore_cmd('install_node from-backup', $clone_restore);
 // and job-internal dumps are role-portable because the restore runs as the
 // TARGET site's own DB user under ON_ERROR_STOP — an OWNER TO naming the
 // source site's role would fail the job.
-$dump_sets = ['restore_database' => $engine_steps];
-$dump_sets['install_node from-backup'] = $clone_steps;
+$dump_sets = ['install_node from-backup' => $clone_steps];
 foreach ($dump_sets as $name => $steps) {
 	foreach ($steps as $step) {
 		$label = $step['label'] ?? '';
@@ -1226,28 +1171,34 @@ check(!in_array('Seal the backup key to the archive', $plain_labels, true),
 
 // Restores prefer the envelope beside the archive, so a node can restore itself
 // with no operator present, and fall back to the old node key for archives made
-// before envelopes existed.
-$restore_cmd = '';
-foreach (JobCommandBuilder::build_restore_database($enc_node,
-		array('local_path' => '/backups/site-20260802.sql.gz.enc')) as $s) {
-	if (($s['label'] ?? '') === 'Restore database from backup') { $restore_cmd = $s['cmd']; }
-}
-check($restore_cmd !== '', 'the restore builder emits a restore step');
-// Assert the WHOLE path, not just the suffix: an empty archive path would
-// still produce a string containing ".keys.json" and read as passing.
-check(strpos($restore_cmd, "/backups/site-20260802.sql.gz.enc'.keys.json") !== false,
-	'a database restore looks for the envelope belonging to THAT archive', $restore_cmd);
-check(strpos($restore_cmd, '.joinery_backup_key') !== false,
-	'and still falls back to the node key for pre-envelope archives', $restore_cmd);
-check(strpos($restore_cmd, 'backup_envelope.php') !== false && strpos($restore_cmd, ' open ') !== false,
-	'the envelope is opened with the site key, so no operator is needed', $restore_cmd);
+// before envelopes existed. That resolution moved ONTO the node with the
+// transport: this plane sends no key and no key path, and restore_database.sh
+// 3.4 resolves --key-file, then the sidecar beside the archive opened with the
+// machine's own backup_site_key, then ~/.joinery_backup_key. A plane that could
+// hand a node a key could use the node to open something the node could not
+// open by itself, which is why there is no longer a field for one.
+$enc_engine = (string)file_get_contents(
+	PathHelper::getSiteRoot() . '/maintenance_scripts/sysadmin_tools/restore_database.sh');
+check(strpos($enc_engine, 'keys.json') !== false,
+	'the engine resolves the envelope beside the archive itself');
+check(strpos($enc_engine, '.joinery_backup_key') !== false,
+	'and still falls back to the node key for pre-envelope archives');
 
-// A restore with nothing to restore from must fail at build time, not after
-// the pre-restore snapshot has already run.
+$enc_paired = jcb_node(array(
+	'mgn_web_root'         => '/var/www/html/encnode/public_html',
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x03", 32)),
+	'mgn_agent_version'    => '1.13.0'));
+$enc_built = JobCommandBuilder::build_restore_database($enc_paired,
+	array('filename' => 'site-20260802.sql.gz.enc'));
+$enc_json = (string)json_encode($enc_built);
+check(strpos($enc_json, 'key') === false && strpos($enc_json, '/backups/') === false,
+	'a dispatched restore carries no key and no path — only a name and a profile', $enc_json);
+
+// A restore with nothing to name must fail at build time, not on the node.
 $threw = false;
-try { JobCommandBuilder::build_restore_database($enc_node, array('filename' => 'orphan.sql.gz.enc')); }
+try { JobCommandBuilder::build_restore_database($enc_paired, array('filename' => '')); }
 catch (Exception $e) { $threw = true; }
-check($threw, 'a restore with no resolvable archive path is refused up front');
+check($threw, 'a restore that names no archive is refused up front');
 
 section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
 
@@ -1512,8 +1463,16 @@ $bkt_split = new BackupTarget(NULL);
 $bkt_split->set('bkt_name', 'HarnessTest Split Target ' . bin2hex(random_bytes(3)));
 $bkt_split->set('bkt_provider', 'b2');
 $bkt_split->set('bkt_bucket', 'harness-split-bucket');
-$bkt_split->set('bkt_credentials', json_encode(array('access_key' => 'MAIN', 'secret_key' => 'main_full_perm')));
-$bkt_split->set('bkt_node_credentials', json_encode(array('access_key' => 'NODE', 'secret_key' => 'node_write_only')));
+// region and endpoint are part of a usable credential, not decoration: a
+// restore download is SIGNED here rather than sent as a key, and a signature
+// needs both. A fixture without them made the builder refuse for a reason that
+// had nothing to do with what was being tested.
+$bkt_split->set('bkt_credentials', json_encode(array(
+	'access_key' => 'MAIN', 'secret_key' => 'main_full_perm',
+	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.example.invalid')));
+$bkt_split->set('bkt_node_credentials', json_encode(array(
+	'access_key' => 'NODE', 'secret_key' => 'node_write_only',
+	'region' => 'us-west-004', 'endpoint' => 'https://s3.us-west-004.example.invalid')));
 $bkt_split->save();
 harness_register_row('bkt_backup_targets', 'bkt_id', $bkt_split->key);
 
@@ -1555,14 +1514,37 @@ check($split_del !== '', 'a cloud delete step is emitted for the split-credentia
 check(strpos($split_del, $main_token) !== false && strpos($split_del, $node_token) === false,
 	'a cloud delete carries the main token, never the write-only one');
 
-$split_dl = '';
-foreach (JobCommandBuilder::build_restore_database($split_node, array(
-		'filename' => 'splitnode-20260101.sql.gz.enc', 'cloud_path' => 'joinery-backups/x/splitnode-20260101.sql.gz.enc')) as $s) {
-	if (($s['label'] ?? '') === 'Download backup from cloud') { $split_dl = $s['cmd']; }
-}
-check($split_dl !== '', 'a cloud restore emits a download step for the split-credential target');
-check(strpos($split_dl, $main_token) !== false && strpos($split_dl, $node_token) === false,
-	'a restore download carries the main token, never the write-only one');
+// A RESTORE DOWNLOAD CARRIES NO TOKEN AT ALL — not the main one either.
+//
+// This used to hand a node the main, delete-capable credential, on the
+// reasoning that the write-only one cannot read and a restore has to. That is
+// the right diagnosis and the wrong remedy: the read a restore needs is ONE
+// OBJECT, and the way to grant one object is to sign it here, on the machine
+// that already holds the key, and send the signature. A signature is not a
+// credential — it names one object, the name is inside it, and it expires with
+// the job.
+$split_paired = jcb_node(array(
+	'mgn_web_root'             => '/var/www/html/splitnode/public_html',
+	'mgn_slug'                 => 'splitnode',
+	'mgn_bkt_backup_target_id' => $bkt_split->key,
+	'mgn_agent_public_key'     => base64_encode(str_repeat("\x04", 32)),
+	'mgn_agent_version'        => '1.13.0'));
+$split_download = JobCommandBuilder::build_download_backup($split_paired, array(
+	'filename'   => 'splitnode-20260101.sql.gz.enc',
+	'cloud_path' => 'joinery-backups/splitnode/manager/splitnode-20260101.sql.gz.enc'));
+$split_dl_json = (string)json_encode($split_download);
+
+check(($split_download['primitive'] ?? '') === 'download_backup',
+	'fetching a backup back is its own primitive');
+check(strpos($split_dl_json, $main_token) === false && strpos($split_dl_json, $node_token) === false,
+	'and carries neither credential token — a node is handed a signature, not a key',
+	$split_dl_json);
+check(strpos($split_dl_json, 'main_full_perm') === false
+	&& strpos($split_dl_json, 'node_write_only') === false,
+	'nor either secret key inline');
+check(strpos($split_dl_json, 'X-Amz-Signature') !== false
+	&& strpos($split_dl_json, 'X-Amz-Expires') !== false,
+	'what it does carry is a signed, expiring link to one object', $split_dl_json);
 
 // Without a node credential, everything stays on the main token ($run_node's
 // target has none) — already asserted above via credentials_b64 === __SM_CREDS_.
