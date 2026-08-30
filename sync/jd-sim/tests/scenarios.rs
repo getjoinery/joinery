@@ -5805,3 +5805,120 @@ fn probe_escaped_name_lands_escaped() {
         "and must not be left holding the raw name: {after_names:?}"
     );
 }
+
+/// A rename into a hostile name that arrives WITH new content.
+///
+/// The move path and the download path resolve a file's local name by two
+/// different routes, and they disagree for exactly one pass. `local_placement`
+/// is deliberately the last AGREED placement, so naming resolves this entry
+/// against its OLD name and produces no escape for the new one until the move
+/// has applied. A download that lands in that window asks
+/// `effective_local_name` for a path, gets a fresh placement bolted to a stale
+/// mapping, and writes the file under the raw server name -- which real Windows
+/// silently alters and this engine never looks at again.
+///
+/// The scanner then finds that file, does not recognise it, and mints a
+/// provisional upload the server refuses every pass. The device never goes
+/// quiet. Both remaining seeds of the Windows-hostile sweep are this shape.
+#[test]
+fn a_rename_into_a_hostile_name_carrying_new_content_lands_once() {
+    let world = World::of(9_401, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    boxd.fs.user_write("memo.txt", b"first version");
+    assert!(world.settle().is_some(), "the ordinary name settles");
+    assert!(pc.fs.peek("memo.txt").is_some(), "and reaches the windows box");
+
+    // Renamed into a name Windows cannot hold, and edited in the same breath.
+    // The content change is what forces a download while the rename is still
+    // in flight; without it the move path alone gets the name right.
+    boxd.fs.user_rename("memo.txt", "CON.memo.txt");
+    boxd.fs.user_write("CON.memo.txt", b"second version");
+    assert!(world.settle().is_some(), "the rename and the edit settle");
+
+    let tree = jd_sim::scenario::disk_tree(pc);
+    let names: Vec<&String> = tree.keys().collect();
+
+    assert!(
+        pc.fs.peek("CON.memo.txt").is_none(),
+        "the windows box must not be left holding a name it cannot write: {names:?}"
+    );
+    assert!(
+        pc.fs.peek("%43ON.memo.txt").is_some(),
+        "it must hold the escaped name: {names:?}"
+    );
+    assert_eq!(
+        pc.fs.peek("%43ON.memo.txt").map(|b| b.to_vec()),
+        Some(b"second version".to_vec()),
+        "and the escaped name must carry the CURRENT content, not a version \
+         stranded by the download that went to the raw name: {names:?}"
+    );
+    assert_eq!(
+        tree.len(),
+        1,
+        "exactly one file, not the escaped one plus an orphaned raw one: {names:?}"
+    );
+}
+
+/// A slot an entry has reserved but not yet filled is not a free slot.
+///
+/// `known_local` leaves out an entry whose bytes have not arrived -- there is no
+/// local file to have moved away from, and counting one would read it as
+/// deleted. The cost is that the scan cannot see the reservation, so whatever
+/// stands at that path looks like a brand new file and is given an identity of
+/// its own.
+///
+/// For an escaped name that is how the escape reaches the server as a REAL
+/// name. `memo-47 ` is legal on Linux and lands on Windows as `memo-47%20`; a
+/// file adopted at that path goes up called `memo-47%20`, and from then on the
+/// server holds both, which are one name on the disk that had to escape. They
+/// collide there for ever, and each spawns conflict copies of its own -- one
+/// sweep seed reached ten files where two belonged.
+///
+/// `holds_a_local_file` already states the rule: a `PendingDownload` entry
+/// holds its slot, because those bytes are on their way to that path.
+#[test]
+fn a_slot_reserved_for_an_arriving_file_is_not_adopted_from_under_it() {
+    let world = World::of(9_402, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    // Legal on Linux; Windows has to escape it to `memo-47%20`.
+    boxd.fs.user_write("memo-47 ", b"the real file");
+    world.pass(boxd); // uploaded, but pc has not fetched it yet
+
+    // Meanwhile the user on the Windows box happens to have a file sitting at
+    // exactly the name the arriving file will need.
+    pc.fs.user_write("memo-47%20", b"a squatter");
+
+    assert!(world.settle().is_some(), "it settles");
+
+    // The squatter must not have become a second server file called
+    // `memo-47%20`. That name is the ESCAPE of `memo-47 `, so a server holding
+    // both can never be represented on a Windows disk.
+    let server: Vec<String> = jd_sim::scenario::server_tree(&world.server)
+        .into_keys()
+        .collect();
+    assert!(
+        server.iter().any(|p| p == "memo-47 "),
+        "the real file is still on the server: {server:?}"
+    );
+    assert!(
+        !server.iter().any(|p| p == "memo-47%20"),
+        "the escape must never become a real server name -- it collides with \
+         the file it is the escape OF: {server:?}"
+    );
+
+    // And the squatter's bytes are not destroyed; they are kept beside it.
+    let disk = jd_sim::scenario::disk_tree(pc);
+    let names: Vec<&String> = disk.keys().collect();
+    assert!(
+        disk.values().any(|h| h.is_some()),
+        "the windows box holds files: {names:?}"
+    );
+    assert!(
+        pc.fs.peek("memo-47%20").is_some(),
+        "the arriving file materializes under its escaped name: {names:?}"
+    );
+}

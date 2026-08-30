@@ -12,6 +12,9 @@
  * shared with me" (act on it: remove the local copy) from "the request failed"
  * (act on it: retry later). Those are opposite behaviors and guessing wrong
  * either deletes the user's files or stalls the sync forever.
+ *
+ * `not_yours` names the ones that still exist and are simply no longer the
+ * caller's — an unshare rather than a deletion. It is a subset of `missing`.
  */
 
 if (!defined('DRIVE_STAT_MAX')) {
@@ -69,10 +72,23 @@ function drive_stat_logic(array $input): LogicResult {
 	$permission = $session->get_permission();
 	$loaded = array();
 	$missing = array();
+	// Gone and no-longer-mine are both invisible, and they are not the same
+	// thing. A file that was deleted may still have local edits worth rescuing
+	// into a new file; a file the caller was unshared from must simply go. Told
+	// only "missing", a client rescues the bytes and leaves a copy of somebody
+	// else's file behind under a new name, which is the exact opposite of what
+	// unsharing is for. `not_yours` is a SUBSET of `missing`, deliberately: a
+	// client that has never heard of it behaves exactly as it did before.
+	$not_yours = array();
 	foreach ($wanted as $key => $req) {
 		$entity = DriveHelper::load_entity($req['entity_type'], $req['entity_id']);
-		if (!$entity || !DriveHelper::can_read($req['entity_type'], $entity, $user_id, $permission)) {
+		if (!$entity) {
 			$missing[] = $req;
+			continue;
+		}
+		if (!DriveHelper::can_read($req['entity_type'], $entity, $user_id, $permission)) {
+			$missing[] = $req;
+			$not_yours[] = $req;
 			continue;
 		}
 		$loaded[$key] = array('req' => $req, 'entity' => $entity);
@@ -108,15 +124,16 @@ function drive_stat_logic(array $input): LogicResult {
 	}
 
 	return LogicResult::render(array(
-		'ok'      => true,
-		'items'   => $items,
-		'missing' => $missing,
+		'ok'        => true,
+		'items'     => $items,
+		'missing'   => $missing,
+		'not_yours' => $not_yours,
 	));
 }
 
 function drive_stat_logic_descriptor(): array {
 	return array(
-		'description'      => 'Batch-fetch Drive entities by id — the companion to the id-only change feed. Entities that are gone or no longer visible to the caller are returned under `missing` instead of erroring, so a sync client can tell "deleted / unshared" from "request failed". Signed download and thumbnail URLs are omitted unless `urls` is true.',
+		'description'      => 'Batch-fetch Drive entities by id — the companion to the id-only change feed. Entities that are gone or no longer visible to the caller are returned under `missing` instead of erroring, so a sync client can tell "deleted / unshared" from "request failed". Those that still exist but are no longer shared with the caller are also listed under `not_yours`, a subset of `missing`. Signed download and thumbnail URLs are omitted unless `urls` is true.',
 		'requires_session' => true,
 		'requires_setting' => 'drive_active',
 		'mutates'          => false,

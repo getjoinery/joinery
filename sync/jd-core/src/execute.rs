@@ -3098,6 +3098,31 @@ fn move_local(
     // settled -- and the change that said otherwise is already behind the
     // cursor. Recording only what this disk now holds leaves the disagreement
     // that plans the next move.
+    // The name this file is NOW materialized under, recorded in the same breath
+    // as the placement it belongs to.
+    //
+    // Without this the two halves of the entry disagree for a pass: the
+    // placement is fresh and the mapping is stale, because naming resolves an
+    // entry against its last AGREED name (see `competing_placement`) and so has
+    // never looked at this destination. `effective_local_name` then bolts the
+    // new placement to the old mapping and answers with a path the file is not
+    // at -- the raw server name, which on Windows is one the volume would have
+    // altered anyway. Anything resolving a path in that window writes there: a
+    // download landing beside the file it was meant to replace, and a scan that
+    // finds the result, does not recognise it, and offers it to the server as a
+    // brand new file every pass for ever.
+    //
+    // `dest` is where this operation actually put it, so it is the one answer
+    // that cannot be stale. Equal to the server's spelling in the ordinary case,
+    // which is recorded as no mapping at all.
+    let landed_as = dest
+        .file_name()
+        .and_then(|n| n.to_str())
+        .map(|n| n.to_string());
+    entry.local_name = match landed_as {
+        Some(ref n) if *n != to.name => Some(n.clone()),
+        _ => None,
+    };
     entry.synced_placement = Some(to);
     entry.synced_fingerprint = env.vfs.fingerprint(&dest)?;
 

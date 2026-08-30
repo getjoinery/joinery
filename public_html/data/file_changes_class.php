@@ -11,7 +11,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * never updated or soft-deleted; a purge task trims rows past the retention
  * window.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 class FileChange extends SystemBase {
 	public static $prefix = 'fch';
@@ -50,6 +50,13 @@ class FileChange extends SystemBase {
 		'fch_entity_id'          => array('type' => 'int8', 'is_nullable' => false),
 		'fch_usr_user_id'        => array('type' => 'int4', 'is_nullable' => false, 'required' => true, 'index' => true),
 		'fch_source_usr_user_id' => array('type' => 'int4', 'is_nullable' => true),
+		// Who this row has to reach, when owning the entity is not what earns
+		// them the right to hear about it. Set only where the ordinary
+		// visibility rules would hide the row from the one person it is for:
+		// a share revoked, where the grant is gone by the time this is written
+		// and the loser matches no clause in the feed. Null on every other row,
+		// which is nearly all of them.
+		'fch_audience_usr_user_id' => array('type' => 'int4', 'is_nullable' => true, 'index' => true),
 		'fch_change_kind'        => array('type' => 'varchar(24)', 'is_nullable' => false, 'required' => true),
 		'fch_create_time'        => array('type' => 'timestamp(6)', 'is_nullable' => false, 'default' => 'now()', 'index' => true),
 	);
@@ -59,9 +66,13 @@ class FileChange extends SystemBase {
 	 * Best-effort by design: a failure to record a change never fails the
 	 * mutation that already succeeded, so it swallows and logs.
 	 *
+	 * `$audience_id` addresses the row to one user who would not otherwise see
+	 * it. The owner stays in fch_usr_user_id either way, so a row never lies
+	 * about who the entity belongs to.
+	 *
 	 * @return FileChange|null the recorded row (null on failure)
 	 */
-	public static function record($kind, $entity_type, $entity_id, $owner_id, $actor_id = null) {
+	public static function record($kind, $entity_type, $entity_id, $owner_id, $actor_id = null, $audience_id = null) {
 		try {
 			$change = new self(NULL);
 			$change->set('fch_change_kind', $kind);
@@ -70,6 +81,9 @@ class FileChange extends SystemBase {
 			$change->set('fch_usr_user_id', (int)$owner_id);
 			if ($actor_id !== null) {
 				$change->set('fch_source_usr_user_id', (int)$actor_id);
+			}
+			if ($audience_id !== null) {
+				$change->set('fch_audience_usr_user_id', (int)$audience_id);
 			}
 			$change->save();
 			return $change;

@@ -2503,9 +2503,16 @@ mod tests {
     }
 
     #[test]
-    fn trashing_a_folder_reports_everything_inside_it_too() {
-        // A client that only heard about the folder would keep every file
-        // inside it materialized forever.
+    fn trashing_a_folder_takes_the_subtree_and_reports_one_row() {
+        // The platform cascades the flags over every descendant and records a
+        // single change row, for the folder. This mock says the same thing,
+        // and the fidelity is the point: a mock that reported a row per
+        // descendant would let a client lean on rows the real server never
+        // sends, and the sweep would go green over a defect that only appears
+        // in the field.
+        //
+        // The client's answer to the one row is to forget the subtree, which
+        // is `forget_folder_the_server_confirms` in `jd-core`.
         let s = server();
         let f = s.seed_folder(None, "Docs");
         let sub = s.seed_folder(Some(f), "Sub");
@@ -2518,15 +2525,29 @@ mod tests {
         )
         .unwrap();
         let out = s.action("drive_changes", &json!({ "cursor": at })).unwrap();
-        let kinds: Vec<&str> = out["changes"]
+        let rows: Vec<(&str, &str, i64)> = out["changes"]
             .as_array()
             .unwrap()
             .iter()
-            .map(|c| c["kind"].as_str().unwrap())
+            .map(|c| {
+                (
+                    c["kind"].as_str().unwrap(),
+                    c["entity_type"].as_str().unwrap(),
+                    c["entity_id"].as_i64().unwrap(),
+                )
+            })
             .collect();
-        assert_eq!(kinds.len(), 4, "the folder, its subfolder, and both files");
-        assert!(kinds.iter().all(|k| *k == "trashed"));
-        assert!(s.tree().is_empty());
+        assert_eq!(
+            rows,
+            vec![("trashed", "folder", f)],
+            "one row, naming the folder itself"
+        );
+        // The cascade still happened; it is only unreported.
+        assert!(
+            s.tree().is_empty(),
+            "the whole subtree is gone, {:?} remains",
+            s.tree()
+        );
     }
 
     #[test]
