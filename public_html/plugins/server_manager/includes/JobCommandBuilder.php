@@ -1178,7 +1178,7 @@ class JobCommandBuilder {
 		// that needed it. The node's standing legacy key is not ours to remove.
 		$key_resolve = self::step_resolve_restore_key($node, $restore_path);
 		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --no-pre-restore-dump --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
+			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
 				. '; RC=$?; if [ -n "$KEY_PATH" ] && [ "$KEY_PATH" != "$HOME/.joinery_backup_key" ]; then rm -f "$KEY_PATH"; fi; exit $RC',
 			'timeout' => 3600];
 
@@ -4042,7 +4042,7 @@ class JobCommandBuilder {
 			$restore_engine = "/var/www/html/{$sitename}/maintenance_scripts/sysadmin_tools/restore_database.sh";
 			$db_dump_arg = escapeshellarg($remote_db_dump);
 			$steps[] = array_merge($step_base, ['type' => 'ssh', 'label' => 'Restore source database',
-				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --no-pre-restore-dump --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
+				'cmd' => "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && bash " . escapeshellarg($restore_engine) . " \"\$DB_NAME\" {$db_dump_arg} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\"",
 				'timeout' => 3600]);
 
 			// backup_project.sh archives are two levels deep:

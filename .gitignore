@@ -26,6 +26,13 @@ Globalvars_site.php
 # commercial and entitlement-gated, so it cannot be the carrier.
 public_html/agent_dist/
 
+# The publisher's swap leavings. agent_dist is replaced by moving the previous
+# bundle to agent_dist.old and the new one into place; a .old that cannot be
+# removed (one left root-owned by a publish that ran as root) otherwise sits in
+# the tree as 10MB of untracked, still-signed, superseded binaries waiting for
+# somebody's `git add -A`. Ignored so a transient can never become a commit.
+public_html/agent_dist.*
+
 # Prebuilt relay-sealer binaries - cross-compiled into the mailbox plugin by
 # RelaySealerPublisher on every publish that needs them. They SHIP (the plugin
 # archive tars the live directory, which git does not gate) but they are build

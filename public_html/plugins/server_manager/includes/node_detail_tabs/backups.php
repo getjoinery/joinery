@@ -445,8 +445,8 @@
 			<button type="button" aria-label="Close" onclick="closeRestoreModal();" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">
-			A pre-restore snapshot of the current database and project files is written to
-			<code>/backups/auto_pre_project_restore_*</code> before the restore runs.
+			<strong>Nothing is saved first.</strong> The current site files and database are
+			replaced, and what is there now is not kept anywhere.
 		</p>
 		<?php
 		// Asked, never assumed. This is the one thing a restore cannot work out
@@ -501,8 +501,8 @@
 			<button type="button" aria-label="Close" onclick="closeChainRestoreModal();" class="svm-modal-close">&times;</button>
 		</div>
 		<p class="text-muted small">
-			Every artifact is checked against its recorded size and hash before anything is written, and a
-			pre-restore snapshot of the database is taken first.
+			Every artifact is checked against its recorded size and hash before anything is written.
+			<strong>Nothing is saved first</strong> — what is on this node now is not kept.
 		</p>
 		<?php
 		// The run picker is filled in by openChainRestoreModal from the manifest —
@@ -670,7 +670,7 @@ function submitChainRestoreModal() {
 		return;
 	}
 	JoineryModal.confirm('Restore ' + chainId + ' as at run ' + seq + ', serving ' + domain
-		+ '? Files deleted since the full backup are deleted here too. A pre-restore snapshot is written first.',
+		+ '? Files deleted since the full backup are deleted here too, and nothing is saved first.',
 		function() {
 			document.getElementById('chainRestoreForm').submit();
 		});
@@ -697,14 +697,14 @@ function submitRestoreModal() {
 		if (document.getElementById('rm_files').checked)    parts.push('project files');
 		if (document.getElementById('rm_database').checked) parts.push('database');
 		JoineryModal.confirm('Restore ' + parts.join(', ') + ' from ' + fn + ', serving ' + domain
-			+ '? This will overwrite the current site. A pre-restore snapshot is written to /backups/ first.', function() {
+			+ '? This will overwrite the current site, and nothing is saved first.', function() {
 			document.getElementById('restoreForm').submit();
 		});
 		return;
 	}
 
 	// restore_database
-	JoineryModal.confirm('Restore database from ' + fn + '? This will overwrite the current database. A pre-restore snapshot is written first.', function() {
+	JoineryModal.confirm('Restore database from ' + fn + '? This will overwrite the current database, and nothing is saved first.', function() {
 		document.getElementById('restoreForm').submit();
 	});
 }

@@ -530,7 +530,6 @@ perform_restore() {
                 # the extracted dump. Extraction stages beside the archive and
                 # is cleaned up when this finishes, so a dump written there
                 # would be deleted by the very restore it exists to undo.
-                db_flags+=(--pre-restore-dump-dir "$(dirname "$BACKUP_FILE")")
                 # The dump was encrypted with the same key as the archive around
                 # it, so hand over whatever opened the archive — which may have
                 # come from the envelope rather than from --key-file.

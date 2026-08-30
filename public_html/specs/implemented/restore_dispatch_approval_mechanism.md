@@ -409,9 +409,9 @@ Three things narrow it, none of which rely on anyone reading carefully:
    reach the history. Capture is necessary and not sufficient, and the
    architecture had already paid for most of that.
 
-   Narrowed further by the build than the plan expected, and by accident: the
-   pre-restore safety dump found below is written under `umask 077` for exactly
-   this reason, and the ledger is closed to the web tier as well. What is NOT
+   Narrowed further by the build than the plan expected: the ledger is closed to
+   the web tier as well. (The pre-restore safety dump, written under `umask 077`
+   for the same reason, no longer exists — see the superseded section below.) What is NOT
    closed is the ledger's ownership — see Part A — so a compromised web tier on
    the node could still forge a ledger entry. That stays inside the scope rule:
    a machine whose web tier you suspect is rebuilt, not restored in place.
@@ -525,6 +525,29 @@ so a chain too long to describe fails where an operator is standing.
 
 ### Found while building this: the pre-restore safety dump
 
+> **THE FEATURE DESCRIBED BELOW WAS REMOVED ON 2026-08-30**, the day after it
+> shipped, by owner decision — and this file is edited, against the rule that
+> implemented specs are never touched, because leaving it would have this
+> document describe a safety mechanism the code does not have.
+>
+> **The defect it records was real** and the fix below was right at the time:
+> unattended restores genuinely took no dump, on reasoning that could not hold
+> on the primitive path. What changed is the answer, not the finding. **A
+> restore happens because the current state is wrong**, so saving that state
+> first preserves precisely what the operator has decided to discard — and it
+> kept a full copy of the database, per restore, indefinitely, on a disk sized
+> for backups rather than for regret. The approval the operator answers already
+> says in words that anything written since the archive was taken is gone.
+>
+> Knowingly given up: a load that fails part way leaves the schema replaced with
+> nothing on the machine to put back (`RESTORE_LOAD_FAILED`). The answer is the
+> archive itself, still on the shelf, and the chain behind it.
+>
+> `restore_database.sh` 3.7 removed the stage and both flags; the engine refuses
+> an unknown option, so a caller still passing one fails loudly rather than
+> being ignored. `restore_roundtrip_gate.sh` now proves the inverse — that
+> nothing is left behind, and that the flags are refused.
+
 Not part of the plan, and the plan was wrong not to have noticed it.
 
 `restore_database.sh` skipped its pre-restore safety dump whenever
@@ -604,7 +627,9 @@ the shapes recur, not for the changelog:
 - The interactive `restore_project.sh` branch moved the tree aside and lost the
   ledger with it; the safety dump was created world-readable and tightened
   afterwards, a window in which a full plaintext copy of the live database sat
-  in a directory the web tier can read; `decline_restore` took nothing but a job
+  in a directory the web tier can read (that dump was removed entirely the next
+  day — see the superseded section above, which is what finally closed this
+  one); `decline_restore` took nothing but a job
   id printed on the page, on a handler that fires on GET; and the download's
   profile was not required to agree with the shelf the signed object was
   actually on.
@@ -787,9 +812,11 @@ test, the test is named; where it is not yet proven, it says so.
   (`backup_ledger_test.php`, `destructive_restore_test.go`).
 - The machine's own ledger survives a chain restore — verified to fail without
   the fix (`backup_chain_gate.sh`).
-- An unattended restore takes a pre-restore safety dump of what it is about to
-  destroy, beside the archive and readable by nobody else, against a real
-  PostgreSQL (`restore_roundtrip_gate.sh`).
+- ~~An unattended restore takes a pre-restore safety dump of what it is about to
+  destroy.~~ **Reversed 2026-08-30** — a restore now keeps nothing of what it
+  replaces, and the same gate proves that instead: no dump is left anywhere, and
+  the two flags that controlled it are refused rather than ignored
+  (`restore_roundtrip_gate.sh`). See the superseded section above.
 - The restore vocabulary declares no parameter that could carry an approval
   answer — read out of the agent's own source, not this plane's belief about it
   (`restore_dispatch_test.php`).

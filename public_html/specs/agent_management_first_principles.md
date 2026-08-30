@@ -156,6 +156,8 @@ status**; the spec named is where its design lives.
 | 1 | Destructive approval on the node | `implemented/restore_dispatch_approval_mechanism.md` | **BUILT + DEPLOYED 2026-08-30.** Fleet 9/9 on agent 1.13.0; gate open on every paired node |
 | 2a | Prove one restore end to end | `restore_readiness.md` (acceptance) | **NEXT, and small.** Precondition arrives on its own with the next scheduled backup |
 | 2b | Restore readiness — make the gap visible | `restore_readiness.md` | Follows 2a; does not gate it |
+| 2c | Delete the three SSH restore builders | this table | **UNBLOCKED 2026-08-30** by the live restore. They were kept only until one had been done over the channel; they are already unreachable, refusing through `refuse_dead_restore_transport()`. Homeless otherwise: their spec is in `implemented/` and must not be edited |
+| 2d | Deferred destructive approval | `deferred_destructive_approval.md` | The approval window is bounded by how long a node can afford to be deaf, not by what a person needs. Raised to 60m as an interim |
 | 3 | The plane-side executor (WP1+WP2) | `plane_side_executor.md` | **BLOCKING.** Twelve operations have no transport since SSH was removed |
 | 4 | Keyless provisioning | `keyless_provisioning.md` | Needs only executor WP1, not the whole executor |
 | 5 | Credential custody — delete the shared key | `fleet_ssh_credential_custody.md` | WP1 done; WP3–WP5 gated on item 2 |
@@ -243,6 +245,30 @@ annexes.
 - The executor runs as the site user and no step it runs is privileged. *(item 3)*
 - The agent's `local` step type is gone, it holds no database credential, and
   inserting a row into `mjb_management_jobs` by hand executes nothing. *(item 7)*
+
+## One reversal inside an implemented spec
+
+`implemented/restore_dispatch_approval_mechanism.md` records the **pre-restore
+safety dump** as a defect found while building and as a met acceptance
+criterion. **That feature was removed on 2026-08-30**, the day after it shipped,
+by owner decision: a restore happens because the current state is wrong, so
+dumping it first preserved exactly what was being discarded and kept a full copy
+of the database, per restore, indefinitely.
+
+**That spec has been edited to say so** — a deliberate, owner-authorised
+exception to the rule that implemented specs are never touched, because the
+alternative was a document describing a safety mechanism the code does not have.
+The correction is scoped: superseding notes at the four places the dump is
+named, with the original finding and reasoning left intact, since the defect it
+recorded was real and only the answer changed. What is knowingly given up: a
+load that fails part way leaves the schema replaced with nothing to put back
+(`RESTORE_LOAD_FAILED`); the answer is the archive itself, still on the shelf.
+
+**The rule held everywhere else, and the exception is worth a decision of its
+own.** This is the second time in two days that a completed spec needed
+amending — the other being WP5, rehomed to item 2c above rather than recorded
+where it belonged. A rule with no amendment path produces either stale documents
+or ad-hoc exceptions, and both have now happened.
 
 ## Annexes
 

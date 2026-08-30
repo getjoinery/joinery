@@ -167,17 +167,22 @@ class ManagementJob extends SystemBase {
 		// post the result, not the same number — a budget equal to the node's
 		// deadline requeues a job whose result is still in flight.
 		//
-		// Each of these now carries the agent's APPROVAL WINDOW as well as its
-		// work. A destructive job is claimed, and then held while the node's own
+		// Each of these carries the agent's APPROVAL WINDOW as well as its work.
+		// A destructive job is claimed, and then held while the node's own
 		// operator opens a challenge on the node's own site and answers it — the
 		// wait happens inside the claim, because a challenge is bound to a
-		// specific job and re-dispatching would issue a different one. Fifteen
-		// minutes of that is inside every number below. A budget sized for the
-		// restore alone would requeue a job during the approval the restore
-		// requires.
-		'restore_database'      => 5400,  // 70m + 15m approval + slack
-		'restore_project'       => 8100,  // 70m + 15m approval, with room
-		'restore_chain'         => 15720, // 2h20m + 15m approval + slack
+		// specific job and re-dispatching would issue a different one. ONE HOUR
+		// of that is inside every number below (it was fifteen minutes until
+		// 2026-08-30). A budget sized for the restore alone would requeue a job
+		// during the approval the restore requires — and requeuing a restore
+		// starts a second one over the first.
+		//
+		// These grow with the window, which is the cost that bounds it: see
+		// `deferred_destructive_approval.md`, where the wait stops being held
+		// inside the claim and these numbers go back to being about the work.
+		'restore_database'      => 8400,  // 70m + 60m approval + slack
+		'restore_project'       => 8400,  // 70m + 60m approval + slack
+		'restore_chain'         => 15720, // 2h20m + 60m approval, with room
 		// Bringing a backup back off the shelf. Mirrors upload_backup's budget,
 		// because it is the same transfer in the other direction and S3Signer's
 		// window is what bounds both.

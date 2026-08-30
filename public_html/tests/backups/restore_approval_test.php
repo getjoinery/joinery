@@ -53,16 +53,23 @@ function ra_put($name, $value) {
 	Setting::put($name, (string)$value);
 }
 
-// The two handoff rows are the agent's and the page's; put them back however
-// this test leaves them.
-$snapshot = array(
-	RestoreApproval::REQUEST_SETTING => get_setting_raw(RestoreApproval::REQUEST_SETTING),
-	RestoreApproval::ANSWER_SETTING  => get_setting_raw(RestoreApproval::ANSWER_SETTING),
-);
-harness_defer(function () use ($snapshot) {
-	foreach ($snapshot as $name => $value) {
-		ra_put($name, (string)$value);
-	}
+// Both handoff rows are left EMPTY afterwards, not restored to whatever was
+// found. That is not laziness about cleanup — it is the correct end state, and
+// restoring what was there is actively wrong here.
+//
+// These two rows are ephemeral by construction: the agent writes a challenge,
+// waits, and clears both in a deferred block whatever the outcome. Empty is the
+// only value a healthy machine ever rests at. So a snapshot-and-restore has no
+// state to protect, and it has one failure mode that matters — a run killed
+// before its cleanup leaves a fixture behind, and every later run then faithfully
+// restores that fixture, permanently. This happened: dev carried a stale
+// `{"job_id":1,"challenge":"abc",...}` for hours, and it was only inert because
+// its expiry had passed. A fixture with a future expiry would have put a
+// FAKE APPROVAL SCREEN on a real site's admin page, which is the one thing this
+// mechanism must never show.
+harness_defer(function () {
+	ra_put(RestoreApproval::REQUEST_SETTING, '');
+	ra_put(RestoreApproval::ANSWER_SETTING, '');
 });
 
 /** Stage a challenge the way the agent does, expiring $seconds from now. */

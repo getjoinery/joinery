@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
-#Version 3.6 - The safety dump is created under umask 077 rather than chmod'd after the
-#              redirect: it is a full plaintext copy of the live database, and on a container
-#              node it lands inside the site tree where the web tier could read it in the gap
+#Version 3.7 - The pre-restore safety dump is GONE, with its two flags. A restore happens
+#              because the current state is wrong; dumping it first preserved the thing being
+#              discarded and kept a full copy of the database per restore, for ever. Owner
+#              decision 2026-08-30. See stage 2 for what is given up
 #Version 3.5 - The pre-restore safety dump is taken in --non-interactive mode too. It used to be
 #              skipped there on the grounds that "the dashboard always prepends its own
 #              auto-backup step" — true of the SSH path and structurally impossible on the
@@ -24,14 +25,12 @@
 # jobs, project restore, from-backup install, manual ops). Contract:
 #
 #   restore_database.sh DB_NAME FILE [--non-interactive] [--key-file PATH]
-#                       [--db-user USER] [--no-pre-restore-dump]
-#                       [--pre-restore-dump-dir PATH]
+#                       [--db-user USER]
 #
-#   * A safety dump of the existing database is written beside the archive
-#     before anything is dropped, unless --no-pre-restore-dump says a caller has
-#     already taken one. It is best-effort and never blocks the restore: a
-#     machine with no room says so and carries on, because refusing to restore
-#     is not the safer answer when someone is already recovering.
+#   * NOTHING IS SAVED BEFORE THE SCHEMA IS DROPPED. A restore happens because
+#     the current state is wrong, so a safety dump preserved the very thing
+#     being discarded, and kept a full copy of the database per restore for
+#     ever. Removed deliberately (owner, 2026-08-30) -- see stage 2.
 #   * Verify before destroy: the archive is decrypted (if .enc) and integrity-
 #     checked into a temp file BEFORE the target database is touched. A bad key,
 #     truncated file, or corrupt archive exits with the database untouched.
@@ -63,13 +62,11 @@ DB_USER="postgres"
 # That direction is the whole point of the flag — the previous shape assumed
 # every unattended caller had prepended a dump, and the one that could not
 # (a primitive runs one script) silently lost it.
-PRE_RESTORE_DUMP=true
 # Where the safety dump goes. Empty means "beside the archive", which is right
 # whenever the archive is sitting in a backup directory. A caller whose archive
 # is in a staging directory it is about to delete has to say so — restore_project
 # extracts beside the archive and cleans up after itself, so a dump written
 # there would be removed by the very restore it exists to undo.
-PRE_RESTORE_DUMP_DIR=""
 POSITIONAL=()
 
 while [[ $# -gt 0 ]]; do
@@ -79,12 +76,8 @@ while [[ $# -gt 0 ]]; do
         --key-file=*)         KEY_FILE="${1#*=}"; shift ;;
         --db-user)            DB_USER="$2"; shift 2 ;;
         --db-user=*)          DB_USER="${1#*=}"; shift ;;
-        --no-pre-restore-dump) PRE_RESTORE_DUMP=false; shift ;;
-        --pre-restore-dump-dir)   PRE_RESTORE_DUMP_DIR="$2"; shift 2 ;;
-        --pre-restore-dump-dir=*) PRE_RESTORE_DUMP_DIR="${1#*=}"; shift ;;
         --help|-h)
             info "Usage: $0 DB_NAME FILE [--non-interactive] [--key-file PATH] [--db-user USER]"
-            info "          [--no-pre-restore-dump] [--pre-restore-dump-dir PATH]"
             info ""
             info "Supported formats: .sql  .sql.gz  .sql.gz.enc"
             info "Markers (stdout): RESTORE_OK BACKUP_KEY_MISSING DECRYPT_FAILED ARCHIVE_CORRUPT RESTORE_LOAD_FAILED DB_UNREACHABLE RESTORE_USAGE_ERROR"
@@ -351,58 +344,25 @@ if [ -n "$DUMP_PG_MAJOR" ] && [ -n "$TARGET_VERSION_NUM" ]; then
     fi
 fi
 
-# --- Stage 2: pre-restore safety dump -----------------------------------------
+# --- Stage 2: (removed) ---------------------------------------------------------
 #
-# THIS RUNS UNATTENDED TOO, and that is the correction. It used to be skipped
-# whenever --non-interactive was given, on the reasoning that "the dashboard
-# always prepends its own auto-backup step". That was true of the SSH path,
-# which composed a pg_dump step in front of this one — and it is structurally
-# impossible on the primitive path, where one job runs one script and there is
-# nowhere to prepend anything. So every unattended restore over the agent
-# channel dropped a live schema with nothing behind it.
+# THERE IS NO PRE-RESTORE SAFETY DUMP, and that is a decision rather than an
+# omission (owner, 2026-08-30).
 #
-# A caller that really has taken its own dump says so with
-# --no-pre-restore-dump. Defaulting the other way would put the safety of the
-# most destructive operation in the platform back into a promise each caller has
-# to remember to keep.
+# A restore happens because the current state is wrong. Saving a copy of it
+# first preserves precisely the thing the operator has decided to discard, and
+# then keeps it — a full copy of the database, per restore, for ever, on a
+# machine whose disk is sized for backups rather than for regret. The operator
+# already approved a statement that says in words that anything written since
+# the archive was taken is gone.
 #
-# Best-effort by design: a machine with no room to write the dump says so and
-# continues. Refusing to restore is not the safer answer at the moment somebody
-# is already recovering from something.
-if [ "$PRE_RESTORE_DUMP" = true ]; then
-    DB_EXISTS=$(psql -U "$DB_USER" -XtAc "SELECT 1 FROM pg_database WHERE datname='$DB_NAME'" 2>/dev/null)
-    if [ "$DB_EXISTS" = "1" ]; then
-        now=$(date +"%Y%m%d_%H%M%S")
-        # BESIDE THE ARCHIVE, not in the current directory. A bare filename put
-        # the dump wherever the caller happened to be standing — which for a
-        # root agent is whatever its working directory is, and for an operator
-        # is wherever they ran the command from. Beside the archive is where
-        # somebody looking for it will look, and it is the one directory on the
-        # machine that is sized for backups.
-        dump_dir="${PRE_RESTORE_DUMP_DIR:-$(dirname "$INPUT_FILE")}"
-        safety="${dump_dir}/${DB_NAME}-${now}-pre-restore.sql.gz"
-        info "📦 Creating pre-restore safety dump: $safety"
-        # umask BEFORE the redirect, not chmod after it. The redirect creates the
-        # file under the ambient umask (typically 0644) and it is a full
-        # plaintext copy of the live database — on a container node the backup
-        # directory resolves inside the site tree, so between creation and the
-        # chmod anything with a shell, the web tier included, can read the whole
-        # database. Creating it closed removes the window rather than shortening
-        # it; the chmod stays as a belt for a pre-existing file.
-        old_umask=$(umask)
-        umask 077
-        pg_dump -U "$DB_USER" "$DB_NAME" 2>/dev/null | gzip -9 > "$safety" 2>/dev/null
-        dump_rc=$?
-        umask "$old_umask"
-        if [ "$dump_rc" -eq 0 ]; then
-            chmod 600 "$safety" 2>/dev/null
-            info "✓ Pre-restore safety dump written."
-        else
-            rm -f "$safety"
-            info "⚠️  Could not write pre-restore safety dump — continuing."
-        fi
-    fi
-fi
+# What is genuinely given up: a load that fails PART WAY leaves the old database
+# already dropped and the new one incomplete (RESTORE_LOAD_FAILED below), and
+# there is now nothing on the machine to put back. The answer to that is the
+# archive itself, which is still there and can be retried — and on a managed
+# node the chain it came from is still on the shelf. It is a real cost, taken
+# knowingly, in exchange for not keeping a second copy of every database around
+# to protect against a case the operator has already been shown and accepted.
 
 # --- Stage 3: terminate connections, replace schema, load ----------------------
 info "🔌 Terminating active connections to '$DB_NAME'..."
@@ -443,9 +403,9 @@ if psql -U "$DB_USER" -d "$DB_NAME" -v ON_ERROR_STOP=1 -f "$SQL_TMP" 1>&2; then
     exit 0
 else
     info "✗ Load failed under ON_ERROR_STOP — the restore did not complete cleanly."
-    info "  The schema was replaced before the failure. Recover from the newest"
-    info "  /backups/auto_pre_*.sql.gz (the job's auto-backup step) or the"
-    info "  pre-restore safety dump if one was made."
+    info "  The schema was replaced before the failure, and nothing was kept"
+    info "  beforehand -- see stage 2. Retry this archive, or restore an earlier"
+    info "  one: both are still on the shelf."
     echo "RESTORE_LOAD_FAILED"
     exit 6
 fi

@@ -183,4 +183,53 @@ check(in_array($result['status'], array('skipped', 'error'), true),
 	'an unconfigured site does not claim success', $result['status']);
 check(strlen($result['message']) > 20, 'and says what is missing', $result['message']);
 
+// ── Staged chain restores nobody came back for ──────────────────────────────
+section('A staged chain restore is swept as a unit');
+
+// stage_chain downloads a whole chain onto the node and recovers the chain data
+// key beside it, so an operator can approve a restore against artifacts already
+// verified there. Deciding NOT to approve is an ordinary outcome — and nothing
+// removed the workspace afterwards, so a look at an approval screen left the
+// entire chain on disk for ever. Measured at 67MB for a small site.
+$base = $work . '/base';
+$profile_out = $base . '/manager';
+@mkdir($profile_out, 0700, true);
+
+$staged = $base . '/' . BackupRunner::STAGED_RESTORE_PREFIX . BackupChain::DIR_PREFIX . '20260101_040000';
+@mkdir($staged, 0700, true);
+file_put_contents($staged . '/files-0000.tar.gz.enc', 'x');
+file_put_contents($staged . '/' . BackupChain::MANIFEST_NAME, '{}');
+// The recovered chain data key. BackupNaming does not know this name, so a
+// sweep that folded the workspace's files into the ordinary candidate list
+// would delete the archives and leave the KEY — the worse half of the leak.
+file_put_contents($staged . '/chain.key', 'a-recovered-data-key');
+touch($staged, time() - (30 * 86400));
+
+$fresh = $base . '/' . BackupRunner::STAGED_RESTORE_PREFIX . BackupChain::DIR_PREFIX . '20260101_050000';
+@mkdir($fresh, 0700, true);
+file_put_contents($fresh . '/files-0000.tar.gz.enc', 'x');
+
+// A manager-profile plan: output_dir is a level BELOW the base, which is why
+// the workspace has to be resolved from base_dir and not from output_dir.
+BackupRunner::sweep_local(array(
+	'output_dir' => $profile_out, 'base_dir' => $base, 'keep_local' => 7));
+
+check(!is_dir($staged), 'a staged restore past the window is removed');
+check(!file_exists($staged . '/chain.key'),
+	'the recovered chain key goes with it — the part BackupNaming would not have matched');
+check(is_dir($fresh) && file_exists($fresh . '/files-0000.tar.gz.enc'),
+	'a workspace still inside the window is left alone — a restore may be mid-flight');
+
+// It is resolved from the base, not the profile directory. A manager-profile
+// run whose output_dir was used instead would never see the workspace at all,
+// which is exactly how this was missed the first time.
+$deep = $profile_out . '/' . BackupRunner::STAGED_RESTORE_PREFIX . BackupChain::DIR_PREFIX . '20260101_060000';
+@mkdir($deep, 0700, true);
+file_put_contents($deep . '/files-0000.tar.gz.enc', 'x');
+touch($deep, time() - (30 * 86400));
+BackupRunner::sweep_local(array(
+	'output_dir' => $profile_out, 'base_dir' => $base, 'keep_local' => 7));
+check(is_dir($deep),
+	'and only under the base: stage_chain never writes one inside a profile directory');
+
 harness_finish();
