@@ -83,9 +83,25 @@ function drive_share_sync_logic(array $input): LogicResult {
 	$owner_id = DriveHelper::owner_id_of($entity_type, $entity);
 	// The owner never holds a grant row on their own entity; don't count one.
 	unset($desired[$owner_id]);
-	$newly = FileAccessGrant::sync_for_entity($entity_type, $entity_id, $desired, $owner_id);
+	$revoked = array();
+	$newly = FileAccessGrant::sync_for_entity($entity_type, $entity_id, $desired, $owner_id, $revoked);
 
 	FileChange::record(FileChange::KIND_GRANT_CHANGED, $entity_type, $entity_id, $owner_id, $user_id);
+
+	// Take the copy back, as best we can. A user who has just lost access
+	// matches nothing in the feed -- their grant row is gone, and the row above
+	// carries the OWNER's id -- so without this they are never told, and the
+	// copy sits on their disk for ever while the web UI says they cannot see it.
+	// One row each, addressed to them: their client reads it, asks about the
+	// entity, is told it is no longer theirs, and removes the local copy.
+	//
+	// Best effort and nothing more. A device that is off, uninstalled or offline
+	// for longer than the feed's retention window never gets the row, and
+	// nothing here can reach a copy the user has already moved elsewhere. The
+	// promise is that we ask, not that the copy comes back.
+	foreach ($revoked as $lost_id) {
+		FileChange::record(FileChange::KIND_GRANT_CHANGED, $entity_type, $entity_id, $owner_id, $user_id, $lost_id);
+	}
 
 	// Notify newly-granted users (honoring their preference; absent row = on).
 	$entity_name = ($entity_type === DriveHelper::ENTITY_FOLDER) ? $entity->get('fol_name') : $entity->get('fil_title');

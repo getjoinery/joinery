@@ -1945,7 +1945,7 @@ fn scratch_trace() {
     let spec = platform_spec(&names);
     let refs: Vec<(&str, Platform)> = spec.iter().map(|(n, p)| (n.as_str(), *p)).collect();
     let world = sweep_world(seed, &refs, steps, chaos, vault);
-    drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, Names::Ordinary);
+    drive(&world, seed, steps, chaos, sweep_root(vault), vault, kills, scratch_names());
     for round in 0..12 {
         for d in &world.devices {
             world.clock.advance_secs(20 * 60);

@@ -83,11 +83,16 @@ function drive_changes_logic(array $input): LogicResult {
 	$file_in = DriveHelper::int_in_list($file_ids);
 	$folder_in = DriveHelper::int_in_list($folder_ids);
 
+	// A row may also be addressed to one user directly. That is how a revoked
+	// share reaches the person who lost it: by the time the row is written their
+	// grant is gone, so every clause below would hide from them the one change
+	// they most need to hear about.
 	$sql = "SELECT fch_file_change_id, fch_entity_type, fch_entity_id, fch_change_kind,
 	               fch_usr_user_id, fch_source_usr_user_id, fch_create_time
 	          FROM fch_file_changes
 	         WHERE fch_file_change_id > :cursor
 	           AND (fch_usr_user_id = :me
+	                OR fch_audience_usr_user_id = :me
 	                OR (fch_entity_type = 'file'   AND fch_entity_id IN ($file_in))
 	                OR (fch_entity_type = 'folder' AND fch_entity_id IN ($folder_in))
 	                OR (fch_entity_type = 'file'   AND fch_entity_id IN (

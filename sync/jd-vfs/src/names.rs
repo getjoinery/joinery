@@ -321,6 +321,21 @@ pub fn resolve_siblings(remote_names: &[String], p: &Personality) -> Vec<Resolve
 /// path the user knows, and the local version lands beside it under a name that
 /// says what it is, when it happened, and which machine it came from. `suffix`
 /// disambiguates repeats within the same day.
+///
+/// The result is legal on every filesystem the engine supports, and that is
+/// load-bearing rather than tidy. A conflict copy is written to this disk and
+/// then deliberately left for the scanner to adopt as a new file -- that is how
+/// it reaches the server. The scanner reads it under the name the DISK holds,
+/// and `to_local_name` has no inverse: the mapping on an entry is authoritative
+/// precisely because an escape cannot be reliably undone, and a user is entitled
+/// to a file genuinely called `%43ON.txt`. So a conflict copy that needed
+/// escaping would be adopted under its escaped spelling and uploaded as that,
+/// putting the escape on the server as a real name for ever.
+///
+/// The engine chooses these names, so it chooses ones that never need escaping.
+/// A name inheriting a reserved DOS stem or a forbidden character from the file
+/// it copies is normalized here, once, rather than being escaped differently on
+/// every disk that holds it. Ordinary names are untouched.
 pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> String {
     let (stem, ext) = split_extension(name);
     let stem = strip_conflict_markers(stem);
@@ -329,12 +344,24 @@ pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> 
     } else {
         format!(" {}", suffix)
     };
-    match ext {
+    let assembled = match ext {
         Some(e) => format!(
             "{} (conflicted copy {} from {}){}.{}",
             stem, date, device, n, e
         ),
         None => format!("{} (conflicted copy {} from {}){}", stem, date, device, n),
+    };
+    // Windows is the strictest of the supported personalities on name SHAPE --
+    // its illegal set covers POSIX's, it is the only one with reserved stems,
+    // and the only one that strips trailing dots and spaces. A name it accepts
+    // as-is is accepted as-is everywhere.
+    match to_local_name(&assembled, &crate::Personality::windows()) {
+        LocalName::AsIs(_) => assembled,
+        LocalName::Escaped { local, .. } => local,
+        // Nothing here can make it materializable, and inventing a different
+        // name would hide that. The caller's existing unsyncable path is the
+        // honest answer and it already exists.
+        LocalName::Unsyncable(_) => assembled,
     }
 }
 
@@ -695,6 +722,53 @@ mod tests {
         assert_eq!(
             conflict_copy_name("Makefile", "2026-07-16", "PC", 1),
             "Makefile (conflicted copy 2026-07-16 from PC)"
+        );
+    }
+
+    #[test]
+    fn a_conflict_copy_never_needs_escaping_anywhere() {
+        // A conflict copy is written to this disk and then left for the scanner
+        // to adopt as a new file -- that is how it reaches the server. The
+        // scanner reads it under the name the DISK holds, and an escape has no
+        // inverse, so a conflict copy that needed escaping would go up under its
+        // escaped spelling and become a real server name for ever. Three sweep
+        // seeds were exactly that: servers holding %43ON.12.txt and a%3Ab-37.txt
+        // as genuine names.
+        for hostile in [
+            "CON.12.txt",          // a reserved DOS stem, reserved whatever follows
+            "a:b-37.txt",          // a character Windows refuses outright
+            "notes-30.",           // a trailing dot Windows strips behind your back
+            "memo-47 ",            // a trailing space, the same trap
+        ] {
+            let copy = conflict_copy_name(hostile, "2026-07-31", "pc", 1);
+            for p in [
+                Personality::windows(),
+                Personality::fat32(),
+                Personality::linux(),
+                Personality::macos(),
+                Personality::hfs_plus(),
+            ] {
+                assert!(
+                    matches!(to_local_name(&copy, &p), LocalName::AsIs(_)),
+                    "the conflict copy of {hostile:?} is {copy:?}, which this \
+                     filesystem would have to escape -- and the escape is what \
+                     ends up on the server"
+                );
+            }
+        }
+    }
+
+    #[test]
+    fn making_conflict_names_safe_leaves_ordinary_ones_alone() {
+        // The normalization is for names that inherit hostility, not a tax on
+        // every conflict copy the user ever sees.
+        assert_eq!(
+            conflict_copy_name("Quarterly Report (final).xlsx", "2026-07-16", "MacBook", 1),
+            "Quarterly Report (final) (conflicted copy 2026-07-16 from MacBook).xlsx"
+        );
+        assert_eq!(
+            conflict_copy_name("caf\u{e9}-9.txt", "2026-07-16", "pc", 1),
+            "caf\u{e9}-9 (conflicted copy 2026-07-16 from pc).txt"
         );
     }
 

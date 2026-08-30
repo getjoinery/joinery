@@ -250,7 +250,43 @@ pub fn run_pass(
         folder_ids.insert(dir.clone(), id.server_id);
         out.local_creations += 1;
     }
+    // Slots already spoken for by an entry whose bytes have not arrived yet.
+    //
+    // `known_local` deliberately leaves those entries out -- there is no local
+    // file to have moved away from, and counting one would read it as deleted.
+    // The cost is that the scan cannot see the reservation, so anything
+    // standing at that path looks like a brand new file and is given an
+    // identity of its own.
+    //
+    // That is how an escape reaches the server as a real name. A file the
+    // engine wrote under an escaped name is adopted under that name, uploaded
+    // as that name, and from then on the server genuinely holds `memo-47%20`
+    // beside `memo-47 ` -- two names that are one name on the disk that had to
+    // escape, so they collide there for ever. `holds_a_local_file` already
+    // states the rule this restores: a `PendingDownload` entry holds its slot,
+    // because those bytes are on their way to that path.
+    //
+    // Nothing is lost by leaving the file alone. The download that is coming
+    // treats whatever stands at its destination as an occupant and moves it
+    // aside as a conflict copy, which keeps the user's bytes under a name that
+    // says where they came from -- the designed path, and the one that does not
+    // invent a second identity for a file that already has an owner.
+    let mut reserved: std::collections::HashSet<String> = std::collections::HashSet::new();
+    for entry in all_entries(env)? {
+        if entry.synced_placement.is_some() || entry.id.is_provisional() {
+            continue; // already accounted for by `known_local`
+        }
+        if !entry.holds_a_local_file() {
+            continue; // parked: it is not going to materialize here at all
+        }
+        if let Some(path) = relative_path(env, &entry)? {
+            reserved.insert(path);
+        }
+    }
     for file in &scan.created {
+        if reserved.contains(&file.path) {
+            continue;
+        }
         let Some(placement) = placement_of(&file.path, &folder_ids) else {
             // Its folder is not tracked yet. Nothing is lost: the folder gets an
             // identity above on this pass or the next, and the file follows.

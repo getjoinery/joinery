@@ -25,6 +25,7 @@ require_once(PathHelper::getIncludePath('logic/drive_restore_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_delete_forever_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_share_sync_logic.php'));
 require_once(PathHelper::getIncludePath('logic/drive_changes_logic.php'));
+require_once(PathHelper::getIncludePath('logic/drive_stat_logic.php'));
 
 $made_files = array(); $made_folders = array();
 harness_defer(function () use (&$made_files, &$made_folders) {
@@ -188,5 +189,67 @@ foreach (($feed_q->data['changes'] ?? array()) as $c) {
 	if (($c['entity_type'] ?? '') === 'file' && (int)($c['entity_id'] ?? 0) === (int)$Q->key) { $sees_private = true; }
 }
 check(!$sees_private, 'grantee is still not told about files outside anything shared to them');
+
+// ---------------------------------------------------------------------------
+section('unsharing reaches the person who lost access');
+
+// Best effort take-back. When a share is revoked the grant row is hard-deleted,
+// so by the time the change row is written the losing user matches nothing the
+// feed selects on -- they do not own the entity, and they no longer hold a
+// grant. Without a row addressed to them they are never told, and the copy sits
+// on their disk for ever. This is the whole mechanism by which an unshare ever
+// reaches a synced device.
+$session->set_api_user($owner->key);
+$R = File::createFromBytes('r-' . bin2hex(random_bytes(6)), 'revoked.txt', 'text/plain', $owner->key,
+	array('fil_private' => true, 'fil_source' => File::SOURCE_DRIVE));
+$R->set('fil_fol_folder_id', $F); $R->save();
+$made_files[] = $R->key;
+drive_share_sync_logic(array('entity_type' => 'file', 'entity_id' => $R->key,
+	'grants' => array((string)$grantee->key => 'viewer')));
+
+$cur_rev = (int)$dblink->query("SELECT COALESCE(MAX(fch_file_change_id),0) FROM fch_file_changes")->fetchColumn();
+// Revoke: an empty grant map is the whole point of a reconcile endpoint.
+drive_share_sync_logic(array('entity_type' => 'file', 'entity_id' => $R->key, 'grants' => array()));
+
+check(FileAccessGrant::role_for('file', $R->key, $grantee->key) === null, 'the grant is actually gone');
+
+$session->set_api_user($grantee->key);
+$feed_rev = drive_changes_logic(array('cursor' => $cur_rev));
+$told = false;
+foreach (($feed_rev->data['changes'] ?? array()) as $c) {
+	if (($c['entity_type'] ?? '') === 'file' && (int)($c['entity_id'] ?? 0) === (int)$R->key
+		&& ($c['kind'] ?? '') === 'grant_changed') { $told = true; }
+}
+check($told, 'the user who lost access is told the share changed');
+
+// And the row must not lie about who owns the file.
+foreach (($feed_rev->data['changes'] ?? array()) as $c) {
+	if ((int)($c['entity_id'] ?? 0) === (int)$R->key) {
+		check((int)$c['owner_id'] === (int)$owner->key, 'the revocation row still names the real owner');
+		break;
+	}
+}
+
+// Following that row, stat has to say no-longer-yours rather than merely gone:
+// a deletion invites the client to rescue local edits into a new file, which
+// for an unshare would leave a copy of somebody else's file behind.
+$stat = drive_stat_logic(array('entities' => array(array('entity_type' => 'file', 'entity_id' => (int)$R->key))));
+$in_missing = false; $in_not_yours = false;
+foreach (($stat->data['missing'] ?? array()) as $m) {
+	if ((int)($m['entity_id'] ?? 0) === (int)$R->key) { $in_missing = true; }
+}
+foreach (($stat->data['not_yours'] ?? array()) as $m) {
+	if ((int)($m['entity_id'] ?? 0) === (int)$R->key) { $in_not_yours = true; }
+}
+check($in_missing, 'a revoked entity is still reported missing, so an older client is unaffected');
+check($in_not_yours, 'a revoked entity is reported as no longer the caller\'s, not merely gone');
+
+// A file that never existed is gone, NOT not-yours -- or the client would keep
+// a record waiting for access that is never coming back.
+$stat_gone = drive_stat_logic(array('entities' => array(array('entity_type' => 'file', 'entity_id' => 2147483600))));
+check(count($stat_gone->data['missing'] ?? array()) === 1, 'a file that does not exist is missing');
+check(empty($stat_gone->data['not_yours']), 'a file that does not exist is not reported as somebody else\'s');
+
+$session->set_api_user($owner->key);
 
 harness_finish();

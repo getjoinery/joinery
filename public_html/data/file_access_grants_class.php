@@ -12,7 +12,7 @@ require_once(PathHelper::getIncludePath('includes/SystemBase.php'));
  * (no delete_time column) — the ieg_ precedent. Authorization for who may sync
  * lives in the logic layer (drive_share_sync); this class stays CRUD.
  *
- * @version 1.0.0
+ * @version 1.1.0
  */
 class FileAccessGrant extends SystemBase {
 	public static $prefix = 'fga';
@@ -71,9 +71,11 @@ class FileAccessGrant extends SystemBase {
 	/**
 	 * Reconcile the full grant set for an entity to $grants (user_id => role):
 	 * delete grants no longer wanted, insert new ones, update changed roles, leave
-	 * the rest. Returns the list of newly-granted user ids (for notifications).
+	 * the rest. Returns the list of newly-granted user ids (for notifications),
+	 * and fills $revoked with the user ids whose access was taken away.
 	 */
-	public static function sync_for_entity($entity_type, $entity_id, array $grants, $granted_by_user_id) {
+	public static function sync_for_entity($entity_type, $entity_id, array $grants, $granted_by_user_id, &$revoked = null) {
+		$revoked = array();
 		$desired = array();
 		foreach ($grants as $uid => $role) {
 			$uid = (int)$uid;
@@ -93,9 +95,14 @@ class FileAccessGrant extends SystemBase {
 		$newly_granted = array();
 
 		// Remove grants no longer wanted (hard delete).
+		// Who lost access is reported back, because after this loop there is no
+		// record anywhere that they ever had it -- the row is hard-deleted, so
+		// nothing downstream can work out who to tell. A revocation nobody is
+		// told about leaves the copy sitting on their disk for ever.
 		foreach ($current as $uid => $grant) {
 			if (!isset($desired[$uid])) {
 				$grant->permanent_delete();
+				$revoked[] = (int)$uid;
 			}
 		}
 

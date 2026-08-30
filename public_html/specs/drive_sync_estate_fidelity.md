@@ -149,21 +149,190 @@ insists it is elsewhere.
 
 Ten of the twelve failing seeds went green with the leaf escaped in `path_for`.
 
-### Held for review, because the fix may be implicated
+### The real defect underneath, traced 2026-08-30
 
-Seed 123010 does not settle, and it now holds TWO files where before the fix it
-held one: the escaped name and a leftover raw one, with the raw one looping as a
-provisional upload that is refused every pass.
+`path_for` was not the disease. Two seeds still fail — 123010 and 123212 — and
+instrumenting `download()` and naming's `put_entry` on 123212 gives the whole
+mechanism:
 
-The underlying defect is clear and independent: **naming records an escape, but
-nothing renames a file already on disk to match it.** The record changes and the
-disk does not follow — the same shape as the trash work above. What is NOT clear
-is whether `path_for` is the right home for the escape, or whether it papers
-over that gap and manufactures the duplicate. That is a placement-path design
-call and it is unreviewed.
+```
+download id=904 remote_name=cafe-9.txt   local_name=None  synced=None
+download id=904 remote_name=CON.36.txt   local_name=None  synced=Some(CON.36.txt)
+NAMETRACE  id=904 remote=CON.36.txt      local_name None -> Some(%43ON.36.txt)
+```
 
-Treat the `path_for` change as provisional. The oracle fix, the workload fix and
-the reserved-prefix issue stand on their own.
+Entry 904 was `cafe-9.txt`; the server renamed it to `CON.36.txt`. Naming runs
+at the top of the pass (`pass.rs:184`) and resolved against the **old** name,
+which is `AsIs` and yields `None`. The rename was then agreed, so
+`synced_placement` said `CON.36.txt` while `local_name` still said nothing. The
+download resolved through `effective_local_name()`, got the raw `CON.36.txt`,
+and wrote the file there. Naming produced `%43ON.36.txt` only on the **next**
+pass, by which time the file was already on disk under the raw name.
+
+**The defect in one line: `effective_local_name()` combines a fresh placement
+with a stale name mapping.**
+
+`local_placement()` is deliberately the last *agreed* placement, and its doc
+comment spells out why reaching for the remote one is a bug with teeth — the
+scanner finds the file where its records say it is not and reads it as a local
+move. `local_name` has no equivalent discipline. Combining the two yields a path
+that is neither the old one nor the right new one, and the scanner then does
+exactly what that doc comment predicts: in both seeds it mints a provisional
+upload for the orphaned raw name, which the server refuses every pass.
+
+This explains 123010 too, without contradiction. There the move landed at the
+escaped name because `path_for` derives forwards, while a download in the same
+window still resolved raw through the stale mapping — hence **two** files where
+before there was one. `path_for` shortened the window on the move path and left
+it wide open on the download path.
+
+**`local_name: None` is ambiguous**, and that ambiguity is what makes the bug
+undetectable from inside the engine: it means both *this name needs no escaping*
+and *naming has not looked yet*. Nothing can tell those apart, so nothing can
+wait for the second.
+
+Verified by A/B: with the `path_for` escape reverted, 123010 ends with ONE file
+at the raw name while the record says escaped — the record and the disk already
+disagreed before the change. `reconcile.rs` and `round.rs` never read
+`local_name` at all, so a change to it plans nothing and no rename is ever
+issued. `local_index` is keyed by inode and caches hashes, so nothing anywhere
+records the name a file was materialised under.
+
+### Defer was the wrong fix, and reading the code says why
+
+The first candidate was to record which server name `local_name` was resolved
+for and **defer** any op whose mapping is stale. Reviewed and rejected: it
+deadlocks on the move path, which is the case the sweep exists for.
+
+`competing_placement` (`naming.rs:169`) resolves an entry that holds a local
+file against `local_placement()` — the last *agreed* placement, deliberately,
+because until the move applies the file is still competing with its old
+siblings. So naming never resolves the DESTINATION name; a move deferred until
+that name has a verdict waits for a verdict that only its own execution can
+produce.
+
+A second shape was rejected for a symmetric reason: pre-recording the
+destination mapping into the single `local_name` the scanner reads. The scan
+resolves through `relative_path` → `effective_local_name` (`pass.rs:1813`), so
+the mapping would flip while the file still sat at the old name — the tracked
+file reads as missing and the file on disk reads as untracked, which is the same
+provisional loop reached by a new route.
+
+### Fixed: the move records the name it landed under
+
+The window is closed where it opens. `apply_local_move` computes `dest`, which
+is where it actually put the file, and now writes the resulting leaf into
+`local_name` in the same `put_entry` that sets `synced_placement` — the
+atomicity `synced_placement` already had. Equal to the server's spelling in the
+ordinary case, which is recorded as no mapping at all.
+
+`dest` is the one answer that cannot be stale, because the operation just used
+it. Nothing derives forwards and nothing waits.
+
+Pinned by `a_rename_into_a_hostile_name_carrying_new_content_lands_once`, which
+fails without the change by **never settling** — the world does not go quiet,
+which is how both remaining sweep seeds present. The content edit is what makes
+it bite: a rename alone is carried correctly by the move path, and it takes a
+download landing inside the same window to expose the disagreement.
+
+### The count was wrong: five seeds, not two
+
+The arm was reported as failing on two seeds. It failed on **five** — the
+earlier figure covered only the first two of the five sub-arms. `winname-linux-pc`
+and `winname-hostile` are now 0 of 400 each behind the fix above; the remaining
+three were pre-existing and were confirmed so by A/B (all three fail identically
+with the fix disabled).
+
+---
+
+## The escape reaching the server as a real name
+
+Three seeds, one cause, and the worst class found in this work: **`memo-47%20`
+and `a%3Ab-37.txt` ended up on the server as genuine file names.**
+
+That is not cosmetic. `memo-47%20` is the escape OF `memo-47 `, so a server
+holding both holds two names that are one name on any disk that has to escape.
+They collide there permanently, one is parked `UnicodeClash`, and each spelling
+goes on to spawn conflict copies of its own — seed 124149 reached **ten files
+where two belonged**.
+
+`to_local_name` has no inverse, deliberately: the mapping recorded on an entry
+is authoritative precisely because an escape cannot be reliably undone, and a
+user is entitled to a file genuinely called `%43ON.txt`. So once the escape is
+on the server there is nothing that can tell it from a real name again.
+
+### Defect A — a conflict copy inherits the hostility it copies
+
+`conflict_copy_name` built `CON.12 (conflicted copy … from pc).txt` from
+`CON.12.txt`: still a reserved DOS stem, because the reservation is on the stem
+before the first dot. `a:b-37.txt` kept its colon.
+
+A conflict copy is written to this disk and then **deliberately left for the
+scanner to adopt as a new file** — that is how it reaches the server. The
+scanner reads it under the name the DISK holds, so a conflict copy that needed
+escaping went up under its escaped spelling.
+
+**Fixed.** The engine chooses these names, so it now chooses ones that never
+need escaping: the assembled name is normalized once, against
+`Personality::windows()` — strictly the most restrictive of the supported
+personalities on name shape, so `AsIs` there is `AsIs` everywhere. Ordinary
+names are untouched. Pinned by `a_conflict_copy_never_needs_escaping_anywhere`
+and `making_conflict_names_safe_leaves_ordinary_ones_alone`.
+
+Cleared seeds 124427 and 124574.
+
+### Defect B — a reserved slot adopted from under the file that reserved it
+
+The general form, and the one that produced the leak without any conflict copy
+involved. Traced by instrumenting the adoption site:
+
+```
+ADOPT path="Contested Folder/memo-47%20"
+   RIVAL id=901 remote="memo-47 " local_name=Some("memo-47%20")
+         synced=None status=PendingDownload
+```
+
+Entry 901 had already reserved that escaped name; its bytes had not arrived.
+`known_local` (`pass.rs:1476`) deliberately excludes an entry with no
+`synced_placement` — there is no local file to have moved away from, and
+counting one would read it as deleted — so the scan cannot see the reservation.
+Whatever stands at that path is adopted as a brand new file and uploaded under
+the escaped name.
+
+`holds_a_local_file` already states the rule the scan was breaking: a
+`PendingDownload` entry holds its slot, *because those bytes are on their way to
+that path*. Naming honours it; the scan did not. The two disagreed about the
+same question.
+
+**Fixed.** The scan collects the paths reserved by entries awaiting a first
+download and does not adopt anything standing in one. Nothing is lost: the
+arriving download treats an occupant as an occupant and moves it aside as a
+conflict copy, which is the designed path and keeps the user's bytes under a
+name that says what happened. Pinned by
+`a_slot_reserved_for_an_arriving_file_is_not_adopted_from_under_it`, which
+without the guard fails with the server holding
+`["memo-47 ", "memo-47%20", "memo-47%20 (conflicted copy …)"]`.
+
+Cleared seed 124149.
+
+---
+
+## Still open on this axis
+
+- **Naming cannot see the destination folder's siblings.** `path_for`'s forward
+  derivation stays for now, and it is a strictly weaker computation than naming:
+  a move whose escaped leaf case-clashes with a file already in the destination
+  is resolved wrongly, before and after these fixes. Closing that means naming
+  resolving `remote` against the destination folder's sibling set and carrying
+  a second, target-side mapping — at which point the forward derivation should
+  be removed in the same change, not before.
+- **Nothing renames a file already on disk when naming re-maps it.** Reachable
+  when `duplicate_losers` re-maps an already-materialized file. Separate from
+  everything above, and still unfixed.
+- **A user file colliding with an escape is renamed to a conflict copy.** The
+  consequence of defect B's fix, and the right trade — `make_room` exists to
+  keep a copy rather than destroy one — but it is a conflict name for something
+  that was not a conflict.
 
 ---
 
