@@ -348,6 +348,37 @@
 			echo '</div></div>';
 		}
 
+		// Service, for a machine this plane reaches by probing it. The DNS boxes
+		// and the mail relay carry no agent and host no site, so what their own
+		// health document says about them is the only account of them there is.
+		if (isset($status_data['status']) || isset($status_data['port_reachable'])) {
+			echo '<div class="col-md-6 col-xl-4">';
+			echo '<div class="border rounded p-3 h-100">';
+			echo '<div class="text-muted small text-uppercase">Service</div>';
+			if (isset($status_data['port_reachable'])) {
+				echo '<div class="mt-1"><span class="badge bg-success">Answering on port '
+					. (int)$status_data['port_reachable'] . '</span></div>';
+			} else {
+				$svc_ok = ($status_data['status'] === 'ok');
+				echo '<div class="mt-1"><span class="badge bg-' . ($svc_ok ? 'success' : 'warning') . '">'
+					. htmlspecialchars((string)$status_data['status']) . '</span></div>';
+			}
+			$svc_bits = array();
+			if (isset($status_data['db_connected'])) {
+				$svc_bits[] = $status_data['db_connected'] ? 'database connected' : 'database unreachable';
+			}
+			if (!empty($status_data['service_uptime_seconds'])) {
+				$svc_bits[] = 'up ' . NodeMonitorHealth::humanize((int)$status_data['service_uptime_seconds']);
+			}
+			if (isset($status_data['probe_latency_ms'])) {
+				$svc_bits[] = 'answered in ' . (int)$status_data['probe_latency_ms'] . 'ms';
+			}
+			if ($svc_bits) {
+				echo '<div class="text-muted small mt-2">' . htmlspecialchars(implode(' · ', $svc_bits)) . '</div>';
+			}
+			echo '</div></div>';
+		}
+
 		// PostgreSQL
 		if (!empty($status_data['postgres_status'])) {
 			$pg_class = $status_data['postgres_status'] === 'accepting connections' ? 'success' : 'danger';

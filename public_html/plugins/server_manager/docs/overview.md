@@ -338,7 +338,7 @@ Install with `install_agent.sh --siteless`, which is explicit and never inferred
 
 | Job Type | Description | Destructive |
 |----------|-------------|-------------|
-| `check_status` | Disk, memory, load, uptime, PostgreSQL, version and database list. On a cut-over node this is the `check_status` **observe primitive**, which collects all of it without running a command; otherwise the management API or an SSH probe | No |
+| `check_status` | Disk, memory, load, uptime, PostgreSQL, version and database list. On a node with an agent this is the `check_status` **observe primitive**, which collects all of it without running a command; on a Joinery site without one, the management API; on a machine with neither, a **probe** of what the machine publishes about itself | No |
 | `backup_database` | Run `backup_database.sh`, optionally upload to cloud | No |
 | `backup_project` | Run `backup_project.sh` (DB + files + Apache config), optionally upload | No |
 | `list_backups` | List backup files on local server and cloud target | No |
@@ -411,7 +411,7 @@ Each node tracks its TLS certificate state in `mgn_ssl_state`:
 
 ### Automatic Detection
 
-`check_status` jobs include an SSH step that checks for a Let's Encrypt cert under `/etc/letsencrypt/live/{domain}/`. `JobResultProcessor` updates `mgn_ssl_state` and stores `ssl_domain`, `ssl_expiry_raw`, and `ssl_expiry_ts` in `mgn_last_status_data`. State transitions:
+A `check_status` on a node with an agent enumerates the certificate lineages the node holds, and `JobResultProcessor` matches them against the host this plane expects. Where no certificate is reported, an HTTPS probe from here catches a site whose TLS terminates at an edge. `JobResultProcessor` updates `mgn_ssl_state` and stores `ssl_domain`, `ssl_expiry_raw`, and `ssl_expiry_ts` in `mgn_last_status_data`. State transitions:
 
 - `CERT_FOUND` → sets state to `active` (from any prior state)
 - `CERT_MISSING` → clears state to `null` only if currently `null` or `active`; never overwrites `pending` or `failed`
@@ -1124,24 +1124,41 @@ All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a ge
 5. Agent runs the job's teardown steps (if any), then marks the job completed or failed
 6. `JobResultProcessor` optionally parses the output into structured data
 
-**Example: what a `check_status` job looks like in the database:**
+**Example: what a `backup_database` job looks like in the database:**
 
 ```json
 {
     "steps": [
-        {"type": "ssh", "label": "Check disk usage", "cmd": "df -h /"},
-        {"type": "ssh", "label": "Check memory", "cmd": "free -m"},
-        {"type": "ssh", "label": "Check uptime", "cmd": "uptime"},
-        {"type": "ssh", "label": "Check PostgreSQL", "cmd": "pg_isready"},
-        {"type": "ssh", "label": "Check Joinery version",
-         "cmd": "grep VERSION /var/www/html/site/public_html/includes/version.php"},
-        {"type": "ssh", "label": "Container stats",
-         "cmd": "docker stats --no-stream empoweredhealthtn", "on_host": true}
+        {"type": "ssh", "label": "Run database backup",
+         "cmd": "/var/www/html/site/maintenance_scripts/sysadmin_tools/backup_database.sh"},
+        {"type": "ssh", "label": "Upload to cloud", "cmd": "...", "continue_on_error": true}
     ]
 }
 ```
 
-The agent doesn't know this is a "status check." It just runs each step's command via SSH, captures output, and moves on.
+The agent doesn't know this is a "backup." It just runs each step's command, captures output, and moves on.
+
+### Not every job is a step list
+
+Two job shapes carry no commands for anything to execute.
+
+A **primitive** job names an operation the node's own agent compiled in
+(`{"primitive": "check_status", "params": {}}`). The plane composes nothing; the
+node looks the name up in its own vocabulary and refuses anything it does not
+recognise.
+
+A **probe** job (`{"probe": "check_status"}`) is work this plane does itself, and
+it is already finished by the time the row exists. `NodeHealthProbe` reads what
+the machine publishes about itself over HTTP, or establishes that it answers on
+its port, then folds the figures onto the node and writes the row in a terminal
+state. This is how a machine that carries no agent and hosts no site is asked
+about itself: the ScrollDaddy DNS servers report their own disk and memory in
+their `/health` document, and the mail relay proves it is alive by accepting
+connections on port 25, which is what it exists to do.
+
+`ManagementJob::createFromBuild()` reads which shape a builder returned and
+stores it correctly, so a caller dispatches an operation and never chooses a
+transport.
 
 ### Execution phases: main and teardown
 
@@ -1256,7 +1273,7 @@ Discovery: `GET /api/v1/management` returns every endpoint with its description.
 
 > **IP restriction on docker-prod nodes:** for sites fronted directly by host Apache (no Cloudflare), the container now reads the real client IP via `mod_remoteip` + the host's `X-Forwarded-For: %{REMOTE_ADDR}s` header, so IP restriction works end-to-end. For Cloudflare-fronted sites, the container sees Cloudflare's edge IP — IP restriction is not yet meaningful in that case (a future spec will trust Cloudflare's ranges and read `CF-Connecting-IP`).
 
-**Build-time routing:** `JobCommandBuilder::build_<op>()` dispatches to `build_<op>_api()` or `build_<op>_ssh()` based on `has_api($node, $op)`, which checks: (1) credentials stored on the node row, (2) a matching `build_<op>_api` exists, (3) a fresh `/health` probe succeeds. No runtime fallback — a job is decided at build-time and runs that path or fails. The existing SSH implementation stays in place; clearing the stored credentials or breaking `/health` routes the next job back to SSH automatically.
+**Build-time routing:** `JobCommandBuilder::build_<op>()` picks one implementation in preference order — `build_<op>_primitive()`, then `build_<op>_api()`, then `build_<op>_probe()`, then `build_<op>_ssh()` — and an operation with none it can reach throws rather than emitting an empty job. The API arm is gated on `has_api($node, $op)`: credentials stored on the node row, a matching `build_<op>_api`, and a fresh `/health` probe. There is no runtime fallback; a job is decided at build time and runs that path or fails. `check_status` has no `_ssh` implementation at all.
 
 **Adding a new management endpoint:** drop a file under `includes/management_api/<name>_handler.php` with `<name>_handler($request)` + `<name>_handler_api()` meta function. Nested paths mirror directories (`backups/list_handler.php` → `GET /api/v1/management/backups/list`). Parallels the action-endpoint convention in `logic/*_logic.php`. The machine-key + superadmin default applies automatically; a handler can **tighten** it (never loosen) by returning an `'auth'` block from `<name>_handler_api()` — e.g. `'auth' => ['capability' => 'delete']` for a destructive endpoint. See [docs/api.md](../../../docs/api.md#declaring-endpoint-authorization).
 

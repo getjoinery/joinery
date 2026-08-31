@@ -150,14 +150,17 @@ check(!JobCommandBuilder::has_api_creds($partial),
 	'API credentials require the secret key too, not just a public key and URL');
 
 $transports = JobCommandBuilder::transports_for('check_status');
-check(in_array('api', $transports) && in_array('ssh', $transports),
-	'check_status reports both transports',
+check(in_array('primitive', $transports) && in_array('api', $transports)
+		&& in_array('probe', $transports) && !in_array('ssh', $transports),
+	'check_status reports agent, api and probe transports, and no SSH',
 	implode(',', $transports));
 check(JobCommandBuilder::transports_for('no_such_operation') === array(),
 	'an unimplemented operation reports no transports');
 
-check(JobCommandBuilder::can_run($ssh_node, 'check_status'),
-	'an SSH node can run an operation with an SSH implementation');
+check(JobCommandBuilder::can_run($ssh_node, 'list_backups'),
+	'an SSH node can run an operation that still has an SSH implementation');
+check(!JobCommandBuilder::can_run($ssh_node, 'check_status'),
+	'but not check_status, which has nothing on that node to reach or probe');
 check(!JobCommandBuilder::can_run($bare_node, 'check_status'),
 	'a node with neither transport cannot run anything');
 check(!JobCommandBuilder::can_run($ssh_node, 'no_such_operation'),
@@ -166,8 +169,10 @@ check(!JobCommandBuilder::can_run($ssh_node, 'no_such_operation'),
 // The disabled-button tooltip has to say something true, since it is the only
 // explanation an admin gets for why an action is greyed out.
 $why = JobCommandBuilder::why_cannot_run($bare_node, 'check_status');
-check(strpos($why, 'SSH is not configured') !== false,
-	'the refusal reason names the missing SSH configuration', $why);
+check(strpos($why, 'no health check URL or port to probe') !== false,
+	'the refusal reason names what is actually missing', $why);
+check(strpos($why, 'no SSH implementation exists') === false,
+	'and does not report the absence of a transport being retired as a shortfall', $why);
 check(strpos($why, 'no API credentials') !== false,
 	'the refusal reason names the missing API credentials', $why);
 $why = JobCommandBuilder::why_cannot_run($ssh_node, 'no_such_operation');
@@ -411,16 +416,30 @@ check(strpos((string)file_get_contents($conf2), 'X-Forwarded-Proto "https"') !==
 // ---------------------------------------------------------------------------
 section('Step structure');
 
-// The dispatcher reads these keys; a step missing one is a job that cannot run.
-$steps = JobCommandBuilder::build_check_status($ssh_node);
-check(is_array($steps) && count($steps) > 0, 'check_status emits at least one step');
-foreach ($steps as $i => $step) {
-	check(isset($step['type']) && in_array($step['type'], array('ssh', 'local', 'api')),
-		'step ' . $i . ' declares a transport type the dispatcher understands',
-		'type: ' . var_export($step['type'] ?? null, true));
-	check(isset($step['label']) && $step['label'] !== '',
-		'step ' . $i . ' carries a label for the job log');
-}
+// check_status has no SSH implementation at all. A node with no agent, no API
+// and nothing to probe cannot be asked, and must say so rather than emit a job.
+$threw = '';
+try { JobCommandBuilder::build_check_status($ssh_node); }
+catch (Exception $e) { $threw = $e->getMessage(); }
+check($threw !== '', 'check_status refuses a node it has no way to reach');
+check(strpos($threw, 'SSH') === false,
+	'and does not blame SSH, which is no longer a transport for it', $threw);
+
+// A node that publishes a health document is reached by reading it.
+$probe_node = jcb_node(array(
+	'mgn_health_check_url'    => 'https://192.0.2.12/health',
+	'mgn_skip_joinery_checks' => true,
+));
+$built = JobCommandBuilder::build_check_status($probe_node);
+check(is_array($built) && ($built['probe'] ?? '') === 'check_status',
+	'a probe-only node gets a probe envelope, not a step list',
+	var_export($built, true));
+check(in_array('probe', JobCommandBuilder::transports_for('check_status'), true),
+	'check_status advertises the probe transport');
+check(!in_array('ssh', JobCommandBuilder::transports_for('check_status'), true),
+	'check_status advertises no SSH transport');
+check(JobCommandBuilder::can_run($probe_node, 'check_status'),
+	'and the action is offered on that node');
 
 // An API-capable node with no reachable endpoint must not silently produce an
 // empty job; the SSH path is the fallback and it has to be chosen.

@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.46 - check_status routes primitive -> api -> probe; build_check_status_ssh deleted.
+ *                 A machine with no agent and no site reports itself over HTTP instead of
+ *                 being read over a shell
  * @version 1.45 - the three restore operations gain primitive builders so the plane can address
  *                 what the agent ships, and a destructive-class gate keeps them OFF the primitive
  *                 transport: node_can_dispatch_destructive() is false until a node-verified
@@ -141,6 +144,9 @@ class JobCommandBuilder {
 		}
 		if (method_exists(static::class, "build_{$operation}_api")) {
 			$transports[] = 'api';
+		}
+		if (method_exists(static::class, "build_{$operation}_probe")) {
+			$transports[] = 'probe';
 		}
 		if (method_exists(static::class, "build_{$operation}_ssh")) {
 			$transports[] = 'ssh';
@@ -312,6 +318,7 @@ class JobCommandBuilder {
 		$op_transports = self::transports_for($operation);
 		if (in_array('primitive', $op_transports) && self::has_agent_channel($node)) return true;
 		if (in_array('api', $op_transports) && self::has_api_creds($node)) return true;
+		if (in_array('probe', $op_transports) && NodeHealthProbe::has_target($node)) return true;
 		if (in_array('ssh', $op_transports) && self::has_ssh($node)) return true;
 		return false;
 	}
@@ -334,13 +341,22 @@ class JobCommandBuilder {
 		if (in_array('api', $op_transports) && !self::has_api_creds($node)) {
 			$parts[] = 'no API credentials are configured';
 		}
+		if (in_array('probe', $op_transports) && !NodeHealthProbe::has_target($node)) {
+			$parts[] = 'there is no health check URL or port to probe';
+		}
 		if (in_array('ssh', $op_transports) && !self::has_ssh($node)) {
 			$parts[] = 'SSH is not configured';
 		}
 		if (!in_array('api', $op_transports)) {
 			$parts[] = 'no API implementation exists';
 		}
-		if (!in_array('ssh', $op_transports)) {
+		// Only worth saying where SSH could still be the answer. An operation
+		// that reaches nodes by primitive or probe has no SSH implementation by
+		// design, and reporting that as a shortfall points the reader at a
+		// transport that is being retired.
+		if (!in_array('ssh', $op_transports)
+				&& !in_array('primitive', $op_transports)
+				&& !in_array('probe', $op_transports)) {
 			$parts[] = 'no SSH implementation exists';
 		}
 		return "Cannot run '{$operation}' on this node: " . implode('; ', $parts) . '.';
@@ -727,12 +743,12 @@ class JobCommandBuilder {
 		if (self::has_api($node, 'check_status')) {
 			return self::build_check_status_api($node);
 		}
-		if (self::has_ssh($node)) {
-			return self::build_check_status_ssh($node);
+		if (NodeHealthProbe::has_target($node)) {
+			return self::build_check_status_probe($node);
 		}
 		throw new Exception(
-			"Node '{$node->get('mgn_slug')}' cannot run check_status: "
-			. "no API credentials (or health probe failed) and no SSH credentials configured."
+			"Node '{$node->get('mgn_slug')}' cannot run check_status: it has no agent, no API "
+			. "credentials, and no health check URL or port for this plane to probe."
 		);
 	}
 
@@ -764,87 +780,23 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Legacy SSH path — unchanged. Not called directly; the dispatcher above
-	 * routes here when API isn't available.
+	 * Probe path: the node is asked nothing and runs nothing. This plane reads
+	 * what the machine already publishes about itself over HTTP, or establishes
+	 * that it answers on its port.
+	 *
+	 * For the machines that will never carry an agent and host no site - the DNS
+	 * servers and the mail relay - this is the whole of check_status. Those boxes
+	 * report their own disk and memory in their /health document, taken by the
+	 * same syscalls the agent's check_status primitive uses, so the figures are
+	 * published by the machine rather than extracted from it.
+	 *
+	 * Returned as an envelope, like the primitive path. NodeHealthProbe runs it,
+	 * and it runs to completion inside the request that asked for it.
 	 */
-	public static function build_check_status_ssh($node) {
-		// Cast for the same reason as get_config_path(): a siteless node stores
-		// NULL, and this value reaches dirname() below.
-		$web_root = (string)$node->get('mgn_web_root');
-		$skip_joinery = $node->get('mgn_skip_joinery_checks');
-
-		$steps = [
-			['type' => 'ssh', 'label' => 'Check disk usage', 'cmd' => 'df -h /'],
-			['type' => 'ssh', 'label' => 'Check memory', 'cmd' => 'free -m'],
-			['type' => 'ssh', 'label' => 'Check uptime', 'cmd' => 'uptime'],
-		];
-
-		if (!$skip_joinery) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Check PostgreSQL', 'cmd' => 'pg_isready'];
-			$steps[] = ['type' => 'ssh', 'label' => 'Check Joinery version',
-				'cmd' => self::get_db_credentials_script($node) . " && psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -tAc \"SELECT 'VERSION=' || stg_value FROM stg_settings WHERE stg_name = 'system_version'\""];
-			$steps[] = ['type' => 'ssh', 'label' => 'Recent errors',
-				'cmd' => "grep -i 'fatal\\|error\\|exception' " . dirname($web_root) . "/logs/error.log | tail -20",
-				'continue_on_error' => true];
-		}
-
-		if ($node->get('mgn_container_name')) {
-			$container = $node->get('mgn_container_name');
-			$steps[] = ['type' => 'ssh', 'label' => 'Container stats',
-						'cmd' => "docker stats --no-stream {$container}", 'on_host' => true];
-		}
-
-		if (!$skip_joinery) {
-			// Which recovery key this node is holding, if any. Asked here because
-			// the status check is the job that already runs against every node —
-			// the fleet view can then show the answer without reaching out to
-			// each node on page load. Reports, never writes; a node too old to
-			// have the tool simply does not answer.
-			$steps[] = ['type' => 'ssh', 'label' => 'Check backup recovery key',
-				'cmd' => 'php ' . escapeshellarg(self::get_scripts_path($node) . '/sysadmin_tools/set_recovery_key.php')
-					. ' --report',
-				'continue_on_error' => true];
-		}
-
-		if (!$skip_joinery) {
-			$creds = self::get_db_credentials_script($node);
-			$steps[] = ['type' => 'ssh', 'label' => 'Check cron health',
-				'cmd' => "{$creds} && psql -U \"\$DB_USER\" -d \"\$DB_NAME\" -tAc \"SELECT 'CRON_LAST_RUN=' || stg_value FROM stg_settings WHERE stg_name = 'scheduled_tasks_last_cron_run'\"",
-				'continue_on_error' => true];
-		}
-
-		if (!$skip_joinery) {
-			// List databases in this node's PostgreSQL instance for the Internal Copy dropdown.
-			// For Docker this runs inside the container; for bare-metal on the host. Either way,
-			// it returns the databases accessible to the node's DB user.
-			$creds = self::get_db_credentials_script($node);
-			$steps[] = ['type' => 'ssh', 'label' => 'List databases',
-				'cmd' => "{$creds} && echo \"CURRENT_DB=\$DB_NAME\" && psql -U \"\$DB_USER\" -tAc \"SELECT 'DB:' || datname FROM pg_database WHERE datistemplate = false AND datname NOT IN ('postgres') ORDER BY datname\"",
-				'continue_on_error' => true];
-		}
-
-		// SSL certificate check. For Docker nodes the cert lives on the host (where the
-		// reverse-proxy Apache and certbot run), not inside the container — hence on_host.
-		// mgn_site_url is NULL on a node with no site — a bare install, a relay
-		// shard, a DNS box — so it is cast rather than passed straight through.
-		$domain = parse_url((string)$node->get('mgn_site_url'), PHP_URL_HOST) ?: '';
-		if ($domain) {
-			$is_docker  = (bool)$node->get('mgn_container_name');
-			$domain_esc = escapeshellarg($domain);
-			$steps[] = [
-				'type'             => 'ssh',
-				'label'            => 'Check SSL certificate',
-				'on_host'          => $is_docker,
-				'cmd'              => "if [ -f /etc/letsencrypt/live/{$domain_esc}/fullchain.pem ]; then"
-				                   . " EXPIRY=\$(openssl x509 -enddate -noout -in /etc/letsencrypt/live/{$domain_esc}/fullchain.pem | cut -d= -f2);"
-				                   . " echo \"SSL_CERT_FOUND domain={$domain} expiry=\$EXPIRY\";"
-				                   . " else echo \"SSL_CERT_MISSING domain={$domain}\"; fi",
-				'continue_on_error' => true,
-			];
-		}
-
-		return $steps;
+	public static function build_check_status_probe($node) {
+		return ['probe' => 'check_status'];
 	}
+
 
 	/**
 	 * Backup a node's database using backup_database.sh.
