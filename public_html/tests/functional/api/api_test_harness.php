@@ -54,13 +54,22 @@ function api_test_boot($argv) {
 	$meta = ($caller[0]['file'] ?? '') ? (harness_parse_metadata($caller[0]['file']) ?: array()) : array();
 	harness_boot($meta);
 
-	// The API's failed-auth limiter counts credential-less requests per IP in a
-	// shared window (api_auth_rate_limit_requests per api_auth_rate_limit_window).
-	// Suites probe unauthenticated paths deliberately, so an earlier suite — or an
-	// earlier run — would exhaust the budget and turn every later check into a 429.
-	// Each suite starts with a clean counter.
-	$db = DbConnector::get_instance()->get_db_link();
-	$db->prepare("DELETE FROM rql_request_logs WHERE rql_feature = 'api_auth'")->execute();
+	// The API's limiters count requests per IP in a shared window, and every
+	// suite here shares one IP with every other suite and every earlier run.
+	// 'api_auth' fills because suites probe credential-less paths deliberately;
+	// 'api' and 'api_upload' fill because a gate run makes hundreds of
+	// authenticated calls, so running the tier twice in an hour turned every
+	// later check into a 429 that looked like a broken endpoint. Each suite
+	// starts with clean counters.
+	//
+	// Guarded on debug, the platform's own dev discriminator, because this is a
+	// delete pass: a suite declaring env any must never wipe a customer's
+	// request history.
+	if (Globalvars::get_instance()->get_setting('debug')) {
+		$db = DbConnector::get_instance()->get_db_link();
+		$db->prepare("DELETE FROM rql_request_logs
+			WHERE rql_feature IN ('api_auth', 'api', 'api_upload')")->execute();
+	}
 }
 
 /**
