@@ -54,7 +54,7 @@ fi
 # More threads than cores on purpose. jd-soak's conductor tests are dominated by
 # deliberate waiting — a storm segment, a settle deadline — rather than by work,
 # so the default (one thread per core) leaves the box idle and the gate slow.
-cargo test -p jd-sim -p jd-soak --manifest-path "$SYNC_DIR/Cargo.toml" --quiet \
+nice -n 19 cargo test -p jd-sim -p jd-soak --manifest-path "$SYNC_DIR/Cargo.toml" --quiet \
 	-- --test-threads=8
 
 echo "sync sim gate: jd-sim and jd-soak green"

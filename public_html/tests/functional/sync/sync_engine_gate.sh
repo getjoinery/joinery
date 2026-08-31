@@ -38,11 +38,11 @@ if ! command -v cargo >/dev/null 2>&1; then
 	fi
 fi
 
-cargo test -p jd-vfs -p jd-core -p jd-platform -p jd-daemon \
+nice -n 19 cargo test -p jd-vfs -p jd-core -p jd-platform -p jd-daemon \
 	--manifest-path "$SYNC_DIR/Cargo.toml" --quiet
 
 # jd-shell has no library target, so its pure presentation logic is reached
 # through the binary's own tests rather than a lib test.
-cargo test --bin joinery-drive-tray --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
+nice -n 19 cargo test --bin joinery-drive-tray --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
 
 echo "sync engine gate: jd-vfs + jd-core + jd-platform + jd-daemon + jd-shell green"
