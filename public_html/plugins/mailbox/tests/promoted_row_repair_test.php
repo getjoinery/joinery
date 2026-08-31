@@ -137,7 +137,7 @@ $make_inbound = function (string $mid_header, string $thread_key, bool $seal) us
 	$m->set('iem_message_id_header', $mid_header);
 	$m->set('iem_thread_key', $thread_key);
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	if ($seal) {
 		InboundEmailMessage::sealAndPersistContent((int)$m->key, $vault,
 			'me@source.example', $alias_addr, 'a sent message', 'body', '');
@@ -277,7 +277,7 @@ $keeper->set('iem_thread_key', 'tk-dup-' . $suffix);
 $keeper->set('iem_direction', 'outbound');
 $keeper->save();
 $keeper_id = (int)$keeper->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $keeper_id);
+harness_register_model('InboundEmailMessage', $keeper_id);
 InboundEmailMessage::sealAndPersistContent($keeper_id, $vault, $alias_addr,
 	'friend@example.org', 'a sent message', 'body', '', true);
 

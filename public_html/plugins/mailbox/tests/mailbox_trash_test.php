@@ -111,7 +111,7 @@ $make_msg = function ($alias_id, $thread_key, $subject, $body, $spam = false) us
 	$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
 	if ($spam) { $m->set('iem_spam_verdict', InboundEmailMessage::SPAM_VERDICT_SPAM); }
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 

@@ -92,7 +92,7 @@ $make_msg = function ($subject, $body) use ($domain, $alias_id) {
 	$m->set('iem_message_id_header', 'stream-' . bin2hex(random_bytes(8)) . '@example.com');
 	$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 
@@ -116,7 +116,7 @@ $m1 = $make_msg('First', 'alpha streamkwone');
 $idx->fold($uid, $kp['secret']);
 
 $fil_1 = $blob_file_id();
-harness_register_row('fil_files', 'fil_file_id', $fil_1);
+harness_register_model('File', $fil_1);
 check($fil_1 > 0, 'the first fold persisted a blob (no blob existed yet)', 'fil=' . $fil_1);
 $path_1 = $blob_path($fil_1);
 check($path_1 !== '' && is_file($path_1), 'the blob is on local disk', $path_1);
@@ -133,7 +133,7 @@ check($blob_file_id() === $fil_1, 'no new mail, no refolds — the blob id holds
 $m2 = $make_msg('Second', 'beta streamkwtwo');
 $idx->fold($uid, $kp['secret']);
 $fil_2 = $blob_file_id();
-harness_register_row('fil_files', 'fil_file_id', $fil_2);
+harness_register_model('File', $fil_2);
 check($fil_2 > 0 && $fil_2 !== $fil_1, 'one new row rotates the blob', "was $fil_1 now $fil_2");
 check(SealedBox::isStreamFile($blob_path($fil_2)), 'the rotated blob is stream-format too');
 
@@ -165,7 +165,7 @@ $legacy_file = File::createFromBytes($legacy_blob, 'mailfts_' . $uid . '.bin', '
 	'fil_private' => true,
 	'fil_source'  => File::SOURCE_MAILBOX_SEARCH_INDEX,
 ));
-harness_register_row('fil_files', 'fil_file_id', (int)$legacy_file->key);
+harness_register_model('File', (int)$legacy_file->key);
 
 $bk = InboundMailboxSearchIndex::loadOrCreateForUser($uid);
 $bk->set('imi_fil_file_id', (int)$legacy_file->key);
@@ -177,7 +177,7 @@ $idx->fold($uid, $kp['secret']);
 check($idx->search($uid, 'streamkwone') === array($m1) && $idx->search($uid, 'streamkwtwo') === array($m2),
 	'the rebuild produced a searchable index');
 $fil_3 = $blob_file_id();
-harness_register_row('fil_files', 'fil_file_id', $fil_3);
+harness_register_model('File', $fil_3);
 check($fil_3 > 0 && $fil_3 !== (int)$legacy_file->key,
 	'the rebuild persisted a fresh blob in place of the legacy one', "legacy={$legacy_file->key} now=$fil_3");
 check(SealedBox::isStreamFile($blob_path($fil_3)), 'and it is stream-format');

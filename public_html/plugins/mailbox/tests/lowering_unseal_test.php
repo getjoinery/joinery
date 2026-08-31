@@ -83,7 +83,7 @@ function lu_message(int $domain_id, int $alias_id, string $direction, string $su
 	$msg->set('iem_body_plain', $body);
 	$msg->save();
 	$msg->load();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($msg->key));
+	harness_register_model('InboundEmailMessage', intval($msg->key));
 	return intval($msg->key);
 }
 
@@ -134,7 +134,7 @@ try {
 	// after the row seal so the DEK wrapping exists to seal under.
 	$att_plain = 'attachment plaintext bytes ' . bin2hex(random_bytes(6));
 	$file = File::createFromBytes($att_plain, 'note.txt', 'text/plain', User::USER_SYSTEM, array('fil_private' => true));
-	harness_register_row('fil_files', 'fil_file_id', intval($file->key));
+	harness_register_model('File', intval($file->key));
 	$crypto = new VaultCrypto();
 	$m1_dek = $crypto->openItemDek((string)lu_row($m1)['iem_sealed_key'],
 		SealedBox::b64url(sodium_crypto_box_secretkey($owner_kp)));

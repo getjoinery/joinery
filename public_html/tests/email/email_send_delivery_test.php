@@ -85,7 +85,7 @@ function mig_poll(string $addr, string $token, int $timeout = 150): ?array {
 		$q->execute(array('%' . $addr . '%', '%' . $token . '%'));
 		$row = $q->fetch(PDO::FETCH_ASSOC);
 		if ($row) {
-			harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$row['id']);
+			harness_register_model('InboundEmailMessage', (int)$row['id']);
 			return $row;
 		}
 		sleep(5);

@@ -755,15 +755,89 @@ function harness_cleanup_stale_fixtures() {
 	}
 }
 
-/** Register a created row for teardown (deleted LIFO with everything else). */
+/**
+ * The model class that owns a table, or null if nothing claims it.
+ *
+ * Discovery is expensive and the answer cannot change inside a run, so it is
+ * built once, on the first teardown that asks.
+ */
+function harness_model_class_for_table($table) {
+	$h = &$GLOBALS['__harness'];
+	if (!isset($h['table_models'])) {
+		$h['table_models'] = array();
+		try {
+			$classes = LibraryFunctions::discover_model_classes(array(
+				'require_tablename' => true,
+				'require_field_specifications' => true,
+				'include_plugins' => true,
+			));
+			foreach ($classes as $class) { $h['table_models'][$class::$tablename] = $class; }
+		} catch (\Throwable $e) {
+			// No discovery, no delegation: every registration falls back to SQL.
+		}
+	}
+	return $h['table_models'][$table] ?? null;
+}
+
+/**
+ * Register a created row for teardown (deleted LIFO with everything else).
+ *
+ * Deleted through its model class wherever one owns the table, because a flat
+ * DELETE reaches exactly one row: declared cascades do not run, and an override
+ * like InboundEmailMessage::permanent_delete() never gets to reclaim the bytes
+ * its rows point at. A parent registered this way used to leave its children
+ * behind for good — invisible, because an undeclared parent link has no foreign
+ * key for the referential-integrity gate to notice.
+ *
+ * The flat DELETE remains the fallback, for a table no model claims and for a
+ * model that refuses the delete (a 'prevent' rule, a ceremony a test cannot
+ * perform). That is the old behaviour, so nothing a suite could clean before
+ * stops being cleaned now — it just says so on the way past.
+ */
 function harness_register_row($table, $pkey_column, $id) {
 	harness_defer(function () use ($table, $pkey_column, $id) {
+		$class = harness_model_class_for_table($table);
+		if ($class !== null && class_exists($class)) {
+			try {
+				$obj = new $class((int)$id, TRUE);
+				if (!$obj->key) { return; }
+				$obj->permanent_delete();
+				return;
+			} catch (\Throwable $e) {
+				echo "  NOTE: $class#$id would not delete through the model ("
+					. $e->getMessage() . "); falling back to SQL\n";
+			}
+		}
 		$db = DbConnector::get_instance()->get_db_link();
 		try {
+			if ($db->inTransaction()) { $db->rollBack(); }
 			$q = $db->prepare("DELETE FROM $table WHERE $pkey_column = ?");
 			$q->execute(array($id));
 		} catch (\Throwable $e) {
 			echo "  WARNING: could not delete $table row $id: " . $e->getMessage() . "\n";
+		}
+	});
+}
+
+/**
+ * Register a created model for teardown by class name.
+ *
+ * Same delete as harness_register_row(), addressed by class rather than table.
+ * Use it where the fixture came back from production code as a bare id and the
+ * table it landed in is an implementation detail of that code.
+ */
+function harness_register_model($class, $id) {
+	harness_defer(function () use ($class, $id) {
+		try {
+			if (!class_exists($class)) {
+				echo "  WARNING: cannot delete $class#$id at teardown: class does not resolve\n";
+				return;
+			}
+			$obj = new $class((int)$id, TRUE);
+			if (!$obj->key) { return; }
+			$obj->permanent_delete();
+		} catch (\Throwable $e) {
+			echo "  WARNING: could not delete $class row $id: " . $e->getMessage() . "\n";
 		}
 	});
 }

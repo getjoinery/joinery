@@ -74,7 +74,7 @@ class SpamLearningTest {
 			"From: sender@spam-learn-test.example\nSubject: diverged fixture\n\nbody",
 			InboundEmailMessage::SPAM_VERDICT_SPAM));
 		$this->message_id = (int)$q->fetchColumn();
-		harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $this->message_id);
+		harness_register_model('InboundEmailMessage', $this->message_id);
 	}
 
 	/** What the row's learned marker currently says (null = never taught). */

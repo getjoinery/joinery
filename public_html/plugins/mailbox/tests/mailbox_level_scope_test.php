@@ -295,7 +295,7 @@ try {
 	check(empty($repaired['dedup']) && !empty($repaired['message']),
 		'once the mailbox has a member with a vault, the held message stores');
 	if (!empty($repaired['message'])) {
-		harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id',
+		harness_register_model('InboundEmailMessage',
 			intval($repaired['message']->key));
 		$row = new InboundEmailMessage(intval($repaired['message']->key), TRUE);
 		check((bool)$row->get('iem_content_sealed') === true, 'and it stores SEALED, not plaintext');

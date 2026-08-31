@@ -289,7 +289,7 @@ try {
 		$msg->save();
 		$msg->load();
 		$msg_ids[] = intval($msg->key);
-		harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($msg->key));
+		harness_register_model('InboundEmailMessage', intval($msg->key));
 	}
 
 	check(mailbox_protection_backlog_count(intval($dom->key)) === 2, 'both pre-raise rows count as backlog');
@@ -338,7 +338,7 @@ try {
 	$omsg->set('iem_body_plain', 'orphan body');
 	$omsg->save();
 	$omsg->load();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($omsg->key));
+	harness_register_model('InboundEmailMessage', intval($omsg->key));
 
 	$result = mailbox_protection_seal_batch($dom, 200);
 	check($result['sealed'] === 0 && $result['remaining'] === 1,

@@ -25,6 +25,7 @@
  *
  * Run: php tests/run.php db --filter=sealed_serve_grant
  *
+ * @version 1.1 - the ingest-adopted message is registered for teardown
  * @version 1.0
  */
 
@@ -118,7 +119,7 @@ $make_sealed_message = function (string $tag) use ($domain, $alias, $alias_addr,
 	$m->set('iem_body_html', '<p><img src="cid:' . $tag . '"></p>');
 	$m->set('iem_thread_key', 'tk-' . $tag);
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	$dek = InboundEmailMessage::sealAndPersistContent((int)$m->key, $vault, 'sender@example.org',
 		$alias_addr, 'with a picture', 'body', '<p><img src="cid:' . $tag . '"></p>');
 	return array((int)$m->key, $dek);
@@ -172,7 +173,7 @@ file_put_contents($tmp, $png);
 $sealed_file = DriveSealed::createSealedFile($tmp, 'selfsealed.png', 'image/png', $uid,
 	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
 @unlink($tmp);
-harness_register_row('fil_files', 'fil_file_id', (int)$sealed_file->key);
+harness_register_model('File', (int)$sealed_file->key);
 $att_a = $make_att_row($msg_a, 'selfsealed', '2', (int)$sealed_file->key, false);
 
 $container_bytes = file_get_contents($sealed_file->get_filesystem_path('original'));
@@ -212,7 +213,7 @@ file_put_contents($tmp, 'placeholder');
 $dek_file = File::createFromUpload($tmp, 'msgdek.png', 'image/png', $uid,
 	array('fil_private' => true, 'fil_source' => File::SOURCE_EMAIL_ATTACHMENT));
 if (is_file($tmp)) { @unlink($tmp); }
-harness_register_row('fil_files', 'fil_file_id', (int)$dek_file->key);
+harness_register_model('File', (int)$dek_file->key);
 $att_b = $make_att_row($msg_b, 'msgdek', '2', (int)$dek_file->key, true);
 
 $aead_bytes = $crypto->sealField($png, $dek_b, InboundEmailMessage::attachmentAd($msg_b, '2'));
@@ -298,6 +299,11 @@ $res = $m->invoke($ingestor, $folder_all, 900, $fetch_data, $router,
 	array($inline_part), 'body text', '<p><img src="cid:ingestinline@x.example"></p>', array(),
 	array('2' => $png));
 
+// Through the model, so the manifest row and the File the adoption just sealed
+// go with it — ingest built them, and only the model's own delete reclaims them.
+if (!empty($res['message_id'])) {
+	harness_register_model('InboundEmailMessage', (int)$res['message_id']);
+}
 check(!$res['dedup'] && $res['message_id'] > 0, 'the message stored fresh');
 $stmt = $db->prepare('SELECT ima_inbound_message_attachment_id, ima_fil_file_id, ima_size_bytes
 	FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?');
@@ -345,7 +351,7 @@ $m2->set('iem_raw_storage_driver', 'inline');
 $m2->set('iem_sealed_owner_user_id', $uid); // owner without sealing: the backfill scopes by owner
 $m2->save();
 $raw_msg_id = (int)$m2->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $raw_msg_id);
+harness_register_model('InboundEmailMessage', $raw_msg_id);
 $att_raw = $make_att_row($raw_msg_id, 'rawinline', '2', null, false);
 // And one part the raw does not contain — the failure/backoff case.
 $att_gone = $make_att_row($raw_msg_id, 'gone', '9', null, false);
@@ -361,7 +367,7 @@ $stmt->execute(array($att_raw));
 $fil_id = $stmt->fetchColumn();
 check($fil_id !== null && intval($fil_id) > 0, 'the raw-backed part is file-backed now');
 if ($fil_id) {
-	harness_register_row('fil_files', 'fil_file_id', intval($fil_id));
+	harness_register_model('File', intval($fil_id));
 	$adopted = new File(intval($fil_id), TRUE);
 	$adopted_bytes = file_get_contents($adopted->get_filesystem_path('original'));
 	check($adopted_bytes === $png, 'the adopted bytes are the image (unsealed message → plain File)');

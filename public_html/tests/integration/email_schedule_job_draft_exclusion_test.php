@@ -90,7 +90,7 @@ $mk = function ($direction, $subject) use ($domain, $alias_id) {
 	$m->set('iem_message_id_header', 'zzsched-' . bin2hex(random_bytes(8)) . '@example.com');
 	$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 

@@ -172,7 +172,7 @@ try {
 		$msg->save();
 		$msg->load();
 		$msg_ids[] = intval($msg->key);
-		harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($msg->key));
+		harness_register_model('InboundEmailMessage', intval($msg->key));
 	}
 
 	check(mailbox_protection_backlog_count(intval($dom->key)) === 2, 'two unsealed rows count as backlog');

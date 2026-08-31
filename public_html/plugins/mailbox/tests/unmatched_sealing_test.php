@@ -112,7 +112,7 @@ function um_message(int $domain_id, ?int $alias_id, string $recipient, string $s
 	$msg->set('iem_message_id_header', 'um-' . bin2hex(random_bytes(8)) . '@example.com');
 	$msg->save();
 	$msg->load();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($msg->key));
+	harness_register_model('InboundEmailMessage', intval($msg->key));
 	return intval($msg->key);
 }
 

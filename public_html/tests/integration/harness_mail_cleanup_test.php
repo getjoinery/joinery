@@ -103,7 +103,7 @@ $plant = function ($recipient, $alias_id = null, $received = null) use ($domain_
 	$m->set('iem_received_time', $received ?: gmdate('Y-m-d H:i:s'));
 	$m->save();
 	$id = (int)$m->key;
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $id);
+	harness_register_model('InboundEmailMessage', $id);
 	return $id;
 };
 

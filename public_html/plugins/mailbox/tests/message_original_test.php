@@ -180,7 +180,7 @@ $plain_addr = 'inbox@' . $plain_domain->get('ied_domain');
 $raw = $raw_email($token, $plain_addr);
 $res = $router->storeMessage($raw, $router->parseEmail($raw), $plain_alias, $plain_domain, $plain_addr);
 $plain_id = (int)$res['message']->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $plain_id);
+harness_register_model('InboundEmailMessage', $plain_id);
 
 $m = $reload($plain_id);
 check((string)$m->get('iem_raw_headers') === $router->rawHeaderBlock($raw),
@@ -225,7 +225,7 @@ $sealed_addr = 'inbox@' . $sealed_domain->get('ied_domain');
 $raw = $raw_email($token, $sealed_addr);
 $res = $router->storeMessage($raw, $router->parseEmail($raw), $sealed_alias, $sealed_domain, $sealed_addr);
 $sealed_id = (int)$res['message']->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $sealed_id);
+harness_register_model('InboundEmailMessage', $sealed_id);
 
 $row = $db->query('SELECT * FROM iem_inbound_email_messages WHERE iem_inbound_email_message_id = ' . $sealed_id)
 	->fetch(PDO::FETCH_ASSOC);
@@ -265,7 +265,7 @@ $res = $router->storeExtracted(array(
 	'imap_folder'       => 'INBOX',
 ), $plain_alias, $plain_domain, $plain_addr, $auth);
 $remote_id = (int)$res['message']->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $remote_id);
+harness_register_model('InboundEmailMessage', $remote_id);
 
 $m = $reload($remote_id);
 check((string)$m->get('iem_raw_storage_driver') === 'remote', 'the row is reference-backed (precondition)');

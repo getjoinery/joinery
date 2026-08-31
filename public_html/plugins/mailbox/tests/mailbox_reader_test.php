@@ -20,6 +20,8 @@
  * Run: php plugins/mailbox/tests/mailbox_reader_test.php
  * (requires schema synced — iem threading/state columns + ieg table).
  *
+ * @version 1.6 - teardown removes the attachment manifest before the messages
+ *                it hangs off
  * @version 1.5 - Sent is ordered by time alone: a read message sent today
  *                outranks an unread one sent a month ago, Sent renders as one
  *                plain list, and the Inbox still sections
@@ -530,6 +532,10 @@ class MailboxReaderTest {
 		try {
 			$ids = array_filter(array_map('intval', array_values($this->msg_ids)));
 			if (count($ids)) {
+				// Attachments first: the manifest has no DB foreign key, so a
+				// message deleted out from under it strands the row for good.
+				$this->db->exec("DELETE FROM ima_inbound_message_attachments
+					WHERE ima_iem_inbound_email_message_id IN (" . implode(',', $ids) . ")");
 				$this->db->exec("DELETE FROM iem_inbound_email_messages
 					WHERE iem_inbound_email_message_id IN (" . implode(',', $ids) . ")");
 			}
