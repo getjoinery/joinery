@@ -95,7 +95,7 @@ $mk_message = function ($alias_id) use ($domain, $raw) {
 	$m->set('iem_raw_message', $raw);
 	$m->set('iem_raw_storage_driver', 'inline');
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 

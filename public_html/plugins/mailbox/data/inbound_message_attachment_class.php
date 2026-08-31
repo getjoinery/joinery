@@ -30,7 +30,9 @@
  * file-backed the moment any path turns up the real bytes — an archive import
  * of the same message adopts them, whichever order the two happened in.
  *
- * @version 1.4
+ * @version 1.5
+ * @changelog 1.5 - ima_iem_inbound_email_message_id declared as a real
+ *   foreign key: a manifest row can no longer outlive its message.
  * @changelog 1.4 - ima_adopt_attempt_time, the inline-image backfill's
  *   retry-with-backoff stamp (specs/bugfix_sealed_inline_images.md).
  * @changelog 1.3 - the adoption upgrade rewrites a few columns on a live row
@@ -53,7 +55,12 @@ class InboundMessageAttachment extends SystemBase {
 
 	public static $field_specifications = array(
 		'ima_inbound_message_attachment_id' => array('type'=>'int8', 'is_nullable'=>false, 'serial'=>true),
-		'ima_iem_inbound_email_message_id'  => array('type'=>'int8', 'is_nullable'=>false),
+		// A real constraint, not just a declared cascade: a manifest row is worth
+		// nothing without its message, and with no FK a delete that goes round the
+		// model leaves one behind where nothing looks for it.
+		'ima_iem_inbound_email_message_id'  => array('type'=>'int8', 'is_nullable'=>false,
+			'foreign_key'=>array('table'=>'iem_inbound_email_messages',
+				'column'=>'iem_inbound_email_message_id', 'on_delete'=>'CASCADE')),
 		'ima_filename'      => array('type'=>'varchar(500)'),
 		'ima_content_type'  => array('type'=>'varchar(255)'),
 		'ima_size_bytes'    => array('type'=>'int8'),

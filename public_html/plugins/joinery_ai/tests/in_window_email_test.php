@@ -122,7 +122,7 @@ function iw_message(int $domain_id, int $alias_id, string $subject, string $body
 	$msg->set('iem_received_time', gmdate('Y-m-d H:i:s', strtotime("$offset_minutes minutes")));
 	$msg->save();
 	$msg->load();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($msg->key));
+	harness_register_model('InboundEmailMessage', intval($msg->key));
 	return intval($msg->key);
 }
 

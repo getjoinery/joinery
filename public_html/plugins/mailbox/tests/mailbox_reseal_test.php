@@ -95,7 +95,7 @@ $make_message = function (UserEncryptionVault $seal_vault, string $body) use ($d
 	$m->set('iem_body_plain', $body);
 	$m->set('iem_body_html', '<p>' . $body . '</p>');
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	InboundEmailMessage::sealAndPersistContent((int)$m->key, $seal_vault, 'sender@example.com',
 		'inbox@' . $domain->get('ied_domain'), 'subject', $body, '<p>' . $body . '</p>');
 	return (int)$m->key;

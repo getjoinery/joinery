@@ -98,7 +98,7 @@ $mk_msg = function ($alias_id, $sender, $mid) use ($domain) {
 	$m->set('iem_message_id_header', $mid);
 	$m->set('iem_thread_key', $mid);
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 $member_msg = $mk_msg($alias, 'Member Person <' . $member_email . '>', '<ctx-mem@x>');

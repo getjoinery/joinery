@@ -92,6 +92,45 @@ foreach ($classes as $class) {
 }
 check($fk_count > 0, 'at least one declared foreign key was checked', 'declaration discovery is broken');
 
+section('Owned rows never outlive their owner');
+// The declared-FK check above only reaches relationships the database itself
+// enforces, and most ownership here is declared in PHP instead: a
+// $foreign_key_actions entry of 'cascade' or 'permanent_delete' says the child
+// cannot outlive the parent. That holds only while deletes go through the
+// model — a flat DELETE takes the parent and leaves the children where nothing
+// will ever look for them again. This is where that shows up.
+$owned_orphans = array();
+$owned_checked = 0;
+$pkeys = array();
+foreach ($classes as $class) {
+	if (isset($existing_tables[$class::$tablename])) { $pkeys[$class::$tablename] = $class::$pkey_column; }
+}
+try {
+	$rules = $dblink->query("SELECT del_source_table AS parent, del_target_table AS child,
+			del_target_column AS col
+		   FROM del_deletion_rules WHERE del_action IN ('cascade','permanent_delete')
+	   ORDER BY del_target_table, del_target_column")->fetchAll(PDO::FETCH_ASSOC);
+} catch (PDOException $e) {
+	$rules = array(); // registry absent on this install — nothing declared to check
+}
+foreach ($rules as $rule) {
+	if (!isset($pkeys[$rule['parent']]) || !isset($existing_tables[$rule['child']])) { continue; }
+	if (!in_array($rule['col'], $existing_tables[$rule['child']], true)) { continue; }
+	try {
+		$q = $dblink->query("SELECT count(*) FROM {$rule['child']} c
+			 WHERE c.{$rule['col']} IS NOT NULL
+			   AND NOT EXISTS (SELECT 1 FROM {$rule['parent']} p
+			                    WHERE p.{$pkeys[$rule['parent']]} = c.{$rule['col']})");
+		$n = (int)$q->fetchColumn();
+	} catch (PDOException $e) {
+		continue; // shape this install does not have
+	}
+	$owned_checked++;
+	if ($n > 0) { $owned_orphans[] = "{$rule['child']}.{$rule['col']} -> {$rule['parent']}: $n"; }
+}
+check(count($owned_orphans) === 0, "no owned rows outliving their owner ($owned_checked relationships checked)",
+	implode('; ', $owned_orphans));
+
 section('Serial sequences are never behind MAX(pkey)');
 $behind = array();
 $checked = 0;

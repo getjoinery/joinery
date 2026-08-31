@@ -1173,7 +1173,16 @@ private static function UcName($string) {
 	function permanent_delete($debug=false){
 		$dbhelper = DbConnector::get_instance();
 		$dblink = $dbhelper->get_db_link();
-		
+
+		// No key, no row: the delete already happened, or the object was never
+		// saved. Either way there is nothing left to remove, and the cascade
+		// prep below cannot run without one — it would ask Group to drop member
+		// '' and get back an exception about a missing id, which describes the
+		// empty key rather than the double delete that produced it.
+		if($this->key === NULL || $this->key === ''){
+			return true;
+		}
+
 		if($this->key == User::USER_SYSTEM || $this->key == User::USER_DELETED){
 			throw new SystemAuthenticationError(
 					'You cannot delete this user.');

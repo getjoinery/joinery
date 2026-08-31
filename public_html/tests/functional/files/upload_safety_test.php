@@ -91,7 +91,7 @@ $owner = make_user('upload_safety', 5);
 /** Ingest bytes under a display name and register the row for teardown. */
 function ingest($bytes, $display_name, $claimed_type, $owner_id, array $restrictions = array()) {
     $file = File::createFromBytes($bytes, $display_name, $claimed_type, $owner_id, $restrictions);
-    harness_register_row('fil_files', 'fil_file_id', $file->key);
+    harness_register_model('File', $file->key);
     return $file;
 }
 

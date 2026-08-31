@@ -89,7 +89,7 @@ $msg->set('iem_message_id_header', 'idxrt-' . bin2hex(random_bytes(8)) . '@examp
 $msg->set('iem_received_time', gmdate('Y-m-d H:i:s'));
 $msg->save();
 $mid = (int)$msg->key;
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $mid);
+harness_register_model('InboundEmailMessage', $mid);
 
 $idx = new MailboxIndex();
 $idx->wipe($uid);              // start from a clean working copy

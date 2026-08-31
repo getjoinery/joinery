@@ -222,13 +222,13 @@ check(dvi_message_count($db, intval($dom->key)) === 1,
 $q = $db->prepare("SELECT iem_inbound_email_message_id FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id = ?");
 $q->execute(array(intval($dom->key)));
 foreach ($q->fetchAll(PDO::FETCH_COLUMN, 0) as $id) {
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', intval($id));
+	harness_register_model('InboundEmailMessage', intval($id));
 	$a = $db->prepare("SELECT ima_inbound_message_attachment_id, ima_fil_file_id FROM ima_inbound_message_attachments WHERE ima_iem_inbound_email_message_id = ?");
 	$a->execute(array(intval($id)));
 	foreach ($a->fetchAll(PDO::FETCH_ASSOC) as $att) {
 		harness_register_row('ima_inbound_message_attachments', 'ima_inbound_message_attachment_id', intval($att['ima_inbound_message_attachment_id']));
 		if ($att['ima_fil_file_id']) {
-			harness_register_row('fil_files', 'fil_file_id', intval($att['ima_fil_file_id']));
+			harness_register_model('File', intval($att['ima_fil_file_id']));
 		}
 	}
 }
@@ -247,7 +247,7 @@ $result = $router->storeRelayPending(
 	$sealed, $fdom, null, User::USER_SYSTEM);
 check($result['message'] !== null, 'the pending row stored');
 $pending_id = intval($result['message']->key);
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $pending_id);
+harness_register_model('InboundEmailMessage', $pending_id);
 
 $msg = new InboundEmailMessage($pending_id, TRUE);
 $done = $router->parsePendingMessage($msg, $kp['secret']);

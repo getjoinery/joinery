@@ -78,7 +78,7 @@ $make_msg = function ($direction, $subject, $body) use ($domain, $alias_id) {
 	$m->set('iem_message_id_header', 'fts-' . bin2hex(random_bytes(8)) . '@example.com');
 	$m->set('iem_received_time', gmdate('Y-m-d H:i:s'));
 	$m->save();
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', (int)$m->key);
+	harness_register_model('InboundEmailMessage', (int)$m->key);
 	return (int)$m->key;
 };
 
@@ -94,7 +94,7 @@ section('refold queue');
 $m1 = $make_msg('outbound', 'First', 'alpha uniquekwone');
 $draft_id = intval($drafts->saveDraft(array('alias_id' => $alias_id, 'mode' => 'new',
 	'to' => 'x@y.com', 'subject' => 'A draft', 'body_html' => '<p>draftbody kwdraft</p>'))['draft_id']);
-harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $draft_id);
+harness_register_model('InboundEmailMessage', $draft_id);
 $m2 = $make_msg('inbound', 'Third', 'beta uniquekwtwo');
 
 $idx->fold($uid, 'dummy-secret');

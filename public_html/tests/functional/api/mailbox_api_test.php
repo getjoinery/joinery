@@ -282,12 +282,12 @@ try {
 		'Granted thread ' . $suffix,
 		'<p>body</p><img src="cid:mapi_inline_' . $suffix . '">',
 		$suffix, ++$msg_counter);
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $msg_granted);
+	harness_register_model('InboundEmailMessage', $msg_granted);
 
 	$other_thread_key = '<mapi-other-' . $suffix . '@x>';
 	$msg_other = mapi_insert_msg($db, $domain_id, $other_alias, $other_thread_key,
 		'Other thread ' . $suffix, '', $suffix, ++$msg_counter);
-	harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $msg_other);
+	harness_register_model('InboundEmailMessage', $msg_other);
 
 	$att_row = InboundMessageAttachment::CreateEntry(array(
 		'ima_iem_inbound_email_message_id' => $msg_granted,
@@ -479,7 +479,7 @@ try {
 
 	$sent_thread_key = null;
 	if ($sent_ok && $outbound_id > 0) {
-		harness_register_row('iem_inbound_email_messages', 'iem_inbound_email_message_id', $outbound_id);
+		harness_register_model('InboundEmailMessage', $outbound_id);
 
 		$row = $db->query("SELECT iem_thread_key, iem_direction, iem_subject FROM iem_inbound_email_messages
 			WHERE iem_inbound_email_message_id = $outbound_id")->fetch(PDO::FETCH_ASSOC);
