@@ -17,7 +17,7 @@
  * failed run destroys the instance it created within the same grant — the
  * customer is never left paying for a half-built box.
  *
- * Test seams: $driver_factory and $runner are injectable statics.
+ * Test seams: $driver_factory here, and the command runner on RelaySsh::$runner.
  *
  * @version 1.9 - the provisioning bundle carries provisioning/bin/, the prebuilt
  *                relay-sealer binaries, and no longer carries the sealer's Go source.
@@ -67,8 +67,6 @@ class RelayCloudProvisioner {
 	/** @var callable|null fn(RelayCloudProvision): CloudComputeProvider — test seam. */
 	public static $driver_factory = null;
 
-	/** @var callable|null fn(string $cmd): array{0:int,1:string} — test seam. */
-	public static $runner = null;
 
 	/** Advance one run a single step. Returns a short human status line. */
 	public function advance(RelayCloudProvision $run): string {
@@ -646,9 +644,6 @@ class RelayCloudProvisioner {
 	}
 
 	private function run(string $cmd): array {
-		if (self::$runner !== null) {
-			return call_user_func(self::$runner, $cmd);
-		}
 		return RelaySsh::run($cmd);
 	}
 

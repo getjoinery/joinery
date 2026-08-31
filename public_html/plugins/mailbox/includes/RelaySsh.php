@@ -14,6 +14,8 @@
  * rsync push into its own fragment drop area, joinery-ack, joinery-merge,
  * joinery-ping (specs/mailbox_relay_shared_fleet.md § Multi-tenancy on a shard).
  *
+ * @version 1.4 - $runner: the injectable command runner lives here, on the one
+ *                execution chokepoint, not on individual callers
  * @version 1.3 - forgetHostKey(): a rebuilt relay reuses the tunnel address with
  *                a new host key, which accept-new refuses until the old one goes
  * @version 1.2 - login derives from the relay row's tenant identity (pullUser);
@@ -95,8 +97,19 @@ class RelaySsh {
 		return implode(' ', array_map('escapeshellarg', $args));
 	}
 
+	/** @var callable|null fn(string $cmd): array{0:int,1:string} — test seam.
+	 * THE seam, singular: every relay command line (provisioner, spool pull,
+	 * map push, ping, forgetHostKey) executes through run(), so installing a
+	 * scripted runner here intercepts all of it. A second seam elsewhere is how
+	 * a real rsync once escaped a fully-scripted test and spent 15 seconds
+	 * timing out against the tunnel address. */
+	public static $runner = null;
+
 	/** Run a shell command, returning [exit_code, combined_output]. */
 	public static function run(string $cmd): array {
+		if (self::$runner !== null) {
+			return call_user_func(self::$runner, $cmd);
+		}
 		$output = array();
 		$code = 0;
 		exec($cmd . ' 2>&1', $output, $code);

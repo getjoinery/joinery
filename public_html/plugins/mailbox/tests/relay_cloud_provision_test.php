@@ -74,6 +74,10 @@ class RelayCloudProvisionTest {
 	private $driver;
 	private $ssh_script_ok = true;
 	private $commands = array();
+	/** Paths the seam actually wrote a keypair to. */
+	private $keygen_writes = array();
+	/** Paths named by an ssh-keygen -R; these are real known_hosts files. */
+	private $forget_targets = array();
 
 	private $wg_setting_was = null;
 
@@ -114,7 +118,7 @@ class RelayCloudProvisionTest {
 			check(false, 'uncaught ' . get_class($e), $e->getMessage());
 		} finally {
 			RelayCloudProvisioner::$driver_factory = null;
-			RelayCloudProvisioner::$runner = null;
+			RelaySsh::$runner = null;
 			if ($this->pull_pub_created !== '') {
 				@unlink($this->pull_pub_created);
 			}
@@ -130,12 +134,34 @@ class RelayCloudProvisionTest {
 		// Scripted runner: ssh-keygen produces a real throwaway keypair (the
 		// engine reads the files); tar/scp succeed silently; the big ssh build
 		// step succeeds (with markers) or fails per the test's flag; the
-		// WireGuard peer helper succeeds.
-		RelayCloudProvisioner::$runner = function ($cmd) use ($test) {
+		// WireGuard peer helper succeeds. Installed on RelaySsh — the ONE
+		// execution chokepoint — so no command line can run for real: the old
+		// per-class seam let RelaySsh::run() slip a real rsync to the dead
+		// tunnel address (15s of connect timeout) and a real ssh-keygen -R
+		// against ~/.ssh/known_hosts on every gate run.
+		RelaySsh::$runner = function ($cmd) use ($test) {
 			$test->commands[] = $cmd;
+			// Two unrelated commands share the ssh-keygen name: generating the
+			// throwaway keypair, and forgetting a stale host key. Only the
+			// first creates a file. Keying on -f alone made the stub write a
+			// fake private key over the -R target, which is a real
+			// ~/.ssh/known_hosts.
 			if (strpos($cmd, 'ssh-keygen') === 0) {
+				if (strpos($cmd, ' -R ') !== false) {
+					// Forgetting a host key touches nothing here. The -f target
+					// is a real ~/.ssh/known_hosts, not a key to be written.
+					if (preg_match('/-f (\S+)/', $cmd, $m)) {
+						$test->forget_targets[] = trim($m[1], "'");
+					}
+					return array(0, 'ok');
+				}
+				if (strpos($cmd, ' -t ') === false) {
+					check(false, 'ssh-keygen in the seam is one we recognise', $cmd);
+					return array(1, 'unrecognised ssh-keygen');
+				}
 				if (preg_match('/-f (\S+)/', $cmd, $m)) {
 					$f = trim($m[1], "'");
+					$test->keygen_writes[] = $f;
 					file_put_contents($f, "FAKE-PRIVATE-KEY\n");
 					file_put_contents($f . '.pub', "ssh-ed25519 AAAAfake joinery-relay-provision\n");
 				}
@@ -222,6 +248,15 @@ class RelayCloudProvisionTest {
 			check((string)$relay->get('mrl_wg_public_key') === 'FAKEWGKEY123', 'relay carries the WG key from the markers');
 			check((string)$relay->get('mrl_tenant_slug') === 'main', 'self-provisioned relay is a fleet of one');
 		}
+
+		// A new machine reuses the tunnel address, so the engine forgets the
+		// stale host key. That path names a real ~/.ssh/known_hosts after -f.
+		// The seam must never mistake it for a keypair to write: doing so
+		// destroys the known_hosts of whoever runs the suite.
+		check(count($this->forget_targets) > 0, 'the run forgot the stale host key');
+		$clobbered = array_intersect($this->forget_targets, $this->keygen_writes);
+		check(count($clobbered) === 0, 'no host-key file was written as a keypair',
+			implode(', ', $clobbered));
 	}
 
 	private function testCreateFails() {
