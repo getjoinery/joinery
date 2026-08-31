@@ -5,6 +5,9 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.49 - the last SSH fallbacks behind primitive-routed ops are gone: upload_backup and
+ *                 delete_backup route primitive or refuse, and upload_step /
+ *                 build_node_uploader_script / strip_php_tags go with them
  * @version 1.48 - the dead SSH surface comes out: build_backup_database and build_backup_project
  *                 (superseded by backup_run), the SSH step composition behind the three restore
  *                 builders (every restore travels as a primitive), build_list_backups_ssh, and the
@@ -844,40 +847,23 @@ class JobCommandBuilder {
 	 * the life of the process and one of these fields is a credential.
 	 */
 	public static function build_backup_run($node, $params = []) {
-		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-
-		if (self::has_primitive($node, 'backup_run')) {
-			return self::build_backup_run_primitive($node, $params);
+		// Config problems refuse first, paired or not: 'no shelf' or 'no
+		// verified key' is the reason an operator can act on, and it must not
+		// be shadowed by a generic pairing message.
+		self::backup_run_config($node, $params);
+		if (!self::has_primitive($node, 'backup_run')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot run a backup: that needs a paired agent. "
+				. 'Pair the node.');
 		}
-
-		$config = self::backup_run_config($node, $params);
-		$web_root = rtrim((string)$node->get('mgn_web_root'), '/');
-
-		// JSON_UNESCAPED_SLASHES only for readability in the job log; the value is
-		// consumed by json_decode either way. The heredoc is quoted, so nothing in
-		// the body is expanded by the shell.
-		$json = json_encode($config, JSON_UNESCAPED_SLASHES);
-		$eof  = '__JOINERY_BACKUP_CONFIG_EOF__';
-
-		$cmd = 'php ' . escapeshellarg($web_root . '/utils/run_backup.php') . ' --profile=manager'
-			. " <<'{$eof}'\n{$json}\n{$eof}";
-
-		return [[
-			'type'    => 'ssh',
-			'label'   => 'Run backup to ' . $config['target_name'],
-			'cmd'     => $cmd,
-			// The engine ceiling plus the uploader's own retry budget: the agent
-			// must not kill a transfer part-way through a retry.
-			'timeout' => S3Signer::transfer_budget_seconds() + 10800,
-		]];
+		return self::build_backup_run_primitive($node, $params);
 	}
 
 	/**
-	 * Primitive path: the SAME config, as declared parameters rather than a
-	 * shell heredoc. The node validates every field against its compiled-in
-	 * spec, composes the engine's config itself, and hands it to
-	 * run_backup.php on stdin — so the credential still never reaches argv,
-	 * and nothing this plane sends is executed as syntax.
+	 * The config as declared parameters. The node validates every field
+	 * against its compiled-in spec, composes the engine's config itself, and
+	 * hands it to run_backup.php on stdin — so the credential never reaches
+	 * argv, and nothing this plane sends is executed as syntax.
 	 *
 	 * A4 becomes structural here: the node declares no parameter through
 	 * which encryption key material could arrive, so a job carrying one is
@@ -1268,29 +1254,18 @@ class JobCommandBuilder {
 	/**
 	 * Apply a Joinery update on the node via its own upgrade.php.
 	 *
-	 * The most-used operation this plane has, and the last large one to cross.
-	 * The SSH form below composes `cd {web_root} && php utils/upgrade.php
-	 * --verbose` from a column in THIS plane's database and sends it to be run
-	 * as root — which is the whole shape the migration exists to end: the string
-	 * is executed, and the path in it is this plane's belief about where someone
-	 * else's site lives.
-	 *
-	 * The SSH builder stays until the Phase 3 cutover, for the nodes that have
-	 * not paired. transports_for() prefers the primitive wherever it is
-	 * available, so a paired node with the channel switched on stops using this
-	 * path without any caller changing.
+	 * The most-used operation this plane has. Primitive only: the node runs its
+	 * own upgrade.php from its own compiled-in paths — this plane sends a name,
+	 * never a command string or its belief about where someone else's site
+	 * lives.
 	 */
 	public static function build_apply_update($node, $params = []) {
-		if (self::has_primitive($node, 'apply_update')) {
-			return self::build_apply_update_primitive($node);
+		if (!self::has_primitive($node, 'apply_update')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot apply an update: that needs a paired agent "
+				. 'of at least ' . self::PRIMITIVE_MIN_AGENT_VERSION['apply_update'] . '. Pair the node.');
 		}
-		$web_root = $node->get('mgn_web_root');
-
-		return [
-			['type' => 'ssh', 'label' => 'Apply Joinery update',
-			 'cmd' => "cd {$web_root} && php utils/upgrade.php --verbose",
-			 'timeout' => 3600],
-		];
+		return self::build_apply_update_primitive($node);
 	}
 
 	/**
@@ -1330,31 +1305,12 @@ class JobCommandBuilder {
 	 * ran — read it, don't infer from the green.
 	 */
 	public static function build_run_plugin_installers($node) {
-		if (self::has_primitive($node, 'run_plugin_installers')) {
-			return self::build_run_plugin_installers_primitive($node);
-		}
-		if (!self::has_ssh($node)) {
+		if (!self::has_primitive($node, 'run_plugin_installers')) {
 			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: no SSH credentials configured.");
+				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: that needs a "
+				. 'paired agent. Pair the node.');
 		}
-		$web_root = rtrim($node->get('mgn_web_root'), '/');
-		if (!$web_root || dirname($web_root) === '/' || dirname($web_root) === '.') {
-			throw new Exception(
-				"Node '{$node->get('mgn_slug')}' cannot run plugin installers: mgn_web_root is not set.");
-		}
-		$site_dir     = dirname($web_root);
-		$sitename_esc = escapeshellarg(basename($site_dir));
-		$runner       = $site_dir . '/maintenance_scripts/install_tools/_plugin_installers_start.sh';
-		$sudo         = self::sudo_prefix($node);
-		$creds        = self::get_db_credentials_script($node);
-
-		return [
-			['type' => 'ssh', 'label' => 'Run active plugin host installers',
-			 // PGPASSWORD is passed explicitly because sudo does not forward the
-			 // caller's environment; the runner needs it to query active plugins.
-			 'cmd' => "{$creds} && {$sudo}env PGPASSWORD=\"\$PGPASSWORD\" bash {$runner} {$sitename_esc}",
-			 'timeout' => 900],
-		];
+		return self::build_run_plugin_installers_primitive($node);
 	}
 
 	/**
@@ -1723,15 +1679,13 @@ class JobCommandBuilder {
 		if ($filename === '' || $filename === '.' || $filename === '..') {
 			throw new Exception('No backup filename given.');
 		}
-		$target = self::get_target($node);
-		if (!$target) {
-			throw new Exception("Node '{$node->get('mgn_slug')}' has no enabled cloud backup target.");
+		if (!self::has_primitive($node, 'upload_backup')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot push a backup to the shelf: that needs a "
+				. 'paired agent. There is no SSH equivalent — the old one heredoc-fed the node an '
+				. 'uploader with the bucket credentials inside it. Pair the node.');
 		}
-		if (self::has_primitive($node, 'upload_backup')) {
-			return self::build_upload_backup_primitive($node, $params);
-		}
-		$resolve = 'UPLOAD_FILE=' . escapeshellarg('/backups/' . $filename);
-		return [self::upload_step($node, $target, $resolve, false)];
+		return self::build_upload_backup_primitive($node, $params);
 	}
 
 	/**
@@ -2109,83 +2063,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The shared upload step. $resolve_cmd is a shell assignment that puts the
-	 * absolute path of the file to upload in UPLOAD_FILE.
-	 */
-	private static function upload_step($node, $target, $resolve_cmd, $delete_local) {
-		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-
-		$slug = $node->get('mgn_slug');
-		$prefix = $target->get('bkt_path_prefix') ?: 'joinery-backups';
-		$bucket = $target->get('bkt_bucket');
-
-		$check = 'test -n "$UPLOAD_FILE" && test -f "$UPLOAD_FILE"';
-		$remote_key = "REMOTE_KEY=\"{$prefix}/{$slug}/\$(basename \"\$UPLOAD_FILE\")\"";
-
-		$uploader_script = self::build_node_uploader_script($bucket, $target, 'upload');
-		$eof = '__JOINERY_UPLOADER_EOF__';
-
-		// Optional local cleanup is folded into the SAME step as the upload so it
-		// deletes exactly the file it just uploaded (one UPLOAD_FILE evaluation).
-		// A separate cleanup step re-globs "the newest now" and would delete a
-		// backup that landed in between, un-uploaded (P-23). The rm is chained
-		// with && ON THE REDIRECT LINE, before the heredoc body: the shell keeps
-		// parsing the command list on that line and only then reads the body, so
-		// the rm runs iff the upload succeeded. Chaining after the terminator
-		// line instead would not parse — the terminator must be the entire line,
-		// so the chain is swallowed into the uploader's stdin and the step dies.
-		$rm = $delete_local ? " && rm -f \"\$UPLOAD_FILE\"" : '';
-		$upload_cmd = "php -- upload \"\$UPLOAD_FILE\" \"\$REMOTE_KEY\" <<'{$eof}'{$rm}\n{$uploader_script}\n{$eof}";
-
-		$cmd = "{$resolve_cmd} && {$check} && {$remote_key} && {$upload_cmd}";
-
-		// No continue_on_error: if upload fails, halt so (a) the local copy — the
-		// only surviving one — is not deleted, and (b) the job is marked failed so
-		// the failure is visible in the UI instead of silently labeled "completed".
-		return [
-			'type' => 'ssh',
-			'label' => 'Upload backup to ' . $target->get('bkt_name'),
-			'cmd' => $cmd,
-			// Sized from the uploader's own retry budget rather than a bare 3600, so
-			// the agent cannot kill a transfer part-way through a retry. The slack
-			// covers process start and feeding the heredoc.
-			'timeout' => S3Signer::transfer_budget_seconds() + 300,
-		];
-	}
-
-	/**
-	 * Assemble the standalone PHP uploader script that will be heredoc'd onto
-	 * the node. Concatenates S3Signer.php + node_uploader.php + a credentials
-	 * block. The result runs under `php -` on the node with no file deps.
-	 *
-	 * Credentials never persist in the step command: the block reads a
-	 * credential token (see creds_token) that the agent (>= 0.4.0; >= 0.4.1 for
-	 * node tokens) replaces with the unsealed credentials in memory just before
-	 * the step runs (S-8). There is deliberately no inline fallback — a job an
-	 * old agent cannot run fails visibly, whereas inlined credentials would
-	 * persist in the job row forever.
-	 */
-	private static function build_node_uploader_script($bucket, $target, $op = 'upload') {
-		$signer_path = PathHelper::getIncludePath('includes/S3Signer.php');
-		$dispatcher_path = PathHelper::getIncludePath('plugins/server_manager/includes/node_uploader.php');
-
-		$signer = self::strip_php_tags(file_get_contents($signer_path));
-		$dispatcher = self::strip_php_tags(file_get_contents($dispatcher_path));
-
-		// Only an upload can run under the write-only node credential. A
-		// download needs read and a cloud delete needs delete, which only the
-		// main credential has — handing those operations the node key would
-		// fail them against a properly scoped bucket key.
-		$token = ($op === 'upload')
-			? self::creds_token($target)
-			: '__SM_CREDS_' . (int)$target->key . '__';
-		$creds_block = '$creds = json_decode(base64_decode(' . var_export($token, true) . '), true);' . "\n"
-		             . '$bucket = ' . var_export($bucket, true) . ";\n";
-
-		return "<?php\n" . $signer . "\n" . $creds_block . "\n" . $dispatcher;
-	}
-
-	/**
 	 * The credential placeholder a NODE-bound step carries for this target.
 	 *
 	 * A target can hold a second, write-only credential (bkt_node_credentials).
@@ -2203,16 +2080,6 @@ class JobCommandBuilder {
 	private static function creds_token($target) {
 		$slot = $target->has_node_credentials() ? '__SM_NODE_CREDS_' : '__SM_CREDS_';
 		return $slot . (int)$target->key . '__';
-	}
-
-	/**
-	 * Strip opening and closing PHP tags so a file body can be concatenated
-	 * inside another `<?php ... ?>` block.
-	 */
-	private static function strip_php_tags($code) {
-		$code = preg_replace('/^\s*<\?php\s*/', '', $code);
-		$code = preg_replace('/\?>\s*$/', '', $code);
-		return $code;
 	}
 
 	/**
@@ -2364,54 +2231,21 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * Delete a backup file from local, cloud, or both.
-	 * $params: target ('local', 'cloud', 'both'), local_path, cloud_path, filename
+	 * Delete ONE LOCAL backup file on the node. Local only: the cloud copy is
+	 * deleted by the plane itself, in-process with S3Signer, which is what
+	 * backup_actions_logic does before it ever files a job — a cloud delete
+	 * needs the delete-capable credential, and that one stays on the
+	 * management node.
+	 *
+	 * $params: filename (or local_path, from which the basename is taken), profile
 	 */
 	public static function build_delete_backup($node, $params) {
-		if (self::has_primitive($node, 'delete_backup')) {
-			return self::build_delete_backup_primitive($node, $params);
+		if (!self::has_primitive($node, 'delete_backup')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot delete a local backup: that needs a "
+				. 'paired agent. Pair the node.');
 		}
-		$which = $params['target'] ?? 'local';
-		$local_path = $params['local_path'] ?? '';
-		$cloud_path = $params['cloud_path'] ?? '';
-		$steps = [];
-
-		if (($which === 'local' || $which === 'both') && $local_path) {
-			// Backups under /backups are written as root by the backup scripts; on a
-			// bare-metal node jobs run as user1, so the rm needs sudo (empty for a
-			// Docker node, where the job already runs as root). Without it the rm
-			// fails Permission denied while the step still reports done.
-			$sudo = self::sudo_prefix($node);
-			$steps[] = [
-				'type' => 'ssh', 'label' => 'Delete local backup',
-				'cmd' => "{$sudo}rm -f " . escapeshellarg($local_path) . " && echo 'LOCAL_DELETE_OK'",
-				'continue_on_error' => true,
-			];
-		}
-
-		if (($which === 'cloud' || $which === 'both') && $cloud_path) {
-			$target = self::get_target($node);
-			if ($target) {
-				$bucket = $target->get('bkt_bucket');
-
-				$uploader_script = self::build_node_uploader_script($bucket, $target, 'delete');
-				$eof = '__JOINERY_UPLOADER_EOF__';
-				$remote_key = escapeshellarg($cloud_path);
-				$cmd = "php -- delete {$remote_key} <<'{$eof}'\n{$uploader_script}\n{$eof}";
-
-				$steps[] = [
-					'type' => 'ssh', 'label' => 'Delete cloud backup',
-					'cmd' => $cmd,
-					'continue_on_error' => true,
-				];
-			}
-		}
-
-		if (empty($steps)) {
-			$steps[] = ['type' => 'ssh', 'label' => 'No files to delete', 'cmd' => 'echo "Nothing to delete"'];
-		}
-
-		return $steps;
+		return self::build_delete_backup_primitive($node, $params);
 	}
 
 	/**

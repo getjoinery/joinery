@@ -19,6 +19,8 @@
  * is no known action (the shell then renders the page). The shell owns the
  * actual header()/redirect — logic files never exit().
  *
+ * @version 1.20 - comment truth: apply_update_all_on_host queues primitives only; an unpaired
+ *                 sibling throws and is logged, since the SSH fallback no longer exists
  * @version 1.19 - the backup_database and backup_project actions are gone with their builders;
  *                 backup_run is the one backup a node detail page dispatches
  * @version 1.18 - the three restore actions dispatch through createFromBuild. Their builders now
@@ -289,9 +291,9 @@ class NodeDetailActions {
 				$queued = 0;
 				foreach ($siblings as $sibling) {
 					try {
-						// Same reason as the single-node case above: each sibling
-						// is routed on its own transport, so this loop queues a
-						// mixture of primitive and SSH jobs across a host.
+						// Same entry point as the single-node case above; an
+						// unpaired sibling throws and is logged rather than
+						// silently skipped.
 						$built = JobCommandBuilder::build_apply_update($sibling);
 						ManagementJob::createFromBuild($sibling->key, 'apply_update', $built, [], $uid);
 						$queued++;

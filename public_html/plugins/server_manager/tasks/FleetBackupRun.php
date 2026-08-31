@@ -20,6 +20,8 @@
  *     slow node gets fewer backups rather than a queue;
  *   - no more than N run at once across the whole fleet.
  *
+ * @version 1.1 - build_backup_run() returns a primitive envelope only; an unpaired node throws
+ *                and lands in problems[]
  * @version 1.0
  */
 
@@ -123,8 +125,8 @@ class FleetBackupRun implements ScheduledTaskInterface, ScheduledTaskDryRunnable
 					'full_interval_days' => $policy['full_interval_days'],
 				);
 				// createFromBuild, not createJob: build_backup_run() returns a
-				// primitive envelope for a paired node and a step list otherwise,
-				// and only this entry point stores both correctly.
+				// primitive envelope, and only this entry point stores one
+				// correctly. An unpaired node throws and lands in problems[].
 				$built = JobCommandBuilder::build_backup_run($node, $params);
 				ManagementJob::createFromBuild($node->key, 'backup_run', $built, $params, null);
 
