@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.17 - the managed-domain pair: process_managed_domain_prepare reads the node's mail plan
+ *                 off the job, and process_managed_domain_notice puts the type in the sweep
  * @version 1.16 - process_backup_run unwraps the primitive/API JSON envelope before parsing BACKUP_RESULT,
  *                 so a backup that ran over the primitive transport is stamped by its real verdict instead
  *                 of reading as failed fleet-wide (the /m anchors missed the envelope's escaped newlines)
@@ -1497,6 +1499,76 @@ HTML;
 
 		$job->set('mjb_result', json_encode($result));
 		$job->save();
+	}
+
+	/**
+	 * managed_domain_prepare: the mail DNS the node says its own topology needs.
+	 *
+	 * The utility prints ONE JSON line — {"ok":…,"dkim_ready":…,"records":[…]} —
+	 * and the agent wraps that text inside its own envelope, so the line is
+	 * behind escaped newlines that no /m anchor matches. Unwrap first, then read
+	 * the LAST decodable line: anything before it is noise from the site's own
+	 * bootstrap.
+	 *
+	 * ok:false and dkim_ready:false are both recorded rather than flattened into
+	 * a failure. They are different facts and the caller branches on both: a
+	 * refusal is retried, while records without DKIM are published anyway — MX
+	 * and SPF are what make mail arrive — and the step is left open so the
+	 * signing key still gets published later.
+	 */
+	private static function process_managed_domain_prepare($job) {
+		$output = (string)($job->get('mjb_output') ?: '');
+
+		$data = self::extract_api_envelope_data($output);
+		if (is_array($data) && isset($data['output'])) {
+			$output = (string)$data['output'];
+		}
+
+		$payload = null;
+		$lines = array_values(array_filter(array_map('trim', explode("\n", $output)), 'strlen'));
+		for ($i = count($lines) - 1; $i >= 0; $i--) {
+			$decoded = json_decode($lines[$i], true);
+			if (is_array($decoded) && array_key_exists('ok', $decoded)) {
+				$payload = $decoded;
+				break;
+			}
+		}
+
+		if ($payload === null) {
+			// A node that answered something unreadable. Recorded as measured:
+			// false rather than invented, so the caller retries instead of
+			// publishing a record set nobody described.
+			$job->set('mjb_result', json_encode(['answered' => false]));
+			$job->save();
+			return;
+		}
+
+		$job->set('mjb_result', json_encode([
+			'answered'    => true,
+			'ok'          => !empty($payload['ok']),
+			'dkim_ready'  => !empty($payload['dkim_ready']),
+			'records'     => is_array($payload['records'] ?? null) ? $payload['records'] : [],
+			'error'       => (string)($payload['error'] ?? ''),
+		]));
+		$job->save();
+	}
+
+	/**
+	 * managed_domain_notice: intentionally thin, like restart_agent.
+	 *
+	 * There is nothing to fold. The script writes four settings and says so;
+	 * whether it did is the job's own terminal status, which process()'s
+	 * backstop already records. The handler exists so processable_types() lists
+	 * the type deliberately rather than by omission — without one the dashboard
+	 * sweep skips it and a terminal notice job keeps mjb_result NULL forever,
+	 * which is how the sweep re-processes a job on every render.
+	 *
+	 * It matters more here than for restart_agent: ManagedDomainWatch decides
+	 * whether to re-push by looking for the last COMPLETED notice job, so a job
+	 * the sweep never finishes is a push that repeats every tick.
+	 */
+	private static function process_managed_domain_notice($job) {
+		// Deliberately empty: see the docblock.
 	}
 
 	/**

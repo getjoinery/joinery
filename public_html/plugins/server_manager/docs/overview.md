@@ -626,12 +626,27 @@ because a stamp written after a charge is one crash away from a second charge
 
 The web records unblock certificate issuance, so `ProvisionPendingSsl`
 succeeds without the buyer doing anything. The mail records are **not**
-computed on the management node: `plugins/mailbox/utils/managed_domain_prepare.php`
-runs on the box over SSH, makes the domain mail-ready, and prints the record
-set `InboundEmailSetupCheck::dnsPlan()` prescribes — the box is what knows its
-own topology, SPF shape, DKIM key and Joinery Direct state. A record set
-returned without DKIM is published anyway (MX and SPF are what make mail
-arrive) but the step stays open until the signing key is included.
+computed on the management node. The box is asked, as a
+`managed_domain_prepare` job on the agent channel whose whole vocabulary is the
+domain: the node runs
+`plugins/mailbox/utils/managed_domain_prepare.php` against its own site, makes
+the domain mail-ready, and prints the record set
+`InboundEmailSetupCheck::dnsPlan()` prescribes — the box is what knows its own
+topology, SPF shape, DKIM key and Joinery Direct state, and a management node
+that guessed would publish a plausible set the box does not match.
+
+The answer therefore lands on a later tick than the question, and the mail step
+is a four-state check rather than a call: a completed and unread job is read,
+published and marked consumed; a job in flight is waited for; a finished one is
+re-asked after `PREPARE_RETRY_GAP_MINUTES`. **Reading it exactly once is what
+makes the incomplete answers work.** A record set returned without DKIM is
+published anyway (MX and SPF are what make mail arrive) but the step stays open
+until the signing key is included — and without the consumed mark, that same
+answer would be re-read and re-published every tick and the signing key never
+asked for again. The lookup is scoped to the domain as well as the node,
+because a shared host carries many managed domains. A node whose agent does not
+offer the primitive writes the reason onto `rdm_error`, where the Domains page
+shows it, and is retried rather than failed.
 
 **Before anything is bought, the order is checked for the money.** The
 checkout answers and the payment are two separate objects, and the cart lets a
@@ -709,6 +724,21 @@ offer them and the management node is their only author:
 `managed_domain_name`, `managed_domain_expiry_time`, `managed_domain_state`,
 `managed_domain_manage_url`. Empty `managed_domain_state` renders no notice,
 which is what every deployment that did not buy a domain this way has.
+
+They are written by a `managed_domain_notice` job, and **the setting names are
+not on the wire**. The job carries four VALUES; which settings they land in is
+decided by `utils/managed_domain_notice.php` on the node, which writes them
+through `Setting::put` — so an undeclared name is refused by the declared-
+settings gate, and a generic write-a-setting job that could reach the rest of
+`stg_settings` does not exist.
+
+`ManagedDomainWatch` **converges** on that state rather than pushing at it: each
+tick computes what the box should be holding, compares it against the last
+notice job that completed for that node and domain, and files one only when they
+differ. A push that failed therefore self-heals on the next tick, and
+`rdm_prompt_pushed_time` — the record that the buyer has seen the take-ownership
+notice at all — is stamped from a job that COMPLETED carrying a state that
+renders one, never from a dispatch.
 
 ### Adding a registrar
 

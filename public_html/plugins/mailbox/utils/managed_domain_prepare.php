@@ -4,8 +4,9 @@
  * managed_domain_prepare.php - make this box mail-ready for one domain, and
  * say what DNS that requires.
  *
- * Runs ON the node, called over SSH by the management node's managed-domain
- * provisioning phase (specs/managed_domain_registration.md). The management node
+ * Runs ON the node, as the agent's managed_domain_prepare primitive, for the
+ * management node's managed-domain provisioning phase
+ * (specs/managed_domain_registration.md). The management node
  * owns the registrar and the zone; the box owns everything that decides what
  * belongs in that zone — its receive topology, its SPF shape, its DKIM key,
  * whether it speaks Joinery Direct. A management node that computed those
@@ -31,6 +32,7 @@
  *
  * Usage: php plugins/mailbox/utils/managed_domain_prepare.php <domain>
  *
+ * @version 1.1 - reached as an agent primitive; the domain is its whole vocabulary
  * @version 1.0
  */
 

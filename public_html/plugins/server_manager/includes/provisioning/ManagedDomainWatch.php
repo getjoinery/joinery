@@ -26,6 +26,23 @@
  * for the domain to leave the account. inAccount() returning false IS the
  * success signal.
  *
+ * **The box is converged on, not pushed at.** The four notice settings have one
+ * owner and one desired state: compute what the box should be holding, compare
+ * it against the last notice job that actually completed, and dispatch only
+ * when they differ. That is one check rather than a push fired from each of the
+ * four places something changes, and it is what makes a failed push self-heal
+ * on the next tick instead of leaving stale values on a customer's site until
+ * the next expiry change happens to trigger another one.
+ *
+ * The prompt timestamp follows the same rule: rdm_prompt_pushed_time is stamped
+ * from a notice job that COMPLETED, never from one that was dispatched. A
+ * dispatch that then failed — the agent down that hour, the node missing the
+ * primitive — would otherwise record as shown a prompt the buyer never saw, and
+ * that prompt is their first mention of a deadline that takes their site and
+ * their email with it if they miss it.
+ *
+ * @version 1.3 - the notice travels the agent channel as a job, and the watcher converges
+ *                on desired state instead of firing four separate pushes
  * @version 1.2 - the sweep mark never steps past an order nobody was told about
  * @version 1.1 - sweeps for domain years paid for but never registered
  * @version 1.0
@@ -37,6 +54,23 @@ class ManagedDomainWatch {
 
 	/** How often an expiry date is worth re-reading from the registrar. */
 	const EXPIRY_REFRESH_DAYS = 7;
+
+	/** The job type carrying the four notice values to a node. */
+	const JOB_NOTICE = 'managed_domain_notice';
+
+	/**
+	 * How long after a notice job finished before another is dispatched.
+	 *
+	 * The converge check re-dispatches whenever the box does not match, which on
+	 * a node that keeps failing the job would be one job per tick forever. The
+	 * gap turns that into a slow retry: the values are not urgent — the earliest
+	 * one matters six months before an expiry — and a node that cannot take them
+	 * this minute will not be able to a minute later.
+	 */
+	const NOTICE_RETRY_GAP_MINUTES = 10;
+
+	/** How many recent notice jobs one converge check reads. */
+	const NOTICE_JOB_LOOKBACK = 5;
 
 	/**
 	 * How long a paid domain line is given to produce its registration row
@@ -92,17 +126,24 @@ class ManagedDomainWatch {
 		);
 	}
 
-	/** One row. Returns the number of things that changed. */
+	/**
+	 * One row. Returns the number of things that changed.
+	 *
+	 * A domain in the buyer's own account is finished as far as the REGISTRAR is
+	 * concerned — no expiry to re-read, no custody to ask about, and not one API
+	 * call spent on either. It is not finished as far as the BOX is concerned:
+	 * self_custody is the value that makes the notice stop rendering, and if the
+	 * job carrying it failed, the buyer is still being told to do something they
+	 * have already done. So the converge check runs for every row, including
+	 * this one, and costs a query when the box already matches.
+	 */
 	private function watch($row): int {
-		$state = (string)$row->get('rdm_graduation_state');
-		if ($state === RegisteredDomain::GRAD_SELF) {
-			return 0;   // finished; nothing left to watch
-		}
-
 		$changed = 0;
-		$changed += $this->refresh_expiry($row);
-		$changed += $this->check_custody($row);
-		$changed += $this->push_prompt($row);
+		if ((string)$row->get('rdm_graduation_state') !== RegisteredDomain::GRAD_SELF) {
+			$changed += $this->refresh_expiry($row);
+			$changed += $this->check_custody($row);
+		}
+		$changed += $this->converge_notice($row);
 		return $changed;
 	}
 
@@ -136,7 +177,9 @@ class ManagedDomainWatch {
 		if ($expiry !== null && $expiry !== (string)$row->get('rdm_expiry_time')) {
 			$row->set('rdm_expiry_time', $expiry);
 			$row->save();
-			$this->pushIfLive($row);
+			// The box is not told here. The converge check later in this same
+			// tick sees the new date and dispatches — one author for the value,
+			// and a push that failed is retried rather than lost.
 			return 1;
 		}
 		$row->save();
@@ -167,29 +210,8 @@ class ManagedDomainWatch {
 
 		$row->set('rdm_graduation_state', RegisteredDomain::GRAD_SELF);
 		$row->save();
-		$this->pushIfLive($row);
 		$this->send_self_custody_email($row);
 		$this->notes[] = $row->get('rdm_domain') . ' is now in the buyer\'s own account.';
-		return 1;
-	}
-
-	/**
-	 * At six months out, tell the box to start showing the notice.
-	 *
-	 * This push is the buyer's FIRST mention of graduation anywhere — not the
-	 * setup wizard, not the welcome email. Before the threshold the box holds
-	 * the domain and expiry but an empty custody state, which renders nothing.
-	 */
-	private function push_prompt($row): int {
-		if ($row->get('rdm_prompt_pushed_time') || !$row->in_prompt_window()) {
-			return 0;
-		}
-		if (!$this->pushIfLive($row)) {
-			return 0;   // transient; retried next tick
-		}
-		$row->set('rdm_prompt_pushed_time', gmdate('Y-m-d H:i:s'));
-		$row->save();
-		$this->notes[] = $row->get('rdm_domain') . ': take-ownership prompt is now live on the box.';
 		return 1;
 	}
 
@@ -364,144 +386,208 @@ class ManagedDomainWatch {
 	}
 
 	// ------------------------------------------------------------------
-	// The node banner
+	// The node notice
 	// ------------------------------------------------------------------
 
-	/** Push the row's current state, if a node is linked. */
-	protected function pushIfLive($row): bool {
+	/**
+	 * Make the box hold the four facts it should be holding.
+	 *
+	 * A desired-state check, not a push. It computes what the notice on this
+	 * buyer's own site ought to be saying, compares that against the last notice
+	 * job that actually COMPLETED for this node and this domain, and dispatches
+	 * one only when they differ or none exists.
+	 *
+	 * That single check replaced four push sites — activation, an expiry
+	 * refresh, custody moving, and the six-month prompt. Each of them fired at
+	 * the moment something changed and had no idea whether it landed, so a push
+	 * that failed left stale values on a customer's site until the next change
+	 * happened to trigger another one. Here a failure just means the box still
+	 * does not match, and the next tick tries again.
+	 *
+	 * @return int 1 when something moved: the prompt was recorded as seen, or a
+	 *             fresh notice was dispatched.
+	 */
+	protected function converge_notice($row): int {
 		$node_id = (int)$row->get('rdm_mgn_node_id');
 		if ($node_id <= 0) {
-			return false;
+			return 0;   // nothing built yet; there is no box to tell
 		}
 		$node = new ManagedNode($node_id, TRUE);
 		if (!$node->key) {
-			return false;
+			return 0;
 		}
-		// Before the six-month threshold the box is given no custody state, so
-		// it holds the facts and says nothing.
-		$state = ($row->get('rdm_prompt_pushed_time') || $row->in_prompt_window())
-			? (string)$row->get('rdm_graduation_state') : '';
-		return $this->pushBannerState($row, $node, $state);
+
+		$domain = (string)$row->get('rdm_domain');
+		$jobs   = $this->notice_jobs($node_id, $domain);
+		$latest = $jobs ? $jobs[0] : null;
+		$landed = null;
+		foreach ($jobs as $job) {
+			if ($job['mjb_status'] === 'completed') { $landed = $job; break; }
+		}
+
+		$changed = 0;
+
+		// THE PROMPT IS RECORDED FROM A JOB THAT COMPLETED. A dispatch means
+		// queued, and a queued job that then failed would record as shown a
+		// prompt the buyer never saw — of a deadline that takes their site and
+		// their email with it.
+		//
+		// And only from a job carrying a state that RENDERS one. self_custody is
+		// a real state the box is told, and it is the state that makes the
+		// notice stop: a buyer whose domain moved into their own account before
+		// the six-month mark was never prompted, and recording one would be
+		// recording a thing that never happened.
+		if ($landed && !trim((string)$row->get('rdm_prompt_pushed_time'))
+				&& self::state_prompts((string)(self::job_params($landed)['state'] ?? ''))) {
+			$row->set('rdm_prompt_pushed_time',
+				(string)($landed['mjb_completed_time'] ?: gmdate('Y-m-d H:i:s')));
+			$row->save();
+			$this->notes[] = $domain . ': take-ownership prompt is now live on the box.';
+			$changed = 1;
+		}
+
+		// Computed after the stamp: the stamp is one of its inputs — a prompt
+		// already shown keeps showing even once the window arithmetic would say
+		// otherwise.
+		$desired = self::desired_notice($row);
+
+		if ($latest && in_array($latest['mjb_status'], array('pending', 'running'), true)) {
+			return $changed;   // asked; waiting
+		}
+		if ($landed && self::notice_matches($landed, $desired)) {
+			return $changed;   // the box already holds it
+		}
+		if ($latest) {
+			$since = strtotime((string)($latest['mjb_completed_time'] ?: $latest['mjb_create_time']));
+			if ($since && (time() - $since) < self::NOTICE_RETRY_GAP_MINUTES * 60) {
+				return $changed;   // tried recently; a slow retry, not a per-tick one
+			}
+		}
+
+		return $changed + $this->dispatch_notice($node, $desired);
 	}
 
 	/**
-	 * Write the four managed settings onto the node.
+	 * What this box should be holding, from the row.
 	 *
-	 * The values are non-secret, so they go in the SQL directly rather than
-	 * through the stdin dance the credential seeder needs. The settings are
-	 * declared `managed` in core, which keeps them off the node's settings page
-	 * — the management node is their only author.
+	 * Before the six-month threshold the custody state is deliberately EMPTY:
+	 * the box holds the domain and its expiry and says nothing. That is the
+	 * whole restraint of this feature — a buyer who just bought hosting does not
+	 * need a chore — and empty is a real value the node writes, not an omission,
+	 * so a state pushed early can be taken back.
+	 *
+	 * A prompt already shown stays shown. Once a buyer has been told, the notice
+	 * does not disappear because a renewal moved the date back out of the
+	 * window; the thing they were asked to do is still outstanding.
 	 */
-	protected function pushBannerState($row, $node, string $state): bool {
-		$command = self::buildBannerCommand($row, $node, $state);
-		if ($command === '') {
-			return false;
+	public static function desired_notice($row): array {
+		$state = ($row->get('rdm_prompt_pushed_time') || $row->in_prompt_window())
+			? (string)$row->get('rdm_graduation_state') : '';
+		return array(
+			'domain'      => (string)$row->get('rdm_domain'),
+			'expiry_time' => self::notice_expiry($row),
+			'state'       => $state,
+			'manage_url'  => self::manageUrl(),
+		);
+	}
+
+	/**
+	 * The expiry in the shape the notice carries: a date, optionally with a
+	 * time.
+	 *
+	 * Trimmed by pattern rather than reparsed. rdm_expiry_time is a
+	 * timestamp(6), so it can come back carrying fractional seconds that the
+	 * node's parameter spec refuses — and running it through strtotime to
+	 * reformat would read a UTC-stored naive string in whatever timezone this
+	 * process happens to be in, which moves a date the buyer is counting down
+	 * to.
+	 */
+	private static function notice_expiry($row): string {
+		$raw = trim((string)$row->get('rdm_expiry_time'));
+		if ($raw === '' || !preg_match('/^(\d{4}-\d{2}-\d{2})(?:[ T](\d{2}:\d{2}:\d{2}))?/', $raw, $m)) {
+			return '';
 		}
-		$run = $this->sendToNode($node, $command);
-		if (!$run['ok']) {
-			error_log('ManagedDomainWatch: banner push to ' . $node->get('mgn_name') . ' failed ('
-				. $run['code'] . '): ' . $run['output']);
-			return false;
+		return $m[1] . (isset($m[2]) && $m[2] !== '' ? ' ' . $m[2] : '');
+	}
+
+	/**
+	 * Does this custody state put a take-ownership notice on the owner's site?
+	 *
+	 * Empty says nothing, and self_custody says the job is done — neither is a
+	 * prompt. The three in between are.
+	 */
+	public static function state_prompts(string $state): bool {
+		return in_array($state, array(RegisteredDomain::GRAD_OPERATOR,
+			RegisteredDomain::GRAD_REQUESTED, RegisteredDomain::GRAD_SENT), true);
+	}
+
+	/** Does a completed notice job carry exactly these four values? */
+	public static function notice_matches(array $job, array $desired): bool {
+		$params = self::job_params($job);
+		foreach (array('domain', 'expiry_time', 'state', 'manage_url') as $key) {
+			if ((string)($params[$key] ?? '') !== (string)($desired[$key] ?? '')) {
+				return false;
+			}
 		}
 		return true;
 	}
 
 	/**
-	 * The remote command, built separately so a test can assert what would be
-	 * sent without an SSH connection existing.
+	 * Send one notice job to a node.
+	 *
+	 * A builder exception — the node's agent does not offer the primitive — is
+	 * a note rather than a thrown error: the row is fine, the box is behind, and
+	 * an operator reading the run summary is who can do something about it.
+	 *
+	 * @return int 1 when a job was queued.
 	 */
-	public static function buildBannerCommand($row, $node, string $state): string {
-		$sitename = self::sitenameFor($node);
-		if ($sitename === '') {
-			return '';
+	protected function dispatch_notice($node, array $desired): int {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+
+		try {
+			$built = JobCommandBuilder::build_managed_domain_notice($node, $desired);
+		} catch (Throwable $e) {
+			$this->notes[] = $desired['domain'] . ': ' . $e->getMessage();
+			return 0;
 		}
 
-		$values = array(
-			'managed_domain_name'        => (string)$row->get('rdm_domain'),
-			'managed_domain_expiry_time' => (string)$row->get('rdm_expiry_time'),
-			'managed_domain_state'       => $state,
-			'managed_domain_manage_url'  => self::manageUrl(),
-		);
-		$tuples = array();
-		foreach ($values as $name => $value) {
-			$tuples[] = "  ('" . str_replace("'", "''", $name) . "', '"
-				. str_replace("'", "''", $value) . "')";
-		}
-		$upsert = "INSERT INTO stg_settings (stg_name, stg_value) VALUES\n"
-			. implode(",\n", $tuples) . "\n"
-			. 'ON CONFLICT (stg_name) DO UPDATE SET stg_value = EXCLUDED.stg_value, stg_update_time = now();';
-
-		$extract = 'head -1 | cut -d";" -f1 | cut -d"=" -f2 | tr -d " " | sed "s/^.//;s/.$//"';
-		$inner = 'set -e' . "\n"
-			. 'CFG=/var/www/html/' . $sitename . "/config/Globalvars_site.php\n"
-			. "DB_NAME=\$(grep dbname \$CFG | {$extract})\n"
-			. "DB_USER=\$(grep dbusername \$CFG | {$extract})\n"
-			. "export PGPASSWORD=\$(grep dbpassword \$CFG | {$extract})\n"
-			. "psql -q -U \"\$DB_USER\" -d \"\$DB_NAME\" <<JOINERY_SQL\n"
-			. $upsert . "\n"
-			. "JOINERY_SQL\n"
-			. 'echo DOMAIN_BANNER_PUSHED';
-
-		$container = trim((string)$node->get('mgn_container_name'));
-		$ssh_user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$sudo = ($ssh_user !== 'root') ? 'sudo ' : '';
-		if ($container !== '') {
-			return $sudo . 'docker exec -i ' . escapeshellarg($container)
-				. ' bash -c ' . escapeshellarg($inner);
-		}
-		return $sudo . 'bash -c ' . escapeshellarg($inner);
+		ManagementJob::createFromBuild($node->key, self::JOB_NOTICE, $built, $desired, null);
+		$this->notes[] = $desired['domain'] . ': the box is being told what it holds.';
+		return 1;
 	}
 
-	/** The site directory name on the node, from its web root or container. */
-	private static function sitenameFor($node): string {
-		$container = trim((string)$node->get('mgn_container_name'));
-		if ($container !== '') {
-			return $container;
-		}
-		$web_root = trim((string)$node->get('mgn_web_root'));
-		if ($web_root === '') {
-			return '';
-		}
-		return basename(dirname($web_root));
+	/**
+	 * The recent notice jobs for this node AND this domain, newest first.
+	 *
+	 * Scoped by domain because a shared host carries many managed domains, and
+	 * by node because that is who the job is addressed to. createPrimitiveJob
+	 * writes mjb_parameters as well as the envelope, so both are already there
+	 * to filter on.
+	 */
+	protected function notice_jobs(int $node_id, string $domain): array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters
+			 FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			   AND mjb_parameters->>'domain' = ?
+			 ORDER BY mjb_create_time DESC, mjb_id DESC
+			 LIMIT " . (int)self::NOTICE_JOB_LOOKBACK);
+		$q->execute(array($node_id, self::JOB_NOTICE, $domain));
+		return $q->fetchAll(PDO::FETCH_ASSOC) ?: array();
+	}
+
+	/** A job row's parameters, decoded. */
+	protected static function job_params(array $job): array {
+		$params = json_decode((string)($job['mjb_parameters'] ?? ''), true);
+		return is_array($params) ? $params : array();
 	}
 
 	/** Where the take-ownership flow lives, on this management node. */
 	public static function manageUrl(): string {
 		require_once(PathHelper::getIncludePath('includes/LibraryFunctions.php'));
 		return LibraryFunctions::get_absolute_url('/profile/server_manager/domain');
-	}
-
-	/** One SSH command against a node. The test seam. */
-	protected function sendToNode($node, string $remote_command): array {
-		return self::runSsh($node, $remote_command);
-	}
-
-	/** One SSH command against a node. */
-	private static function runSsh($node, string $remote_command): array {
-		$key_path = (string)$node->get('mgn_ssh_key_path');
-		$host = (string)$node->get('mgn_host');
-		$user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$port = intval($node->get('mgn_ssh_port')) ?: 22;
-		if ($key_path === '' || !is_readable($key_path) || $host === '') {
-			return array('ok' => false, 'code' => -1,
-				'output' => 'Node SSH coordinates incomplete (key: ' . $key_path . ', host: ' . $host . ').');
-		}
-
-		$cmd = array('ssh', '-i', $key_path, '-p', (string)$port,
-			'-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
-			'-o', 'ConnectTimeout=15', $user . '@' . $host, $remote_command);
-		$proc = proc_open($cmd, array(
-			0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
-		if (!is_resource($proc)) {
-			return array('ok' => false, 'code' => -1, 'output' => 'Could not start ssh.');
-		}
-		fclose($pipes[0]);
-		$out = (string)stream_get_contents($pipes[1]);
-		$err = (string)stream_get_contents($pipes[2]);
-		fclose($pipes[1]);
-		fclose($pipes[2]);
-		$code = proc_close($proc);
-		return array('ok' => ($code === 0), 'code' => $code, 'output' => trim($out . "\n" . $err));
 	}
 
 	// ------------------------------------------------------------------

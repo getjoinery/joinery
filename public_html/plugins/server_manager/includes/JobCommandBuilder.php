@@ -82,6 +82,8 @@
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
+ * @version 1.21 - managed domains cross to the channel: build_managed_domain_prepare and
+ *                 build_managed_domain_notice, both primitive-only with no SSH sibling
  * @version 1.20 - backup key escrow runs as a management-node step (step_escrow_backup_key) instead of
  *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
  *                 them, and encrypting backups seal the key on their way in
@@ -197,6 +199,13 @@ class JobCommandBuilder {
 		// above have something to restore FROM.
 		'download_backup'  => '1.13.0',
 		'stage_chain'      => '1.13.0',
+		// The managed-domain pair, new in 1.14.0 and therefore newer than every
+		// agent in the field. A node that reports its vocabulary is answered by
+		// that report; these floors are for the agents at 1.10.0 and earlier
+		// that never send one, where routing to a vocabulary this plane cannot
+		// confirm buys a guaranteed refusal.
+		'managed_domain_prepare' => '1.14.0',
+		'managed_domain_notice'  => '1.14.0',
 	];
 
 	/**
@@ -3434,6 +3443,116 @@ class JobCommandBuilder {
 	public static function build_ssl_probe_clear_primitive($node) {
 		return ['primitive' => 'ssl_probe_clear', 'params' => []];
 	}
+
+	// ── Managed domains ──
+	//
+	// Both of these reach into a customer's own box, and the reach is a job. It
+	// was not always: PHP shelled out directly, which made it invisible to
+	// transports_for(), to can_run(), to the SSH-only inventory and to the
+	// agent's own refusal of shell steps, because it never entered the job
+	// system at all. It enters it here.
+	//
+	// Neither has an SSH sibling, and neither may grow one: an SSH fallback would
+	// recreate exactly what this removed. A node without the primitive gets an
+	// exception naming what is missing, and the caller writes it where an
+	// operator can read it.
+
+	/**
+	 * Ask a node to make itself mail-ready for one managed domain and report
+	 * the DNS records that requires.
+	 *
+	 * The management node owns the registrar and the zone; the BOX owns
+	 * everything that decides what belongs in that zone — its receive topology,
+	 * its SPF shape, its DKIM key, whether it speaks Joinery Direct. A plane
+	 * that computed those records itself would publish a plausible set the box
+	 * does not match, and the mismatch shows up as mail silently failing
+	 * authentication. So the box prints desired state and this plane publishes
+	 * it. That split is the design; only the transport changed.
+	 *
+	 * The answer comes back as one JSON line in the job's output, which
+	 * JobResultProcessor::process_managed_domain_prepare parses onto the job.
+	 */
+	public static function build_managed_domain_prepare($node, $params) {
+		if (!self::has_primitive($node, 'managed_domain_prepare')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot prepare a managed domain for mail: its agent "
+				. "does not offer the managed_domain_prepare primitive. Apply an update to the node; "
+				. "there is no SSH route left for this.");
+		}
+		return self::build_managed_domain_prepare_primitive($node, $params);
+	}
+
+	public static function build_managed_domain_prepare_primitive($node, $params) {
+		// Lowercased before it crosses, because the node's pattern is lowercase
+		// and one name has one spelling in a zone.
+		$domain = strtolower(trim((string)($params['domain'] ?? '')));
+		if ($domain === '') {
+			throw new Exception('Preparing a node for mail needs the domain it is about.');
+		}
+		return ['primitive' => 'managed_domain_prepare', 'params' => ['domain' => $domain]];
+	}
+
+	/**
+	 * Set the four managed-domain facts on a node, from which its own
+	 * ManagedDomainNotice renders the take-ownership countdown.
+	 *
+	 * FOUR VALUES CROSS, AND NOT THE SETTING NAMES. Those are compiled into
+	 * utils/managed_domain_notice.php on the node: this plane supplies what the
+	 * notice says and cannot express where it lands. The alternative — a generic
+	 * write-a-setting job — would hand a compromised management node every row
+	 * in every node's stg_settings, which is where the credentials are.
+	 *
+	 * An empty state is a real value and the ordinary one: it is what renders
+	 * nothing, and it is what a box holds for the first six months.
+	 */
+	public static function build_managed_domain_notice($node, $params) {
+		if (!self::has_primitive($node, 'managed_domain_notice')) {
+			throw new Exception(
+				"Node '{$node->get('mgn_slug')}' cannot be told about its managed domain: its agent "
+				. "does not offer the managed_domain_notice primitive. Apply an update to the node; "
+				. "there is no SSH route left for this.");
+		}
+		return self::build_managed_domain_notice_primitive($node, $params);
+	}
+
+	public static function build_managed_domain_notice_primitive($node, $params) {
+		$domain = strtolower(trim((string)($params['domain'] ?? '')));
+		if ($domain === '') {
+			throw new Exception('A managed-domain notice needs the domain it is about.');
+		}
+
+		// Only the domain is required. The other three are sent even when empty
+		// so the node clears them: the caller converges on desired state, and a
+		// push that could only add would leave a stale expiry date on a
+		// customer's site after a renewal.
+		$expiry = trim((string)($params['expiry_time'] ?? ''));
+		if ($expiry !== '' && !preg_match('/^\d{4}-\d{2}-\d{2}( \d{2}:\d{2}:\d{2})?$/', $expiry)) {
+			// Refused here as well as on the node, so a malformed date fails
+			// where the row that holds it can be looked at rather than as an
+			// opaque refusal from a machine.
+			throw new Exception('The expiry ' . $expiry . ' is not a date this notice can carry.');
+		}
+
+		$state = trim((string)($params['state'] ?? ''));
+		if (!in_array($state, self::MANAGED_DOMAIN_STATES, true)) {
+			throw new Exception("Custody state '{$state}' is not one the notice renders.");
+		}
+
+		return ['primitive' => 'managed_domain_notice', 'params' => [
+			'domain'      => $domain,
+			'expiry_time' => $expiry,
+			'state'       => $state,
+			'manage_url'  => trim((string)($params['manage_url'] ?? '')),
+		]];
+	}
+
+	/**
+	 * The custody states the notice renders, plus the empty one that renders
+	 * nothing. Mirrors the agent's own enum and RegisteredDomain's GRAD_
+	 * constants; kept here so a builder can refuse a bad state without loading
+	 * the domain model.
+	 */
+	const MANAGED_DOMAIN_STATES = ['operator_managed', 'push_requested', 'push_sent', 'self_custody', ''];
 
 	public static function build_provision_ssl($node, $params) {
 		$domain   = $params['domain'] ?? '';
