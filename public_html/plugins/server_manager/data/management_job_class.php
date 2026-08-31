@@ -2,6 +2,8 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.11 - createFromBuild routes a probe envelope to NodeHealthProbe, which completes it
+ *                 in-request and files an already-finished row
  * @version 1.10 - claim budgets for the three restore primitives, set before anything can
  *                 dispatch them: the plane must never give up on a restore the node is still
  *                 running, and a restore is the worst job to hand out twice
@@ -302,6 +304,14 @@ class ManagementJob extends SystemBase {
 	 * by gaining a build_<op>_primitive method, with no callsite touched.
 	 */
 	static function createFromBuild($node_id, $job_type, $built, $params, $created_by) {
+		// A probe is not queued work. NodeHealthProbe reaches the machine over
+		// HTTP or TCP inside this request, folds what it learned onto the node,
+		// and files a row that is already complete. It is handled here so that
+		// callers keep dispatching an operation rather than choosing a transport.
+		if (is_array($built) && isset($built['probe'])) {
+			require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeHealthProbe.php'));
+			return NodeHealthProbe::run_and_record(new ManagedNode($node_id, TRUE), $created_by);
+		}
 		if (is_array($built) && isset($built['primitive'])) {
 			return self::createPrimitiveJob($node_id, $job_type, $built['primitive'],
 				$built['params'] ?? [], $created_by);

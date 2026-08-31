@@ -18,6 +18,9 @@
  * (over the wire, pinned to the node's own IP) that warns before a
  * self-renewed cert lapses. See check_cert_expiry().
  *
+ * @version 1.9 - probes moved to NodeHealthProbe so the uptime pass and check_status cannot
+ *                disagree about reachability; a health document read on the way past is folded,
+ *                and only a pass that measured something dates the node figures
  * @version 1.8 - the http_status probe no longer stamps mgn_last_status_check. It reads no status
  *                data, so stamping it made months-stale figures read as seconds old on every tick
  * @version 1.7 - sweeps stale agent-channel claims: a job claimed by a node agent that never
@@ -38,6 +41,8 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 		require_once(PathHelper::getIncludePath('plugins/server_manager/data/managed_node_class.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeMonitorHealth.php'));
 		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/NodeHealthProbe.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
 		require_once(PathHelper::getIncludePath('includes/EmailSender.php'));
 		require_once(PathHelper::getIncludePath('includes/DnsResolver.php'));
 
@@ -198,27 +203,7 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	 * resolve — nothing was ever dialled, so there is no result to report.
 	 */
 	private function check_tcp_port($node): array {
-		$host = trim((string)$node->get('mgn_host'));
-		$port = (int)$node->get('mgn_uptime_tcp_port');
-
-		$errno = 0;
-		$errstr = '';
-		$sock = @fsockopen($host, $port, $errno, $errstr, self::TIMEOUT_SECONDS);
-		if ($sock === false) {
-			$detail = trim($errstr) !== '' ? $errstr : ('error ' . $errno);
-			// fsockopen reports a DNS failure only in the message text, and with
-			// errno 0 — so classify on the message alone.
-			if (NodeMonitorHealth::is_name_resolution_failure(0, $detail)) {
-				return $this->unresolvable($host, $detail);
-			}
-			return [
-				'ok'      => false,
-				'status'  => 'done',
-				'message' => sprintf('TCP %s:%d unreachable (%s)', $host, $port, $detail),
-			];
-		}
-		fclose($sock);
-		return ['ok' => true, 'message' => null, 'status' => 'done'];
+		return $this->from_probe($node, NodeHealthProbe::tcp($node, self::TIMEOUT_SECONDS));
 	}
 
 	/**
@@ -263,72 +248,43 @@ class RunNodeUptimeChecks implements ScheduledTaskInterface {
 	}
 
 	/**
-	 * http_status check: plain HEAD to mgn_site_url. Any 2xx/3xx is up.
+	 * http_status check: ask the node's web endpoint whether it answers.
 	 *
-	 * It stamps nothing about status freshness, deliberately. This probe reads no
-	 * status data at all — it asks a web server whether it answers — and it writes
-	 * its own mgn_uptime_* columns, which is the whole fact it establishes. It
-	 * used to also stamp mgn_last_status_check "so the dashboard stays
-	 * consistent", and since it runs every cron pass it made every node's figures
-	 * look seconds old: the overview said "Last checked: a minute ago" over disk
-	 * and load numbers that were months stale, and the health badge went green off
-	 * them. Consistency with a number nobody measured is not consistency.
+	 * Where the node publishes a health document, that document is also read and
+	 * its figures folded onto the node — see check_status_without_ssh.md. Two
+	 * things follow from that, and both matter:
+	 *
+	 * mgn_last_status_check is stamped ONLY on a pass that actually measured
+	 * something. A probe against a node with no health document establishes that
+	 * a web server answered and nothing more, and dating the node's figures to
+	 * that would put "Last checked: a minute ago" over disk and load numbers
+	 * taken months earlier. Consistency with a number nobody measured is not
+	 * consistency.
+	 *
+	 * The up/down conclusion is drawn from reachability alone, never from the
+	 * contents of the document. A node whose service reports itself degraded is
+	 * a node that answered.
 	 */
 	private function check_http_status($node): array {
-		$health_url = trim((string)$node->get('mgn_health_check_url'));
-		if ($health_url === '') {
-			$site_url = rtrim((string)$node->get('mgn_site_url'), '/');
-			$health_url = $site_url . '/';
-		}
-		$ch = curl_init($health_url);
-		$opts = [
-			CURLOPT_RETURNTRANSFER => true,
-			CURLOPT_NOBODY         => true,
-			CURLOPT_CONNECTTIMEOUT => self::TIMEOUT_SECONDS,
-			CURLOPT_TIMEOUT        => self::TIMEOUT_SECONDS,
-			CURLOPT_FOLLOWLOCATION => true,
-			CURLOPT_MAXREDIRS      => 5,
-			CURLOPT_SSL_VERIFYPEER => $node->get('mgn_tls_insecure') ? false : true,
-			CURLOPT_SSL_VERIFYHOST => $node->get('mgn_tls_insecure') ? 0 : 2,
-		];
-		// Pin the request to THIS node's own IP while preserving SNI/Host, so a node
-		// behind a shared or round-robin hostname (e.g. dual-A-record DNS servers) is
-		// checked as itself rather than whichever A record DNS happens to return.
-		// Only when directly exposed: pinning a Cloudflare-fronted node to its origin
-		// IP bypasses the edge and hits the Apache default-vhost fallback cert, which
-		// fails SNI/cert validation for the site's hostname (false "down").
-		$node_ip = trim((string)$node->get('mgn_host'));
-		$parts    = parse_url($health_url);
-		$url_host = $parts['host'] ?? '';
-		$url_port = $parts['port'] ?? ((($parts['scheme'] ?? 'https') === 'https') ? 443 : 80);
-		if ($url_host !== '' && $node_ip !== '' && $url_host !== $node_ip
-				&& filter_var($node_ip, FILTER_VALIDATE_IP) && !filter_var($url_host, FILTER_VALIDATE_IP)) {
-			try {
-				$public_ips = DnsResolver::getA($url_host);
-				if (in_array($node_ip, $public_ips, true)) {
-					$opts[CURLOPT_RESOLVE] = ["{$url_host}:{$url_port}:{$node_ip}"];
-				}
-			} catch (DnsLookupException $e) {
-				// transient resolver failure: fall back to unpinned (pre-existing behavior)
-			}
-		}
-		curl_setopt_array($ch, $opts);
-		curl_exec($ch);
-		$errno  = curl_errno($ch);
-		$errmsg = curl_error($ch);
-		$status = (int)curl_getinfo($ch, CURLINFO_HTTP_CODE);
+		return $this->from_probe($node, NodeHealthProbe::http($node, self::TIMEOUT_SECONDS));
+	}
 
-		if ($errno) {
-			$detail = $errmsg ?: ('curl errno ' . $errno);
-			if (NodeMonitorHealth::is_name_resolution_failure($errno, $detail)) {
-				return $this->unresolvable($url_host !== '' ? $url_host : $health_url, $detail);
-			}
-			return ['ok' => false, 'message' => $detail, 'status' => 'done'];
+	/**
+	 * Adapt a probe result to this task's up/down vocabulary, folding any figures
+	 * the probe collected on the way past.
+	 */
+	private function from_probe($node, array $probe): array {
+		if ($probe['unresolvable']) {
+			return $this->unresolvable($probe['host'], $probe['detail']);
 		}
-		if ($status >= 200 && $status < 400) {
-			return ['ok' => true, 'message' => null, 'status' => 'done'];
+		if (!empty($probe['measured'])) {
+			$now = gmdate('Y-m-d H:i:s');
+			$node->set('mgn_last_status_data', json_encode(JobResultProcessor::fold_status_data(
+				$node->get('mgn_last_status_data'), $probe['measured'],
+				NodeHealthProbe::TRANSPORT, $now)));
+			$node->set('mgn_last_status_check', $now);
 		}
-		return ['ok' => false, 'message' => 'HTTP ' . $status, 'status' => 'done'];
+		return ['ok' => $probe['ok'], 'message' => $probe['message'], 'status' => 'done'];
 	}
 
 	/**

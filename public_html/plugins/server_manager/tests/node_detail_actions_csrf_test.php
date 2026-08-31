@@ -57,6 +57,12 @@ try {
 	$n->set('mgn_host', '203.0.113.20');
 	$n->set('mgn_ssh_user', 'root');
 	$n->set('mgn_ssh_key_path', '/home/user1/.ssh/id_ed25519_claude');
+	// check_status reaches a node with no agent and no site by probing what it
+	// publishes. This test is about CSRF, not about reachability, so the probe is
+	// aimed at a closed loopback port: refused immediately, which still files the
+	// job row whose existence is the thing being asserted.
+	$n->set('mgn_health_check_url', 'http://127.0.0.1:9/health');
+	$n->set('mgn_skip_joinery_checks', true);
 	$n->save();
 	$n->load();
 	$node_id = (int)$n->key;

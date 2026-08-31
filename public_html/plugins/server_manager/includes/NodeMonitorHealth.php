@@ -433,7 +433,10 @@ class NodeMonitorHealth {
 		return ['state' => $state, 'label' => $label, 'detail' => $detail, 'is_problem' => $is_problem];
 	}
 
-	private static function humanize($seconds): string {
+	/** Rough, readable duration. Public because the node page formats a probed
+	 *  machine's service uptime with it, and two spellings of 'up 34 days' on one
+	 *  page is how they drift. */
+	public static function humanize($seconds): string {
 		$seconds = (int)$seconds;
 		if ($seconds < 90)    return $seconds . 's';
 		if ($seconds < 5400)  return round($seconds / 60) . ' min';
