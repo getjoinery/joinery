@@ -306,14 +306,6 @@ section('Terminal jobs always record a result (the sweep can never re-process fo
 
 // The dashboard sweep selects mjb_result IS NULL; a handler path that returns
 // without recording would make that job re-processed on every render, forever.
-$fb = jrp_job($node, 'backup_database', "BACKUP_KEY_MISSING\nssh step failed");
-$fb->set('mjb_status', 'failed');
-$fb->save();
-JobResultProcessor::process($fb);
-check((string)$fb->get('mjb_result') !== '',
-	'a failed backup with no path in its output still records a result',
-	var_export($fb->get('mjb_result'), true));
-
 // Handler early-returns (no node on the job) are covered by the process()
 // backstop, for every job type at once.
 $orphan = jrp_job(null, 'provision_ssl', 'whatever');

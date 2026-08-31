@@ -5,6 +5,8 @@
  * Called when a job transitions to 'completed'. Extracts meaningful data
  * from raw command output and updates related records.
  *
+ * @version 1.18 - process_backup_database and process_backup_project are gone with their
+ *                 builders; backup_run is the one backup result that stamps a node
  * @version 1.17 - the managed-domain pair: process_managed_domain_prepare reads the node's mail plan
  *                 off the job, and process_managed_domain_notice puts the type in the sweep
  * @version 1.16 - process_backup_run unwraps the primitive/API JSON envelope before parsing BACKUP_RESULT,
@@ -733,46 +735,6 @@ class JobResultProcessor {
 			return ['found' => false, 'domain' => $m[1]];
 		}
 		return null;
-	}
-
-	/**
-	 * Parse backup output to extract file path and size.
-	 */
-	private static function process_backup_database($job) {
-		$output = $job->get('mjb_output') ?: '';
-		$result = [];
-
-		// Look for backup file path in output (.sql.gz, .sql.gz.enc, or .tar.gz)
-		if (preg_match('/(\/\S+\.(?:sql\.gz(?:\.enc)?|tar\.gz))\b/', $output, $m)) {
-			$result['backup_file'] = $m[1];
-		}
-
-		// Look for file size from ls output
-		if (preg_match('/(\d+(?:\.\d+)?[KMGT]?)\s+.*\.(?:sql\.gz|tar\.gz)/', $output, $m)) {
-			$result['backup_size'] = $m[1];
-		}
-
-		// ALWAYS record a result. The dashboard sweep selects on
-		// mjb_result IS NULL, so a handler that returns without recording
-		// leaves the job re-processed on every sweep forever (the invariant
-		// record_apply_update_result documents). A failed backup — no path in
-		// the output — records what is known instead of nothing.
-		if (empty($result)) {
-			$result = [
-				'status' => (string)$job->get('mjb_status'),
-				'note'   => 'no backup file path in output',
-			];
-		}
-		$job->set('mjb_result', json_encode($result));
-		$job->save();
-
-	}
-
-	/**
-	 * Parse backup_project output.
-	 */
-	private static function process_backup_project($job) {
-		self::process_backup_database($job);
 	}
 
 	/**

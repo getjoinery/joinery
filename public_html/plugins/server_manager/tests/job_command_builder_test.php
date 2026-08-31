@@ -157,8 +157,8 @@ check(in_array('primitive', $transports) && in_array('api', $transports)
 check(JobCommandBuilder::transports_for('no_such_operation') === array(),
 	'an unimplemented operation reports no transports');
 
-check(JobCommandBuilder::can_run($ssh_node, 'list_backups'),
-	'an SSH node can run an operation that still has an SSH implementation');
+check(!JobCommandBuilder::can_run($ssh_node, 'list_backups'),
+	'SSH credentials alone run nothing with a variant builder — no _ssh variant remains');
 check(!JobCommandBuilder::can_run($ssh_node, 'check_status'),
 	'but not check_status, which has nothing on that node to reach or probe');
 check(!JobCommandBuilder::can_run($bare_node, 'check_status'),
@@ -441,11 +441,14 @@ check(!in_array('ssh', JobCommandBuilder::transports_for('check_status'), true),
 check(JobCommandBuilder::can_run($probe_node, 'check_status'),
 	'and the action is offered on that node');
 
-// An API-capable node with no reachable endpoint must not silently produce an
-// empty job; the SSH path is the fallback and it has to be chosen.
-$steps = JobCommandBuilder::build_list_backups($ssh_node);
-check(count($steps) > 0, 'a node without API credentials still gets a backup listing job');
-check($steps[0]['type'] === 'ssh', 'that job runs over SSH', $steps[0]['type']);
+// A node with neither a paired agent nor API credentials gets a refusal that
+// names both, never an empty job the dispatcher would treat as completed.
+$lb_threw = '';
+try { JobCommandBuilder::build_list_backups($ssh_node); }
+catch (Exception $e) { $lb_threw = $e->getMessage(); }
+check(strpos($lb_threw, 'cannot run list_backups') !== false,
+	'a node with SSH credentials alone is refused a listing — SSH is not a transport',
+	$lb_threw);
 
 // Delete-backup with nothing selected still emits a runnable step rather than
 // an empty array the dispatcher would treat as a completed job.
@@ -974,11 +977,6 @@ $pub_cmd = isset($pub_steps[0]['cmd']) ? $pub_steps[0]['cmd'] : '';
 check(strpos($pub_cmd, 'cd ' . escapeshellarg(PathHelper::getRootDir()) . ' ') === 0,
       'publish_upgrade cds to the running site web root, not a hardcoded one');
 
-// Rule 1 (policy deletions): the local-cleanup that follows a successful upload
-// is folded INTO the upload step (chained with && after the upload command), so
-// it deletes exactly the file it just uploaded and can never run on an upload
-// failure or delete a backup that landed between two steps (P-23). There must be
-// no separate cleanup step, and the rm must sit after the upload in the command.
 require_once(PathHelper::getIncludePath('data/backup_target_class.php'));
 $bkt = new BackupTarget(NULL);
 $bkt->set('bkt_name', 'HarnessTest Target ' . bin2hex(random_bytes(3)));
@@ -987,79 +985,6 @@ $bkt->set('bkt_bucket', 'harness-test-bucket');
 $bkt->set('bkt_credentials', json_encode(array('key_id' => 'k', 'application_key' => 'a')));
 $bkt->save();
 harness_register_row('bkt_backup_targets', 'bkt_id', $bkt->key);
-
-$offsite_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/offsite/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key,
-	'mgn_delete_local_after_upload' => true));
-$offsite_steps = JobCommandBuilder::build_backup_database($offsite_node);
-$upload_step = null;
-$separate_cleanup = null;
-foreach ($offsite_steps as $step) {
-	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $upload_step = $step; }
-	if (($step['label'] ?? '') === 'Clean up local backup') { $separate_cleanup = $step; }
-}
-check($upload_step !== null, 'the upload step exists to audit');
-check($separate_cleanup === null,
-	'no separate local-cleanup step exists — cleanup is folded into the upload');
-$ucmd = $upload_step['cmd'] ?? '';
-// The rm must ride the heredoc REDIRECT line: the shell keeps parsing the
-// command list there and reads the body afterwards, so the rm runs iff the
-// upload succeeded. Anything chained after the TERMINATOR line does not parse
-// as shell at all — it is swallowed into the uploader's stdin and the step
-// dies on a PHP parse error before uploading anything.
-$ucmd_lines = explode("\n", $ucmd);
-$redirect_line = '';
-foreach ($ucmd_lines as $l) {
-	if (strpos($l, "<<'__JOINERY_UPLOADER_EOF__'") !== false) { $redirect_line = $l; break; }
-}
-check($redirect_line !== '', 'the upload step feeds the uploader via heredoc');
-
-// Read the variable the command uploads out of the command itself rather than
-// naming it here. The literal name was NEWEST_BACKUP until the upload-retry
-// work renamed it to UPLOAD_FILE, and both assertions in this block kept
-// checking the old name: this one started failing, and the negative one below
-// started passing for the wrong reason. Deriving it means a future rename
-// cannot rot either check.
-preg_match('/php -- upload "\$(\w+)"/', $redirect_line, $upload_var);
-$uploaded = $upload_var[1] ?? '';
-check($uploaded !== '', 'the redirect line names the file it uploads', $redirect_line);
-
-check($uploaded !== '' && strpos($redirect_line, '&& rm -f "$' . $uploaded . '"') !== false,
-	'retention rm rides the heredoc redirect line (runs only on upload success)', $redirect_line);
-
-// The rm must target the file that was just uploaded, not some other path a
-// rename or a copy-paste could leave behind — deleting the wrong file here
-// destroys a backup that was never sent anywhere.
-preg_match('/rm -f "\$(\w+)"/', $redirect_line, $removed_var);
-check(($removed_var[1] ?? '') === $uploaded,
-	'and removes exactly the file it uploaded', 'uploaded ' . $uploaded . ', removed ' . ($removed_var[1] ?? '(none)'));
-check(trim(end($ucmd_lines)) === '__JOINERY_UPLOADER_EOF__',
-	'the heredoc terminator is the entire final line — nothing chained after it', trim(end($ucmd_lines)));
-// Shell validity: bash warns "delimited by end-of-file" when the heredoc never
-// closes — the exact failure the old strpos-only check waved through.
-$ucmd_tmp = tempnam(sys_get_temp_dir(), 'jcbsh');
-file_put_contents($ucmd_tmp, $ucmd . "\n");
-exec('bash -n ' . escapeshellarg($ucmd_tmp) . ' 2>&1', $ucmd_lint, $ucmd_rc);
-unlink($ucmd_tmp);
-$ucmd_lint_text = implode("\n", $ucmd_lint);
-check($ucmd_rc === 0 && strpos($ucmd_lint_text, 'delimited by end-of-file') === false,
-	'the upload+retention command parses as valid bash with a closed heredoc', $ucmd_lint_text);
-
-// A node WITHOUT the retention flag must never delete its local backup.
-$keep_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/keep/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key,
-	'mgn_delete_local_after_upload' => false));
-$keep_upload = '';
-foreach (JobCommandBuilder::build_backup_database($keep_node) as $step) {
-	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $keep_upload = $step['cmd']; }
-}
-// Any rm at all, not one spelled a particular way. Checking for a specific
-// variable name is what let this pass while naming a variable that no longer
-// existed.
-check(strpos($keep_upload, 'rm -f') === false,
-	'without the retention flag the upload step deletes nothing', $keep_upload);
 
 // From-EXISTING-backup clones: the named /backups/ paths are the user's real
 // backup files, not job scratch. No teardown step may touch them.
@@ -1097,103 +1022,7 @@ preg_match('#/tmp/joinery_install_[a-f0-9]{12}#', $fresh_b, $mb);
 check(!empty($ma[0]) && !empty($mb[0]) && $ma[0] !== $mb[0],
 	'two installs never share an installer directory', ($ma[0] ?? '?') . ' vs ' . ($mb[0] ?? '?'));
 
-section('Backup key: one envelope per run, nothing precious left behind');
-
-// Every encrypted backup mints its own key on the node, seals it to the
-// operator's recovery key and to the node's own site key, and destroys the
-// plaintext copy. A cloud target forces encryption.
-$enc_node = jcb_node(array(
-	'mgn_web_root' => '/var/www/html/encnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key));
-foreach (['build_backup_database', 'build_backup_project'] as $builder) {
-	$steps = JobCommandBuilder::$builder($enc_node);
-	$all_cmd = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $steps));
-
-	$mint_at = $engine_at = $final_at = -1;
-	$mint_step = $final_step = '';
-	foreach ($steps as $i => $s) {
-		$label = $s['label'] ?? '';
-		if ($label === 'Mint backup encryption key')     { $mint_at = $i; $mint_step = $s['cmd']; }
-		if (strpos($label, 'Run ') === 0)                { $engine_at = $i; }
-		if ($label === 'Seal the backup key to the archive') { $final_at = $i; $final_step = $s['cmd']; }
-	}
-
-	check($mint_at !== -1, $builder . ': mints an envelope for the run');
-	check($mint_at < $engine_at, $builder . ': mints the key before the engine that encrypts with it',
-		"mint@{$mint_at} engine@{$engine_at}");
-	check($final_at > $engine_at, $builder . ': seals the envelope to the archive after it exists',
-		"final@{$final_at} engine@{$engine_at}");
-
-	check(strpos($mint_step, 'backup_envelope.php') !== false && strpos($mint_step, ' mint') !== false,
-		$builder . ': minting runs the envelope tool', $mint_step);
-	check(($steps[$mint_at]['type'] ?? '') === 'ssh',
-		$builder . ': minting happens ON THE NODE, so no plaintext key crosses the wire');
-	check(strpos($mint_step, '--recovery-pub') === false,
-		$builder . ': is handed no recovery key — the node reads the one it holds and has proven',
-		$mint_step);
-	check(strpos($mint_step, '--site-key') !== false,
-		$builder . ': names the node site key, so the node can restore itself unattended', $mint_step);
-	check(strpos($mint_step, '/config/backup_site_key') !== false,
-		$builder . ': the site key is read from the node project config', $mint_step);
-
-	// The engine has to be told which key to use, or it would silently fall
-	// back to whatever happens to be in $HOME and the envelope would describe
-	// a key the archive was not encrypted with.
-	check(strpos($all_cmd, '--key-file') !== false
-		&& strpos($all_cmd, JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX) !== false,
-		$builder . ': the engine is pointed at the minted key');
-
-	// Scratch paths are per job. A fixed path means two backups running on one
-	// node at the same time mint over each other's envelope, and the loser gets
-	// an archive whose envelope names a different archive — silent, and only
-	// discovered when someone tries to restore.
-	$second = JobCommandBuilder::$builder($enc_node);
-	$second_cmd = implode("\n", array_map(function ($s) { return $s['cmd'] ?? ''; }, $second));
-	preg_match('/' . preg_quote(JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX, '/') . '([0-9a-f]+)\./', $all_cmd, $m1);
-	preg_match('/' . preg_quote(JobCommandBuilder::ENVELOPE_SCRATCH_PREFIX, '/') . '([0-9a-f]+)\./', $second_cmd, $m2);
-	check(!empty($m1[1]) && !empty($m2[1]) && $m1[1] !== $m2[1],
-		$builder . ': two jobs get different envelope scratch paths',
-		($m1[1] ?? '?') . ' vs ' . ($m2[1] ?? '?'));
-
-	// The archive is identified by being NEW, not by being newest. Newest picks
-	// up whatever the node's own scheduled run wrote in the same window.
-	check(strpos($all_cmd, JobCommandBuilder::BEFORE_LIST_PREFIX) !== false
-		&& strpos($all_cmd, 'grep -vxF -f') !== false,
-		$builder . ': resolves its own archive against a before-list, not ls -t');
-
-	// The plaintext key must not outlive the run: leaving it on disk puts a
-	// working decryption key next to the thing it decrypts.
-	check(strpos($final_step, 'shred') !== false || strpos($final_step, 'rm -f') !== false,
-		$builder . ': destroys the plaintext key when the run ends', $final_step);
-	check(strpos($final_step, 'RC=$?') !== false,
-		$builder . ': shreds the key even when the relabel fails, and still reports the failure', $final_step);
-
-	check(strpos($all_cmd, 'openssl rand') === false,
-		$builder . ': no ad-hoc node-side key generation remains anywhere in the job', $all_cmd);
-	check(strpos($all_cmd, 'escrow') === false,
-		$builder . ': no escrow step survives', $all_cmd);
-}
-
-// The envelope has to reach the bucket too — an encrypted archive alone is
-// indistinguishable from noise.
-$upload_labels = array();
-foreach (JobCommandBuilder::build_backup_project($enc_node) as $s) {
-	if (strpos($s['label'] ?? '', 'Upload backup') === 0) { $upload_labels[] = $s['cmd']; }
-}
-check(count($upload_labels) === 2, 'an encrypted backup uploads the archive AND its envelope',
-	'uploads: ' . count($upload_labels));
-check(strpos(implode("\n", $upload_labels), '.keys.json') !== false,
-	'one of the uploads is the envelope sidecar');
-
-// A plaintext backup on a node with no cloud target mints nothing — there is no
-// key in play at all, and no envelope to upload.
-$plain_node = jcb_node(array('mgn_web_root' => '/var/www/html/plainnode/public_html'));
-$plain_labels = array_map(function ($s) { return $s['label'] ?? ''; },
-	JobCommandBuilder::build_backup_database($plain_node));
-check(!in_array('Mint backup encryption key', $plain_labels, true),
-	'an unencrypted backup mints no key', implode(' | ', $plain_labels));
-check(!in_array('Seal the backup key to the archive', $plain_labels, true),
-	'and seals no envelope', implode(' | ', $plain_labels));
+section('Backup key: resolved on the node, never sent from here');
 
 // Restores prefer the envelope beside the archive, so a node can restore itself
 // with no operator present, and fall back to the old node key for archives made
@@ -1237,7 +1066,7 @@ $cloud_node = jcb_node(array(
 	'mgn_delete_local_after_upload' => false));
 
 $ph_cmd = '';
-foreach (JobCommandBuilder::build_backup_database($cloud_node) as $step) {
+foreach (JobCommandBuilder::build_upload_backup($cloud_node, array('filename' => 'credmode.sql.gz')) as $step) {
 	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $ph_cmd = $step['cmd']; }
 }
 $token = '__SM_CREDS_' . (int)$bkt->key . '__';
@@ -1466,22 +1295,7 @@ foreach ($rk_cases as $label => $pair) {
 		|| strpos($rk_refusal, 'administrator') !== false
 		|| strpos($rk_refusal, 'status check') !== false,
 		"and the refusal for {$label} says where it is fixed", $rk_refusal);
-
-	// The older per-op backup jobs mint an envelope on the node too, so they are
-	// the same vulnerability and get the same answer.
-	$rk_refusal = '';
-	try { JobCommandBuilder::build_backup_project($rk_node, array('encryption' => true)); }
-	catch (Exception $e) { $rk_refusal = $e->getMessage(); }
-	check(strpos($rk_refusal, 'cannot be backed up') !== false,
-		"{$label} is refused an encrypting backup_project too", $rk_refusal);
 }
-
-// And the envelope-minting step of a per-op backup passes no key either.
-$mint_cmds = jcb_cmds(JobCommandBuilder::build_backup_project($run_node, array('encryption' => true)));
-check(strpos($mint_cmds, '--recovery-pub') === false,
-	'backup_project mints its envelope without being handed a recovery key');
-check(strpos($mint_cmds, 'backup_envelope.php') !== false && strpos($mint_cmds, ' mint') !== false,
-	'it still mints one — on the node, from the key the node holds');
 
 // A target holding a node (write-only) credential hands nodes THAT key's
 // token; the main delete-capable credential then never travels to a node.
@@ -1515,14 +1329,14 @@ check(($split_config['credentials_b64'] ?? '') === $node_token,
 check(strpos(implode("\n", $split_lines), $main_token) === false,
 	'the main (delete-capable) token appears nowhere in the node-bound command');
 
-// The one-off backup jobs upload from the node too, so their uploader follows
+// The per-file upload action sends from the node too, so its uploader follows
 // the same rule.
 $split_upload = '';
-foreach (JobCommandBuilder::build_backup_database($split_node) as $s) {
+foreach (JobCommandBuilder::build_upload_backup($split_node, array('filename' => 'splitnode.sql.gz')) as $s) {
 	if (strpos($s['label'] ?? '', 'Upload backup') === 0) { $split_upload = $s['cmd']; break; }
 }
 check(strpos($split_upload, $node_token) !== false,
-	'the ad-hoc backup uploader also carries the node token', substr($split_upload, 0, 120));
+	'the per-file uploader also carries the node token', substr($split_upload, 0, 120));
 check(strpos($split_upload, $main_token) === false,
 	'and never the main token');
 

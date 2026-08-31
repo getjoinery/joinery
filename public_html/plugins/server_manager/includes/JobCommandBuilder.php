@@ -5,6 +5,12 @@
  * All job-type intelligence lives here. The Go agent is a generic executor
  * that reads these steps and runs them in order.
  *
+ * @version 1.48 - the dead SSH surface comes out: build_backup_database and build_backup_project
+ *                 (superseded by backup_run), the SSH step composition behind the three restore
+ *                 builders (every restore travels as a primitive), build_list_backups_ssh, and the
+ *                 helpers only those paths used
+ * @version 1.47 - managed domains cross to the channel: build_managed_domain_prepare and
+ *                 build_managed_domain_notice, both primitive-only with no SSH sibling
  * @version 1.46 - check_status routes primitive -> api -> probe; build_check_status_ssh deleted.
  *                 A machine with no agent and no site reports itself over HTTP instead of
  *                 being read over a shell
@@ -82,8 +88,6 @@
  * @version 1.21 - build_upload_backup(): push one already-existing backup from the node to its cloud
  *                 target (the per-file Backups tab action), sharing upload_step() with the automatic
  *                 post-backup upload; the step timeout is sized from S3Signer's retry budget
- * @version 1.21 - managed domains cross to the channel: build_managed_domain_prepare and
- *                 build_managed_domain_notice, both primitive-only with no SSH sibling
  * @version 1.20 - backup key escrow runs as a management-node step (step_escrow_backup_key) instead of
  *                 inside the web request: node SSH keys are operator-owned, so only the agent can read
  *                 them, and encrypting backups seal the key on their way in
@@ -808,122 +812,6 @@ class JobCommandBuilder {
 
 
 	/**
-	 * Backup a node's database using backup_database.sh.
-	 * If the node has a cloud backup target, appends upload and optional cleanup steps.
-	 */
-	public static function build_backup_database($node, $params = []) {
-		$scripts = self::get_scripts_path($node);
-		$creds = self::get_db_credentials_script($node);
-
-		// Force encryption whenever backups will be uploaded to a cloud target
-		$target = self::get_target($node);
-		if ($target) {
-			$params['encryption'] = true;
-		}
-
-		// Script encrypts by default; pass --plaintext to disable
-		$flags = '--non-interactive';
-		if (empty($params['encryption'])) {
-			$flags .= ' --plaintext';
-		}
-
-		$steps = [];
-		$scratch = self::new_scratch_id();
-
-		$sudo = self::sudo_prefix($node);
-		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
-		$steps[] = self::step_snapshot_before($scratch);
-
-		// The key is minted before the engine runs, because the engine encrypts
-		// with it. Directory first, since that is where the key lands.
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_mint_envelope($node, $scratch);
-			$flags .= ' --key-file ' . escapeshellarg(self::envelope_key_path($scratch));
-		}
-
-		$steps[] = ['type' => 'ssh', 'label' => 'Run database backup',
-			'cmd' => "{$creds} && cd /backups && bash {$scripts}/sysadmin_tools/backup_database.sh {$flags} \"\$DB_NAME\"",
-			'timeout' => 3600];
-
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_finalize_envelope($node, $scratch);
-		}
-
-		// Append upload step if node has a cloud target
-		self::append_upload_steps($steps, $node, !empty($params['encryption']), $scratch);
-
-		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
-			'cmd' => 'ls -lht ' . self::backup_glob() . ' 2>/dev/null | head -5',
-			'continue_on_error' => true];
-
-		$steps[] = self::step_clean_before($scratch);
-
-		return $steps;
-	}
-
-	/**
-	 * Full project backup (DB + files + Apache config).
-	 * If the node has a cloud backup target, appends upload and optional cleanup steps.
-	 */
-	public static function build_backup_project($node, $params = []) {
-		$scripts = self::get_scripts_path($node);
-		$web_root = rtrim($node->get('mgn_web_root'), '/');
-		$project_root = dirname($web_root);
-		// Extract project name from path: /var/www/html/empoweredhealthtn/public_html -> empoweredhealthtn
-		$project_name = basename($project_root);
-
-		// Force encryption whenever backups will be uploaded to a cloud target
-		$target = self::get_target($node);
-		if ($target) {
-			$params['encryption'] = true;
-		}
-
-		// Script encrypts by default; pass --plaintext to disable
-		$flags = '--non-interactive --output-dir /backups';
-		if (empty($params['encryption'])) {
-			$flags .= ' --plaintext';
-		}
-
-		$steps = [];
-		$scratch = self::new_scratch_id();
-
-		$sudo = self::sudo_prefix($node);
-		$steps[] = ['type' => 'ssh', 'label' => 'Ensure backup directory',
-			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups"];
-		$steps[] = self::step_snapshot_before($scratch);
-
-		// The key is minted before the engine runs, because the engine encrypts
-		// the archive with it as tar streams out.
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_mint_envelope($node, $scratch);
-			$flags .= ' --key-file ' . escapeshellarg(self::envelope_key_path($scratch));
-		}
-
-		// Emit the credentials preamble so the script inherits DB_NAME/DB_USER/
-		// PGPASSWORD from the environment instead of self-harvesting the config,
-		// which the unprivileged SSH user may not be able to read (P-10).
-		$creds = self::get_db_credentials_script($node);
-		$steps[] = ['type' => 'ssh', 'label' => 'Run full project backup',
-			'cmd' => "{$creds} && bash {$scripts}/sysadmin_tools/backup_project.sh {$project_name} {$flags}",
-			'timeout' => 3600];
-
-		if (!empty($params['encryption'])) {
-			$steps[] = self::step_finalize_envelope($node, $scratch);
-		}
-
-		self::append_upload_steps($steps, $node, !empty($params['encryption']), $scratch);
-
-		$steps[] = ['type' => 'ssh', 'label' => 'List backup files',
-			'cmd' => "ls -lht /backups/ 2>/dev/null | head -5",
-			'continue_on_error' => true];
-
-		$steps[] = self::step_clean_before($scratch);
-
-		return $steps;
-	}
-
-	/**
 	 * A management node's own backup of a node — the manager profile.
 	 *
 	 * The node does the work. It builds the archive, extends the chain, seals the
@@ -1057,97 +945,20 @@ class JobCommandBuilder {
 
 
 	/**
-	 * Restore a database from a backup file (local or cloud).
-	 * Auto-prepends a backup before overwrite.
-	 * If the file is cloud-only, downloads it to /backups/ first.
+	 * Restore a database from one of the node's own backup archives.
+	 *
+	 * Primitive only: the job travels to the node's agent, which asks its own
+	 * operator for approval. A node that cannot take one is refused with the
+	 * fix named — there is no other transport.
 	 *
 	 * Params:
-	 *   filename   - original filename (used for cloud download target)
-	 *   local_path - path on server if file exists locally (may be null)
-	 *   cloud_path - provider path if file exists in cloud (may be null)
+	 *   filename - archive name; the node resolves it in its own backup directory
 	 */
 	public static function build_restore_database($node, $params) {
 		if (self::has_primitive($node, 'restore_database')) {
 			return self::build_restore_database_primitive($node, $params);
 		}
-		// The SSH path below no longer runs anywhere. SSH and SCP were removed
-		// from the agent on 2026-08-30, and it refuses a step of either type by
-		// name — so composing these steps would produce a job that dies at its
-		// first step with a message about a deprecated capability, during a
-		// restore. Say what is actually wrong instead, and say it where the
-		// operator is standing.
-		//
-		// The steps themselves are kept, not deleted, and deliberately: they are
-		// the only written record of what a restore used to do, and they come out
-		// once the primitive path has been proven live on a node
-		// (specs/restore_dispatch_approval_mechanism.md, WP5).
 		self::refuse_dead_restore_transport($node, 'restore_database');
-
-		$creds      = self::get_db_credentials_script($node);
-		$scripts    = self::get_scripts_path($node);
-		$sudo       = self::sudo_prefix($node);
-		$local_path = $params['local_path'] ?? $params['backup_path'] ?? null;
-		$cloud_path = $params['cloud_path'] ?? null;
-		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
-
-		$steps = [];
-
-		// Auto-backup target before overwrite
-		$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-			'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
-			'timeout' => 3600];
-
-		// If cloud-only: download to /backups/ on the remote server first
-		if (!$local_path && $cloud_path) {
-			$target = self::get_target($node);
-			if ($target) {
-				$bucket    = $target->get('bkt_bucket');
-				$dl_path   = '/backups/' . basename($filename);
-
-				$uploader_script = self::build_node_uploader_script($bucket, $target, 'download');
-				$eof = '__JOINERY_UPLOADER_EOF__';
-				$cp_arg = escapeshellarg($cloud_path);
-				$dl_arg = escapeshellarg($dl_path);
-				$dl_cmd = "php -- download {$cp_arg} {$dl_arg} <<'{$eof}'\n{$uploader_script}\n{$eof}";
-
-				$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
-					'cmd' => $dl_cmd, 'timeout' => 3600];
-				$local_path = $dl_path;
-			}
-		}
-
-		// Neither a local path nor a downloadable cloud path leaves nothing to
-		// restore FROM. Left unchecked this becomes an empty argument, and the
-		// engine is asked to restore a file called "" after the pre-restore
-		// snapshot has already run — a confusing failure in the one operation
-		// where clarity matters most.
-		if (!$local_path) {
-			throw new Exception(
-				'No backup file given to restore. Pass local_path, or cloud_path on a node with a configured target.');
-		}
-
-		$restore_path = escapeshellarg($local_path);
-		$engine       = escapeshellarg("{$scripts}/sysadmin_tools/restore_database.sh");
-
-		// One restore engine for every path: it verifies the archive (decrypting
-		// an .enc with the resolved key) BEFORE dropping anything, replaces the
-		// schema, and loads under ON_ERROR_STOP — a bad key or corrupt file
-		// leaves the database intact.
-		// The trailing cleanup removes the key step_resolve_restore_key unsealed
-		// into a temp file — whatever the engine's outcome, and without eating
-		// its exit code. A usable decryption key must not outlive the restore
-		// that needed it. The node's standing legacy key is not ours to remove.
-		$key_resolve = self::step_resolve_restore_key($node, $restore_path);
-		$steps[] = ['type' => 'ssh', 'label' => 'Restore database from backup',
-			'cmd' => "{$creds} && {$key_resolve} && bash {$engine} \"\$DB_NAME\" {$restore_path} --non-interactive --db-user \"\$DB_USER\" --key-file \"\$KEY_PATH\""
-				. '; RC=$?; if [ -n "$KEY_PATH" ] && [ "$KEY_PATH" != "$HOME/.joinery_backup_key" ]; then rm -f "$KEY_PATH"; fi; exit $RC',
-			'timeout' => 3600];
-
-		// Verify
-		$steps[] = ['type' => 'ssh', 'label' => 'Verify restore',
-			'cmd' => "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -c \"SELECT count(*) AS table_count FROM information_schema.tables WHERE table_schema = 'public'\""];
-
-		return $steps;
 	}
 
 	/**
@@ -1297,11 +1108,11 @@ class JobCommandBuilder {
 	/**
 	 * Restore a full project backup (.tar.gz) onto an existing node.
 	 *
+	 * Primitive only, like every restore: the node's agent runs it, the node's
+	 * operator approves it.
+	 *
 	 * $params:
-	 *   filename      - display name of the archive (for logging)
-	 *   local_path    - /backups/*.tar.gz on the node, or null
-	 *   cloud_path    - remote object key in the bucket, or null
-	 *   domain        - REQUIRED. The domain the restored site is to answer to.
+	 *   filename      - archive name; the node resolves it in its own backup directory
 	 *   skip_database - bool
 	 *   skip_files    - bool
 	 *
@@ -1315,126 +1126,7 @@ class JobCommandBuilder {
 		if (self::has_primitive($node, 'restore_project')) {
 			return self::build_restore_project_primitive($node, $params);
 		}
-		// The SSH path below no longer runs anywhere. SSH and SCP were removed
-		// from the agent on 2026-08-30, and it refuses a step of either type by
-		// name — so composing these steps would produce a job that dies at its
-		// first step with a message about a deprecated capability, during a
-		// restore. Say what is actually wrong instead, and say it where the
-		// operator is standing.
-		//
-		// The steps themselves are kept, not deleted, and deliberately: they are
-		// the only written record of what a restore used to do, and they come out
-		// once the primitive path has been proven live on a node
-		// (specs/restore_dispatch_approval_mechanism.md, WP5).
 		self::refuse_dead_restore_transport($node, 'restore_project');
-
-		$local_path = $params['local_path'] ?? null;
-		$cloud_path = $params['cloud_path'] ?? null;
-		$filename   = $params['filename'] ?? basename((string)($local_path ?: $cloud_path));
-
-		$skip_db     = !empty($params['skip_database']);
-		$skip_files  = !empty($params['skip_files']);
-
-		if ($skip_db && $skip_files) {
-			throw new Exception('At least one of project files or database must be restored.');
-		}
-
-		$domain = self::restore_domain($node, $params);
-
-		$web_root    = rtrim($node->get('mgn_web_root'), '/');
-		$project_dir = dirname($web_root);
-		$project_name = basename($project_dir);
-
-		$scripts = self::get_scripts_path($node);
-		$creds   = self::get_db_credentials_script($node);
-		$steps   = [];
-
-		// 1. Download from cloud if the backup only exists remotely
-		if (!$local_path && $cloud_path) {
-			$target = self::get_target($node);
-			if (!$target) {
-				throw new Exception('Cannot restore cloud-only backup: node has no backup target configured.');
-			}
-			$bucket    = $target->get('bkt_bucket');
-			$dl_path   = '/backups/' . basename($filename);
-
-			$uploader_script = self::build_node_uploader_script($bucket, $target, 'download');
-			$eof    = '__JOINERY_UPLOADER_EOF__';
-			$cp_arg = escapeshellarg($cloud_path);
-			$dl_arg = escapeshellarg($dl_path);
-			$dl_cmd = "php -- download {$cp_arg} {$dl_arg} <<'{$eof}'\n{$uploader_script}\n{$eof}";
-
-			$steps[] = ['type' => 'ssh', 'label' => 'Download backup from cloud',
-				'cmd' => $dl_cmd, 'timeout' => 3600];
-			$local_path = $dl_path;
-		}
-
-		$sudo = self::sudo_prefix($node);
-		// 2. Auto-backup current DB before overwrite (plaintext — fast recovery, no key needed)
-		if (!$skip_db) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
-				'timeout' => 3600];
-		}
-
-		// 3. Auto-backup current project tree (no DB, no Apache — just the files)
-		if (!$skip_files) {
-			$parent = escapeshellarg(dirname($project_dir));
-			$base   = escapeshellarg(basename($project_dir));
-			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup project files before restore',
-				'cmd' => "{$sudo}mkdir -p /backups && {$sudo}chmod 1777 /backups && {$sudo}tar czf /backups/auto_pre_project_restore_\$(date +%Y%m%d_%H%M%S).tar.gz -C {$parent} {$base}",
-				'timeout' => 3600];
-		}
-
-		// 4. Run restore_project.sh — --force activates non-interactive mode and
-		// cascades --non-interactive into the inner restore_database.sh call.
-		// The restore ends by reconciling the site to this machine (domain,
-		// deployment shape, regenerated virtualhost, armed certificate retry).
-		$skip_flags = '';
-		if ($skip_db)     $skip_flags .= ' --skip-database';
-		if ($skip_files)  $skip_flags .= ' --skip-files';
-
-		// Resolve DB user + key path in this NON-sudo shell and pass them absolute
-		// into the sudo'd restore, which forwards them to the DB restore engine
-		// (B-2: a $HOME-relative key lookup breaks once sudo changes $HOME).
-		$restore_cmd = "{$creds} && KEY_PATH=\"\$HOME/.joinery_backup_key\" && cd /backups && {$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_project.sh")
-			. ' ' . escapeshellarg($project_name)
-			. ' ' . escapeshellarg($local_path)
-			. ' --force' . $skip_flags
-			. ' --domain ' . escapeshellarg($domain)
-			. ' --db-user "$DB_USER" --key-file "$KEY_PATH"';
-
-		$steps[] = ['type' => 'ssh', 'label' => 'Run project restore', 'cmd' => $restore_cmd, 'timeout' => 3600];
-
-		// A container's public face is the HOST's proxy virtualhost, which lives
-		// outside the container and therefore in no backup at all. The restore
-		// inside the container cannot write it; this step can.
-		foreach (self::steps_publish_container_domain($node, $domain) as $s) {
-			$steps[] = $s;
-		}
-
-		// 5. Verify. A directory listing always succeeds, so it confirms nothing —
-		// assert the restored web root actually holds a site, and that a restored
-		// database came back with a populated schema. restore_project.sh checks
-		// every file individually and fails on a partial copy; this is the cheap
-		// second gate that catches a restore which ran against the wrong target.
-		$web_root_esc = escapeshellarg($web_root);
-		$verify_cmd = "test -s {$web_root_esc}/serve.php || "
-		            . "{ echo 'VERIFY FAILED: no serve.php under the web root after restore'; exit 1; }; "
-		            . "echo \"restore verify: \$(find {$web_root_esc} -type f | wc -l) files under the web root\"";
-		if (!$skip_db) {
-			$verify_cmd .= "; {$creds} && "
-			            . "TABLES=\$(psql -U \"\$DB_USER\" \"\$DB_NAME\" -tAc \"SELECT count(*) FROM information_schema.tables WHERE table_schema = 'public'\") && "
-			            . "echo \"restore verify: \$TABLES tables in the restored schema\" && "
-			            . "test \"\$TABLES\" -gt 0 || "
-			            . "{ echo 'VERIFY FAILED: the restored database has no tables'; exit 1; }";
-		}
-		$steps[] = ['type' => 'ssh', 'label' => 'Verify restore', 'cmd' => $verify_cmd];
-
-		$steps[] = self::step_verify_identity($node, $domain);
-		$steps[] = self::step_verify_served($node, $domain);
-
-		return $steps;
 	}
 
 	/**
@@ -1450,17 +1142,12 @@ class JobCommandBuilder {
 	 * would not ask anybody anything, it would hang until the primitive's
 	 * deadline killed it.
 	 *
-	 * NO DOMAIN CROSSES, AND ITS ABSENCE IS THE POINT. The SSH path requires
-	 * one because it can move a site: restore_domain() refuses to infer, since a
-	 * rebuild keeps the site's own domain while a rehearsal must not claim it.
-	 * The primitive answers a narrower question — restore this node's own backup
-	 * onto itself — and restore_project.sh defaults to the machine's own
-	 * configured domain when --domain is absent. So the node keeps its own
-	 * identity and a compromised plane cannot redirect a restore onto a domain
-	 * of its choosing. Moving a site to a different name is install_node's job,
-	 * not this one's. This is why restore_domain() is not called here: there is
-	 * nothing to validate, and validating a value that never crosses would read
-	 * like it did.
+	 * NO DOMAIN CROSSES, AND ITS ABSENCE IS THE POINT. The primitive answers a
+	 * narrow question — restore this node's own backup onto itself — and
+	 * restore_project.sh defaults to the machine's own configured domain when
+	 * --domain is absent. So the node keeps its own identity and a compromised
+	 * plane cannot redirect a restore onto a domain of its choosing. Moving a
+	 * site to a different name is install_node's job, not this one's.
 	 *
 	 * Cloud-only archives have the same gap as restore_database: no bucket, no
 	 * key, no credential crosses, so the file must already be on the node.
@@ -1475,145 +1162,6 @@ class JobCommandBuilder {
 	}
 
 	/**
-	 * The domain a restore job is to leave the site answering to.
-	 *
-	 * Required, never inferred. The correct answer depends on intent that is not
-	 * present in the data: a real rebuild keeps the site's own domain and cuts
-	 * DNS at the end, while a rehearsal must NOT claim it — the same backup and
-	 * the same target want opposite answers. The tempting rule "the node's
-	 * recorded URL wins when set" fails in exactly the case that matters most: a
-	 * node provisioned during an incident carries whatever hostname somebody
-	 * typed in a hurry, so the restore would adopt a throwaway name and the
-	 * mistake would surface only after DNS moved.
-	 *
-	 * The dashboard pre-fills the field from mgn_site_url. Requiring the value
-	 * costs one field and records the decision at the moment somebody knows it.
-	 */
-	private static function restore_domain($node, array $params) {
-		$domain = trim((string)($params['domain'] ?? ''));
-		if ($domain === '') {
-			throw new Exception(
-				'A restore must be told which domain the site is to answer to. It is not inferred: '
-				. 'a rebuild keeps the site\'s own domain while a rehearsal must not claim it, and the '
-				. 'backup looks identical either way.');
-		}
-		if (preg_match('/[^A-Za-z0-9.\-]/', $domain)) {
-			throw new Exception("'{$domain}' is not a valid domain name for a restore.");
-		}
-		return $domain;
-	}
-
-	/**
-	 * Publish a container site's domain on its HOST.
-	 *
-	 * In the container shape, TLS terminates on the host: the container serves
-	 * :80 under an internal ServerName and the host proxies to it. That proxy
-	 * virtualhost is outside the container's filesystem, so no backup contains
-	 * it and no in-container restore can write it. manage_domain.sh writes it,
-	 * is idempotent, and installs mod_proxy if the host lacks it.
-	 *
-	 * Empty for a bare-metal node (nothing to proxy) and for an IP or localhost
-	 * (a ServerName-based proxy needs a routable name).
-	 */
-	private static function steps_publish_container_domain($node, $domain) {
-		$container = trim((string)$node->get('mgn_container_name'));
-		if ($container === '') {
-			return [];
-		}
-		if ($domain === 'localhost' || preg_match('/^\d+\.\d+\.\d+\.\d+$/', $domain)) {
-			return [];
-		}
-
-		// maintenance_scripts is baked into the container image, not present on
-		// the host — so run the copy inside the container has no host effect.
-		// Read the script out of the container and run it on the host instead.
-		// manage_domain.sh identifies the site by its CONTAINER name (that is what
-		// it looks for in `docker ps` and what it proxies to), not by the node's
-		// slug, which is a management-node label and need not match.
-		$c = escapeshellarg($container);
-		$d = escapeshellarg($domain);
-		$s = $c;
-		$scripts = self::get_scripts_path($node);
-		$md = escapeshellarg($scripts . '/sysadmin_tools/manage_domain.sh');
-
-		return [[
-			'type' => 'ssh', 'label' => 'Publish the domain on the container host', 'on_host' => true,
-			'cmd' => "TMP=\$(mktemp) && sudo docker exec {$c} cat {$md} > \"\$TMP\" && "
-			       . "sudo bash \"\$TMP\" set {$s} {$d} --no-ssl; RC=\$?; rm -f \"\$TMP\"; exit \$RC",
-			'timeout' => 600,
-			// A host that already proxies this name is the normal case on a
-			// re-restore, and manage_domain.sh says so rather than failing —
-			// but a host with no Apache at all should not sink the restore
-			// that already succeeded inside the container.
-			'continue_on_error' => true,
-		]];
-	}
-
-	/**
-	 * Prove the restored site AGREES with the machine it landed on.
-	 *
-	 * The rebuild drill passed every check it had and still produced a site that
-	 * believed it was in a container, at the old address, with a database
-	 * password from another box. Each of those is one grep away from being
-	 * caught, which is why this step exists.
-	 */
-	private static function step_verify_identity($node, $domain) {
-		$config = escapeshellarg(self::get_config_path($node));
-		$sudo   = self::sudo_prefix($node);
-		$is_docker = (bool)$node->get('mgn_container_name');
-		$want_env  = $is_docker ? 'docker' : 'baremetal';
-		$d = escapeshellarg($domain);
-		$creds = self::get_db_credentials_script($node);
-
-		$cmd = "CFG={$config}; "
-		     . "GOT_DOMAIN=\$({$sudo}grep \"settings\\['webDir'\\]\" \$CFG | head -1 | grep -oP \"'[^']*'\" | tail -1 | tr -d \"'\"); "
-		     . "GOT_ENV=\$({$sudo}grep \"settings\\['deployment_environment'\\]\" \$CFG | head -1 | grep -oP \"'[^']*'\" | tail -1 | tr -d \"'\"); "
-		     . "case \"\$GOT_ENV\" in bare-metal) GOT_ENV=baremetal ;; esac; "
-		     . "echo \"identity: webDir=\$GOT_DOMAIN deployment_environment=\$GOT_ENV\"; "
-		     . "test \"\$GOT_DOMAIN\" = {$d} || { echo \"VERIFY FAILED: the site still calls itself \$GOT_DOMAIN\"; exit 1; }; "
-		     . "test \"\$GOT_ENV\" = '{$want_env}' || { echo \"VERIFY FAILED: the site thinks it is running on \$GOT_ENV, not {$want_env}\"; exit 1; }; "
-		     . "{$creds} && psql -U \"\$DB_USER\" \"\$DB_NAME\" -tAc 'SELECT 1' > /dev/null || "
-		     . "{ echo 'VERIFY FAILED: the database will not open with this machine credentials'; exit 1; }; "
-		     . "echo 'identity verify: OK'";
-
-		return ['type' => 'ssh', 'label' => 'Verify the site agrees with this machine', 'cmd' => $cmd];
-	}
-
-	/**
-	 * Prove the site is actually being SERVED — over HTTPS when it can be.
-	 *
-	 * Called out separately because the drill's failure passed an HTTP-only
-	 * check comfortably: the site answered on :80 the whole time, under a
-	 * container's internal virtualhost, with a valid certificate sitting unused
-	 * on disk.
-	 *
-	 * HTTPS is required only once the domain resolves HERE. Restoring before the
-	 * DNS cutover is the normal shape of a rebuild, and the certificate arrives
-	 * on its own afterwards — so a name that does not point here yet reports
-	 * pending rather than failing.
-	 */
-	private static function step_verify_served($node, $domain) {
-		$d = escapeshellarg($domain);
-		$cmd = "DOM={$d}; "
-		     . "MYIP=\$(curl -s --max-time 5 ifconfig.me 2>/dev/null || curl -s --max-time 5 icanhazip.com 2>/dev/null); "
-		     . "DNSIP=\$(getent ahostsv4 \"\$DOM\" 2>/dev/null | awk '{print \$1; exit}'); "
-		     . "if [ -n \"\$DNSIP\" ] && [ \"\$DNSIP\" = \"\$MYIP\" ]; then "
-		     .   "CODE=\$(curl -sILo /dev/null -w '%{http_code}' --max-time 20 \"https://\$DOM/\" 2>/dev/null); "
-		     .   "echo \"served: https://\$DOM -> HTTP \$CODE\"; "
-		     .   "case \"\$CODE\" in 200|301|302|303) echo 'served verify: OK over HTTPS' ;; "
-		     .     "*) echo \"VERIFY FAILED: \$DOM resolves here but HTTPS answered \$CODE\"; exit 1 ;; esac; "
-		     . "else "
-		     .   "CODE=\$(curl -sILo /dev/null -w '%{http_code}' --max-time 20 -H \"Host: \$DOM\" 'http://127.0.0.1/' 2>/dev/null); "
-		     .   "echo \"served: \$DOM does not resolve to this server yet (DNS \${DNSIP:-none} vs \${MYIP:-unknown})\"; "
-		     .   "echo \"served: local HTTP answered \$CODE\"; "
-		     .   "echo 'served verify: certificate deferred — the retry timer issues it once DNS points here'; "
-		     . "fi";
-
-		return ['type' => 'ssh', 'label' => 'Verify the site is served', 'cmd' => $cmd,
-		        'on_host' => true, 'timeout' => 120];
-	}
-
-	/**
 	 * Restore a node from an incremental backup CHAIN.
 	 *
 	 * Chains are what the fleet actually produces — the manager backup profile
@@ -1621,181 +1169,20 @@ class JobCommandBuilder {
 	 * the backups every scheduled run uploads could not be restored from the
 	 * dashboard at all.
 	 *
-	 * The shape of the job:
-	 *   1. fetch the chain's manifest onto the node
-	 *   2. recover the chain data key from the manifest's envelope, using the
-	 *      node's OWN backup_site_key (every chain seals to the node as well as
-	 *      to the management node's recovery key, so a node can always open its
-	 *      own backups without anybody's private key travelling)
-	 *   3. download every artifact the manifest names, up to the chosen run
-	 *   4. restore_chain.sh verifies each one against its recorded size and hash
-	 *      BEFORE writing anything, applies them in order, then reconciles
+	 * Primitive only: stage_chain puts the artifacts and the recovered chain key
+	 * on the node first, then this job has restore_chain.sh verify and apply
+	 * them. The node's agent runs it; the node's operator approves it.
 	 *
 	 * $params:
 	 *   chain_id  - e.g. chain-20260807_231507 (required)
 	 *   seq       - restore as at this run; default the newest in the manifest
-	 *   domain    - REQUIRED, see restore_domain()
 	 *   skip_database - bool
 	 */
 	public static function build_restore_chain($node, $params) {
 		if (self::has_primitive($node, 'restore_chain')) {
 			return self::build_restore_chain_primitive($node, $params);
 		}
-		// The SSH path below no longer runs anywhere. SSH and SCP were removed
-		// from the agent on 2026-08-30, and it refuses a step of either type by
-		// name — so composing these steps would produce a job that dies at its
-		// first step with a message about a deprecated capability, during a
-		// restore. Say what is actually wrong instead, and say it where the
-		// operator is standing.
-		//
-		// The steps themselves are kept, not deleted, and deliberately: they are
-		// the only written record of what a restore used to do, and they come out
-		// once the primitive path has been proven live on a node
-		// (specs/restore_dispatch_approval_mechanism.md, WP5).
 		self::refuse_dead_restore_transport($node, 'restore_chain');
-
-		require_once(PathHelper::getIncludePath('includes/S3Signer.php'));
-
-		$chain_id = trim((string)($params['chain_id'] ?? ''));
-		if ($chain_id === '' || !preg_match('/^chain-[0-9_]+$/', $chain_id)) {
-			throw new Exception('A chain restore needs the chain id (for example chain-20260807_231507).');
-		}
-		$seq    = isset($params['seq']) && $params['seq'] !== '' ? (int)$params['seq'] : null;
-		$domain = self::restore_domain($node, $params);
-		$skip_db = !empty($params['skip_database']);
-
-		$target = self::get_target($node);
-		if (!$target) {
-			throw new Exception('This node has no backup target, so there is no shelf to read a chain from.');
-		}
-
-		$slug = trim((string)$node->get('mgn_slug'));
-		if (!preg_match('/^[A-Za-z0-9_-]+$/', $slug)) {
-			throw new Exception("Node slug '{$slug}' cannot be used as a bucket path segment.");
-		}
-
-		$web_root     = rtrim((string)$node->get('mgn_web_root'), '/');
-		$project_dir  = dirname($web_root);
-		$project_name = basename($project_dir);
-		$scripts      = self::get_scripts_path($node);
-		$sudo         = self::sudo_prefix($node);
-		$creds        = self::get_db_credentials_script($node);
-
-		// {prefix}/{slug}/{profile}/{chain_id}/. The profile segment keeps two
-		// parties' backups apart — the site's own and this management node's — so
-		// it is carried from the listing rather than assumed. A chain restore
-		// started from the dashboard is normally a manager-profile chain.
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/BackupChainListHelper.php'));
-		// normalize('') means the SITE profile, which is a different shelf — so an
-		// unset parameter defaults here rather than falling through to it.
-		$profile   = BackupProfile::normalize(
-			trim((string)($params['profile'] ?? '')) ?: BackupProfile::MANAGER);
-		$chain_key = BackupChainListHelper::chain_path($target, $slug, $profile, $chain_id);
-		$work      = '/backups/restore_' . $chain_id;
-
-		$uploader = self::build_node_uploader_script($target->get('bkt_bucket'), $target, 'download');
-		$eof      = '__JOINERY_UPLOADER_EOF__';
-
-		$steps = [];
-
-		$steps[] = ['type' => 'ssh', 'label' => 'Prepare the restore workspace',
-			'cmd' => "{$sudo}mkdir -p " . escapeshellarg($work) . " && {$sudo}chmod 1777 /backups && "
-			       . "{$sudo}chmod 700 " . escapeshellarg($work) . " && echo WORKSPACE_READY"];
-
-		// The manifest first: it names every artifact, in order, with the size and
-		// hash each must match, and carries the sealed data keys. A bucket full of
-		// files-0003.tar.gz.enc without it is not a backup.
-		$manifest_remote = escapeshellarg($chain_key . '/manifest.json');
-		$manifest_local  = escapeshellarg($work . '/manifest.json');
-		$steps[] = ['type' => 'ssh', 'label' => 'Fetch the chain manifest',
-			'cmd' => "php -- download {$manifest_remote} {$manifest_local} <<'{$eof}'\n{$uploader}\n{$eof}",
-			'timeout' => 600];
-
-		// Recover the chain data key on the NODE, from the node's own site key.
-		// The management node's recovery private key never travels: it is the key
-		// of last resort for a machine that no longer exists, and putting it in a
-		// job record would make every stored job a copy of it.
-		$envelope_tool = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
-		$site_key      = escapeshellarg($project_dir . '/config/backup_site_key');
-		$key_out       = escapeshellarg($work . '/chain.key');
-		$steps[] = ['type' => 'ssh', 'label' => 'Recover the chain key',
-			'cmd' => "{$sudo}test -f {$site_key} || { echo 'This node has no backup_site_key, so it cannot open its own chain.'; "
-			       . "echo 'Recover the key with backup_envelope.php open --sidecar manifest.json --private <recovery key> and restore from a shell.'; exit 1; }; "
-			       . "{$sudo}php {$envelope_tool} open --sidecar {$manifest_local} --private {$site_key} --key-out {$key_out} > /dev/null 2>&1 || "
-			       . "{ echo 'The chain envelope did not open with this node key — this chain was taken by a different machine.'; "
-			       . "echo 'Restore it from a shell with the recovery key: backup_envelope.php open --sidecar manifest.json --private <recovery key>'; exit 1; }; "
-			       . "{$sudo}chmod 600 {$key_out}; echo CHAIN_KEY_OK",
-			'timeout' => 300];
-
-		// Download exactly what the manifest names, in the run range asked for.
-		// Reading the manifest ON the node keeps the artifact list and the file
-		// list one thing — a management node that computed names itself would be a
-		// second implementation of the chain layout, free to drift.
-		// `|| exit 1` rides the heredoc REDIRECT line, not the line after the
-		// terminator: anything placed after a terminator is a fresh statement, and
-		// putting the guard there both breaks the loop's syntax and (in the older
-		// form of this bug) got swallowed into the uploader's stdin.
-		$seq_arg = ($seq === null) ? '' : (string)$seq;
-		$fetch = "cd " . escapeshellarg($work) . " || exit 1\n"
-		       . "NAMES=\$(python3 - manifest.json " . escapeshellarg($seq_arg) . " <<'PYEOF'\n"
-		       . "import json,sys\n"
-		       . "m=json.load(open(sys.argv[1]))\n"
-		       . "runs=m.get('runs') or []\n"
-		       . "want=sys.argv[2]\n"
-		       . "seq=(len(runs)-1) if want=='' else int(want)\n"
-		       . "if seq<0 or seq>=len(runs): sys.exit('this chain has no run %s' % want)\n"
-		       . "names=[runs[i]['artifacts']['files']['name'] for i in range(seq+1)]\n"
-		       . "last=runs[seq].get('artifacts') or {}\n"
-		       . "for kind in ('db','meta'):\n"
-		       . "    if kind in last: names.append(last[kind]['name'])\n"
-		       . "print('\\n'.join(names))\n"
-		       . "PYEOF\n"
-		       . ") || exit 1\n"
-		       . "test -n \"\$NAMES\" || { echo 'the manifest names no artifacts'; exit 1; }\n"
-		       . "for N in \$NAMES; do\n"
-		       . "  echo \"fetching \$N\"\n"
-		       . "  php -- download " . escapeshellarg($chain_key) . "/\"\$N\" \"\$N\" <<'{$eof}' || exit 1\n"
-		       . "{$uploader}\n"
-		       . "{$eof}\n"
-		       . "done\n"
-		       . "echo CHAIN_ARTIFACTS_FETCHED";
-		$steps[] = ['type' => 'ssh', 'label' => 'Download the chain artifacts',
-			'cmd' => $fetch, 'timeout' => S3Signer::transfer_budget_seconds() + 3600];
-
-		// Pre-restore snapshot, same as every other restore path.
-		if (!$skip_db) {
-			$steps[] = ['type' => 'ssh', 'label' => 'Auto-backup database before restore',
-				'cmd' => "{$creds} && umask 077 && pg_dump -U \"\$DB_USER\" \"\$DB_NAME\" | gzip > /backups/auto_pre_chain_restore_\$(date +%Y%m%d_%H%M%S).sql.gz",
-				'timeout' => 3600];
-		}
-
-		$restore = "{$sudo}bash " . escapeshellarg("{$scripts}/sysadmin_tools/restore_chain.sh")
-			. ' ' . escapeshellarg($project_name)
-			. ' --artifacts ' . escapeshellarg($work)
-			. ' --key-file ' . $key_out
-			. ' --domain ' . escapeshellarg($domain)
-			. ' --force';
-		if ($seq !== null)  { $restore .= ' --seq ' . escapeshellarg((string)$seq); }
-		if ($skip_db)       { $restore .= ' --skip-database'; }
-
-		// The key is shredded whatever the outcome, without eating the exit code.
-		// A usable decryption key must not outlive the restore that needed it.
-		$steps[] = ['type' => 'ssh', 'label' => 'Restore the chain',
-			'cmd' => $restore . "; RC=\$?; {$sudo}rm -f {$key_out}; exit \$RC",
-			'timeout' => 7200];
-
-		foreach (self::steps_publish_container_domain($node, $domain) as $s) {
-			$steps[] = $s;
-		}
-
-		$steps[] = self::step_verify_identity($node, $domain);
-		$steps[] = self::step_verify_served($node, $domain);
-
-		$steps[] = ['type' => 'ssh', 'label' => 'Clean up the restore workspace',
-			'cmd' => "{$sudo}rm -rf " . escapeshellarg($work),
-			'teardown' => true, 'continue_on_error' => true, 'timeout' => 300];
-
-		return $steps;
 	}
 
 	/**
@@ -2226,125 +1613,6 @@ class JobCommandBuilder {
 	// ── Backup target helpers ──
 
 	/**
-	 * Scratch paths for a backup job, before the archive's real name is known.
-	 *
-	 * Per job, not fixed. Two backups running on one node at the same time — two
-	 * jobs, or a job alongside the node's own scheduled run — used to mint over
-	 * each other's envelope at one shared path, and the loser ended up with an
-	 * archive whose envelope named a different archive. That is unrecoverable and
-	 * silent: the archive looks encrypted and complete right up until someone
-	 * needs it.
-	 *
-	 * The id is baked into the stored command, so a teardown replayed against a
-	 * stale job still addresses that job's own scratch and nobody else's.
-	 */
-	const ENVELOPE_SCRATCH_PREFIX = '/backups/.jy_envelope_';
-	const BEFORE_LIST_PREFIX      = '/backups/.jy_before_';
-
-	private static function new_scratch_id() {
-		return bin2hex(random_bytes(6));
-	}
-
-	private static function envelope_key_path($scratch) {
-		return self::ENVELOPE_SCRATCH_PREFIX . $scratch . '.key';
-	}
-
-	private static function envelope_sidecar_path($scratch) {
-		return self::ENVELOPE_SCRATCH_PREFIX . $scratch . '.keys.json';
-	}
-
-	private static function before_list_path($scratch) {
-		return self::BEFORE_LIST_PREFIX . $scratch . '.list';
-	}
-
-	/**
-	 * Record what is in the backup directory BEFORE this job writes anything.
-	 *
-	 * Every later step that has to name "the archive this job just produced"
-	 * resolves it by being new, not by being newest. Newest is wrong whenever
-	 * anything else writes to the same directory in the same window — the node's
-	 * own scheduled backup, most obviously — and the failure mode is that the job
-	 * seals, uploads or deletes a file belonging to somebody else's run.
-	 */
-	private static function step_snapshot_before($scratch) {
-		$before = escapeshellarg(self::before_list_path($scratch));
-		return ['type' => 'ssh', 'label' => 'Note existing backup files',
-			'cmd' => 'ls -1d /backups/* 2>/dev/null > ' . $before . ' || true',
-			'continue_on_error' => true, 'timeout' => 60];
-	}
-
-	/** Remove the before-list. Scratch at a per-job path: teardown-safe. */
-	private static function step_clean_before($scratch) {
-		return ['type' => 'ssh', 'label' => 'Clean up backup scratch',
-			'cmd' => 'rm -f ' . escapeshellarg(self::before_list_path($scratch)),
-			'teardown' => true, 'continue_on_error' => true, 'timeout' => 60];
-	}
-
-	/**
-	 * Shell that puts the path of the file this job produced in $ARCHIVE — the
-	 * newest backup artifact that was NOT there when the job started.
-	 *
-	 * Falls back to plain newest only when the before-list is missing, which
-	 * means the snapshot step could not run at all.
-	 */
-	private static function resolve_new_archive($scratch) {
-		return 'ARCHIVE=$(' . self::new_file_pipeline(self::backup_glob(), $scratch, true) . ')';
-	}
-
-	/** The same, for the envelope this job's finalize step wrote. */
-	private static function resolve_new_sidecar($scratch) {
-		return 'UPLOAD_FILE=$(' . self::new_file_pipeline('/backups/*.keys.json', $scratch, false) . ')';
-	}
-
-	private static function new_file_pipeline($glob, $scratch, $drop_sidecars) {
-		$before = escapeshellarg(self::before_list_path($scratch));
-		$pipe = 'ls -1t ' . $glob . ' 2>/dev/null';
-		if ($drop_sidecars) {
-			// A sidecar is a backup artifact by glob but never the archive, and
-			// it is also new — so it would win a newest-first race with the file
-			// it describes.
-			$pipe .= " | grep -v '\\.keys\\.json\$'";
-		}
-		$pipe .= ' | { if [ -f ' . $before . ' ]; then grep -vxF -f ' . $before . '; else cat; fi; }';
-		return $pipe . ' | head -1';
-	}
-
-	/**
-	 * Mint the encryption key for this backup, on the node.
-	 *
-	 * Every run gets its own random key, sealed to the recovery key the node
-	 * holds and to the node's own site key, and written beside the archive as a
-	 * JSON envelope. Nothing precious is left on the node: the plaintext key
-	 * exists only as a 0600 file for the length of the run, and losing the node
-	 * loses no ability to read any backup it made.
-	 *
-	 * No key travels in the step command. The node reads the recovery key it
-	 * holds and has proven, which is the only key anyone here can be sure was
-	 * verified by someone holding its private half — a key sent from here would
-	 * seal just as happily whether or not anybody could ever open the result,
-	 * which is what makes a substituted one invisible. `backup_envelope.php mint`
-	 * refuses a supplied key outright, so a management node still passing one is
-	 * told rather than obeyed.
-	 */
-	private static function step_mint_envelope($node, $scratch) {
-		// Asked here rather than in each caller: this is the step that needs a
-		// key, so every path that mints one is covered by construction.
-		self::assert_node_can_be_backed_up($node);
-
-		$scripts      = self::get_scripts_path($node);
-		$project_root = dirname(rtrim($node->get('mgn_web_root'), '/'));
-		$site_key     = $project_root . '/config/backup_site_key';
-
-		$cmd = 'php ' . escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php') . ' mint'
-			. ' --artifact pending'
-			. ' --key-out ' . escapeshellarg(self::envelope_key_path($scratch))
-			. ' --sidecar-out ' . escapeshellarg(self::envelope_sidecar_path($scratch))
-			. ' --site-key ' . escapeshellarg($site_key);
-
-		return ['type' => 'ssh', 'label' => 'Mint backup encryption key', 'cmd' => $cmd, 'timeout' => 120];
-	}
-
-	/**
 	 * There is deliberately no way to write a node's recovery key from here, and
 	 * no way to hand one to a job.
 	 *
@@ -2380,73 +1648,6 @@ class JobCommandBuilder {
 		throw new Exception(
 			"Node '" . $node->get('mgn_slug') . "' cannot be backed up. "
 			. RecoveryKeyFleet::blocker_summary($state));
-	}
-
-	/**
-	 * Point the envelope at the archive that was just written, and destroy the
-	 * plaintext key.
-	 *
-	 * The key is shredded whether or not the relabel worked: leaving it behind
-	 * would put a usable decryption key next to the thing it decrypts, which is
-	 * the one arrangement the whole design exists to avoid. A failed relabel
-	 * still fails the step, so the operator sees an archive whose envelope needs
-	 * attention rather than one silently missing its key.
-	 */
-	private static function step_finalize_envelope($node, $scratch) {
-		$scripts = self::get_scripts_path($node);
-		$tool    = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
-		$key     = escapeshellarg(self::envelope_key_path($scratch));
-		$sidecar = escapeshellarg(self::envelope_sidecar_path($scratch));
-
-		$resolve = self::resolve_new_archive($scratch);
-		$shred   = '{ shred -u ' . $key . ' 2>/dev/null || rm -f ' . $key . '; }';
-
-		$cmd = $resolve
-			. ' && test -n "$ARCHIVE"'
-			. ' && php ' . $tool . ' relabel --sidecar ' . $sidecar . ' --artifact "$ARCHIVE" --out "$ARCHIVE.keys.json"'
-			. '; RC=$?; ' . $shred . '; exit $RC';
-
-		return ['type' => 'ssh', 'label' => 'Seal the backup key to the archive', 'cmd' => $cmd, 'timeout' => 120];
-	}
-
-	/**
-	 * The archive shapes a node may hold. One list, because "which files are
-	 * backups" was previously spelled out separately at every place that had to
-	 * decide, and they drifted.
-	 */
-	public static function backup_glob() {
-		require_once(PathHelper::getIncludePath('includes/BackupNaming.php'));
-		return BackupNaming::shell_glob();
-	}
-
-	/**
-	 * Shell that leaves the decryption key for an archive in KEY_PATH.
-	 *
-	 * The envelope beside the archive is tried first — that is the key that
-	 * provably belongs to this file, and it is what lets a node restore itself
-	 * with no operator present. Archives made before envelope keys existed have
-	 * no envelope, so the node's old key remains the fallback and those restores
-	 * keep working untouched.
-	 *
-	 * KEY_PATH is resolved here, in the non-sudo shell, and passed absolute:
-	 * a $HOME-relative lookup breaks once sudo changes $HOME (B-2).
-	 *
-	 * @param string $archive_expr shell expression for the archive path, already quoted
-	 */
-	private static function step_resolve_restore_key($node, $archive_expr) {
-		$scripts      = self::get_scripts_path($node);
-		$tool         = escapeshellarg($scripts . '/sysadmin_tools/backup_envelope.php');
-		$project_root = dirname(rtrim($node->get('mgn_web_root'), '/'));
-		$site_key     = escapeshellarg($project_root . '/config/backup_site_key');
-
-		return 'KEY_PATH="$HOME/.joinery_backup_key"'
-			. " && SIDECAR={$archive_expr}.keys.json"
-			. " && { if [ -f \"\$SIDECAR\" ] && [ -f {$site_key} ] && [ -f {$tool} ]; then"
-			. "   UNSEALED=$(mktemp /tmp/jy_restore_key_XXXXXX);"
-			. "   if php {$tool} open --sidecar \"\$SIDECAR\" --private {$site_key} --key-out \"\$UNSEALED\" >/dev/null 2>&1; then"
-			. '     KEY_PATH="$UNSEALED";'
-			. '   else rm -f "$UNSEALED"; fi;'
-			. ' fi; }';
 	}
 
 	/**
@@ -2502,32 +1703,6 @@ class JobCommandBuilder {
 		$count = 0;
 		foreach ($enabled as $ignored) { $count++; }
 		return $count;
-	}
-
-	/**
-	 * Append the upload (and optional local cleanup) step to a steps array if the
-	 * node has a cloud backup target configured. Picks the newest backup file,
-	 * which is the one the preceding backup step just wrote.
-	 */
-	private static function append_upload_steps(&$steps, $node, $encrypted, $scratch) {
-		$target = self::get_target($node);
-		if (!$target) return;
-
-		$delete_local = (bool) $node->get('mgn_delete_local_after_upload');
-
-		$resolve = self::resolve_new_archive($scratch) . ' && UPLOAD_FILE="$ARCHIVE"';
-		$steps[] = self::upload_step($node, $target, $resolve, $delete_local);
-
-		// The envelope is what makes the archive readable again, so it has to
-		// reach the bucket too — an encrypted archive sitting there alone is
-		// indistinguishable from noise. It is resolved separately rather than
-		// carried over from the previous step because each step is its own SSH
-		// session; the archive upload may also have just deleted its own file,
-		// which is why this finds the sidecar directly rather than deriving it
-		// from a path that no longer exists.
-		if ($encrypted) {
-			$steps[] = self::upload_step($node, $target, self::resolve_new_sidecar($scratch), $delete_local);
-		}
 	}
 
 	/**
@@ -3043,7 +2218,7 @@ class JobCommandBuilder {
 	/**
 	 * List backup files on a node. Local only — cloud listings are done
 	 * web-server-side via TargetLister when the Backups tab renders.
-	 * Dispatches to API or SSH based on has_api().
+	 * Routes primitive first, then the management API.
 	 */
 	public static function build_list_backups($node) {
 		if (self::has_primitive($node, 'list_backups')) {
@@ -3052,12 +2227,9 @@ class JobCommandBuilder {
 		if (self::has_api($node, 'list_backups')) {
 			return self::build_list_backups_api($node);
 		}
-		if (self::has_ssh($node)) {
-			return self::build_list_backups_ssh($node);
-		}
 		throw new Exception(
 			"Node '{$node->get('mgn_slug')}' cannot run list_backups: "
-			. "no API credentials (or health probe failed) and no SSH credentials configured."
+			. "no paired agent and no API credentials (or the health probe failed)."
 		);
 	}
 
@@ -3078,16 +2250,6 @@ class JobCommandBuilder {
 	public static function build_list_backups_api($node) {
 		return [
 			['type' => 'api', 'label' => 'List local backups', 'method' => 'GET', 'endpoint' => 'backups/list', 'timeout' => 30],
-		];
-	}
-
-	public static function build_list_backups_ssh($node) {
-		return [
-			['type' => 'ssh', 'label' => 'List local backups',
-			 'cmd' => "for f in " . self::backup_glob() . "; do "
-			        . "[ -f \"\$f\" ] && stat --format='LOCAL|%s|%Y|%n' \"\$f\"; "
-			        . "done 2>/dev/null; echo 'LOCAL_LIST_DONE'",
-			 'continue_on_error' => true],
 		];
 	}
 

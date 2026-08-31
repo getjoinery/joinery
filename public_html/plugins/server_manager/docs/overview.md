@@ -1154,14 +1154,13 @@ All job-type intelligence lives in `JobCommandBuilder.php`. The Go agent is a ge
 5. Agent runs the job's teardown steps (if any), then marks the job completed or failed
 6. `JobResultProcessor` optionally parses the output into structured data
 
-**Example: what a `backup_database` job looks like in the database:**
+**Example: what a step-list job looks like in the database:**
 
 ```json
 {
     "steps": [
-        {"type": "ssh", "label": "Run database backup",
-         "cmd": "/var/www/html/site/maintenance_scripts/sysadmin_tools/backup_database.sh"},
-        {"type": "ssh", "label": "Upload to cloud", "cmd": "...", "continue_on_error": true}
+        {"type": "ssh", "label": "Prepare the workspace", "cmd": "mkdir -p ..."},
+        {"type": "ssh", "label": "Run the operation", "cmd": "...", "continue_on_error": true}
     ]
 }
 ```
@@ -1368,7 +1367,7 @@ ownership belongs to neither — the buyer is the registrant from registration.
 Represents a queued, running, or completed operation. Key fields:
 
 - `mjb_mgn_node_id` -- Target node (FK to mgn_managed_nodes, null for local-only jobs)
-- `mjb_job_type` -- Label for display/filtering (e.g., "backup_database")
+- `mjb_job_type` -- Label for display/filtering (e.g., "backup_run")
 - `mjb_status` -- `pending`, `running`, `completed`, `failed`, or `cancelled`
 - `mjb_commands` -- JSON with the step array the agent executes
 - `mjb_output` -- Progressive text output (appended during execution)
@@ -1380,9 +1379,9 @@ Create jobs with the static helper:
 ```php
 $job = ManagementJob::createJob(
     $node_id,               // target node ID (or null for local)
-    'backup_database',      // job type label
+    'backup_run',           // job type label
     $steps,                 // array of step dicts from JobCommandBuilder
-    ['encryption' => true], // parameters (stored for reference/re-run)
+    ['profile' => 'manager'], // parameters (stored for reference/re-run)
     $session->get_user_id() // who triggered it
 );
 ```
