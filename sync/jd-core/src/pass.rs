@@ -331,6 +331,17 @@ pub fn run_pass(
     // long as the first one kept failing.
     let busy = env.store.entities_with_open_ops()?;
     let written_off = env.store.written_off_now()?;
+    // Sources whose bytes are already claimed by an entry waiting for a key.
+    //
+    // Derived fresh every pass rather than remembered, so there is no state to
+    // go stale: the moment the claimant's create lands it stops being
+    // provisional and the hold lapses, and if the user moves the file back out
+    // of the vault the claimant is swept away and the hold goes with it.
+    let held_for_replacement: std::collections::HashSet<EntityId> = all_entries(env)?
+        .iter()
+        .filter(|e| e.id.is_provisional())
+        .filter_map(|e| e.replaces)
+        .collect();
 
     for entry in all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || busy.contains(&entry.id) {
@@ -426,6 +437,36 @@ pub fn run_pass(
                 (env.now_ms)() as i64,
             )?;
         }
+        // Nothing on the server, and now nothing on the disk either: there is
+        // no third place for it to be, so it is forgotten.
+        //
+        // Checked BEFORE the skips below rather than after, because every one
+        // of them is a reason to wait and waiting needs a file to wait for. An
+        // entry parked, or holding a slot for a key, whose file the user has
+        // since taken away would otherwise sit in the store for its whole life
+        // -- and anything derived from its existence sits with it. That is not
+        // hypothetical: the hold one of these puts on the server copy it is
+        // going to replace lapses only when it goes, so a file dragged into a
+        // vault and straight back out again would never move at all.
+        if entry.id.is_provisional() {
+            let gone = match relative_path(env, &entry)? {
+                // The sweep at the top of the pass has already removed anything
+                // with no way back to the root; belt and braces.
+                None => true,
+                Some(path) => match entry.id.entity_type {
+                    EntityType::File => !observed.iter().any(|o| o.path == path),
+                    EntityType::Folder => !dirs_on_disk.contains(&path),
+                },
+            };
+            if gone {
+                // Created and removed again before it ever reached the server.
+                // There is nothing to tell anyone about -- and for a folder that
+                // means everything inside it too, or its children are left
+                // pointing at a parent that is not there any more.
+                env.store.delete_subtree(entry.id)?;
+                continue;
+            }
+        }
         if matches!(entry.status, LocalStatus::Unsyncable(_)) && !entry.remote_deleted {
             continue;
         }
@@ -451,6 +492,18 @@ pub fn run_pass(
         // no lifting logic to run. A remote delete still gets through, exactly
         // as it does for the two skips above, so a file thrown away while it
         // was unreadable is still cleaned up.
+        // The user moved this file into a vault this device has no key for, and
+        // the bytes are already claimed at their new path by an entry waiting
+        // for that key. There is nothing at the agreed path any more, which
+        // reads as the user deleting it -- and acting on that would trash the
+        // last copy anyone else can reach, in favour of a replacement this
+        // device cannot upload yet. So the source waits for the replacement to
+        // LAND, which is stricter than the keyed path: that one trashes first
+        // and re-uploads after. A remote delete still gets through, exactly as
+        // it does for the three skips above.
+        if !entry.remote_deleted && held_for_replacement.contains(&entry.id) {
+            continue;
+        }
         if !entry.remote_deleted && written_off.contains(&entry.id) {
             continue;
         }
@@ -461,25 +514,11 @@ pub fn run_pass(
         // would read "no agreement" as "the server made this", and plan a
         // download of a file that exists nowhere but this disk.
         if entry.id.is_provisional() {
+            // The sweep above has already forgotten every provisional entry
+            // with nothing behind it, so there is a file here.
             let Some(path) = relative_path(env, &entry)? else {
-                // Belt and braces: the sweep at the top of the pass has already
-                // removed anything with no way back to the root, and this list
-                // was walked from the root anyway.
-                env.store.delete_subtree(entry.id)?;
                 continue;
             };
-            let gone = match entry.id.entity_type {
-                EntityType::File => !observed.iter().any(|o| o.path == path),
-                EntityType::Folder => !dirs_on_disk.contains(&path),
-            };
-            if gone {
-                // Created and removed again before it ever reached the server.
-                // There is nothing to tell anyone about — and for a folder that
-                // means everything inside it too, or its children are left
-                // pointing at a parent that is not there any more.
-                env.store.delete_subtree(entry.id)?;
-                continue;
-            }
             let content = observed.iter().find(|o| o.path == path).map(|o| ContentId {
                 sha256: o.sha256.clone(),
                 size: o.fingerprint.size,
@@ -556,13 +595,58 @@ pub fn run_pass(
             if env.vault.is_none() {
                 // No key here, so this device cannot do the re-upload either --
                 // and it must not trash the server's copy on the strength of a
-                // conversion it cannot perform. The same bargain the creation
-                // path makes: the file stays where the user put it, the entry
-                // waits visibly, and `apply_naming` releases it by itself the
-                // moment a key arrives.
-                if entry.status != LocalStatus::PendingKey {
-                    let mut waiting = entry.clone();
+                // conversion it cannot perform.
+                //
+                // Saying so on the SOURCE does not work, and the shape of the
+                // failure is worth keeping: a status meaning "the file went
+                // somewhere I cannot follow" was cleared by the name resolver
+                // on the very next pass, because that asks whether the ENTRY is
+                // encrypted and the entry is still recorded in the plaintext
+                // folder it came from. Set here, cleared there, every pass, for
+                // ever -- and all the while nothing owned the bytes at their
+                // new path: no scan adopted them, no upload sent them, no
+                // delete removed them, and the next thing to want that name
+                // would have written straight over them.
+                //
+                // So the memory goes on the record that is TRUE. The file is
+                // inside the vault now, so it gets an entry that says exactly
+                // that, at the path it is actually at, already waiting for a
+                // key -- the same bargain the creation path makes for a file
+                // the user saves into a vault this device cannot open. What it
+                // carries beyond that is where it came from, which is what
+                // holds the source's server copy until this upload lands.
+                // The destination, from the same delta the crossing was read
+                // from: only a move can cross an edge, so this always matches.
+                let to = match &local {
+                    Delta::Moved { to } | Delta::MovedAndEdited { to, .. } => to,
+                    _ => continue,
+                };
+                // Only a PLAINTEXT entry can get here, and nothing at this
+                // site says so. `crossing_a_vault_edge` answers Convert for a
+                // file in BOTH directions, and a locked vault is also
+                // `env.vault.is_none()` -- so on paper an encrypted file being
+                // dragged OUT reaches this branch, where the mint would be
+                // wrong twice over: `is_encrypted` hardcoded true at a
+                // plaintext destination, and a wait for a key the conversion
+                // does not need.
+                //
+                // What actually prevents it is ordering in two other functions:
+                // `apply_naming` runs at the top of this same pass and
+                // `no_key_for` parks every encrypted entry `PendingKey` while
+                // there is no key, so the skip above drops it long before this.
+                // That is a real guarantee and an invisible one, so it is
+                // asserted here rather than assumed.
+                debug_assert!(
+                    !entry.is_encrypted,
+                    "an encrypted entry reached the keyless crossing mint; the \
+                     PendingKey skip above is meant to have taken it"
+                );
+                if !held_for_replacement.contains(&entry.id) {
+                    let claimant = EntityId::file(env.store.next_provisional_id()?);
+                    let mut waiting = blank(claimant, to);
+                    waiting.is_encrypted = true;
                     waiting.status = LocalStatus::PendingKey;
+                    waiting.replaces = Some(entry.id);
                     env.store.put_entry(&waiting)?;
                 }
                 continue;
@@ -945,7 +1029,7 @@ pub(crate) fn absorb_remote(
                 if state.wrapped_file_key.is_some() {
                     entry.wrapped_file_key = state.wrapped_file_key.clone();
                 }
-                open_metadata(env, &mut entry, state);
+                let _ = open_metadata(env, &mut entry, state);
             }
             env.store.put_entry(&entry)?;
         }
@@ -966,7 +1050,7 @@ pub(crate) fn absorb_remote(
                 EntityType::Folder => LocalStatus::PendingDownload,
                 EntityType::File => LocalStatus::PendingDownload,
             };
-            open_metadata(env, &mut entry, state);
+            let _ = open_metadata(env, &mut entry, state);
             env.store.put_entry(&entry)?;
         }
     }
@@ -988,22 +1072,22 @@ pub(crate) fn absorb_remote(
 /// said. The entry keeps its placeholder name, `apply_naming` reads that as
 /// having no key and marks it `PendingKey`, and the user is told once, at the
 /// device level, rather than once per file.
-fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteState) {
+pub(crate) fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteState) -> bool {
     if !state.is_encrypted {
-        return;
+        return false;
     }
     let (Some(vault), Some(wrapped), Some(blob)) = (
         env.vault,
         entry.wrapped_file_key.as_deref(),
         state.encrypted_metadata.as_deref(),
     ) else {
-        return;
+        return false;
     };
     let Ok(file_key) = vault.open_file_key(wrapped) else {
-        return;
+        return false;
     };
     let Ok(meta) = jd_crypto::drive::decrypt_metadata(blob, &file_key) else {
-        return;
+        return false;
     };
     if !meta.name.is_empty() {
         // The name the user chose, replacing the placeholder the server holds.
@@ -1020,6 +1104,7 @@ fn open_metadata(env: &ExecEnv, entry: &mut Entry, state: &RemoteState) {
     if meta.mtime.is_some() {
         entry.remote_modified_time = meta.mtime;
     }
+    true
 }
 
 /// The remote state as currently recorded for an entry.
@@ -1665,6 +1750,7 @@ fn blank(id: EntityId, placement: &Placement) -> Entry {
         local_name: None,
         status: LocalStatus::PendingUpload,
         wrapped_file_key: None,
+        replaces: None,
     }
 }
 

@@ -620,6 +620,7 @@ mod tests {
             local_name: None,
             status: LocalStatus::PendingDownload,
             wrapped_file_key: None,
+            replaces: None,
         }
     }
 

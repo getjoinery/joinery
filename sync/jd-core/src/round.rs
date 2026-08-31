@@ -248,6 +248,7 @@ mod tests {
             local_name: None,
             status: LocalStatus::Synced,
             wrapped_file_key: None,
+            replaces: None,
         }
     }
 

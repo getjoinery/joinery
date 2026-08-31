@@ -708,6 +708,7 @@ fn path_for(env: &ExecEnv, p: &Placement) -> Result<Placed, ExecError> {
         local_name: local_leaf,
         status: LocalStatus::Synced,
         wrapped_file_key: None,
+        replaces: None,
     };
     local_path(env, &probe)
 }
@@ -2409,6 +2410,7 @@ fn preserve_local_as(env: &ExecEnv, op: &Op, params: &Value) -> Result<OpOutcome
         local_name: None,
         status: LocalStatus::PendingUpload,
         wrapped_file_key: None,
+        replaces: None,
     };
     env.store.put_entry(&rescued)?;
 
@@ -2952,15 +2954,54 @@ fn move_remote(
     // Where it ACTUALLY is, when this op has been tried before — the calls above
     // may have been idempotent replays describing a journey the server has
     // since taken further. See server_view_after_retry.
-    entry.remote = match server_view_after_retry(env, op, entry.id)? {
+    match server_view_after_retry(env, op, entry.id)? {
         Some(state) if state.deleted => {
             entry.remote_deleted = true;
             env.store.put_entry(&entry)?;
             return Ok(OpOutcome::Done);
         }
-        Some(state) => state.placement,
-        None => to,
-    };
+        // The answer comes back in the SERVER's language, and for an encrypted
+        // file that language has no name in it: the stored title is
+        // `enc-{content id}` for the life of the file, and the real name lives
+        // sealed in the metadata blob beside it. Recording the answer whole
+        // therefore writes the placeholder into the agreement -- and
+        // `local_placement` prefers the agreement over everything else, so from
+        // that moment the user's file IS called `enc-...`. The next download
+        // lands under that name, the scan meets a file no entry knows, and the
+        // engine offers it back to the server as a brand new file whose real
+        // name is another file's placeholder: a name the vault exists to keep
+        // secret, stored in the clear.
+        //
+        // The blob rides along with the stat, so opening it here recovers the
+        // name exactly as the change feed does. The upload path already states
+        // this rule; this is the other place that adopts a server view, and it
+        // has to obey it too.
+        Some(state) => {
+            // The blob rides along with the stat, but opening it needs the
+            // vault -- and the vault can be locked by the time a queued op is
+            // retried, because the skip that gates PLANNING does not gate the
+            // queue. Adopting anyway would put the placeholder into the
+            // agreement exactly as before, and nothing re-stats an entry that
+            // reads as settled, so it would never repair itself.
+            //
+            // So it waits, which is what every other wait in this engine does.
+            // Scoped to files: a folder inside a vault wears its real name on
+            // the server and has no blob to open, so asking it to produce one
+            // would be a wait with nothing to wait for.
+            entry.remote = state.placement.clone();
+            let opened = crate::pass::open_metadata(env, &mut entry, &state);
+            if entry.id.entity_type == EntityType::File && state.is_encrypted && !opened {
+                // Nothing has been written down: `entry` is this call's own
+                // copy and the store is only touched below.
+                return Ok(OpOutcome::Retry(
+                    "the vault is not open, so the server's answer cannot be read \
+                     back into the file's real name"
+                        .into(),
+                ));
+            }
+        }
+        None => entry.remote = to,
+    }
     entry.synced_placement = Some(entry.remote.clone());
     if entry.status == LocalStatus::Synced || entry.synced_content.is_some() {
         entry.status = LocalStatus::Synced;

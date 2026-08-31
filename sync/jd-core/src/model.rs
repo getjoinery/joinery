@@ -165,6 +165,23 @@ pub struct Entry {
     pub local_name: Option<String>,
     pub status: LocalStatus,
     pub wrapped_file_key: Option<String>,
+    /// The file on the server whose copy this entry's first upload replaces.
+    ///
+    /// Set only when the user moved a tracked plaintext file into a vault this
+    /// device has no key for. The bytes are at a path inside the vault now, so
+    /// this entry is minted to claim them and wait for a key -- and the file
+    /// they came from is still on the server with its own entry, which suddenly
+    /// has no local file at all. That reads as the user deleting it, and acting
+    /// on it would trash the last copy anyone else can reach while the
+    /// replacement is one this device cannot yet upload.
+    ///
+    /// So the source is held until the create here has LANDED, which is
+    /// strictly safer than the keyed path -- that trashes first and re-uploads
+    /// after. This is a fact about where these bytes came from, not a state
+    /// something has to remember to clear: the hold is recomputed from it every
+    /// pass, lapses by itself the moment this entry stops being provisional,
+    /// and disappears with this entry if the user moves the file back out.
+    pub replaces: Option<EntityId>,
 }
 
 impl Entry {

@@ -472,6 +472,127 @@ state has not been staged by hand; the seed stands until it is.
 
 ---
 
+## Defect F — the file the user dragged into their private folder, that nothing owned
+
+On a device with no key for the vault, dragging a file into the private folder
+left the bytes owned by nobody, for ever. No scan adopted them, no upload sent
+them, no rename moved them, no delete removed them, and the next thing to want
+that name would have written straight over them. The device reported itself
+perfectly quiet the whole time.
+
+The engine's answer to that gesture was already decided and already stated in a
+comment: this device cannot do the conversion, so the file stays where the user
+put it and the entry waits, visibly, for a key. The wait was written on the
+entry for the file's OLD identity — and the name resolver cleared it on the very
+next pass, because it asks whether the ENTRY is encrypted and the entry was
+still recorded in the plaintext folder the file came from. Set by one part
+because of where the file went, cleared by another because of where the record
+said it was. Round it went: the scan re-derived the same move by inode every
+pass, the move was declined every pass, and nothing ever claimed the file.
+
+Even a wait that survived would not have been enough. `local_placement` is the
+agreement or the server's placement, and there is no third place to say "the
+local copy is over here now" — the model tolerates that gap only while an
+operation is queued to close it, and here no operation ever could be.
+
+So the memory goes on the record that is true. The bytes are inside the vault
+now, so they get an entry that says exactly that, at the path they are actually
+at, minted already waiting for a key — the same bargain the creation path makes
+for a file the user saves into a vault this device cannot open. Beyond that it
+carries one fact, `replaces`: the server-side file its first upload supersedes.
+
+Only a plaintext entry can reach that mint, and nothing at the mint says so:
+the crossing predicate answers the same for a file going either way, and a
+LOCKED vault is also "no key here". What prevents an encrypted file on its way
+out from reaching it is ordering in two other functions — the name resolver runs
+at the top of the same pass and parks every encrypted entry while there is no
+key, so the wait-skip takes it first. A real guarantee, and an invisible one, so
+it is asserted at the mint rather than assumed.
+
+That fact is what protects the original. Once the new entry claims the bytes,
+the old one has no local file at all, which reads as the user deleting it —
+and trashing on the strength of that would remove the last copy anyone else can
+reach in favour of a replacement this device cannot upload. So the source is
+held until the replacement's create has LANDED, which is stricter than the keyed
+path: that one trashes first and uploads after. The hold is recomputed from
+`replaces` every pass rather than remembered, so it lapses by itself the moment
+the new entry stops being provisional, and it disappears with that entry if the
+user drags the file back out.
+
+One thing had to move for the lapse to work. A provisional entry whose file is
+gone is now forgotten BEFORE the skips that mean "wait", not after: every one of
+those skips is a reason to wait, and waiting needs a file to wait for. A parked
+or key-pending entry whose file the user has since taken away used to sit in the
+store for its whole life, and anything derived from its existence sat with it —
+which would have left a file dragged in and straight back out again never moving
+at all.
+
+That ordering was already wrong on its own, and it had a second victim nothing
+was looking for. Rename a local-only file inside a vault this device cannot
+open: the file has no server identity, so the scan mints a fresh one at the new
+path and the old record is left describing a file that is not there. It goes on
+claiming a name, it is counted by anything asking what the device holds, and no
+oracle could see it — convergence compares the disk against the SERVER, and an
+entry the server has never heard of is on neither side of that comparison.
+
+So there is now a mirror invariant. `assert_no_disk_file_is_unclaimed` finds
+bytes no record owns; `assert_no_provisional_entry_is_a_ghost` finds records
+that own no bytes. It fails without the reordering, naming `Private/memo.txt`.
+
+Pinned by hand, not by seed:
+`a_file_dragged_into_a_vault_with_no_key_here_waits_instead_of_trashing_it` now
+also asserts that something owns the bytes, and fails without the fix naming
+`Private/memo.txt`. Three more cover the edges the design turns on — dragged in
+and back out again, the key arriving mid-wait, and the server deleting the
+original while the wait is on.
+
+Found by seeds 2078473, 2078482 and 2078533 in `onekey-longhostile`, all three
+caught by the unclaimed-file oracle from defect D.
+
+---
+
+## Defect G — the server's placeholder recorded as the file's name
+
+The server never learns what a file inside a vault is called: it stores
+`enc-{content id}` for the life of the file and the real name lives sealed in
+the metadata blob beside it. `move_remote` asks the server where a file ended up
+— which it only does on a RETRY, so a healthy network never reaches it — and
+recorded the answer whole, placeholder and all, into the agreement.
+
+`local_placement` prefers the agreement over everything else, so from that
+moment the user's file WAS called `enc-...`. A later download landed under that
+name, the scan met a file no entry knew, and the engine offered it back to the
+server as a brand new file whose real name was another file's placeholder. The
+one name the vault exists to keep secret, stored in the clear.
+
+The rule was already written down at the other place that adopts a server view
+— the upload path says in as many words that the server's language has no name
+in it for an encrypted file — and enforced nowhere else. The blob rides along
+with the stat, so the fix opens it exactly as the change feed does, and the
+agreement records the name the user gave.
+
+One thing the fix cannot do is open a locked vault. A queued operation is
+retried by the executor whether or not the vault is open — the skip that holds
+an encrypted entry back gates PLANNING, not the queue — so the recovery can
+arrive at a moment when there is no key to do it with. Adopting anyway would put
+the placeholder into the agreement exactly as before, and nothing ever re-stats
+an entry that reads as settled, so it would never repair itself. So it waits
+instead, which is what every other wait here does. Scoped to files: a folder
+inside a vault wears its real name on the server and has no blob to open, so
+asking it to produce one would be a wait with nothing to wait for.
+
+Pinned by frozen seed 1073449, and frozen rather than hand-built for a stated
+reason: three scenarios were written and all three passed with the fix in and
+out, because none could get `move_remote` to run with an attempt already behind
+it. Losing the answer to the rename lets the next change poll absorb it and the
+op never re-runs; refusing it before the server sees it leaves no retry either;
+and a blanket server error fails the change poll at the top of the pass, so the
+rename is never attempted and the attempt counter never moves. The aimed fault
+this needs — one operation retried while everything around it succeeds — is a
+state a long hostile run reaches by accident and a scenario cannot yet ask for.
+
+---
+
 ## Still open on this axis
 
 - **`path_for`'s forward derivation is still weaker than naming.** Destination
@@ -505,6 +626,15 @@ state has not been staged by hand; the seed stands until it is.
   (`scratch_windows_hostile_name_sweep`, 1,800 seeds across five sub-arms) and
   are green. The generator still cannot spell them into the shared hostile
   table, so they live in that arm rather than throughout the estate.
+- **A sealed blob that opens but carries no name still adopts the
+  placeholder.** `open_metadata` reports that it opened the blob, not that it
+  recovered a name, so a blob with an empty name passes the check that waits for
+  a locked vault. Engine-written blobs always carry a name and the change-feed
+  path has the same property, so this is a shape shared with `absorb_remote`
+  rather than anything defect G introduced — and if it is ever fixed it belongs
+  in `open_metadata`, for both callers at once. Worth saying why it was not
+  simply folded into the wait: waiting on a blob that will never have a name is
+  an unbounded wedge, which is a worse failure than a bounded wrong name.
 - **Sharing is not modelled at all.** The mock has one owner. On the platform a
   `missing` stat means gone OR no longer visible, so a revoked share reads to
   the client as a deletion — and the client trashes the local copy. Whether

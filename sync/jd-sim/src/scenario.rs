@@ -992,6 +992,7 @@ pub fn assert_converged(world: &World) {
     // rule that excuses it being absent, so this is the only place it can be
     // seen at all.
     assert_no_disk_file_is_unclaimed(world);
+    assert_no_provisional_entry_is_a_ghost(world);
     let clashes = vault_names_the_server_cannot_tell_apart(world);
     assert!(
         clashes.is_empty(),
@@ -1064,17 +1065,29 @@ pub fn assert_converged(world: &World) {
         // difference are spelt differently by construction: the server holds the
         // name the device refused, and the device may hold the same bytes under
         // a conflict-copy name it chose when the slot was taken.
-        let declined: std::collections::HashSet<String> = device
-            .store
-            .every_entry()
-            .unwrap()
+        //
+        // The third reason is a file the user moved INTO a vault this device
+        // cannot open. The bytes are claimed at their new path by an entry
+        // waiting for a key, and the server goes on holding the copy at the old
+        // path until that upload lands -- deliberately, because trashing it
+        // first would leave the only copy on a disk that cannot send it. The
+        // device is not failing to hold that file; it is holding it somewhere
+        // else, under a protection it cannot yet apply.
+        let entries = device.store.every_entry().unwrap();
+        let awaiting_replacement: std::collections::HashSet<jd_core::EntityId> = entries
+            .iter()
+            .filter(|e| e.id.is_provisional())
+            .filter_map(|e| e.replaces)
+            .collect();
+        let declined: std::collections::HashSet<String> = entries
             .iter()
             .filter(|e| {
-                matches!(
-                    e.status,
-                    jd_core::model::LocalStatus::Unsyncable(_)
-                        | jd_core::model::LocalStatus::PendingKey
-                )
+                awaiting_replacement.contains(&e.id)
+                    || matches!(
+                        e.status,
+                        jd_core::model::LocalStatus::Unsyncable(_)
+                            | jd_core::model::LocalStatus::PendingKey
+                    )
             })
             .filter_map(|e| {
                 if e.is_encrypted {
@@ -1425,6 +1438,71 @@ pub fn assert_no_disk_file_is_unclaimed(world: &World) {
             unclaimed.is_empty(),
             "{} is holding files no entry claims, so nothing will ever scan, \
              send, move or remove them: {unclaimed:?}",
+            device.name
+        );
+    }
+}
+
+/// Every entry that exists only here has a file behind it.
+///
+/// A provisional entry is one the server has never heard of, so the disk is the
+/// only thing that can say whether it is real. When the file goes -- the user
+/// deletes it, or moves it and the scan mints a fresh identity at the new path
+/// -- the entry has nothing left to be about, and an entry about nothing is not
+/// harmless. It goes on claiming a name nothing else may use, it is counted by
+/// anything that asks what this device is holding, and while it sits there
+/// anything derived from its existence sits with it: the hold one of these puts
+/// on the server copy it is going to replace never lapses, and the file that
+/// hold was protecting never moves again.
+///
+/// Convergence cannot see this. It compares the disk against the SERVER, and a
+/// provisional entry is by definition on neither side of that comparison. This
+/// is the mirror of `assert_no_disk_file_is_unclaimed`: that one finds bytes no
+/// record owns, and this one finds records that own no bytes.
+pub fn assert_no_provisional_entry_is_a_ghost(world: &World) {
+    for device in &world.devices {
+        let entries = device.store.every_entry().unwrap();
+        let composes = jd_vfs::Vfs::personality(&device.fs).decomposes_unicode;
+        let folders: std::collections::HashMap<i64, &jd_core::model::Entry> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+            .map(|e| (e.id.server_id, e))
+            .collect();
+        let path_of = |e: &jd_core::model::Entry| -> Option<String> {
+            let mut parts = vec![e.effective_local_name().to_string()];
+            let mut parent = e.local_placement().parent;
+            let mut guard = 0;
+            while let Some(id) = parent {
+                let f = folders.get(&id)?;
+                parts.push(f.effective_local_name().to_string());
+                parent = f.local_placement().parent;
+                guard += 1;
+                if guard > 64 {
+                    return None;
+                }
+            }
+            parts.reverse();
+            let path = parts.join("/");
+            Some(if composes { jd_vfs::nfc(&path) } else { path })
+        };
+        let disk = disk_tree(device);
+        // A parent chain that does not reach the root has an invariant of its
+        // own (`assert_no_entry_is_stranded`), so it is named here rather than
+        // judged: this oracle is about the disk, and an entry with no path has
+        // no disk answer to give.
+        let ghosts: Vec<String> = entries
+            .iter()
+            .filter(|e| e.id.is_provisional())
+            .filter_map(|e| match path_of(e) {
+                None => Some(format!("{:?} (no path to the root)", e.id)),
+                Some(path) if !disk.contains_key(&path) => Some(path),
+                Some(_) => None,
+            })
+            .collect();
+        assert!(
+            ghosts.is_empty(),
+            "{} is keeping records of files that are not there and that no \
+             server has ever heard of: {ghosts:?}",
             device.name
         );
     }
