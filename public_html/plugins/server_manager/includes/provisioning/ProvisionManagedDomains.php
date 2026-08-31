@@ -29,16 +29,37 @@
  * overwrite something a person put there.
  *
  * The mail records are NOT computed here. They are asked of the box itself,
- * over SSH, because the box is what knows its own topology, its SPF shape, its
- * DKIM key and whether it speaks Joinery Direct. A management node that guessed
- * would publish a plausible record set the box does not actually match.
+ * because the box is what knows its own topology, its SPF shape, its DKIM key
+ * and whether it speaks Joinery Direct. A management node that guessed would
+ * publish a plausible record set the box does not actually match.
  *
+ * The asking travels the agent channel as a managed_domain_prepare job, so the
+ * answer arrives on a LATER tick than the question. That is why the mail step
+ * has four states rather than one call: waiting for an answer is a state the
+ * phase already knew how to be in, because an unstamped step is simply retried.
+ *
+ * @version 1.2 - the mail plan is asked over the agent channel, as a job whose whole
+ *                vocabulary is the domain
  * @version 1.1 - send_failure_alert() is a protected seam, so tests intercept the mail edge
  */
 
 require_once(PathHelper::getIncludePath('plugins/server_manager/includes/domain_registrar/DomainRegistrarRegistry.php'));
 
 class ProvisionManagedDomains {
+
+	/** The job type carrying a mail-preparation request to a node. */
+	const JOB_PREPARE = 'managed_domain_prepare';
+
+	/**
+	 * How long after a prepare job finished before another is dispatched.
+	 *
+	 * Every finished prepare is either consumed or failed, and either way the
+	 * next one is a fresh question to the same box. Ten minutes because the
+	 * answer usually changes for a reason that takes minutes — a DKIM key being
+	 * minted, a plugin finishing its install — and asking every tick would spend
+	 * a job on a node to be told the same thing.
+	 */
+	const PREPARE_RETRY_GAP_MINUTES = 10;
 
 	/** @var array Human-readable problems for the run summary. */
 	private $errors = array();
@@ -400,8 +421,18 @@ class ProvisionManagedDomains {
 	// ==================================================================
 
 	/**
-	 * Ask the box to make itself mail-ready for the domain and hand back the
-	 * record set that describes the result, then publish it.
+	 * Ask the box to make itself mail-ready for the domain, publish the record
+	 * set it describes, and stamp the step when the set is complete.
+	 *
+	 * The asking is a job on the agent channel, so the answer arrives on a later
+	 * tick than the question. This method is therefore a four-state check rather
+	 * than a call:
+	 *
+	 *   1. a completed, unconsumed prepare job    -> read it, publish, consume
+	 *   2. a prepare job queued or running        -> wait
+	 *   3. the last one is consumed or failed and
+	 *      the retry gap has passed               -> ask again
+	 *   4. no job at all                          -> ask
 	 *
 	 * Waits for the install to finish first: a box mid-install has no mailbox
 	 * plugin state to answer from, and its answer would be wrong rather than
@@ -413,23 +444,64 @@ class ProvisionManagedDomains {
 		}
 
 		$domain = (string)$row->get('rdm_domain');
-		$payload = $this->prepare_on_node($node, $domain);
-		if ($payload === null) {
-			// Treated as transient in every case, including a node too old to
-			// carry the utility: a management node that gave up here would leave
-			// a paid-for domain with no mail and no path back.
-			$row->set('rdm_error', mb_substr('Transient (mail DNS): the node could not prepare '
-				. $domain . ' for mail.', 0, 4000));
-			$row->save();
+		$job = $this->latest_prepare_job((int)$node->key, $domain);
+
+		if ($job && in_array($job['mjb_status'], array('pending', 'running'), true)) {
+			return 0;   // the node has been asked; the answer is not back yet
+		}
+
+		if ($job && $job['mjb_status'] === 'completed' && empty(self::job_params($job)['consumed_time'])) {
+			return $this->consume_prepare($row, $job, $domain);
+		}
+
+		if ($job) {
+			$since = strtotime((string)($job['mjb_completed_time'] ?: $job['mjb_create_time']));
+			if ($since && (time() - $since) < self::PREPARE_RETRY_GAP_MINUTES * 60) {
+				return 0;   // asked recently; give the box time to change its answer
+			}
+		}
+
+		return $this->dispatch_prepare($row, $node, $domain);
+	}
+
+	/**
+	 * Read one completed prepare job's answer and act on it.
+	 *
+	 * THE JOB IS MARKED CONSUMED ON EVERY PATH THAT DOES NOT STAMP THE STEP, and
+	 * that mark is load-bearing rather than bookkeeping. Both of those paths —
+	 * a payload the node refused, and one without DKIM — deliberately leave
+	 * rdm_dns_mail_time null so the step comes back. Without the mark, state 1
+	 * above stays true for the same job forever: the same payload is re-read and
+	 * the same records re-published every tick, and a new job is never
+	 * dispatched. The dkim_ready:false case would then never come back for the
+	 * signing key, which is the one thing that path exists to do, and a refusal
+	 * would park the row with no path back.
+	 *
+	 * A publish that FAILED is the one case left unconsumed, because it is the
+	 * one case where re-asking the node buys nothing: the box already said what
+	 * it needs and the DNS provider is what refused. Retrying the publish alone
+	 * is both cheaper and the same thing every other step here does with a
+	 * provider failure.
+	 */
+	private function consume_prepare($row, array $job, string $domain): int {
+		$payload = $this->prepare_payload($job);
+
+		if ($payload === null || empty($payload['answered'])) {
+			// The node answered something unreadable. Transient in every case,
+			// including a node too old to carry the utility: a management node
+			// that gave up here would leave a paid-for domain with no mail and
+			// no path back.
+			$this->mark_prepare_consumed($job);
+			$this->note_mail_transient($row, 'the node could not prepare ' . $domain . ' for mail.');
 			$this->errors[] = 'Mail preparation for ' . $domain . ' did not answer; will retry.';
 			return 0;
 		}
+
 		if (empty($payload['ok'])) {
-			$row->set('rdm_error', mb_substr('Transient (mail DNS): ' . (string)($payload['error']
-				?? 'the node refused to prepare the domain'), 0, 4000));
-			$row->save();
+			$this->mark_prepare_consumed($job);
+			$this->note_mail_transient($row, (string)($payload['error'] ?: 'the node refused to prepare the domain'));
 			$this->errors[] = 'Mail preparation for ' . $domain . ': '
-				. (string)($payload['error'] ?? 'refused');
+				. (string)($payload['error'] ?: 'refused');
 			return 0;
 		}
 
@@ -448,11 +520,14 @@ class ProvisionManagedDomains {
 		}
 
 		if (count($plan) === 0) {
+			$this->mark_prepare_consumed($job);
 			$this->errors[] = 'The node returned no mail records for ' . $domain . '; will retry.';
 			return 0;
 		}
 
 		if (!$this->publish($row, $plan, 'mail records')) {
+			// Deliberately NOT consumed — see the docblock. The box's answer is
+			// still good; it is the zone that refused.
 			return 0;
 		}
 
@@ -461,15 +536,133 @@ class ProvisionManagedDomains {
 		// mean the signing key never gets published at all. So publish, do not
 		// stamp, and come back for it.
 		if (empty($payload['dkim_ready'])) {
+			$this->mark_prepare_consumed($job);
 			$this->errors[] = 'Mail records for ' . $domain
 				. ' published without DKIM; waiting for the signing key.';
 			return 0;
 		}
 
+		$this->mark_prepare_consumed($job);
 		$row->set('rdm_dns_mail_time', gmdate('Y-m-d H:i:s'));
 		$row->set('rdm_error', null);
 		$row->save();
 		return 1;
+	}
+
+	/**
+	 * Ask a node to prepare one domain.
+	 *
+	 * A builder exception — the node's agent does not offer the primitive — is
+	 * caught HERE rather than left to run()'s per-row catch. Both retry the row
+	 * correctly, but only this one leaves the Domains admin page with a sentence
+	 * saying why the row is parked, which is the difference between an operator
+	 * seeing "apply an update to this node" and seeing nothing at all.
+	 */
+	protected function dispatch_prepare($row, $node, string $domain): int {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+
+		try {
+			$built = JobCommandBuilder::build_managed_domain_prepare($node, array('domain' => $domain));
+		} catch (Throwable $e) {
+			$this->note_mail_transient($row, $e->getMessage());
+			$this->errors[] = 'Mail preparation for ' . $domain . ': ' . $e->getMessage();
+			return 0;
+		}
+
+		ManagementJob::createFromBuild($node->key, self::JOB_PREPARE, $built,
+			array('domain' => $domain), null);
+		return 0;   // the step is not done; the answer lands on a later tick
+	}
+
+	/**
+	 * The most recent prepare job for THIS node AND THIS DOMAIN.
+	 *
+	 * Scoped by domain, not just by node. One node has one certificate, which is
+	 * why ProvisionPendingSsl can filter its chain by node alone — but a shared
+	 * host carries many managed domains, and filtering by node there would make
+	 * every domain on the box read the answer meant for whichever one was asked
+	 * last. createPrimitiveJob writes mjb_parameters as well as the envelope, so
+	 * the domain is already there to filter on and no new column is needed.
+	 */
+	protected function latest_prepare_job(int $node_id, string $domain): ?array {
+		$db = DbConnector::get_instance()->get_db_link();
+		$q = $db->prepare(
+			"SELECT mjb_id, mjb_status, mjb_create_time, mjb_completed_time, mjb_parameters,
+			        mjb_output, mjb_result
+			 FROM mjb_management_jobs
+			 WHERE mjb_mgn_node_id = ? AND mjb_job_type = ? AND mjb_delete_time IS NULL
+			   AND mjb_parameters->>'domain' = ?
+			 ORDER BY mjb_create_time DESC, mjb_id DESC
+			 LIMIT 1");
+		$q->execute(array($node_id, self::JOB_PREPARE, $domain));
+		$row = $q->fetch(PDO::FETCH_ASSOC);
+		return $row ?: null;
+	}
+
+	/**
+	 * One completed prepare job's answer, in the shape
+	 * JobResultProcessor::process_managed_domain_prepare records.
+	 *
+	 * The result is processed here when nobody has processed it yet. Admin page
+	 * views also process results, but an unattended pipeline must not depend on
+	 * somebody looking at a dashboard — the same reason ProvisionPendingSsl
+	 * processes its own certificate jobs.
+	 */
+	protected function prepare_payload(array $job): ?array {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/JobResultProcessor.php'));
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+
+		$result = $job['mjb_result'] ?? null;
+		if (!$result) {
+			$done = new ManagementJob((int)$job['mjb_id'], TRUE);
+			if (!$done->key) {
+				return null;
+			}
+			JobResultProcessor::process($done);
+			$result = $done->get('mjb_result');
+		}
+		if (is_string($result)) {
+			$result = json_decode($result, true);
+		}
+		return is_array($result) ? $result : null;
+	}
+
+	/**
+	 * Mark a completed prepare job as read, so it is never read twice.
+	 *
+	 * Folded into mjb_parameters the way ProvisionPendingSsl marks its alerts:
+	 * the mark belongs to the job rather than to the domain row, so deleting the
+	 * jobs for a node naturally re-arms the whole sequence.
+	 */
+	protected function mark_prepare_consumed(array $job): void {
+		require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+		$record = new ManagementJob((int)$job['mjb_id'], TRUE);
+		if (!$record->key) {
+			return;
+		}
+		$params = $record->get('mjb_parameters');
+		if (is_string($params)) {
+			$params = json_decode($params, true);
+		}
+		if (!is_array($params)) {
+			$params = array();
+		}
+		$params['consumed_time'] = gmdate('Y-m-d H:i:s');
+		$record->set('mjb_parameters', $params);
+		$record->save();
+	}
+
+	/** A job row's parameters, decoded. */
+	protected static function job_params(array $job): array {
+		$params = json_decode((string)($job['mjb_parameters'] ?? ''), true);
+		return is_array($params) ? $params : array();
+	}
+
+	/** Record a mail-step problem on the row without parking it. */
+	private function note_mail_transient($row, string $reason): void {
+		$row->set('rdm_error', mb_substr('Transient (mail DNS): ' . $reason, 0, 4000));
+		$row->save();
 	}
 
 	// ==================================================================
@@ -512,38 +705,23 @@ class ProvisionManagedDomains {
 	// Step 6 — done
 	// ==================================================================
 
+	/**
+	 * The row is finished here. What the BOX is told is not this phase's job.
+	 *
+	 * ManagedDomainWatch owns the four notice settings, and it owns them as a
+	 * desired state it converges on rather than as pushes fired from wherever
+	 * something changed. Activation used to be one of four places that fired
+	 * one; it is not any more, because the watcher's first tick over a newly
+	 * active row computes exactly the same thing — the domain and its expiry,
+	 * with an EMPTY custody state, so the box holds the facts and says nothing
+	 * until six months out. A push from here would be a fifth author of a value
+	 * with one owner, and the one that fails silently.
+	 */
 	private function activate($row, $node): int {
 		$row->set('rdm_status', RegisteredDomain::STATUS_ACTIVE);
 		$row->set('rdm_error', null);
 		$row->save();
-
-		// The box is told its domain and expiry now, with no custody state —
-		// so it holds the facts but says nothing. The take-ownership notice
-		// only appears when the watcher pushes a state, six months out.
-		$this->push_banner_state($row, $node, '');
 		return 1;
-	}
-
-	/**
-	 * Write the managed-domain settings onto the node.
-	 *
-	 * The command is built by ManagedDomainWatch, which owns that shape, but
-	 * sent through this phase's own SSH seam so there is one overridable edge
-	 * per class rather than a second connection path nothing can intercept.
-	 */
-	protected function push_banner_state($row, $node, string $state): bool {
-		require_once(PathHelper::getIncludePath('plugins/server_manager/includes/provisioning/ManagedDomainWatch.php'));
-		$command = ManagedDomainWatch::buildBannerCommand($row, $node, $state);
-		if ($command === '') {
-			return false;
-		}
-		$run = $this->run_on_node($node, $command);
-		if (!$run['ok']) {
-			error_log('ProvisionManagedDomains: banner push to ' . $node->get('mgn_name')
-				. ' failed (' . $run['code'] . '): ' . $run['output']);
-			return false;
-		}
-		return true;
 	}
 
 	// ==================================================================
@@ -612,75 +790,6 @@ class ProvisionManagedDomains {
 		return true;
 	}
 
-	/**
-	 * Run the mailbox prepare utility on the node and read its JSON answer.
-	 * Returns null when the utility could not be reached or did not answer.
-	 */
-	protected function prepare_on_node($node, string $domain): ?array {
-		$utility = 'public_html/plugins/mailbox/utils/managed_domain_prepare.php';
-		$inner = 'php ' . escapeshellarg($utility) . ' ' . escapeshellarg($domain);
-
-		$container = trim((string)$node->get('mgn_container_name'));
-		$ssh_user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$sudo = ($ssh_user !== 'root') ? 'sudo ' : '';
-		if ($container !== '') {
-			$remote = $sudo . 'docker exec -i ' . escapeshellarg($container) . ' bash -c ' . escapeshellarg($inner);
-		} else {
-			$web_root = trim((string)$node->get('mgn_web_root'));
-			$site_dir = $web_root !== '' ? dirname($web_root) : '';
-			$remote = $sudo . 'bash -c ' . escapeshellarg(
-				($site_dir !== '' ? 'cd ' . escapeshellarg($site_dir) . ' && ' : '') . $inner);
-		}
-
-		$run = $this->run_on_node($node, $remote);
-		if (!$run['ok']) {
-			error_log('ProvisionManagedDomains: prepare on ' . $node->get('mgn_name') . ' for '
-				. $domain . ' exited ' . $run['code'] . ': ' . $run['output']);
-			return null;
-		}
-
-		// The utility prints one JSON line last; anything before it is noise
-		// from the shell or the site's own bootstrap.
-		$lines = array_values(array_filter(array_map('trim', explode("\n", $run['output'])), 'strlen'));
-		for ($i = count($lines) - 1; $i >= 0; $i--) {
-			$decoded = json_decode($lines[$i], true);
-			if (is_array($decoded) && array_key_exists('ok', $decoded)) {
-				return $decoded;
-			}
-		}
-		error_log('ProvisionManagedDomains: prepare on ' . $node->get('mgn_name') . ' for ' . $domain
-			. ' printed no JSON: ' . $run['output']);
-		return null;
-	}
-
-	/** One SSH command against a node. Overridable for tests. */
-	protected function run_on_node($node, string $remote_command): array {
-		$key_path = (string)$node->get('mgn_ssh_key_path');
-		$host = (string)$node->get('mgn_host');
-		$user = (string)$node->get('mgn_ssh_user') ?: 'root';
-		$port = intval($node->get('mgn_ssh_port')) ?: 22;
-		if ($key_path === '' || !is_readable($key_path) || $host === '') {
-			return array('ok' => false, 'code' => -1,
-				'output' => 'Node SSH coordinates incomplete (key: ' . $key_path . ', host: ' . $host . ').');
-		}
-
-		$cmd = array('ssh', '-i', $key_path, '-p', (string)$port,
-			'-o', 'BatchMode=yes', '-o', 'StrictHostKeyChecking=accept-new',
-			'-o', 'ConnectTimeout=15', $user . '@' . $host, $remote_command);
-		$proc = proc_open($cmd, array(
-			0 => array('pipe', 'r'), 1 => array('pipe', 'w'), 2 => array('pipe', 'w')), $pipes);
-		if (!is_resource($proc)) {
-			return array('ok' => false, 'code' => -1, 'output' => 'Could not start ssh.');
-		}
-		fclose($pipes[0]);
-		$out = (string)stream_get_contents($pipes[1]);
-		$err = (string)stream_get_contents($pipes[2]);
-		fclose($pipes[1]);
-		fclose($pipes[2]);
-		$code = proc_close($proc);
-		return array('ok' => ($code === 0), 'code' => $code, 'output' => trim($out . "\n" . $err));
-	}
-
 	/** Record a transient failure and leave the row where it is. */
 	private function note_transient($row, string $phase, DomainRegistrarException $e): int {
 		$row->set('rdm_error', mb_substr('Transient (' . $phase . '): ' . $e->getMessage(), 0, 4000));
@@ -702,7 +811,7 @@ class ProvisionManagedDomains {
 
 	/**
 	 * The operator email for a parked row. Protected as this class's fourth
-	 * outside edge (registrar, DNS, SSH, mail): a test double must be able to
+	 * outside edge (registrar, DNS, the agent channel, mail): a test double must be able to
 	 * intercept it — this class's suite once sent sixty real alerts through
 	 * dev's live Postfix because it could not — and asserting the alert's
 	 * content is stronger than letting it fire.

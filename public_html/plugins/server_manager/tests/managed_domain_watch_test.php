@@ -21,12 +21,23 @@
  *    buyer would keep being told to finish a step they already finished, and
  *    the operator queue would never empty.
  *
- * The banner push is asserted as a COMMAND STRING rather than executed: what
- * matters is that the right settings, with the right values, would be written,
- * and no test should be opening SSH connections.
+ * The notice is asserted as JOB ROWS. The watcher does not push at the box; it
+ * computes what the box should be holding, compares that against the last
+ * notice job that COMPLETED, and files one only when they differ. So the tests
+ * file no doubles at that seam — they read the rows the watcher created, answer
+ * them the way the node would, and check that a second tick files nothing.
  *
- * Sections: the six-month threshold; the banner command; custody detection;
- * a finished domain is left alone.
+ * Two properties are only visible in that shape, and both are here:
+ *
+ *  - **A dispatch is not a prompt.** rdm_prompt_pushed_time is stamped from a
+ *    completed job. A job that failed leaves the row unstamped and the next tick
+ *    re-files, because a buyer who never saw the notice has not been told.
+ *  - **A failed push self-heals.** The box not matching IS the trigger, so
+ *    nothing has to remember to re-push.
+ *
+ * Sections: the six-month threshold; the four values and the converge check;
+ * the prompt stamp; custody detection; a finished domain still gets its final
+ * state; the unclaimed-line sweep.
  *
  * Run: php plugins/server_manager/tests/managed_domain_watch_test.php
  */
@@ -53,10 +64,38 @@ $node->set('mgn_ssh_key_path', '/dev/null');
 $node->set('mgn_web_root', '/var/www/html/mdwtest/public_html');
 $node->set('mgn_container_name', 'mdwtest');
 $node->set('mgn_enabled', true);
+// A paired agent reporting the managed-domain vocabulary; has_primitive() reads
+// exactly these columns.
+$node->set('mgn_agent_public_key', 'mdw-agent-key-' . $suffix);
+$node->set('mgn_agent_version', '1.14.0');
+$node->set('mgn_agent_primitives', 'managed_domain_prepare,managed_domain_notice');
 $node->prepare();
 $node->save();
 $node->load();
 harness_register_row('mgn_managed_nodes', 'mgn_id', $node->key);
+
+/**
+ * Belt and braces: every managed-domain job this node collects, gone.
+ *
+ * The helpers below register each job they enumerate, but the phase is what
+ * creates them and a path this suite does not read would leak a row. Registered
+ * here, right after the node, so LIFO teardown clears the jobs before the node
+ * they point at.
+ */
+function mdw_clear_jobs_for($node_id) {
+	harness_defer(function () use ($node_id) {
+		$db = DbConnector::get_instance()->get_db_link();
+		try {
+			$q = $db->prepare("DELETE FROM mjb_management_jobs WHERE mjb_mgn_node_id = ? "
+				. "AND mjb_job_type IN ('managed_domain_prepare', 'managed_domain_notice')");
+			$q->execute(array((int)$node_id));
+		} catch (\Throwable $e) {
+			echo "  WARNING: could not clear managed-domain jobs for node $node_id: " . $e->getMessage() . "\n";
+		}
+	});
+}
+
+mdw_clear_jobs_for($node->key);
 
 function mdw_row($buyer, $node, $domain, $expiry_modifier, $state) {
 	$row = new RegisteredDomain(NULL);
@@ -101,7 +140,6 @@ class MdwFakeRegistrar implements DomainRegistrarProvider {
 
 class MdwWatch extends ManagedDomainWatch {
 	public $registrar;
-	public $pushed = array();
 	public function __construct($registrar) { $this->registrar = $registrar; }
 	protected function get_registrar() { return $this->registrar; }
 	/** Run the private orphan sweep and report how many alerts it decided on. */
@@ -118,12 +156,57 @@ class MdwWatch extends ManagedDomainWatch {
 	public $alerted = array();
 	/** Simulate no recipient configured, or a send that threw. */
 	public $alerts_fail = false;
-	// No test opens a connection to anything. What would have been sent is
-	// recorded instead, which is also the only part worth asserting.
-	protected function sendToNode($node, string $remote_command): array {
-		$this->pushed[] = $remote_command;
-		return array('ok' => true, 'code' => 0, 'output' => 'DOMAIN_BANNER_PUSHED');
+	/** Run the private per-row converge check. */
+	public function converge($row): int {
+		$m = new ReflectionMethod('ManagedDomainWatch', 'converge_notice');
+		$m->setAccessible(true);
+		return (int)$m->invoke($this, $row);
 	}
+}
+
+require_once(PathHelper::getIncludePath('plugins/server_manager/data/management_job_class.php'));
+
+/**
+ * The notice jobs filed for one node and one domain, oldest first — registered
+ * for cleanup as they are found, since the watcher is what creates them.
+ */
+function mdw_notice_jobs($node, string $domain): array {
+	$db = DbConnector::get_instance()->get_db_link();
+	$q = $db->prepare(
+		"SELECT mjb_id, mjb_status, mjb_commands, mjb_parameters, mjb_completed_time
+		 FROM mjb_management_jobs
+		 WHERE mjb_mgn_node_id = ? AND mjb_job_type = 'managed_domain_notice'
+		   AND mjb_delete_time IS NULL AND mjb_parameters->>'domain' = ?
+		 ORDER BY mjb_id ASC");
+	$q->execute(array((int)$node->key, $domain));
+	$jobs = $q->fetchAll(PDO::FETCH_ASSOC) ?: array();
+	foreach ($jobs as $job) {
+		harness_register_row('mjb_management_jobs', 'mjb_id', $job['mjb_id']);
+	}
+	return $jobs;
+}
+
+/**
+ * Land or fail a notice job the way the node would.
+ *
+ * Completion is dated an hour back so the retry gap never masks what a
+ * following tick decides to do.
+ */
+function mdw_finish(array $job, string $status = 'completed'): void {
+	$record = new ManagementJob((int)$job['mjb_id'], TRUE);
+	$record->set('mjb_status', $status);
+	$record->set('mjb_completed_time', gmdate('Y-m-d H:i:s', strtotime('-1 hour')));
+	$record->set('mjb_output', json_encode(array('api_version' => '1.0', 'data' => array(
+		'output'       => "MANAGED_DOMAIN_NOTICE=ok\n",
+		'output_bytes' => 24,
+	))) . "\n");
+	$record->save();
+}
+
+/** The params a notice job carries. */
+function mdw_params(array $job): array {
+	$params = json_decode((string)($job['mjb_parameters'] ?? ''), true);
+	return is_array($params) ? $params : array();
 }
 
 /** Run the private per-row watcher, capturing what it pushed. */
@@ -136,42 +219,70 @@ function mdw_watch(MdwWatch $watch, $row) {
 }
 
 // ---------------------------------------------------------------------------
-section('The banner command writes the four managed settings, and only those');
+section('The notice carries four values, and no setting name');
 
 $far = mdw_row($buyer, $node, 'mdw-far-' . $suffix . '.com', '+300 days',
 	RegisteredDomain::GRAD_OPERATOR);
-$command = ManagedDomainWatch::buildBannerCommand($far, $node, RegisteredDomain::GRAD_OPERATOR);
 
-check($command !== '', 'a command is produced for a node with a site');
-foreach (array('managed_domain_name', 'managed_domain_expiry_time',
-		'managed_domain_state', 'managed_domain_manage_url') as $setting) {
-	check(strpos($command, $setting) !== false, $setting . ' is written');
-}
-check(strpos($command, $far->get('rdm_domain')) !== false, 'the domain name is the value written');
-check(strpos($command, 'ON CONFLICT (stg_name) DO UPDATE') !== false,
-	'it upserts, so a re-push corrects rather than duplicates');
-check(strpos($command, 'docker exec -i') !== false,
-	'a containerised node is written to inside its container');
-check(strpos($command, 'mdwtest') !== false, 'and the container is named');
-check(strpos($command, 'PGPASSWORD') !== false,
-	'the DB password is read from the node\'s own config, never carried from here');
-check(strpos($command, ManagedDomainWatch::manageUrl()) !== false,
+$watch = new MdwWatch(new MdwFakeRegistrar());
+check($watch->converge($far) === 1, 'a box holding nothing gets a notice job');
+$jobs = mdw_notice_jobs($node, $far->get('rdm_domain'));
+check(count($jobs) === 1, 'exactly one', 'jobs: ' . count($jobs));
+
+$envelope = json_decode((string)$jobs[0]['mjb_commands'], true);
+check(($envelope['primitive'] ?? '') === 'managed_domain_notice',
+	'it is a primitive job, addressed by name', $jobs[0]['mjb_commands']);
+$params = $envelope['params'] ?? array();
+$keys = array_keys($params);
+sort($keys);   // mjb_commands is jsonb; key order is the database's business
+check($keys === array('domain', 'expiry_time', 'manage_url', 'state'),
+	'carrying exactly the four values', json_encode($params));
+check($params['domain'] === $far->get('rdm_domain'), 'the domain is one of them');
+check(strpos((string)$params['expiry_time'], gmdate('Y-m-d', strtotime('+300 days'))) === 0,
+	'and the expiry', 'got: ' . $params['expiry_time']);
+check($params['manage_url'] === ManagedDomainWatch::manageUrl(),
 	'the take-ownership link points back at this management node');
+
+// The property this whole design exists for: the four SETTING names are
+// compiled into the node's own script. A job that could name a setting would be
+// a job that could name any setting, and stg_settings is where the credentials
+// are.
+$wire = json_encode($envelope);
+foreach (array('managed_domain_name', 'managed_domain_expiry_time',
+		'managed_domain_state', 'managed_domain_manage_url', 'stg_settings') as $name) {
+	check(strpos($wire, $name) === false, $name . ' is nowhere on the wire', $wire);
+}
+check(strpos($wire, 'PGPASSWORD') === false && stripos($wire, 'psql') === false,
+	'and neither is a database credential or a statement', $wire);
 
 section('An empty custody state is a real value — it is what renders nothing');
 
-$silent = ManagedDomainWatch::buildBannerCommand($far, $node, '');
-check(strpos($silent, 'managed_domain_state') !== false
-	&& strpos($silent, RegisteredDomain::GRAD_OPERATOR) === false,
-	'the state is written as empty, clearing any earlier one',
-	'command: ' . substr($silent, 0, 300));
-check(strpos($command, RegisteredDomain::GRAD_OPERATOR) !== false,
-	'while a real state is written as itself');
+check($params['state'] === '',
+	'a domain 300 days out is told its facts with NO custody state, so its owner sees nothing',
+	'state: ' . var_export($params['state'], true));
+check(!$far->in_prompt_window(), 'because it is outside the prompt window');
 
-$bare = new ManagedNode(NULL);
-$bare->set('mgn_name', 'bare');
-check(ManagedDomainWatch::buildBannerCommand($far, $bare, '') === '',
-	'a node with no site to write to produces no command at all');
+section('The box is converged on, not pushed at');
+
+mdw_finish($jobs[0]);
+check($watch->converge($far) === 0, 'a box already holding the right four values is left alone');
+check(count(mdw_notice_jobs($node, $far->get('rdm_domain'))) === 1,
+	'no second job is filed');
+
+// The expiry moves — a renewal made in the buyer's own account — and the box no
+// longer matches. Nothing had to remember to push: not matching IS the trigger.
+$far->set('rdm_expiry_time', gmdate('Y-m-d H:i:s', strtotime('+400 days')));
+$far->save();
+check($watch->converge($far) === 1, 'a changed expiry is noticed');
+$jobs = mdw_notice_jobs($node, $far->get('rdm_domain'));
+check(count($jobs) === 2, 'and a fresh notice is filed', 'jobs: ' . count($jobs));
+check(strpos((string)mdw_params($jobs[1])['expiry_time'], gmdate('Y-m-d', strtotime('+400 days'))) === 0,
+	'carrying the new date', json_encode(mdw_params($jobs[1])));
+
+section('A job in flight is waited for, not piled on');
+
+check($watch->converge($far) === 0, 'while it is pending, nothing further is filed');
+check(count(mdw_notice_jobs($node, $far->get('rdm_domain'))) === 2, 'still two');
 
 // ---------------------------------------------------------------------------
 section('Nothing is said to the buyer until six months out');
@@ -181,10 +292,9 @@ $watch = new MdwWatch($registrar);
 $far->set('rdm_expiry_checked_time', gmdate('Y-m-d H:i:s'));   // no refresh due
 $far->save();
 
-check(!$far->in_prompt_window(), 'a domain 300 days out is outside the prompt window');
 mdw_watch($watch, $far);
 check(trim((string)$far->get('rdm_prompt_pushed_time')) === '',
-	'so no prompt is pushed and no notice appears on their box');
+	'a domain 300 days out records no prompt, so no notice appears on their box');
 
 $near = mdw_row($buyer, $node, 'mdw-near-' . $suffix . '.com', '+100 days',
 	RegisteredDomain::GRAD_OPERATOR);
@@ -193,23 +303,40 @@ check($near->days_to_expiry() >= 99 && $near->days_to_expiry() <= 101,
 	'and the countdown reads correctly', 'got: ' . var_export($near->days_to_expiry(), true));
 
 $watch = new MdwWatch(new MdwFakeRegistrar());
-$push = new ReflectionMethod('ManagedDomainWatch', 'push_prompt');
-$push->setAccessible(true);
-check($push->invoke($watch, $near) === 1, 'inside the window, the prompt is pushed');
+check($watch->converge($near) === 1, 'inside the window, a notice is filed');
+$near_jobs = mdw_notice_jobs($node, $near->get('rdm_domain'));
+check(mdw_params($near_jobs[0])['state'] === RegisteredDomain::GRAD_OPERATOR,
+	'carrying the real custody state — this is what makes the notice appear',
+	json_encode(mdw_params($near_jobs[0])));
+
+section('A dispatch is not a prompt; only a job that landed is');
+
+// The buyer's FIRST mention of a deadline that takes their site and their email
+// with it. Recording it from a dispatch would mean a job that failed — the agent
+// down that hour, the node missing the primitive — reads as a prompt they saw.
+$near->load();
+check(trim((string)$near->get('rdm_prompt_pushed_time')) === '',
+	'filing the job records nothing on the row');
+
+mdw_finish($near_jobs[0], 'failed');
+check($watch->converge($near) === 1, 'a failed job leaves the box not matching, so it is re-filed');
+$near->load();
+check(trim((string)$near->get('rdm_prompt_pushed_time')) === '',
+	'and the row still records no prompt — the buyer has not been told');
+$near_jobs = mdw_notice_jobs($node, $near->get('rdm_domain'));
+check(count($near_jobs) === 2, 'the retry exists', 'jobs: ' . count($near_jobs));
+
+mdw_finish($near_jobs[1]);
+check($watch->converge($near) === 1, 'the completed job is what resolves it');
 $near->load();
 check(trim((string)$near->get('rdm_prompt_pushed_time')) !== '',
-	'and the row records that the buyer has been told');
-check(count($watch->pushed) === 1, 'exactly one write to the box');
-check(strpos($watch->pushed[0], RegisteredDomain::GRAD_OPERATOR) !== false,
-	'carrying the real custody state — this is what makes the notice appear',
-	'command: ' . substr($watch->pushed[0], 0, 300));
+	'now the row records that the buyer has been told');
 
-section('A prompt that reached the box is not pushed again');
+section('A prompt that reached the box is not filed again');
 
-// The push itself needs SSH, which this test does not have — so the guard is
-// asserted on the state that decides whether to try, not on the attempt.
-check($push->invoke($watch, $near) === 0, 'an already-prompted row does nothing further');
-check(count($watch->pushed) === 1, 'and the box is not written to a second time');
+check($watch->converge($near) === 0, 'an already-matching row does nothing further');
+check(count(mdw_notice_jobs($node, $near->get('rdm_domain'))) === 2,
+	'and the box is not written to a third time');
 
 // ---------------------------------------------------------------------------
 section('Custody is only asked about once a push is in flight');
@@ -246,15 +373,28 @@ $waiting->load();
 check($waiting->get('rdm_graduation_state') === RegisteredDomain::GRAD_SENT,
 	'the buyer has not accepted yet, and we do not pretend otherwise');
 
-section('A finished domain is left entirely alone');
+section('A finished domain costs the registrar nothing, and still gets its last word');
 
+// Self-custody means the REGISTRAR side is done: no expiry to re-read, no
+// custody to ask about. The BOX side is not — self_custody is the value that
+// makes the notice stop rendering, so a buyer whose job failed would still be
+// told to do something they have already done.
 $registrar = new MdwFakeRegistrar();
 $watch = new MdwWatch($registrar);
 $done = mdw_row($buyer, $node, 'mdw-done-' . $suffix . '.com', '+60 days',
 	RegisteredDomain::GRAD_SELF);
-check(mdw_watch($watch, $done) === 0, 'nothing to do');
+
+check(mdw_watch($watch, $done) === 1, 'the box is told custody has moved');
 check($registrar->expiry_calls === 0,
 	'and not one registrar call is spent on a domain that is no longer ours');
+$done_jobs = mdw_notice_jobs($node, $done->get('rdm_domain'));
+check(count($done_jobs) === 1 && mdw_params($done_jobs[0])['state'] === RegisteredDomain::GRAD_SELF,
+	'the final state is what it carries', json_encode(mdw_params($done_jobs[0] ?? array())));
+
+mdw_finish($done_jobs[0]);
+$registrar->expiry_calls = 0;
+check(mdw_watch($watch, $done) === 0, 'once it has landed, there is nothing left to do at all');
+check($registrar->expiry_calls === 0, 'still no registrar call');
 
 section('The expiry is refreshed weekly, not every tick');
 
