@@ -45,6 +45,7 @@ running anything:
  * tier: safe            # safe | db | test-db | live
  * env: dev-only         # any | prod-verify | dev-only
  * needs: []             # e.g. [stripe-test-keys, macmini, mailgun, b2, rust, curl]
+ * covers: []            # optional repo-relative globs the suite reaches WITHOUT loading
  * timeout: 180          # optional wall-clock cap in seconds (default 180, max 1800)
  */
 ```
@@ -69,6 +70,9 @@ php tests/run.php db           # safe + db + test-db — the pre-deploy gate
 php tests/run.php test-db      # only the test-database suites
 php tests/run.php live         # only live tests (never implied)
 php tests/run.php deploy       # does the deployed code run here — what upgrade.php runs
+php tests/run.php --changed         # only the suites the edited files can reach
+php tests/run.php db --changed      # the same narrowing, over the db gate
+php tests/run.php db --changed=origin/main  # edited + everything different from a ref
 php tests/run.php db --filter=api   # narrow by name or path substring
 php tests/run.php db --serial       # disable the test-db lane overlap (fully serial)
 php tests/run.php --only=tests/unit/dns_resolver_test.php  # one exact test by repo-relative path
@@ -94,6 +98,51 @@ serial *within* the lane (they share the copy), lane results carry a
 `[test-db]` tag in the output, and a lane failure — including a crash of the
 lane worker — fails the gate. `--serial` forces the fully serial order, for
 debugging or as a fallback.
+
+### `--changed`: run what the change can reach
+
+`--changed` narrows a run to the suites that can actually be affected by what
+is edited (`git status`: staged, unstaged, and untracked; `--changed=<ref>`
+adds everything different from the ref). It never changes what the full gate
+means — `php tests/run.php db` with no flags remains the complete pre-publish
+gate.
+
+**How a suite's reach is known.** A PHP suite reaches code by loading it, so
+its result contract carries the repo files its process included (`files` in
+the JSON contract). Every run folds those into the coverage map at
+`{site root}/cache/test_coverage_map.json`, so the map is never older than
+the last time each suite ran, and a full run refreshes all of it. Files a
+suite reaches *without* loading them — a manifest it reads, a script it runs,
+the code a shell gate builds — are declared in its header as `covers:` globs
+(`**` crosses directories, `*` stays within one segment); a shell gate's
+`covers:` is its whole declaration.
+
+**Selection rules.** A suite in the requested batch runs when any of these
+holds, and the summary names which:
+
+- the map has no entry for it — unknown means run, never skip;
+- its own file changed, or a fixture in its area (`tests/X/fixtures/` selects
+  the suites under `tests/X/`; `tests/fixtures/` selects everything);
+- a changed file is in its recorded `files` or matches its `covers`;
+- it drives the web server (`needs: [dev-web]`) and a core directory
+  (`includes/`, `data/`, `logic/`, `views/`, `adm/`, `api/`, `ajax/`,
+  `theme/`, `serve.php`) or its own plugin changed — Apache-side reach is not
+  in the process's include list.
+
+A change under `tests/lib/` or to `tests/run.php` runs the whole batch: the
+harness changing invalidates every recorded reach. A stale or missing map can
+therefore only widen a run, never wrongly narrow it.
+
+**What the output says.** The summary states how many changed files selected
+how many suites and why each ran; the aggregate JSON carries the same as
+`selection`. Changed code files that *no suite in the estate* reaches are
+listed as uncovered — a coverage gap named at the moment someone is looking
+(markdown, `specs/` and `docs/` are never listed). A `--changed` run that
+selects nothing exits 0: a docs-only change is legitimately green.
+
+`--changed` refuses the `live` and `deploy` tiers (real effects and deployed
+nodes are never silently narrowed), refuses `--only` (which already names its
+test), and refuses to run without git and a repository.
 
 ### `deploy` is not a development tier
 
@@ -124,22 +173,25 @@ currently checks.
 
 ### What each tier costs
 
-`safe` is the tier to run while working: 79 tests in about 20 seconds. `db`
-is the gate to run before a checkin or a publish: 221 tests (cumulative with
-safe and test-db) in about four minutes — the test-db lane runs alongside the
-db batch, so the gate's wall clock is the db batch's alone.
+The working loop is a scoped run: `php tests/run.php --changed` executes only
+the safe suites the edited files can reach — typically seconds. Pre-checkin,
+`php tests/run.php db --changed` does the same over the full gate's batch.
+The complete gate, `php tests/run.php db`, is the pre-publish proof: about
+350 tests in six to seven minutes on the dev box (the `safe` batch alone is
+just over a minute; the test-db lane hides inside the db batch's wall clock).
 
-That gap is not a matter of test count. Of those 221 tests, 159 finish in
-under a second each and account for 27 seconds between them; twelve tests carry
-half of the total. The expensive ones are expensive for a legible reason —
-they drive a real subsystem end to end rather than a unit of one:
+Most suites are cheap — over 200 finish in under a second each. The expensive
+ones are expensive for a legible reason — they drive a real subsystem end to
+end rather than a unit of one:
 
 | test | tier | ~time | what it drives |
 |---|---|---|---|
-| `models_crud` | test-db | 34s | CRUD against every data class in the platform |
-| `multi_models_crud` | test-db | 21s | every Multi collection's filter surface |
-| `account_login` | db | 12s | the sign-in matrix, including deliberate lockout waits |
-| `plugin_sync` | db | 9s | a full `PluginManager::sync()` over every active plugin, twice (the idempotence check) |
+| `sync_sim` | safe | 25s | a real `cargo test` of the sync simulator and soak rig (`covers: [sync/**]`, so a scoped run pays it only when `sync/` changed) |
+| `models_crud` | test-db | 19s | CRUD against every data class in the platform |
+| `restore_roundtrip` | db | 13s | five real PostgreSQL dump/restore round trips |
+| `plugin_sync` | db | 11s | a full `PluginManager::sync()` over every active plugin, twice (the idempotence check) |
+| `multi_models_crud` | test-db | 10s | every Multi collection's filter surface |
+| `drive_encryption` | db | 10s | the real chunked encrypted upload pipeline |
 | `booking_flow` | db | 8s | the whole booking subsystem, availability through checkout |
 
 Adding a small test costs the gate almost nothing. Adding a suite that boots a
@@ -274,6 +326,16 @@ cascade that is not declared. The `referential_integrity` test (tier `safe`)
 fails the gate whenever a run leaves orphan rows, stray `harnesstest_%` users,
 or a serial sequence behind its table's `MAX(pkey)` — a leak surfaces in the
 very next run with the table named, not later as flakiness in another suite.
+
+A run killed outright (SIGKILL — a timed-out suite past its grace period, an
+interrupted gate) never reaches teardown, so its fixtures strand. The harness
+collects those itself: `harness_cleanup_stale_fixtures()` runs at every
+db-tier suite's boot and reclaims fixture rows older than an hour — no live
+run can own them, since no suite outlives the runner's timeout cap — deleting
+through the models so cascades hold. Debug-gated, so it never runs on
+production. The `referential_integrity` gate itself stays read-only; a red
+there points at the run that just happened, and a failed fixture teardown
+also fails the suite that leaked, right where the leaker is named.
 
 It also names surviving rows in the fixture families that label themselves.
 Name any standalone fixture `HarnessTest <something>` in the table's name column
@@ -457,6 +519,15 @@ database the copy is about 16 MB, nearly all of which is the floor cost of
 Nothing should be written that expects to find real rows there. The model
 suites create their own — see [How the model suite satisfies foreign
 keys](#how-the-model-suite-satisfies-foreign-keys).
+
+**The runner keeps the copy current.** A copy goes stale the moment
+`update_database` adds a table or column, and a stale copy fails every
+`test-db` suite with "column does not exist" noise. So when a run is about to
+execute `test-db` suites on a dev environment and the schema comparison says
+the copy is behind, the runner rebuilds it (structure copy, seconds, atomic
+rename) before the lane starts and says so in the output — and in the
+aggregate JSON as `test_db_refresh`. A failed rebuild is reported and the
+suites then fail with the real drift errors.
 
 A full copy, content included, is a second button on the same page. It exists
 to reproduce a problem against real data; no test needs it, and it duplicates

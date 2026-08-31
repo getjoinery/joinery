@@ -47,6 +47,8 @@
  *                it has ever made. manifest.json and the snapshot are never swept
  * @version 1.6 - a rotated recovery key ends the current chain: the next run starts a fresh chain
  *                sealed to the new key instead of extending one only the old key opens
+ * @version 1.6 - a failed chain run removes the empty chain directory it created;
+ *                one husk per failed run had been accumulating on the shelf forever
  * @version 1.5 - a manager-profile run seals to THIS machine's own proven recovery key, read
  *                locally. A run carrying key material is refused, and a machine with no proven
  *                key of its own refuses to back up rather than sealing to a key it was handed
@@ -724,6 +726,7 @@ class BackupRunner {
 		}
 		if ($manifest_before === null) {
 			@unlink($manifest_path);
+			self::remove_empty_chain_dir($chain_d);
 			return;
 		}
 		try {
@@ -734,6 +737,18 @@ class BackupRunner {
 			// next run starts a fresh chain, which is the safe direction.
 			@unlink($manifest_path);
 		}
+		self::remove_empty_chain_dir($chain_d);
+	}
+
+	/**
+	 * A failed run must not leave an empty chain directory on the shelf.
+	 * rmdir refuses a directory with anything in it, so this can only ever
+	 * remove a husk — a run that failed before producing an artifact. Left
+	 * alone they accumulate one per failed run (159 were standing on the dev
+	 * shelf when this was written) and make the shelf unreadable.
+	 */
+	private static function remove_empty_chain_dir($chain_d) {
+		@rmdir($chain_d);
 	}
 
 	/** Archive the file tree, incrementally when the chain is being extended. */

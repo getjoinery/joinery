@@ -93,7 +93,7 @@ function harness_parse_metadata($filepath) {
 	// the dashboard only marks a test CLI-only when its author explicitly set a
 	// long cap, so default-cap tests stay web-runnable.
 	$meta = array('name' => '', 'tier' => 'safe', 'env' => 'dev-only', 'needs' => array(),
-		'timeout' => 180, 'timeout_explicit' => false);
+		'covers' => array(), 'timeout' => 180, 'timeout_explicit' => false);
 	$after = substr($head, $marker_offset);
 	$lines = preg_split('/\r\n|\r|\n/', $after);
 	foreach ($lines as $i => $raw) {
@@ -103,7 +103,7 @@ function harness_parse_metadata($filepath) {
 		if ($line === '' ) continue;
 		// End of the comment block.
 		if (strpos($raw, '*/') !== false && strpos($raw, ':') === false) break;
-		if (!preg_match('/^(name|tier|env|needs|timeout)\s*:\s*(.*)$/i', $line, $m)) {
+		if (!preg_match('/^(name|tier|env|needs|covers|timeout)\s*:\s*(.*)$/i', $line, $m)) {
 			// A non key:value line ends the header region (blank framing aside).
 			if (strpos($line, '@') === 0) continue;
 			break;
@@ -117,9 +117,13 @@ function harness_parse_metadata($filepath) {
 		// tier/env are closed vocabularies — normalize case so a header typo
 		// like `tier: Live` cannot slip past the membership checks below.
 		if ($key === 'tier' || $key === 'env') $val = strtolower($val);
-		if ($key === 'needs') {
+		if ($key === 'needs' || $key === 'covers') {
+			// covers: repo-relative glob paths this suite reaches WITHOUT
+			// including them — data files it reads, scripts it runs, the code a
+			// shell gate builds. Merged with the recorded include list when the
+			// runner selects suites for a change (--changed).
 			$val = trim($val, "[] \t");
-			$meta['needs'] = $val === '' ? array()
+			$meta[$key] = $val === '' ? array()
 				: array_values(array_filter(array_map('trim', explode(',', $val))));
 		} elseif ($key === 'timeout') {
 			// Per-test wall-clock cap (seconds). Non-numeric → default; clamp 1–1800.
@@ -167,6 +171,19 @@ function harness_boot(array $overrides = array()) {
 	$h['booted'] = true;
 
 	harness_enforce_env();
+
+	// Mark this process for cheap password hashing. Argon2id at production
+	// parameters is 64 MB and ~0.5s PER HASH on the dev box, and suites paid
+	// it for every fixture user, sign-in attempt, and 2FA backup-code set (ten
+	// hashes at once). User::password_hash_options() answers with cheap test
+	// parameters when this constant is present — same algorithm, and the hash
+	// string carries its own parameters, so verification never notices. The
+	// User class also disables rehash-on-login in a marked process, so a
+	// production hash a test verifies is never rewritten weak. CLI only: the
+	// web SAPI never boots the harness and must never hash cheap.
+	if (PHP_SAPI === 'cli' && !defined('JOINERY_TEST_FAST_HASH')) {
+		define('JOINERY_TEST_FAST_HASH', true);
+	}
 
 	// A test run must not send mail through a real delivery service. dev's
 	// email_service is mailgun, so every suite that created a user or triggered a
@@ -218,6 +235,11 @@ function harness_boot(array $overrides = array()) {
 		// Now: whatever earlier runs left behind, which has certainly finished
 		// being delivered. This is the pass that actually empties the box.
 		harness_cleanup_stale_delivered_mail();
+
+		// And fixture ROWS a killed run stranded — a plain SIGKILL skips both
+		// teardown paths, so rows outlive their run just as mail does. Same
+		// two-pass philosophy, its own guards. See harness_cleanup_stale_fixtures().
+		harness_cleanup_stale_fixtures();
 
 		// And at the end: registered FIRST so LIFO teardown runs it LAST, giving
 		// the relay every spare moment to hand over what this run sent. It still
@@ -641,6 +663,98 @@ function make_machine_key($user_id, $name, $permission = 4) {
 	return array('api_key' => $key, 'secret_key' => $secret_plaintext);
 }
 
+/**
+ * Reclaim fixture rows a KILLED run left behind.
+ *
+ * Teardown runs on a clean finish, on a crash, and (via the SIGTERM handler
+ * above) on the runner's timeout — but a plain SIGKILL skips all three, and
+ * this box runs several agents that interrupt runs all day. The stranded rows
+ * then red the referential_integrity gate until a person deletes them by
+ * hand, which had become a recurring chore. So the harness collects its own
+ * dead, on the delivered-mail sweep's two-pass philosophy: teardown takes
+ * what its own run made; this boot-time pass takes what earlier KILLED runs
+ * left.
+ *
+ * The one-hour floor is what makes it safe beside live runs: no suite
+ * process outlives the runner's 1800-second timeout cap, so anything older
+ * belongs to no live run, however many agents are working. Deletion goes
+ * through each model's permanent_delete(), so declared cascades run and
+ * nothing is orphaned. Gated like the mail sweep: never without debug
+ * (production), and never from a tier that promises no side effects — which
+ * keeps referential_integrity (tier safe) a pure read. A red there now means
+ * a SAME-RUN leak (a teardown bug in the suite that just ran) or debris
+ * younger than the floor; the old kind of red — week-old kill debris nobody
+ * remembered making — reclaims itself here instead.
+ */
+function harness_cleanup_stale_fixtures() {
+	$h = &$GLOBALS['__harness'];
+	if (!in_array($h['meta']['tier'] ?? '', array('db', 'test-db', 'live'), true)) return;
+	try {
+		if (!Globalvars::get_instance()->get_setting('debug')) return;
+	} catch (\Throwable $e) { return; }
+	if (!class_exists('User')) return;
+
+	$floor = gmdate('Y-m-d H:i:s', time() - 3600);
+	$db = DbConnector::get_instance()->get_db_link();
+
+	// Users. Every make_user_row() fixture stamps usr_terms_accepted_time at
+	// creation, which doubles as its birth time here; the rare fixture whose
+	// suite cleared it is left for referential_integrity to name.
+	try {
+		$q = $db->prepare("SELECT usr_user_id, usr_email FROM usr_users
+			WHERE usr_email LIKE 'harnesstest\\_%' AND usr_terms_accepted_time < ?");
+		$q->execute(array($floor));
+		foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+			try {
+				$u = new User((int)$row['usr_user_id'], TRUE);
+				if ($u->key) { $u->permanent_delete(); }
+				echo "  reclaimed stale fixture user " . $row['usr_email'] . " (a killed run's leftover)\n";
+			} catch (\Throwable $e) {
+				echo "  WARNING: could not reclaim stale fixture user " . $row['usr_email'] . ": " . $e->getMessage() . "\n";
+			}
+		}
+	} catch (\Throwable $e) {
+		echo "  WARNING: stale fixture user lookup failed: " . $e->getMessage() . "\n";
+	}
+
+	// The self-labelling families referential_integrity watches, same floor.
+	// A class that does not resolve here (inactive plugin) is skipped: its
+	// rows cannot be deleted with their cascades honoured, and the gate still
+	// names them.
+	$families = array(
+		array('Event', 'evt_events', 'evt_name', 'evt_create_time'),
+		array('Survey', 'svy_surveys', 'svy_name', 'svy_create_time'),
+		array('Group', 'grp_groups', 'grp_name', 'grp_create_time'),
+		array('Product', 'pro_products', 'pro_name', 'pro_create_time'),
+		array('BookingType', 'bkt_booking_types', 'bkt_name', 'bkt_create_time'),
+		array('ManagedNode', 'mgn_managed_nodes', 'mgn_name', 'mgn_create_time'),
+		array('Question', 'qst_questions', 'qst_question', 'qst_create_time'),
+	);
+	foreach ($families as $f) {
+		list($cls, $table, $name_col, $created_col) = $f;
+		if (!class_exists($cls)) continue;
+		if (!property_exists($cls, 'tablename') || $cls::$tablename !== $table) continue;
+		try {
+			$pkey_col = $cls::$pkey_column;
+			$q = $db->prepare("SELECT {$pkey_col}, {$name_col} FROM {$table} WHERE {$name_col} LIKE 'HarnessTest %' AND {$created_col} < ?");
+			$q->execute(array($floor));
+			foreach ($q->fetchAll(PDO::FETCH_ASSOC) as $row) {
+				try {
+					$id = (int)$row[$pkey_col];
+					$obj = new $cls($id, TRUE);
+					if (!$obj->key) { continue; }
+					$obj->permanent_delete();
+					echo "  reclaimed stale fixture row {$table}#{$id} (" . $row[$name_col] . ")\n";
+				} catch (\Throwable $e) {
+					echo "  WARNING: could not reclaim {$table} row: " . $e->getMessage() . "\n";
+				}
+			}
+		} catch (\Throwable $e) {
+			// Absent table or column on this install: nothing to reclaim.
+		}
+	}
+}
+
 /** Register a created row for teardown (deleted LIFO with everything else). */
 function harness_register_row($table, $pkey_column, $id) {
 	harness_defer(function () use ($table, $pkey_column, $id) {
@@ -676,6 +790,11 @@ function harness_register_user($user) {
 		try {
 			$user->permanent_delete();
 		} catch (\Throwable $e) {
+			// A teardown that cannot delete its fixture is the suite's OWN
+			// failure. Left as a warning, the stranded row reds
+			// referential_integrity later with no leaker named; red HERE,
+			// in the suite that knows whose row it is.
+			check(false, 'fixture user ' . $user->key . ' deleted at teardown', $e->getMessage());
 			echo "  WARNING: could not permanently delete user " . $user->key . " (" . $e->getMessage() . "); soft-deleting\n";
 			if ($db->inTransaction()) $db->rollBack();
 			try {
@@ -819,6 +938,10 @@ function harness_emit_json($sections = null) {
 		),
 		'sections'    => $sections,
 		'duration_ms' => (int)round((microtime(true) - $h['started']) * 1000),
+		// The suite's reach: every repo file this process loaded. The runner
+		// records it into the coverage map so --changed can select the suites
+		// a change can actually affect.
+		'files'       => harness_loaded_repo_files(),
 	);
 	$json = json_encode($contract);
 	if (php_sapi_name() === 'cli') {
@@ -827,6 +950,22 @@ function harness_emit_json($sections = null) {
 		header('Content-Type: application/json');
 		echo $json;
 	}
+}
+
+/** Repo-relative paths of every file this process has loaded, vendor/
+ *  excluded. A PHP suite reaches code by loading it — the class autoloader
+ *  and require make get_included_files() an honest record of the suite's
+ *  reach, refreshed for free on every run. */
+function harness_loaded_repo_files() {
+	$root = rtrim(PathHelper::getSiteRoot(), '/') . '/';
+	$out = array();
+	foreach (get_included_files() as $f) {
+		if (strpos($f, $root) !== 0) continue;
+		$rel = substr($f, strlen($root));
+		if (strpos($rel, 'vendor/') === 0) continue;
+		$out[] = $rel;
+	}
+	return $out;
 }
 
 /** Print the human summary (CLI) or emit the JSON contract, then exit. */

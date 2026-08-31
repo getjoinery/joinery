@@ -177,11 +177,42 @@ check(BackupRunner::slug() === 'good-name_1', 'a sane folder name is accepted', 
 
 $settings_row('backup_path_slug', $original_slug);
 
-// A run with nothing configured reports why instead of failing obscurely.
+// A run with nothing configured reports why instead of failing obscurely —
+// and does NOTHING else. This check once called run(array()) as-is, on a box
+// where backups ARE configured: it passed only because a REAL full-site
+// backup (30s of tar+encrypt, every gate run) happened to fail afterwards —
+// a crash read as a refusal — leaving an empty chain directory and a failed
+// history row each time (159 dirs and 198 rows stood on dev when noticed).
+// So: make the site genuinely unconfigured for this one call, and pin the
+// shelf and the history untouched.
+$q = $db->prepare('SELECT stg_value FROM stg_settings WHERE stg_name = ?');
+$q->execute(array('backup_target_id'));
+$original_target = $q->fetchColumn();
+$settings_row('backup_target_id', '');
+
+$shelf = PathHelper::getSiteRoot() . '/backups';
+$shelf_before = is_dir($shelf) ? scandir($shelf) : array();
+$hist_before = (int)$db->query('SELECT count(*) FROM bkh_backup_history')->fetchColumn();
+
+$run_started = microtime(true);
 $result = BackupRunner::run(array());
-check(in_array($result['status'], array('skipped', 'error'), true),
-	'an unconfigured site does not claim success', $result['status']);
-check(strlen($result['message']) > 20, 'and says what is missing', $result['message']);
+$run_ms = (int)round((microtime(true) - $run_started) * 1000);
+
+// Restore before asserting, so a failed check cannot strand the setting.
+if ($original_target === false) {
+	$db->exec("DELETE FROM stg_settings WHERE stg_name = 'backup_target_id'");
+} else {
+	$settings_row('backup_target_id', $original_target);
+}
+
+check($result['status'] === 'skipped',
+	'an unconfigured site is SKIPPED — a crash after doing work is not a refusal', $result['status']);
+check(stripos($result['message'], 'target') !== false, 'and says what is missing', $result['message']);
+check($run_ms < 2000, 'refusing costs nothing', $run_ms . 'ms');
+$shelf_after = is_dir($shelf) ? scandir($shelf) : array();
+check($shelf_after === $shelf_before, 'the shelf is untouched — no chain directory was created');
+$hist_after = (int)$db->query('SELECT count(*) FROM bkh_backup_history')->fetchColumn();
+check($hist_after === $hist_before, 'and no history row was written');
 
 // ── Staged chain restores nobody came back for ──────────────────────────────
 section('A staged chain restore is swept as a unit');

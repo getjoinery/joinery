@@ -539,6 +539,9 @@ class RateLimitProbeDriver extends DnsDriverBase {
 	}
 	/** Reach the protected plumbing from the test. */
 	public function probe(string $method, string $url) { return $this->request($method, $url); }
+	/** The waits the driver WOULD have made, recorded instead of slept. */
+	public $pauses = array();
+	protected function pause(int $seconds): void { $this->pauses[] = $seconds; }
 }
 
 $cf_body = '{"success":false,"errors":[{"code":971,'
@@ -563,6 +566,8 @@ check($caught instanceof DnsRateLimitedException, 'a 429 raises a rate-limit err
 	$caught ? get_class($caught) : 'nothing thrown');
 check($http->calls === 1 + DnsDriverBase::RATE_LIMIT_MAX_RETRIES,
 	'a rate-limited read is retried within the budget', 'calls: ' . $http->calls);
+check($driver->pauses === array(1, 1),
+	'each retry waits the vendor Retry-After', implode(',', $driver->pauses));
 check($caught->getRetryAfter() === 1, 'the vendor Retry-After is carried on the exception');
 
 // A WRITE is never retried: the vendor may have applied it before deciding to
@@ -572,6 +577,7 @@ $caught = null;
 try { $driver->probe('POST', 'https://api.example.com/client/v4/zones/z/dns_records'); }
 catch (Throwable $e) { $caught = $e; }
 check($http->calls === 1, 'a rate-limited write is attempted exactly once', 'calls: ' . $http->calls);
+check($driver->pauses === array(), 'and never waits — there is nothing safe to wait for');
 check(stripos($caught->getMessage(), 'may already have been updated') !== false,
 	'and says records may already have been written');
 
@@ -582,6 +588,8 @@ try { $driver->probe('GET', 'https://api.example.com/client/v4/zones'); }
 catch (Throwable $e) { $caught = $e; }
 check(stripos($caught->getMessage(), 'nothing was changed') !== false,
 	'a rate-limited read states plainly that nothing changed');
+check($driver->pauses === array(2, 4),
+	'without a Retry-After the backoff doubles per attempt', implode(',', $driver->pauses));
 
 // The message has to be actionable, and has to correct the natural misreading
 // that the server is being blocked.

@@ -628,13 +628,37 @@ private static function UcName($string) {
 		return $user;
 	}
 
+	/**
+	 * Argon2id parameters for every password-family hash this class makes.
+	 * Production: PHP's defaults (64 MB, 4 passes) — an empty array. A harness
+	 * test process (JOINERY_TEST_FAST_HASH, set by harness_boot, CLI only):
+	 * cheap parameters, because half a second and 64 MB per hash turned
+	 * fixture users and sign-in matrices into whole seconds of every gate run.
+	 * The hash string carries its own parameters, so password_verify() never
+	 * cares. The counterpart rule lives in check_password(): a marked process
+	 * never REHASHES, or every production hash a test verified would be
+	 * silently rewritten at test cost.
+	 */
+	/** One suite may opt back into rehash-on-login for its OWN fixture — the
+	 *  session-keys suite proves the silent upgrade preserves session keys,
+	 *  which needs the upgrade to actually run. Scoped and explicit; the
+	 *  default stays off so no other suite can weaken a real row by accident. */
+	public static $allow_test_rehash = false;
+
+	public static function password_hash_options() {
+		if (PHP_SAPI === 'cli' && defined('JOINERY_TEST_FAST_HASH')) {
+			return array('memory_cost' => 8192, 'time_cost' => 1, 'threads' => 1);
+		}
+		return array();
+	}
+
 	public static function GeneratePassword($password) {
 		$password = trim($password);
 		if (strlen($password) < 8) {
 			throw new DisplayableUserException('Your password must be at least 8 characters');
 		}
 
-		return password_hash($password, PASSWORD_ARGON2ID);
+		return password_hash($password, PASSWORD_ARGON2ID, self::password_hash_options());
 	}
 
 	function check_password($password) {
@@ -645,7 +669,12 @@ private static function UcName($string) {
 		if (password_verify($password, $stored)) {
 			// Silently upgrade hash to Argon2id if needed. Same plaintext, new
 			// hash — not a credential change, so session keys must survive.
-			if (password_needs_rehash($stored, PASSWORD_ARGON2ID)) {
+			// Never in a test process (password_hash_options() non-empty):
+			// there every production hash "needs" a rehash by the cheap test
+			// parameters, and acting on that would overwrite a real user's
+			// strong hash with a weak one on the first test sign-in.
+			if ((self::password_hash_options() === array() || self::$allow_test_rehash)
+					&& password_needs_rehash($stored, PASSWORD_ARGON2ID)) {
 				$this->suppress_session_key_revocation = TRUE;
 				try {
 					$this->set('usr_password', static::GeneratePassword($password));
@@ -660,10 +689,15 @@ private static function UcName($string) {
 		}
 
 		// Fall back to legacy phpass hashes and upgrade on success. Same
-		// plaintext, new hash — not a credential change.
+		// plaintext, new hash — not a credential change. Not in a test
+		// process, for the same reason as above: the upgrade would write a
+		// cheap-parameter hash onto a real row.
 		require_once(PathHelper::getIncludePath('includes/PasswordHash.php'));
 		$hasher = new PasswordHash(8, TRUE);
 		if ($hasher->CheckPassword($password, $stored)) {
+			if (self::password_hash_options() !== array() && !self::$allow_test_rehash) {
+				return true;
+			}
 			$this->suppress_session_key_revocation = TRUE;
 			try {
 				$this->set('usr_password', static::GeneratePassword($password));
@@ -835,7 +869,7 @@ private static function UcName($string) {
 				$raw .= $alphabet[random_int(0, strlen($alphabet) - 1)];
 			}
 			$display_codes[] = substr($raw, 0, 4) . '-' . substr($raw, 4, 4);
-			$hashes[] = password_hash($raw, PASSWORD_ARGON2ID);
+			$hashes[] = password_hash($raw, PASSWORD_ARGON2ID, User::password_hash_options());
 		}
 		$this->set('usr_totp_backup_codes', json_encode($hashes));
 		$this->save();

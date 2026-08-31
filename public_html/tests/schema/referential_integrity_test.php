@@ -22,6 +22,14 @@
  *      here names its leaker's table instead of surfacing later as
  *      unexplainable flakiness in an unrelated suite, or as phantom rows
  *      someone eventually notices in an admin screen.
+ *
+ * This file stays a pure read (tier safe promises that). What CLEANS stale
+ * strays is harness_cleanup_stale_fixtures(), which every db-tier suite runs
+ * at boot: debris older than an hour — a killed run's leftovers — is
+ * reclaimed there, through the models so cascades hold. So a red in check 4
+ * means a SAME-RUN leak (a teardown bug in a suite that just ran) or debris
+ * younger than the floor, both worth a human look now — never last week's
+ * kill nobody remembers.
  */
 require_once(__DIR__ . '/../lib/harness.php');
 harness_boot();

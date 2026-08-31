@@ -1774,17 +1774,30 @@ section('The generated keepalive actually launches the agent');
 $tmp = sys_get_temp_dir() . '/keepalive_' . bin2hex(random_bytes(4));
 @mkdir($tmp, 0777, true);
 
+// The stand-in agent's PROCESS NAME has to be unique to this run, because
+// pgrep's namespace is the whole machine and this suite's directory is not.
+// Two copies running at once — the db tier's parallel batch, or two agents
+// testing on one dev box — otherwise both install a binary called `fake-agent`,
+// and the second copy's liveness probe finds the FIRST copy's still-sleeping
+// process, correctly decides an agent is already running, and skips the launch.
+// Both launch assertions then fail for a reason that has nothing to do with the
+// keepalive.
+//
+// Kept to 15 characters: Linux truncates comm there, and `pgrep -x` matches
+// against comm, so a longer name would never match itself.
+$fake_agent = 'fake-agent-' . bin2hex(random_bytes(2));
+
 if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE\n/s', $agent_src, $km)) {
 	check(false, 'the keepalive body can be extracted from the installer', 'heredoc shape changed');
 } else {
 	// Point the generated script at a stand-in agent and temp markers. Only the
 	// paths change; the launch mechanics under test are the shipped ones.
 	$body = $km[1];
-	$body = str_replace('/usr/local/bin/joinery-agent', $tmp . '/fake-agent', $body);
+	$body = str_replace('/usr/local/bin/joinery-agent', $tmp . '/' . $fake_agent, $body);
 	// Also retarget the liveness probe: this box runs its own agent, and the
 	// unmodified probe would find it, correctly decide one is already running,
 	// and skip the launch — making the test pass for the wrong reason.
-	$body = str_replace('pgrep -x joinery-agent', 'pgrep -x fake-agent', $body);
+	$body = str_replace('pgrep -x joinery-agent', 'pgrep -x ' . $fake_agent, $body);
 	$body = str_replace('/etc/joinery-agent/enabled', $tmp . '/enabled', $body);
 	$body = str_replace('/etc/joinery-agent/joinery-agent.env', $tmp . '/agent.env', $body);
 	$body = str_replace('/var/log/joinery-agent.log', $tmp . '/agent.log', $body);
@@ -1793,19 +1806,45 @@ if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE
 	chmod($tmp . '/keepalive.sh', 0755);
 	file_put_contents($tmp . '/enabled', "1\n");
 	file_put_contents($tmp . '/agent.env', "");
-	// Records that it ran, and which descriptors it inherited.
-	file_put_contents($tmp . '/fake-agent',
-		"#!/bin/sh\necho started > " . $tmp . "/ran\nls /proc/\$\$/fd > " . $tmp . "/fds 2>/dev/null\nsleep 2\n");
-	chmod($tmp . '/fake-agent', 0755);
+	// Records that it ran, and which descriptors it inherited. The listing is
+	// ls -l (targets, not bare numbers) because the observing shell parks its
+	// OWN redirection descriptors at 10 and above - a bare number can never
+	// distinguish those from a caller leak, but a target pointing at the
+	// lockfile can only be inherited.
+	file_put_contents($tmp . '/' . $fake_agent,
+		"#!/bin/sh\necho started > " . $tmp . "/ran\nls -l /proc/\$\$/fd > " . $tmp . "/fds 2>/dev/null\nsleep 2\n");
+	chmod($tmp . '/' . $fake_agent, 0755);
 	touch($tmp . '/lockfile');
 
-	// pgrep must not find a stray real agent on the dev box and skip the launch.
-	$pgrep_safe = (trim((string)shell_exec('pgrep -x fake-agent 2>/dev/null')) === '');
+	// pgrep must not find a stray process of this run's own name and skip the
+	// launch. With a per-run name the only way this is false is a genuine
+	// collision, which is worth failing on rather than working around.
+	$pgrep_safe = (trim((string)shell_exec('pgrep -x ' . escapeshellarg($fake_agent) . ' 2>/dev/null')) === '');
 
-	// Run it holding a descriptor open, exactly as an upgrade holding the
-	// .upgrade.lock does when it calls the host installers.
-	shell_exec('sh -c ' . escapeshellarg('exec 9<' . $tmp . '/lockfile; ' . $tmp . '/keepalive.sh') . ' 2>/dev/null');
-	sleep(1);
+	// Run it holding descriptors open, exactly as an upgrade holding the
+	// .upgrade.lock does when it calls the host installers - including
+	// descriptors NUMBERED 10 AND ABOVE, which an upgrade process easily
+	// holds. Those are the regression case for a real outage class: POSIX sh
+	// (dash) parses `exec 10>&-` as "run the program named 10", so the
+	// keepalive's descriptor-closing launcher exited 127 before starting the
+	// agent whenever any fd >= 10 was inherited. The outer shell here must be
+	// bash for the same reason - dash cannot OPEN fd 10 either.
+	shell_exec('bash -c ' . escapeshellarg(
+		'exec 9<' . $tmp . '/lockfile 10<' . $tmp . '/lockfile 11<' . $tmp . '/lockfile'
+		. ' 12<' . $tmp . '/lockfile 13<' . $tmp . '/lockfile; ' . $tmp . '/keepalive.sh') . ' 2>/dev/null');
+
+	// WAITED FOR, NOT SLEPT THROUGH. The keepalive launches the agent with
+	// `nohup ... &` and returns immediately, so how long the child takes to get
+	// scheduled and write its markers is a property of the box, not of the code
+	// under test. A fixed one-second sleep passed on an idle machine and failed
+	// under the db tier's parallel batch — reporting "the generated script
+	// exited before launching" about a launch that simply had not happened yet.
+	// The stand-in writes /ran and then /fds, so /fds is the later of the two
+	// and the one worth waiting on.
+	$deadline = microtime(true) + 15;
+	while (!file_exists($tmp . '/fds') && microtime(true) < $deadline) {
+		usleep(50000);
+	}
 
 	check($pgrep_safe && file_exists($tmp . '/ran'),
 		'the keepalive starts the agent when none is running',
@@ -1815,10 +1854,15 @@ if (!preg_match('/cat > "\$SUPERVISE_PATH" <<\x27SUPERVISE\x27\n(.*?)\nSUPERVISE
 	// And the reason the descriptor closing exists at all: the launched agent
 	// must NOT inherit the upgrade lock, or every later upgrade on that node is
 	// refused by a lock whose holder is the agent.
-	$fds = file_exists($tmp . '/fds') ? preg_split('/\s+/', trim(file_get_contents($tmp . '/fds'))) : array();
-	check(file_exists($tmp . '/fds') && !in_array('9', $fds, true),
+	$fds_listing = file_exists($tmp . '/fds') ? file_get_contents($tmp . '/fds') : '';
+	$leaked = array();
+	foreach (preg_split('/\n/', trim($fds_listing)) as $fd_line) {
+		if (strpos($fd_line, $tmp . '/lockfile') !== false) $leaked[] = trim($fd_line);
+	}
+	check($fds_listing !== '' && $leaked === array(),
 		'the launched agent does not inherit the caller descriptors',
-		'inherited fds: ' . implode(',', $fds) . ' — fd 9 is the stand-in upgrade lock');
+		$fds_listing === '' ? 'fds listing missing'
+			: ($leaked ? 'inherited: ' . implode('; ', $leaked) . ' — fds 9-13 all point at the stand-in upgrade lock' : ''));
 }
 
 foreach (glob($tmp . '/*') as $f) { @unlink($f); }
