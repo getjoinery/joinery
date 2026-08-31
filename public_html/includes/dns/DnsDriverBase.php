@@ -402,7 +402,7 @@ abstract class DnsDriverBase implements DnsProvider {
 					// operator is reported to them rather than waited out.
 					if ($wait <= self::RATE_LIMIT_MAX_WAIT_SECONDS) {
 						$attempt++;
-						sleep(max(1, $wait ?: self::RATE_LIMIT_BACKOFF_SECONDS * $attempt));
+						$this->pause(max(1, $wait ?: self::RATE_LIMIT_BACKOFF_SECONDS * $attempt));
 						continue;
 					}
 				}
@@ -420,6 +420,15 @@ abstract class DnsDriverBase implements DnsProvider {
 	}
 
 	/** Reads may be repeated safely; anything that writes may not. */
+	/**
+	 * The retry wait, as its own seam. Production sleeps; the rate-limit tests
+	 * record the schedule instead — ten real seconds of sleeping proved nothing
+	 * the recorded numbers don't, and cost every gate run ten seconds.
+	 */
+	protected function pause(int $seconds): void {
+		sleep($seconds);
+	}
+
 	protected function isSafeToRepeat(string $method): bool {
 		return in_array(strtoupper($method), array('GET', 'HEAD'), true);
 	}

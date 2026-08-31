@@ -41,6 +41,7 @@ if (php_sapi_name() !== 'cli') {
 
 require_once(__DIR__ . '/lib/harness.php');    // parser + Globalvars, no side effects until harness_boot()
 require_once(__DIR__ . '/lib/discovery.php');  // harness_discover(), harness_rel()
+require_once(__DIR__ . '/lib/coverage.php');   // coverage map + --changed selection
 
 // ---------------------------------------------------------------------------
 // Arguments
@@ -49,6 +50,8 @@ $args = array_slice($argv, 1);
 $want_json = in_array('--json', $args, true);
 $want_list = in_array('--list', $args, true);
 $want_serial = in_array('--serial', $args, true);
+$changed_mode = false;   // --changed: run only the suites the edited files can reach
+$changed_ref = '';       // --changed=<ref>: also everything different from <ref>
 $filter = '';
 $only = '';                  // exact repo-relative path — run just this one declared test
 $tier_arg = 'safe';
@@ -57,12 +60,25 @@ foreach ($args as $a) {
 	if (strpos($a, '--filter=') === 0)  { $filter = substr($a, strlen('--filter=')); continue; }
 	if (strpos($a, '--only=') === 0)    { $only = substr($a, strlen('--only=')); continue; }
 	if (strpos($a, '--timeout=') === 0) { $timeout_override = max(1, (int)substr($a, strlen('--timeout='))); continue; }
+	if ($a === '--changed') { $changed_mode = true; continue; }
+	if (strpos($a, '--changed=') === 0) { $changed_mode = true; $changed_ref = substr($a, strlen('--changed=')); continue; }
 	if ($a === '--json' || $a === '--list') continue;
 	if (strpos($a, '--') === 0) continue;
 	$tier_arg = $a; // first bare positional is the tier
 }
 
 $valid_tiers = array('safe', 'db', 'test-db', 'live', 'deploy');
+// --changed narrows a DEVELOPMENT run by what is edited. live has real external
+// effects and is always an explicit, complete choice; deploy runs on nodes with
+// no repository. Neither may be silently narrowed, so both refuse.
+if ($changed_mode && ($tier_arg === 'live' || $tier_arg === 'deploy')) {
+	fwrite(STDERR, "--changed does not apply to the '$tier_arg' tier.\n");
+	exit(2);
+}
+if ($changed_mode && $only !== '') {
+	fwrite(STDERR, "--changed and --only conflict: --only already names the exact test to run.\n");
+	exit(2);
+}
 if (!in_array($tier_arg, $valid_tiers, true)) {
 	fwrite(STDERR, "Unknown tier '$tier_arg'. Use one of: " . implode(', ', $valid_tiers) . "\n");
 	exit(2);
@@ -267,6 +283,73 @@ foreach ($declared as $d) {
 	$to_run[] = $d;
 }
 
+// --changed: intersect the batch with what the edited files can reach. The
+// coverage map records each suite's reach (see tests/lib/coverage.php); a
+// suite the map has never seen runs unconditionally, so a stale or missing
+// map can only widen a run, never narrow it wrongly. Uncovered is computed
+// against the WHOLE estate, so a file whose suite lives in another tier is
+// not misreported as unreached.
+$selection = null;
+if ($changed_mode) {
+	$changed = coverage_changed_files(dirname($ROOT), $changed_ref);
+	if ($changed === null) {
+		fwrite(STDERR, "--changed needs git and a repository"
+			. ($changed_ref !== '' ? " (and '$changed_ref' must be a resolvable ref)" : '') . ".\n");
+		exit(2);
+	}
+	$map = coverage_map_load($ROOT);
+	$as_sel = function ($d) use ($ROOT) {
+		return array('path' => 'public_html/' . harness_rel($d['path'], $ROOT), 'meta' => $d['meta']);
+	};
+	$sel = coverage_select(array_map($as_sel, $to_run), $map, $changed);
+	$sel_estate = coverage_select(array_map($as_sel, $declared), $map, $changed);
+	if ($sel['run_all'] === '') {
+		$kept = array();
+		foreach ($to_run as $d) {
+			$key = 'public_html/' . harness_rel($d['path'], $ROOT);
+			if (isset($sel['selected'][$key])) {
+				$d['_selected_because'] = $sel['selected'][$key];
+				$kept[] = $d;
+			}
+		}
+		$to_run = $kept;
+	}
+	$selection = array(
+		'mode' => 'changed', 'ref' => $changed_ref, 'changed' => $changed,
+		'run_all' => $sel['run_all'], 'selected' => count($to_run),
+		'uncovered' => $sel_estate['uncovered'],
+	);
+	if (!$want_json) {
+		echo 'Changed: ' . count($changed) . ' file' . (count($changed) === 1 ? '' : 's')
+			. ' -> ' . count($to_run) . " {$tier_arg}-batch suite" . (count($to_run) === 1 ? '' : 's') . " selected"
+			. ' (map: ' . count($map) . " entries)\n";
+		if ($sel['run_all'] !== '') echo '  running EVERYTHING: ' . $sel['run_all'] . "\n";
+		$shown = 0;
+		foreach ($to_run as $d) {
+			if (empty($d['_selected_because'])) continue;
+			if (++$shown > 20) { echo "  ... and " . (count($to_run) - 20) . " more\n"; break; }
+			echo '  ' . sprintf('%-28s', $d['meta']['name']) . ' ' . $d['_selected_because'] . "\n";
+		}
+		if ($selection['uncovered']) {
+			echo "Uncovered - no suite in the estate reaches these:\n";
+			foreach ($selection['uncovered'] as $u) echo "  $u\n";
+		}
+	}
+	// Selecting nothing is a legitimate green - a docs-only change - not the
+	// typo the zero-match guard below exists to catch.
+	if (count($to_run) === 0) {
+		if ($want_json) {
+			echo json_encode(array('selection' => $selection, 'totals' => array(
+				'tests' => 0, 'tests_passed' => 0, 'tests_failed' => 0,
+				'checks_passed' => 0, 'checks_failed' => 0, 'checks_skipped' => 0,
+			), 'results' => array())) . "\n";
+		} else {
+			echo "Nothing the edited files reach is in this batch. Green by scope.\n";
+		}
+		exit(0);
+	}
+}
+
 // A run that matched ZERO declared tests is almost always a mistake (a --filter
 // or --only typo, or a tier name with no tests) — and as the pre-deploy gate and
 // CI entry point, silently reporting PASS for "nothing ran" is a real hazard.
@@ -306,6 +389,29 @@ foreach ($to_run as $d) {
 	if ($d['meta']['tier'] === 'test-db') { $lane_tests[] = $d; } else { $main_tests[] = $d; }
 }
 $overlap = !$want_serial && $only === '' && count($lane_tests) > 0 && count($main_tests) > 0;
+
+// The test database is a COPY of live, so it goes stale the moment
+// update_database adds a table or column - and then every test-db suite fails
+// with "column does not exist" noise until someone refreshes it by hand
+// (which is how the gate stayed red for a day on 2026-08-30 over a column
+// added that morning). The copy is disposable by design, so when this run is
+// about to use it and it is behind, rebuild it here: structure + reference
+// tables, ~seconds, atomic rename. Failure to refresh is reported and the
+// suites then fail with the real drift errors, exactly as before.
+$test_db_refresh = '';
+if (count($lane_tests) > 0 && $debug_on) {
+	try {
+		if (!TestDatabaseHelper::isInSync()) {
+			$r = TestDatabaseHelper::copy(TestDatabaseHelper::MODE_STRUCTURE);
+			$test_db_refresh = $r['success']
+				? 'test database was behind live - refreshed (structure copy) before the test-db suites ran'
+				: 'test database is behind live and the refresh FAILED: ' . $r['message'];
+		}
+	} catch (\Throwable $e) {
+		$test_db_refresh = 'test database sync check failed: ' . $e->getMessage();
+	}
+	if ($test_db_refresh !== '' && !$want_json) echo $test_db_refresh . "\n";
+}
 
 $results = array();
 if (!$overlap) {
@@ -417,7 +523,18 @@ function run_one($d, $root, $timeout_s) {
 		? 'bash ' . escapeshellarg($path)
 		: escapeshellarg(PHP_BINARY) . ' -d apc.enable_cli=1 ' . escapeshellarg($path) . ' --json';
 	// -k 5s sends SIGKILL 5s after SIGTERM if the test ignores the term.
-	$cmd = 'timeout -k 5s ' . (int)$timeout_s . 's ' . $inner;
+	//
+	// The child starts with ONLY stdio open. This process inherits descriptors
+	// from whatever invoked it and holds bookkeeping handles of its own (the
+	// test-db lane's files), and PHP's proc_open passes every one of them to
+	// the child - so without this, a test behaves differently in the gate than
+	// run alone (a red gate over a green test, observed 2026-08-30 when leaked
+	// fds >= 10 killed installer_contract's keepalive launcher). bash, not sh:
+	// dash cannot express closing a two-digit descriptor.
+	$closes = '';
+	for ($fd = 3; $fd <= 31; $fd++) { $closes .= ' ' . $fd . '>&-'; }
+	$cmd = 'bash -c ' . escapeshellarg(
+		'exec' . $closes . '; exec timeout -k 5s ' . (int)$timeout_s . 's ' . $inner);
 
 	// Capture stdout/stderr to temp files, not pipes: a child that writes more
 	// than the ~64KB pipe buffer to one stream before we drain it would deadlock.
@@ -441,6 +558,7 @@ function run_one($d, $root, $timeout_s) {
 			'stats' => array('total' => 0, 'passed' => 0, 'failed' => 1, 'skipped' => 0),
 			'sections' => array(), 'duration_ms' => $ms, 'exit' => $exit,
 			'note' => "timed out after {$timeout_s}s (killed)",
+			'files' => array(), 'covers' => $d['meta']['covers'] ?? array(),
 		);
 	}
 
@@ -454,6 +572,7 @@ function run_one($d, $root, $timeout_s) {
 			'status' => $failed ? 'fail' : 'pass',
 			'stats' => $contract['stats'], 'sections' => $contract['sections'] ?? array(),
 			'duration_ms' => $contract['duration_ms'] ?? $ms, 'exit' => $exit,
+			'files' => $contract['files'] ?? array(), 'covers' => $d['meta']['covers'] ?? array(),
 		);
 	}
 
@@ -476,6 +595,7 @@ function run_one($d, $root, $timeout_s) {
 		'status' => $status, 'stats' => array('total' => 0, 'passed' => 0, 'failed' => $status === 'fail' ? 1 : 0, 'skipped' => 0),
 		'sections' => array(), 'duration_ms' => $ms, 'exit' => $exit,
 		'note' => $note, 'output_tail' => $tail,
+		'files' => array(), 'covers' => $d['meta']['covers'] ?? array(),
 	);
 }
 
@@ -507,6 +627,10 @@ function print_human_line($r, $root, $tag = '') {
 	}
 }
 
+// Record what each suite reached into the coverage map, whatever mode this run
+// was in — every run refreshes the entries for the suites it ran.
+coverage_map_update($results, $ROOT);
+
 // ---------------------------------------------------------------------------
 // Aggregate + report
 // ---------------------------------------------------------------------------
@@ -523,6 +647,8 @@ if ($want_json) {
 		'tiers_run' => $selected_tiers,
 		'filter' => $filter,
 		'debug_env' => $debug_on,
+		'test_db_refresh' => $test_db_refresh,
+		'selection' => $selection,
 		'totals' => array(
 			'tests' => $tests_total, 'tests_passed' => $tests_passed, 'tests_failed' => $tests_failed,
 			'checks_passed' => $checks_passed, 'checks_failed' => $checks_failed, 'checks_skipped' => $checks_skipped,

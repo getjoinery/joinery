@@ -4,6 +4,7 @@
 # tier: safe
 # env: any
 # needs: [rust]
+# covers: [sync/**]
 # timeout: 600
 #
 # The two harnesses the sync client is verified with, held to their own

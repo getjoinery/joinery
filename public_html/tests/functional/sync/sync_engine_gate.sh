@@ -4,6 +4,7 @@
 # tier: safe
 # env: any
 # needs: [rust]
+# covers: [sync/**]
 # timeout: 300
 #
 # The sync client's decision-making, everywhere it is a pure function

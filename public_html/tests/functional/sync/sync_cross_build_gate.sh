@@ -4,6 +4,7 @@
 # tier: safe
 # env: any
 # needs: [rust]
+# covers: [sync/**]
 # timeout: 900
 #
 # The macOS and Windows halves of the sync client, compiled from here.

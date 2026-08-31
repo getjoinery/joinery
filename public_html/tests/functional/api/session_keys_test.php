@@ -323,8 +323,13 @@ try {
 	$b_session = ApiKey::CreateSessionKey($user_b->key, 'B Phone ' . $suffix);
 	harness_register_key_id($b_session['api_key']->key);
 
+	// Test processes disable rehash-on-login (a production hash must never be
+	// rewritten at test cost). This section IS the rehash mechanism's test and
+	// user_b is its own fixture, so opt back in for exactly this sign-in.
+	User::$allow_test_rehash = true;
 	$user_b_login = new User($user_b->key, TRUE);
 	check($user_b_login->check_password($legacy_plain), 'legacy password verifies (triggers rehash)');
+	User::$allow_test_rehash = false;
 	$user_b_after = new User($user_b->key, TRUE);
 	check(strpos($user_b_after->get('usr_password'), '$argon2id$') === 0, 'hash silently upgraded to Argon2id');
 	$b_session_check = new ApiKey($b_session['api_key']->key, TRUE);

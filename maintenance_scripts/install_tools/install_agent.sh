@@ -3,6 +3,11 @@
 # install_agent.sh - install or converge the joinery-agent on this machine from
 # the shipped agent_dist artifact, or stop it where it is switched off.
 #
+# Version: 2.9 - The keepalive's descriptor-closing launcher runs under bash, not sh.
+#           dash parses `exec 10>&-` as "run the program named 10 with stdout closed",
+#           so ANY inherited descriptor numbered 10 or above made the launcher exit 127
+#           before starting the agent - the same silent-death family as 2.6. bash
+#           accepts multi-digit descriptor redirections.
 # Version: 2.8 - Installs on a machine with NO Joinery site (--siteless), for relays and Docker
 #           hosts that the plane manages but that host no deployment: the artifact location
 #           becomes an argument (--dist-dir), the run switch is written explicitly rather
@@ -338,7 +343,15 @@ if ! pgrep -x joinery-agent >/dev/null 2>&1; then
     # a node whose agent exited was never restarted by anything. Observed on
     # joinerydemo at 0.8.347: the agent self-updated to 1.7.0, exited as
     # designed, and stayed down. sh -c has no script descriptor to lose.
-    nohup sh -c 'for f in /proc/$$/fd/*; do n=${f##*/}; case "$n" in 0|1|2) continue;; esac; eval "exec $n>&-" 2>/dev/null || true; done; exec /usr/local/bin/joinery-agent' >> /var/log/joinery-agent.log 2>&1 < /dev/null &
+    #
+    # bash, not sh, and that is also load-bearing: POSIX sh (dash) only accepts
+    # SINGLE-DIGIT descriptor numbers in a redirection. It parses `exec 10>&-`
+    # as "exec the program named 10, with stdout closed" - the program does not
+    # exist, exec fails, and the shell exits 127 without reaching the launch.
+    # So under sh, ANY inherited descriptor numbered 10 or above (an upgrade
+    # process easily holds them) killed this launcher silently and the agent
+    # was never started. bash closes fd 10 the way the line means.
+    nohup bash -c 'for f in /proc/$$/fd/*; do n=${f##*/}; case "$n" in 0|1|2) continue;; esac; eval "exec $n>&-" 2>/dev/null || true; done; exec /usr/local/bin/joinery-agent' >> /var/log/joinery-agent.log 2>&1 < /dev/null &
 fi
 SUPERVISE
     chmod 755 "$SUPERVISE_PATH"

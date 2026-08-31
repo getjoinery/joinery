@@ -4,6 +4,7 @@
 # tier: safe
 # env: any
 # needs: [rust, node]
+# covers: [sync/**, public_html/assets/js/vault-crypto.js, public_html/assets/js/drive-crypto.js]
 # timeout: 300
 #
 # Cross-implementation crypto parity: the Rust jd-crypto crate ({repo
