@@ -45,7 +45,10 @@ interface FileStreamingDecryptor {
  * File — uploaded file records: storage (local/cloud), visibility, resizing,
  * serving gates, and signed URLs (docs/file_signed_urls.md).
  *
- * @version 1.10.2
+ * @version 1.10.3
+ * @changelog 1.10.3 - permanent_delete flushes the at-zero blob reclaim it
+ *   deferred against its own transaction, so bytes are freed at the call
+ *   rather than at process shutdown.
  * @changelog 1.10.0 - SOURCE_MESSENGER_ATTACHMENT: photos and files sent in a
  *   conversation, gated on that conversation rather than owned privately.
  */
@@ -1758,6 +1761,12 @@ public static function get_by_name($name, $search_deleted = false) {
 			if ($own_tx && $dblink->inTransaction()) { $dblink->rollBack(); }
 			throw $e;
 		}
+		// release() saw this method's transaction open and deferred any at-zero
+		// reclaim to shutdown, mistaking our transaction for the caller's. When we
+		// own it, it is committed by now — reclaim immediately, so the bytes never
+		// depend on a shutdown hook a killed process would not reach. When the
+		// caller owns the transaction the deferral stands, which is the point.
+		if ($own_tx) { FileBlob::flushDeferredReclaims(); }
 		return true;
 	}
 
