@@ -381,12 +381,23 @@ pub fn conflict_copy_name(name: &str, date: &str, device: &str, suffix: u32) -> 
 ///
 /// Any existing ` (n)` is replaced rather than appended to, so renaming twice
 /// cannot produce `report (2) (3).txt`.
+///
+/// Normalized to a spelling every supported filesystem accepts, for the same
+/// reason `conflict_copy_name` is: a name the engine mints for a file that then
+/// lands on a disk which has to escape it is adopted back under the escaped
+/// spelling, and the escape becomes a real name on the server. `a:b.txt` at 2
+/// is otherwise `a:b (2).txt`, which no Windows volume will hold.
 pub fn numbered_name(name: &str, n: u32) -> String {
     let (stem, ext) = split_extension(name);
     let stem = strip_number(stem);
-    match ext {
+    let assembled = match ext {
         Some(e) => format!("{stem} ({n}).{e}"),
         None => format!("{stem} ({n})"),
+    };
+    match to_local_name(&assembled, &crate::Personality::windows()) {
+        LocalName::AsIs(_) => assembled,
+        LocalName::Escaped { local, .. } => local,
+        LocalName::Unsyncable(_) => assembled,
     }
 }
 
@@ -741,6 +752,7 @@ mod tests {
             "memo-47 ",            // a trailing space, the same trap
         ] {
             let copy = conflict_copy_name(hostile, "2026-07-31", "pc", 1);
+            let numbered = numbered_name(hostile, 2);
             for p in [
                 Personality::windows(),
                 Personality::fat32(),
@@ -753,6 +765,12 @@ mod tests {
                     "the conflict copy of {hostile:?} is {copy:?}, which this \
                      filesystem would have to escape -- and the escape is what \
                      ends up on the server"
+                );
+                assert!(
+                    matches!(to_local_name(&numbered, &p), LocalName::AsIs(_)),
+                    "the numbered name of {hostile:?} is {numbered:?}, which \
+                     this filesystem would have to escape -- same leak, and \
+                     numbered names reach the disk the same way"
                 );
             }
         }

@@ -197,9 +197,13 @@ fn stage_for(action: &Action) -> Stage {
         // itself around who is vacating which name, and an entry that is
         // already where it is going vacates nothing.
         | Action::AdoptPlacement { .. } => Stage::Transfer,
-        Action::TrashLocal | Action::TrashRemote | Action::Forget | Action::RemoveFromScope => {
-            Stage::Delete
-        }
+        Action::TrashLocal
+        | Action::TrashRemote
+        | Action::Forget
+        | Action::RemoveFromScope
+        // It frees a name somebody else is waiting on, so it belongs with the
+        // work that vacates names rather than with the deletions.
+        | Action::UnmaterializeAndPark { .. } => Stage::Delete,
     }
 }
 

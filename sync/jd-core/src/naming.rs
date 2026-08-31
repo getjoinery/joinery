@@ -51,6 +51,11 @@ pub struct NamingOutcome {
     /// business, journalled with a key like every other order, and this stage
     /// only decides.
     pub renames: Vec<(EntityId, Placement, Placement)>,
+    /// Entries on their way to a name this disk cannot hold beside what is
+    /// already there. Carried out rather than acted on here: giving up a local
+    /// copy is an operation with a filesystem step and a precondition, and this
+    /// stage only decides.
+    pub park_at_destination: Vec<(EntityId, UnsyncableReason)>,
 }
 
 impl NamingOutcome {
@@ -219,6 +224,10 @@ pub fn apply_naming(
     // children's lengths by a byte or two, which the next pass settles.
     let folder_paths = folder_path_lengths(env)?;
 
+    // Folder -> what actually holds a name in it, filled as each folder is
+    // resolved and read by `judge_destinations` afterwards.
+    let mut settled: HashMap<Option<i64>, Vec<(EntityId, String)>> = HashMap::new();
+
     for (parent, mut siblings) in by_parent {
         siblings.sort_by_key(resolution_order);
         let names: Vec<String> = siblings
@@ -349,13 +358,101 @@ pub fn apply_naming(
                 None => {}
             }
 
+            if !matches!(updated.status, LocalStatus::Unsyncable(_)) {
+                settled
+                    .entry(parent)
+                    .or_default()
+                    .push((updated.id, competing_placement(&updated).name.clone()));
+            }
+
             if updated != entry {
                 env.store.put_entry(&updated)?;
             }
         }
     }
 
+    judge_destinations(env, personality, &settled, &mut out)?;
+
     Ok(out)
+}
+
+/// Judge an entry on its way somewhere against the folder it is going TO.
+///
+/// `competing_placement` resolves a materialized entry against its last AGREED
+/// placement, deliberately -- until the move applies the file is still in its
+/// old folder, competing with its old siblings. The consequence is that nothing
+/// asks whether the DESTINATION can hold it, and `path_for` then derives a local
+/// name from the destination name alone: a strictly weaker computation that
+/// cannot see siblings, so it cannot see that the name it derived is already
+/// taken.
+///
+/// What that cost: a user with a file genuinely called `%43ON.txt`, and
+/// `CON.txt` moved into the same folder. Windows escapes `CON.txt` onto exactly
+/// that name, the move landed on it, and `make_room` moved the user's real file
+/// aside as a conflict copy -- which propagated to the server and to every other
+/// device, including a Linux one where the two names never collided. It
+/// converged, so no sweep could find it.
+///
+/// The entrant is judged LAST so the file already wearing the name keeps it,
+/// and losing is not a rename of anybody: the loser gives up its own local copy
+/// and parks. Nothing that belongs to the winner is touched.
+fn judge_destinations(
+    env: &ExecEnv,
+    personality: &Personality,
+    settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
+    out: &mut NamingOutcome,
+) -> Result<(), ExecError> {
+    for entry in crate::pass::all_entries(env)? {
+        if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
+            continue;
+        }
+        if !entry.holds_a_local_file() {
+            continue;
+        }
+        // Placement inequality, not parent inequality. A server rename inside
+        // one folder reaches the same clash with nothing reparented, and a
+        // trigger watching only the parent would sail straight past it.
+        if entry.remote == *entry.local_placement() {
+            continue;
+        }
+        let mut names: Vec<String> = settled
+            .get(&entry.remote.parent)
+            .map(|v| {
+                v.iter()
+                    .filter(|(id, _)| *id != entry.id)
+                    .map(|(_, n)| n.clone())
+                    .collect()
+            })
+            .unwrap_or_default();
+        let entrant = names.len();
+        names.push(entry.remote.name.clone());
+        let resolved = jd_vfs::resolve_siblings(&names, personality);
+        // Only a COLLISION with something already in the destination. Whether
+        // the name is usable at all -- too long, empty once escaped, wearing
+        // the engine's own reserved prefix -- is the main loop's judgement and
+        // it has already made it.
+        //
+        // The distinction is load-bearing, not tidiness. An entry whose server
+        // name is `.jd-swap-...` is one an interrupted rename left half
+        // finished, and the operation that renames it back is the only thing
+        // that will ever clean it up. Parking it here for `ReservedPrefix` --
+        // which is true of the name, and beside the point -- cancels that
+        // recovery and strands the scratch name on the server for ever.
+        let taken = match &resolved[entrant].outcome {
+            jd_vfs::LocalName::Unsyncable(reason) => matches!(
+                reason,
+                UnsyncableReason::CaseClash { .. }
+                    | UnsyncableReason::UnicodeClash { .. }
+                    | UnsyncableReason::DuplicateName { .. }
+            )
+            .then(|| reason.clone()),
+            _ => None,
+        };
+        if let Some(reason) = taken {
+            out.park_at_destination.push((entry.id, reason));
+        }
+    }
+    Ok(())
 }
 
 /// Is this an encrypted entry this device has no key for?
@@ -414,10 +511,30 @@ fn no_key_for(env: &ExecEnv, entry: &Entry) -> Option<LocalStatus> {
 /// in different orders keep different members of it. Both files remain on the
 /// server and both devices report the clash, so nothing is lost and the user is
 /// told — which is the whole bargain of refusing rather than mangling.
+///
+/// "Already on this disk" has to mean already on this disk UNDER THE NAME IT IS
+/// CLAIMING. Without that, an entry mid-move or mid-rename satisfies it from the
+/// placement it is leaving, so a lower-numbered arrival outranks the file
+/// already wearing the name and the settled file is the one demoted -- which
+/// cost a user the filename they chose, on every device they owned, over a
+/// clash that existed on one of them.
+///
+/// It is the PLACEMENT that has to be settled, not the parent. A rename inside
+/// one folder claims a new name with nothing reparented, and a rule comparing
+/// folders would call both of them incumbents and let the claimant win on id.
 fn resolution_order(e: &Entry) -> (u8, i64) {
     let materialized =
         e.synced_placement.is_some() || e.synced_fingerprint.is_some() || e.id.is_provisional();
-    (if materialized { 0 } else { 1 }, e.id.server_id)
+    let settled_here = e
+        .synced_placement
+        .as_ref()
+        .map_or(true, |p| *p == e.remote);
+    let rank = match (materialized, settled_here) {
+        (true, true) => 0,
+        (true, false) => 1,
+        (false, _) => 2,
+    };
+    (rank, e.id.server_id)
 }
 
 /// Length in bytes of each tracked folder's path below the root.

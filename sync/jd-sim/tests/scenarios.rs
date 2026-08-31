@@ -4728,7 +4728,7 @@ fn scratch_asymmetric_land_beside() {
 #[test]
 #[ignore]
 fn scratch_park_then_recover() {
-    use jd_core::model::{EntityId, Entry, LocalStatus, Placement};
+    use jd_core::model::{EntityId, LocalStatus, Placement};
 
     let world = World::new(4481, &["laptop"]);
     let laptop = world.device("laptop");
@@ -5921,4 +5921,119 @@ fn a_slot_reserved_for_an_arriving_file_is_not_adopted_from_under_it() {
         pc.fs.peek("memo-47%20").is_some(),
         "the arriving file materializes under its escaped name: {names:?}"
     );
+}
+
+/// The same destination clash, reached by a rename inside one folder.
+#[test]
+fn scratch_same_folder_clash() {
+    let world = World::of(9_502, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    boxd.fs.user_mkdir("Dest");
+    boxd.fs.user_write("Dest/%43ON.txt", b"a file genuinely called that");
+    boxd.fs.user_write("Dest/other.txt", b"the one about to be renamed");
+    assert!(world.settle().is_some(), "they settle apart");
+    println!("BEFORE pc: {:?}", jd_sim::scenario::disk_tree(pc).keys().collect::<Vec<_>>());
+
+    // No reparent at all: a rename, in place, into a name that escapes onto
+    // the name a sibling already holds.
+    boxd.fs.user_rename("Dest/other.txt", "Dest/CON.txt");
+    let settled = world.settle();
+    println!("AFTER settle={:?}", settled.is_some());
+    println!("AFTER server: {:?}", jd_sim::scenario::server_tree(&world.server).keys().collect::<Vec<_>>());
+    println!("AFTER box:    {:?}", jd_sim::scenario::disk_tree(boxd).keys().collect::<Vec<_>>());
+    println!("AFTER pc:     {:?}", jd_sim::scenario::disk_tree(pc).keys().collect::<Vec<_>>());
+}
+
+/// A file arriving in a folder must not evict the file already living there.
+///
+/// `%43ON.txt` is a name a user is entitled to. On Windows `CON.txt` escapes
+/// onto exactly that name, so moving it into the same folder makes two server
+/// names one local name. Nothing about that entitles either file to be renamed.
+///
+/// What happened before: `path_for` derived the escaped destination without
+/// being able to see siblings, the move landed on the occupied slot, and
+/// `make_room` moved the user's genuine file aside as a conflict copy -- which
+/// propagated to the server and to every other device, including a Linux one
+/// where the two names never collided. And it CONVERGED, so no sweep could
+/// reach it: the estate finds loops, not settled wrong answers.
+#[test]
+
+fn a_file_arriving_in_a_folder_does_not_evict_the_one_already_there() {
+    let world = World::of(9_501, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    boxd.fs.user_mkdir("Dest");
+    boxd.fs.user_write("Dest/%43ON.txt", b"a file genuinely called that");
+    boxd.fs.user_write("CON.txt", b"the reserved stem");
+    assert!(world.settle().is_some(), "the two settle apart");
+
+    boxd.fs.user_rename("CON.txt", "Dest/CON.txt");
+    assert!(world.settle().is_some(), "the move settles");
+
+    let server: Vec<String> = jd_sim::scenario::server_tree(&world.server).into_keys().collect();
+    assert!(
+        !server.iter().any(|p| p.contains("conflicted copy")),
+        "nothing was renamed: the clash is local to one device and belongs to \
+         neither file: {server:?}"
+    );
+    assert!(
+        server.iter().any(|p| p == "Dest/%43ON.txt") && server.iter().any(|p| p == "Dest/CON.txt"),
+        "both files are still themselves on the server: {server:?}"
+    );
+    // The Linux box can hold both and does.
+    let on_box = jd_sim::scenario::disk_tree(boxd);
+    assert!(
+        on_box.contains_key("Dest/%43ON.txt") && on_box.contains_key("Dest/CON.txt"),
+        "the linux box holds both: {:?}", on_box.keys().collect::<Vec<_>>()
+    );
+    // The Windows box keeps the file it already had; the arrival gives up its
+    // local copy rather than evicting anybody, and says so.
+    assert_eq!(
+        pc.fs.peek("Dest/%43ON.txt").map(|b| b.to_vec()),
+        Some(b"a file genuinely called that".to_vec()),
+        "the file the user already had is untouched and still itself"
+    );
+    // The assertion that actually matters, and the one whose absence let a
+    // non-convergent version of this fix pass: every device agrees with the
+    // server about everything it is holding.
+    assert_converged(&world);
+
+}
+
+/// The same eviction, reached by a rename inside one folder.
+///
+/// No reparent is involved, so a trigger watching the parent would sail past
+/// it. The entry is already in the folder and merely claims a new name -- which
+/// is why ranking by folder membership is not enough, and the settled PLACEMENT
+/// is what has to decide.
+#[test]
+
+fn a_rename_onto_a_siblings_escaped_name_does_not_evict_the_sibling() {
+    let world = World::of(9_502, &[("box", jd_sim::scenario::Platform::Linux), ("pc", jd_sim::scenario::Platform::Windows)]);
+    let boxd = world.device("box");
+    let pc = world.device("pc");
+
+    boxd.fs.user_mkdir("Dest");
+    boxd.fs.user_write("Dest/%43ON.txt", b"a file genuinely called that");
+    boxd.fs.user_write("Dest/other.txt", b"the one about to be renamed");
+    assert!(world.settle().is_some(), "they settle apart");
+
+    boxd.fs.user_rename("Dest/other.txt", "Dest/CON.txt");
+    assert!(world.settle().is_some(), "the rename settles");
+
+    let server: Vec<String> = jd_sim::scenario::server_tree(&world.server).into_keys().collect();
+    assert!(
+        !server.iter().any(|p| p.contains("conflicted copy")),
+        "nothing was renamed: {server:?}"
+    );
+    assert_eq!(
+        pc.fs.peek("Dest/%43ON.txt").map(|b| b.to_vec()),
+        Some(b"a file genuinely called that".to_vec()),
+        "the sibling that already held the name keeps it, and its content"
+    );
+    assert_converged(&world);
+
 }
