@@ -2,6 +2,7 @@
 /**
  * ManagementJob - A queued, running, or completed server management operation.
  *
+ * @version 1.12 - backup_database and backup_project leave the job-type filter (retired ops)
  * @version 1.11 - createFromBuild routes a probe envelope to NodeHealthProbe, which completes it
  *                 in-request and files an already-finished row
  * @version 1.10 - claim budgets for the three restore primitives, set before anything can
@@ -436,12 +437,11 @@ class ManagementJob extends SystemBase {
 	 * @return string[]
 	 */
 	static function filterTypes($include_publish = false) {
-		// run_command and both copy_database types are retired (A1/A3). Historical
-		// rows keep their type strings and still render; what is gone is the
-		// ability to create another, so they are not offered as a filter for a
-		// kind of job that can no longer happen.
+		// Retired types (run_command, both copy_database kinds, backup_database,
+		// backup_project) are not offered: historical rows keep their type strings
+		// and still render, but a filter is for kinds of job that can still happen.
 		$types = [
-			'check_status', 'backup_database', 'backup_project',
+			'check_status',
 			'restore_database', 'list_backups',
 			'restore_project', 'restore_chain', 'apply_update', 'decommission_node',
 			'backup_run',

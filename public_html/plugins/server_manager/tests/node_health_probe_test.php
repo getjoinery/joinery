@@ -130,12 +130,9 @@ section('What SSH still owns');
 // SSH-only operation is a step backwards taken by accident.
 //
 // Five of these are relay builders that die at the cutover rather than crossing
-// (agent_machine_posture_and_relay_converge.md), and backup_database and
-// backup_project predate backup_run. The four that have to be answered are
-// install_node, enable_agent, decommission_node and provision_ssl.
+// (agent_machine_posture_and_relay_converge.md). The four that have to be
+// answered are install_node, enable_agent, decommission_node and provision_ssl.
 $expected_ssh_only = array(
-	'backup_database',
-	'backup_project',
 	'decommission_node',
 	'enable_agent',
 	'install_node',
