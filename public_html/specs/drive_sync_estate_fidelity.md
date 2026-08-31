@@ -377,6 +377,101 @@ Cleared seed 42348. Estate after the fix: 16 arms, 40,070 seeds, zero failures.
 
 ---
 
+## Defect D — the park that changed a status and left the file
+
+Every oracle above passed on a device holding a file nothing owned.
+
+`café-57.txt` and its decomposed twin are two names on the server and one name
+on a Mac. The twin that loses the slot has to stop being held there, and the
+engine says so by parking its entry `Unsyncable(UnicodeClash)`. In the case the
+estate found, that entry was **materialized**: an arriving file had taken the
+slot, `make_room` had moved the loser's copy aside under a conflict-copy name,
+and naming then parked it by assigning a status and nothing else.
+
+What that left: a file on the user's disk, at a name the engine invented, that
+no entry claims. Every later scan pairs it back to the parked entry and reports
+the same local move; nothing acts on a parked entry's move, so the report is
+made again next pass, and the pass still calls itself quiet because no operation
+was planned. The file is never scanned, never uploaded, never renamed and never
+removed. An edit to it goes nowhere.
+
+Nothing saw it, and the reason is worth stating: `assert_converged` **excuses
+declined content by hash**, and it drops that hash from the disk side as
+readily as from the server side. The exemption written to excuse the file being
+absent excused it being present. There is a second reason the estate could not
+find it either way — the world converges, and a converged wrong answer is not
+what a sweep looks for.
+
+Two halves, as with defect C:
+
+- **A new oracle.** `assert_no_disk_file_is_unclaimed`: every file on a disk is
+  claimed by some entry. Only a park releases a claim — `PendingKey` and
+  `OutOfScope` both answer no to `holds_a_local_file` while legitimately keeping
+  the bytes, a keyless device holding local-only files under a vault folder it
+  cannot read being the case that proves it. Called from `assert_converged`,
+  before the exemption gets a chance to hide anything.
+- **The fix.** A materialized entry is not parked by changing a status.
+  `apply_naming` hands it to `give_up_local_copy`, and the park OPERATION does
+  the work: it checks the server already has the bytes, trashes the local copy,
+  clears the record and sets the status, so the disk and the record change
+  together or not at all. The operation already existed — destination judging
+  used it — and only the in-place verdict was still taking the shortcut.
+
+`holds_a_local_file` had stated the rule the whole time: *no bytes of its are at
+that path and none ever were*. It was enforced nowhere.
+
+Pinned by frozen seed 111120 (`mac`/`pc`/`disk`, 70 steps, chaos), which fails
+on the old code with the new oracle in and passes with the fix. A hand-written
+scenario would not reach it: the settled twin always wins, so the loser is
+normally parked before it ever materializes, and only a race that asides the
+loser's copy first produces a materialized loser.
+
+---
+
+## Defect E — the guard was refreshed by the thing it guards against
+
+The first defect the fresh seeds found, and the first content loss in this
+spec: a download destroyed seven bytes that were on no server and in no trash.
+
+A download may only overwrite a local file if that file is still the one the
+download was decided against, and the engine asks that question by comparing a
+recorded fingerprint — size, modification time, inode — with the disk. The
+answer is only as good as the record.
+
+Applying a rename the server made refreshes that record. It re-stamped the
+fingerprint from whatever now stood at the destination and left the recorded
+CONTENT untouched, so the two halves of one agreement came to describe two
+different files. In the seed the inode had moved as well: the record asserted
+*unchanged since we agreed, and what we agreed is X* about a file holding
+neither. That runs moments before the guard, and it is the guard's only
+reference point — so the rename handed the guard a reference that matched by
+construction and the guard could no longer fire at all. The scan does compare
+content and was honest throughout; it simply ran at the top of the pass, before
+the record was made to lie.
+
+Two fixes, and each stops it alone:
+
+- **A fingerprint is recorded only about bytes that have been read.** The
+  destination is hashed and compared with the content agreement; no match, no
+  fingerprint. `synced_content` is deliberately left alone — clearing it would
+  strip the hash the scan compares against, and a genuine local edit would then
+  arrive as a stranger (delete-plus-create, version chain gone) instead of as
+  the conflict it is.
+- **The commit reads the file before overwriting it.** The last gate before
+  bytes are destroyed, and the only one no history can defeat: every cheaper
+  discriminator is itself one of the suspects. Neither what arrived nor what was
+  agreed means nobody has seen these bytes, and the operation stands down for
+  the scan to meet them as a conflict.
+
+Pinned by frozen seed 2024110. A hand-built version was attempted and does not
+reproduce it: staging a user's file at the name a rename is about to claim ends
+correctly, with `make_room` moving it aside, so an occupied destination is not
+the ingredient. What the seed has is an entry whose own local file had been
+replaced while the content agreement still described the file before it. That
+state has not been staged by hand; the seed stands until it is.
+
+---
+
 ## Still open on this axis
 
 - **`path_for`'s forward derivation is still weaker than naming.** Destination

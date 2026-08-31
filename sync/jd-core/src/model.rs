@@ -197,8 +197,15 @@ impl Entry {
     /// already told the user, by name, that it will not be materializing this
     /// here: a name the filesystem cannot hold, an encrypted file whose key has
     /// not arrived, and a subtree the user took out of scope. Such an entry
-    /// still records a placement -- that is how it says what it is waiting for
-    /// -- but no bytes of its are at that path and none ever were.
+    /// still records a placement -- that is how it says what it is waiting for.
+    ///
+    /// What that means about the disk differs by status, and the difference is
+    /// load-bearing. `Unsyncable` is a release: the park operation gives up the
+    /// local copy, so nothing of this entry is at that path. `PendingKey` and
+    /// `OutOfScope` are not. Both say only that the ENGINE will neither put
+    /// anything there nor touch what is; a keyless device keeps the local-only
+    /// files the user saved under a vault folder it cannot read, and taking a
+    /// subtree out of scope leaves the user's copies exactly where they are.
     ///
     /// The distinction matters wherever one entry asks whether a path belongs
     /// to another. `PendingDownload` deliberately answers yes: those bytes are

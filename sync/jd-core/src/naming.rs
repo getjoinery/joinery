@@ -51,11 +51,19 @@ pub struct NamingOutcome {
     /// business, journalled with a key like every other order, and this stage
     /// only decides.
     pub renames: Vec<(EntityId, Placement, Placement)>,
-    /// Entries on their way to a name this disk cannot hold beside what is
-    /// already there. Carried out rather than acted on here: giving up a local
-    /// copy is an operation with a filesystem step and a precondition, and this
-    /// stage only decides.
-    pub park_at_destination: Vec<(EntityId, UnsyncableReason)>,
+    /// Entries that are holding a file this disk may not go on holding: the
+    /// name clashes with a sibling that outranks them, either where they
+    /// already are or in the folder they are moving to. Carried out rather than
+    /// acted on here: giving up a local copy is an operation with a filesystem
+    /// step and a precondition (the server has to have the bytes first), and
+    /// this stage only decides.
+    ///
+    /// The alternative -- flipping the status to `Unsyncable` here and leaving
+    /// the file where it is -- looks like it works and does not. The record
+    /// still names the file, so every later scan reports it as a local move
+    /// that nothing acts on, for ever, while the user sees a file that is never
+    /// scanned, sent, renamed or removed again.
+    pub give_up_local_copy: Vec<(EntityId, UnsyncableReason)>,
 }
 
 impl NamingOutcome {
@@ -333,14 +341,30 @@ pub fn apply_naming(
             let mut updated = entry.clone();
             updated.local_name = local_name;
 
+            // Set when this entry is being parked by giving up a copy it is
+            // actually holding, so the rest of the loop knows the status has
+            // not been flipped here and will not be.
+            let mut releasing = false;
             match verdict {
                 Some(reason) => {
-                    // Re-raising the same verdict every pass would fill the
-                    // issues panel with one problem repeated a thousand times.
-                    if entry.status != LocalStatus::Unsyncable(reason.clone()) {
-                        out.unsyncable.push((entry.id, reason.clone()));
+                    // A materialized entry cannot be parked by changing a
+                    // status. There is a file on the disk, and giving it up has
+                    // a precondition (the server must already have these bytes)
+                    // and a filesystem step, which is what the park OPERATION
+                    // is for. The op flips the status itself, once the copy is
+                    // really gone, so the record and the disk change together.
+                    if entry.holds_a_local_file() && entry.synced_placement.is_some() {
+                        releasing = true;
+                        out.give_up_local_copy.push((entry.id, reason));
+                    } else {
+                        // Re-raising the same verdict every pass would fill the
+                        // issues panel with one problem repeated a thousand
+                        // times.
+                        if entry.status != LocalStatus::Unsyncable(reason.clone()) {
+                            out.unsyncable.push((entry.id, reason.clone()));
+                        }
+                        updated.status = LocalStatus::Unsyncable(reason);
                     }
-                    updated.status = LocalStatus::Unsyncable(reason);
                 }
                 None if was_held => {
                     // Whatever was in the way has cleared. Whether it can be
@@ -358,7 +382,10 @@ pub fn apply_naming(
                 None => {}
             }
 
-            if !matches!(updated.status, LocalStatus::Unsyncable(_)) {
+            // An entry on its way out of the name does not hold it. Its status
+            // still says `Synced` until the park op runs, so the verdict has to
+            // be read from the decision rather than from the record.
+            if !releasing && !matches!(updated.status, LocalStatus::Unsyncable(_)) {
                 settled
                     .entry(parent)
                     .or_default()
@@ -402,11 +429,23 @@ fn judge_destinations(
     settled: &HashMap<Option<i64>, Vec<(EntityId, String)>>,
     out: &mut NamingOutcome,
 ) -> Result<(), ExecError> {
+    // At most one park per entity per batch.
+    //
+    // The in-place verdict above no longer writes `Unsyncable` to the store --
+    // the park op does, when the copy is really gone -- so an entity it decided
+    // to release still reads as holding a file here. Judged again, it would be
+    // pushed a second time and journalled twice. The first op clears the record
+    // and the second then resolves its path through the fallback to `remote`,
+    // finds the WINNER's file answering at that name, and retries against it
+    // for ever: never destructive, because the agreement it would need is gone,
+    // but a device that is never quiet again.
+    let already: std::collections::HashSet<EntityId> =
+        out.give_up_local_copy.iter().map(|(id, _)| *id).collect();
     for entry in crate::pass::all_entries(env)? {
         if entry.status == LocalStatus::OutOfScope || entry.remote_deleted {
             continue;
         }
-        if !entry.holds_a_local_file() {
+        if !entry.holds_a_local_file() || already.contains(&entry.id) {
             continue;
         }
         // Placement inequality, not parent inequality. A server rename inside
@@ -449,7 +488,7 @@ fn judge_destinations(
             _ => None,
         };
         if let Some(reason) = taken {
-            out.park_at_destination.push((entry.id, reason));
+            out.give_up_local_copy.push((entry.id, reason));
         }
     }
     Ok(())
