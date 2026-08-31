@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-#version 3.13 - Fixed fix_permissions path resolution after cd commands
+#version 3.14 - Validators no longer narrate; dropped the ignored verbose argument
 # MODIFIED v3.12: Changed from "add new themes" to "update installed themes only" model
 # MODIFIED v3.12: Now uses sparse checkout to only fetch themes already in public_html
 # MODIFIED v3.12: Replaced preserveCustomThemesPlugins with updateInstalledThemesOnly
@@ -28,7 +28,7 @@
 # MODIFIED v3.51: Removed blocking .htaccess creation in backup/failed directories (caused rollback access issues)
 
 # Deploy script version
-DEPLOY_VERSION="3.13"
+DEPLOY_VERSION="3.14"
 
 # Capture script directory at startup (before any cd commands change working directory)
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -898,8 +898,7 @@ php_validation_output=$(php -r "
     require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
     require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-    \$verbose = $VERBOSE ? true : false;
-    \$result = DeploymentHelper::validatePHPSyntax('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
+    \$result = DeploymentHelper::validatePHPSyntax('/var/www/html/$TARGET_SITE/public_html_stage');
 
     if (!\$result['success']) {
         echo 'ERRORS_FOUND:' . count(\$result['errors']) . ':' . \$result['files_checked'] . PHP_EOL;
@@ -942,8 +941,7 @@ plugin_test_output=$(php -r "
     require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
     require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-    \$verbose = $VERBOSE ? true : false;
-    \$result = DeploymentHelper::testPluginLoading('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
+    \$result = DeploymentHelper::testPluginLoading('/var/www/html/$TARGET_SITE/public_html_stage');
 
     if (!\$result['success']) {
         echo 'ERRORS_FOUND:' . count(\$result['errors']) . ':' . \$result['files_checked'] . PHP_EOL;
@@ -1005,8 +1003,7 @@ bootstrap_output=$(php -r "
     require_once('/var/www/html/$TARGET_SITE/public_html_stage/includes/PathHelper.php');
     require_once(PathHelper::getIncludePath('includes/DeploymentHelper.php'));
 
-    \$verbose = $VERBOSE ? true : false;
-    \$result = DeploymentHelper::testBootstrap('/var/www/html/$TARGET_SITE/public_html_stage', \$verbose);
+    \$result = DeploymentHelper::testBootstrap('/var/www/html/$TARGET_SITE/public_html_stage');
 
     if (!\$result['success']) {
         echo 'ERRORS_FOUND:' . count(\$result['errors']) . PHP_EOL;

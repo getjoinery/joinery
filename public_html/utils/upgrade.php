@@ -26,6 +26,33 @@
 	// Detect CLI mode early to avoid loading unnecessary UI components
 	$is_cli = (php_sapi_name() === 'cli');
 
+	// Turn the run's HTML into the plain text a terminal or a log file wants.
+	// Only tags this pipeline actually emits are removed: an unexpected <...> in
+	// a tar or php -l error message is content, and passes through untouched.
+	function upgrade_plain_text($html) {
+		$tags = 'h[1-6]|p|div|span|strong|b|em|i|small|code|pre|a|table|td|th|hr'
+			. '|fieldset|form|input|button|label|select|option|textarea';
+		$text = preg_replace('~<script\b[^>]*>.*?</script>~is', '', $html);
+		$text = preg_replace('~<br\s*/?>~i', "\n", $text);
+		$text = preg_replace('~<li\b[^>]*>~i', '  - ', $text);
+		$text = preg_replace('~</(li|h[1-6]|p|div|ul|ol|tr|table)>~i', "\n", $text);
+		$text = preg_replace('~<(h[1-6]|p|ul|ol|table|tr)\b[^>]*>~i', "\n", $text);
+		$text = preg_replace('~</?(' . $tags . ')\b[^>]*>~i', '', $text);
+		$text = html_entity_decode($text, ENT_QUOTES | ENT_HTML5, 'UTF-8');
+		return preg_replace("~\n{3,}~", "\n\n", $text);
+	}
+
+	// The upgrade narrates itself once, in HTML. A CLI run - an agent job, cron,
+	// a scripted deploy - has no browser, and its transcript is read afterwards
+	// on the job detail page inside a <pre>, where markup written for a browser
+	// arrives as the literal characters <br>. Rather than ask each of the ~130
+	// output sites to know which mode it is in, the whole run is buffered and
+	// converted at the one point that knows the answer. Everything upgrade.php
+	// calls is covered too.
+	if ($is_cli) {
+		ob_start('upgrade_plain_text');
+	}
+
 	require_once( __DIR__ . '/../includes/PathHelper.php');
 
 	require_once(PathHelper::getIncludePath('includes/Globalvars.php'));
@@ -42,12 +69,12 @@
 	$full_site_dir = $baseDir.$site_template;
 
 	if($baseDir == '' || !$baseDir){
-		echo '$baseDir is empty.  Aborting upgrade.' . ($is_cli ? "\n" : '<br>');
+		echo '$baseDir is empty.  Aborting upgrade.<br>';
 		exit;
 	}
 
 	if($site_template == '' || !$site_template){
-		echo '$site_template is empty.  Aborting upgrade.' . ($is_cli ? "\n" : '<br>');
+		echo '$site_template is empty.  Aborting upgrade.<br>';
 		exit;
 	}
 	$verbose = false;
@@ -824,15 +851,10 @@
 		}
 
 		if (!empty($files_needing_update)) {
-			if ($is_cli) {
-				echo "\n=== SELF-UPDATE REQUIRED ===\n";
-				echo "The following deployment files have changed in the new version:\n";
-			} else {
-				out_step('Self-Update Required');
-				echo 'The following deployment files have changed in the new version:<br>';
-			}
+			out_step('Self-Update Required');
+			echo 'The following deployment files have changed in the new version:<br>';
 			foreach ($files_needing_update as $f) {
-				echo ($is_cli ? '  - ' : '  &bull; ') . htmlspecialchars($f) . ($is_cli ? "\n" : '<br>');
+				echo '  &bull; ' . htmlspecialchars($f) . '<br>';
 			}
 
 			// Copy new versions over live files
@@ -960,14 +982,18 @@
 		// ============================================
 		out_step('Pre-deployment Validation');
 
-		// Validate tarball structure (heuristic check for obvious issues)
-		$result = DeploymentHelper::validateTarballStructure($stage_directory, $verbose);
+		// Each check below announces itself before it runs and reports on the same
+		// line when it finishes. The validators themselves say nothing - that way a
+		// run that dies part way still names the stage it died in, and no result is
+		// printed twice by both the check and its caller.
+		upgrade_echo('Tarball structure... ');
+		$result = DeploymentHelper::validateTarballStructure($stage_directory);
 		if (!$result['success']) {
 			$detail = 'The upgrade package does not have the expected structure (likely corrupted download or wrong file):<br>'
 				. '<ul>' . implode('', array_map(function($e){ return '<li>' . htmlspecialchars($e) . '</li>'; }, $result['errors'])) . '</ul>';
 			upgrade_abort('Tarball Validation Failed', $detail);
 		}
-		echo "✓ Tarball structure validation passed<br>";
+		upgrade_echo("✓<br>");
 		if (!empty($result['warnings'])) {
 			$body = implode('<br>', array_map(function($w){ return '• ' . htmlspecialchars($w); }, $result['warnings']));
 			out_alert('warning', 'Warnings', $body);
@@ -1007,12 +1033,13 @@
 					upgrade_abort('UPGRADE BLOCKED: Active Theme Missing', $detail);
 				}
 			} else {
-				echo "✓ Active theme '" . htmlspecialchars($active_theme) . "' found in upgrade package<br>";
+				upgrade_echo("Active theme '" . htmlspecialchars($active_theme) . "'... ✓<br>");
 			}
 		}
 
 		// Validate PHP syntax
-		$result = DeploymentHelper::validatePHPSyntax($stage_directory, $verbose);
+		upgrade_echo('PHP syntax... ');
+		$result = DeploymentHelper::validatePHPSyntax($stage_directory);
 		if (!$result['success']) {
 			$lines = [];
 			foreach ($result['errors'] as $error) {
@@ -1020,11 +1047,12 @@
 			}
 			upgrade_abort('PHP Syntax Validation FAILED (' . $result['files_checked'] . ' files checked, ' . count($result['errors']) . ' errors)', implode('<br>', $lines));
 		} else {
-			echo "✓ PHP syntax validation passed ({$result['files_checked']} files)<br>";
+			upgrade_echo("✓ {$result['files_checked']} files<br>");
 		}
 
 		// Test plugin loading
-		$result = DeploymentHelper::testPluginLoading($stage_directory, $verbose);
+		upgrade_echo('Plugin loading... ');
+		$result = DeploymentHelper::testPluginLoading($stage_directory);
 		if (!$result['success']) {
 			$lines = [];
 			foreach ($result['errors'] as $error) {
@@ -1033,15 +1061,16 @@
 			}
 			upgrade_abort('Plugin Loading Tests FAILED', implode('<br>', $lines));
 		} else {
-			echo "✓ Plugin loading tests passed ({$result['files_checked']} plugins)<br>";
+			upgrade_echo("✓ {$result['files_checked']} plugins<br>");
 		}
 
 		// Test bootstrap
-		$result = DeploymentHelper::testBootstrap($stage_directory, $verbose);
+		upgrade_echo('Application bootstrap... ');
+		$result = DeploymentHelper::testBootstrap($stage_directory);
 		if (!$result['success']) {
 			upgrade_abort('Bootstrap Test FAILED', htmlspecialchars($result['error']));
 		} else {
-			echo "✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")<br>";
+			upgrade_echo("✓ " . implode(', ', $result['components_loaded']) . "<br>");
 		}
 
 		out_step('Preserving Themes/Plugins');
