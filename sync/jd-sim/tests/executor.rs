@@ -95,6 +95,7 @@ fn fresh(id: EntityId, parent: Option<i64>, name: &str, status: LocalStatus) -> 
         local_name: None,
         status,
         wrapped_file_key: None,
+        replaces: None,
     }
 }
 

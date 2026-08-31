@@ -417,6 +417,7 @@ fn a_folder_that_lost_a_creation_race_still_converges() {
             local_name: None,
             status: LocalStatus::PendingUpload,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 
@@ -503,6 +504,7 @@ fn a_file_that_lost_a_naming_race_still_converges() {
             local_name: None,
             status: LocalStatus::PendingUpload,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 
@@ -818,6 +820,7 @@ fn a_rescue_does_not_claim_a_name_the_server_has_already_given_away() {
             local_name: None,
             status: LocalStatus::OutOfScope,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 
@@ -2442,6 +2445,7 @@ fn a_file_deleted_before_this_device_ever_fetched_it_stops_being_tracked() {
         local_name: None,
         status: jd_core::model::LocalStatus::PendingDownload,
         wrapped_file_key: None,
+        replaces: None,
     };
     laptop.store.put_entry(&orphan).unwrap();
     assert!(
@@ -2891,6 +2895,7 @@ fn a_download_for_a_file_the_server_has_lost_stops_being_planned() {
             local_name: None,
             status: jd_core::model::LocalStatus::PendingDownload,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 
@@ -2946,6 +2951,7 @@ fn bytes_on_this_disk_survive_the_server_losing_the_file_they_belonged_to() {
             local_name: None,
             status: jd_core::model::LocalStatus::PendingDownload,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 
@@ -4443,7 +4449,170 @@ fn a_file_dragged_into_a_vault_with_no_key_here_waits_instead_of_trashing_it() {
         "the guest trashed a file it had no way to replace: {:?}",
         world.server.tree()
     );
+    // And the bytes the user dragged are OWNED where they now are. Waiting is
+    // only a bargain if something is still watching the file: an entry that
+    // says it is waiting while pointing at the path the file has left is not
+    // waiting, it is lost -- nothing scans those bytes, nothing sends them,
+    // nothing moves them, and the next thing to want that name writes over
+    // them.
+    assert_converged(&world);
     assert_nothing_lost(&world, &committed);
+}
+
+/// Dragged in, then dragged back out again before any key arrives.
+///
+/// The hold on the server's copy has to be a fact that lapses, not a state
+/// something remembers to clear. The entry minted inside the vault goes away
+/// with the file, and the moment it does the original is an ordinary file that
+/// moved -- so the move must complete normally rather than sit behind a hold
+/// nothing will ever lift.
+#[test]
+fn a_file_dragged_into_a_vault_and_back_out_again_still_moves() {
+    let vault = SimVault::new(9_213);
+    let mut world = World::new(9_213, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"in, then out again";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the drag in settles");
+
+    guest.fs.user_mkdir("Work");
+    guest.fs.user_rename("Private/memo.txt", "Work/memo.txt");
+    assert!(
+        world.settle().is_some(),
+        "the drag back out has to finish; a hold that outlives the file it was \
+         protecting is a file that never syncs again"
+    );
+
+    let server = world.server.tree();
+    assert!(
+        server.contains_key("Work/memo.txt"),
+        "the move out never reached the server: {server:?}"
+    );
+    assert!(
+        !server.contains_key("memo.txt"),
+        "the old copy should be gone once the move completed: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The key arrives while the file is waiting inside the vault.
+///
+/// This is the whole point of holding rather than trashing: the conversion is
+/// deferred, not abandoned. Once the device can encrypt, the waiting copy goes
+/// up under the vault's protection and only then does the plaintext original
+/// get thrown away -- which is stricter than the keyed path, where the trash
+/// goes first and the upload follows.
+#[test]
+fn the_key_arriving_finishes_a_conversion_that_was_waiting() {
+    let vault = SimVault::new(9_215);
+    let mut world = World::new(9_215, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+    let mut committed = Committed::default();
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let body = b"private in the end";
+    world.device("guest").fs.user_write("memo.txt", body);
+    committed.note("memo.txt", body);
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the drag settles into a wait");
+    assert!(
+        world.server.tree().contains_key("memo.txt"),
+        "the plaintext copy must still be there while the wait lasts"
+    );
+
+    world.give_vault("guest", &vault);
+    assert!(world.settle().is_some(), "the conversion finishes on its own");
+
+    let server = world.server.tree();
+    assert!(
+        !server.contains_key("memo.txt"),
+        "the plaintext original should be gone once the vault copy landed: {server:?}"
+    );
+    assert!(
+        server.keys().any(|p| p.starts_with("Private/")),
+        "nothing arrived in the vault: {server:?}"
+    );
+    assert_converged(&world);
+    assert_nothing_lost(&world, &committed);
+}
+
+/// The server throws the original away while the conversion is still waiting.
+///
+/// The hold is about not trashing the server's copy ourselves. It must not turn
+/// into a refusal to hear that somebody else did -- a remote delete gets
+/// through every other skip in the same loop and has to get through this one,
+/// or the entry sits for ever describing a file that is gone.
+#[test]
+fn a_remote_delete_reaches_a_source_that_is_waiting_to_be_replaced() {
+    let vault = SimVault::new(9_217);
+    let mut world = World::new(9_217, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    world.device("guest").fs.user_write("memo.txt", b"deleted mid-wait");
+    assert!(world.settle().is_some(), "the plaintext file goes up first");
+
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_rename("memo.txt", "Private/memo.txt");
+    assert!(world.settle().is_some(), "the drag settles into a wait");
+
+    world.device("holder").fs.user_remove("memo.txt");
+    assert!(
+        world.settle().is_some(),
+        "the delete has to be heard through the hold"
+    );
+
+    assert!(
+        !world.server.tree().contains_key("memo.txt"),
+        "the delete never reached the server: {:?}",
+        world.server.tree()
+    );
+    assert_converged(&world);
+}
+
+/// Renaming a local-only file inside a vault this device cannot open leaves one
+/// record, not two.
+///
+/// The file has no server identity, so the scan mints a fresh one at the new
+/// path and the old entry has nothing left to be about. Nothing on the server
+/// says so and nothing on the disk says so, which is why this needs an oracle
+/// of its own: the record that owns no bytes goes on claiming a name, and any
+/// hold that depends on its existence never lapses.
+#[test]
+fn a_keyless_local_file_renamed_inside_the_vault_leaves_no_ghost_record() {
+    let vault = SimVault::new(9_219);
+    let mut world = World::new(9_219, &["holder", "guest"]);
+    world.give_vault("holder", &vault);
+    world.server.set_vault_public_key(1, &vault.public_key_b64);
+
+    world.server.seed_encrypted_folder(None, "Private");
+    let guest = world.device("guest");
+    guest.fs.user_mkdir("Private");
+    guest.fs.user_mkdir("Private/Notes");
+    guest.fs.user_write("Private/memo.txt", b"local only, no key here");
+    assert!(world.settle().is_some(), "the local-only file settles into a wait");
+
+    guest.fs.user_rename("Private/memo.txt", "Private/renamed.txt");
+    assert!(world.settle().is_some(), "the move within the vault settles");
+    assert_converged(&world);
 }
 
 /// A plaintext folder dragged into the vault is converted, contents and all.
@@ -4689,6 +4858,7 @@ fn scratch_asymmetric_land_beside() {
             local_name: None,
             status: LocalStatus::Synced,
             wrapped_file_key: None,
+            replaces: None,
         })
         .unwrap();
 

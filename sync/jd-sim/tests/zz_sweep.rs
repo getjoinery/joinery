@@ -2436,6 +2436,44 @@ fn scratch_ghost_probe() {
 /// It fails on the old code with either fix reverted, and both fixes stop it
 /// independently: the one that refuses to record a fingerprint about bytes it
 /// has not read, and the commit-time content check behind it.
+/// The seed that proves an encrypted file keeps its own name across a retry.
+///
+/// The defect: `move_remote` asks the server where the file ended up -- which
+/// it only does on a RETRY -- and records the answer whole. For an encrypted
+/// file the server's answer contains no name, only the placeholder
+/// `enc-{content id}` it stores for the life of the file, so the agreement
+/// ended up holding the placeholder. `local_placement` prefers the agreement,
+/// so from then on the user's file was CALLED `enc-...`: a later download
+/// landed under that name, the scan met a file no entry knew, and the engine
+/// offered it back to the server as a brand new file whose real name was
+/// another file's placeholder -- the one name the vault exists to keep secret,
+/// stored in the clear. `assert_the_server_was_never_told_a_real_name` catches
+/// it, one remove from the cause.
+///
+/// Frozen rather than hand-built, and not for want of trying. Three scenarios
+/// were written and all three passed with the fix in and out, because none of
+/// them could get `move_remote` to run with an attempt already behind it:
+/// losing the answer to the rename lets the next change poll absorb it and the
+/// op never re-runs; refusing it before the server sees it does not leave a
+/// retry either; and a blanket server error fails the change poll at the top of
+/// the pass, so the rename is never attempted at all and the attempt counter
+/// stays where it was. The aimed fault this needs -- one operation retried
+/// while everything around it succeeds -- is the state a long hostile run
+/// reaches by accident and a scenario cannot yet ask for.
+///
+/// Fails on every run before the fix and passes on every run after; the
+/// placeholder differs run to run because sealing draws a fresh nonce, so the
+/// name in the failure is not stable but the failure is.
+#[test]
+fn frozen_vault_placeholder_seed() {
+    let refs: [(&str, Platform); 3] = [
+        ("mac", Platform::MacOs),
+        ("pc", Platform::Windows),
+        ("disk", Platform::Decomposing),
+    ];
+    workload_core(1_073_449, 40, &refs, true, Vault::Shared, false, Names::Ordinary);
+}
+
 #[test]
 fn frozen_stale_agreement_seed() {
     let refs: [(&str, Platform); 3] = [
