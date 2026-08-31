@@ -571,14 +571,17 @@ class MailboxService {
 			// emptying it hides it — along with the only route to its own trash, leaving
 			// discarded mail recoverable in the database and unreachable in the interface
 			// until retention purges it (specs/mailbox_unmatched_sealing.md § unmatched
-			// mail you cannot reach). `unread` excludes archived for the same reason the
-			// per-mailbox badge does: selecting a box opens its Inbox view, so the count
-			// has to describe what that view shows.
+			// mail you cannot reach). `unread` excludes archived, judged spam and
+			// trashed rows for the same reason the per-mailbox badge does: selecting a
+			// box opens its Inbox view, so the count has to describe what that view
+			// shows — a badge counting mail sitting in Spam or Trash sends the reader
+			// looking for unread mail the Inbox does not hold.
 			$stmt = $db->query("SELECT iem_ied_inbound_email_domain_id AS domain_id,
 					COUNT(*) FILTER (WHERE iem_delete_time IS NULL) AS total,
 					COUNT(*) FILTER (
 						WHERE iem_delete_time IS NULL AND iem_is_read = false
 						AND iem_is_archived IS NOT TRUE
+						AND iem_spam_verdict IS DISTINCT FROM 'spam'
 					) AS unread,
 					COUNT(*) FILTER (WHERE iem_delete_time IS NOT NULL) AS trashed
 				FROM iem_inbound_email_messages
