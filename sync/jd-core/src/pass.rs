@@ -607,7 +607,7 @@ pub fn run_pass(
     // free a name somebody else is waiting on, so running them ahead of the
     // round's own work is the point rather than an accident of ordering -- and
     // they are decided before the scan, so they cannot be part of the round.
-    if !out.naming.renames.is_empty() || !out.naming.park_at_destination.is_empty() {
+    if !out.naming.renames.is_empty() || !out.naming.give_up_local_copy.is_empty() {
         let mut ops: Vec<crate::order::PlannedOp> = out
             .naming
             .renames
@@ -624,13 +624,19 @@ pub fn run_pass(
         // ahead of the park in the journal -- so it would run first, land on the
         // occupied name, and evict the very file the park exists to protect.
         // The decision has to reach back and cancel it.
-        if !out.naming.park_at_destination.is_empty() {
+        if !out.naming.give_up_local_copy.is_empty() {
             let parking: std::collections::HashSet<EntityId> = out
                 .naming
-                .park_at_destination
+                .give_up_local_copy
                 .iter()
                 .map(|(id, _)| *id)
                 .collect();
+            // This also keeps the batch to one park per entity ACROSS passes: a
+            // park still retrying from last pass is dropped here before the
+            // fresh one is journalled. The cost is that dropping and requeueing
+            // resets the attempt count, so a park that keeps retrying never
+            // escalates its backoff -- it simply tries once per pass, at
+            // whatever cadence passes run.
             for op in env.store.queued_ops()? {
                 if parking.contains(&op.entity) {
                     env.store.drop_op(op.op_id)?;
@@ -641,7 +647,7 @@ pub fn run_pass(
         // batch for the same reason: it is decided before the scan, so it
         // cannot be part of the round, and whoever is waiting on the name
         // should not have to wait a further pass for it.
-        ops.extend(out.naming.park_at_destination.iter().map(|(id, reason)| {
+        ops.extend(out.naming.give_up_local_copy.iter().map(|(id, reason)| {
             crate::order::PlannedOp {
                 entity: *id,
                 action: crate::reconcile::Action::UnmaterializeAndPark {

@@ -5979,9 +5979,20 @@ fn a_file_arriving_in_a_folder_does_not_evict_the_one_already_there() {
         "nothing was renamed: the clash is local to one device and belongs to \
          neither file: {server:?}"
     );
-    assert!(
-        server.iter().any(|p| p == "Dest/%43ON.txt") && server.iter().any(|p| p == "Dest/CON.txt"),
-        "both files are still themselves on the server: {server:?}"
+    // The exact tree, not just the presence of the two files. A device that
+    // gives up its local copy and fails to remove it leaves a file no entry
+    // claims -- and the very next scan ADOPTS it, so the server quietly gains a
+    // third file and every other device downloads it. Both sides then hold the
+    // same thing and convergence is perfectly happy; only counting what is
+    // there catches it.
+    assert_eq!(
+        server,
+        vec![
+            "Dest".to_string(),
+            "Dest/%43ON.txt".to_string(),
+            "Dest/CON.txt".to_string()
+        ],
+        "the server holds these three and nothing else"
     );
     // The Linux box can hold both and does.
     let on_box = jd_sim::scenario::disk_tree(boxd);
@@ -6028,6 +6039,17 @@ fn a_rename_onto_a_siblings_escaped_name_does_not_evict_the_sibling() {
     assert!(
         !server.iter().any(|p| p.contains("conflicted copy")),
         "nothing was renamed: {server:?}"
+    );
+    // As above: the exact tree, so a local copy given up but left on the disk
+    // cannot be re-adopted back onto the server unnoticed.
+    assert_eq!(
+        server,
+        vec![
+            "Dest".to_string(),
+            "Dest/%43ON.txt".to_string(),
+            "Dest/CON.txt".to_string()
+        ],
+        "the server holds these three and nothing else"
     );
     assert_eq!(
         pc.fs.peek("Dest/%43ON.txt").map(|b| b.to_vec()),

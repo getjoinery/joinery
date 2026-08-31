@@ -987,6 +987,11 @@ pub fn assert_converged(world: &World) {
     // other way round, every one of these reads as an unexplained missing file
     // and sends you looking at transfers.
     assert_records_agree_with_the_server(world);
+    // Before the content exemption below gets a chance to hide it: a file the
+    // device has stopped claiming is filtered off the DISK side by the same
+    // rule that excuses it being absent, so this is the only place it can be
+    // seen at all.
+    assert_no_disk_file_is_unclaimed(world);
     let clashes = vault_names_the_server_cannot_tell_apart(world);
     assert!(
         clashes.is_empty(),
@@ -1349,6 +1354,80 @@ pub fn assert_no_live_orphan_on_the_server(world: &World) {
         "the server is holding live items under trashed folders, where no \
          listing will ever show them and no client can place them: {orphans:?}"
     );
+}
+
+/// Every file on a disk is claimed by an entry that says it is holding one.
+///
+/// A device declines a name by parking the entry: it says by name that it will
+/// not hold this file here, gives up the local copy, and clears every record
+/// that pointed at it. Convergence then EXCUSES that content -- and it excuses
+/// it on both sides, because the exemption is matched by content hash rather
+/// than by path. So a park that flips the status but leaves the file sitting on
+/// the disk is excused by the very rule written to excuse the file being gone,
+/// and no oracle above sees the difference between the two.
+///
+/// What is left behind is worse than a stray file. No entry claims the path, so
+/// no scan adopts it, no upload sends it, no rename moves it and no delete
+/// removes it; the next thing that wants that name writes straight over bytes
+/// the user can still see in their folder.
+///
+/// Only a park releases a claim. `PendingKey` and `OutOfScope` also answer no
+/// to `holds_a_local_file` and both legitimately leave the user's bytes where
+/// they are, so both go on claiming their path here -- see that method for why
+/// the three are not one rule.
+pub fn assert_no_disk_file_is_unclaimed(world: &World) {
+    for device in &world.devices {
+        let entries = device.store.every_entry().unwrap();
+        let composes = jd_vfs::Vfs::personality(&device.fs).decomposes_unicode;
+        let folders: std::collections::HashMap<i64, &jd_core::model::Entry> = entries
+            .iter()
+            .filter(|e| e.id.entity_type == jd_core::EntityType::Folder)
+            .map(|e| (e.id.server_id, e))
+            .collect();
+        // The path this entry's file would be at, walking its parents up to the
+        // root by the names those folders actually wear on this disk. A parent
+        // that is not in the store has no path at all, which is a different
+        // fault with an invariant of its own.
+        let path_of = |e: &jd_core::model::Entry| -> Option<String> {
+            let mut parts = vec![e.effective_local_name().to_string()];
+            let mut parent = e.local_placement().parent;
+            let mut guard = 0;
+            while let Some(id) = parent {
+                let f = folders.get(&id)?;
+                parts.push(f.effective_local_name().to_string());
+                parent = f.local_placement().parent;
+                guard += 1;
+                if guard > 64 {
+                    return None;
+                }
+            }
+            parts.reverse();
+            let path = parts.join("/");
+            Some(if composes { jd_vfs::nfc(&path) } else { path })
+        };
+        // Every entry names its path, EXCEPT one parked `Unsyncable`: that is
+        // the one status that means the local copy was deliberately given up.
+        // `PendingKey` and `OutOfScope` also answer no to `holds_a_local_file`,
+        // and for both the file legitimately stays where it is -- a keyless
+        // device keeps the local-only files it made under a vault folder it
+        // cannot read, and taking a subtree out of scope leaves the user's
+        // copies alone. Those two are still claims; only a park is a release.
+        let claimed: std::collections::HashSet<String> = entries
+            .iter()
+            .filter(|e| !matches!(e.status, jd_core::model::LocalStatus::Unsyncable(_)))
+            .filter_map(|e| path_of(e))
+            .collect();
+        let unclaimed: Vec<String> = disk_tree(device)
+            .into_keys()
+            .filter(|p| !claimed.contains(p))
+            .collect();
+        assert!(
+            unclaimed.is_empty(),
+            "{} is holding files no entry claims, so nothing will ever scan, \
+             send, move or remove them: {unclaimed:?}",
+            device.name
+        );
+    }
 }
 
 /// No entry may name a parent that is not in the store.

@@ -1056,6 +1056,23 @@ fn sweep_killing_on(
     sweep_core(label, seeds, steps, devices, chaos, vault, true, Names::Ordinary)
 }
 
+/// How far to move every arm's seeds, from SEED_SHIFT.
+///
+/// The estate is a fixed set of seeds, so re-running it after a fix proves the
+/// fix and nothing else: the same worlds come back in the same order. A shift
+/// moves every arm onto ground the engine has never run before while leaving
+/// the arms themselves alone -- same devices, steps, platforms and faults -- so
+/// a clean shifted estate is new evidence rather than a repeat of the old one.
+///
+/// The shift is applied before anything is printed, so a seed named in a
+/// failure is the seed to reproduce with and needs no arithmetic.
+fn seed_shift() -> u64 {
+    std::env::var("SEED_SHIFT")
+        .ok()
+        .and_then(|v| v.parse().ok())
+        .unwrap_or(0)
+}
+
 #[must_use]
 fn sweep_core(
     label: &str,
@@ -1067,6 +1084,8 @@ fn sweep_core(
     kills: bool,
     names: Names,
 ) -> Vec<(String, u64)> {
+    let shift = seed_shift();
+    let seeds = (seeds.start + shift)..(seeds.end + shift);
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
     let mut kills_made = 0usize;
@@ -1096,8 +1115,9 @@ fn sweep_core(
     } else {
         String::new()
     };
+    let shifted = if shift == 0 { String::new() } else { format!(" [shift {shift}]") };
     println!(
-        "SWEEP {label}: {} of {total} failed: {:?}{killed}",
+        "SWEEP {label}{shifted}: {} of {total} failed: {:?}{killed}",
         failures.len(),
         failures
     );
@@ -2145,6 +2165,8 @@ fn hammer_sweep(
     chaos: bool,
 ) -> Vec<(String, u64)> {
     let spec: Vec<(&str, Platform)> = devices.iter().map(|n| (*n, Platform::Linux)).collect();
+    let shift = seed_shift();
+    let seeds = (seeds.start + shift)..(seeds.end + shift);
     let total = (seeds.end - seeds.start) as usize;
     let mut failures = Vec::new();
     for seed in seeds {
@@ -2160,8 +2182,9 @@ fn hammer_sweep(
         }
     }
     let collided = CONFLICTS.swap(0, std::sync::atomic::Ordering::Relaxed);
+    let shifted = if shift == 0 { String::new() } else { format!(" [shift {shift}]") };
     println!(
-        "SWEEP {label}: {} of {total} failed: {:?} ({collided} conflict copies)",
+        "SWEEP {label}{shifted}: {} of {total} failed: {:?} ({collided} conflict copies)",
         failures.len(),
         failures
     );
@@ -2380,6 +2403,49 @@ fn scratch_ghost_probe() {
     }
 }
 
+/// The seed that found a download destroying an unsynced local file.
+///
+/// `move_local` recorded the fingerprint of the file standing at the
+/// destination while leaving `synced_content` describing an older one. The
+/// record then said "unchanged, and its content is X" about bytes that were
+/// neither -- and the download guard, which compares only fingerprints, was
+/// handed a reference that matched by construction. It overwrote seven bytes
+/// nothing had ever uploaded, and the no-loss oracle found them nowhere.
+///
+/// Frozen with the arm's exact shape rather than left in the sweep, because it
+/// is the only reproduction there is. What cannot be staged from outside is the
+/// LYING RECORD -- not the state around it. The scan is honest throughout: in
+/// the fatal pass it refused the cached hash, read the real bytes and reported
+/// them correctly. Its honesty about the disk simply does not constrain what an
+/// operation writes into the record later in the same pass.
+///
+/// The obvious ingredients were tried and do NOT reproduce it. Staging an
+/// untracked file of the user's at the name a rename is about to claim, with
+/// the rename and an edit arriving together, ends correctly: `make_room` moves
+/// the stranger aside as a conflict copy and both files survive, with the fixes
+/// off as well as on. So an occupied destination is not the missing ingredient.
+///
+/// What this seed has instead is an entry whose OWN local file had already been
+/// replaced -- a different inode, holding bytes nothing had uploaded -- while
+/// `synced_content` still described the file before it. Its op history runs
+/// through a `preserve_local_as` to get there. `move_local` then stamped a
+/// fresh fingerprint over that stale content half, and a record that had been
+/// merely out of date became one that actively asserted agreement. Nobody has
+/// yet staged that by hand; if someone does, this seed can go.
+///
+/// It fails on the old code with either fix reverted, and both fixes stop it
+/// independently: the one that refuses to record a fingerprint about bytes it
+/// has not read, and the commit-time content check behind it.
+#[test]
+fn frozen_stale_agreement_seed() {
+    let refs: [(&str, Platform); 3] = [
+        ("a", Platform::Linux),
+        ("b", Platform::Linux),
+        ("c", Platform::Linux),
+    ];
+    workload_core(2_024_110, 90, &refs, false, Vault::None, false, Names::Ordinary);
+}
+
 /// Seeds that found the contested-name loop, frozen so it cannot come back.
 ///
 /// An identity minted for an untracked file, refused the name it wants,
@@ -2394,6 +2460,14 @@ fn scratch_ghost_probe() {
 /// Pinned with explicit platforms rather than the sweep's environment
 /// variables, because the mix is what puts two records and one disk slot in the
 /// same neighbourhood, and a different mix reproduces a different world.
+///
+/// Seed 111120 pins a second thing, found later and by a different oracle: a
+/// materialized entry parked by a change of status alone, leaving its file
+/// standing on the disk under the conflict-copy name an arriving twin moved it
+/// aside to. Nothing owned it afterwards, every pass re-reported the same
+/// unactioned local move, and the run still called itself quiet. It takes
+/// `assert_no_disk_file_is_unclaimed` to see it -- convergence excuses declined
+/// content by hash and drops that hash from the disk side too.
 #[test]
 fn frozen_contested_name_loop_seeds() {
     let refs: [(&str, Platform); 3] = [

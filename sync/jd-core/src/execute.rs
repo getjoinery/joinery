@@ -1369,6 +1369,33 @@ fn download(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         make_room(env, &path, Some(&arrived.plain.sha256))?;
     }
 
+    // The last gate before bytes are destroyed, and the only one that cannot be
+    // defeated by history.
+    //
+    // The guard below compares fingerprints, and a fingerprint is a claim about
+    // content made by something that looked earlier. Every such claim can be
+    // wrong about the file standing here NOW -- the recorded agreement, the
+    // hash cache, an operation that refreshed the fingerprint on its way past
+    // -- and each of them has been. A cheaper discriminator is defeated by
+    // construction for the same reason: it is one of the suspects.
+    //
+    // So the file is read. It costs one hash of a file this operation is about
+    // to rewrite in full, and only when something is actually standing there.
+    if entry.synced_fingerprint.is_some() && env.vfs.fingerprint(&path)?.is_some() {
+        let here = env.vfs.hash(&path)?;
+        let agreed = entry.synced_content.as_ref().map(|c| c.sha256.as_str());
+        if here != arrived.plain.sha256 && agreed != Some(here.as_str()) {
+            // Neither what has just arrived nor what both sides last agreed on.
+            // Whatever it is, nobody has seen it, and it is not this
+            // operation's to overwrite: the scan meets it as a conflict, which
+            // keeps both copies. The same three-way answer the refusal arm
+            // below gives, asked before the write rather than after it.
+            return Ok(OpOutcome::Overtaken(
+                "the file standing here is not the one this download was decided against".into(),
+            ));
+        }
+    }
+
     // The guard: if the local file changed while this was in flight, the
     // decision that produced this download was made against something that no
     // longer exists, and overwriting would discard an edit nobody has seen.
@@ -3147,7 +3174,45 @@ fn move_local(
         _ => None,
     };
     entry.synced_placement = Some(to);
-    entry.synced_fingerprint = env.vfs.fingerprint(&dest)?;
+    // A fingerprint is only ever recorded about bytes that have been looked at.
+    //
+    // This runs moments before the download guard uses it, and that guard has
+    // no other reference point: it asks whether the local file changed since
+    // the decision that planned the download, and it asks by comparing the
+    // recorded fingerprint with the disk. Recording the fingerprint of whatever
+    // happens to be standing at the destination hands that guard a reference
+    // that matches by construction. The rig found the shape: the file at the
+    // destination was a different one (a different inode) holding bytes nothing
+    // had ever uploaded, this line recorded ITS fingerprint against a content
+    // hash belonging to the old file, and the download in the same pass sailed
+    // through the guard and destroyed the only copy.
+    //
+    // Asked by content rather than by inode, because inodes are reused and the
+    // question is not whether this is the same file but whether these are the
+    // bytes the entry agreed about. No agreement is the honest answer when they
+    // are not: the download path then makes room instead of overwriting, and
+    // the scan meets the bytes as the change they are. `synced_content` stays,
+    // so a genuine local edit is still met as a conflict rather than as a
+    // stranger.
+    // Both halves have to be readable for the answer to mean anything. An
+    // unreadable file and an entry with no content agreement are both `None`,
+    // and letting those compare equal would record a fingerprint about bytes
+    // nobody managed to read -- accidentally safe, because with no content
+    // agreement every later guard falls through to its refusal arm, but safe by
+    // luck rather than by decision.
+    let agreed = entry.synced_content.as_ref().map(|c| c.sha256.clone());
+    let verified = match (entry.id.entity_type, &agreed) {
+        (EntityType::Folder, _) => true,
+        (EntityType::File, Some(agreed)) => {
+            env.vfs.hash(&dest).ok().as_deref() == Some(agreed.as_str())
+        }
+        (EntityType::File, None) => false,
+    };
+    entry.synced_fingerprint = if verified {
+        env.vfs.fingerprint(&dest)?
+    } else {
+        None
+    };
 
     // An agreement was just recorded, so say what that means for the entry's
     // status too. Leaving it behind is not cosmetic: an entry still claiming to
