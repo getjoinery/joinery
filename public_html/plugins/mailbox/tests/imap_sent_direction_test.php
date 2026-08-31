@@ -159,6 +159,8 @@ class ImapSentDirectionTest {
 			if ($aids) {
 				$ain = implode(',', array_map('intval', $aids));
 				$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN ($ain)");
+				$this->db->exec("DELETE FROM isp_inbound_imap_seed_proofs WHERE isp_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain))");
+				$this->db->exec("DELETE FROM iif_inbound_imap_folders WHERE iif_iia_inbound_imap_account_id IN (SELECT iia_inbound_imap_account_id FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain))");
 				$this->db->exec("DELETE FROM iia_inbound_imap_accounts WHERE iia_inbound_imap_account_id IN ($ain)");
 			}
 			$this->db->exec("DELETE FROM iem_inbound_email_messages WHERE iem_ied_inbound_email_domain_id IN ($in)");

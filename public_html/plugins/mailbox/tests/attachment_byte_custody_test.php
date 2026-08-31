@@ -130,6 +130,9 @@ harness_defer(function () use (&$file_ids, &$message_ids, $alias_id, $domain_id,
 			if ($f->key) { $f->permanent_delete(); }
 		} catch (\Throwable $e) {}
 	}
+	try { $db->prepare('DELETE FROM mie_mail_import_entries WHERE mie_mir_mail_import_run_id IN
+			(SELECT mir_mail_import_run_id FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?)')
+		->execute(array($alias_id)); } catch (\Throwable $e) {}
 	try { $db->prepare('DELETE FROM mir_mail_import_runs WHERE mir_iea_inbound_email_alias_id = ?')
 		->execute(array($alias_id)); } catch (\Throwable $e) {}
 	try { $grant->permanent_delete(); } catch (\Throwable $e) {}

@@ -445,7 +445,11 @@ if (!PluginHelper::isPluginActive('mailbox')) {
 	check($conversation_id > 0, 'open_remote with a local address opens a conversation', $opened->error ?? '');
 	harness_defer(function () use ($db, $conversation_id) {
 		if ($conversation_id <= 0) { return; }
+		$owned = 'SELECT msg_message_id FROM msg_messages WHERE msg_cnv_conversation_id = ?';
+		$db->prepare('DELETE FROM msr_message_reactions WHERE msr_msg_message_id IN (' . $owned . ')')->execute(array($conversation_id));
+		$db->prepare('DELETE FROM msa_message_attachments WHERE msa_msg_message_id IN (' . $owned . ')')->execute(array($conversation_id));
 		$db->prepare('DELETE FROM msg_messages WHERE msg_cnv_conversation_id = ?')->execute(array($conversation_id));
+		$db->prepare('DELETE FROM crp_conversation_remote_peers WHERE crp_cnv_conversation_id = ?')->execute(array($conversation_id));
 		$db->prepare('DELETE FROM cnp_conversation_participants WHERE cnp_cnv_conversation_id = ?')->execute(array($conversation_id));
 		$db->prepare('DELETE FROM cnv_conversations WHERE cnv_conversation_id = ?')->execute(array($conversation_id));
 	});

@@ -25,8 +25,12 @@ class Message extends SystemBase {	public static $prefix = 'msg';
 	protected static $foreign_key_actions = [
 		'msg_usr_user_id_sender' => ['action' => 'set_value', 'value' => User::USER_DELETED],
 		'msg_usr_user_id_recipient' => ['action' => 'set_value', 'value' => User::USER_DELETED],
-		// 'cnv' prefix collides with ContentVersion - name the source explicitly
-		'msg_cnv_conversation_id' => ['action' => 'cascade', 'source_class' => 'Conversation'],
+		// 'cnv' prefix collides with ContentVersion - name the source explicitly.
+		// permanent_delete, not cascade: a cascade is one level, so deleting a
+		// conversation with a flat cascade would take its messages and leave
+		// their reactions and attachments pointing at nothing. Deleting each
+		// message through the model runs that second level.
+		'msg_cnv_conversation_id' => ['action' => 'permanent_delete', 'source_class' => 'Conversation'],
 		// A reply outlives the message it quoted: the pointer clears and the
 		// bubble renders without a quote, rather than the reply vanishing.
 		'msg_reply_to_message_id' => ['action' => 'null', 'source_class' => 'Message'],
