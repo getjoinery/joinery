@@ -224,6 +224,10 @@ fn encode(action: &Action) -> (&'static str, Value) {
         Action::Adopt => ("adopt", json!({})),
         Action::AdoptPlacement { to } => ("adopt_placement", place(to)),
         Action::RemoveFromScope => ("remove_from_scope", json!({})),
+        Action::UnmaterializeAndPark { reason } => (
+            "unmaterialize_and_park",
+            json!({ "reason": crate::store::encode_reason(reason) }),
+        ),
     }
 }
 
@@ -553,6 +557,15 @@ fn perform(env: &ExecEnv, op: &Op) -> Result<OpOutcome, ExecError> {
         }
         "adopt" => adopt(env, op),
         "adopt_placement" => adopt_placement(env, op, read_place(&params)?),
+        "unmaterialize_and_park" => {
+            let raw = params
+                .get("reason")
+                .and_then(Value::as_str)
+                .ok_or_else(|| ExecError::UnknownOp("park has no reason".into()))?;
+            let reason = crate::store::decode_reason(raw)
+                .ok_or_else(|| ExecError::UnknownOp("park has an unreadable reason".into()))?;
+            unmaterialize_and_park(env, op, reason)
+        }
         "remove_from_scope" => {
             if let Some(mut entry) = env.store.get_entry(op.entity)? {
                 entry.status = LocalStatus::OutOfScope;
@@ -2973,6 +2986,16 @@ fn move_local(
             "the entry is no longer tracked".into(),
         ));
     };
+    // Belt and braces beside the cancellation in `pass`. Naming may have parked
+    // this entry because the destination cannot hold its name, and an op that
+    // ran anyway would land on the occupied name and `make_room` would move a
+    // file nobody touched out of the way. Dropped quietly: the park is already
+    // a visible statement with an issue of its own.
+    if matches!(entry.status, LocalStatus::Unsyncable(_)) {
+        return Ok(OpOutcome::Overtaken(
+            "the destination cannot hold this name".into(),
+        ));
+    }
     let agreed = local_path(env, &entry)?;
     let planned = match &source {
         Some(p) => Some(path_for(env, p)?),
@@ -3157,6 +3180,95 @@ fn move_local(
         }
     }
     env.store.put_entry(&entry)?;
+    Ok(OpOutcome::Done)
+}
+
+/// Give up the local copy, then park.
+///
+/// Reached when the name the server has given this entry cannot be held on this
+/// disk beside what is already there. The entry has to stop claiming a slot it
+/// cannot occupy, and the file it currently has is a materialization of a
+/// placement the server no longer holds -- so it is a stale copy under a name
+/// that means nothing anywhere else.
+///
+/// The order is the whole point. Flipping the status first would leave a parked
+/// entry with a file on the disk, and "parked implies nothing of this entry is
+/// here" is relied on in at least four places: `competing_placement` judges a
+/// parked entry by its remote placement, the scan's reserved set skips it, the
+/// adoption path treats its path as free, and the convergence oracle expects
+/// nothing on disk for it. A status flip alone strands the file under a
+/// superseded name, which is exactly the class of defect this engine exists to
+/// avoid.
+///
+/// Nothing is destroyed. The bytes are on the server -- proven here, not
+/// assumed -- and the copy goes to the OS trash rather than being unlinked, so
+/// a user who disagrees can take it back. A local edit that is NOT on the
+/// server yet stops this cold: the op retries, the ordinary upload runs first,
+/// and the park happens on a later pass once the work is safe.
+fn unmaterialize_and_park(
+    env: &ExecEnv,
+    op: &Op,
+    reason: jd_vfs::UnsyncableReason,
+) -> Result<OpOutcome, ExecError> {
+    let Some(mut entry) = require_entry(env, op.entity)? else {
+        return Ok(OpOutcome::Overtaken(
+            "the entry is no longer tracked".into(),
+        ));
+    };
+    // The server is the only thing making this safe. If it has let go of the
+    // entry, the local copy may be the last one and must not be touched here --
+    // the deletion path knows how to rescue it.
+    if entry.remote_deleted {
+        return Ok(OpOutcome::Overtaken(
+            "the server no longer has it, so the deletion path owns this".into(),
+        ));
+    }
+    let path = match local_path(env, &entry)? {
+        Placed::At(p) => p,
+        Placed::Not(why) => return Ok(why.outcome()),
+    };
+    let on_disk = env.vfs.fingerprint(&path)?;
+    if let Some(now) = on_disk {
+        let agreed = entry.synced_fingerprint.filter(|agreed| {
+            now.unchanged_from(agreed, &env.vfs.personality())
+        });
+        if agreed.is_none() || entry.synced_content.is_none() {
+            return Ok(OpOutcome::Retry(
+                "this copy has work the server does not have yet".into(),
+            ));
+        }
+        match env.vfs.trash(&path) {
+            Ok(()) => {}
+            Err(jd_vfs::VfsError::NotFound(_)) => {}
+            Err(e) => return Err(e.into()),
+        }
+    }
+    let told = entry
+        .synced_placement
+        .as_ref()
+        .map(|p| p.name.clone())
+        .unwrap_or_else(|| entry.remote.name.clone());
+    // Everything that said "there is a copy of this here" goes with the copy.
+    // Left behind, they would describe a file that is not there any more; and
+    // the entry has to look un-downloaded so that releasing it fetches the
+    // bytes again under whatever name it is then allowed.
+    entry.synced_placement = None;
+    entry.synced_fingerprint = None;
+    entry.synced_content = None;
+    entry.synced_remote_content = None;
+    entry.local_name = None;
+    entry.status = LocalStatus::Unsyncable(reason.clone());
+    env.store.put_entry(&entry)?;
+    env.store.raise_issue(
+        Some(entry.id),
+        "unsyncable",
+        &format!(
+            "{told} was moved to the trash: this computer cannot hold the name \
+             it now has on the server ({reason:?}). It is safe on the server, \
+             and it comes back here if the clash is resolved."
+        ),
+        (env.now_ms)() as i64,
+    )?;
     Ok(OpOutcome::Done)
 }
 

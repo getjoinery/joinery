@@ -1398,7 +1398,7 @@ fn decode_status(status: &str, reason: Option<String>) -> LocalStatus {
 /// worth fixing: the reason is the entire user-facing content of an unsyncable
 /// entry, so a reason that does not round-trip is a panel that tells somebody
 /// their file clashes with a file called `NameTooLong { bytes: 300, limit: 255 }`.
-fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
+pub(crate) fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
     use jd_vfs::UnsyncableReason as R;
     match reason {
         R::CaseClash { with } => format!("case_clash:{with}"),
@@ -1412,7 +1412,7 @@ fn encode_reason(reason: &jd_vfs::UnsyncableReason) -> String {
     }
 }
 
-fn decode_reason(raw: &str) -> Option<jd_vfs::UnsyncableReason> {
+pub(crate) fn decode_reason(raw: &str) -> Option<jd_vfs::UnsyncableReason> {
     use jd_vfs::UnsyncableReason as R;
     let (kind, rest) = raw.split_once(':').unwrap_or((raw, ""));
     match kind {

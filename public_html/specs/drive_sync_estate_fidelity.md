@@ -317,15 +317,76 @@ Cleared seed 124149.
 
 ---
 
+## Defect C — the destination evicts the file already standing there
+
+The one the estate could never have found, because it converges. A file whose
+name needs escaping on one device is moved into a folder where the escape
+collides with a file already there. Naming resolves the folder, the newcomer
+wins the slot, and the sitting file — a real file, with a name the user chose
+and every other device is perfectly happy with — is renamed to a conflict copy
+and that rename is propagated fleet-wide.
+
+Every device then agrees, which is exactly why 38,000 seeds blessed it. Seed
+42348 was *green* on HEAD while doing this:
+
+```
+kept_aside: café-37.txt was moved aside to
+            café-37 (conflicted copy 2026-07-31 from mac).txt
+```
+
+A settled wrong answer, not a loop. The estate finds loops.
+
+The rule the resolution was breaking: a device's own inability to hold a name
+is not a warrant to rename another device's file. The escape is local; the
+eviction was global.
+
+**Fixed, in two halves.**
+
+*Ranking.* `resolution_order` ranked by whether an entry was materialized, which
+let an arriving file outrank a settled one. It now ranks by settled placement
+first — a file sitting where the server agrees it sits outranks a file still
+moving toward that folder. The sitting file keeps its name.
+
+*The loser.* The newcomer that loses the slot cannot simply flip to
+`Unsyncable`: that strands its bytes on disk and breaks the unstated invariant
+that a parked entry holds no local file. It un-materializes first —
+`UnmaterializeAndPark`, a journalled operation that verifies the bytes are on
+the server, trashes the local copy to the OS trash, and clears the local half
+and parks atomically. A local edit not yet uploaded stops it: the op returns
+`Retry` and the ordinary upload runs first. The result is a state the rest of
+the engine already understands, which is why no oracle change was needed.
+
+Two things only tests caught:
+
+- A move journalled in an earlier pass runs *ahead* of the park and evicts the
+  file the park exists to protect. The decision now cancels queued ops for the
+  parking entity, with a guard in `move_local` behind it.
+- The first version parked anything whose server name was unusable, including
+  the engine's own `.jd-swap-*` scratch names — cancelling the recovery that
+  renames those back and stranding them on the server forever. Three scenarios
+  failed. Destination judging now acts only on a *collision*
+  (`CaseClash`, `UnicodeClash`, `DuplicateName`), never on whether a name is
+  intrinsically holdable; the main loop already owns that question.
+
+Pinned by `a_file_arriving_in_a_folder_does_not_evict_the_one_already_there` and
+`a_rename_onto_a_siblings_escaped_name_does_not_evict_the_sibling`, both
+asserting `assert_converged` — the gap that let a first, non-convergent attempt
+pass while asserting only the absence of a spurious rename.
+
+Cleared seed 42348. Estate after the fix: 16 arms, 40,070 seeds, zero failures.
+
+---
+
 ## Still open on this axis
 
-- **Naming cannot see the destination folder's siblings.** `path_for`'s forward
-  derivation stays for now, and it is a strictly weaker computation than naming:
-  a move whose escaped leaf case-clashes with a file already in the destination
-  is resolved wrongly, before and after these fixes. Closing that means naming
-  resolving `remote` against the destination folder's sibling set and carrying
-  a second, target-side mapping — at which point the forward derivation should
-  be removed in the same change, not before.
+- **`path_for`'s forward derivation is still weaker than naming.** Destination
+  judging now catches the *collision* case — a move whose escaped leaf clashes
+  with a file already in the destination parks the mover instead of evicting the
+  sitter — but it decides only who yields, not what the mover should have been
+  called. Closing that means naming resolving `remote` against the destination
+  folder's sibling set and carrying a second, target-side mapping, at which
+  point the forward derivation should be removed in the same change, not
+  before.
 - **Nothing renames a file already on disk when naming re-maps it.** Reachable
   when `duplicate_losers` re-maps an already-materialized file. Separate from
   everything above, and still unfixed.
@@ -345,8 +406,10 @@ Cleared seed 124149.
   this is a case of it. Not yet added to the hostile table, because the oracle
   skips those names too and would have to learn the difference between the
   engine's litter and a file the user named.
-- **Windows-hostile names** — trailing dot, trailing space, reserved device
-  names. Another class the table cannot spell.
+- **Windows-hostile names** are now a sweep arm of their own
+  (`scratch_windows_hostile_name_sweep`, 1,800 seeds across five sub-arms) and
+  are green. The generator still cannot spell them into the shared hostile
+  table, so they live in that arm rather than throughout the estate.
 - **Sharing is not modelled at all.** The mock has one owner. On the platform a
   `missing` stat means gone OR no longer visible, so a revoked share reads to
   the client as a deletion — and the client trashes the local copy. Whether

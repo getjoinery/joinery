@@ -62,6 +62,16 @@ pub enum Action {
     AdoptPlacement { to: Placement },
     /// Stop materializing this locally, but keep tracking it.
     RemoveFromScope,
+    /// Give up the local copy and park the entry, because this filesystem
+    /// cannot hold the name the server has given it.
+    ///
+    /// A park has always implied "no file of this entry is on this disk" --
+    /// `competing_placement`, the scan's reserved set and the convergence
+    /// oracle all read it that way. An entry that is ALREADY materialized and
+    /// then loses its name would break that implication, and a status flip
+    /// would leave the file stranded under a name the server no longer has.
+    /// So the local copy goes first and the park is recorded when it is gone.
+    UnmaterializeAndPark { reason: jd_vfs::UnsyncableReason },
 }
 
 /// Something the user should be told about. Issues are never fatal and never

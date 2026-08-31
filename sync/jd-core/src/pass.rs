@@ -607,20 +607,53 @@ pub fn run_pass(
     // free a name somebody else is waiting on, so running them ahead of the
     // round's own work is the point rather than an accident of ordering -- and
     // they are decided before the scan, so they cannot be part of the round.
-    if !out.naming.renames.is_empty() {
-        let freeing = crate::order::Plan {
-            ops: out
+    if !out.naming.renames.is_empty() || !out.naming.park_at_destination.is_empty() {
+        let mut ops: Vec<crate::order::PlannedOp> = out
+            .naming
+            .renames
+            .iter()
+            .map(|(id, from, to)| crate::order::PlannedOp {
+                entity: *id,
+                action: crate::reconcile::Action::ApplyLocalMove { to: to.clone() },
+                stage: crate::order::Stage::Move,
+                rank: 0,
+                from: Some(from.clone()),
+            })
+            .collect();
+        // A move planned before this verdict existed is now wrong, and it is
+        // ahead of the park in the journal -- so it would run first, land on the
+        // occupied name, and evict the very file the park exists to protect.
+        // The decision has to reach back and cancel it.
+        if !out.naming.park_at_destination.is_empty() {
+            let parking: std::collections::HashSet<EntityId> = out
                 .naming
-                .renames
+                .park_at_destination
                 .iter()
-                .map(|(id, from, to)| crate::order::PlannedOp {
-                    entity: *id,
-                    action: crate::reconcile::Action::ApplyLocalMove { to: to.clone() },
-                    stage: crate::order::Stage::Move,
-                    rank: 0,
-                    from: Some(from.clone()),
-                })
-                .collect(),
+                .map(|(id, _)| *id)
+                .collect();
+            for op in env.store.queued_ops()? {
+                if parking.contains(&op.entity) {
+                    env.store.drop_op(op.op_id)?;
+                }
+            }
+        }
+        // Giving up a local copy frees a name too, and it belongs in the same
+        // batch for the same reason: it is decided before the scan, so it
+        // cannot be part of the round, and whoever is waiting on the name
+        // should not have to wait a further pass for it.
+        ops.extend(out.naming.park_at_destination.iter().map(|(id, reason)| {
+            crate::order::PlannedOp {
+                entity: *id,
+                action: crate::reconcile::Action::UnmaterializeAndPark {
+                    reason: reason.clone(),
+                },
+                stage: crate::order::Stage::Delete,
+                rank: 0,
+                from: None,
+            }
+        }));
+        let freeing = crate::order::Plan {
+            ops,
             broken_cycles: Vec::new(),
         };
         journal(env.store, &freeing, key_for)?;
