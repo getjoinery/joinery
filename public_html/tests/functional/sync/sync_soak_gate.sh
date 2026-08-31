@@ -85,7 +85,7 @@ cleanup() {
 trap cleanup EXIT
 
 echo "building the workspace…"
-cargo build --release --manifest-path "$SYNC_DIR/Cargo.toml" \
+nice -n 19 cargo build --release --manifest-path "$SYNC_DIR/Cargo.toml" \
 	-p jd-daemon -p jd-soak --quiet
 DRIVE="$SYNC_DIR/target/release/joinery-drive"
 SOAK="$SYNC_DIR/target/release/jd-soak"

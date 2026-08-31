@@ -42,7 +42,7 @@ WORK="$(mktemp -d)"
 trap 'rm -rf "$WORK"' EXIT
 
 echo "building jd-crypto-parity (release)..."
-cargo build --release -p jd-crypto --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
+nice -n 19 cargo build --release -p jd-crypto --manifest-path "$SYNC_DIR/Cargo.toml" --quiet
 BIN="$SYNC_DIR/target/release/jd-crypto-parity"
 MJS="$HERE/sync_crypto_parity.mjs"
 

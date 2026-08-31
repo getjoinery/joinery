@@ -24,3 +24,9 @@ publish = false
 
 [profile.release]
 lto = "thin"
+
+# Test binaries here statically link SQLite and ring, so full debug info made
+# each one 60+MB and cargo keeps every stale copy. Line tables still give
+# backtraces file and line numbers, which is all the gates ever read.
+[profile.dev]
+debug = "line-tables-only"

@@ -64,7 +64,7 @@ for target in x86_64-pc-windows-gnu aarch64-apple-darwin; do
 	fi
 
 	echo "--- $target ---"
-	if cargo check $CRATES --all-targets --target "$target" \
+	if nice -n 19 cargo check $CRATES --all-targets --target "$target" \
 		--manifest-path "$SYNC_DIR/Cargo.toml" --quiet; then
 		echo "ok"
 	else
