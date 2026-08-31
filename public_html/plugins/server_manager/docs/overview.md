@@ -265,15 +265,15 @@ The web tier's only involvement on the node is a handoff through three managed s
 
 ### Routing
 
-A connected agent is routed to — approving the join is the routing decision, and there is no further switch. Any operation with a primitive implementation runs on the node's own agent; everything else routes over the API and SSH. Disconnecting the agent is what returns all of a node's work to API/SSH.
+A connected agent is routed to — approving the join is the routing decision, and there is no further switch. An operation with a primitive implementation runs on the node's own agent, and only there: a node without a paired agent is refused such a job at build time, with the fix (pair the node) in the message. SSH-credential routing exists only for the operations that have no primitive — bootstrap (`install_node`, `enable_agent`, unpaired `provision_ssl`), `decommission_node`, and the relay lifecycle. Disconnecting the agent therefore stops a node's primitive operations until it pairs again.
 
 Either side can end the pairing, and neither needs the other's cooperation. This plane's Disconnect button forgets the node's key. The node's own Management Node page has a Disconnect too: its agent finishes any running job, sends one signed goodbye to `/api/v1/agent/leave` (so this plane forgets the key immediately), deletes its identity, and returns to serving only local work — and it leaves even when the goodbye cannot be delivered, in which case this plane just sees the agent go silent until someone disconnects the node here as well. Both endings run through `AgentChannelEndpoint::forgetAgent()`, so they cannot drift apart.
 
-Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` then lists `primitive` ahead of `api` and `ssh`, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
+Operations cross one at a time. An operation has crossed when `JobCommandBuilder` has a `build_<op>_primitive` method for it; `transports_for()` discovers that by reflection, and `ManagementJob::createFromBuild()` stores the right shape without any caller knowing which transport ran.
 
-**A primitive is routed to a node only when that node says it has it.** Every claim carries the agent's own list of the primitives its binary compiled in, and the plane stores it (`mgn_agent_primitives`). Routing consults that list: an operation missing from it is dispatched over API or SSH instead, whatever version the node reports. The node's own account is the only one that is not a guess — a version number says which release a machine runs, and only the machine says what that release compiled into it.
+**A primitive is routed to a node only when that node says it has it.** Every claim carries the agent's own list of the primitives its binary compiled in, and the plane stores it (`mgn_agent_primitives`). Routing consults that list: an operation missing from it is not sent to the agent — the builder refuses at build time (or, for `list_backups` and `check_status`, falls to the API or probe transport). The node's own account is the only one that is not a guess — a version number says which release a machine runs, and only the machine says what that release compiled into it.
 
-An agent old enough not to send a list leaves the column empty, and those nodes are answered by `JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION`: a per-operation floor naming the agent version that introduced the primitive. A node below the floor, or with no known version, routes away from the primitive — dispatching to a vocabulary that cannot be confirmed trades a working transport for a certain refusal.
+An agent old enough not to send a list leaves the column empty, and those nodes are answered by `JobCommandBuilder::PRIMITIVE_MIN_AGENT_VERSION`: a per-operation floor naming the agent version that introduced the primitive. A node below the floor, or with no known version, is refused the primitive — dispatching to a vocabulary that cannot be confirmed buys a certain refusal on the node instead of a clear one at build time.
 
 **Upgrade the management node's own agent before connecting any node.** An agent from before this channel existed does not know to leave primitive jobs alone, and would claim one out of its local queue. Such a job carries a step type no released executor recognises, so that agent fails it and says exactly why rather than marking it complete having done nothing — but the job still has to be re-run.
 
@@ -358,7 +358,7 @@ Install with `install_agent.sh --siteless`, which is explicit and never inferred
 
 Destructive operations auto-backup the target database before proceeding. The UI requires explicit confirmation checkboxes.
 
-**Note on bare-metal nodes with user1 SSH:** When a bare-metal install completes, `install.sh` disables root SSH and the node's `mgn_ssh_user` is automatically updated to `user1`. Subsequent jobs run as `user1` with `NOPASSWD sudo`. All backup/restore commands that need root-level paths (e.g. `/backups/`) use `sudo` automatically.
+**Note on bare-metal nodes with user1 SSH:** When a bare-metal install completes, `install.sh` disables root SSH and the node's `mgn_ssh_user` is automatically updated to `user1`. SSH-only jobs (bootstrap, decommission) then run as `user1` with `NOPASSWD sudo`; steps that need root-level paths carry the `sudo` prefix automatically. Backup and restore work runs on the node's own agent, which is already root.
 
 ### One-Click Node Install
 
@@ -762,7 +762,7 @@ Backup targets define where backup files are uploaded after creation. Each node 
 | **Amazon S3** | Access Key + Secret Key + Region |
 | **Linode Object Storage** | Access Key + Secret Key + Region + Endpoint URL |
 
-All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls from either the management node (web tier) or the node (via a heredoc'd `node_uploader.php` script). New S3-compatible providers can be added by configuration alone, no script changes.
+All providers authenticate against their S3-compatible endpoint via AWS SigV4 signing performed by `S3Signer.php`. There is **no per-provider CLI dependency** — uploads, downloads, deletes, and listings all run as direct HTTPS calls, from the management node (web tier) or from the node's own agent. New S3-compatible providers can be added by configuration alone, no script changes.
 
 Nodes with no backup target leave backups local-only on the remote server.
 
@@ -789,11 +789,9 @@ Credentials are stored on the `bkt_backup_targets` table using a unified shape f
 
 Two columns hold two keys: `bkt_credentials` is the main (delete-capable) credential the management node itself uses, and `bkt_node_credentials` optionally holds a write-only key handed to nodes instead (see *The node may write to the shelf but never erase it*). Both are SecretBox-sealed at rest.
 
-A persisted job command never contains a credential — it carries a placeholder token that the agent resolves in memory immediately before the step runs: `__SM_CREDS_<target_id>__` for the main slot, `__SM_NODE_CREDS_<target_id>__` for the node slot. The builder decides at build time which token a step gets: node-side **uploads** carry the node token whenever the node slot is filled, while node-side **downloads and cloud deletes** always carry the main token, because those need the read and delete capability a write-only key deliberately lacks. The agent resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
+A persisted job never contains a credential — a node-bound **upload** (`backup_run`, `upload_backup`) carries a placeholder token that the agent channel resolves in memory when the job is handed out: `__SM_NODE_CREDS_<target_id>__` for the write-only node slot whenever it is filled, `__SM_CREDS_<target_id>__` otherwise. The channel resolves exactly the slot the token names and never falls back to the other, so a job built against a since-emptied slot fails visibly rather than running with a more powerful key than intended.
 
-For node-side operations (upload, delete, download), the resolved credentials are embedded into a self-contained PHP script that is piped to the node via a heredoc'd `php --` invocation — never written to a file on the node and never visible in process listings as positional arguments. The `S3Signer.php` and `node_uploader.php` source is composed at job-build time by `JobCommandBuilder::build_node_uploader_script()`.
-
-Because the script is composed from the management node's own copy of those two files, changes to the signer or the uploader reach every node on its next job — there is no agent release or node upgrade in the loop.
+The operations that need more capability than a write-only key never send one at all: a node-side **download** receives a presigned URL for the one object it names, signed on the management node with the main credential; a **cloud delete** runs on the management node itself, in-process. So the main (delete-capable) credential never travels to a node in any form.
 
 ### Transient Failures
 
@@ -1578,10 +1576,8 @@ Used by the auto-detect panel on the Add Node page. Creates and polls `discover_
 | `includes/JobCommandBuilder.php` | Command generation for all job types; `ssh_prefix()` is public for use by other tools |
 | `includes/JobResultProcessor.php` | Parses completed job output into structured data |
 | `includes/S3Signer.php` | AWS SigV4 signer for S3-compatible storage (get/put/delete) |
-| `includes/TargetUploader.php` | Web-tier upload + delete helpers using S3Signer |
 | `includes/TargetLister.php` | Web-tier paginated bucket listing using S3Signer |
 | `includes/TargetTester.php` | Connection test on Save for Backup Targets |
-| `includes/node_uploader.php` | Self-contained upload/delete/download dispatcher run on the node via heredoc; composed at job-build time with S3Signer + injected credentials |
 | `includes/BackupListHelper.php` | Merges latest local list_backups job output with live cloud listing into a unified file table |
 | `ajax/job_status.php` | Live job output polling |
 | `ajax/discover_nodes.php` | Creates and polls node discovery jobs |

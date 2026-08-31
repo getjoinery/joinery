@@ -242,9 +242,6 @@ section('Shell safety');
 // a shell evaluating the emitted command never executes it.
 $cases = array();
 
-$cases['delete_backup local path'] = jcb_cmds(JobCommandBuilder::build_delete_backup(
-	$ssh_node, array('target' => 'local', 'local_path' => '/backups/' . $PAYLOAD)));
-
 $cases['relay_add_tenant pull key'] = jcb_cmds(JobCommandBuilder::build_relay_add_tenant(
 	$ssh_node, array('slug' => 'tenant-a', 'pull_pubkey' => $PAYLOAD)));
 
@@ -280,8 +277,8 @@ foreach ($cases as $label => $cmd) {
 
 // A quote in a value must not close the quoting around it.
 $quote_payload = "'; touch CANARY_FIRED; '";
-$cmd = jcb_cmds(JobCommandBuilder::build_delete_backup(
-	$ssh_node, array('target' => 'local', 'local_path' => '/backups/' . $quote_payload)));
+$cmd = jcb_cmds(JobCommandBuilder::build_relay_add_tenant(
+	$ssh_node, array('slug' => 'tenant-a', 'pull_pubkey' => 'abc', 'domains' => $quote_payload)));
 check(!jcb_payload_fired($cmd, $tmpdir),
 	'a value containing a single quote cannot close the quoting around it',
 	'emitted: ' . substr($cmd, 0, 160));
@@ -296,23 +293,23 @@ check(strpos($cmd, 'CANARY_FIRED') === false,
 	'a numeric option discards trailing text entirely rather than quoting it', $cmd);
 
 // ---------------------------------------------------------------------------
-section('Local backup delete privilege');
+section('Local backup delete: a name, never a path');
 
-// Backups under /backups are written as root. On a bare-metal node jobs run as a
-// non-root user, so the rm must be sudo-prefixed or it fails Permission denied
-// while the continue_on_error step still reports done. A Docker node runs the job
-// as root inside the container and must NOT carry a sudo prefix.
-$bm_del = jcb_cmds(JobCommandBuilder::build_delete_backup(
-	jcb_node(array('mgn_ssh_user' => 'user1')),
-	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz')));
-check(strpos($bm_del, 'sudo rm -f ') !== false,
-	'a bare-metal (non-root) node deletes a local backup with sudo', $bm_del);
-
-$dk_del = jcb_cmds(JobCommandBuilder::build_delete_backup(
-	jcb_node(array('mgn_container_name' => 'somesite')),
-	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz')));
-check(strpos($dk_del, 'sudo ') === false && strpos($dk_del, 'rm -f ') !== false,
-	'a Docker node deletes a local backup without sudo (already root)', $dk_del);
+// The node deletes inside its own compiled-in backup directory; the plane can
+// only NAME a file. The legacy caller passes local_path, so the basename must
+// be taken from it — a full path crossing the wire would reopen the plane's
+// ability to point rm at anything.
+$del_paired = jcb_node(array(
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x05", 32)),
+	'mgn_agent_version'    => '1.13.0'));
+$del_built = JobCommandBuilder::build_delete_backup($del_paired,
+	array('target' => 'local', 'local_path' => '/backups/auto_pre_install_x.sql.gz'));
+check(($del_built['primitive'] ?? '') === 'delete_backup',
+	'a paired node deletes a local backup as a primitive');
+check(($del_built['params']['filename'] ?? '') === 'auto_pre_install_x.sql.gz',
+	'the filename is the basename of the caller-supplied path');
+check(strpos((string)json_encode($del_built), '/backups/') === false,
+	'no path crosses to the node');
 
 // ---------------------------------------------------------------------------
 section('Path construction');
@@ -450,49 +447,39 @@ check(strpos($lb_threw, 'cannot run list_backups') !== false,
 	'a node with SSH credentials alone is refused a listing — SSH is not a transport',
 	$lb_threw);
 
-// Delete-backup with nothing selected still emits a runnable step rather than
-// an empty array the dispatcher would treat as a completed job.
-$steps = JobCommandBuilder::build_delete_backup($ssh_node, array('target' => 'local', 'local_path' => ''));
-check(count($steps) === 1, 'deleting nothing still emits one step', 'steps: ' . count($steps));
-check(strpos($steps[0]['cmd'], 'Nothing to delete') !== false,
-	'that step says nothing was deleted rather than pretending it deleted something');
+// The per-file backup actions are primitive-only: an unpaired node is refused
+// at build time with the fix in the message, never handed dead SSH steps.
+$db_threw = '';
+try { JobCommandBuilder::build_delete_backup($ssh_node, array('local_path' => '/backups/x.sql.gz')); }
+catch (Exception $e) { $db_threw = $e->getMessage(); }
+check(strpos($db_threw, 'paired agent') !== false,
+	'an unpaired node is refused delete_backup and told to pair', $db_threw);
+
+$ub_threw = '';
+try { JobCommandBuilder::build_upload_backup($ssh_node, array('filename' => 'x.sql.gz')); }
+catch (Exception $e) { $ub_threw = $e->getMessage(); }
+check(strpos($ub_threw, 'paired agent') !== false,
+	'an unpaired node is refused upload_backup and told to pair', $ub_threw);
 
 section('Plugin installers');
 
-// The runner lives in the site dir, one level above web root, and needs the
-// sitename as its argument. On a bare-metal node whose SSH user is not root
-// the whole invocation must be sudo'd — and because sudo strips the caller's
-// environment, PGPASSWORD (which the runner needs to query active plugins)
-// has to be re-injected explicitly, not assumed to survive.
-$bare = jcb_node(array(
-	'mgn_ssh_user' => 'user1',
-	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
-$steps = JobCommandBuilder::build_run_plugin_installers($bare);
-check(count($steps) === 1, 'one step is emitted', 'steps: ' . count($steps));
-$cmd = $steps[0]['cmd'];
-check(strpos($cmd, 'sudo ') !== false,
-	'a bare-metal non-root node gets a sudo invocation', $cmd);
-check(strpos($cmd, '/var/www/html/jeremytunnell/maintenance_scripts/install_tools/_plugin_installers_start.sh') !== false,
-	'the runner path is the site dir, not the web root', $cmd);
-check(preg_match("/_plugin_installers_start\\.sh '?jeremytunnell'?(\\s|$)/", $cmd) === 1,
-	'the sitename is passed as the runner argument', $cmd);
-check(strpos($cmd, 'PGPASSWORD') !== false,
-	'PGPASSWORD is carried across the sudo boundary', $cmd);
+// Primitive only: the node derives its own site root and reads its own DB
+// credentials, so the job carries no parameters at all — nothing the plane
+// sends can influence what runs.
+$installer_paired = jcb_node(array(
+	'mgn_web_root'         => '/var/www/html/jeremytunnell/public_html',
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x08", 32)),
+	'mgn_agent_version'    => '1.13.0'));
+$pi_built = JobCommandBuilder::build_run_plugin_installers($installer_paired);
+check(($pi_built['primitive'] ?? '') === 'run_plugin_installers',
+	'a paired node runs the installers as a primitive');
+check(($pi_built['params'] ?? null) === array(),
+	'the primitive carries no parameters', json_encode($pi_built));
 
-// A docker node's steps execute inside the container as root: no sudo.
-$dockered = jcb_node(array(
-	'mgn_container_name' => 'jeremytunnell',
-	'mgn_web_root' => '/var/www/html/jeremytunnell/public_html'));
-$steps = JobCommandBuilder::build_run_plugin_installers($dockered);
-check(strpos($steps[0]['cmd'], 'sudo ') === false,
-	'a docker node runs the installers without sudo', $steps[0]['cmd']);
-
-// A node with no web root cannot address a site: refuse at build time rather
-// than emit a job that greps a config under the filesystem root.
-$rootless = jcb_node(array('mgn_web_root' => ''));
+// An unpaired node is refused at build time — the old SSH invocation is gone.
 $threw = false;
-try { JobCommandBuilder::build_run_plugin_installers($rootless); } catch (Exception $e) { $threw = true; }
-check($threw, 'a node without mgn_web_root is refused at build time');
+try { JobCommandBuilder::build_run_plugin_installers($ssh_node); } catch (Exception $e) { $threw = true; }
+check($threw, 'an unpaired node is refused run_plugin_installers at build time');
 
 section('Turning a node\'s agent on from here');
 
@@ -1058,39 +1045,37 @@ check($threw, 'a restore that names no archive is refused up front');
 section('Cloud credentials: placeholder-only (S-8) — no inline fallback exists');
 
 // Job rows persist forever, so credentials must NEVER be inlined into a
-// command. The agent resolves __SM_CREDS_<id>__ in memory at run time; a job
-// an old agent cannot run fails visibly instead of leaking.
+// job payload. The agent channel resolves __SM_CREDS_<id>__ in memory when
+// the job is handed out; the row at rest carries only the placeholder.
 $cloud_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/credmode/public_html',
 	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x06", 32)),
+	'mgn_agent_version'    => '1.13.0',
 	'mgn_delete_local_after_upload' => false));
 
-$ph_cmd = '';
-foreach (JobCommandBuilder::build_upload_backup($cloud_node, array('filename' => 'credmode.sql.gz')) as $step) {
-	if (strpos($step['label'] ?? '', 'Upload backup') === 0) { $ph_cmd = $step['cmd']; }
-}
+$ph_built = JobCommandBuilder::build_upload_backup($cloud_node, array('filename' => 'credmode.sql.gz'));
 $token = '__SM_CREDS_' . (int)$bkt->key . '__';
-check(strpos($ph_cmd, $token) !== false, 'upload command carries the __SM_CREDS_<id>__ token', $ph_cmd);
-check(strpos($ph_cmd, "base64_decode('" . $token . "')") !== false,
-	'creds line reads the token via base64_decode');
-// The uploader SOURCE may reference $creds['secret_key']; what must never
-// appear is inlined credential DATA — the var_export'd array the old
-// fallback emitted.
-check(strpos($ph_cmd, "'application_key'") === false && strpos($ph_cmd, '$creds = array') === false,
-	'no inlined credential data appears anywhere in the command', substr($ph_cmd, 0, 300));
+check(($ph_built['params']['credentials_b64'] ?? '') === $token,
+	'the upload primitive carries the __SM_CREDS_<id>__ token, not a credential');
+$ph_json = (string)json_encode($ph_built);
+check(strpos($ph_json, "'application_key'") === false && strpos($ph_json, 'secret_key') === false,
+	'no credential data appears anywhere in the payload', substr($ph_json, 0, 300));
 check(!property_exists('JobCommandBuilder', 'agent_placeholder_support_override'),
 	'the inline-credentials fallback (and its heartbeat gate) is gone entirely');
 
-section('Fleet backup run: config on stdin, nothing secret at rest');
+section('Fleet backup run: declared parameters, nothing secret at rest');
 
 // The manager-profile backup job. The node runs its own engine; what the
 // builder contributes is the two things the node has no other way to reach —
-// the bucket and the credential — and they travel on stdin, not argv, because
-// argv is world-readable on the box for the life of the process. What opens the
-// archive is not among them and never travels at all.
+// the bucket and the credential — as declared parameters the node validates
+// field by field. What opens the archive is not among them and never travels
+// at all.
 $run_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/runnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt->key));
+	'mgn_bkt_backup_target_id' => $bkt->key,
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x09", 32)),
+	'mgn_agent_version'    => '1.13.0'));
 
 // Refusals: a job that cannot say where the backup goes, or which site to back
 // up, fails at build time with a message the operator sees — not part-way
@@ -1108,7 +1093,9 @@ $threw = false;
 $refusal = '';
 try {
 	JobCommandBuilder::build_backup_run(jcb_node(array(
-		'mgn_web_root' => '/var/www/html/notarget/public_html')));
+		'mgn_web_root' => '/var/www/html/notarget/public_html',
+		'mgn_agent_public_key' => base64_encode(str_repeat("\x0a", 32)),
+		'mgn_agent_version'    => '1.13.0')));
 } catch (Exception $e) { $threw = true; $refusal = $e->getMessage(); }
 
 if ($enabled_now > 1) {
@@ -1187,38 +1174,13 @@ foreach (array($PAYLOAD, $SUBSHELL, 'has space', '../../etc') as $bad_slug) {
 	check($threw, 'backup_run refuses the slug ' . var_export(substr($bad_slug, 0, 20), true));
 }
 
-// The happy path: one labelled SSH step running the node's own engine under
-// the manager profile, config fed through a QUOTED heredoc so the shell
-// expands nothing in the body.
-$run_steps = JobCommandBuilder::build_backup_run($run_node);
-check(count($run_steps) === 1, 'backup_run emits exactly one step', 'steps: ' . count($run_steps));
-$run_step = $run_steps[0];
-check(($run_step['type'] ?? '') === 'ssh' && !empty($run_step['label']),
-	'the step is a labelled SSH step like every other job');
-check(($run_step['timeout'] ?? 0) > 3600,
-	'the timeout is transfer-sized, not the default', 'timeout: ' . ($run_step['timeout'] ?? 0));
-
-$run_cmd = $run_step['cmd'];
-check(strpos($run_cmd, "/utils/run_backup.php' --profile=manager") !== false,
-	'the node runs run_backup.php under the manager profile', $run_cmd);
-check(strpos($run_cmd, "<<'__JOINERY_BACKUP_CONFIG_EOF__'") !== false,
-	'the config heredoc is quoted, so nothing in the body reaches the shell', $run_cmd);
-$run_lines = explode("\n", $run_cmd);
-check(trim(end($run_lines)) === '__JOINERY_BACKUP_CONFIG_EOF__',
-	'the heredoc terminator is the entire final line — nothing chained after it', trim(end($run_lines)));
-
-$run_tmp = tempnam(sys_get_temp_dir(), 'jcbrun');
-file_put_contents($run_tmp, $run_cmd . "\n");
-$run_lint = array();
-exec('bash -n ' . escapeshellarg($run_tmp) . ' 2>&1', $run_lint, $run_rc);
-unlink($run_tmp);
-check($run_rc === 0, 'the emitted command parses as valid bash with a closed heredoc',
-	implode("\n", $run_lint));
-
-// The heredoc body is the config the node will run under; hold it to the
-// contract rather than to substrings of the command.
-$run_config = json_decode($run_lines[1] ?? '', true);
-check(is_array($run_config), 'the heredoc body is one line of valid JSON');
+// The happy path: a primitive envelope carrying the run config as declared
+// parameters. Nothing this plane sends is executed as syntax.
+$run_built = JobCommandBuilder::build_backup_run($run_node);
+check(($run_built['primitive'] ?? '') === 'backup_run',
+	'backup_run travels as a primitive');
+$run_config = $run_built['params'] ?? null;
+check(is_array($run_config), 'the primitive carries the run config as parameters');
 check(($run_config['bucket'] ?? '') === 'harness-test-bucket',
 	'the config names the target bucket', $run_config['bucket'] ?? '?');
 check(($run_config['slug'] ?? '') === (string)$run_node->get('mgn_slug'),
@@ -1228,13 +1190,15 @@ check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') =
 check(($run_config['full_interval_days'] ?? 0) === 7,
 	'the full interval defaults to a weekly full');
 
-// The credential is the resolve-at-run-time placeholder the agent swaps in
-// memory — job rows persist forever, so credential DATA must never be inlined.
+// The credential is the resolve-at-run-time placeholder the agent channel
+// swaps in memory — job rows persist forever, so credential DATA must never
+// be inlined.
 $run_token = '__SM_CREDS_' . (int)$bkt->key . '__';
 check(($run_config['credentials_b64'] ?? '') === $run_token,
 	'the credential is the __SM_CREDS_<id>__ placeholder, resolved at run time');
-check(strpos($run_cmd, "'application_key'") === false && strpos($run_cmd, '"application_key"') === false,
-	'no credential data appears anywhere in the command');
+$run_json = (string)json_encode($run_built);
+check(strpos($run_json, 'application_key') === false,
+	'no credential data appears anywhere in the payload');
 
 // No encryption key travels, in any field. Sealing to a public key always
 // appears to succeed, so a management node that could supply one could re-seal
@@ -1246,22 +1210,30 @@ foreach (array('recovery_public_key', 'recovery_fpr', 'recipients') as $forbidde
 	check(!array_key_exists($forbidden, $run_config),
 		"the config carries no {$forbidden} — no key material is supplied to a node");
 }
-check(strpos($run_cmd, 'recovery') === false,
-	'and the word does not appear anywhere in the command either', substr($run_cmd, 0, 300));
+check(strpos($run_json, 'recovery') === false,
+	'and the word does not appear anywhere in the payload either', substr($run_json, 0, 300));
 
 // Policy fields reach the config; unrecognised values coerce to the closed set
 // rather than travelling to a node as text.
-$run_lines = explode("\n", JobCommandBuilder::build_backup_run($run_node, array(
-	'type' => 'database', 'mode' => 'full', 'full_interval_days' => 3))[0]['cmd']);
-$run_config = json_decode($run_lines[1] ?? '', true);
+$run_config = JobCommandBuilder::build_backup_run($run_node, array(
+	'type' => 'database', 'mode' => 'full', 'full_interval_days' => 3))['params'];
 check(($run_config['type'] ?? '') === 'database' && ($run_config['mode'] ?? '') === 'full'
 	&& ($run_config['full_interval_days'] ?? 0) === 3,
 	'policy type, mode and full interval reach the node config');
-$run_lines = explode("\n", JobCommandBuilder::build_backup_run($run_node, array(
-	'type' => $PAYLOAD, 'mode' => 'evil'))[0]['cmd']);
-$run_config = json_decode($run_lines[1] ?? '', true);
+$run_config = JobCommandBuilder::build_backup_run($run_node, array(
+	'type' => $PAYLOAD, 'mode' => 'evil'))['params'];
 check(($run_config['type'] ?? '') === 'project' && ($run_config['mode'] ?? '') === 'chain',
-	'unrecognised type and mode coerce to the defaults rather than reaching a shell');
+	'unrecognised type and mode coerce to the defaults rather than travelling as text');
+
+// An unpaired node with an otherwise valid config is refused with the fix.
+$bru_threw = '';
+try {
+	JobCommandBuilder::build_backup_run(jcb_node(array(
+		'mgn_web_root' => '/var/www/html/unpairedrun/public_html',
+		'mgn_bkt_backup_target_id' => $bkt->key)));
+} catch (Exception $e) { $bru_threw = $e->getMessage(); }
+check(strpos($bru_threw, 'paired agent') !== false,
+	'an unpaired node is refused backup_run and told to pair', $bru_threw);
 
 check(in_array('backup_run', ManagementJob::filterTypes(), true),
 	'backup_run is a filterable job type, so fleet runs are findable on the jobs pages');
@@ -1318,41 +1290,35 @@ harness_register_row('bkt_backup_targets', 'bkt_id', $bkt_split->key);
 
 $split_node = jcb_node(array(
 	'mgn_web_root' => '/var/www/html/splitnode/public_html',
-	'mgn_bkt_backup_target_id' => $bkt_split->key));
+	'mgn_bkt_backup_target_id' => $bkt_split->key,
+	'mgn_agent_public_key' => base64_encode(str_repeat("\x07", 32)),
+	'mgn_agent_version'    => '1.13.0'));
 
-$split_lines = explode("\n", JobCommandBuilder::build_backup_run($split_node)[0]['cmd']);
-$split_config = json_decode($split_lines[1] ?? '', true);
+$split_config = JobCommandBuilder::build_backup_run($split_node)['params'];
 $node_token = '__SM_NODE_CREDS_' . (int)$bkt_split->key . '__';
 $main_token = '__SM_CREDS_' . (int)$bkt_split->key . '__';
 check(($split_config['credentials_b64'] ?? '') === $node_token,
 	'with a node credential configured, backup_run carries the node token');
-check(strpos(implode("\n", $split_lines), $main_token) === false,
-	'the main (delete-capable) token appears nowhere in the node-bound command');
+check(strpos((string)json_encode($split_config), $main_token) === false,
+	'the main (delete-capable) token appears nowhere in the node-bound payload');
 
-// The per-file upload action sends from the node too, so its uploader follows
-// the same rule.
-$split_upload = '';
-foreach (JobCommandBuilder::build_upload_backup($split_node, array('filename' => 'splitnode.sql.gz')) as $s) {
-	if (strpos($s['label'] ?? '', 'Upload backup') === 0) { $split_upload = $s['cmd']; break; }
-}
-check(strpos($split_upload, $node_token) !== false,
-	'the per-file uploader also carries the node token', substr($split_upload, 0, 120));
-check(strpos($split_upload, $main_token) === false,
+// The per-file upload action sends from the node too, so it follows the same
+// rule.
+$split_upload = JobCommandBuilder::build_upload_backup($split_node, array('filename' => 'splitnode.sql.gz'));
+check(($split_upload['params']['credentials_b64'] ?? '') === $node_token,
+	'the per-file upload also carries the node token');
+check(strpos((string)json_encode($split_upload), $main_token) === false,
 	'and never the main token');
 
 // Only an UPLOAD may run under the write-only key. A cloud delete needs delete
-// capability and a restore download needs read, so those node-side scripts must
-// keep the main token even when a node credential is configured — otherwise a
-// properly scoped write-only key would fail exactly the operations it is
-// scoped against.
-$split_del = '';
-foreach (JobCommandBuilder::build_delete_backup($split_node, array(
-		'target' => 'cloud', 'cloud_path' => 'joinery-backups/x/y.tar.gz')) as $s) {
-	if (($s['label'] ?? '') === 'Delete cloud backup') { $split_del = $s['cmd']; }
-}
-check($split_del !== '', 'a cloud delete step is emitted for the split-credential target');
-check(strpos($split_del, $main_token) !== false && strpos($split_del, $node_token) === false,
-	'a cloud delete carries the main token, never the write-only one');
+// capability, so the delete-capable credential never travels at all: the plane
+// deletes cloud objects itself, in-process, and the delete primitive names a
+// local file with NO credential parameter through which one could arrive.
+$split_del = JobCommandBuilder::build_delete_backup($split_node, array('filename' => 'y.tar.gz'));
+$split_del_json = (string)json_encode($split_del);
+check(strpos($split_del_json, $main_token) === false && strpos($split_del_json, $node_token) === false
+	&& !array_key_exists('credentials_b64', $split_del['params'] ?? array()),
+	'a local delete carries no credential token of either kind', $split_del_json);
 
 // A RESTORE DOWNLOAD CARRIES NO TOKEN AT ALL — not the main one either.
 //

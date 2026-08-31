@@ -69,14 +69,21 @@ check(S3Signer::transfer_budget_seconds() > S3Signer::TRANSFER_TIMEOUT_SECONDS,
 	'the transfer budget leaves room beyond one full-length attempt',
 	S3Signer::transfer_budget_seconds() . 's vs ' . S3Signer::TRANSFER_TIMEOUT_SECONDS . 's');
 
-// The agent kills a step at its declared timeout. If that ceiling were below the
-// signer's own budget a retry would be cut off part-way, so the upload step has to
-// derive its timeout from the budget rather than carry its own number. Checked at
-// the source level because building a real step needs a node and a live target.
+// No job step runs an S3Signer transfer: plane-side calls happen in-process
+// where nothing imposes a step timeout, and node-side transfers are the
+// agent's own code with its own budget. A builder step that timed a signer
+// transfer again would reopen the mid-retry kill (a step ceiling below the
+// signer's budget cuts a retry off part-way), so its absence is the claim.
+// Checked at the source level; the @version history may name the symbol, so
+// only code lines count.
 $builder_src = file_get_contents(PathHelper::getIncludePath('plugins/server_manager/includes/JobCommandBuilder.php'));
-check(strpos($builder_src, 'S3Signer::transfer_budget_seconds()') !== false,
-	'the upload step sizes its timeout from the retry budget',
-	'a hardcoded number there silently re-introduces the mid-retry kill');
+$src_lines = array_filter(explode("\n", $builder_src), function ($l) {
+	$t = ltrim($l);
+	return strpos($t, '*') !== 0 && strpos($t, '//') !== 0 && strpos($t, '/*') !== 0;
+});
+check(strpos(implode("\n", $src_lines), 'transfer_budget_seconds') === false,
+	'no builder step times an S3Signer transfer — those run in-process or on the agent',
+	'a step timeout sized from the signer budget means a shell transfer step came back');
 
 // ─────────────────────────────────────────────────────────────────────────────
 section('A retried upload resends the whole body');
