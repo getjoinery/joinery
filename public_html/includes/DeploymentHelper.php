@@ -160,20 +160,15 @@ class DeploymentHelper {
     /**
      * Validate PHP syntax on all files in directory
      * @param string $directory Directory to validate
-     * @param bool $verbose Echo progress to screen
      * @return array ['success' => bool, 'errors' => array, 'files_checked' => int]
      *               Each error: ['file' => string, 'line' => int, 'message' => string, 'type' => 'syntax']
      */
-    public static function validatePHPSyntax($directory, $verbose = false) {
+    public static function validatePHPSyntax($directory) {
         $result = [
             'success' => true,
             'errors' => [],
             'files_checked' => 0
         ];
-
-        if ($verbose) {
-            echo "Validating PHP syntax in: $directory\n";
-        }
 
         if (!is_dir($directory)) {
             $result['success'] = false;
@@ -196,10 +191,6 @@ class DeploymentHelper {
             $result['files_checked']++;
             $filepath = $file->getPathname();
 
-            if ($verbose) {
-                echo "  Checking: " . str_replace($directory, '', $filepath) . "...";
-            }
-
             $output = [];
             $return_var = 0;
             exec("php -l " . escapeshellarg($filepath) . " 2>&1", $output, $return_var);
@@ -219,21 +210,7 @@ class DeploymentHelper {
                     'type' => 'syntax'
                 ];
                 $result['success'] = false;
-
-                if ($verbose) {
-                    echo " FAILED\n";
-                    echo "    Error: $message\n";
-                }
-            } else {
-                if ($verbose) {
-                    echo " OK\n";
-                }
             }
-        }
-
-        if ($verbose) {
-            echo "Syntax validation complete: {$result['files_checked']} files checked, " .
-                 count($result['errors']) . " errors found\n";
         }
 
         return $result;
@@ -242,27 +219,19 @@ class DeploymentHelper {
     /**
      * Test that plugin class files can be loaded
      * @param string $stage_dir Staging directory
-     * @param bool $verbose Echo progress to screen
      * @return array ['success' => bool, 'errors' => array, 'files_checked' => int]
      *               Each error: ['file' => string, 'message' => string, 'type' => string]
      *               Types: 'syntax', 'missing_dependency', 'fatal_error', 'include_error'
      */
-    public static function testPluginLoading($stage_dir, $verbose = false) {
+    public static function testPluginLoading($stage_dir) {
         $result = [
             'success' => true,
             'errors' => [],
             'files_checked' => 0
         ];
 
-        if ($verbose) {
-            echo "Testing plugin loading in: $stage_dir\n";
-        }
-
         $plugins_dir = $stage_dir . '/plugins';
         if (!is_dir($plugins_dir)) {
-            if ($verbose) {
-                echo "  No plugins directory found - skipping plugin tests\n";
-            }
             return $result;
         }
 
@@ -270,19 +239,12 @@ class DeploymentHelper {
         $plugin_classes = glob($plugins_dir . '/*/_class.php');
 
         if (empty($plugin_classes)) {
-            if ($verbose) {
-                echo "  No plugin class files found\n";
-            }
             return $result;
         }
 
         foreach ($plugin_classes as $class_file) {
             $result['files_checked']++;
             $plugin_name = basename(dirname($class_file));
-
-            if ($verbose) {
-                echo "  Testing plugin: $plugin_name...";
-            }
 
             // First check syntax
             $output = [];
@@ -297,10 +259,6 @@ class DeploymentHelper {
                 ];
                 $result['success'] = false;
 
-                if ($verbose) {
-                    echo " SYNTAX ERROR\n";
-                    echo "    " . implode(' ', $output) . "\n";
-                }
                 continue;
             }
 
@@ -342,21 +300,7 @@ class DeploymentHelper {
                     'type' => $error_type
                 ];
                 $result['success'] = false;
-
-                if ($verbose) {
-                    echo " FAILED\n";
-                    echo "    " . $output_text . "\n";
-                }
-            } else {
-                if ($verbose) {
-                    echo " OK\n";
-                }
             }
-        }
-
-        if ($verbose) {
-            echo "Plugin loading tests complete: {$result['files_checked']} plugins checked, " .
-                 count($result['errors']) . " errors found\n";
         }
 
         return $result;
@@ -365,19 +309,14 @@ class DeploymentHelper {
     /**
      * Test application bootstrap (PathHelper, Globalvars, DbConnector)
      * @param string $stage_dir Staging directory
-     * @param bool $verbose Echo progress to screen
      * @return array ['success' => bool, 'error' => string|null, 'components_loaded' => array]
      */
-    public static function testBootstrap($stage_dir, $verbose = false) {
+    public static function testBootstrap($stage_dir) {
         $result = [
             'success' => false,
             'error' => null,
             'components_loaded' => []
         ];
-
-        if ($verbose) {
-            echo "Testing application bootstrap in: $stage_dir\n";
-        }
 
         // Create a test script to bootstrap the application
         $test_script = tempnam(sys_get_temp_dir(), 'bootstrap_test_');
@@ -434,17 +373,8 @@ class DeploymentHelper {
             $result['success'] = true;
             $components = str_replace('SUCCESS:', '', $output_text);
             $result['components_loaded'] = explode(',', trim($components));
-
-            if ($verbose) {
-                echo "  ✓ Bootstrap test passed (loaded: " . implode(', ', $result['components_loaded']) . ")\n";
-            }
         } else {
             $result['error'] = $output_text;
-
-            if ($verbose) {
-                echo "  ✗ Bootstrap test FAILED\n";
-                echo "    " . $output_text . "\n";
-            }
         }
 
         return $result;
@@ -462,10 +392,9 @@ class DeploymentHelper {
      * but catches wrong files, basic malware, and misconfigurations.
      *
      * @param string $stage_dir Staging directory containing extracted public_html
-     * @param bool $verbose Echo progress to screen
      * @return array ['success' => bool, 'errors' => array, 'warnings' => array]
      */
-    public static function validateTarballStructure($stage_dir, $verbose = false) {
+    public static function validateTarballStructure($stage_dir) {
         $result = [
             'success' => true,
             'errors' => [],
@@ -495,10 +424,6 @@ class DeploymentHelper {
             'views' => 'View templates',
             'adm' => 'Admin interface',
         ];
-
-        if ($verbose) {
-            echo "Validating tarball structure...\n";
-        }
 
         // Check required directories
         foreach ($required_dirs as $dir => $description) {
@@ -586,18 +511,7 @@ class DeploymentHelper {
             $result['warnings'][] = "... and " . ($suspicious_count - $max_suspicious_report) . " more suspicious files";
         }
 
-        // If there are warnings but no errors, still succeed but report warnings
-        if ($verbose) {
-            if ($result['success']) {
-                echo "  ✓ Tarball structure validation passed\n";
-            } else {
-                echo "  ✗ Tarball structure validation FAILED\n";
-            }
-            foreach ($result['warnings'] as $warning) {
-                echo "  ⚠ $warning\n";
-            }
-        }
-
+        // Warnings never fail the check. They are returned for the caller to show.
         return $result;
     }
 
